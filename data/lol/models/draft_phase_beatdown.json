@@ -1,0 +1,282 @@
+{
+  "version": 1,
+  "buckets": {
+    "10": {
+      "minute": 10,
+      "win": {
+        "coef": [
+          2.341031059159578,
+          0.31082552180636513,
+          0.020855310783334264,
+          0.003065727385254534
+        ],
+        "intercept": 0.13592593211308054,
+        "n": 37635
+      },
+      "ahead": {
+        "coef": [
+          1.0594017098146822,
+          0.11107331012199796,
+          0.1385470717032991,
+          -0.017170543351474173
+        ],
+        "intercept": -0.6460888338984061,
+        "n": 37635
+      },
+      "gold_k": {
+        "coef": [
+          1.042462773750351,
+          0.11555875922555306,
+          0.12537029862083268,
+          -0.022720084592624323
+        ],
+        "intercept": 0.13369669417795807,
+        "n": 33235,
+        "r2": 0.03639834222730853
+      },
+      "win_given_gold": {
+        "coef": [
+          2.035568781606009,
+          0.796550483342606,
+          0.3022244935364474,
+          -0.06868700570319998,
+          0.018867951750547316
+        ],
+        "intercept": 0.06185425384842791,
+        "n": 33235,
+        "feature_names": [
+          "elo_z",
+          "gold_k",
+          "draft_win_logit",
+          "beatdown_diff",
+          "inev_diff"
+        ]
+      },
+      "feature_names": [
+        "elo_z",
+        "draft_win_logit",
+        "beatdown_diff",
+        "inev_diff"
+      ],
+      "mean_gold": 134.2,
+      "p_ahead_base": 0.3469
+    },
+    "15": {
+      "minute": 15,
+      "win": {
+        "coef": [
+          2.341031059159578,
+          0.31082552180636513,
+          0.020855310783334264,
+          0.003065727385254534
+        ],
+        "intercept": 0.13592593211308054,
+        "n": 37635
+      },
+      "ahead": {
+        "coef": [
+          1.2414335121926252,
+          0.13465402758821038,
+          0.12345275051417527,
+          -0.033478115769079934
+        ],
+        "intercept": -0.3708662138832954,
+        "n": 37635
+      },
+      "gold_k": {
+        "coef": [
+          2.466588940349887,
+          0.27666059532312015,
+          0.23894650537290277,
+          -0.05738770200899881
+        ],
+        "intercept": 0.2808794117803677,
+        "n": 33234,
+        "r2": 0.043137441423221956
+      },
+      "win_given_gold": {
+        "coef": [
+          1.8224867676286083,
+          0.5722765369300667,
+          0.2818581728127986,
+          -0.09592640367442279,
+          0.033159624071459434
+        ],
+        "intercept": 0.035891500906038494,
+        "n": 33234,
+        "feature_names": [
+          "elo_z",
+          "gold_k",
+          "draft_win_logit",
+          "beatdown_diff",
+          "inev_diff"
+        ]
+      },
+      "feature_names": [
+        "elo_z",
+        "draft_win_logit",
+        "beatdown_diff",
+        "inev_diff"
+      ],
+      "mean_gold": 281.8,
+      "p_ahead_base": 0.4107
+    },
+    "20": {
+      "minute": 20,
+      "win": {
+        "coef": [
+          2.341031059159578,
+          0.31082552180636513,
+          0.020855310783334264,
+          0.003065727385254534
+        ],
+        "intercept": 0.13592593211308054,
+        "n": 37635
+      },
+      "ahead": {
+        "coef": [
+          1.4793125194468664,
+          0.17442771095632836,
+          0.1182626131541901,
+          -0.03351933030326614
+        ],
+        "intercept": -0.2502125107315421,
+        "n": 37635
+      },
+      "gold_k": {
+        "coef": [
+          4.56305901910355,
+          0.5497788732415427,
+          0.3638203354876323,
+          -0.08368849506648657
+        ],
+        "intercept": 0.47248072246787365,
+        "n": 33150,
+        "r2": 0.04918201444435022
+      },
+      "win_given_gold": {
+        "coef": [
+          1.518464457217354,
+          0.49813662674701076,
+          0.22152332299171143,
+          -0.13840485046619277,
+          0.04728196555915414
+        ],
+        "intercept": -0.008548436136978116,
+        "n": 33150,
+        "feature_names": [
+          "elo_z",
+          "gold_k",
+          "draft_win_logit",
+          "beatdown_diff",
+          "inev_diff"
+        ]
+      },
+      "feature_names": [
+        "elo_z",
+        "draft_win_logit",
+        "beatdown_diff",
+        "inev_diff"
+      ],
+      "mean_gold": 472.2,
+      "p_ahead_base": 0.4396
+    },
+    "25": {
+      "minute": 25,
+      "win": {
+        "coef": [
+          2.341031059159578,
+          0.31082552180636513,
+          0.020855310783334264,
+          0.003065727385254534
+        ],
+        "intercept": 0.13592593211308054,
+        "n": 37635
+      },
+      "ahead": {
+        "coef": [
+          1.353853223722233,
+          0.18784557159642956,
+          0.08512297948802411,
+          -0.02090928018492454
+        ],
+        "intercept": -0.32112620122111146,
+        "n": 37635
+      },
+      "gold_k": {
+        "coef": [
+          6.5189119883643345,
+          0.9156525736477146,
+          0.4012255310727218,
+          -0.09739473431243137
+        ],
+        "intercept": 0.5546388922069257,
+        "n": 31131,
+        "r2": 0.044323488783136744
+      },
+      "win_given_gold": {
+        "coef": [
+          1.3103141319800358,
+          0.46149766825911076,
+          0.21394170789528946,
+          -0.15399365371706833,
+          0.05305854108589271
+        ],
+        "intercept": -0.028414361461279843,
+        "n": 31131,
+        "feature_names": [
+          "elo_z",
+          "gold_k",
+          "draft_win_logit",
+          "beatdown_diff",
+          "inev_diff"
+        ]
+      },
+      "feature_names": [
+        "elo_z",
+        "draft_win_logit",
+        "beatdown_diff",
+        "inev_diff"
+      ],
+      "mean_gold": 549.4,
+      "p_ahead_base": 0.4219
+    }
+  },
+  "beatdown_weights": {
+    "early_snowball": 1.0,
+    "assassin": 0.85,
+    "roam": 0.45,
+    "engage": 0.35,
+    "skirmisher": 0.25,
+    "poke_siege": 0.2
+  },
+  "inevitability_weights": {
+    "scaling_late": 1.0,
+    "hypercarry_adc": 0.9,
+    "control_mage": 0.75,
+    "teamfight_aoe": 0.55,
+    "peel_enchanter": 0.35,
+    "splitpush": 0.3
+  },
+  "role_conversion": {
+    "blue_beatdown_ahead": {
+      "n": 8585,
+      "wr": 0.7702
+    },
+    "blue_beatdown_behind": {
+      "n": 5861,
+      "wr": 0.2225
+    },
+    "blue_control_ahead": {
+      "n": 6870,
+      "wr": 0.8029
+    },
+    "blue_control_behind": {
+      "n": 6907,
+      "wr": 0.2512
+    }
+  },
+  "n_maps": 37635,
+  "note": "Flores beatdown: early-damage side must convert; inevitability side must reach late. Per-bucket `win` coefs are identical (final WR target) \u2014 runtime curve uses gold_k path \u00d7 win_given_gold leftovers, which do vary by @10/@15/@20/@25. win_given_gold: beatdown coef is negative (must have converted already); inev coef is positive (survives after gold is held).",
+  "citation": "Mike Flores \u2014 Who's the Beatdown? (The Dojo / StarCityGames, 1999)"
+}
