@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { listMajorTeams } from "@/lib/duck";
+import { useCallback, useMemo, useState } from "react";
 import type { PlayerRating, TeamRating } from "@/lib/pack";
 import { eloToWinProb, softMu, teamSlug, type EloCalibration } from "@/lib/pack";
 
@@ -10,8 +9,7 @@ type Props = {
   teams: TeamRating[];
   players: PlayerRating[];
   calibration: EloCalibration | null;
-  baseUrl: string;
-  years: number[];
+  majorTeams: string[];
 };
 
 type Scope = "major" | "all";
@@ -37,13 +35,15 @@ function SortTh({
   onSort: (col: string) => void;
 }) {
   return (
-    <th className={align === "num" ? "num" : undefined}>
+    <th
+      className={align === "num" ? "num" : undefined}
+      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
+    >
       <button
         type="button"
         className={`sort-th ${active ? "is-active" : ""}`}
         onClick={() => onSort(col)}
         title={title}
-        aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
       >
         {label}
         <span className="sort-ind" aria-hidden>
@@ -54,7 +54,7 @@ function SortTh({
   );
 }
 
-export function EloLadders({ teams, players, calibration, baseUrl, years }: Props) {
+export function EloLadders({ teams, players, calibration, majorTeams }: Props) {
   const [tab, setTab] = useState<"teams" | "players">("teams");
   const [q, setQ] = useState("");
   const [minMaps, setMinMaps] = useState(20);
@@ -63,22 +63,7 @@ export function EloLadders({ teams, players, calibration, baseUrl, years }: Prop
   const [teamDir, setTeamDir] = useState<Dir>("desc");
   const [playerCol, setPlayerCol] = useState<PlayerCol>("soft");
   const [playerDir, setPlayerDir] = useState<Dir>("desc");
-  const [majors, setMajors] = useState<Set<string> | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const s = await listMajorTeams(baseUrl, years);
-        if (!cancelled) setMajors(s);
-      } catch {
-        if (!cancelled) setMajors(new Set());
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [baseUrl, years]);
+  const majors = useMemo(() => new Set(majorTeams), [majorTeams]);
 
   const meanTeam =
     teams.reduce((s, t) => s + t.mu_total, 0) / Math.max(teams.length, 1);
@@ -106,7 +91,7 @@ export function EloLadders({ teams, players, calibration, baseUrl, years }: Prop
   const sortedTeams = useMemo(() => {
     const needle = q.trim().toLowerCase();
     let list = [...teams];
-    if (scope === "major" && majors) {
+    if (scope === "major") {
       list = list.filter((t) => majors.has(t.team));
     }
     list = list.filter((t) => !needle || t.team.toLowerCase().includes(needle));
@@ -330,7 +315,7 @@ export function EloLadders({ teams, players, calibration, baseUrl, years }: Prop
               })}
             </tbody>
           </table>
-          {scope === "major" && majors && (
+          {scope === "major" && (
             <p className="empty-hint">
               Showing {sortedTeams.length} major-circuit teams
               {majors.size ? ` · ${majors.size} orgs seen in pack majors` : ""}.

@@ -2,8 +2,11 @@ import { promises as fs } from "fs";
 import path from "path";
 import { ArticleContestCharts } from "@/components/ArticleContestCharts";
 import { PdfEmbed } from "@/components/PdfEmbed";
+import { blockMathHtml } from "@/lib/formulaHtml";
 import type { PackManifest } from "@/lib/pack";
 import { packUrl } from "@/lib/pack";
+import { PSTAR_TEX } from "@/lib/pstar";
+import "katex/dist/katex.min.css";
 
 type ArticleEv = {
   p_star: number;
@@ -91,6 +94,11 @@ export default async function GrubsPage() {
   const pdfHref = packUrl(man, "studies/grubs/void_grubs_scrap_value_and_contest_rationality.pdf");
   const articleHref = packUrl(man, "studies/grubs/grubs_article_contest_ev.json");
   const at50 = article.curve.find((c) => c.p_win_fight === 0.5);
+  const formulaHtml = {
+    pStar: blockMathHtml(PSTAR_TEX.pStar),
+    winProb: blockMathHtml(PSTAR_TEX.winProb),
+    params: blockMathHtml(PSTAR_TEX.params),
+  };
 
   return (
     <div className="space-y-[var(--space-5)]">
@@ -139,7 +147,8 @@ export default async function GrubsPage() {
         </span>
         <br />
         Quote this: contest bar ≈ {article.p_star_pct}% at even gold (two-wave leave). Below that
-        fight-win chance, leave; above it, contest can be worth it.
+        fight-win chance, leave; above it, contest can be worth it. (pp = percentage points of map
+        win rate.)
       </p>
 
       <ArticleContestCharts
@@ -147,6 +156,7 @@ export default async function GrubsPage() {
         pStar={article.p_star}
         byLeaveFarm={article.by_leave_farm_F}
         byGoldB={article.by_precontest_gold_B_two_wave_leave}
+        formulaHtml={formulaHtml}
       />
 
       <section className="space-y-3">

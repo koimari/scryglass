@@ -38,13 +38,17 @@ export function articlePStarAtGoldB(
 }
 
 /** KaTeX source for optional equation fold (display). Public UI says “contest bar”. */
+function coefTex(x: number): string {
+  const [coeff, exp] = x.toExponential(3).split("e");
+  return `${coeff}\\times 10^{${Number(exp)}}`;
+}
+
 export const PSTAR_TEX = {
   pStar:
     "\\mathrm{contest\\,bar}(\\mathrm{gold\\,lead})=\\frac{P_{\\mathrm{leave}}-P_{\\mathrm{loss}}}{P_{\\mathrm{win}}-P_{\\mathrm{loss}}}",
   winProb:
     "P(\\mathrm{gold})=\\tfrac{1}{2}\\bigl[\\sigma(a+b\\cdot\\mathrm{gold})+\\sigma(-a+b\\cdot\\mathrm{gold})\\bigr]",
-  params:
-    "\\mathrm{farm}=241.33\\,\\mathrm{g},\\; \\mathrm{objective}=115.6\\,\\mathrm{g},\\; \\text{fight swing }\\pm 600\\,\\mathrm{g},\\; a=0.1611,\\; b=6.669\\times 10^{-4}",
+  params: `\\mathrm{farm}=${LEAVE_FARM_TWO_WAVE}\\,\\mathrm{g},\\; \\mathrm{objective}=${OBJECTIVE_GOLD}\\,\\mathrm{g},\\; \\text{fight swing }\\pm ${WIN_KILL}\\,\\mathrm{g},\\; a=${GOLD10_INTERCEPT.toFixed(4)},\\; b=${coefTex(GOLD10_COEF)}`,
 } as const;
 
 export const PSTAR_FX = {
@@ -54,7 +58,9 @@ export const PSTAR_FX = {
   leaveFarmTwoWave: LEAVE_FARM_TWO_WAVE,
   winKill: WIN_KILL,
   lossKill: LOSS_KILL,
-  /** @deprecated Prefer PSTAR_TEX + Formula components */
-  formula:
-    "p*(B) = (P_leave − P_loss) / (P_win − P_loss) with two-wave F=241.33g, O=115.6g, ±600g fight swing; P(g) = ½[σ(a+bg)+σ(−a+bg)], a=0.1611, b=6.669e-4",
 };
+
+/** Contest-bar percent for charts (0–100). */
+export function contestBarPct(pStar: number): number {
+  return 100 * pStar;
+}

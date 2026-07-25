@@ -1,12 +1,13 @@
 "use client";
 
-import * as duckdb from "@duckdb/duckdb-wasm";
+import type { AsyncDuckDB } from "@duckdb/duckdb-wasm";
 
-let dbPromise: Promise<duckdb.AsyncDuckDB> | null = null;
+let dbPromise: Promise<AsyncDuckDB> | null = null;
 
-async function getDb(): Promise<duckdb.AsyncDuckDB> {
+async function getDb(): Promise<AsyncDuckDB> {
   if (!dbPromise) {
     dbPromise = (async () => {
+      const duckdb = await import("@duckdb/duckdb-wasm");
       const bundles = duckdb.getJsDelivrBundles();
       const bundle = await duckdb.selectBundle(bundles);
       const workerUrl = URL.createObjectURL(
@@ -304,61 +305,48 @@ export type ChampAgg = {
   wr: number;
 };
 
-export async function queryPlayerChampStats(
-  baseUrl: string,
-  years: number[],
-  playername: string,
-  limit = 5,
-): Promise<ChampAgg[]> {
-  const urls = years.map((y) => playersUrl(baseUrl, y));
-  // Query each year and merge in JS (simpler than multi-parquet union in WASM)
-  const buckets = new Map<
-    string,
-    { n: number; k: number; d: number; a: number; gold: number; dpm: number; dpmN: number; cs: number; csN: number; wins: number }
-  >();
-  for (const url of urls) {
-    const rows = await queryPackParquet(
-      url,
-      `SELECT champion, kills, deaths, assists, totalgold, dpm, minionkills, monsterkills, result
-       FROM read_parquet($PARQUET)
-       WHERE playername = '${esc(playername)}'
-         AND champion IS NOT NULL`,
-    );
-    for (const r of rows) {
-      const champ = String(r.champion);
-      const b = buckets.get(champ) ?? {
-        n: 0,
-        k: 0,
-        d: 0,
-        a: 0,
-        gold: 0,
-        dpm: 0,
-        dpmN: 0,
-        cs: 0,
-        csN: 0,
-        wins: 0,
-      };
-      b.n += 1;
-      b.k += Number(r.kills) || 0;
-      b.d += Number(r.deaths) || 0;
-      b.a += Number(r.assists) || 0;
-      b.gold += Number(r.totalgold) || 0;
-      if (r.dpm != null && Number.isFinite(Number(r.dpm))) {
-        b.dpm += Number(r.dpm);
-        b.dpmN += 1;
-      }
-      const cs =
-        r.minionkills != null || r.monsterkills != null
-          ? (Number(r.minionkills) || 0) + (Number(r.monsterkills) || 0)
-          : null;
-      if (cs != null) {
-        b.cs += cs;
-        b.csN += 1;
-      }
-      if (Number(r.result) === 1) b.wins += 1;
-      buckets.set(champ, b);
-    }
+type ChampBucket = {
+  n: number;
+  k: number;
+  d: number;
+  a: number;
+  gold: number;
+  dpm: number;
+  dpmN: number;
+  cs: number;
+  csN: number;
+  wins: number;
+};
+
+function emptyBucket(): ChampBucket {
+  return { n: 0, k: 0, d: 0, a: 0, gold: 0, dpm: 0, dpmN: 0, cs: 0, csN: 0, wins: 0 };
+}
+
+function ingestChampRow(buckets: Map<string, ChampBucket>, r: QueryRow) {
+  const champ = String(r.champion);
+  const b = buckets.get(champ) ?? emptyBucket();
+  b.n += 1;
+  b.k += Number(r.kills) || 0;
+  b.d += Number(r.deaths) || 0;
+  b.a += Number(r.assists) || 0;
+  b.gold += Number(r.totalgold) || 0;
+  if (r.dpm != null && Number.isFinite(Number(r.dpm))) {
+    b.dpm += Number(r.dpm);
+    b.dpmN += 1;
   }
+  const cs =
+    r.minionkills != null || r.monsterkills != null
+      ? (Number(r.minionkills) || 0) + (Number(r.monsterkills) || 0)
+      : null;
+  if (cs != null) {
+    b.cs += cs;
+    b.csN += 1;
+  }
+  if (Number(r.result) === 1) b.wins += 1;
+  buckets.set(champ, b);
+}
+
+function bucketsToAgg(buckets: Map<string, ChampBucket>, limit: number): ChampAgg[] {
   return [...buckets.entries()]
     .map(([champion, b]) => ({
       champion,
@@ -375,6 +363,54 @@ export async function queryPlayerChampStats(
     .slice(0, limit);
 }
 
+export async function queryPlayerChampStats(
+  baseUrl: string,
+  years: number[],
+  playername: string,
+  limit = 5,
+): Promise<ChampAgg[]> {
+  const byPlayer = await queryRosterChampStats(baseUrl, years, [playername], limit);
+  return byPlayer[playername] ?? [];
+}
+
+/** One scan per year for the whole roster (avoids N× full parquet passes). */
+export async function queryRosterChampStats(
+  baseUrl: string,
+  years: number[],
+  playernames: string[],
+  limit = 5,
+): Promise<Record<string, ChampAgg[]>> {
+  const names = [...new Set(playernames.map((p) => p.trim()).filter(Boolean))];
+  const out: Record<string, Map<string, ChampBucket>> = {};
+  for (const n of names) out[n] = new Map();
+  if (!names.length) return {};
+
+  const inList = names.map((n) => `'${esc(n)}'`).join(", ");
+  for (const year of years) {
+    const url = playersUrl(baseUrl, year);
+    const rows = await queryPackParquet(
+      url,
+      `SELECT playername, champion, kills, deaths, assists, totalgold, dpm, minionkills, monsterkills, result
+       FROM read_parquet($PARQUET)
+       WHERE playername IN (${inList})
+         AND champion IS NOT NULL`,
+    );
+    for (const r of rows) {
+      const pn = String(r.playername);
+      const buckets = out[pn];
+      if (!buckets) continue;
+      ingestChampRow(buckets, r);
+    }
+  }
+
+  const result: Record<string, ChampAgg[]> = {};
+  for (const n of names) {
+    result[n] = bucketsToAgg(out[n], limit);
+  }
+  return result;
+}
+
+/** @deprecated Prefer features/major_teams.json — kept for scripts. */
 export async function listMajorTeams(
   baseUrl: string,
   years: number[],
@@ -437,81 +473,11 @@ export async function queryTeamGames(
   return queryPackParquet(url, sql);
 }
 
-/** Data Dragon champion square icon URL from OE champion name. */
-export function champIconUrl(name: string | null | undefined): string | null {
-  if (!name) return null;
-  const key = String(name)
-    .replace(/['.]/g, "")
-    .replace(/\s+/g, "")
-    .replace(/&/g, "");
-  // Known OE / wiki mismatches
-  const aliases: Record<string, string> = {
-    Wukong: "MonkeyKing",
-    Nunu: "Nunu",
-    "Nunu&Willump": "Nunu",
-    RenataGlasc: "Renata",
-    BelVeth: "Belveth",
-    Kaisa: "Kaisa",
-    Khazix: "Khazix",
-    Chogath: "Chogath",
-    DrMundo: "DrMundo",
-    JarvanIV: "JarvanIV",
-    LeeSin: "LeeSin",
-    MasterYi: "MasterYi",
-    MissFortune: "MissFortune",
-    TwistedFate: "TwistedFate",
-    XinZhao: "XinZhao",
-    AurelionSol: "AurelionSol",
-  };
-  const id = aliases[key] ?? key;
-  return `https://ddragon.leagueoflegends.com/cdn/15.14.1/img/champion/${id}.png`;
-}
+export {
+  champIconUrl,
+  formatClock,
+  formatGold,
+  playerCs,
+  sortPlayersByRole,
+} from "@/lib/format";
 
-export function formatGold(n: unknown): string {
-  if (n == null || n === "") return "—";
-  const v = Number(n);
-  if (!Number.isFinite(v)) return "—";
-  if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
-  return String(Math.round(v));
-}
-
-export function formatClock(gamelengthSec: unknown, lengthMin?: unknown): string {
-  if (lengthMin != null && Number.isFinite(Number(lengthMin))) {
-    const m = Number(lengthMin);
-    const mins = Math.floor(m);
-    const secs = Math.round((m - mins) * 60);
-    return `${mins}:${String(secs).padStart(2, "0")}`;
-  }
-  if (gamelengthSec == null) return "—";
-  const s = Number(gamelengthSec);
-  if (!Number.isFinite(s)) return "—";
-  const mins = Math.floor(s / 60);
-  const secs = Math.round(s % 60);
-  return `${mins}:${String(secs).padStart(2, "0")}`;
-}
-
-export function playerCs(row: QueryRow): number | null {
-  const min = row.minionkills != null ? Number(row.minionkills) : null;
-  const mon = row.monsterkills != null ? Number(row.monsterkills) : null;
-  if (min != null && mon != null && Number.isFinite(min) && Number.isFinite(mon)) {
-    return min + mon;
-  }
-  if (row.cspm != null && row.gamelength != null) {
-    const cspm = Number(row.cspm);
-    const gl = Number(row.gamelength);
-    if (Number.isFinite(cspm) && Number.isFinite(gl) && gl > 0) {
-      return Math.round((cspm * gl) / 60);
-    }
-  }
-  return null;
-}
-
-const ROLE_ORDER = ["top", "jng", "mid", "bot", "sup"] as const;
-
-export function sortPlayersByRole(players: QueryRow[]): QueryRow[] {
-  const rank = (p: string) => {
-    const i = ROLE_ORDER.indexOf(p.toLowerCase() as (typeof ROLE_ORDER)[number]);
-    return i === -1 ? 99 : i;
-  };
-  return [...players].sort((a, b) => rank(String(a.position ?? "")) - rank(String(b.position ?? "")));
-}
