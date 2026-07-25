@@ -14,7 +14,13 @@ export default function HomePage() {
           Latest · {lead.topic} · {lead.date}
         </p>
         <h1 className="blog-title">
-          Leave still wins at <span className="olive">50/50</span>
+          {lead.title.includes("50/50") ? (
+            <>
+              Leave still wins at <span className="olive">50/50</span>
+            </>
+          ) : (
+            lead.title
+          )}
         </h1>
         <p className="blog-dek">{lead.dek}</p>
         <Link href={lead.href} className="blog-cta">

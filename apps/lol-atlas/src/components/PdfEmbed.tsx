@@ -25,15 +25,14 @@ export function PdfEmbed({ src, title = "PDF" }: Props) {
           href={src}
           target="_blank"
           rel="noreferrer"
-          className="status-pill ghost"
-          style={{ padding: "0.55rem 0.9rem", textDecoration: "none" }}
+          className="status-pill ghost pill-btn"
         >
           Open in new tab
         </a>
       </div>
       {open && (
         <div className="pdf-frame anim-fade-up">
-          <iframe title={title} src={src} className="pdf-iframe" />
+          <iframe title={title} src={`${src}#view=FitH`} className="pdf-iframe" loading="lazy" />
         </div>
       )}
     </div>
