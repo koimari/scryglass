@@ -42,8 +42,8 @@ export default async function ReproducePage() {
           </li>
           <li>
             Void grubs: use{" "}
-            <a className="row-link" href="/grubs">
-              /grubs
+            <a className="row-link" href="/articles/void-grubs-contest-or-leave">
+              the void-grubs article
             </a>{" "}
             and <span className="font-mono">studies/grubs/</span> — do not mix leave-mix break-even
             with the article contest bar.

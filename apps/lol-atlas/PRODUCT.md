@@ -4,12 +4,12 @@
 product
 
 ## Product Purpose
-Public LoL research companion: Dual Elo, void-grubs opportunity-cost decision surfaces, and a reproducible OE parquet pack (2025–2026). Readers and video creators open the same tables and match ledgers. Not a betting product.
+Independent League of Legends research publication: authored essays first, Dual Elo ratings and match ledgers as supporting evidence, reproducible OE parquet packs (2025–2026). Readers and creators can verify the same tables. Not a betting product.
 
 ## Users
 - Analysts verifying published numbers
-- Creators walking void-grubs math
-- Fans exploring Dual Elo and head-to-head history
+- Creators walking void-grubs math and other studies
+- Fans exploring ratings and head-to-head history
 
 ## Brand personality
 Credible editorial × Kyle Anthony Miller tactical industrial. Warm sand / warm charcoal. Safety orange + field olive. Airy hierarchy with dense micro-labels. Not hospital, not empty Notion, not financial-dashboard card grids.
@@ -18,11 +18,12 @@ Credible editorial × Kyle Anthony Miller tactical industrial. Warm sand / warm 
 - Clinical cool whites / consultório blues
 - Empty minimalist zero-info heroes
 - Purple SaaS / glassmorphism / parchment broadsheet
-- Confusing OE leave-mix (~24%) with article p* (~58.9%)
+- Betting tip-sheet / odds-board aesthetics
 
-## Strategic principles
-1. Lead with the article estimand on grubs.
-2. Blog-first home; research index below.
-3. One map per row in Browse; ticker scoreboard on match detail.
-4. System theme by default; light and dark as equals (sand ↔ charcoal).
-5. Reproduction one click away via the versioned pack.
+## Positioning
+Scryglass is an independent League of Legends research publication by koi, using reproducible match data to test ideas that seem plausible but may not survive the evidence.
+
+## Known traps
+- Confusing OE leave-mix (~24%) with article contest bar (~58.9%)
+- Shipping betting language (odds, props, Kelly, tip sheets) into public copy
+- Treating tools as equal to articles on the homepage

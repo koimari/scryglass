@@ -52,10 +52,10 @@ export default function MethodologyPage() {
         <div className="method-body space-y-3">
           <p>
             The{" "}
-            <Link href="/grubs" className="underline decoration-[var(--line)] underline-offset-2 hover:decoration-[var(--ink)]">
-              Grubs
+            <Link href="/articles/void-grubs-contest-or-leave" className="underline decoration-[var(--line)] underline-offset-2 hover:decoration-[var(--ink)]">
+              void-grubs article
             </Link>{" "}
-            companion leads with the article&apos;s opportunity-cost estimand. At even gold, leaving
+            leads with the article&apos;s opportunity-cost estimand. At even gold, leaving
             to collect the two-wave farm reference is worth more than contesting until your estimated
             chance to win the fight reaches the{" "}
             <span className="font-mono text-[var(--ink)]">contest bar ≈ 58.9%</span>. A coin-flip

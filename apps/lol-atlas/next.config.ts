@@ -5,6 +5,15 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  async redirects() {
+    return [
+      {
+        source: "/grubs",
+        destination: "/articles/void-grubs-contest-or-leave",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {
@@ -22,7 +31,6 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        // Immutable versioned packs (pack ids look like v2026.07.25)
         source: "/packs/:pack(v\\d{4}\\.\\d{2}\\.\\d{2})/:path*",
         headers: [
           { key: "Access-Control-Allow-Origin", value: "*" },

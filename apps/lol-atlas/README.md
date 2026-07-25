@@ -1,6 +1,6 @@
 # Scryglass
 
-Public LoL research companion (Next.js) under `apps/lol-atlas/`.
+Public LoL research publication (Next.js) under `apps/lol-atlas/`.
 
 ## Local
 
@@ -14,8 +14,6 @@ Open http://localhost:3000.
 
 ## Pack
 
-Refresh years 2025–2026 into `public/packs/`:
-
 ```bash
 python3 -m lol_kills.export.public_pack --years 2025,2026
 python3 -m lol_kills.export.upload_pack --local-only
@@ -23,11 +21,12 @@ python3 -m lol_kills.export.upload_pack --local-only
 
 ## Surfaces
 
-- `/elo` — Dual Elo ladders
-- `/grubs` — void-grubs article p*
-- `/browse` — one row per OE map
-- `/browse/head-to-head` — H2H + Leaguepedia-style scoreboard
-- `/browse/match/[gameId]` — single match board
+- `/` — latest article
+- `/articles` — research notes
+- `/articles/void-grubs-contest-or-leave` — void-grubs essay
+- `/elo` — Dual Elo ratings
+- `/browse` — match explorer
+- `/browse/head-to-head` — head-to-head
 - `/reproduce` — pack download
 - `/methodology` — estimands
 

@@ -24,9 +24,9 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Scryglass — Dual Elo & reproducible LoL research",
+  title: "Scryglass — LoL research by koi",
   description:
-    "Browse Dual Elo, head-to-head scoreboards, and a compressed Oracle’s Elixir pack (2025–2026). Reproduce published void-grubs and rating findings.",
+    "Independent League of Legends research publication: essays, Dual Elo ratings, and reproducible Oracle’s Elixir packs (2025–2026).",
   robots: { index: true, follow: true },
 };
 

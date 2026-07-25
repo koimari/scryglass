@@ -340,7 +340,8 @@ export function ArticleContestCharts({
             <p>
               This chart uses the two-wave leave package (~{PSTAR_FX.leaveFarmTwoWave.toFixed(0)}g
               farm), ~{PSTAR_FX.objectiveGold.toFixed(0)}g for the objective, and a ±
-              {PSTAR_FX.winKill}g fight swing. Map-win odds come from gold lead at 10 minutes.
+              a ±{PSTAR_FX.winKill}g fight swing. Map-win probability comes from gold lead at 10
+              minutes.
             </p>
             <details className="pt-1">
               <summary className="cursor-pointer text-[var(--accent-ink)] text-xs uppercase tracking-wide">

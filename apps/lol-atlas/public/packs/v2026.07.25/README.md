@@ -18,7 +18,6 @@ Versioned parquet + calibration for reproducing published LoL research findings.
 ## Not included
 - Riot Match-V5 / Live Stats timelines (~GB)
 - Raw Oracle's Elixir CSVs (download from OE; filters documented in manifest)
-- Betting fair-odds / Slip Composer artifacts
 
 ## Attribution
 Map and player rows are derived from Oracle's Elixir public match data. Obtain raw CSVs from Oracle's Elixir; this pack is a filtered parquet subset for reproducing published research. Dual Elo and calibration are our own.
