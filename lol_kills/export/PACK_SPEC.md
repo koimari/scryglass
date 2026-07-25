@@ -27,7 +27,7 @@ Canonical machine-readable allowlists and defaults live in
 
 - `warehouse/timelines/` (~1.2GB)
 - Raw OE CSVs (`warehouse/raw/`)
-- Betting fair-odds / Slip Composer / joblibs
+- Private betting tooling / joblibs
 
 ## Build
 

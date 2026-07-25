@@ -14,8 +14,8 @@
   "excluded": [
     "warehouse/timelines",
     "warehouse/raw OE CSVs",
-    "betting fair-odds / Slip Composer",
-    "joblib models"
+    "joblib models",
+    "private betting tooling (not shipped)"
   ],
   "studies": {
     "grubs": {

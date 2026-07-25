@@ -6,7 +6,7 @@ brand
 
 ## Users
 
-River and anyone handed the working paper under time pressure (research, coaching debate, betting model audit). Context: desk reading, daylight or cool lamp, high stakes on getting the estimand right. Job: extract the quantity, the decision rule, and what was *not* measured, without marketing fluff.
+River and anyone handed the working paper under time pressure (research, coaching debate, analysis audit). Context: desk reading, daylight or cool lamp, high stakes on getting the estimand right. Job: extract the quantity, the decision rule, and what was *not* measured, without marketing fluff.
 
 ## Product Purpose
 
