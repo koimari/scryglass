@@ -2,10 +2,26 @@ import { promises as fs } from "fs";
 import path from "path";
 import { EloLadders } from "@/components/EloLadders";
 import type { EloCalibration, PackManifest, PlayerRating, TeamRating } from "@/lib/pack";
-import { packUrl } from "@/lib/pack";
+import { packUrl, softMu } from "@/lib/pack";
 
 async function loadJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await fs.readFile(filePath, "utf8")) as T;
+}
+
+/** Ladder-only player rows (drop unused fields; floor thin one-offs). */
+function thinPlayers(players: PlayerRating[]): PlayerRating[] {
+  return players
+    .filter((p) => (p.n_maps ?? 0) >= 5)
+    .map((p) => ({
+      player: p.player,
+      mu_total: p.mu_total,
+      mu_regional: 0,
+      mu_meta: 0,
+      sigma: p.sigma,
+      n_maps: p.n_maps,
+      last_team: p.last_team,
+    }))
+    .sort((a, b) => softMu(b.mu_total, b.sigma) - softMu(a.mu_total, a.sigma));
 }
 
 export default async function EloPage() {
@@ -16,9 +32,19 @@ export default async function EloPage() {
   const teams = await loadJson<TeamRating[]>(
     path.join(base, "features", "ratings_snapshot.json"),
   );
-  const players = await loadJson<PlayerRating[]>(
+  const playersRaw = await loadJson<PlayerRating[]>(
     path.join(base, "features", "player_ratings_snapshot.json"),
   );
+  const players = thinPlayers(playersRaw);
+  let majorTeams: string[] = [];
+  try {
+    const maj = await loadJson<{ teams: string[] }>(
+      path.join(base, "features", "major_teams.json"),
+    );
+    majorTeams = maj.teams ?? [];
+  } catch {
+    majorTeams = [];
+  }
   let calibration: EloCalibration | null = null;
   try {
     calibration = await loadJson<EloCalibration>(
@@ -27,7 +53,6 @@ export default async function EloPage() {
   } catch {
     calibration = null;
   }
-  const baseUrl = man.base_url || `/packs/${man.pack_id}`;
 
   return (
     <div className="space-y-6">
@@ -54,8 +79,7 @@ export default async function EloPage() {
         teams={teams}
         players={players}
         calibration={calibration}
-        baseUrl={baseUrl}
-        years={man.filters.years}
+        majorTeams={majorTeams}
       />
     </div>
   );

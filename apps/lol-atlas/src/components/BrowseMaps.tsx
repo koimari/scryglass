@@ -2,13 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import {
-  formatClock,
-  formatGold,
-  listLeagues,
-  queryMaps,
-  type QueryRow,
-} from "@/lib/duck";
+import { listLeagues, queryMaps, type QueryRow } from "@/lib/duck";
+import { formatClock, formatGold } from "@/lib/format";
 
 type Props = { baseUrl: string; years: number[] };
 
@@ -21,10 +16,16 @@ export function BrowseMaps({ baseUrl, years }: Props) {
   const [year, setYear] = useState(yearDefault);
   const [league, setLeague] = useState("");
   const [team, setTeam] = useState("");
+  const [teamQuery, setTeamQuery] = useState("");
   const [leagues, setLeagues] = useState<string[]>([]);
   const [rows, setRows] = useState<QueryRow[]>([]);
   const [status, setStatus] = useState("Idle");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setTeamQuery(team.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [team]);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +55,7 @@ export function BrowseMaps({ baseUrl, years }: Props) {
     try {
       const data = await queryMaps(baseUrl, year, {
         league: league || undefined,
-        team: team || undefined,
+        team: teamQuery || undefined,
         limit: 100,
       });
       setRows(data);
@@ -63,7 +64,7 @@ export function BrowseMaps({ baseUrl, years }: Props) {
       setError(e instanceof Error ? e.message : String(e));
       setStatus("Error");
     }
-  }, [baseUrl, year, league, team]);
+  }, [baseUrl, year, league, teamQuery]);
 
   useEffect(() => {
     void run();

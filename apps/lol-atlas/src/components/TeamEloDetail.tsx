@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { champIconUrl, formatGold, queryPlayerChampStats, type ChampAgg } from "@/lib/duck";
+import { queryRosterChampStats, type ChampAgg } from "@/lib/duck";
+import { champIconUrl, formatGold } from "@/lib/format";
 import type { PlayerRating, TeamRating } from "@/lib/pack";
 import { softMu } from "@/lib/pack";
 
@@ -40,31 +41,15 @@ function ChampRow({ c }: { c: ChampAgg }) {
 
 function PlayerBlock({
   player,
-  baseUrl,
-  years,
+  champs,
+  loading,
+  err,
 }: {
   player: PlayerRating;
-  baseUrl: string;
-  years: number[];
+  champs: ChampAgg[] | null;
+  loading: boolean;
+  err: string | null;
 }) {
-  const [champs, setChamps] = useState<ChampAgg[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const rows = await queryPlayerChampStats(baseUrl, years, player.player, 5);
-        if (!cancelled) setChamps(rows);
-      } catch (e) {
-        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [baseUrl, years, player.player]);
-
   return (
     <section className="border-t border-[var(--line)] pt-4 space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -85,7 +70,7 @@ function PlayerBlock({
         </div>
       </div>
       {err && <p className="error-banner">{err}</p>}
-      {!champs && !err && <p className="status-hint">Loading top champions…</p>}
+      {loading && !err && <p className="status-hint">Loading top champions…</p>}
       {champs && champs.length === 0 && (
         <p className="empty-hint">No champion rows in pack years for this player.</p>
       )}
@@ -120,6 +105,25 @@ export function TeamEloDetail({ team, roster, baseUrl, years }: Props) {
     () => [...roster].sort((a, b) => softMu(b.mu_total, b.sigma) - softMu(a.mu_total, a.sigma)),
     [roster],
   );
+  const rosterKey = useMemo(() => sorted.map((p) => p.player).join("\0"), [sorted]);
+  const [byPlayer, setByPlayer] = useState<Record<string, ChampAgg[]> | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const names = rosterKey ? rosterKey.split("\0") : [];
+        const rows = await queryRosterChampStats(baseUrl, years, names, 5);
+        if (!cancelled) setByPlayer(rows);
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl, years, rosterKey]);
 
   return (
     <div className="space-y-6">
@@ -156,7 +160,13 @@ export function TeamEloDetail({ team, roster, baseUrl, years }: Props) {
         </p>
       ) : (
         sorted.map((p) => (
-          <PlayerBlock key={p.player} player={p} baseUrl={baseUrl} years={years} />
+          <PlayerBlock
+            key={p.player}
+            player={p}
+            champs={byPlayer ? (byPlayer[p.player] ?? []) : null}
+            loading={!byPlayer && !err}
+            err={err}
+          />
         ))
       )}
     </div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { QueryRow } from "@/lib/duck";
-import { sortPlayersByRole } from "@/lib/duck";
+import { sortPlayersByRole } from "@/lib/format";
 
 export type DraftWrResult = {
   p_blue_draft: number;

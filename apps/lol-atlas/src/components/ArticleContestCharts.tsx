@@ -1,8 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BlockMath } from "@/components/Formula";
-import { articlePStarAtGoldB, PSTAR_TEX } from "@/lib/pstar";
+import { articlePStarAtGoldB, contestBarPct, PSTAR_FX } from "@/lib/pstar";
 
 export type ArticleCurvePoint = {
   p_win_fight: number;
@@ -29,11 +28,18 @@ export type GoldBRow = {
   p_star_pct: number;
 };
 
+export type FormulaHtml = {
+  pStar: string;
+  winProb: string;
+  params: string;
+};
+
 type Props = {
   curve: ArticleCurvePoint[];
   pStar: number;
   byLeaveFarm: LeaveFarmRow[];
   byGoldB: GoldBRow[];
+  formulaHtml: FormulaHtml;
 };
 
 const FARM_ALLOW = new Set(["no_farm", "one_wave", "two_waves"]);
@@ -66,7 +72,13 @@ function interpEdge(curve: ArticleCurvePoint[], p: number) {
   return sorted[0];
 }
 
-export function ArticleContestCharts({ curve, pStar, byLeaveFarm, byGoldB }: Props) {
+export function ArticleContestCharts({
+  curve,
+  pStar,
+  byLeaveFarm,
+  byGoldB,
+  formulaHtml,
+}: Props) {
   const farms = useMemo(
     () => byLeaveFarm.filter((r) => FARM_ALLOW.has(r.label)),
     [byLeaveFarm],
@@ -116,7 +128,8 @@ export function ArticleContestCharts({ curve, pStar, byLeaveFarm, byGoldB }: Pro
     if (ps != null) curvePts.push({ B, pct: 100 * ps });
   }
 
-  const barPct = (100 * pStar).toFixed(1);
+  const barPct = contestBarPct(pStar).toFixed(1);
+  const edgeTicks = [-5, 0, 5].filter((v) => v >= yMin && v <= yMax);
 
   return (
     <div className="space-y-8">
@@ -162,6 +175,45 @@ export function ArticleContestCharts({ curve, pStar, byLeaveFarm, byGoldB }: Pro
           aria-label="Edge versus chance you win the fight"
         >
           <line x1={pad.l} y1={zeroY} x2={W - pad.r} y2={zeroY} stroke="var(--line)" strokeWidth={1} />
+          {edgeTicks.map((v) => (
+            <g key={v}>
+              <line
+                x1={pad.l - 4}
+                y1={yScale(v)}
+                x2={pad.l}
+                y2={yScale(v)}
+                stroke="var(--ink-muted)"
+                strokeWidth={1}
+              />
+              <text
+                x={pad.l - 6}
+                y={yScale(v) + 3}
+                textAnchor="end"
+                className="fill-[var(--ink-muted)]"
+                style={{ fontSize: 11 }}
+              >
+                {v > 0 ? `+${v}` : v}pp
+              </text>
+            </g>
+          ))}
+          <text
+            x={W - pad.r}
+            y={pad.t + 12}
+            textAnchor="end"
+            className="fill-[var(--secondary)]"
+            style={{ fontSize: 11 }}
+          >
+            contest better ↑
+          </text>
+          <text
+            x={W - pad.r}
+            y={H - pad.b - 8}
+            textAnchor="end"
+            className="fill-[var(--danger)]"
+            style={{ fontSize: 11 }}
+          >
+            leave better ↓
+          </text>
           <path
             d={pathD}
             fill="none"
@@ -169,7 +221,7 @@ export function ArticleContestCharts({ curve, pStar, byLeaveFarm, byGoldB }: Pro
             strokeWidth={2.25}
             pathLength={1}
             strokeDasharray="1"
-            style={{ animation: "draw-line 700ms cubic-bezier(0.16, 1, 0.3, 1) both" }}
+            className="chart-draw"
           />
           <line
             x1={starX}
@@ -182,10 +234,10 @@ export function ArticleContestCharts({ curve, pStar, byLeaveFarm, byGoldB }: Pro
             opacity={0.55}
           />
           <circle cx={scrubX} cy={scrubY} r={6} fill="var(--canvas)" stroke="var(--accent)" strokeWidth={2} />
-          <text x={starX + 4} y={pad.t + 12} className="fill-[var(--ink-muted)]" style={{ fontSize: 11 }}>
+          <text x={starX + 4} y={pad.t + 12} className="fill-[var(--ink-muted)]" style={{ fontSize: 12 }}>
             bar {barPct}%
           </text>
-          <text x={pad.l} y={H - 8} className="fill-[var(--ink-muted)]" style={{ fontSize: 11 }}>
+          <text x={pad.l} y={H - 8} className="fill-[var(--ink-muted)]" style={{ fontSize: 12 }}>
             chance you win the fight →
           </text>
         </svg>
@@ -265,13 +317,16 @@ export function ArticleContestCharts({ curve, pStar, byLeaveFarm, byGoldB }: Pro
             })}
             <line
               x1={30}
-              y1={120 * (1 - 58.9 / 80)}
+              y1={120 * (1 - Number(barPct) / 80)}
               x2={380}
-              y2={120 * (1 - 58.9 / 80)}
+              y2={120 * (1 - Number(barPct) / 80)}
               stroke="var(--ink)"
               strokeDasharray="3 3"
               opacity={0.4}
             />
+            <text x={385} y={120 * (1 - Number(barPct) / 80) + 3} style={{ fontSize: 11 }} className="fill-[var(--ink-muted)]">
+              {barPct}%
+            </text>
           </svg>
         </div>
 
@@ -283,19 +338,26 @@ export function ArticleContestCharts({ curve, pStar, byLeaveFarm, byGoldB }: Pro
               Below it, leave looks better; above it, contest can be worth it.
             </p>
             <p>
-              This chart uses the two-wave leave package (~241g farm), ~116g for the objective, and
-              a ±600g fight swing. Map-win odds come from gold lead at 10 minutes.
+              This chart uses the two-wave leave package (~{PSTAR_FX.leaveFarmTwoWave.toFixed(0)}g
+              farm), ~{PSTAR_FX.objectiveGold.toFixed(0)}g for the objective, and a ±
+              {PSTAR_FX.winKill}g fight swing. Map-win odds come from gold lead at 10 minutes.
             </p>
             <details className="pt-1">
-              <summary className="cursor-pointer text-[var(--accent)] text-xs uppercase tracking-wide">
+              <summary className="cursor-pointer text-[var(--accent-ink)] text-xs uppercase tracking-wide">
                 Show equations (optional)
               </summary>
               <div className="mt-2 space-y-1 text-[var(--ink)]">
-                <BlockMath tex={PSTAR_TEX.pStar} />
-                <BlockMath tex={PSTAR_TEX.winProb} />
-                <BlockMath
-                  tex={PSTAR_TEX.params}
+                <div
+                  className="my-2 overflow-x-auto [&_.katex]:text-[1.05em]"
+                  dangerouslySetInnerHTML={{ __html: formulaHtml.pStar }}
+                />
+                <div
+                  className="my-2 overflow-x-auto [&_.katex]:text-[1.05em]"
+                  dangerouslySetInnerHTML={{ __html: formulaHtml.winProb }}
+                />
+                <div
                   className="my-1 overflow-x-auto text-[var(--ink-muted)] [&_.katex]:text-[0.92em]"
+                  dangerouslySetInnerHTML={{ __html: formulaHtml.params }}
                 />
               </div>
             </details>

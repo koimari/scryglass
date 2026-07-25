@@ -1,13 +1,9 @@
 "use client";
 
 import {
-  champIconUrl,
-  formatClock,
-  formatGold,
-  playerCs,
-  sortPlayersByRole,
   type QueryRow,
 } from "@/lib/duck";
+import { champIconUrl, formatClock, formatGold, playerCs, sortPlayersByRole } from "@/lib/format";
 
 type Props = {
   map: QueryRow;

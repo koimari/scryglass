@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  formatClock,
   listLeagues,
   loadMatchBundle,
   loadMatchModelPrior,
@@ -11,6 +10,7 @@ import {
   type MatchModelPrior,
   type QueryRow,
 } from "@/lib/duck";
+import { formatClock } from "@/lib/format";
 import { MatchScoreboard } from "./MatchScoreboard";
 import { ModelChecklist } from "./ModelChecklist";
 import { useDraftWr } from "./DraftWrPanel";
