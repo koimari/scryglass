@@ -1,0 +1,2328 @@
+{
+  "version": 1,
+  "min_n": 80,
+  "hypercarry_threshold": 0.32,
+  "n_champs": 154,
+  "champs": {
+    "Aatrox": {
+      "mean_share": 0.215,
+      "std_share": 0.1482,
+      "n": 3871,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2412,
+          "n": 356
+        },
+        "top": {
+          "mean_share": 0.212,
+          "n": 3503
+        }
+      }
+    },
+    "Ahri": {
+      "mean_share": 0.2473,
+      "std_share": 0.1522,
+      "n": 6047,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2474,
+          "n": 6036
+        }
+      }
+    },
+    "Akali": {
+      "mean_share": 0.3227,
+      "std_share": 0.1646,
+      "n": 2944,
+      "hypercarry": true,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.3249,
+          "n": 2757
+        },
+        "top": {
+          "mean_share": 0.291,
+          "n": 187
+        }
+      }
+    },
+    "Alistar": {
+      "mean_share": 0.0447,
+      "std_share": 0.0687,
+      "n": 6078,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0447,
+          "n": 6072
+        }
+      }
+    },
+    "Ambessa": {
+      "mean_share": 0.2169,
+      "std_share": 0.1402,
+      "n": 3667,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2423,
+          "n": 293
+        },
+        "mid": {
+          "mean_share": 0.2612,
+          "n": 80
+        },
+        "top": {
+          "mean_share": 0.2135,
+          "n": 3294
+        }
+      }
+    },
+    "Amumu": {
+      "mean_share": 0.1194,
+      "std_share": 0.1171,
+      "n": 587,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.1482,
+          "n": 388
+        },
+        "sup": {
+          "mean_share": 0.0629,
+          "n": 198
+        }
+      }
+    },
+    "Anivia": {
+      "mean_share": 0.1796,
+      "std_share": 0.1366,
+      "n": 713,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2028,
+          "n": 515
+        },
+        "sup": {
+          "mean_share": 0.0865,
+          "n": 97
+        },
+        "top": {
+          "mean_share": 0.1458,
+          "n": 98
+        }
+      }
+    },
+    "Annie": {
+      "mean_share": 0.1775,
+      "std_share": 0.1356,
+      "n": 2989,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.1905,
+          "n": 2614
+        },
+        "sup": {
+          "mean_share": 0.0793,
+          "n": 358
+        }
+      }
+    },
+    "Aphelios": {
+      "mean_share": 0.3152,
+      "std_share": 0.1829,
+      "n": 4460,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.3151,
+          "n": 4455
+        }
+      }
+    },
+    "Ashe": {
+      "mean_share": 0.2058,
+      "std_share": 0.1519,
+      "n": 4777,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2417,
+          "n": 3672
+        },
+        "sup": {
+          "mean_share": 0.0862,
+          "n": 1104
+        }
+      }
+    },
+    "Aurelion Sol": {
+      "mean_share": 0.3208,
+      "std_share": 0.1658,
+      "n": 649,
+      "hypercarry": true,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.3202,
+          "n": 639
+        }
+      }
+    },
+    "Aurora": {
+      "mean_share": 0.2626,
+      "std_share": 0.1537,
+      "n": 2993,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2737,
+          "n": 2350
+        },
+        "top": {
+          "mean_share": 0.2222,
+          "n": 641
+        }
+      }
+    },
+    "Azir": {
+      "mean_share": 0.2488,
+      "std_share": 0.1592,
+      "n": 7104,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2487,
+          "n": 7095
+        }
+      }
+    },
+    "Bard": {
+      "mean_share": 0.0676,
+      "std_share": 0.0817,
+      "n": 2255,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0677,
+          "n": 2254
+        }
+      }
+    },
+    "Bel'Veth": {
+      "mean_share": 0.2659,
+      "std_share": 0.1656,
+      "n": 310,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2771,
+          "n": 286
+        }
+      }
+    },
+    "Blitzcrank": {
+      "mean_share": 0.0588,
+      "std_share": 0.0741,
+      "n": 1107,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0588,
+          "n": 1107
+        }
+      }
+    },
+    "Brand": {
+      "mean_share": 0.2467,
+      "std_share": 0.1418,
+      "n": 1042,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2472,
+          "n": 41
+        },
+        "jng": {
+          "mean_share": 0.2474,
+          "n": 973
+        }
+      }
+    },
+    "Braum": {
+      "mean_share": 0.0358,
+      "std_share": 0.0642,
+      "n": 3986,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0358,
+          "n": 3985
+        }
+      }
+    },
+    "Caitlyn": {
+      "mean_share": 0.2964,
+      "std_share": 0.168,
+      "n": 2131,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.3009,
+          "n": 2061
+        },
+        "sup": {
+          "mean_share": 0.1405,
+          "n": 62
+        }
+      }
+    },
+    "Camille": {
+      "mean_share": 0.2205,
+      "std_share": 0.1478,
+      "n": 1645,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.1285,
+          "n": 216
+        },
+        "top": {
+          "mean_share": 0.2345,
+          "n": 1423
+        }
+      }
+    },
+    "Cassiopeia": {
+      "mean_share": 0.2484,
+      "std_share": 0.1498,
+      "n": 1201,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2495,
+          "n": 1141
+        },
+        "top": {
+          "mean_share": 0.2198,
+          "n": 45
+        }
+      }
+    },
+    "Cho'Gath": {
+      "mean_share": 0.2236,
+      "std_share": 0.1557,
+      "n": 589,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2859,
+          "n": 53
+        },
+        "top": {
+          "mean_share": 0.2203,
+          "n": 502
+        }
+      }
+    },
+    "Corki": {
+      "mean_share": 0.2878,
+      "std_share": 0.1608,
+      "n": 6106,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2937,
+          "n": 3132
+        },
+        "mid": {
+          "mean_share": 0.2818,
+          "n": 2959
+        }
+      }
+    },
+    "Darius": {
+      "mean_share": 0.2883,
+      "std_share": 0.1627,
+      "n": 493,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2756,
+          "n": 38
+        },
+        "top": {
+          "mean_share": 0.2885,
+          "n": 454
+        }
+      }
+    },
+    "Diana": {
+      "mean_share": 0.2473,
+      "std_share": 0.1425,
+      "n": 217,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2537,
+          "n": 183
+        },
+        "mid": {
+          "mean_share": 0.2252,
+          "n": 31
+        }
+      }
+    },
+    "Dr. Mundo": {
+      "mean_share": 0.1876,
+      "std_share": 0.1348,
+      "n": 805,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.1997,
+          "n": 556
+        },
+        "top": {
+          "mean_share": 0.1604,
+          "n": 249
+        }
+      }
+    },
+    "Draven": {
+      "mean_share": 0.3167,
+      "std_share": 0.1694,
+      "n": 1158,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.3185,
+          "n": 1133
+        }
+      }
+    },
+    "Ekko": {
+      "mean_share": 0.3206,
+      "std_share": 0.1881,
+      "n": 82,
+      "hypercarry": true,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.3183,
+          "n": 71
+        }
+      }
+    },
+    "Elise": {
+      "mean_share": 0.2084,
+      "std_share": 0.1479,
+      "n": 942,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.231,
+          "n": 672
+        },
+        "sup": {
+          "mean_share": 0.1522,
+          "n": 270
+        }
+      }
+    },
+    "Ezreal": {
+      "mean_share": 0.2756,
+      "std_share": 0.1611,
+      "n": 6976,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2764,
+          "n": 6648
+        },
+        "mid": {
+          "mean_share": 0.2598,
+          "n": 315
+        }
+      }
+    },
+    "Fiddlesticks": {
+      "mean_share": 0.1271,
+      "std_share": 0.1471,
+      "n": 80,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2228,
+          "n": 33
+        },
+        "sup": {
+          "mean_share": 0.0439,
+          "n": 42
+        }
+      }
+    },
+    "Fiora": {
+      "mean_share": 0.2278,
+      "std_share": 0.1617,
+      "n": 1111,
+      "hypercarry": false,
+      "by_role": {
+        "top": {
+          "mean_share": 0.2275,
+          "n": 1101
+        }
+      }
+    },
+    "Galio": {
+      "mean_share": 0.1448,
+      "std_share": 0.1198,
+      "n": 2261,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.1546,
+          "n": 1741
+        },
+        "sup": {
+          "mean_share": 0.078,
+          "n": 125
+        },
+        "top": {
+          "mean_share": 0.1227,
+          "n": 395
+        }
+      }
+    },
+    "Gangplank": {
+      "mean_share": 0.2359,
+      "std_share": 0.1602,
+      "n": 471,
+      "hypercarry": false,
+      "by_role": {
+        "top": {
+          "mean_share": 0.2364,
+          "n": 465
+        }
+      }
+    },
+    "Garen": {
+      "mean_share": 0.2763,
+      "std_share": 0.1456,
+      "n": 272,
+      "hypercarry": false,
+      "by_role": {
+        "top": {
+          "mean_share": 0.2732,
+          "n": 254
+        }
+      }
+    },
+    "Gnar": {
+      "mean_share": 0.1783,
+      "std_share": 0.1328,
+      "n": 5167,
+      "hypercarry": false,
+      "by_role": {
+        "top": {
+          "mean_share": 0.1784,
+          "n": 5162
+        }
+      }
+    },
+    "Gragas": {
+      "mean_share": 0.1459,
+      "std_share": 0.1318,
+      "n": 3193,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.1937,
+          "n": 490
+        },
+        "mid": {
+          "mean_share": 0.1747,
+          "n": 530
+        },
+        "sup": {
+          "mean_share": 0.0611,
+          "n": 99
+        },
+        "top": {
+          "mean_share": 0.1313,
+          "n": 2074
+        }
+      }
+    },
+    "Graves": {
+      "mean_share": 0.2918,
+      "std_share": 0.176,
+      "n": 492,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2944,
+          "n": 474
+        }
+      }
+    },
+    "Gwen": {
+      "mean_share": 0.2423,
+      "std_share": 0.1524,
+      "n": 3245,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.3137,
+          "n": 141
+        },
+        "top": {
+          "mean_share": 0.2388,
+          "n": 3082
+        }
+      }
+    },
+    "Hecarim": {
+      "mean_share": 0.2413,
+      "std_share": 0.1533,
+      "n": 101,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2413,
+          "n": 101
+        }
+      }
+    },
+    "Heimerdinger": {
+      "mean_share": 0.1069,
+      "std_share": 0.1225,
+      "n": 646,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.1041,
+          "n": 628
+        }
+      }
+    },
+    "Hwei": {
+      "mean_share": 0.2376,
+      "std_share": 0.1501,
+      "n": 2594,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2336,
+          "n": 64
+        },
+        "mid": {
+          "mean_share": 0.2406,
+          "n": 2452
+        },
+        "sup": {
+          "mean_share": 0.1431,
+          "n": 76
+        }
+      }
+    },
+    "Illaoi": {
+      "mean_share": 0.2058,
+      "std_share": 0.1319,
+      "n": 106,
+      "hypercarry": false,
+      "by_role": {
+        "top": {
+          "mean_share": 0.2072,
+          "n": 98
+        }
+      }
+    },
+    "Irelia": {
+      "mean_share": 0.2583,
+      "std_share": 0.1548,
+      "n": 543,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2616,
+          "n": 259
+        },
+        "top": {
+          "mean_share": 0.2553,
+          "n": 284
+        }
+      }
+    },
+    "Ivern": {
+      "mean_share": 0.0831,
+      "std_share": 0.102,
+      "n": 1304,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.0834,
+          "n": 1281
+        }
+      }
+    },
+    "Janna": {
+      "mean_share": 0.0431,
+      "std_share": 0.078,
+      "n": 134,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0431,
+          "n": 133
+        }
+      }
+    },
+    "Jarvan IV": {
+      "mean_share": 0.175,
+      "std_share": 0.1275,
+      "n": 3812,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.1755,
+          "n": 3789
+        }
+      }
+    },
+    "Jax": {
+      "mean_share": 0.2186,
+      "std_share": 0.1491,
+      "n": 5182,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2605,
+          "n": 431
+        },
+        "top": {
+          "mean_share": 0.215,
+          "n": 4738
+        }
+      }
+    },
+    "Jayce": {
+      "mean_share": 0.2559,
+      "std_share": 0.1621,
+      "n": 5284,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2726,
+          "n": 207
+        },
+        "mid": {
+          "mean_share": 0.2887,
+          "n": 2413
+        },
+        "top": {
+          "mean_share": 0.2249,
+          "n": 2664
+        }
+      }
+    },
+    "Jhin": {
+      "mean_share": 0.2775,
+      "std_share": 0.159,
+      "n": 4062,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2789,
+          "n": 4006
+        },
+        "sup": {
+          "mean_share": 0.1643,
+          "n": 48
+        }
+      }
+    },
+    "Jinx": {
+      "mean_share": 0.3284,
+      "std_share": 0.1744,
+      "n": 3309,
+      "hypercarry": true,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.3284,
+          "n": 3307
+        }
+      }
+    },
+    "K'Sante": {
+      "mean_share": 0.1694,
+      "std_share": 0.1367,
+      "n": 10781,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.1956,
+          "n": 260
+        },
+        "top": {
+          "mean_share": 0.1688,
+          "n": 10513
+        }
+      }
+    },
+    "Kai'Sa": {
+      "mean_share": 0.3536,
+      "std_share": 0.1673,
+      "n": 6687,
+      "hypercarry": true,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.353,
+          "n": 6496
+        },
+        "mid": {
+          "mean_share": 0.3773,
+          "n": 186
+        }
+      }
+    },
+    "Kalista": {
+      "mean_share": 0.3156,
+      "std_share": 0.1646,
+      "n": 2518,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.3185,
+          "n": 2464
+        },
+        "sup": {
+          "mean_share": 0.1628,
+          "n": 43
+        }
+      }
+    },
+    "Karma": {
+      "mean_share": 0.0868,
+      "std_share": 0.1115,
+      "n": 3414,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.1752,
+          "n": 735
+        },
+        "sup": {
+          "mean_share": 0.0598,
+          "n": 2568
+        },
+        "top": {
+          "mean_share": 0.1276,
+          "n": 105
+        }
+      }
+    },
+    "Karthus": {
+      "mean_share": 0.2797,
+      "std_share": 0.168,
+      "n": 500,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2651,
+          "n": 34
+        },
+        "jng": {
+          "mean_share": 0.2801,
+          "n": 458
+        }
+      }
+    },
+    "Kassadin": {
+      "mean_share": 0.3312,
+      "std_share": 0.1882,
+      "n": 310,
+      "hypercarry": true,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.3324,
+          "n": 308
+        }
+      }
+    },
+    "Kennen": {
+      "mean_share": 0.2086,
+      "std_share": 0.1381,
+      "n": 1450,
+      "hypercarry": false,
+      "by_role": {
+        "top": {
+          "mean_share": 0.2084,
+          "n": 1440
+        }
+      }
+    },
+    "Kha'Zix": {
+      "mean_share": 0.2896,
+      "std_share": 0.1735,
+      "n": 578,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2896,
+          "n": 578
+        }
+      }
+    },
+    "Kindred": {
+      "mean_share": 0.2929,
+      "std_share": 0.1667,
+      "n": 822,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2929,
+          "n": 821
+        }
+      }
+    },
+    "Kled": {
+      "mean_share": 0.2032,
+      "std_share": 0.1318,
+      "n": 202,
+      "hypercarry": false,
+      "by_role": {
+        "top": {
+          "mean_share": 0.2019,
+          "n": 187
+        }
+      }
+    },
+    "Kog'Maw": {
+      "mean_share": 0.3185,
+      "std_share": 0.1639,
+      "n": 372,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.3127,
+          "n": 292
+        },
+        "mid": {
+          "mean_share": 0.3394,
+          "n": 80
+        }
+      }
+    },
+    "LeBlanc": {
+      "mean_share": 0.2775,
+      "std_share": 0.1524,
+      "n": 2384,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2783,
+          "n": 2353
+        }
+      }
+    },
+    "Lee Sin": {
+      "mean_share": 0.243,
+      "std_share": 0.1517,
+      "n": 3534,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2439,
+          "n": 3436
+        },
+        "mid": {
+          "mean_share": 0.2405,
+          "n": 32
+        },
+        "top": {
+          "mean_share": 0.2043,
+          "n": 52
+        }
+      }
+    },
+    "Leona": {
+      "mean_share": 0.0556,
+      "std_share": 0.0763,
+      "n": 5739,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0556,
+          "n": 5738
+        }
+      }
+    },
+    "Lillia": {
+      "mean_share": 0.2466,
+      "std_share": 0.1484,
+      "n": 1431,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2469,
+          "n": 1424
+        }
+      }
+    },
+    "Lissandra": {
+      "mean_share": 0.1607,
+      "std_share": 0.1288,
+      "n": 689,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.1637,
+          "n": 662
+        }
+      }
+    },
+    "Lucian": {
+      "mean_share": 0.313,
+      "std_share": 0.1709,
+      "n": 4803,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.3187,
+          "n": 4124
+        },
+        "mid": {
+          "mean_share": 0.2781,
+          "n": 671
+        }
+      }
+    },
+    "Lulu": {
+      "mean_share": 0.0453,
+      "std_share": 0.0789,
+      "n": 3504,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0451,
+          "n": 3494
+        }
+      }
+    },
+    "Lux": {
+      "mean_share": 0.1245,
+      "std_share": 0.1224,
+      "n": 513,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2429,
+          "n": 86
+        },
+        "sup": {
+          "mean_share": 0.0968,
+          "n": 403
+        }
+      }
+    },
+    "Malphite": {
+      "mean_share": 0.1315,
+      "std_share": 0.1195,
+      "n": 1206,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.1493,
+          "n": 136
+        },
+        "mid": {
+          "mean_share": 0.2259,
+          "n": 52
+        },
+        "top": {
+          "mean_share": 0.1244,
+          "n": 1018
+        }
+      }
+    },
+    "Maokai": {
+      "mean_share": 0.115,
+      "std_share": 0.114,
+      "n": 6821,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.121,
+          "n": 6006
+        },
+        "sup": {
+          "mean_share": 0.0627,
+          "n": 645
+        },
+        "top": {
+          "mean_share": 0.1016,
+          "n": 165
+        }
+      }
+    },
+    "Mel": {
+      "mean_share": 0.37,
+      "std_share": 0.1713,
+      "n": 697,
+      "hypercarry": true,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.3619,
+          "n": 186
+        },
+        "mid": {
+          "mean_share": 0.3761,
+          "n": 498
+        }
+      }
+    },
+    "Milio": {
+      "mean_share": 0.0302,
+      "std_share": 0.0667,
+      "n": 2117,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0302,
+          "n": 2117
+        }
+      }
+    },
+    "Miss Fortune": {
+      "mean_share": 0.2857,
+      "std_share": 0.1592,
+      "n": 2747,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2875,
+          "n": 2717
+        }
+      }
+    },
+    "Mordekaiser": {
+      "mean_share": 0.2317,
+      "std_share": 0.1416,
+      "n": 370,
+      "hypercarry": false,
+      "by_role": {
+        "top": {
+          "mean_share": 0.2295,
+          "n": 351
+        }
+      }
+    },
+    "Morgana": {
+      "mean_share": 0.1413,
+      "std_share": 0.1194,
+      "n": 169,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.1811,
+          "n": 73
+        },
+        "mid": {
+          "mean_share": 0.1507,
+          "n": 49
+        },
+        "sup": {
+          "mean_share": 0.0695,
+          "n": 46
+        }
+      }
+    },
+    "Naafiri": {
+      "mean_share": 0.3004,
+      "std_share": 0.161,
+      "n": 1490,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.3015,
+          "n": 1443
+        },
+        "mid": {
+          "mean_share": 0.286,
+          "n": 30
+        }
+      }
+    },
+    "Nami": {
+      "mean_share": 0.0509,
+      "std_share": 0.0776,
+      "n": 3062,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0509,
+          "n": 3061
+        }
+      }
+    },
+    "Nasus": {
+      "mean_share": 0.222,
+      "std_share": 0.1691,
+      "n": 189,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2759,
+          "n": 31
+        },
+        "mid": {
+          "mean_share": 0.2278,
+          "n": 43
+        },
+        "top": {
+          "mean_share": 0.21,
+          "n": 109
+        }
+      }
+    },
+    "Nautilus": {
+      "mean_share": 0.0565,
+      "std_share": 0.0795,
+      "n": 10838,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.0891,
+          "n": 93
+        },
+        "mid": {
+          "mean_share": 0.0896,
+          "n": 49
+        },
+        "sup": {
+          "mean_share": 0.0559,
+          "n": 10665
+        }
+      }
+    },
+    "Neeko": {
+      "mean_share": 0.1235,
+      "std_share": 0.1222,
+      "n": 3830,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2304,
+          "n": 67
+        },
+        "mid": {
+          "mean_share": 0.1879,
+          "n": 1387
+        },
+        "sup": {
+          "mean_share": 0.0825,
+          "n": 2364
+        }
+      }
+    },
+    "Nidalee": {
+      "mean_share": 0.2554,
+      "std_share": 0.1572,
+      "n": 1217,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2615,
+          "n": 1094
+        },
+        "top": {
+          "mean_share": 0.2191,
+          "n": 107
+        }
+      }
+    },
+    "Nilah": {
+      "mean_share": 0.2997,
+      "std_share": 0.1738,
+      "n": 191,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2997,
+          "n": 191
+        }
+      }
+    },
+    "Nocturne": {
+      "mean_share": 0.2082,
+      "std_share": 0.138,
+      "n": 2883,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2082,
+          "n": 2872
+        }
+      }
+    },
+    "Olaf": {
+      "mean_share": 0.2696,
+      "std_share": 0.1562,
+      "n": 1293,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.296,
+          "n": 153
+        },
+        "top": {
+          "mean_share": 0.2663,
+          "n": 1129
+        }
+      }
+    },
+    "Orianna": {
+      "mean_share": 0.2263,
+      "std_share": 0.1427,
+      "n": 5039,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2264,
+          "n": 5032
+        }
+      }
+    },
+    "Ornn": {
+      "mean_share": 0.1119,
+      "std_share": 0.1118,
+      "n": 3288,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.1137,
+          "n": 168
+        },
+        "top": {
+          "mean_share": 0.1122,
+          "n": 3075
+        }
+      }
+    },
+    "Pantheon": {
+      "mean_share": 0.2821,
+      "std_share": 0.1497,
+      "n": 2874,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2881,
+          "n": 2605
+        },
+        "mid": {
+          "mean_share": 0.2718,
+          "n": 46
+        },
+        "sup": {
+          "mean_share": 0.1725,
+          "n": 121
+        },
+        "top": {
+          "mean_share": 0.2628,
+          "n": 102
+        }
+      }
+    },
+    "Poppy": {
+      "mean_share": 0.1269,
+      "std_share": 0.115,
+      "n": 3797,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.1461,
+          "n": 1830
+        },
+        "sup": {
+          "mean_share": 0.0883,
+          "n": 1099
+        },
+        "top": {
+          "mean_share": 0.1354,
+          "n": 864
+        }
+      }
+    },
+    "Pyke": {
+      "mean_share": 0.2046,
+      "std_share": 0.1264,
+      "n": 789,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.204,
+          "n": 785
+        }
+      }
+    },
+    "Qiyana": {
+      "mean_share": 0.2766,
+      "std_share": 0.15,
+      "n": 458,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2735,
+          "n": 408
+        },
+        "mid": {
+          "mean_share": 0.2992,
+          "n": 48
+        }
+      }
+    },
+    "Rakan": {
+      "mean_share": 0.0471,
+      "std_share": 0.0705,
+      "n": 8135,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0471,
+          "n": 8132
+        }
+      }
+    },
+    "Rek'Sai": {
+      "mean_share": 0.2173,
+      "std_share": 0.147,
+      "n": 607,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2467,
+          "n": 284
+        },
+        "top": {
+          "mean_share": 0.1914,
+          "n": 321
+        }
+      }
+    },
+    "Rell": {
+      "mean_share": 0.0578,
+      "std_share": 0.0788,
+      "n": 9758,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.0824,
+          "n": 1062
+        },
+        "sup": {
+          "mean_share": 0.0547,
+          "n": 8694
+        }
+      }
+    },
+    "Renata Glasc": {
+      "mean_share": 0.055,
+      "std_share": 0.0765,
+      "n": 2289,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.055,
+          "n": 2289
+        }
+      }
+    },
+    "Renekton": {
+      "mean_share": 0.1804,
+      "std_share": 0.1389,
+      "n": 7454,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2046,
+          "n": 123
+        },
+        "top": {
+          "mean_share": 0.18,
+          "n": 7331
+        }
+      }
+    },
+    "Rengar": {
+      "mean_share": 0.246,
+      "std_share": 0.1381,
+      "n": 118,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2504,
+          "n": 107
+        }
+      }
+    },
+    "Riven": {
+      "mean_share": 0.2452,
+      "std_share": 0.1474,
+      "n": 105,
+      "hypercarry": false,
+      "by_role": {
+        "top": {
+          "mean_share": 0.2478,
+          "n": 99
+        }
+      }
+    },
+    "Rumble": {
+      "mean_share": 0.2218,
+      "std_share": 0.1405,
+      "n": 6079,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2826,
+          "n": 153
+        },
+        "mid": {
+          "mean_share": 0.2399,
+          "n": 44
+        },
+        "sup": {
+          "mean_share": 0.1531,
+          "n": 115
+        },
+        "top": {
+          "mean_share": 0.2214,
+          "n": 5763
+        }
+      }
+    },
+    "Ryze": {
+      "mean_share": 0.2448,
+      "std_share": 0.1508,
+      "n": 3836,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2457,
+          "n": 3740
+        },
+        "top": {
+          "mean_share": 0.2077,
+          "n": 94
+        }
+      }
+    },
+    "Samira": {
+      "mean_share": 0.3519,
+      "std_share": 0.18,
+      "n": 273,
+      "hypercarry": true,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.3532,
+          "n": 272
+        }
+      }
+    },
+    "Sejuani": {
+      "mean_share": 0.1314,
+      "std_share": 0.119,
+      "n": 7527,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.1315,
+          "n": 7306
+        },
+        "top": {
+          "mean_share": 0.1365,
+          "n": 178
+        }
+      }
+    },
+    "Senna": {
+      "mean_share": 0.1921,
+      "std_share": 0.1371,
+      "n": 2216,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2025,
+          "n": 1866
+        },
+        "sup": {
+          "mean_share": 0.1355,
+          "n": 348
+        }
+      }
+    },
+    "Seraphine": {
+      "mean_share": 0.1019,
+      "std_share": 0.1086,
+      "n": 1596,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.1757,
+          "n": 288
+        },
+        "mid": {
+          "mean_share": 0.1886,
+          "n": 80
+        },
+        "sup": {
+          "mean_share": 0.079,
+          "n": 1228
+        }
+      }
+    },
+    "Sett": {
+      "mean_share": 0.1741,
+      "std_share": 0.1273,
+      "n": 295,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.1859,
+          "n": 31
+        },
+        "sup": {
+          "mean_share": 0.0917,
+          "n": 74
+        },
+        "top": {
+          "mean_share": 0.2034,
+          "n": 187
+        }
+      }
+    },
+    "Shen": {
+      "mean_share": 0.1471,
+      "std_share": 0.1192,
+      "n": 549,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.165,
+          "n": 33
+        },
+        "sup": {
+          "mean_share": 0.0861,
+          "n": 129
+        },
+        "top": {
+          "mean_share": 0.1657,
+          "n": 386
+        }
+      }
+    },
+    "Shyvana": {
+      "mean_share": 0.2406,
+      "std_share": 0.1471,
+      "n": 171,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.247,
+          "n": 133
+        },
+        "top": {
+          "mean_share": 0.2181,
+          "n": 38
+        }
+      }
+    },
+    "Sion": {
+      "mean_share": 0.1226,
+      "std_share": 0.1103,
+      "n": 4901,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.1292,
+          "n": 148
+        },
+        "top": {
+          "mean_share": 0.1222,
+          "n": 4699
+        }
+      }
+    },
+    "Sivir": {
+      "mean_share": 0.2605,
+      "std_share": 0.1622,
+      "n": 2622,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2607,
+          "n": 2614
+        }
+      }
+    },
+    "Skarner": {
+      "mean_share": 0.1442,
+      "std_share": 0.1141,
+      "n": 2626,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.1502,
+          "n": 1957
+        },
+        "sup": {
+          "mean_share": 0.1088,
+          "n": 34
+        },
+        "top": {
+          "mean_share": 0.1275,
+          "n": 632
+        }
+      }
+    },
+    "Smolder": {
+      "mean_share": 0.3568,
+      "std_share": 0.189,
+      "n": 1571,
+      "hypercarry": true,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.3647,
+          "n": 1197
+        },
+        "mid": {
+          "mean_share": 0.3312,
+          "n": 315
+        },
+        "top": {
+          "mean_share": 0.3314,
+          "n": 59
+        }
+      }
+    },
+    "Sona": {
+      "mean_share": 0.072,
+      "std_share": 0.0975,
+      "n": 96,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.072,
+          "n": 96
+        }
+      }
+    },
+    "Soraka": {
+      "mean_share": 0.0434,
+      "std_share": 0.0747,
+      "n": 268,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0438,
+          "n": 263
+        }
+      }
+    },
+    "Swain": {
+      "mean_share": 0.2015,
+      "std_share": 0.1431,
+      "n": 383,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2031,
+          "n": 311
+        },
+        "top": {
+          "mean_share": 0.1931,
+          "n": 45
+        }
+      }
+    },
+    "Sylas": {
+      "mean_share": 0.2555,
+      "std_share": 0.1575,
+      "n": 2697,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.272,
+          "n": 130
+        },
+        "mid": {
+          "mean_share": 0.2568,
+          "n": 2478
+        },
+        "top": {
+          "mean_share": 0.2202,
+          "n": 71
+        }
+      }
+    },
+    "Syndra": {
+      "mean_share": 0.268,
+      "std_share": 0.1585,
+      "n": 3228,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2394,
+          "n": 41
+        },
+        "mid": {
+          "mean_share": 0.2683,
+          "n": 3185
+        }
+      }
+    },
+    "Tahm Kench": {
+      "mean_share": 0.0603,
+      "std_share": 0.0799,
+      "n": 834,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0571,
+          "n": 800
+        }
+      }
+    },
+    "Taliyah": {
+      "mean_share": 0.2213,
+      "std_share": 0.1402,
+      "n": 5711,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2407,
+          "n": 541
+        },
+        "mid": {
+          "mean_share": 0.2191,
+          "n": 5143
+        }
+      }
+    },
+    "Taric": {
+      "mean_share": 0.0403,
+      "std_share": 0.0642,
+      "n": 196,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0392,
+          "n": 190
+        }
+      }
+    },
+    "Thresh": {
+      "mean_share": 0.0562,
+      "std_share": 0.0837,
+      "n": 1282,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0563,
+          "n": 1281
+        }
+      }
+    },
+    "Tristana": {
+      "mean_share": 0.3217,
+      "std_share": 0.1758,
+      "n": 4302,
+      "hypercarry": true,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.3447,
+          "n": 933
+        },
+        "mid": {
+          "mean_share": 0.3156,
+          "n": 3341
+        }
+      }
+    },
+    "Trundle": {
+      "mean_share": 0.1959,
+      "std_share": 0.1309,
+      "n": 1680,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.1967,
+          "n": 1648
+        }
+      }
+    },
+    "Tryndamere": {
+      "mean_share": 0.2797,
+      "std_share": 0.1501,
+      "n": 133,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2836,
+          "n": 60
+        },
+        "top": {
+          "mean_share": 0.2694,
+          "n": 69
+        }
+      }
+    },
+    "Twisted Fate": {
+      "mean_share": 0.2112,
+      "std_share": 0.1382,
+      "n": 1021,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2736,
+          "n": 39
+        },
+        "mid": {
+          "mean_share": 0.1986,
+          "n": 459
+        },
+        "top": {
+          "mean_share": 0.2177,
+          "n": 523
+        }
+      }
+    },
+    "Twitch": {
+      "mean_share": 0.3197,
+      "std_share": 0.1799,
+      "n": 157,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.323,
+          "n": 149
+        }
+      }
+    },
+    "Udyr": {
+      "mean_share": 0.136,
+      "std_share": 0.1398,
+      "n": 1090,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.1932,
+          "n": 167
+        },
+        "top": {
+          "mean_share": 0.1255,
+          "n": 920
+        }
+      }
+    },
+    "Urgot": {
+      "mean_share": 0.317,
+      "std_share": 0.1759,
+      "n": 169,
+      "hypercarry": false,
+      "by_role": {
+        "top": {
+          "mean_share": 0.3125,
+          "n": 165
+        }
+      }
+    },
+    "Varus": {
+      "mean_share": 0.2899,
+      "std_share": 0.1579,
+      "n": 8428,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2911,
+          "n": 8082
+        },
+        "mid": {
+          "mean_share": 0.2941,
+          "n": 82
+        },
+        "sup": {
+          "mean_share": 0.1848,
+          "n": 42
+        },
+        "top": {
+          "mean_share": 0.2617,
+          "n": 222
+        }
+      }
+    },
+    "Vayne": {
+      "mean_share": 0.2883,
+      "std_share": 0.1507,
+      "n": 552,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.3396,
+          "n": 194
+        },
+        "top": {
+          "mean_share": 0.2596,
+          "n": 344
+        }
+      }
+    },
+    "Veigar": {
+      "mean_share": 0.3038,
+      "std_share": 0.1778,
+      "n": 401,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2774,
+          "n": 44
+        },
+        "mid": {
+          "mean_share": 0.3104,
+          "n": 351
+        }
+      }
+    },
+    "Vex": {
+      "mean_share": 0.2429,
+      "std_share": 0.1358,
+      "n": 190,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2495,
+          "n": 180
+        }
+      }
+    },
+    "Vi": {
+      "mean_share": 0.183,
+      "std_share": 0.1361,
+      "n": 7570,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.1831,
+          "n": 7559
+        }
+      }
+    },
+    "Viego": {
+      "mean_share": 0.2904,
+      "std_share": 0.1681,
+      "n": 3914,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2904,
+          "n": 3874
+        }
+      }
+    },
+    "Viktor": {
+      "mean_share": 0.2368,
+      "std_share": 0.156,
+      "n": 3115,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.237,
+          "n": 3095
+        }
+      }
+    },
+    "Vladimir": {
+      "mean_share": 0.2418,
+      "std_share": 0.148,
+      "n": 286,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2732,
+          "n": 106
+        },
+        "top": {
+          "mean_share": 0.2226,
+          "n": 177
+        }
+      }
+    },
+    "Volibear": {
+      "mean_share": 0.1863,
+      "std_share": 0.126,
+      "n": 986,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.1864,
+          "n": 744
+        },
+        "top": {
+          "mean_share": 0.1863,
+          "n": 242
+        }
+      }
+    },
+    "Wukong": {
+      "mean_share": 0.2381,
+      "std_share": 0.1586,
+      "n": 6525,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2386,
+          "n": 6461
+        },
+        "top": {
+          "mean_share": 0.2021,
+          "n": 57
+        }
+      }
+    },
+    "Xayah": {
+      "mean_share": 0.2965,
+      "std_share": 0.1677,
+      "n": 5775,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2966,
+          "n": 5769
+        }
+      }
+    },
+    "Xerath": {
+      "mean_share": 0.2713,
+      "std_share": 0.1545,
+      "n": 211,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2786,
+          "n": 196
+        }
+      }
+    },
+    "Xin Zhao": {
+      "mean_share": 0.2073,
+      "std_share": 0.1408,
+      "n": 6702,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2073,
+          "n": 6690
+        }
+      }
+    },
+    "Yasuo": {
+      "mean_share": 0.2264,
+      "std_share": 0.1385,
+      "n": 618,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2503,
+          "n": 82
+        },
+        "mid": {
+          "mean_share": 0.2316,
+          "n": 415
+        },
+        "top": {
+          "mean_share": 0.19,
+          "n": 112
+        }
+      }
+    },
+    "Yone": {
+      "mean_share": 0.2384,
+      "std_share": 0.1499,
+      "n": 3408,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.2399,
+          "n": 3042
+        },
+        "top": {
+          "mean_share": 0.225,
+          "n": 359
+        }
+      }
+    },
+    "Yorick": {
+      "mean_share": 0.1755,
+      "std_share": 0.1417,
+      "n": 1006,
+      "hypercarry": false,
+      "by_role": {
+        "top": {
+          "mean_share": 0.1751,
+          "n": 1002
+        }
+      }
+    },
+    "Yunara": {
+      "mean_share": 0.3059,
+      "std_share": 0.1584,
+      "n": 2106,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.3059,
+          "n": 2106
+        }
+      }
+    },
+    "Yuumi": {
+      "mean_share": 0.0467,
+      "std_share": 0.0826,
+      "n": 829,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0467,
+          "n": 829
+        }
+      }
+    },
+    "Zaahen": {
+      "mean_share": 0.2075,
+      "std_share": 0.1507,
+      "n": 657,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2524,
+          "n": 249
+        },
+        "top": {
+          "mean_share": 0.1806,
+          "n": 407
+        }
+      }
+    },
+    "Zac": {
+      "mean_share": 0.1357,
+      "std_share": 0.1163,
+      "n": 522,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.1455,
+          "n": 207
+        },
+        "sup": {
+          "mean_share": 0.086,
+          "n": 33
+        },
+        "top": {
+          "mean_share": 0.1331,
+          "n": 271
+        }
+      }
+    },
+    "Zed": {
+      "mean_share": 0.3011,
+      "std_share": 0.1362,
+      "n": 302,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.2984,
+          "n": 170
+        },
+        "mid": {
+          "mean_share": 0.3093,
+          "n": 128
+        }
+      }
+    },
+    "Zeri": {
+      "mean_share": 0.3325,
+      "std_share": 0.1831,
+      "n": 5341,
+      "hypercarry": true,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.3335,
+          "n": 5062
+        },
+        "mid": {
+          "mean_share": 0.318,
+          "n": 260
+        }
+      }
+    },
+    "Ziggs": {
+      "mean_share": 0.2302,
+      "std_share": 0.1449,
+      "n": 1545,
+      "hypercarry": false,
+      "by_role": {
+        "bot": {
+          "mean_share": 0.2293,
+          "n": 1205
+        },
+        "mid": {
+          "mean_share": 0.2335,
+          "n": 333
+        }
+      }
+    },
+    "Zilean": {
+      "mean_share": 0.0769,
+      "std_share": 0.1028,
+      "n": 116,
+      "hypercarry": false,
+      "by_role": {
+        "sup": {
+          "mean_share": 0.0628,
+          "n": 87
+        }
+      }
+    },
+    "Zoe": {
+      "mean_share": 0.2634,
+      "std_share": 0.1542,
+      "n": 337,
+      "hypercarry": false,
+      "by_role": {
+        "mid": {
+          "mean_share": 0.265,
+          "n": 331
+        }
+      }
+    },
+    "Zyra": {
+      "mean_share": 0.1844,
+      "std_share": 0.1307,
+      "n": 1273,
+      "hypercarry": false,
+      "by_role": {
+        "jng": {
+          "mean_share": 0.189,
+          "n": 1209
+        },
+        "sup": {
+          "mean_share": 0.0965,
+          "n": 61
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,950 @@
+{
+  "version": 1,
+  "n_maps": 12325,
+  "champ_tag_coverage": {
+    "n": 172,
+    "tagged": 153,
+    "frac": 0.8895348837209303
+  },
+  "archetypes": [
+    "assassin",
+    "burst_mage",
+    "control_mage",
+    "early_snowball",
+    "engage",
+    "hypercarry_adc",
+    "peel_enchanter",
+    "pick",
+    "poke_siege",
+    "roam",
+    "scaling_late",
+    "siege_specialist",
+    "skirmisher",
+    "splitpush",
+    "tank_frontline",
+    "teamfight_aoe",
+    "utility_adc"
+  ],
+  "control_mage_late": {
+    "buckets": [
+      {
+        "bucket": "red_more",
+        "n": 3219,
+        "mean_length": 32.07,
+        "p_long_32": 0.4461,
+        "p_win": 0.53,
+        "p_win_if_long_32": 0.5181,
+        "n_long": 1436,
+        "mean_kills": 28.43,
+        "p_under_29_5": 0.5812
+      },
+      {
+        "bucket": "even",
+        "n": 5901,
+        "mean_length": 31.89,
+        "p_long_32": 0.4347,
+        "p_win": 0.5248,
+        "p_win_if_long_32": 0.4971,
+        "n_long": 2565,
+        "mean_kills": 28.52,
+        "p_under_29_5": 0.5872
+      },
+      {
+        "bucket": "blue_more",
+        "n": 3205,
+        "mean_length": 32.09,
+        "p_long_32": 0.449,
+        "p_win": 0.5395,
+        "p_win_if_long_32": 0.5108,
+        "n_long": 1439,
+        "mean_kills": 29.03,
+        "p_under_29_5": 0.5694
+      }
+    ],
+    "n_long_32": 5440,
+    "logistic_win_given_long": {
+      "coef_elo_z": 1.2760026189526634,
+      "coef_control_mage_diff": -0.008048187083884559,
+      "delta_pp_per_extra_blue_control_mage": -0.2
+    },
+    "length_ols": {
+      "coef_elo_z": -0.54403177714152,
+      "coef_control_mage_diff": 0.017758249691048295,
+      "minutes_per_extra_blue_control_mage": 0.018
+    }
+  },
+  "hypercarry_behind": {
+    "n_behind": 2897,
+    "p_win_blue_has_more_hypercarry": 0.2097,
+    "n_blue_hyper": 720,
+    "p_win_red_has_more_hypercarry": 0.1886,
+    "n_red_hyper": 684,
+    "p_win_even": 0.1862,
+    "gap_pp": 2.11
+  },
+  "early_snowball": {
+    "gold15_per_extra_snowball_champ": 260.7,
+    "kills_per_extra_snowball_champ": -0.041,
+    "r_snowball_under29": -0.006209179739243
+  },
+  "compound_edge_board": [
+    {
+      "predictor": "arch_scaling_late_sum",
+      "outcome": "ckpm",
+      "r_residual": -0.1583,
+      "n": 12325,
+      "abs_r": 0.15825382333134985,
+      "label": "arch_scaling_late_sum",
+      "edge_hint": "more on red (or fewer on blue) \u2192 lower pace/kills"
+    },
+    {
+      "predictor": "arch_scaling_late_sum",
+      "outcome": "total_kills",
+      "r_residual": -0.1515,
+      "n": 12325,
+      "abs_r": 0.15153933739859243,
+      "label": "arch_scaling_late_sum",
+      "edge_hint": "more on red (or fewer on blue) \u2192 lower pace/kills"
+    },
+    {
+      "predictor": "arch_scaling_late_sum",
+      "outcome": "under_29_5",
+      "r_residual": 0.1245,
+      "n": 12325,
+      "abs_r": 0.12454062901878998,
+      "label": "arch_scaling_late_sum",
+      "edge_hint": "more on blue \u2192 higher P(under) \u2014 O/U"
+    },
+    {
+      "predictor": "arch_scale_vs_snowball",
+      "outcome": "gold15",
+      "r_residual": -0.118,
+      "n": 9516,
+      "abs_r": 0.11800601766678574,
+      "label": "scale \u2212 snowball index",
+      "edge_hint": "more on red (or fewer on blue) \u2194 gold15"
+    },
+    {
+      "predictor": "arch_early_snowball_diff",
+      "outcome": "gold15",
+      "r_residual": 0.1175,
+      "n": 9516,
+      "abs_r": 0.117459845675473,
+      "label": "early snowball",
+      "edge_hint": "more on blue \u2194 gold15"
+    },
+    {
+      "predictor": "arch_scaling_late_sum",
+      "outcome": "under_32_5",
+      "r_residual": 0.1071,
+      "n": 12325,
+      "abs_r": 0.10712371240633875,
+      "label": "arch_scaling_late_sum",
+      "edge_hint": "more on blue \u2192 higher P(under) \u2014 O/U"
+    },
+    {
+      "predictor": "arch_hypercarry_adc_sum",
+      "outcome": "total_kills",
+      "r_residual": -0.1024,
+      "n": 12325,
+      "abs_r": 0.10244024681099248,
+      "label": "arch_hypercarry_adc_sum",
+      "edge_hint": "more on red (or fewer on blue) \u2192 lower pace/kills"
+    },
+    {
+      "predictor": "arch_early_snowball_diff",
+      "outcome": "blue_firsttower",
+      "r_residual": 0.0951,
+      "n": 12322,
+      "abs_r": 0.09509200026709651,
+      "label": "early snowball",
+      "edge_hint": "more on blue \u2194 blue_firsttower"
+    },
+    {
+      "predictor": "arch_tank_frontline_diff",
+      "outcome": "gold15",
+      "r_residual": -0.0887,
+      "n": 9516,
+      "abs_r": 0.0887371136953047,
+      "label": "arch_tank_frontline_diff",
+      "edge_hint": "more on red (or fewer on blue) \u2194 gold15"
+    },
+    {
+      "predictor": "arch_hypercarry_adc_sum",
+      "outcome": "ckpm",
+      "r_residual": -0.0876,
+      "n": 12325,
+      "abs_r": 0.08761321021555774,
+      "label": "arch_hypercarry_adc_sum",
+      "edge_hint": "more on red (or fewer on blue) \u2192 lower pace/kills"
+    },
+    {
+      "predictor": "arch_scaling_late_diff",
+      "outcome": "blue_firstdragon",
+      "r_residual": -0.087,
+      "n": 12322,
+      "abs_r": 0.08699563396530295,
+      "label": "late scalers",
+      "edge_hint": "more on red (or fewer on blue) \u2194 blue_firstdragon"
+    },
+    {
+      "predictor": "arch_scale_vs_snowball",
+      "outcome": "blue_firsttower",
+      "r_residual": -0.0862,
+      "n": 12322,
+      "abs_r": 0.08615405754182325,
+      "label": "scale \u2212 snowball index",
+      "edge_hint": "more on red (or fewer on blue) \u2194 blue_firsttower"
+    },
+    {
+      "predictor": "arch_hypercarry_adc_sum",
+      "outcome": "under_29_5",
+      "r_residual": 0.0861,
+      "n": 12325,
+      "abs_r": 0.08611302792971674,
+      "label": "arch_hypercarry_adc_sum",
+      "edge_hint": "more on blue \u2192 higher P(under) \u2014 O/U"
+    },
+    {
+      "predictor": "arch_scale_vs_snowball",
+      "outcome": "blue_firstdragon",
+      "r_residual": -0.0834,
+      "n": 12322,
+      "abs_r": 0.08338598776300313,
+      "label": "scale \u2212 snowball index",
+      "edge_hint": "more on red (or fewer on blue) \u2194 blue_firstdragon"
+    },
+    {
+      "predictor": "arch_engage_sum",
+      "outcome": "ckpm",
+      "r_residual": 0.0798,
+      "n": 12325,
+      "abs_r": 0.07980367545314039,
+      "label": "arch_engage_sum",
+      "edge_hint": "more on blue \u2192 higher pace/kills"
+    },
+    {
+      "predictor": "arch_early_snowball_diff",
+      "outcome": "win_if_ahead_15",
+      "r_residual": -0.0788,
+      "n": 3589,
+      "abs_r": 0.07877411266573021,
+      "label": "early snowball",
+      "edge_hint": "more on red (or fewer on blue) \u2194 win_if_ahead_15"
+    },
+    {
+      "predictor": "arch_hypercarry_adc_sum",
+      "outcome": "under_32_5",
+      "r_residual": 0.0774,
+      "n": 12325,
+      "abs_r": 0.07739966513993109,
+      "label": "arch_hypercarry_adc_sum",
+      "edge_hint": "more on blue \u2192 higher P(under) \u2014 O/U"
+    },
+    {
+      "predictor": "arch_control_mage_sum",
+      "outcome": "length_min",
+      "r_residual": 0.0762,
+      "n": 12325,
+      "abs_r": 0.07623172551988773,
+      "label": "arch_control_mage_sum",
+      "edge_hint": "more on blue \u2192 longer games"
+    },
+    {
+      "predictor": "arch_engage_sum",
+      "outcome": "total_kills",
+      "r_residual": 0.0702,
+      "n": 12325,
+      "abs_r": 0.07019094741627566,
+      "label": "arch_engage_sum",
+      "edge_hint": "more on blue \u2192 higher pace/kills"
+    },
+    {
+      "predictor": "arch_scaling_late_diff",
+      "outcome": "gold15",
+      "r_residual": -0.07,
+      "n": 9516,
+      "abs_r": 0.07001694570912767,
+      "label": "late scalers",
+      "edge_hint": "more on red (or fewer on blue) \u2194 gold15"
+    },
+    {
+      "predictor": "arch_poke_siege_diff",
+      "outcome": "win_if_long_35",
+      "r_residual": -0.0674,
+      "n": 3206,
+      "abs_r": 0.06741162437781752,
+      "label": "poke/siege",
+      "edge_hint": "more on red (or fewer on blue) \u2192 worse WR in long games (late TF proxy)"
+    },
+    {
+      "predictor": "arch_poke_vs_engage",
+      "outcome": "blue_firsttower",
+      "r_residual": 0.0674,
+      "n": 12322,
+      "abs_r": 0.06735282357192898,
+      "label": "arch_poke_vs_engage",
+      "edge_hint": "more on blue \u2194 blue_firsttower"
+    },
+    {
+      "predictor": "arch_siege_specialist_diff",
+      "outcome": "blue_firsttower",
+      "r_residual": 0.0668,
+      "n": 12322,
+      "abs_r": 0.06676363265277033,
+      "label": "arch_siege_specialist_diff",
+      "edge_hint": "more on blue \u2194 blue_firsttower"
+    },
+    {
+      "predictor": "arch_assassin_diff",
+      "outcome": "gold15",
+      "r_residual": 0.0665,
+      "n": 9516,
+      "abs_r": 0.06654076815135576,
+      "label": "assassins",
+      "edge_hint": "more on blue \u2194 gold15"
+    },
+    {
+      "predictor": "arch_hypercarry_adc_diff",
+      "outcome": "win_if_long_35",
+      "r_residual": 0.0642,
+      "n": 3206,
+      "abs_r": 0.06421045552161476,
+      "label": "hypercarry ADC",
+      "edge_hint": "more on blue \u2192 better WR in long games (late TF proxy)"
+    },
+    {
+      "predictor": "arch_control_mage_sum",
+      "outcome": "long_game_32",
+      "r_residual": 0.063,
+      "n": 12325,
+      "abs_r": 0.06301210565876565,
+      "label": "arch_control_mage_sum",
+      "edge_hint": "more on blue \u2192 longer games"
+    },
+    {
+      "predictor": "arch_early_snowball_sum",
+      "outcome": "ckpm",
+      "r_residual": 0.0616,
+      "n": 12325,
+      "abs_r": 0.06157710969153803,
+      "label": "arch_early_snowball_sum",
+      "edge_hint": "more on blue \u2192 higher pace/kills"
+    },
+    {
+      "predictor": "arch_poke_siege_diff",
+      "outcome": "win_if_long_32",
+      "r_residual": -0.0612,
+      "n": 5440,
+      "abs_r": 0.061168921604184294,
+      "label": "poke/siege",
+      "edge_hint": "more on red (or fewer on blue) \u2192 worse WR in long games (late TF proxy)"
+    },
+    {
+      "predictor": "arch_poke_siege_diff",
+      "outcome": "blue_firsttower",
+      "r_residual": 0.0608,
+      "n": 12322,
+      "abs_r": 0.0608483426367079,
+      "label": "poke/siege",
+      "edge_hint": "more on blue \u2194 blue_firsttower"
+    },
+    {
+      "predictor": "arch_scale_vs_snowball",
+      "outcome": "win_if_ahead_15",
+      "r_residual": 0.0604,
+      "n": 3589,
+      "abs_r": 0.060352217984485194,
+      "label": "scale \u2212 snowball index",
+      "edge_hint": "more on blue \u2194 win_if_ahead_15"
+    },
+    {
+      "predictor": "arch_poke_vs_engage",
+      "outcome": "win_if_long_35",
+      "r_residual": -0.0602,
+      "n": 3206,
+      "abs_r": 0.06020332130945194,
+      "label": "arch_poke_vs_engage",
+      "edge_hint": "more on red (or fewer on blue) \u2192 worse WR in long games (late TF proxy)"
+    },
+    {
+      "predictor": "arch_poke_vs_engage",
+      "outcome": "win_if_long_32",
+      "r_residual": -0.0575,
+      "n": 5440,
+      "abs_r": 0.05749802237864355,
+      "label": "arch_poke_vs_engage",
+      "edge_hint": "more on red (or fewer on blue) \u2192 worse WR in long games (late TF proxy)"
+    },
+    {
+      "predictor": "arch_early_snowball_diff",
+      "outcome": "win_if_long_35",
+      "r_residual": -0.0574,
+      "n": 3206,
+      "abs_r": 0.057415450266254164,
+      "label": "early snowball",
+      "edge_hint": "more on red (or fewer on blue) \u2192 worse WR in long games (late TF proxy)"
+    },
+    {
+      "predictor": "arch_engage_sum",
+      "outcome": "under_29_5",
+      "r_residual": -0.0572,
+      "n": 12325,
+      "abs_r": 0.05717214750720057,
+      "label": "arch_engage_sum",
+      "edge_hint": "more on red (or fewer on blue) \u2192 lower P(under) \u2014 O/U"
+    },
+    {
+      "predictor": "arch_assassin_diff",
+      "outcome": "win_if_ahead_15",
+      "r_residual": -0.0571,
+      "n": 3589,
+      "abs_r": 0.05711595935825969,
+      "label": "assassins",
+      "edge_hint": "more on red (or fewer on blue) \u2194 win_if_ahead_15"
+    }
+  ],
+  "late_teamfight_edges": [
+    {
+      "predictor": "arch_control_mage_sum",
+      "outcome": "length_min",
+      "r_residual": 0.0762,
+      "n": 12325,
+      "abs_r": 0.07623172551988773
+    },
+    {
+      "predictor": "arch_poke_siege_diff",
+      "outcome": "win_if_long_35",
+      "r_residual": -0.0674,
+      "n": 3206,
+      "abs_r": 0.06741162437781752
+    },
+    {
+      "predictor": "arch_hypercarry_adc_diff",
+      "outcome": "win_if_long_35",
+      "r_residual": 0.0642,
+      "n": 3206,
+      "abs_r": 0.06421045552161476
+    },
+    {
+      "predictor": "arch_poke_siege_diff",
+      "outcome": "win_if_long_32",
+      "r_residual": -0.0612,
+      "n": 5440,
+      "abs_r": 0.061168921604184294
+    },
+    {
+      "predictor": "arch_poke_vs_engage",
+      "outcome": "win_if_long_35",
+      "r_residual": -0.0602,
+      "n": 3206,
+      "abs_r": 0.06020332130945194
+    },
+    {
+      "predictor": "arch_poke_vs_engage",
+      "outcome": "win_if_long_32",
+      "r_residual": -0.0575,
+      "n": 5440,
+      "abs_r": 0.05749802237864355
+    },
+    {
+      "predictor": "arch_early_snowball_diff",
+      "outcome": "win_if_long_35",
+      "r_residual": -0.0574,
+      "n": 3206,
+      "abs_r": 0.057415450266254164
+    },
+    {
+      "predictor": "arch_hypercarry_adc_diff",
+      "outcome": "win_if_long_32",
+      "r_residual": 0.0535,
+      "n": 5440,
+      "abs_r": 0.053529472142920705
+    },
+    {
+      "predictor": "arch_scale_vs_snowball",
+      "outcome": "win_if_long_35",
+      "r_residual": 0.051,
+      "n": 3206,
+      "abs_r": 0.05103315810348986
+    },
+    {
+      "predictor": "arch_control_mage_sum",
+      "outcome": "long_game_35",
+      "r_residual": 0.0509,
+      "n": 12325,
+      "abs_r": 0.050875679973612926
+    },
+    {
+      "predictor": "arch_engage_diff",
+      "outcome": "win_if_behind_15",
+      "r_residual": 0.0504,
+      "n": 2897,
+      "abs_r": 0.050428768096171535
+    },
+    {
+      "predictor": "arch_poke_vs_engage",
+      "outcome": "win_if_behind_15",
+      "r_residual": -0.0487,
+      "n": 2897,
+      "abs_r": 0.04872042754227272
+    },
+    {
+      "predictor": "arch_early_snowball_diff",
+      "outcome": "comeback_win",
+      "r_residual": -0.0443,
+      "n": 12325,
+      "abs_r": 0.04431952784085387
+    },
+    {
+      "predictor": "arch_scale_vs_snowball",
+      "outcome": "comeback_win",
+      "r_residual": 0.0432,
+      "n": 12325,
+      "abs_r": 0.043229094169208164
+    },
+    {
+      "predictor": "arch_early_snowball_diff",
+      "outcome": "win_if_long_32",
+      "r_residual": -0.043,
+      "n": 5440,
+      "abs_r": 0.04300370205356775
+    },
+    {
+      "predictor": "arch_early_snowball_sum",
+      "outcome": "length_min",
+      "r_residual": -0.0409,
+      "n": 12325,
+      "abs_r": 0.04085382228149997
+    },
+    {
+      "predictor": "arch_roam_diff",
+      "outcome": "win_if_long_35",
+      "r_residual": 0.0402,
+      "n": 3206,
+      "abs_r": 0.0401819078047895
+    },
+    {
+      "predictor": "arch_scale_vs_snowball",
+      "outcome": "win_if_long_32",
+      "r_residual": 0.038,
+      "n": 5440,
+      "abs_r": 0.03800718508783081
+    },
+    {
+      "predictor": "arch_peel_enchanter_diff",
+      "outcome": "comeback_win",
+      "r_residual": 0.0371,
+      "n": 12325,
+      "abs_r": 0.037120195625574476
+    },
+    {
+      "predictor": "arch_roam_diff",
+      "outcome": "win_if_long_32",
+      "r_residual": 0.0371,
+      "n": 5440,
+      "abs_r": 0.03705031572676696
+    }
+  ],
+  "pace_ou_edges": [
+    {
+      "predictor": "arch_scaling_late_sum",
+      "outcome": "ckpm",
+      "r_residual": -0.1583,
+      "n": 12325,
+      "abs_r": 0.15825382333134985
+    },
+    {
+      "predictor": "arch_scaling_late_sum",
+      "outcome": "total_kills",
+      "r_residual": -0.1515,
+      "n": 12325,
+      "abs_r": 0.15153933739859243
+    },
+    {
+      "predictor": "arch_scaling_late_sum",
+      "outcome": "under_29_5",
+      "r_residual": 0.1245,
+      "n": 12325,
+      "abs_r": 0.12454062901878998
+    },
+    {
+      "predictor": "arch_scaling_late_sum",
+      "outcome": "under_32_5",
+      "r_residual": 0.1071,
+      "n": 12325,
+      "abs_r": 0.10712371240633875
+    },
+    {
+      "predictor": "arch_hypercarry_adc_sum",
+      "outcome": "total_kills",
+      "r_residual": -0.1024,
+      "n": 12325,
+      "abs_r": 0.10244024681099248
+    },
+    {
+      "predictor": "arch_hypercarry_adc_sum",
+      "outcome": "ckpm",
+      "r_residual": -0.0876,
+      "n": 12325,
+      "abs_r": 0.08761321021555774
+    },
+    {
+      "predictor": "arch_hypercarry_adc_sum",
+      "outcome": "under_29_5",
+      "r_residual": 0.0861,
+      "n": 12325,
+      "abs_r": 0.08611302792971674
+    },
+    {
+      "predictor": "arch_engage_sum",
+      "outcome": "ckpm",
+      "r_residual": 0.0798,
+      "n": 12325,
+      "abs_r": 0.07980367545314039
+    },
+    {
+      "predictor": "arch_hypercarry_adc_sum",
+      "outcome": "under_32_5",
+      "r_residual": 0.0774,
+      "n": 12325,
+      "abs_r": 0.07739966513993109
+    },
+    {
+      "predictor": "arch_engage_sum",
+      "outcome": "total_kills",
+      "r_residual": 0.0702,
+      "n": 12325,
+      "abs_r": 0.07019094741627566
+    },
+    {
+      "predictor": "arch_early_snowball_sum",
+      "outcome": "ckpm",
+      "r_residual": 0.0616,
+      "n": 12325,
+      "abs_r": 0.06157710969153803
+    },
+    {
+      "predictor": "arch_engage_sum",
+      "outcome": "under_29_5",
+      "r_residual": -0.0572,
+      "n": 12325,
+      "abs_r": 0.05717214750720057
+    },
+    {
+      "predictor": "arch_control_mage_sum",
+      "outcome": "under_29_5",
+      "r_residual": -0.0494,
+      "n": 12325,
+      "abs_r": 0.0493663305459962
+    },
+    {
+      "predictor": "arch_control_mage_sum",
+      "outcome": "total_kills",
+      "r_residual": 0.0476,
+      "n": 12325,
+      "abs_r": 0.047573596605238196
+    },
+    {
+      "predictor": "arch_control_mage_sum",
+      "outcome": "under_32_5",
+      "r_residual": -0.0464,
+      "n": 12325,
+      "abs_r": 0.0464087047295212
+    },
+    {
+      "predictor": "arch_engage_sum",
+      "outcome": "under_32_5",
+      "r_residual": -0.0362,
+      "n": 12325,
+      "abs_r": 0.03619942216318633
+    }
+  ],
+  "top_raw": [
+    {
+      "predictor": "arch_scaling_late_sum",
+      "outcome": "ckpm",
+      "r": -0.1583,
+      "n": 12325,
+      "abs_r": 0.15832509595801958
+    },
+    {
+      "predictor": "arch_scaling_late_sum",
+      "outcome": "total_kills",
+      "r": -0.1516,
+      "n": 12325,
+      "abs_r": 0.1516005395449644
+    },
+    {
+      "predictor": "arch_scaling_late_sum",
+      "outcome": "under_29_5",
+      "r": 0.1246,
+      "n": 12325,
+      "abs_r": 0.12462847570238719
+    },
+    {
+      "predictor": "arch_early_snowball_diff",
+      "outcome": "gold15",
+      "r": 0.1202,
+      "n": 9516,
+      "abs_r": 0.12023075504128916
+    },
+    {
+      "predictor": "arch_scale_vs_snowball",
+      "outcome": "gold15",
+      "r": -0.1171,
+      "n": 9516,
+      "abs_r": 0.1171069791558828
+    },
+    {
+      "predictor": "arch_scaling_late_sum",
+      "outcome": "under_32_5",
+      "r": 0.1072,
+      "n": 12325,
+      "abs_r": 0.1072287055783861
+    },
+    {
+      "predictor": "arch_hypercarry_adc_sum",
+      "outcome": "total_kills",
+      "r": -0.1017,
+      "n": 12325,
+      "abs_r": 0.10167937125364628
+    },
+    {
+      "predictor": "arch_early_snowball_diff",
+      "outcome": "blue_firsttower",
+      "r": 0.0996,
+      "n": 12322,
+      "abs_r": 0.09964073228829268
+    },
+    {
+      "predictor": "arch_tank_frontline_diff",
+      "outcome": "gold15",
+      "r": -0.0924,
+      "n": 9516,
+      "abs_r": 0.09244548806638707
+    },
+    {
+      "predictor": "arch_scale_vs_snowball",
+      "outcome": "blue_firsttower",
+      "r": -0.0878,
+      "n": 12322,
+      "abs_r": 0.08784493717056162
+    },
+    {
+      "predictor": "arch_hypercarry_adc_sum",
+      "outcome": "ckpm",
+      "r": -0.0871,
+      "n": 12325,
+      "abs_r": 0.0871312375838261
+    },
+    {
+      "predictor": "arch_scaling_late_diff",
+      "outcome": "blue_firstdragon",
+      "r": -0.0865,
+      "n": 12322,
+      "abs_r": 0.08654750142957657
+    },
+    {
+      "predictor": "arch_hypercarry_adc_sum",
+      "outcome": "under_29_5",
+      "r": 0.0853,
+      "n": 12325,
+      "abs_r": 0.08534879377983734
+    },
+    {
+      "predictor": "arch_scale_vs_snowball",
+      "outcome": "blue_firstdragon",
+      "r": -0.0844,
+      "n": 12322,
+      "abs_r": 0.08442554812184742
+    },
+    {
+      "predictor": "arch_engage_sum",
+      "outcome": "ckpm",
+      "r": 0.0802,
+      "n": 12325,
+      "abs_r": 0.08024273411284148
+    },
+    {
+      "predictor": "arch_early_snowball_diff",
+      "outcome": "win_if_ahead_15",
+      "r": -0.0795,
+      "n": 3589,
+      "abs_r": 0.07946996826887624
+    },
+    {
+      "predictor": "arch_hypercarry_adc_sum",
+      "outcome": "under_32_5",
+      "r": 0.0768,
+      "n": 12325,
+      "abs_r": 0.07676965971170148
+    },
+    {
+      "predictor": "arch_control_mage_sum",
+      "outcome": "length_min",
+      "r": 0.0753,
+      "n": 12325,
+      "abs_r": 0.07534779687258775
+    },
+    {
+      "predictor": "arch_engage_sum",
+      "outcome": "total_kills",
+      "r": 0.0708,
+      "n": 12325,
+      "abs_r": 0.0708357170831707
+    },
+    {
+      "predictor": "arch_poke_vs_engage",
+      "outcome": "blue_firsttower",
+      "r": 0.0704,
+      "n": 12322,
+      "abs_r": 0.07043205844811103
+    },
+    {
+      "predictor": "arch_scaling_late_diff",
+      "outcome": "gold15",
+      "r": -0.0659,
+      "n": 9516,
+      "abs_r": 0.06586163185294663
+    },
+    {
+      "predictor": "arch_hypercarry_adc_diff",
+      "outcome": "win_if_long_35",
+      "r": 0.0654,
+      "n": 3206,
+      "abs_r": 0.06539826658870201
+    },
+    {
+      "predictor": "arch_poke_siege_diff",
+      "outcome": "blue_firsttower",
+      "r": 0.0645,
+      "n": 12322,
+      "abs_r": 0.06448771393469158
+    },
+    {
+      "predictor": "arch_control_mage_sum",
+      "outcome": "long_game_32",
+      "r": 0.0626,
+      "n": 12325,
+      "abs_r": 0.06260101605650477
+    },
+    {
+      "predictor": "arch_siege_specialist_diff",
+      "outcome": "blue_firsttower",
+      "r": 0.0618,
+      "n": 12322,
+      "abs_r": 0.061835498978971885
+    },
+    {
+      "predictor": "arch_early_snowball_sum",
+      "outcome": "ckpm",
+      "r": 0.0613,
+      "n": 12325,
+      "abs_r": 0.061294071411733396
+    },
+    {
+      "predictor": "arch_poke_siege_diff",
+      "outcome": "win_if_long_35",
+      "r": -0.0612,
+      "n": 3206,
+      "abs_r": 0.061229009677534085
+    },
+    {
+      "predictor": "arch_scale_vs_snowball",
+      "outcome": "win_if_ahead_15",
+      "r": 0.061,
+      "n": 3589,
+      "abs_r": 0.06102554487034027
+    },
+    {
+      "predictor": "arch_assassin_diff",
+      "outcome": "win_if_ahead_15",
+      "r": -0.061,
+      "n": 3589,
+      "abs_r": 0.06095824183219144
+    },
+    {
+      "predictor": "arch_tank_frontline_diff",
+      "outcome": "blue_firsttower",
+      "r": -0.0608,
+      "n": 12322,
+      "abs_r": 0.060846451030236184
+    },
+    {
+      "predictor": "arch_engage_sum",
+      "outcome": "under_29_5",
+      "r": -0.0578,
+      "n": 12325,
+      "abs_r": 0.057847728832536
+    },
+    {
+      "predictor": "arch_poke_siege_diff",
+      "outcome": "win_if_long_32",
+      "r": -0.0578,
+      "n": 5440,
+      "abs_r": 0.057815349370613806
+    },
+    {
+      "predictor": "arch_assassin_diff",
+      "outcome": "gold15",
+      "r": 0.0575,
+      "n": 9516,
+      "abs_r": 0.05746886467067689
+    },
+    {
+      "predictor": "arch_poke_vs_engage",
+      "outcome": "gold15",
+      "r": 0.0565,
+      "n": 9516,
+      "abs_r": 0.05645215975484733
+    },
+    {
+      "predictor": "arch_pick_diff",
+      "outcome": "blue_firstdragon",
+      "r": 0.0547,
+      "n": 12322,
+      "abs_r": 0.054749649826780405
+    },
+    {
+      "predictor": "arch_poke_vs_engage",
+      "outcome": "win_if_long_32",
+      "r": -0.0541,
+      "n": 5440,
+      "abs_r": 0.05406012004870165
+    },
+    {
+      "predictor": "arch_poke_vs_engage",
+      "outcome": "win_if_long_35",
+      "r": -0.0539,
+      "n": 3206,
+      "abs_r": 0.0539473674759071
+    },
+    {
+      "predictor": "arch_hypercarry_adc_diff",
+      "outcome": "win_if_long_32",
+      "r": 0.0533,
+      "n": 5440,
+      "abs_r": 0.05325621705793879
+    },
+    {
+      "predictor": "arch_engage_diff",
+      "outcome": "gold15",
+      "r": -0.0526,
+      "n": 9516,
+      "abs_r": 0.052625690145878465
+    },
+    {
+      "predictor": "arch_early_snowball_diff",
+      "outcome": "win_if_long_35",
+      "r": -0.0526,
+      "n": 3206,
+      "abs_r": 0.05255548206577343
+    }
+  ],
+  "notes": [
+    "Archetypes are multi-label curated tags \u2014 not Riot official roles.",
+    "win_if_long_* is the late teamfight proxy (no timeline fight log in OE).",
+    "All residual edges Elo-controlled via mu_diff."
+  ]
+}

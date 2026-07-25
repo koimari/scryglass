@@ -1,0 +1,121 @@
+{
+  "n_maps": 12325,
+  "concentration_champs": 154,
+  "cv": {
+    "mean": 0.15976400621336234,
+    "std": 0.00592835334940719
+  },
+  "cv_elo": {
+    "mean": 0.21742532732331615,
+    "std": 0.007200515322139356
+  },
+  "holdout": {
+    "n": 1904,
+    "brier_interaction": 0.15834169739332807,
+    "brier_softcap_proxy": 0.1787757079080712,
+    "auc_interaction": 0.848685293711926,
+    "note": "features=gold@15+firsts+draft interactions (no end tower/dragon)"
+  },
+  "sanity_scaling_vs_snowball_behind": {
+    "scaling_behind_wr": 0.2009,
+    "snowball_behind_wr": 0.2034,
+    "n_scaling": 901,
+    "n_snowball": 934,
+    "gap_pp": -0.25,
+    "note": "blue max_carry\u22650.32 vs draft>0.05 no hypercarry, gold15<-1k"
+  },
+  "top_hypercarries": [
+    {
+      "champ": "Mel",
+      "mean_share": 0.37,
+      "n": 697
+    },
+    {
+      "champ": "Smolder",
+      "mean_share": 0.3568,
+      "n": 1571
+    },
+    {
+      "champ": "Kai'Sa",
+      "mean_share": 0.3536,
+      "n": 6687
+    },
+    {
+      "champ": "Samira",
+      "mean_share": 0.3519,
+      "n": 273
+    },
+    {
+      "champ": "Zeri",
+      "mean_share": 0.3325,
+      "n": 5341
+    },
+    {
+      "champ": "Kassadin",
+      "mean_share": 0.3312,
+      "n": 310
+    },
+    {
+      "champ": "Jinx",
+      "mean_share": 0.3284,
+      "n": 3309
+    },
+    {
+      "champ": "Akali",
+      "mean_share": 0.3227,
+      "n": 2944
+    },
+    {
+      "champ": "Tristana",
+      "mean_share": 0.3217,
+      "n": 4302
+    },
+    {
+      "champ": "Aurelion Sol",
+      "mean_share": 0.3208,
+      "n": 649
+    },
+    {
+      "champ": "Ekko",
+      "mean_share": 0.3206,
+      "n": 82
+    }
+  ],
+  "replay_kcdk_20": {
+    "p_pre": 0.587,
+    "draft_edge": -0.0247,
+    "conc": {
+      "kill_conc_blue": 0.2254,
+      "kill_conc_red": 0.2407,
+      "kill_conc_diff": -0.0153,
+      "max_carry_blue": 0.2883,
+      "max_carry_red": 0.3536,
+      "hypercarry_blue": false,
+      "hypercarry_red": true,
+      "blue_hypercarry": 0,
+      "red_hypercarry": 1,
+      "scaling_flag": 1
+    },
+    "p_kc_old_generic": 0.2977,
+    "p_kc_matrix": 0.251,
+    "delta_pp": -4.67,
+    "phase": "mid",
+    "scaling_gap": -2286.6,
+    "matrix_cell": {
+      "phase": "mid",
+      "gold_bin": "-2k--1k",
+      "draft_q": 2,
+      "draft_edge": -0.0247,
+      "kill_conc_diff": -0.0153,
+      "scaling_flag": 1,
+      "blue_hypercarry": 0
+    },
+    "note": "KC lacks blue hypercarry (Vayne share<0.32); DK has Kai'Sa. Matrix p below generic soft-cap is expected \u2014 scaling is on the leading side."
+  },
+  "smoke_behind_scaling": {
+    "p_no_carry": 0.23,
+    "p_blue_hypercarry": 0.2632,
+    "delta_pp": 3.32,
+    "expect": "blue hypercarry behind \u2192 higher p than no-carry"
+  }
+}

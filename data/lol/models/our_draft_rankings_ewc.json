@@ -1,0 +1,168 @@
+{
+  "title": "DRAFT RANKINGS",
+  "subtitle": "ours \u00b7 2026 EWC \u00b7 WR when model draft edge > 0",
+  "metric": "win rate in games where draft_score_composite wr_bump favors the team",
+  "note": "MIBR.LOS mapped to L\u00d8S only (not LOUD). AG.AL mapped to Anyone's Legend only.",
+  "rows": [
+    {
+      "rank": 1,
+      "team": "HLE",
+      "oe_name": "Hanwha Life Esports",
+      "games": 17,
+      "draft_wr": 88.9,
+      "raw_wr": 76.5,
+      "avg_edge_pp": 1.77,
+      "n_draft_plus": 9
+    },
+    {
+      "rank": 2,
+      "team": "MIBR.LOS",
+      "oe_name": "L\u00d8S",
+      "games": 19,
+      "draft_wr": 84.6,
+      "raw_wr": 63.2,
+      "avg_edge_pp": 1.39,
+      "n_draft_plus": 13
+    },
+    {
+      "rank": 3,
+      "team": "TSW",
+      "oe_name": "Team Secret Whales",
+      "games": 7,
+      "draft_wr": 75.0,
+      "raw_wr": 85.7,
+      "avg_edge_pp": 1.32,
+      "n_draft_plus": 4
+    },
+    {
+      "rank": 4,
+      "team": "KC",
+      "oe_name": "Karmine Corp",
+      "games": 21,
+      "draft_wr": 75.0,
+      "raw_wr": 71.4,
+      "avg_edge_pp": 0.47,
+      "n_draft_plus": 12
+    },
+    {
+      "rank": 5,
+      "team": "KOI",
+      "oe_name": "Movistar KOI",
+      "games": 17,
+      "draft_wr": 75.0,
+      "raw_wr": 47.1,
+      "avg_edge_pp": 0.35,
+      "n_draft_plus": 8
+    },
+    {
+      "rank": 6,
+      "team": "SEN",
+      "oe_name": "Sentinels",
+      "games": 15,
+      "draft_wr": 66.7,
+      "raw_wr": 66.7,
+      "avg_edge_pp": 3.46,
+      "n_draft_plus": 12
+    },
+    {
+      "rank": 7,
+      "team": "G2",
+      "oe_name": "G2 Esports",
+      "games": 11,
+      "draft_wr": 66.7,
+      "raw_wr": 72.7,
+      "avg_edge_pp": 0.12,
+      "n_draft_plus": 6
+    },
+    {
+      "rank": 8,
+      "team": "T1",
+      "oe_name": "T1",
+      "games": 15,
+      "draft_wr": 62.5,
+      "raw_wr": 73.3,
+      "avg_edge_pp": 3.68,
+      "n_draft_plus": 8
+    },
+    {
+      "rank": 9,
+      "team": "DK",
+      "oe_name": "Dplus Kia",
+      "games": 23,
+      "draft_wr": 58.3,
+      "raw_wr": 56.5,
+      "avg_edge_pp": -2.27,
+      "n_draft_plus": 12
+    },
+    {
+      "rank": 10,
+      "team": "GAM",
+      "oe_name": "GAM Esports",
+      "games": 21,
+      "draft_wr": 57.1,
+      "raw_wr": 52.4,
+      "avg_edge_pp": -1.88,
+      "n_draft_plus": 7
+    },
+    {
+      "rank": 11,
+      "team": "BLG",
+      "oe_name": "Bilibili Gaming",
+      "games": 5,
+      "draft_wr": 50.0,
+      "raw_wr": 60.0,
+      "avg_edge_pp": 0.19,
+      "n_draft_plus": 2
+    },
+    {
+      "rank": 12,
+      "team": "GEN",
+      "oe_name": "Gen.G",
+      "games": 7,
+      "draft_wr": 50.0,
+      "raw_wr": 71.4,
+      "avg_edge_pp": -1.07,
+      "n_draft_plus": 2
+    },
+    {
+      "rank": 13,
+      "team": "LYON",
+      "oe_name": "LYON",
+      "games": 11,
+      "draft_wr": 40.0,
+      "raw_wr": 36.4,
+      "avg_edge_pp": -2.46,
+      "n_draft_plus": 5
+    },
+    {
+      "rank": 14,
+      "team": "JDG",
+      "oe_name": "JD Gaming",
+      "games": 7,
+      "draft_wr": 25.0,
+      "raw_wr": 42.9,
+      "avg_edge_pp": 3.68,
+      "n_draft_plus": 4
+    },
+    {
+      "rank": 15,
+      "team": "FUR",
+      "oe_name": "FURIA",
+      "games": 3,
+      "draft_wr": 0.0,
+      "raw_wr": 0.0,
+      "avg_edge_pp": 1.15,
+      "n_draft_plus": 2
+    },
+    {
+      "rank": 16,
+      "team": "AG.AL",
+      "oe_name": "Anyone's Legend",
+      "games": 3,
+      "draft_wr": 0.0,
+      "raw_wr": 33.3,
+      "avg_edge_pp": 1.05,
+      "n_draft_plus": 2
+    }
+  ]
+}

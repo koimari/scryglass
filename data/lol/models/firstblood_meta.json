@@ -1,0 +1,113 @@
+{
+  "status": "ok",
+  "name": "firstblood",
+  "feature_cols": [
+    "elo_blue",
+    "elo_red",
+    "elo_diff",
+    "mu_blue",
+    "mu_red",
+    "mu_diff",
+    "sigma_pair",
+    "p_dual_elo",
+    "form_wr_blue",
+    "form_wr_red",
+    "form_wr_diff",
+    "form_kills_blue",
+    "form_kills_red",
+    "form_kills_diff",
+    "form_ka_blue",
+    "form_ka_red",
+    "form_ckpm_blue",
+    "form_ckpm_red",
+    "form_ckpm_avg",
+    "h2h_blue_edge",
+    "draft_kills_shift",
+    "draft_win_logit_blue",
+    "draft_unknown_frac",
+    "draft_n_champs",
+    "draft_expected_kills",
+    "league_strength",
+    "roll_fb_blue",
+    "roll_fb_red",
+    "roll_fb_diff",
+    "roll_g10_blue",
+    "roll_g10_red",
+    "roll_g10_diff",
+    "roster_changed",
+    "player_mu_diff",
+    "p_player_elo",
+    "p_strength_blend",
+    "map_index",
+    "league_id"
+  ],
+  "calibrated": true,
+  "iso_skipped": false,
+  "holdout": {
+    "name": "firstblood",
+    "n": 1849,
+    "brier": 0.24617566632019872,
+    "log_loss": 0.6848481559661989,
+    "ece": 0.014291346241766546,
+    "reliability": [
+      {
+        "bin": 0,
+        "n": 4,
+        "conf": 1e-06,
+        "acc": 0.0
+      },
+      {
+        "bin": 3,
+        "n": 14,
+        "conf": 0.33908429016988395,
+        "acc": 0.5
+      },
+      {
+        "bin": 4,
+        "n": 100,
+        "conf": 0.4290355069079276,
+        "acc": 0.46
+      },
+      {
+        "bin": 5,
+        "n": 1624,
+        "conf": 0.5381669556153348,
+        "acc": 0.5277093596059114
+      },
+      {
+        "bin": 6,
+        "n": 96,
+        "conf": 0.6589598859684137,
+        "acc": 0.6354166666666666
+      },
+      {
+        "bin": 7,
+        "n": 1,
+        "conf": 0.7678620180738798,
+        "acc": 1.0
+      },
+      {
+        "bin": 8,
+        "n": 7,
+        "conf": 0.7999999999999999,
+        "acc": 0.5714285714285714
+      },
+      {
+        "bin": 9,
+        "n": 3,
+        "conf": 0.999999,
+        "acc": 1.0
+      }
+    ],
+    "baseline_mean_brier": 0.2491312012603249
+  },
+  "cv_brier_mean": 0.2606006060332679,
+  "baselines": {
+    "mean_brier": 0.2497267759112938,
+    "elo_brier": 0.24844893142163257,
+    "elo_log_loss": 0.6900359812358964
+  },
+  "conformal_q90": 0.5757575757575758,
+  "n_train": 10353,
+  "n_holdout": 1849
+}

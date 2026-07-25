@@ -1,0 +1,110 @@
+{
+  "title": "OE full-schema \u2192 modeling lenses (arxiv-grounded)",
+  "papers": [
+    {
+      "id": "2403.04873",
+      "title": "The SIDO Performance Model for League of Legends",
+      "use": "Gold = resource gain; damage = resource use. Condition damage on damage-taken (aggression). Champion effects as random effects \u2014 we use role Ridge residuals as champ effects.",
+      "oe_cols": [
+        "earned gpm",
+        "totalgold",
+        "dpm",
+        "damagetochampions",
+        "damagetakenperminute",
+        "damageshare",
+        "earnedgoldshare"
+      ],
+      "lens": "fight"
+    },
+    {
+      "id": "2309.02449",
+      "title": "League of Legends: Real-Time Result Prediction",
+      "use": "Feature importance shifts by elapsed time: kills/dragons/towers early; total gold later. Use multipoint gold diffs + objectives, not a single snapshot.",
+      "oe_cols": [
+        "golddiffat10",
+        "golddiffat15",
+        "golddiffat20",
+        "golddiffat25",
+        "towers",
+        "dragons",
+        "barons",
+        "inhibitors",
+        "firsttower",
+        "firstdragon",
+        "void_grubs",
+        "atakhans"
+      ],
+      "lens": "lane + objectives"
+    },
+    {
+      "id": "1807.08360",
+      "title": "MOBA-Slice: Time Slice Relative Advantage",
+      "use": "Value network over time slices \u2014 phase gold/XP/CS curves as advantage trajectory.",
+      "oe_cols": [
+        "goldat10",
+        "goldat15",
+        "goldat20",
+        "goldat25",
+        "xpat10",
+        "xpat15",
+        "xpat20",
+        "xpat25",
+        "csdiffat10",
+        "csdiffat15",
+        "csdiffat20",
+        "csdiffat25"
+      ],
+      "lens": "lane"
+    },
+    {
+      "id": "1806.10130",
+      "title": "The Art of Drafting",
+      "use": "Draft as combinatorial game; blind vs counter value \u2014 already in Blade-Chest path.",
+      "oe_cols": [
+        "champion",
+        "ban1-5",
+        "pick1-5",
+        "firstPick",
+        "side"
+      ],
+      "lens": "draft (existing)"
+    },
+    {
+      "id": "2501.10049",
+      "title": "PandaSkill \u2014 role-specific performance from player stats",
+      "use": "Role-independent models of in-game stats \u2192 performance score. We residualize within role.",
+      "oe_cols": "full player OE suite (role-normalized)",
+      "lens": "all lenses role-conditional"
+    },
+    {
+      "id": "2204.12750",
+      "title": "DraftRec",
+      "use": "Synergy/competence from compositions \u2014 complements counterability, not OE stats.",
+      "oe_cols": [
+        "champion",
+        "team composition"
+      ],
+      "lens": "draft (existing)"
+    },
+    {
+      "id": "2502.03998",
+      "title": "Online Learning of Counter Categories and Ratings",
+      "use": "Rating + residual counter table \u2014 Blade-Chest counterability path.",
+      "oe_cols": [
+        "champion matchups"
+      ],
+      "lens": "counterability (existing)"
+    },
+    {
+      "id": "1806.02643",
+      "title": "Re-evaluating Evaluation (mElo / Nash averaging)",
+      "use": "Intransitive evaluation \u2014 cyclic matchup term.",
+      "oe_cols": [
+        "matchup outcomes"
+      ],
+      "lens": "counterability (existing)"
+    }
+  ],
+  "objective_note": "void_grubs / atakhans / dragons / towers / barons / heralds joined from OE team rows onto player games by game_uid+side; champ obj residual vs role.",
+  "tier_formula": "tier_score = elo_pp - \u03bb\u00b7cb_tax + clip(oe_pp) where oe_pp = 0.32\u00b7fight + 0.24\u00b7lane + 0.12\u00b7vision + 0.12\u00b7tower + 0.20\u00b7obj"
+}

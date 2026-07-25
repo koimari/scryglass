@@ -1,0 +1,85 @@
+{
+  "status": "ok",
+  "name": "kills",
+  "feature_cols": [
+    "elo_blue",
+    "elo_red",
+    "elo_diff",
+    "mu_blue",
+    "mu_red",
+    "mu_diff",
+    "sigma_pair",
+    "p_dual_elo",
+    "form_wr_blue",
+    "form_wr_red",
+    "form_wr_diff",
+    "form_kills_blue",
+    "form_kills_red",
+    "form_kills_diff",
+    "form_ka_blue",
+    "form_ka_red",
+    "form_ckpm_blue",
+    "form_ckpm_red",
+    "form_ckpm_avg",
+    "h2h_blue_edge",
+    "draft_kills_shift",
+    "draft_win_logit_blue",
+    "draft_unknown_frac",
+    "draft_n_champs",
+    "draft_expected_kills",
+    "league_strength",
+    "roll_fb_blue",
+    "roll_fb_red",
+    "roll_fb_diff",
+    "roll_g10_blue",
+    "roll_g10_red",
+    "roll_g10_diff",
+    "roster_changed",
+    "player_mu_diff",
+    "p_player_elo",
+    "p_strength_blend",
+    "map_index",
+    "league_id"
+  ],
+  "selected_model": "ridge",
+  "holdout": {
+    "name": "ridge",
+    "n": 1849,
+    "rmse": 8.659076650080333,
+    "mae": 6.718034770990719,
+    "crps": 4.796062499392849
+  },
+  "baselines": {
+    "ridge_crps": 4.796062499392849,
+    "ridge_rmse": 8.659076650080333,
+    "quantile_crps": 4.869448192207052,
+    "mean_gbm_crps": 4.882962852600082
+  },
+  "all_holdout": {
+    "ridge": {
+      "name": "ridge",
+      "n": 1849,
+      "rmse": 8.659076650080333,
+      "mae": 6.718034770990719,
+      "crps": 4.796062499392849
+    },
+    "quantile": {
+      "name": "quantile_gbm",
+      "n": 1849,
+      "rmse": 8.80719015420438,
+      "mae": 6.770034683823308,
+      "crps": 4.869448192207052
+    },
+    "mean_gbm": {
+      "name": "mean_gbm",
+      "n": 1849,
+      "rmse": 8.816619269453502,
+      "mae": 6.835591296554795,
+      "crps": 4.882962852600082
+    }
+  },
+  "residual_sd": 8.647721542428794,
+  "conformal_q90": 13.780782262179867,
+  "n_train": 10353,
+  "n_holdout": 1849
+}

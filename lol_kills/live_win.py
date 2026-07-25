@@ -281,6 +281,8 @@ def live_win_from_draft(
     opp_dragons: int = 0,
     infernal: bool = False,
     void_grubs: int = 0,
+    void_grubs_blue: int | None = None,
+    void_grubs_red: int | None = None,
     towers: int = 0,
     opp_towers: int = 0,
     first_dragon: int | None = None,
@@ -298,6 +300,14 @@ def live_win_from_draft(
     ds = draft_score_composite(blue, red, **kwargs)
     edge = draft_edge_at_minute(ds, minute)
     cf = kill_conc_from_draft(blue, red)
+    # Prefer explicit side counts → net (this team − opp). Default: blue is "this team".
+    if void_grubs_blue is not None or void_grubs_red is not None:
+        vb = int(void_grubs_blue or 0)
+        vr = int(void_grubs_red or 0)
+        void_net = vb - vr
+    else:
+        void_net = int(void_grubs)
+        vb = vr = None
     out = live_win_prob(
         p_pre=p_pre,
         minute=minute,
@@ -306,7 +316,7 @@ def live_win_from_draft(
         dragons=dragons,
         opp_dragons=opp_dragons,
         infernal=infernal,
-        void_grubs=void_grubs,
+        void_grubs=void_net,
         towers=towers,
         opp_towers=opp_towers,
         draft_edge=edge,
@@ -327,6 +337,224 @@ def live_win_from_draft(
         "buckets": ds.get("buckets"),
         "concentration": cf,
     }
+    if vb is not None:
+        out["features"]["void_grubs_blue"] = vb
+        out["features"]["void_grubs_red"] = vr
+        out["features"]["void_grubs_net"] = void_net
+    return out
+
+
+GRUBS_DECISION_PATH = MODELS_DIR / "grubs_decision_numbers.json"
+GRUB_CLOCK_END = 14.75  # void grubs despawn ~14:45
+
+
+def _grubs_research_row(minute: float, void_net: int) -> dict | None:
+    """
+    Contest-research estimand (article / OE leave-mix), NOT live model Δpp.
+    Only when grub clock is still relevant.
+    """
+    if minute > GRUB_CLOCK_END:
+        return None
+    if not GRUBS_DECISION_PATH.exists():
+        return None
+    try:
+        art = json.loads(GRUBS_DECISION_PATH.read_text())
+    except Exception:
+        return None
+    dpp = (art.get("deltas_pp") or {}).get("win_minus_leave_mix")
+    if dpp is None:
+        return None
+    # Sign: if this side trails on grubs (net < 0), research row is informational
+    # for the underdog contest EV, not a live map WR bump.
+    return {
+        "label": "grubs_research",
+        "estimand": "win_minus_leave_mix (trailing contest vs leave-mix)",
+        "delta_pp": round(float(dpp), 2),
+        "note": (
+            "Contest research only — not added into live p_win. "
+            f"Live void_grub prior stays separate (net={void_net})."
+        ),
+        "breakeven_p_win_fight_vs_leave": (art.get("breakeven_p_win_fight") or {}).get(
+            "vs_leave_mix"
+        ),
+    }
+
+
+def objective_delta_pp_breakdown(
+    *,
+    p_pre: float,
+    minute: float,
+    kill_diff: float,
+    gold_diff: float,
+    blue: list[str] | None = None,
+    red: list[str] | None = None,
+    league: str | None = None,
+    dragons: int = 0,
+    opp_dragons: int = 0,
+    infernal: bool = False,
+    void_grubs: int = 0,
+    void_grubs_blue: int | None = None,
+    void_grubs_red: int | None = None,
+    towers: int = 0,
+    opp_towers: int = 0,
+    first_dragon: int | None = None,
+    first_herald: int | None = None,
+    first_tower: int | None = None,
+    draft_edge: float | None = None,
+    kill_conc_diff: float | None = None,
+    scaling_flag: int | None = None,
+    blue_hypercarry: int | None = None,
+    stake: float | None = None,
+    odds: float | None = None,
+    cashout: float | None = None,
+) -> dict:
+    """
+    Live map WR + per-channel Δpp via ablation (tanh softcap ⇒ not linear).
+
+    Δpp_channel = 100 * (p_full − p_with_channel_zeroed).
+    Positive ⇒ that channel currently helps the scored side.
+    """
+    base_kw: dict = {
+        "p_pre": p_pre,
+        "minute": minute,
+        "kill_diff": kill_diff,
+        "gold_diff": gold_diff,
+        "dragons": dragons,
+        "opp_dragons": opp_dragons,
+        "infernal": infernal,
+        "void_grubs": void_grubs,
+        "void_grubs_blue": void_grubs_blue,
+        "void_grubs_red": void_grubs_red,
+        "towers": towers,
+        "opp_towers": opp_towers,
+        "first_dragon": first_dragon,
+        "first_herald": first_herald,
+        "first_tower": first_tower,
+        "league": league,
+    }
+
+    use_draft = bool(blue and red and len(blue) >= 3 and len(red) >= 3)
+
+    def _run(overrides: dict | None = None) -> dict:
+        kw = dict(base_kw)
+        if overrides:
+            kw.update(overrides)
+        if use_draft:
+            call = {k: v for k, v in kw.items() if not (k == "league" and v is None)}
+            return live_win_from_draft(
+                blue=list(blue or []),
+                red=list(red or []),
+                **call,
+            )
+        # No draft: live_win_prob with optional edge
+        vb, vr = kw.get("void_grubs_blue"), kw.get("void_grubs_red")
+        if vb is not None or vr is not None:
+            void_net = int(vb or 0) - int(vr or 0)
+        else:
+            void_net = int(kw.get("void_grubs") or 0)
+        return live_win_prob(
+            p_pre=float(kw["p_pre"]),
+            minute=float(kw["minute"]),
+            kill_diff=float(kw["kill_diff"]),
+            gold_diff=float(kw["gold_diff"]),
+            dragons=int(kw.get("dragons") or 0),
+            opp_dragons=int(kw.get("opp_dragons") or 0),
+            infernal=bool(kw.get("infernal")),
+            void_grubs=void_net,
+            towers=int(kw.get("towers") or 0),
+            opp_towers=int(kw.get("opp_towers") or 0),
+            draft_edge=draft_edge,
+            kill_conc_diff=kill_conc_diff,
+            scaling_flag=scaling_flag,
+            blue_hypercarry=blue_hypercarry,
+            draft_q=draft_q_from_edge(float(draft_edge or 0.0)) if draft_edge is not None else None,
+            first_dragon=kw.get("first_dragon"),
+            first_herald=kw.get("first_herald"),
+            first_tower=kw.get("first_tower"),
+        )
+
+    full = _run()
+    p_full = float(full["p_win"])
+
+    channels = {
+        "gold": {"gold_diff": 0.0},
+        "kills": {"kill_diff": 0.0},
+        "dragons": {"dragons": 0, "opp_dragons": 0, "infernal": False},
+        "towers": {"towers": 0, "opp_towers": 0},
+        "void_grubs": {
+            "void_grubs": 0,
+            "void_grubs_blue": 0 if void_grubs_blue is not None or void_grubs_red is not None else None,
+            "void_grubs_red": 0 if void_grubs_blue is not None or void_grubs_red is not None else None,
+        },
+        "first_dragon": {"first_dragon": None},
+        "first_herald": {"first_herald": None},
+        "first_tower": {"first_tower": None},
+    }
+    # Drop first-* ablations when not provided (idle None→None)
+    if first_dragon is None:
+        channels.pop("first_dragon", None)
+    if first_herald is None:
+        channels.pop("first_herald", None)
+    if first_tower is None:
+        channels.pop("first_tower", None)
+
+    deltas: dict[str, float] = {}
+    for name, ov in channels.items():
+        clean = {k: v for k, v in ov.items() if v is not None or k.startswith("first_")}
+        # For firsts, ablate by setting to 0 (neutral) not None
+        for fk in ("first_dragon", "first_herald", "first_tower"):
+            if fk in ov and ov[fk] is None and name == fk:
+                clean[fk] = 0
+        ab = _run(clean)
+        deltas[name] = round(100.0 * (p_full - float(ab["p_win"])), 2)
+
+    # vs pregame
+    delta_vs_pre = round(100.0 * (p_full - float(p_pre)), 2)
+    top = sorted(deltas.items(), key=lambda kv: -abs(kv[1]))
+    top = [{"channel": k, "delta_pp": v} for k, v in top if abs(v) >= 0.05][:6]
+
+    if void_grubs_blue is not None or void_grubs_red is not None:
+        void_net = int(void_grubs_blue or 0) - int(void_grubs_red or 0)
+    else:
+        void_net = int(void_grubs)
+
+    grubs_research = _grubs_research_row(float(minute), void_net)
+
+    out: dict = {
+        "p_win": round(p_full, 4),
+        "p_pre": round(float(p_pre), 4),
+        "fair_odds": round(1.0 / max(p_full, 1e-6), 3),
+        "fair_odds_opp": round(1.0 / max(1.0 - p_full, 1e-6), 3),
+        "delta_vs_pre_pp": delta_vs_pre,
+        "phase": full.get("phase"),
+        "minute": minute,
+        "method": full.get("method"),
+        "deltas_pp": deltas,
+        "top": top,
+        "features": full.get("features"),
+        "grubs_research": grubs_research,
+        "note": (
+            "Δpp via ablation of live_win softcap model. "
+            "grubs_research is contest estimand — not in p_win."
+        ),
+    }
+    if full.get("draft_score"):
+        out["draft_score"] = full["draft_score"]
+
+    if stake is not None and odds is not None:
+        payout = float(stake) * float(odds)
+        fair_cash = round(p_full * payout, 2)
+        out["ticket"] = {
+            "stake": float(stake),
+            "odds": float(odds),
+            "payout": round(payout, 2),
+            "fair_cashout": fair_cash,
+            "hold_ev": round(p_full * payout - float(stake), 2),
+        }
+        if cashout is not None:
+            out["cashout"] = decide_cashout(
+                p_win=p_full, stake=float(stake), odds=float(odds), cashout=float(cashout)
+            )
     return out
 
 

@@ -1,0 +1,406 @@
+{
+  "version": 1,
+  "population": "cached high-elo ranked solo-queue timelines; exact rank/platform manifest unavailable",
+  "target": "p_dec: probability a focal team wins, conditional on a decisive local champion-kill exchange around the first Void Grub camp",
+  "sample": {
+    "timeline_json_files": 1803,
+    "valid_first_grub_episodes": 1678,
+    "kill_resolved_engagements": 332
+  },
+  "event_definition": {
+    "era_filter": "one to three HORDE kills; first HORDE between 7:00 and 11:00",
+    "fight_window": "20 seconds before first HORDE through 35 seconds after the last HORDE in the first contiguous cluster, capped at 90 seconds after first HORDE",
+    "cluster_rule": "stop the first HORDE cluster when the inter-event gap exceeds 45 seconds",
+    "spatial_rule": "primary radius 2200 units around the event-centred median HORDE position; 1500 and 3000 reported as sensitivity",
+    "pre_fight_frame": "latest participant frame at least 30 seconds before first HORDE; outcome window starts 20 seconds before first HORDE",
+    "resolved_rule": "model only non-tied local-kill exchanges; report non-decisive episodes separately",
+    "orientation": "two mirrored team perspectives per engagement; no future objective outcome selects the focal side"
+  },
+  "descriptive": {
+    "decisive_exchange_rate": 0.19785458879618595,
+    "radius_sensitivity": [
+      {
+        "radius": 1500,
+        "episodes_with_local_kill": 246,
+        "decisive_local_exchanges": 210,
+        "tied_local_exchanges": 36
+      },
+      {
+        "radius": 2200,
+        "episodes_with_local_kill": 379,
+        "decisive_local_exchanges": 332,
+        "tied_local_exchanges": 47
+      },
+      {
+        "radius": 3000,
+        "episodes_with_local_kill": 543,
+        "decisive_local_exchanges": 487,
+        "tied_local_exchanges": 56
+      }
+    ],
+    "first_secure_team_won_local_exchange_n": 180,
+    "first_secure_team_won_local_exchange_rate": 0.5421686746987951,
+    "empirical_gold_bins": [
+      {
+        "label": "below -1000g",
+        "lower_gold": null,
+        "upper_gold": -1000.0,
+        "n_oriented_rows": 197,
+        "wins": 81,
+        "observed_win_probability": 0.41116751269035534,
+        "wilson_95_low": 0.3447944474696093,
+        "wilson_95_high": 0.48093886674417907
+      },
+      {
+        "label": "-1000g to -500g",
+        "lower_gold": -1000.0,
+        "upper_gold": -500.0,
+        "n_oriented_rows": 58,
+        "wins": 18,
+        "observed_win_probability": 0.3103448275862069,
+        "wilson_95_low": 0.20621934414805676,
+        "wilson_95_high": 0.4380330684673994
+      },
+      {
+        "label": "-500g to parity",
+        "lower_gold": -500.0,
+        "upper_gold": 0.0,
+        "n_oriented_rows": 77,
+        "wins": 43,
+        "observed_win_probability": 0.5584415584415584,
+        "wilson_95_low": 0.44738036790961955,
+        "wilson_95_high": 0.6639484528955104
+      },
+      {
+        "label": "parity to +500g",
+        "lower_gold": 0.0,
+        "upper_gold": 500.0,
+        "n_oriented_rows": 77,
+        "wins": 34,
+        "observed_win_probability": 0.44155844155844154,
+        "wilson_95_low": 0.3360515471044896,
+        "wilson_95_high": 0.5526196320903805
+      },
+      {
+        "label": "+500g to +1000g",
+        "lower_gold": 500.0,
+        "upper_gold": 1000.0,
+        "n_oriented_rows": 58,
+        "wins": 40,
+        "observed_win_probability": 0.6896551724137931,
+        "wilson_95_low": 0.5619669315326005,
+        "wilson_95_high": 0.7937806558519432
+      },
+      {
+        "label": "above +1000g",
+        "lower_gold": 1000.0,
+        "upper_gold": null,
+        "n_oriented_rows": 197,
+        "wins": 116,
+        "observed_win_probability": 0.5888324873096447,
+        "wilson_95_low": 0.5190611332558209,
+        "wilson_95_high": 0.6552055525303907
+      }
+    ]
+  },
+  "primary_model": {
+    "formula": "logit(p_hat_dec) = beta * focal_pre_fight_gold_lead / 1000",
+    "intercept_fixed_by_symmetry": 0.0,
+    "beta_per_1000_gold": 0.21258829022157708,
+    "validation": {
+      "folds": 10,
+      "n_oriented_rows": 664,
+      "n_engagements": 332,
+      "auc": 0.5915862244157353,
+      "brier": 0.2441041213460018,
+      "null_brier": 0.25,
+      "log_loss": 0.6815084120742925,
+      "kind": "10-fold grouped out-of-fold validation; mirrored team rows remain in the same fold"
+    }
+  },
+  "candidate_models": {
+    "gold_only": {
+      "folds": 10,
+      "n_oriented_rows": 664,
+      "n_engagements": 332,
+      "auc": 0.5915862244157353,
+      "brier": 0.2441041213460018,
+      "null_brier": 0.25,
+      "log_loss": 0.6815084120742925,
+      "kind": "10-fold grouped out-of-fold validation; mirrored team rows remain in the same fold"
+    },
+    "gold_plus_presence": {
+      "folds": 10,
+      "n_oriented_rows": 664,
+      "n_engagements": 332,
+      "auc": 0.5828585426041516,
+      "brier": 0.24563872797589317,
+      "null_brier": 0.25,
+      "log_loss": 0.6846909402926024,
+      "kind": "10-fold grouped out-of-fold validation; mirrored team rows remain in the same fold"
+    }
+  },
+  "reference_decision_comparison": {
+    "reward": "90g cash plus brief Touch ceiling",
+    "outside_option": "two average early waves preserved by conceding without fighting",
+    "fight_swing": "+/-600g",
+    "capture_rule": "secure if fight won; opponent secures if fight lost",
+    "grid": [
+      {
+        "gold_lead": -2000,
+        "p_hat_fight_win": 0.39527870587294717,
+        "p_star_reference": 0.5225921930758226,
+        "decision_margin": -0.12731348720287544
+      },
+      {
+        "gold_lead": -1900,
+        "p_hat_fight_win": 0.4003714230031985,
+        "p_star_reference": 0.5252574583237103,
+        "decision_margin": -0.12488603532051179
+      },
+      {
+        "gold_lead": -1800,
+        "p_hat_fight_win": 0.40548575772124545,
+        "p_star_reference": 0.5280148174435109,
+        "decision_margin": -0.12252905972226541
+      },
+      {
+        "gold_lead": -1700,
+        "p_hat_fight_win": 0.4106206851178392,
+        "p_star_reference": 0.5308628685369634,
+        "decision_margin": -0.12024218341912418
+      },
+      {
+        "gold_lead": -1600,
+        "p_hat_fight_win": 0.415775162672106,
+        "p_star_reference": 0.5337997253127941,
+        "decision_margin": -0.11802456264068806
+      },
+      {
+        "gold_lead": -1500,
+        "p_hat_fight_win": 0.4209481310430901,
+        "p_star_reference": 0.5368230018393384,
+        "decision_margin": -0.11587487079624831
+      },
+      {
+        "gold_lead": -1400,
+        "p_hat_fight_win": 0.42613851489147925,
+        "p_star_reference": 0.5399298020757712,
+        "decision_margin": -0.11379128718429199
+      },
+      {
+        "gold_lead": -1300,
+        "p_hat_fight_win": 0.4313452237302677,
+        "p_star_reference": 0.5431167147241459,
+        "decision_margin": -0.11177149099387823
+      },
+      {
+        "gold_lead": -1200,
+        "p_hat_fight_win": 0.43656715280301556,
+        "p_star_reference": 0.5463798138743995,
+        "decision_margin": -0.10981266107138393
+      },
+      {
+        "gold_lead": -1100,
+        "p_hat_fight_win": 0.44180318398828633,
+        "p_star_reference": 0.5497146658251196,
+        "decision_margin": -0.1079114818368333
+      },
+      {
+        "gold_lead": -1000,
+        "p_hat_fight_win": 0.4470521867287561,
+        "p_star_reference": 0.5531163423554315,
+        "decision_margin": -0.10606415562667543
+      },
+      {
+        "gold_lead": -900,
+        "p_hat_fight_win": 0.45231301898341525,
+        "p_star_reference": 0.5565794406000093,
+        "decision_margin": -0.10426642161659405
+      },
+      {
+        "gold_lead": -800,
+        "p_hat_fight_win": 0.45758452820120965,
+        "p_star_reference": 0.5600981095429693,
+        "decision_margin": -0.1025135813417597
+      },
+      {
+        "gold_lead": -700,
+        "p_hat_fight_win": 0.46286555231439774,
+        "p_star_reference": 0.5636660830009993,
+        "decision_margin": -0.10080053068660155
+      },
+      {
+        "gold_lead": -600,
+        "p_hat_fight_win": 0.4681549207498403,
+        "p_star_reference": 0.5672767188160173,
+        "decision_margin": -0.09912179806617699
+      },
+      {
+        "gold_lead": -500,
+        "p_hat_fight_win": 0.4734514554563801,
+        "p_star_reference": 0.5709230438277585,
+        "decision_margin": -0.09747158837137837
+      },
+      {
+        "gold_lead": -400,
+        "p_hat_fight_win": 0.47875397194641667,
+        "p_star_reference": 0.5745978040522515,
+        "decision_margin": -0.0958438321058348
+      },
+      {
+        "gold_lead": -300,
+        "p_hat_fight_win": 0.48406128034973567,
+        "p_star_reference": 0.5782935193582753,
+        "decision_margin": -0.09423223900853966
+      },
+      {
+        "gold_lead": -200,
+        "p_hat_fight_win": 0.489372186477613,
+        "p_star_reference": 0.582002541815682,
+        "decision_margin": -0.09263035533806901
+      },
+      {
+        "gold_lead": -100,
+        "p_hat_fight_win": 0.4946854928951788,
+        "p_star_reference": 0.5857171167913692,
+        "decision_margin": -0.09103162389619035
+      },
+      {
+        "gold_lead": 0,
+        "p_hat_fight_win": 0.5,
+        "p_star_reference": 0.5894294457945883,
+        "decision_margin": -0.08942944579458834
+      },
+      {
+        "gold_lead": 100,
+        "p_hat_fight_win": 0.5053145071048212,
+        "p_star_reference": 0.5931317500260658,
+        "decision_margin": -0.0878172429212446
+      },
+      {
+        "gold_lead": 200,
+        "p_hat_fight_win": 0.5106278135223871,
+        "p_star_reference": 0.5968163335669262,
+        "decision_margin": -0.08618852004453914
+      },
+      {
+        "gold_lead": 300,
+        "p_hat_fight_win": 0.5159387196502644,
+        "p_star_reference": 0.6004756451544354,
+        "decision_margin": -0.08453692550417102
+      },
+      {
+        "gold_lead": 400,
+        "p_hat_fight_win": 0.5212460280535833,
+        "p_star_reference": 0.6041023375315006,
+        "decision_margin": -0.08285630947791722
+      },
+      {
+        "gold_lead": 500,
+        "p_hat_fight_win": 0.5265485445436199,
+        "p_star_reference": 0.6076893234241645,
+        "decision_margin": -0.0811407788805446
+      },
+      {
+        "gold_lead": 600,
+        "p_hat_fight_win": 0.5318450792501597,
+        "p_star_reference": 0.6112298272931372,
+        "decision_margin": -0.07938474804297757
+      },
+      {
+        "gold_lead": 700,
+        "p_hat_fight_win": 0.5371344476856023,
+        "p_star_reference": 0.6147174321182008,
+        "decision_margin": -0.07758298443259859
+      },
+      {
+        "gold_lead": 800,
+        "p_hat_fight_win": 0.5424154717987903,
+        "p_star_reference": 0.6181461206036039,
+        "decision_margin": -0.0757306488048135
+      },
+      {
+        "gold_lead": 900,
+        "p_hat_fight_win": 0.5476869810165848,
+        "p_star_reference": 0.6215103103335632,
+        "decision_margin": -0.07382332931697844
+      },
+      {
+        "gold_lead": 1000,
+        "p_hat_fight_win": 0.552947813271244,
+        "p_star_reference": 0.6248048825544703,
+        "decision_margin": -0.07185706928322633
+      },
+      {
+        "gold_lead": 1100,
+        "p_hat_fight_win": 0.5581968160117137,
+        "p_star_reference": 0.6280252044093312,
+        "decision_margin": -0.06982838839761751
+      },
+      {
+        "gold_lead": 1200,
+        "p_hat_fight_win": 0.5634328471969844,
+        "p_star_reference": 0.6311671445953484,
+        "decision_margin": -0.06773429739836401
+      },
+      {
+        "gold_lead": 1300,
+        "p_hat_fight_win": 0.5686547762697323,
+        "p_star_reference": 0.6342270825530262,
+        "decision_margin": -0.06557230628329391
+      },
+      {
+        "gold_lead": 1400,
+        "p_hat_fight_win": 0.5738614851085206,
+        "p_star_reference": 0.6372019114207946,
+        "decision_margin": -0.06334042631227399
+      },
+      {
+        "gold_lead": 1500,
+        "p_hat_fight_win": 0.5790518689569099,
+        "p_star_reference": 0.6400890350998587,
+        "decision_margin": -0.06103716614294885
+      },
+      {
+        "gold_lead": 1600,
+        "p_hat_fight_win": 0.584224837327894,
+        "p_star_reference": 0.6428863598675324,
+        "decision_margin": -0.05866152253963841
+      },
+      {
+        "gold_lead": 1700,
+        "p_hat_fight_win": 0.5893793148821608,
+        "p_star_reference": 0.6455922810520944,
+        "decision_margin": -0.056212966169933654
+      },
+      {
+        "gold_lead": 1800,
+        "p_hat_fight_win": 0.5945142422787545,
+        "p_star_reference": 0.6482056653378816,
+        "decision_margin": -0.05369142305912711
+      },
+      {
+        "gold_lead": 1900,
+        "p_hat_fight_win": 0.5996285769968015,
+        "p_star_reference": 0.6507258293057128,
+        "decision_margin": -0.05109725230891127
+      },
+      {
+        "gold_lead": 2000,
+        "p_hat_fight_win": 0.6047212941270528,
+        "p_star_reference": 0.6531525148320028,
+        "decision_margin": -0.048431220704949984
+      }
+    ],
+    "comparability_warning": "p_hat_dec is conditional on a decisive kill exchange and is not directly commensurate with the unconditional binary p in the structural threshold model."
+  },
+  "limitations": [
+    "The exact Diamond versus Master+ and platform labels cannot be reconstructed because the collection manifest was not preserved with the expanded cache.",
+    "The model predicts which side wins conditional on a decisive local kill exchange, not whether an episode becomes decisive, objective secure, map win, or the causal effect of choosing to contest.",
+    "Champion identity, health, items, cooldowns, summoners, vision, wave priority, and smite availability are unavailable in the present predictor set.",
+    "The kill-resolved filter excludes disengages and zero-kill contests, so the target is conditional on an engagement producing a non-tied local kill result.",
+    "Repeated players and collection anchors cannot be clustered without the missing manifest.",
+    "Ranked estimates are not pooled with or presented as professional estimates."
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "status": "ok",
+  "name": "win",
+  "feature_cols": [
+    "elo_blue",
+    "elo_red",
+    "elo_diff",
+    "mu_blue",
+    "mu_red",
+    "mu_diff",
+    "sigma_pair",
+    "p_dual_elo",
+    "form_wr_blue",
+    "form_wr_red",
+    "form_wr_diff",
+    "form_kills_blue",
+    "form_kills_red",
+    "form_kills_diff",
+    "form_ka_blue",
+    "form_ka_red",
+    "form_ckpm_blue",
+    "form_ckpm_red",
+    "form_ckpm_avg",
+    "h2h_blue_edge",
+    "draft_kills_shift",
+    "draft_win_logit_blue",
+    "draft_unknown_frac",
+    "draft_n_champs",
+    "draft_expected_kills",
+    "league_strength",
+    "roll_fb_blue",
+    "roll_fb_red",
+    "roll_fb_diff",
+    "roll_g10_blue",
+    "roll_g10_red",
+    "roll_g10_diff",
+    "roster_changed",
+    "player_mu_diff",
+    "p_player_elo",
+    "p_strength_blend",
+    "map_index",
+    "league_id"
+  ],
+  "calibrated": true,
+  "iso_skipped": false,
+  "holdout": {
+    "name": "win",
+    "n": 1849,
+    "brier": 0.21030202470482168,
+    "log_loss": 0.6313855100946187,
+    "ece": 0.024317002716847776,
+    "reliability": [
+      {
+        "bin": 0,
+        "n": 10,
+        "conf": 1.0000000000000002e-06,
+        "acc": 0.1
+      },
+      {
+        "bin": 1,
+        "n": 24,
+        "conf": 0.1875,
+        "acc": 0.125
+      },
+      {
+        "bin": 2,
+        "n": 239,
+        "conf": 0.2314121437898298,
+        "acc": 0.2594142259414226
+      },
+      {
+        "bin": 3,
+        "n": 150,
+        "conf": 0.3026248594840947,
+        "acc": 0.37333333333333335
+      },
+      {
+        "bin": 4,
+        "n": 359,
+        "conf": 0.4276947331723546,
+        "acc": 0.415041782729805
+      },
+      {
+        "bin": 5,
+        "n": 31,
+        "conf": 0.5,
+        "acc": 0.5161290322580645
+      },
+      {
+        "bin": 6,
+        "n": 423,
+        "conf": 0.6200738006039846,
+        "acc": 0.6099290780141844
+      },
+      {
+        "bin": 7,
+        "n": 324,
+        "conf": 0.7289914203097814,
+        "acc": 0.6975308641975309
+      },
+      {
+        "bin": 8,
+        "n": 262,
+        "conf": 0.8296314531789882,
+        "acc": 0.8396946564885496
+      },
+      {
+        "bin": 9,
+        "n": 27,
+        "conf": 0.9999989999999999,
+        "acc": 0.8888888888888888
+      }
+    ],
+    "baseline_mean_brier": 0.2476043501800778
+  },
+  "cv_brier_mean": 0.2210590932359906,
+  "baselines": {
+    "mean_brier": 0.24811185701455366,
+    "elo_brier": 0.22021044644807342,
+    "elo_log_loss": 0.6309530644390728
+  },
+  "conformal_q90": 0.71875,
+  "n_train": 10353,
+  "n_holdout": 1849
+}

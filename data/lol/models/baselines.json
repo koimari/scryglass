@@ -1,0 +1,6 @@
+{
+  "win_mean_brier": 0.24811185701455366,
+  "win_elo_brier": 0.22021044644807342,
+  "kills_ridge_crps": 4.796062499392849,
+  "kills_selected": "ridge"
+}

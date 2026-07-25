@@ -1,0 +1,72 @@
+---
+description: LoL draft → fair odds → GRADE — Cursor chat only (no user CLI)
+globs:
+alwaysApply: true
+---
+
+# LoL betting props (Cursor-first)
+
+The user **never** runs CLI. They paste drafts/screenshots/odds here; the agent runs `lol_kills` via Shell and **replies in chat**. Do not tell them to run `python -m …`.
+
+## Draft → WR (league-calibrated)
+
+Deep study artifact: `data/lol/models/draft_wr_study.json` + `draft_wr_calibration.json`.
+Refresh with `python3 -m lol_kills.research.draft_wr_study`.
+
+Draft Score uses **league/tier temperature** (not global 1.4). Report `wr_bump_pp` as Elo-controlled ΔWR.
+Draft still reshapes **pace/dynamics** (kills/ckpm) even when WR Δ looks modest — never ignore a big Draft Score edge on kill-handicap / style bets.
+
+
+User fills `web/composer/index.html` and pastes the generated block into chat.
+Treat that paste as ground truth (draft, live counts, bets). Screenshots are optional extras.
+
+Open: `web/composer/index.html` in a browser (or ask agent to open it).
+
+
+HUD and tab OCR **lie often**. Mistakes here destroy trust.
+
+**Before any live advice, explicitly verify and list:**
+
+1. Clock (mm:ss)
+2. Kill score (left–right)
+3. Gold totals + lead
+4. Towers
+5. **Dragon icons — count each icon on each side** (do not round; 3 ≠ 2)
+6. Grubs / Herald / Baron (do **not** confuse grub shields with dragons)
+7. Champs **only** from a clear tab/draft image — if blurry or conflicts with user’s stated draft, **user’s draft wins**
+
+If any of the above is ambiguous → say so and ask; do **not** guess.
+
+When the user corrects a read, acknowledge the miss, restate the corrected state, and recompute. Never argue with their eyes.
+
+## UX (fair-odds first)
+
+1. **Draft / pick-ban / tab image** → extract champs (or use user’s list), run board, lead with **FAIR ODDS**.
+2. **Book decimal > model fair ⇒ +EV** on that side.
+3. Odds optional — only for GRADE/Kelly once they pick a line.
+4. Never invent book prices.
+
+## When the user sends a **draft** (or draft image)
+
+```python
+from lol_kills.board import build_board, format_fair_odds
+sheet = build_board(TEAM1, TEAM2, league=..., blue=[...], red=[...], journal=False)
+```
+
+**Chat order:** matchup + μ/σ → **FAIR ODDS** → book>fair reminder → short Why.
+
+## Live screenshots
+
+State checklist first → then `live_survival` / `live_win_prob` with **exact** counts → HOLD/CASHOUT. Overlays only.
+
+## Odds (optional)
+
+GRADE / Kelly / combo via `grade_bet` / `grade_combo` in `econ.py`.
+
+## Offline refresh (agent-only, when stale)
+
+```bash
+python3 -m lol_kills.refresh_warehouse
+python3 -m lol_kills.pipeline train
+python3 -m lol_kills.pipeline report
+```

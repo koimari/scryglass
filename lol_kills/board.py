@@ -21,6 +21,12 @@ import numpy as np
 import pandas as pd
 
 from lol_kills.draft_phase_score import draft_score_composite
+from lol_kills.draft_dynamics import analyze_draft_dynamics, format_dynamics_report
+from lol_kills.draft_tierlist import (
+    blend_win_with_tierlist,
+    format_tierlist_report,
+    score_draft_tierlist,
+)
 from lol_kills.econ import (
     append_odds_journal,
     disagreement_highlights,
@@ -35,7 +41,10 @@ from lol_kills.features.build import FEATURE_COLS, _load_champ_betas
 from lol_kills.ml.train import predict_row, race_to_k
 from lol_kills.predict_draft import parse_draft
 from lol_kills.recommend import parse_lines, resolve_team
-
+from lol_kills.research.public_soft_signal import (
+    analyze_live_public_edge,
+    format_public_edge_report,
+)
 ROOT = Path(__file__).resolve().parents[1]
 KILL_LINES = [22.5, 24.5, 25.5, 26.5, 27.5, 28.5, 29.5, 30.5, 32.5, 34.5, 36.5]
 HIGH, MED = 0.70, 0.60
@@ -169,6 +178,21 @@ def format_fair_odds(sheet: dict) -> str:
                 f"  ● {label:28}  fair {r['fair_odds']}  "
                 f"→ +EV if book > {r['fair_odds']}"
             )
+    pe = sheet.get("public_edge")
+    if pe:
+        lines.append("")
+        lines.append(format_public_edge_report(pe))
+    tier = sheet.get("tierlist")
+    if tier and float(tier.get("coverage") or 0) >= 0.3:
+        lean = "blue" if float(tier.get("edge_pp_shrunk") or 0) > 0 else "red"
+        if abs(float(tier.get("edge_pp_shrunk") or 0)) >= 0.5:
+            lines.append("")
+            lines.append(
+                f"  Elo tierlist lean {lean}: "
+                f"{float(tier['edge_pp_shrunk']):+.1f}pp "
+                f"(cov {float(tier['coverage']):.0%}, "
+                f"blend Δ{((tier.get('blend') or {}).get('delta_pp') or 0):+.1f}pp on ML)"
+            )
     return "\n".join(lines)
 
 
@@ -236,6 +260,18 @@ def _h2h_edge(df: pd.DataFrame, blue: str, red: str) -> float:
     return wins / n - 0.5
 
 
+# Cached feature store — avoid re-reading maps.parquet every board
+_FEATURES_DF: pd.DataFrame | None = None
+
+
+def _load_features_df() -> pd.DataFrame:
+    global _FEATURES_DF
+    if _FEATURES_DF is None:
+        feat_path = FEATURES_DIR / "maps.parquet"
+        _FEATURES_DF = pd.read_parquet(feat_path) if feat_path.exists() else pd.DataFrame()
+    return _FEATURES_DF
+
+
 def build_match_features(
     team1: str,
     team2: str,
@@ -246,8 +282,7 @@ def build_match_features(
     team1_is_blue: bool = True,
 ) -> tuple[dict, dict]:
     """team1/team2 are matchup names; blue_champs belong to blue side."""
-    feat_path = FEATURES_DIR / "maps.parquet"
-    df = pd.read_parquet(feat_path) if feat_path.exists() else pd.DataFrame()
+    df = _load_features_df()
 
     blue_team = team1 if team1_is_blue else team2
     red_team = team2 if team1_is_blue else team1
@@ -303,19 +338,64 @@ def build_match_features(
         if not sub.empty:
             sig_pair = float(sub.iloc[-1].get("sigma_pair", sig_pair) or sig_pair)
 
-    p_dual = 1.0 / (1.0 + 10 ** ((mu_r - mu_b) / 400.0))
+    mu_diff = float(mu_b - mu_r)
+    p_dual_classic = 1.0 / (1.0 + 10 ** (-mu_diff / 400.0))
     shrink = 1.0 / (1.0 + (sig_pair / 120.0) ** 2)
-    p_dual = 0.5 + (p_dual - 0.5) * shrink
+    p_dual_classic = 0.5 + (p_dual_classic - 0.5) * shrink
+
+    # Player-aggregate Elo from latest known rosters (travels on team changes)
+    p_player = 0.5
+    player_mu_diff = 0.0
+    try:
+        from lol_kills.ratings.player_elo import latest_roster_cached, score_player_lineups
+
+        blu = latest_roster_cached(blue_team)
+        red = latest_roster_cached(red_team)
+        if len(blu) >= 3 and len(red) >= 3:
+            scored = score_player_lineups(
+                [n for n, _ in blu],
+                [n for n, _ in red],
+                blue_roles=[r for _, r in blu],
+                red_roles=[r for _, r in red],
+            )
+            p_player = float(scored["p_player_elo"])
+            player_mu_diff = float(scored["player_mu_diff"])
+    except Exception:
+        pass
+
+    # Time-safe Elo→WR calibration (player scale was hotter than classic 400)
+    try:
+        from lol_kills.ratings.calibrate_elo_wr import calibrated_strength_p, load_calibration
+
+        cal = load_calibration()
+        if cal.get("team") or cal.get("player"):
+            scored = calibrated_strength_p(mu_diff, player_mu_diff, cal)
+            p_dual = float(scored["p_team_cal"])
+            p_player = float(scored["p_player_cal"])
+            p_strength = float(scored["p_strength_blend"])
+            # mild uncertainty shrink after calibration
+            p_dual = 0.5 + (p_dual - 0.5) * shrink
+            p_player = 0.5 + (p_player - 0.5) * shrink
+            p_strength = 0.5 + (p_strength - 0.5) * shrink
+        else:
+            p_dual = p_dual_classic
+            p_strength = 0.60 * p_dual + 0.40 * p_player
+    except Exception:
+        p_dual = p_dual_classic
+        p_strength = 0.60 * p_dual + 0.40 * p_player
 
     features = {
         "elo_blue": mu_b,
         "elo_red": mu_r,
-        "elo_diff": mu_b - mu_r,
+        "elo_diff": mu_diff,
         "mu_blue": mu_b,
         "mu_red": mu_r,
-        "mu_diff": mu_b - mu_r,
+        "mu_diff": mu_diff,
         "sigma_pair": sig_pair,
         "p_dual_elo": p_dual,
+        "p_player_elo": p_player,
+        "p_strength_blend": p_strength,
+        "player_mu_diff": player_mu_diff,
         "form_wr_blue": b.get("form_wr", 0.5),
         "form_wr_red": r.get("form_wr", 0.5),
         "form_wr_diff": b.get("form_wr", 0.5) - r.get("form_wr", 0.5),
@@ -341,7 +421,6 @@ def build_match_features(
         "roll_g10_red": r.get("roll_g10", 0.0),
         "roll_g10_diff": b.get("roll_g10", 0.0) - r.get("roll_g10", 0.0),
         "roster_changed": 0.0,
-        "player_mu_diff": 0.0,
         "map_index": 1.0,
         "league_id": league_id,
     }
@@ -352,7 +431,7 @@ def build_match_features(
 def _shap_why(features: dict, top_n: int = 6) -> list[str]:
     """TreeSHAP on win GBM when available; else gain-style heuristics."""
     try:
-        import shap
+        import shap  # heavy — only when explicitly enabled
         import joblib
         from lol_kills.etl.paths import MODELS_DIR
         from lol_kills.features.build import FEATURE_COLS
@@ -376,9 +455,9 @@ def _shap_why(features: dict, top_n: int = 6) -> list[str]:
         return []
 
 
-def why_features(features: dict, ds: dict, top_n: int = 8) -> list[str]:
-    """Human-readable drivers — prefer SHAP, fall back to heuristics."""
-    shap_lines = _shap_why(features, top_n=top_n)
+def why_features(features: dict, ds: dict, top_n: int = 8, *, use_shap: bool = False) -> list[str]:
+    """Human-readable drivers — heuristics by default (SHAP is slow to import)."""
+    shap_lines = _shap_why(features, top_n=top_n) if use_shap else []
     if shap_lines:
         return shap_lines
     lines = []
@@ -394,6 +473,11 @@ def why_features(features: dict, ds: dict, top_n: int = 8) -> list[str]:
         lines.append(f"Draft win logit (blue): {features['draft_win_logit_blue']:+.3f}")
     if abs(features.get("draft_kills_shift", 0)) > 0.5:
         lines.append(f"Draft pace shift: {features['draft_kills_shift']:+.2f} kills")
+    if abs(features.get("tierlist_edge_pp", 0)) >= 0.4:
+        lines.append(
+            f"Elo tierlist edge (blue): {features['tierlist_edge_pp']:+.1f}pp "
+            f"(cov {features.get('tierlist_coverage', 0):.0%})"
+        )
     lines.append(
         f"Draft Score {ds['draft_score_blue']:.0f}–{ds['draft_score_red']:.0f} "
         f"(conf {ds['confidence']:.0%})"
@@ -427,6 +511,7 @@ def build_board(
     inhib_odds: dict[str, float] | None = None,
     kelly_frac: float = 0.5,
     journal: bool = True,
+    best_of: int = 1,
 ) -> dict:
     features, meta = build_match_features(
         team1, team2, league=league, blue_champs=blue, red_champs=red, team1_is_blue=team1_is_blue
@@ -443,6 +528,11 @@ def build_board(
     features["draft_beatdown_diff"] = float(ds["components"].get("beatdown_diff") or 0.0)
     features["draft_inev_diff"] = float(ds["components"].get("inev_diff") or 0.0)
     features["p_dual_elo"] = features.get("p_dual_elo", 0.5)
+    features["p_player_elo"] = features.get("p_player_elo", 0.5)
+    features["p_strength_blend"] = features.get(
+        "p_strength_blend",
+        0.60 * float(features["p_dual_elo"]) + 0.40 * float(features["p_player_elo"]),
+    )
     preds = predict_row(features)
 
     # Prefer learned stack; fallback to weighted blend
@@ -450,7 +540,7 @@ def build_board(
         p = float(preds["p_blue_win"])
         preds["stack_weights"] = preds.get("stack_components")
     else:
-        p_elo = float(features.get("p_dual_elo") or 0.5)
+        p_elo = float(features.get("p_strength_blend") or features.get("p_dual_elo") or 0.5)
         p_draft = float(ds["p_blue_draft"])
         p_gbm = float(preds.get("p_blue_win_gbm") or preds.get("p_blue_win") or p_elo)
         w_draft = 0.18 * float(ds.get("confidence", 0.5))
@@ -458,9 +548,34 @@ def build_board(
         w_elo = 1.0 - w_gbm - w_draft
         p = float(np.clip(w_gbm * p_gbm + w_elo * p_elo + w_draft * p_draft, 0.05, 0.95))
         preds["stack_weights"] = {"gbm": w_gbm, "elo_form": w_elo, "draft_score": w_draft}
+
+    # Elo / Blade-Chest tierlist — soft blend on top of stack (coverage-weighted)
+    # Assume paste order top/jng/mid/bot/sup when both sides have 5 champs.
+    roles5 = ["top", "jng", "mid", "bot", "sup"]
+    tier_kw = {}
+    if len(blue) == 5 and len(red) == 5:
+        tier_kw = {"blue_roles": roles5, "red_roles": roles5}
+    tier = score_draft_tierlist(blue, red, league=league, **tier_kw)
+    p, tier_blend = blend_win_with_tierlist(p, tier)
+    tier["blend"] = tier_blend
+    features["tierlist_edge_pp"] = float(tier.get("edge_pp_shrunk") or 0.0)
+    features["tierlist_coverage"] = float(tier.get("coverage") or 0.0)
+    features["tierlist_p_blue"] = float(tier.get("p_blue_tier") or 0.5)
+    if tier_blend.get("applied"):
+        sw = dict(preds.get("stack_weights") or {})
+        sw["tierlist"] = float(tier_blend.get("weight") or 0.0)
+        preds["stack_weights"] = sw
+
     preds["p_blue_win"] = p
     preds["p_red_win"] = 1.0 - p
 
+    dynamics = analyze_draft_dynamics(
+        blue,
+        red,
+        league=league,
+        elo_diff=elo_diff,
+        p_blue_pre=float(p),
+    )
     mu = preds.get("kills_mean", features["draft_expected_kills"])
     sd = preds.get("kills_sd", 6.5)
     mu = 0.65 * float(mu) + 0.35 * float(features["draft_expected_kills"])
@@ -640,6 +755,23 @@ def build_board(
     plus_ev = rank_plus_ev(ev_rows) if ev_rows else []
     combo = grade_combo(plus_ev, same_map=True) if len(plus_ev) >= 2 else None
 
+    # Soft-public vs model disagreement / fade flags (parlay & dog hunting)
+    public_edge = analyze_live_public_edge(
+        blue_team,
+        red_team,
+        p_blue_model=float(preds["p_blue_win"]),
+        heat_blue=float(features.get("form_wr_blue") or 0.5),
+        heat_red=float(features.get("form_wr_red") or 0.5),
+        player_mu_diff=float(features.get("player_mu_diff") or 0.0),
+        draft_win_logit_blue=(
+            float(features.get("draft_win_logit_blue") or 0.0)
+            + 0.02 * float(features.get("tierlist_edge_pp") or 0.0)
+        ),
+        form_wr_diff=float(features.get("form_wr_diff") or 0.0),
+        league=league,
+        best_of=int(best_of or 1),
+    )
+
     sheet_match = {
         "team1": team1,
         "team2": team2,
@@ -653,6 +785,9 @@ def build_board(
     return {
         "match": sheet_match,
         "draft_score": ds,
+        "tierlist": tier,
+        "dynamics": dynamics,
+        "public_edge": public_edge,
         "kills": {
             "mean": round(mu, 2),
             "sd": round(sd, 2),
@@ -723,6 +858,20 @@ def format_report(sheet: dict) -> str:
         )
     lines.append(f"  (stack input only — {ds.get('note') or 'composite draft'})")
     lines.append("")
+    tier = sheet.get("tierlist")
+    if tier:
+        lines.append(
+            format_tierlist_report(tier, team_blue=str(m["blue"]), team_red=str(m["red"]))
+        )
+        lines.append("")
+    dyn = sheet.get("dynamics")
+    if dyn:
+        lines.append(format_dynamics_report(dyn, team_blue=str(m["blue"]), team_red=str(m["red"])))
+        lines.append("")
+    pe = sheet.get("public_edge")
+    if pe:
+        lines.append(format_public_edge_report(pe))
+        lines.append("")
     lines.append(f"--- Kills  μ={sheet['kills']['mean']}  σ={sheet['kills']['sd']} ---")
     if sheet["kills"].get("lo") is not None:
         lines[-1] = (
@@ -838,6 +987,7 @@ def main() -> None:
     ap.add_argument("--lines", default=None, help="LINE:OVER/UNDER,... for kills O/U")
     ap.add_argument("--ml", default=None, help="Team:odds,... moneyline")
     ap.add_argument("--kelly", type=float, default=0.5, help="Kelly fraction (default half)")
+    ap.add_argument("--best-of", type=int, default=1, help="Series format 1/3/5 for public-edge series P")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
@@ -872,6 +1022,7 @@ def main() -> None:
         lines=lines,
         ml_odds=ml_odds,
         kelly_frac=args.kelly,
+        best_of=args.best_of,
     )
     if args.json:
         print(json.dumps(sheet, indent=2, default=str))

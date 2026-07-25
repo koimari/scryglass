@@ -1,0 +1,1638 @@
+{
+  "title": "Side-split Elo-controlled champ tiers",
+  "window": "OE majors 16.08\u201316.13",
+  "n_games": 1235,
+  "date_min": "2026-04-18 04:07:45",
+  "date_max": "2026-07-18 16:33:48",
+  "method": {
+    "value": "side-specific presence logistic + Elo control; \u0394WRpp\u224825*\u03b2 at p=50%",
+    "blind_vs_counter": "role-matchup dist on window: Counter if (p90-mean)\u22656pp and p90\u2265+7pp; else Blind if mean\u2265+2.5pp or gap small; Z/S only",
+    "tiers": "Z/S/A/B/C/D/E/F by side-specific \u0394WR quantiles; only Z/S split Blind/Counter"
+  },
+  "blue": {
+    "cuts": {
+      "Z": 6.11,
+      "S": 3.54,
+      "A": 0.61,
+      "B": -0.74,
+      "C": -1.94,
+      "D": -3.83,
+      "E": -6.25
+    },
+    "board": {
+      "Z Blind": [
+        {
+          "champ": "Olaf",
+          "role": "top",
+          "delta_wr_pp": 12.33,
+          "n": 23,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": 14.73
+        },
+        {
+          "champ": "Viktor",
+          "role": "mid",
+          "delta_wr_pp": 6.19,
+          "n": 94,
+          "blind_pp": 3.42,
+          "counter_pp": 6.25,
+          "archetype": "Blind",
+          "resid_pp": 5.04
+        }
+      ],
+      "Z Counter": [
+        {
+          "champ": "Twisted Fate",
+          "role": "mid",
+          "delta_wr_pp": 10.59,
+          "n": 53,
+          "blind_pp": 8.33,
+          "counter_pp": 15.95,
+          "archetype": "Counter",
+          "resid_pp": 9.38
+        },
+        {
+          "champ": "Rakan",
+          "role": "sup",
+          "delta_wr_pp": 9.62,
+          "n": 51,
+          "blind_pp": 9.14,
+          "counter_pp": 21.28,
+          "archetype": "Counter",
+          "resid_pp": 7.08
+        },
+        {
+          "champ": "Cassiopeia",
+          "role": "mid",
+          "delta_wr_pp": 8.71,
+          "n": 102,
+          "blind_pp": 2.4,
+          "counter_pp": 11.11,
+          "archetype": "Counter",
+          "resid_pp": 4.33
+        },
+        {
+          "champ": "Ashe",
+          "role": "bot",
+          "delta_wr_pp": 7.42,
+          "n": 135,
+          "blind_pp": 7.26,
+          "counter_pp": 16.67,
+          "archetype": "Counter",
+          "resid_pp": 6.63
+        },
+        {
+          "champ": "Lucian",
+          "role": "bot",
+          "delta_wr_pp": 6.88,
+          "n": 128,
+          "blind_pp": 5.52,
+          "counter_pp": 12.96,
+          "archetype": "Counter",
+          "resid_pp": 6.65
+        }
+      ],
+      "S Blind": [
+        {
+          "champ": "Karma",
+          "role": "sup",
+          "delta_wr_pp": 5.94,
+          "n": 116,
+          "blind_pp": 2.82,
+          "counter_pp": 7.58,
+          "archetype": "Counter",
+          "resid_pp": -2.52
+        },
+        {
+          "champ": "Bard",
+          "role": "sup",
+          "delta_wr_pp": 5.56,
+          "n": 119,
+          "blind_pp": 6.23,
+          "counter_pp": 9.37,
+          "archetype": "Blind",
+          "resid_pp": 2.44
+        },
+        {
+          "champ": "Leona",
+          "role": "sup",
+          "delta_wr_pp": 4.89,
+          "n": 23,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": 3.73
+        },
+        {
+          "champ": "Poppy",
+          "role": "jng",
+          "delta_wr_pp": 4.85,
+          "n": 21,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": 4.03
+        },
+        {
+          "champ": "Lux",
+          "role": "sup",
+          "delta_wr_pp": 4.8,
+          "n": 19,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": 6.89
+        },
+        {
+          "champ": "Zaahen",
+          "role": "top",
+          "delta_wr_pp": 3.82,
+          "n": 38,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": 4.73
+        },
+        {
+          "champ": "Camille",
+          "role": "sup",
+          "delta_wr_pp": 3.79,
+          "n": 29,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": 2.52
+        }
+      ],
+      "S Counter": [
+        {
+          "champ": "Akali",
+          "role": "mid",
+          "delta_wr_pp": 5.45,
+          "n": 69,
+          "blind_pp": 4.94,
+          "counter_pp": 12.5,
+          "archetype": "Counter",
+          "resid_pp": 4.22
+        },
+        {
+          "champ": "Ryze",
+          "role": "mid",
+          "delta_wr_pp": 4.33,
+          "n": 163,
+          "blind_pp": 0.85,
+          "counter_pp": 11.71,
+          "archetype": "Counter",
+          "resid_pp": 4.05
+        }
+      ],
+      "A": [
+        {
+          "champ": "Trundle",
+          "role": "jng",
+          "delta_wr_pp": 3.48,
+          "n": 53,
+          "blind_pp": 6.67,
+          "counter_pp": 13.33,
+          "archetype": "Counter",
+          "resid_pp": 6.47
+        },
+        {
+          "champ": "Lee Sin",
+          "role": "jng",
+          "delta_wr_pp": 3.47,
+          "n": 93,
+          "blind_pp": 4.87,
+          "counter_pp": 16.39,
+          "archetype": "Counter",
+          "resid_pp": 5.62
+        },
+        {
+          "champ": "Rell",
+          "role": "sup",
+          "delta_wr_pp": 3.41,
+          "n": 52,
+          "blind_pp": 5.56,
+          "counter_pp": 13.33,
+          "archetype": "Counter",
+          "resid_pp": 0.04
+        },
+        {
+          "champ": "Shen",
+          "role": "top",
+          "delta_wr_pp": 3.3,
+          "n": 47,
+          "blind_pp": 0.53,
+          "counter_pp": 16.03,
+          "archetype": "Counter",
+          "resid_pp": 3.65
+        },
+        {
+          "champ": "Yone",
+          "role": "mid",
+          "delta_wr_pp": 3.11,
+          "n": 25,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": 2.98
+        },
+        {
+          "champ": "Kai'Sa",
+          "role": "bot",
+          "delta_wr_pp": 3.09,
+          "n": 31,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": 3.58
+        },
+        {
+          "champ": "Gnar",
+          "role": "top",
+          "delta_wr_pp": 2.91,
+          "n": 119,
+          "blind_pp": 3.9,
+          "counter_pp": 9.0,
+          "archetype": "Counter",
+          "resid_pp": 3.32
+        },
+        {
+          "champ": "Jax",
+          "role": "top",
+          "delta_wr_pp": 2.9,
+          "n": 37,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": 3.03
+        },
+        {
+          "champ": "Orianna",
+          "role": "mid",
+          "delta_wr_pp": 2.2,
+          "n": 90,
+          "blind_pp": 2.43,
+          "counter_pp": 15.29,
+          "archetype": "Counter",
+          "resid_pp": 0.98
+        },
+        {
+          "champ": "Renata Glasc",
+          "role": "sup",
+          "delta_wr_pp": 1.43,
+          "n": 20,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": -0.23
+        },
+        {
+          "champ": "Yorick",
+          "role": "top",
+          "delta_wr_pp": 0.92,
+          "n": 46,
+          "blind_pp": 8.09,
+          "counter_pp": 13.42,
+          "archetype": "Counter",
+          "resid_pp": 3.54
+        },
+        {
+          "champ": "Braum",
+          "role": "sup",
+          "delta_wr_pp": 0.61,
+          "n": 21,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": -1.82
+        }
+      ],
+      "B": [
+        {
+          "champ": "Anivia",
+          "role": "mid",
+          "delta_wr_pp": 0.61,
+          "n": 78,
+          "blind_pp": 4.29,
+          "counter_pp": 7.58,
+          "archetype": "Blind",
+          "resid_pp": 1.95
+        },
+        {
+          "champ": "Alistar",
+          "role": "sup",
+          "delta_wr_pp": 0.36,
+          "n": 43,
+          "blind_pp": 1.54,
+          "counter_pp": 3.85,
+          "archetype": "Counter",
+          "resid_pp": -0.57
+        },
+        {
+          "champ": "Nocturne",
+          "role": "jng",
+          "delta_wr_pp": 0.32,
+          "n": 95,
+          "blind_pp": -0.45,
+          "counter_pp": 6.19,
+          "archetype": "Counter",
+          "resid_pp": 0.69
+        },
+        {
+          "champ": "Syndra",
+          "role": "mid",
+          "delta_wr_pp": 0.11,
+          "n": 33,
+          "blind_pp": 1.1,
+          "counter_pp": 5.71,
+          "archetype": "Counter",
+          "resid_pp": -2.54
+        },
+        {
+          "champ": "Ahri",
+          "role": "mid",
+          "delta_wr_pp": -0.03,
+          "n": 70,
+          "blind_pp": -0.14,
+          "counter_pp": 9.62,
+          "archetype": "Counter",
+          "resid_pp": 0.13
+        },
+        {
+          "champ": "Renekton",
+          "role": "top",
+          "delta_wr_pp": -0.17,
+          "n": 112,
+          "blind_pp": 5.1,
+          "counter_pp": 16.67,
+          "archetype": "Counter",
+          "resid_pp": -0.45
+        },
+        {
+          "champ": "Taliyah",
+          "role": "mid",
+          "delta_wr_pp": -0.22,
+          "n": 45,
+          "blind_pp": 0.95,
+          "counter_pp": 8.68,
+          "archetype": "Counter",
+          "resid_pp": -0.25
+        },
+        {
+          "champ": "Yunara",
+          "role": "bot",
+          "delta_wr_pp": -0.26,
+          "n": 96,
+          "blind_pp": 1.18,
+          "counter_pp": 10.05,
+          "archetype": "Counter",
+          "resid_pp": -1.94
+        },
+        {
+          "champ": "Neeko",
+          "role": "sup",
+          "delta_wr_pp": -0.39,
+          "n": 85,
+          "blind_pp": 2.39,
+          "counter_pp": 6.61,
+          "archetype": "Counter",
+          "resid_pp": -2.68
+        },
+        {
+          "champ": "LeBlanc",
+          "role": "mid",
+          "delta_wr_pp": -0.52,
+          "n": 34,
+          "blind_pp": -1.28,
+          "counter_pp": 0.0,
+          "archetype": "Blind",
+          "resid_pp": 1.19
+        },
+        {
+          "champ": "Senna",
+          "role": "bot",
+          "delta_wr_pp": -0.66,
+          "n": 32,
+          "blind_pp": 5.16,
+          "counter_pp": 8.1,
+          "archetype": "Blind",
+          "resid_pp": -1.13
+        },
+        {
+          "champ": "Sion",
+          "role": "top",
+          "delta_wr_pp": -0.69,
+          "n": 140,
+          "blind_pp": 2.05,
+          "counter_pp": 12.67,
+          "archetype": "Counter",
+          "resid_pp": 0.28
+        }
+      ],
+      "C": [
+        {
+          "champ": "Ezreal",
+          "role": "bot",
+          "delta_wr_pp": -0.8,
+          "n": 171,
+          "blind_pp": 2.92,
+          "counter_pp": 9.61,
+          "archetype": "Counter",
+          "resid_pp": 0.95
+        },
+        {
+          "champ": "Ornn",
+          "role": "top",
+          "delta_wr_pp": -0.9,
+          "n": 32,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": 2.07
+        },
+        {
+          "champ": "Gwen",
+          "role": "top",
+          "delta_wr_pp": -1.12,
+          "n": 21,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": -1.13
+        },
+        {
+          "champ": "Varus",
+          "role": "bot",
+          "delta_wr_pp": -1.18,
+          "n": 85,
+          "blind_pp": -0.03,
+          "counter_pp": 4.66,
+          "archetype": "Counter",
+          "resid_pp": -1.01
+        },
+        {
+          "champ": "Jarvan IV",
+          "role": "jng",
+          "delta_wr_pp": -1.19,
+          "n": 162,
+          "blind_pp": 3.14,
+          "counter_pp": 8.33,
+          "archetype": "Counter",
+          "resid_pp": -0.72
+        },
+        {
+          "champ": "Milio",
+          "role": "sup",
+          "delta_wr_pp": -1.24,
+          "n": 112,
+          "blind_pp": 6.53,
+          "counter_pp": 12.84,
+          "archetype": "Counter",
+          "resid_pp": 5.69
+        },
+        {
+          "champ": "Vi",
+          "role": "jng",
+          "delta_wr_pp": -1.25,
+          "n": 123,
+          "blind_pp": 2.97,
+          "counter_pp": 11.11,
+          "archetype": "Counter",
+          "resid_pp": 0.71
+        },
+        {
+          "champ": "Gragas",
+          "role": "top",
+          "delta_wr_pp": -1.43,
+          "n": 20,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": 0.84
+        },
+        {
+          "champ": "Naafiri",
+          "role": "jng",
+          "delta_wr_pp": -1.49,
+          "n": 91,
+          "blind_pp": 2.48,
+          "counter_pp": 12.5,
+          "archetype": "Counter",
+          "resid_pp": 1.05
+        },
+        {
+          "champ": "Skarner",
+          "role": "jng",
+          "delta_wr_pp": -1.6,
+          "n": 68,
+          "blind_pp": 2.41,
+          "counter_pp": 8.46,
+          "archetype": "Counter",
+          "resid_pp": -3.22
+        },
+        {
+          "champ": "Seraphine",
+          "role": "sup",
+          "delta_wr_pp": -1.69,
+          "n": 122,
+          "blind_pp": 5.33,
+          "counter_pp": 17.6,
+          "archetype": "Counter",
+          "resid_pp": 2.05
+        },
+        {
+          "champ": "Rumble",
+          "role": "top",
+          "delta_wr_pp": -1.94,
+          "n": 164,
+          "blind_pp": 1.66,
+          "counter_pp": 17.02,
+          "archetype": "Counter",
+          "resid_pp": -2.63
+        }
+      ],
+      "D": [
+        {
+          "champ": "Xayah",
+          "role": "bot",
+          "delta_wr_pp": -1.95,
+          "n": 33,
+          "blind_pp": 2.62,
+          "counter_pp": 16.67,
+          "archetype": "Counter",
+          "resid_pp": 5.0
+        },
+        {
+          "champ": "Vayne",
+          "role": "top",
+          "delta_wr_pp": -1.98,
+          "n": 28,
+          "blind_pp": 6.67,
+          "counter_pp": 8.33,
+          "archetype": "Blind",
+          "resid_pp": -1.67
+        },
+        {
+          "champ": "Azir",
+          "role": "mid",
+          "delta_wr_pp": -2.17,
+          "n": 47,
+          "blind_pp": -1.85,
+          "counter_pp": 6.41,
+          "archetype": "Counter",
+          "resid_pp": -2.99
+        },
+        {
+          "champ": "Pantheon",
+          "role": "jng",
+          "delta_wr_pp": -2.27,
+          "n": 127,
+          "blind_pp": 1.64,
+          "counter_pp": 12.64,
+          "archetype": "Counter",
+          "resid_pp": -0.8
+        },
+        {
+          "champ": "Sejuani",
+          "role": "jng",
+          "delta_wr_pp": -2.27,
+          "n": 20,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": -2.0
+        },
+        {
+          "champ": "Aatrox",
+          "role": "jng",
+          "delta_wr_pp": -2.52,
+          "n": 37,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": 0.03
+        },
+        {
+          "champ": "Corki",
+          "role": "bot",
+          "delta_wr_pp": -2.84,
+          "n": 75,
+          "blind_pp": -2.56,
+          "counter_pp": 4.79,
+          "archetype": "Counter",
+          "resid_pp": -2.42
+        },
+        {
+          "champ": "Kalista",
+          "role": "bot",
+          "delta_wr_pp": -2.86,
+          "n": 23,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": -2.06
+        },
+        {
+          "champ": "Maokai",
+          "role": "jng",
+          "delta_wr_pp": -3.1,
+          "n": 19,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": -4.8
+        },
+        {
+          "champ": "Sivir",
+          "role": "bot",
+          "delta_wr_pp": -3.7,
+          "n": 70,
+          "blind_pp": 1.73,
+          "counter_pp": 9.0,
+          "archetype": "Counter",
+          "resid_pp": -2.41
+        },
+        {
+          "champ": "Ziggs",
+          "role": "bot",
+          "delta_wr_pp": -3.7,
+          "n": 33,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": -1.19
+        },
+        {
+          "champ": "Hwei",
+          "role": "mid",
+          "delta_wr_pp": -3.8,
+          "n": 23,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Blind",
+          "resid_pp": -4.04
+        }
+      ],
+      "E": [
+        {
+          "champ": "Nami",
+          "role": "sup",
+          "delta_wr_pp": -3.93,
+          "n": 84,
+          "blind_pp": -2.96,
+          "counter_pp": 3.46,
+          "archetype": "Counter",
+          "resid_pp": -2.53
+        },
+        {
+          "champ": "Galio",
+          "role": "mid",
+          "delta_wr_pp": -3.96,
+          "n": 48,
+          "blind_pp": 0.49,
+          "counter_pp": 3.12,
+          "archetype": "Counter",
+          "resid_pp": -1.72
+        },
+        {
+          "champ": "Jayce",
+          "role": "top",
+          "delta_wr_pp": -4.19,
+          "n": 105,
+          "blind_pp": -0.83,
+          "counter_pp": 10.83,
+          "archetype": "Counter",
+          "resid_pp": -3.22
+        },
+        {
+          "champ": "Mel",
+          "role": "bot",
+          "delta_wr_pp": -4.24,
+          "n": 38,
+          "blind_pp": 1.11,
+          "counter_pp": 6.67,
+          "archetype": "Counter",
+          "resid_pp": -3.39
+        },
+        {
+          "champ": "Nautilus",
+          "role": "sup",
+          "delta_wr_pp": -4.43,
+          "n": 116,
+          "blind_pp": -1.49,
+          "counter_pp": 7.71,
+          "archetype": "Counter",
+          "resid_pp": -4.96
+        },
+        {
+          "champ": "Xin Zhao",
+          "role": "jng",
+          "delta_wr_pp": -4.91,
+          "n": 156,
+          "blind_pp": -3.13,
+          "counter_pp": 6.95,
+          "archetype": "Counter",
+          "resid_pp": -1.91
+        },
+        {
+          "champ": "K'Sante",
+          "role": "top",
+          "delta_wr_pp": -4.95,
+          "n": 119,
+          "blind_pp": 1.85,
+          "counter_pp": 8.33,
+          "archetype": "Counter",
+          "resid_pp": -2.94
+        },
+        {
+          "champ": "Caitlyn",
+          "role": "bot",
+          "delta_wr_pp": -4.97,
+          "n": 113,
+          "blind_pp": 4.25,
+          "counter_pp": 17.0,
+          "archetype": "Counter",
+          "resid_pp": 0.72
+        },
+        {
+          "champ": "Annie",
+          "role": "mid",
+          "delta_wr_pp": -6.19,
+          "n": 120,
+          "blind_pp": 1.03,
+          "counter_pp": 10.67,
+          "archetype": "Counter",
+          "resid_pp": -5.12
+        }
+      ],
+      "F": [
+        {
+          "champ": "Sylas",
+          "role": "mid",
+          "delta_wr_pp": -6.28,
+          "n": 36,
+          "blind_pp": -2.75,
+          "counter_pp": 0.0,
+          "archetype": "Counter",
+          "resid_pp": -8.36
+        },
+        {
+          "champ": "Miss Fortune",
+          "role": "bot",
+          "delta_wr_pp": -6.56,
+          "n": 47,
+          "blind_pp": -3.51,
+          "counter_pp": 7.92,
+          "archetype": "Counter",
+          "resid_pp": -6.16
+        },
+        {
+          "champ": "Lulu",
+          "role": "sup",
+          "delta_wr_pp": -6.6,
+          "n": 111,
+          "blind_pp": -2.19,
+          "counter_pp": 2.31,
+          "archetype": "Counter",
+          "resid_pp": -3.48
+        },
+        {
+          "champ": "Aurora",
+          "role": "mid",
+          "delta_wr_pp": -6.81,
+          "n": 113,
+          "blind_pp": -2.18,
+          "counter_pp": 6.48,
+          "archetype": "Counter",
+          "resid_pp": -7.81
+        },
+        {
+          "champ": "Ambessa",
+          "role": "top",
+          "delta_wr_pp": -8.21,
+          "n": 111,
+          "blind_pp": -2.39,
+          "counter_pp": 1.0,
+          "archetype": "Counter",
+          "resid_pp": -7.71
+        },
+        {
+          "champ": "Wukong",
+          "role": "jng",
+          "delta_wr_pp": -10.47,
+          "n": 94,
+          "blind_pp": -6.03,
+          "counter_pp": 3.15,
+          "archetype": "Counter",
+          "resid_pp": -7.18
+        },
+        {
+          "champ": "Jhin",
+          "role": "bot",
+          "delta_wr_pp": -17.24,
+          "n": 106,
+          "blind_pp": -5.33,
+          "counter_pp": 3.92,
+          "archetype": "Counter",
+          "resid_pp": -11.19
+        }
+      ]
+    }
+  },
+  "red": {
+    "cuts": {
+      "Z": 6.8,
+      "S": 4.16,
+      "A": 1.47,
+      "B": 0.38,
+      "C": -1.24,
+      "D": -3.99,
+      "E": -6.45
+    },
+    "board": {
+      "Z Blind": [
+        {
+          "champ": "Ahri",
+          "role": "mid",
+          "delta_wr_pp": 6.94,
+          "n": 102,
+          "blind_pp": 3.34,
+          "counter_pp": 8.33,
+          "archetype": "Counter",
+          "resid_pp": 6.69
+        },
+        {
+          "champ": "Pyke",
+          "role": "sup",
+          "delta_wr_pp": 6.8,
+          "n": 38,
+          "blind_pp": -0.23,
+          "counter_pp": 4.37,
+          "archetype": "Counter",
+          "resid_pp": 4.32
+        }
+      ],
+      "Z Counter": [
+        {
+          "champ": "Lee Sin",
+          "role": "jng",
+          "delta_wr_pp": 11.37,
+          "n": 107,
+          "blind_pp": 2.64,
+          "counter_pp": 14.55,
+          "archetype": "Counter",
+          "resid_pp": 7.04
+        },
+        {
+          "champ": "Naafiri",
+          "role": "jng",
+          "delta_wr_pp": 10.55,
+          "n": 95,
+          "blind_pp": 1.17,
+          "counter_pp": 12.22,
+          "archetype": "Counter",
+          "resid_pp": 8.25
+        },
+        {
+          "champ": "Ashe",
+          "role": "bot",
+          "delta_wr_pp": 8.05,
+          "n": 106,
+          "blind_pp": 0.94,
+          "counter_pp": 8.02,
+          "archetype": "Counter",
+          "resid_pp": 7.38
+        },
+        {
+          "champ": "Nami",
+          "role": "sup",
+          "delta_wr_pp": 7.98,
+          "n": 76,
+          "blind_pp": -2.06,
+          "counter_pp": 6.92,
+          "archetype": "Counter",
+          "resid_pp": 1.32
+        },
+        {
+          "champ": "Vi",
+          "role": "jng",
+          "delta_wr_pp": 7.23,
+          "n": 117,
+          "blind_pp": 4.05,
+          "counter_pp": 15.69,
+          "archetype": "Counter",
+          "resid_pp": 5.41
+        }
+      ],
+      "S Blind": [
+        {
+          "champ": "Rakan",
+          "role": "sup",
+          "delta_wr_pp": 6.39,
+          "n": 63,
+          "blind_pp": 1.75,
+          "counter_pp": 6.35,
+          "archetype": "Counter",
+          "resid_pp": 4.8
+        },
+        {
+          "champ": "Vayne",
+          "role": "top",
+          "delta_wr_pp": 6.28,
+          "n": 35,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": 9.19
+        },
+        {
+          "champ": "Nautilus",
+          "role": "sup",
+          "delta_wr_pp": 5.0,
+          "n": 120,
+          "blind_pp": -2.29,
+          "counter_pp": 2.0,
+          "archetype": "Counter",
+          "resid_pp": 2.31
+        },
+        {
+          "champ": "Alistar",
+          "role": "sup",
+          "delta_wr_pp": 4.42,
+          "n": 46,
+          "blind_pp": -1.4,
+          "counter_pp": 2.35,
+          "archetype": "Counter",
+          "resid_pp": 2.06
+        },
+        {
+          "champ": "Ornn",
+          "role": "top",
+          "delta_wr_pp": 4.16,
+          "n": 41,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": 8.34
+        }
+      ],
+      "S Counter": [
+        {
+          "champ": "K'Sante",
+          "role": "top",
+          "delta_wr_pp": 6.44,
+          "n": 101,
+          "blind_pp": 3.85,
+          "counter_pp": 10.83,
+          "archetype": "Counter",
+          "resid_pp": 6.75
+        },
+        {
+          "champ": "Akali",
+          "role": "mid",
+          "delta_wr_pp": 5.92,
+          "n": 75,
+          "blind_pp": 2.03,
+          "counter_pp": 9.52,
+          "archetype": "Counter",
+          "resid_pp": 3.51
+        },
+        {
+          "champ": "Annie",
+          "role": "mid",
+          "delta_wr_pp": 4.58,
+          "n": 103,
+          "blind_pp": 1.74,
+          "counter_pp": 10.0,
+          "archetype": "Counter",
+          "resid_pp": 4.35
+        },
+        {
+          "champ": "Anivia",
+          "role": "mid",
+          "delta_wr_pp": 4.32,
+          "n": 78,
+          "blind_pp": -0.2,
+          "counter_pp": 8.63,
+          "archetype": "Counter",
+          "resid_pp": 1.37
+        }
+      ],
+      "A": [
+        {
+          "champ": "Jarvan IV",
+          "role": "jng",
+          "delta_wr_pp": 4.12,
+          "n": 169,
+          "blind_pp": -0.32,
+          "counter_pp": 8.33,
+          "archetype": "Counter",
+          "resid_pp": 0.21
+        },
+        {
+          "champ": "Jax",
+          "role": "top",
+          "delta_wr_pp": 4.1,
+          "n": 36,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": 4.46
+        },
+        {
+          "champ": "Trundle",
+          "role": "jng",
+          "delta_wr_pp": 4.07,
+          "n": 60,
+          "blind_pp": 0.94,
+          "counter_pp": 10.42,
+          "archetype": "Counter",
+          "resid_pp": 3.6
+        },
+        {
+          "champ": "Orianna",
+          "role": "mid",
+          "delta_wr_pp": 3.96,
+          "n": 93,
+          "blind_pp": -2.84,
+          "counter_pp": 4.53,
+          "archetype": "Counter",
+          "resid_pp": 0.44
+        },
+        {
+          "champ": "Sivir",
+          "role": "bot",
+          "delta_wr_pp": 3.42,
+          "n": 54,
+          "blind_pp": 4.7,
+          "counter_pp": 10.32,
+          "archetype": "Counter",
+          "resid_pp": 5.05
+        },
+        {
+          "champ": "Pantheon",
+          "role": "jng",
+          "delta_wr_pp": 3.18,
+          "n": 119,
+          "blind_pp": -2.29,
+          "counter_pp": 6.31,
+          "archetype": "Counter",
+          "resid_pp": 2.54
+        },
+        {
+          "champ": "Ryze",
+          "role": "mid",
+          "delta_wr_pp": 2.82,
+          "n": 151,
+          "blind_pp": -2.61,
+          "counter_pp": 7.88,
+          "archetype": "Counter",
+          "resid_pp": 2.06
+        },
+        {
+          "champ": "Yone",
+          "role": "mid",
+          "delta_wr_pp": 2.58,
+          "n": 37,
+          "blind_pp": -1.32,
+          "counter_pp": 7.71,
+          "archetype": "Counter",
+          "resid_pp": 2.37
+        },
+        {
+          "champ": "Syndra",
+          "role": "mid",
+          "delta_wr_pp": 2.24,
+          "n": 27,
+          "blind_pp": 1.56,
+          "counter_pp": 4.37,
+          "archetype": "Counter",
+          "resid_pp": 1.69
+        },
+        {
+          "champ": "Neeko",
+          "role": "sup",
+          "delta_wr_pp": 1.63,
+          "n": 93,
+          "blind_pp": -5.11,
+          "counter_pp": 5.87,
+          "archetype": "Counter",
+          "resid_pp": -0.88
+        },
+        {
+          "champ": "Sylas",
+          "role": "mid",
+          "delta_wr_pp": 1.54,
+          "n": 36,
+          "blind_pp": -1.79,
+          "counter_pp": 0.0,
+          "archetype": "Counter",
+          "resid_pp": -0.94
+        }
+      ],
+      "B": [
+        {
+          "champ": "Bard",
+          "role": "sup",
+          "delta_wr_pp": 1.26,
+          "n": 153,
+          "blind_pp": -3.32,
+          "counter_pp": 2.17,
+          "archetype": "Counter",
+          "resid_pp": 1.32
+        },
+        {
+          "champ": "Taliyah",
+          "role": "mid",
+          "delta_wr_pp": 1.12,
+          "n": 51,
+          "blind_pp": -5.12,
+          "counter_pp": 2.06,
+          "archetype": "Counter",
+          "resid_pp": 1.83
+        },
+        {
+          "champ": "Gnar",
+          "role": "top",
+          "delta_wr_pp": 1.03,
+          "n": 140,
+          "blind_pp": -1.73,
+          "counter_pp": 3.68,
+          "archetype": "Counter",
+          "resid_pp": 1.99
+        },
+        {
+          "champ": "Ziggs",
+          "role": "bot",
+          "delta_wr_pp": 0.97,
+          "n": 41,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": -1.62
+        },
+        {
+          "champ": "Poppy",
+          "role": "jng",
+          "delta_wr_pp": 0.93,
+          "n": 30,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": 0.98
+        },
+        {
+          "champ": "Gwen",
+          "role": "top",
+          "delta_wr_pp": 0.92,
+          "n": 24,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": 4.74
+        },
+        {
+          "champ": "Ezreal",
+          "role": "bot",
+          "delta_wr_pp": 0.7,
+          "n": 173,
+          "blind_pp": 0.76,
+          "counter_pp": 12.5,
+          "archetype": "Counter",
+          "resid_pp": 5.14
+        },
+        {
+          "champ": "Azir",
+          "role": "mid",
+          "delta_wr_pp": 0.67,
+          "n": 54,
+          "blind_pp": -2.29,
+          "counter_pp": 6.92,
+          "archetype": "Counter",
+          "resid_pp": -3.22
+        },
+        {
+          "champ": "Lulu",
+          "role": "sup",
+          "delta_wr_pp": 0.57,
+          "n": 99,
+          "blind_pp": -4.46,
+          "counter_pp": 0.4,
+          "archetype": "Counter",
+          "resid_pp": -3.61
+        },
+        {
+          "champ": "Leona",
+          "role": "sup",
+          "delta_wr_pp": 0.49,
+          "n": 28,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": 0.61
+        },
+        {
+          "champ": "Aurora",
+          "role": "mid",
+          "delta_wr_pp": 0.44,
+          "n": 119,
+          "blind_pp": -3.39,
+          "counter_pp": 0.0,
+          "archetype": "Counter",
+          "resid_pp": -0.13
+        }
+      ],
+      "C": [
+        {
+          "champ": "Seraphine",
+          "role": "sup",
+          "delta_wr_pp": 0.32,
+          "n": 130,
+          "blind_pp": -0.52,
+          "counter_pp": 16.43,
+          "archetype": "Counter",
+          "resid_pp": 2.81
+        },
+        {
+          "champ": "Camille",
+          "role": "sup",
+          "delta_wr_pp": 0.29,
+          "n": 32,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": -2.05
+        },
+        {
+          "champ": "LeBlanc",
+          "role": "mid",
+          "delta_wr_pp": 0.13,
+          "n": 25,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": 1.22
+        },
+        {
+          "champ": "Viktor",
+          "role": "mid",
+          "delta_wr_pp": -0.1,
+          "n": 76,
+          "blind_pp": -1.27,
+          "counter_pp": 8.67,
+          "archetype": "Counter",
+          "resid_pp": -0.52
+        },
+        {
+          "champ": "Skarner",
+          "role": "jng",
+          "delta_wr_pp": -0.29,
+          "n": 57,
+          "blind_pp": -2.29,
+          "counter_pp": 4.17,
+          "archetype": "Counter",
+          "resid_pp": -3.15
+        },
+        {
+          "champ": "Maokai",
+          "role": "jng",
+          "delta_wr_pp": -0.41,
+          "n": 18,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": -0.79
+        },
+        {
+          "champ": "Shen",
+          "role": "top",
+          "delta_wr_pp": -0.48,
+          "n": 34,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": -1.35
+        },
+        {
+          "champ": "Aatrox",
+          "role": "jng",
+          "delta_wr_pp": -0.59,
+          "n": 28,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": -1.47
+        },
+        {
+          "champ": "Olaf",
+          "role": "top",
+          "delta_wr_pp": -0.7,
+          "n": 32,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": -2.67
+        },
+        {
+          "champ": "Hwei",
+          "role": "mid",
+          "delta_wr_pp": -1.15,
+          "n": 24,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": -3.07
+        },
+        {
+          "champ": "Caitlyn",
+          "role": "bot",
+          "delta_wr_pp": -1.19,
+          "n": 104,
+          "blind_pp": -3.03,
+          "counter_pp": 4.13,
+          "archetype": "Counter",
+          "resid_pp": -0.66
+        }
+      ],
+      "D": [
+        {
+          "champ": "Wukong",
+          "role": "jng",
+          "delta_wr_pp": -1.26,
+          "n": 85,
+          "blind_pp": -3.66,
+          "counter_pp": 5.88,
+          "archetype": "Counter",
+          "resid_pp": -2.57
+        },
+        {
+          "champ": "Miss Fortune",
+          "role": "bot",
+          "delta_wr_pp": -1.3,
+          "n": 50,
+          "blind_pp": -4.67,
+          "counter_pp": 3.12,
+          "archetype": "Counter",
+          "resid_pp": 0.67
+        },
+        {
+          "champ": "Yorick",
+          "role": "top",
+          "delta_wr_pp": -1.32,
+          "n": 46,
+          "blind_pp": -6.09,
+          "counter_pp": 0.71,
+          "archetype": "Counter",
+          "resid_pp": 0.12
+        },
+        {
+          "champ": "Milio",
+          "role": "sup",
+          "delta_wr_pp": -1.53,
+          "n": 105,
+          "blind_pp": -7.14,
+          "counter_pp": 4.38,
+          "archetype": "Counter",
+          "resid_pp": -3.8
+        },
+        {
+          "champ": "Rell",
+          "role": "sup",
+          "delta_wr_pp": -1.57,
+          "n": 47,
+          "blind_pp": 1.68,
+          "counter_pp": 7.44,
+          "archetype": "Counter",
+          "resid_pp": -1.16
+        },
+        {
+          "champ": "Jhin",
+          "role": "bot",
+          "delta_wr_pp": -1.85,
+          "n": 133,
+          "blind_pp": -3.67,
+          "counter_pp": 6.34,
+          "archetype": "Counter",
+          "resid_pp": -2.27
+        },
+        {
+          "champ": "Varus",
+          "role": "bot",
+          "delta_wr_pp": -2.23,
+          "n": 75,
+          "blind_pp": 3.21,
+          "counter_pp": 10.66,
+          "archetype": "Counter",
+          "resid_pp": 0.23
+        },
+        {
+          "champ": "Senna",
+          "role": "bot",
+          "delta_wr_pp": -2.32,
+          "n": 28,
+          "blind_pp": -3.49,
+          "counter_pp": -0.67,
+          "archetype": "Counter",
+          "resid_pp": -2.0
+        },
+        {
+          "champ": "Galio",
+          "role": "mid",
+          "delta_wr_pp": -2.92,
+          "n": 40,
+          "blind_pp": 0.32,
+          "counter_pp": 6.72,
+          "archetype": "Counter",
+          "resid_pp": -2.71
+        },
+        {
+          "champ": "Cassiopeia",
+          "role": "mid",
+          "delta_wr_pp": -2.95,
+          "n": 84,
+          "blind_pp": -4.62,
+          "counter_pp": 0.0,
+          "archetype": "Counter",
+          "resid_pp": -6.25
+        },
+        {
+          "champ": "Mel",
+          "role": "bot",
+          "delta_wr_pp": -3.38,
+          "n": 52,
+          "blind_pp": -4.81,
+          "counter_pp": 2.23,
+          "archetype": "Counter",
+          "resid_pp": -7.38
+        },
+        {
+          "champ": "Lucian",
+          "role": "bot",
+          "delta_wr_pp": -3.99,
+          "n": 114,
+          "blind_pp": -5.74,
+          "counter_pp": 5.67,
+          "archetype": "Counter",
+          "resid_pp": -3.1
+        }
+      ],
+      "E": [
+        {
+          "champ": "Rumble",
+          "role": "top",
+          "delta_wr_pp": -4.01,
+          "n": 135,
+          "blind_pp": -2.93,
+          "counter_pp": 4.1,
+          "archetype": "Counter",
+          "resid_pp": 0.51
+        },
+        {
+          "champ": "Karma",
+          "role": "sup",
+          "delta_wr_pp": -4.43,
+          "n": 102,
+          "blind_pp": -4.14,
+          "counter_pp": 6.39,
+          "archetype": "Counter",
+          "resid_pp": -3.44
+        },
+        {
+          "champ": "Xin Zhao",
+          "role": "jng",
+          "delta_wr_pp": -4.48,
+          "n": 167,
+          "blind_pp": -2.93,
+          "counter_pp": 5.38,
+          "archetype": "Counter",
+          "resid_pp": -4.69
+        },
+        {
+          "champ": "Xayah",
+          "role": "bot",
+          "delta_wr_pp": -4.9,
+          "n": 46,
+          "blind_pp": -2.43,
+          "counter_pp": 5.0,
+          "archetype": "Counter",
+          "resid_pp": 0.62
+        },
+        {
+          "champ": "Ambessa",
+          "role": "top",
+          "delta_wr_pp": -5.07,
+          "n": 90,
+          "blind_pp": -8.32,
+          "counter_pp": -3.3,
+          "archetype": "Counter",
+          "resid_pp": -4.53
+        },
+        {
+          "champ": "Twisted Fate",
+          "role": "mid",
+          "delta_wr_pp": -5.33,
+          "n": 52,
+          "blind_pp": -4.76,
+          "counter_pp": 5.0,
+          "archetype": "Counter",
+          "resid_pp": -5.28
+        },
+        {
+          "champ": "Zaahen",
+          "role": "top",
+          "delta_wr_pp": -5.37,
+          "n": 34,
+          "blind_pp": 0.0,
+          "counter_pp": 0.0,
+          "archetype": "Blind",
+          "resid_pp": -4.25
+        },
+        {
+          "champ": "Nocturne",
+          "role": "jng",
+          "delta_wr_pp": -6.41,
+          "n": 80,
+          "blind_pp": -7.82,
+          "counter_pp": -0.05,
+          "archetype": "Counter",
+          "resid_pp": -7.81
+        },
+        {
+          "champ": "Jayce",
+          "role": "top",
+          "delta_wr_pp": -6.45,
+          "n": 114,
+          "blind_pp": -5.95,
+          "counter_pp": 6.49,
+          "archetype": "Counter",
+          "resid_pp": -4.93
+        }
+      ],
+      "F": [
+        {
+          "champ": "Sion",
+          "role": "top",
+          "delta_wr_pp": -7.03,
+          "n": 124,
+          "blind_pp": -4.06,
+          "counter_pp": 5.75,
+          "archetype": "Counter",
+          "resid_pp": -5.43
+        },
+        {
+          "champ": "Renekton",
+          "role": "top",
+          "delta_wr_pp": -7.07,
+          "n": 100,
+          "blind_pp": -6.77,
+          "counter_pp": 5.19,
+          "archetype": "Counter",
+          "resid_pp": -6.86
+        },
+        {
+          "champ": "Kai'Sa",
+          "role": "bot",
+          "delta_wr_pp": -7.5,
+          "n": 45,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": -4.46
+        },
+        {
+          "champ": "Tristana",
+          "role": "bot",
+          "delta_wr_pp": -8.21,
+          "n": 19,
+          "blind_pp": null,
+          "counter_pp": null,
+          "archetype": "Counter",
+          "resid_pp": -10.96
+        },
+        {
+          "champ": "Yunara",
+          "role": "bot",
+          "delta_wr_pp": -8.94,
+          "n": 87,
+          "blind_pp": -6.58,
+          "counter_pp": 2.67,
+          "archetype": "Counter",
+          "resid_pp": -6.77
+        },
+        {
+          "champ": "Corki",
+          "role": "bot",
+          "delta_wr_pp": -9.82,
+          "n": 78,
+          "blind_pp": -4.12,
+          "counter_pp": 10.69,
+          "archetype": "Counter",
+          "resid_pp": -4.38
+        }
+      ]
+    }
+  }
+}

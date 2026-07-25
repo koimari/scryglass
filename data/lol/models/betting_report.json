@@ -1,0 +1,9 @@
+{
+  "n_journal": 6,
+  "n_plus_ev": 3,
+  "start_bankroll": 100.0,
+  "end_bankroll_paper": 104.15,
+  "growth": 0.0415,
+  "mean_edge_pp": 11.813333333333333,
+  "kelly_frac": 0.5
+}

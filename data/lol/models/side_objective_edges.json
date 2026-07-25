@@ -1,0 +1,765 @@
+{
+  "version": 1,
+  "n_maps": 37635,
+  "date_min": "2023-01-10",
+  "date_max": "2026-07-18",
+  "data_limits": [
+    "OE has no baron *minute* \u2014 gold@20/@25 + firstbaron used as window proxy.",
+    "OE has no labeled first-dragon *type* \u2014 inferred only when taker has exactly one elemental type.",
+    "Void grubs / dragon types exist in raw OE but were missing from warehouse maps.parquet until this study."
+  ],
+  "side_baselines": {
+    "blue_wr": 0.5319,
+    "n": 37635,
+    "blue_firstblood_rate": 0.5148,
+    "blue_firstdragon_rate": 0.4018,
+    "blue_firstherald_rate": 0.6,
+    "blue_firstbaron_rate": 0.4844,
+    "blue_firsttower_rate": 0.5458,
+    "mean_grub_diff": 0.677
+  },
+  "first_objectives": {
+    "firstblood": {
+      "wr_if_blue_takes": 0.6245,
+      "n_takes": 19375,
+      "wr_if_blue_misses": 0.4336,
+      "n_misses": 18259,
+      "delta_pp": 19.09
+    },
+    "firstdragon": {
+      "wr_if_blue_takes": 0.6554,
+      "n_takes": 14501,
+      "wr_if_blue_misses": 0.4482,
+      "n_misses": 21589,
+      "delta_pp": 20.72
+    },
+    "firstherald": {
+      "wr_if_blue_takes": 0.6377,
+      "n_takes": 19942,
+      "wr_if_blue_misses": 0.3729,
+      "n_misses": 13295,
+      "delta_pp": 26.48
+    },
+    "firstbaron": {
+      "wr_if_blue_takes": 0.8555,
+      "n_takes": 16100,
+      "wr_if_blue_misses": 0.2278,
+      "n_misses": 17137,
+      "delta_pp": 62.77
+    },
+    "firsttower": {
+      "wr_if_blue_takes": 0.7092,
+      "n_takes": 19698,
+      "wr_if_blue_misses": 0.3179,
+      "n_misses": 16392,
+      "delta_pp": 39.13
+    }
+  },
+  "dragon_types": {
+    "wr_by_dominant_drake_on_map": [
+      {
+        "key": "oceans",
+        "n": 4945,
+        "wr_blue": 0.5407,
+        "mean_kills": 31.03,
+        "mean_length": 32.28
+      },
+      {
+        "key": "infernals",
+        "n": 7368,
+        "wr_blue": 0.5392,
+        "mean_kills": 30.97,
+        "mean_length": 30.06
+      },
+      {
+        "key": "mountains",
+        "n": 6279,
+        "wr_blue": 0.5359,
+        "mean_kills": 30.6,
+        "mean_length": 30.97
+      },
+      {
+        "key": "clouds",
+        "n": 5410,
+        "wr_blue": 0.5274,
+        "mean_kills": 31.05,
+        "mean_length": 31.58
+      },
+      {
+        "key": "chemtechs",
+        "n": 4676,
+        "wr_blue": 0.5222,
+        "mean_kills": 31.4,
+        "mean_length": 33.2
+      },
+      {
+        "key": "hextechs",
+        "n": 4539,
+        "wr_blue": 0.5182,
+        "mean_kills": 32.31,
+        "mean_length": 32.44
+      }
+    ],
+    "pace_by_dominant_drake": [
+      {
+        "dominant": "hextechs",
+        "n": 4539,
+        "mean_kills": 32.31,
+        "mean_length": 32.44,
+        "p_under_29_5": 0.4327,
+        "p_under_32_5": 0.5554,
+        "p_long_35": 0.2708,
+        "wr_blue": 0.5182
+      },
+      {
+        "dominant": "chemtechs",
+        "n": 4676,
+        "mean_kills": 31.4,
+        "mean_length": 33.2,
+        "p_under_29_5": 0.4756,
+        "p_under_32_5": 0.5956,
+        "p_long_35": 0.3242,
+        "wr_blue": 0.5222
+      },
+      {
+        "dominant": "clouds",
+        "n": 5410,
+        "mean_kills": 31.05,
+        "mean_length": 31.58,
+        "p_under_29_5": 0.4763,
+        "p_under_32_5": 0.5985,
+        "p_long_35": 0.2351,
+        "wr_blue": 0.5274
+      },
+      {
+        "dominant": "oceans",
+        "n": 4945,
+        "mean_kills": 31.03,
+        "mean_length": 32.28,
+        "p_under_29_5": 0.4815,
+        "p_under_32_5": 0.5972,
+        "p_long_35": 0.2667,
+        "wr_blue": 0.5407
+      },
+      {
+        "dominant": "infernals",
+        "n": 7368,
+        "mean_kills": 30.97,
+        "mean_length": 30.06,
+        "p_under_29_5": 0.4806,
+        "p_under_32_5": 0.6091,
+        "p_long_35": 0.1797,
+        "wr_blue": 0.5392
+      },
+      {
+        "dominant": "mountains",
+        "n": 6279,
+        "mean_kills": 30.6,
+        "mean_length": 30.97,
+        "p_under_29_5": 0.4924,
+        "p_under_32_5": 0.6175,
+        "p_long_35": 0.2215,
+        "wr_blue": 0.5359
+      }
+    ],
+    "blue_firstdragon_then_type_stack": [
+      {
+        "type": "oceans",
+        "n_blue_fd_and_has_type": 5189,
+        "wr": 0.7427,
+        "wr_fd_without_type": 0.6067,
+        "delta_pp_vs_fd_without": 13.6,
+        "mean_kills": 30.51,
+        "mean_length": 31.33
+      },
+      {
+        "type": "hextechs",
+        "n_blue_fd_and_has_type": 5255,
+        "wr": 0.7328,
+        "wr_fd_without_type": 0.6114,
+        "delta_pp_vs_fd_without": 12.14,
+        "mean_kills": 30.99,
+        "mean_length": 31.25
+      },
+      {
+        "type": "clouds",
+        "n_blue_fd_and_has_type": 5126,
+        "wr": 0.7306,
+        "wr_fd_without_type": 0.6143,
+        "delta_pp_vs_fd_without": 11.63,
+        "mean_kills": 30.93,
+        "mean_length": 31.47
+      },
+      {
+        "type": "infernals",
+        "n_blue_fd_and_has_type": 5259,
+        "wr": 0.7249,
+        "wr_fd_without_type": 0.6159,
+        "delta_pp_vs_fd_without": 10.9,
+        "mean_kills": 31.11,
+        "mean_length": 31.5
+      },
+      {
+        "type": "mountains",
+        "n_blue_fd_and_has_type": 5233,
+        "wr": 0.7239,
+        "wr_fd_without_type": 0.6167,
+        "delta_pp_vs_fd_without": 10.71,
+        "mean_kills": 30.7,
+        "mean_length": 31.54
+      },
+      {
+        "type": "chemtechs",
+        "n_blue_fd_and_has_type": 4931,
+        "wr": 0.7236,
+        "wr_fd_without_type": 0.6203,
+        "delta_pp_vs_fd_without": 10.33,
+        "mean_kills": 30.69,
+        "mean_length": 31.51
+      }
+    ],
+    "ahead15_conversion_when_blue_has_type": {
+      "any": {
+        "n_ahead15": 12907,
+        "convert_wr": 0.8189
+      },
+      "blue_has_infernals": {
+        "n_ahead15": 4268,
+        "convert_wr": 0.8636,
+        "contrast_wr_no_type": 0.7967,
+        "delta_pp": 6.69
+      },
+      "blue_has_mountains": {
+        "n_ahead15": 4248,
+        "convert_wr": 0.8672,
+        "contrast_wr_no_type": 0.7951,
+        "delta_pp": 7.21
+      },
+      "blue_has_clouds": {
+        "n_ahead15": 4262,
+        "convert_wr": 0.8613,
+        "contrast_wr_no_type": 0.7979,
+        "delta_pp": 6.34
+      },
+      "blue_has_oceans": {
+        "n_ahead15": 4363,
+        "convert_wr": 0.876,
+        "contrast_wr_no_type": 0.7897,
+        "delta_pp": 8.63
+      },
+      "blue_has_hextechs": {
+        "n_ahead15": 4287,
+        "convert_wr": 0.8764,
+        "contrast_wr_no_type": 0.7903,
+        "delta_pp": 8.61
+      },
+      "blue_has_chemtechs": {
+        "n_ahead15": 4013,
+        "convert_wr": 0.8572,
+        "contrast_wr_no_type": 0.8016,
+        "delta_pp": 5.57
+      }
+    },
+    "wr_by_blue_infernal_count": [
+      {
+        "blue_infernals": 0,
+        "n": 29088,
+        "wr": 0.4849
+      },
+      {
+        "blue_infernals": 1,
+        "n": 6373,
+        "wr": 0.651
+      },
+      {
+        "blue_infernals": 2,
+        "n": 1601,
+        "wr": 0.7995
+      },
+      {
+        "blue_infernals": 3,
+        "n": 528,
+        "wr": 0.8542
+      }
+    ],
+    "soul_blue": {
+      "wr_if_blue_soul": 0.9131,
+      "n": 5721
+    },
+    "elder_blue": {
+      "wr_if_blue_elder": 0.775,
+      "n": 1298
+    },
+    "side_quirk": {
+      "blue_firstdragon_rate": 0.4018,
+      "note": "Blue takes first dragon only ~40% in this OE slice \u2014 red-favored FD is a real side quirk to price."
+    }
+  },
+  "void_grubs": {
+    "wr_by_grub_diff_bucket": [
+      {
+        "bucket": "red_sweep",
+        "n": 5289,
+        "wr_blue": 0.4084,
+        "mean_gold15": -1091.8,
+        "p_blue_firsttower": 0.3424,
+        "p_blue_firstherald": 0.4875,
+        "mean_kills": 32.18
+      },
+      {
+        "bucket": "red_edge",
+        "n": 2943,
+        "wr_blue": 0.4832,
+        "mean_gold15": -318.8,
+        "p_blue_firsttower": 0.4448,
+        "p_blue_firstherald": 0.5463,
+        "mean_kills": 32.37
+      },
+      {
+        "bucket": "even",
+        "n": 14793,
+        "wr_blue": 0.5262,
+        "mean_gold15": 215.8,
+        "p_blue_firsttower": 0.534,
+        "p_blue_firstherald": 0.5792,
+        "mean_kills": 29.09
+      },
+      {
+        "bucket": "blue_edge",
+        "n": 9670,
+        "wr_blue": 0.5734,
+        "mean_gold15": 670.6,
+        "p_blue_firsttower": 0.6196,
+        "p_blue_firstherald": 0.6534,
+        "mean_kills": 32.41
+      },
+      {
+        "bucket": "blue_sweep",
+        "n": 4940,
+        "wr_blue": 0.6287,
+        "mean_gold15": 1548.3,
+        "p_blue_firsttower": 0.7109,
+        "p_blue_firstherald": 0.7055,
+        "mean_kills": 30.38
+      }
+    ],
+    "correlations_grub_diff": {
+      "y_blue_win": {
+        "r": 0.1327,
+        "n": 37635
+      },
+      "gold15": {
+        "r": 0.2681,
+        "n": 33234
+      },
+      "gold20": {
+        "r": 0.2507,
+        "n": 33150
+      },
+      "blue_firsttower": {
+        "r": 0.2261,
+        "n": 36090
+      },
+      "blue_firstherald": {
+        "r": 0.1431,
+        "n": 33237
+      },
+      "total_kills": {
+        "r": -0.0018,
+        "n": 37635
+      },
+      "under_29_5": {
+        "r": 0.0007,
+        "n": 37635
+      }
+    },
+    "grub_edge_with_vs_without_herald": {
+      "wr_grubs_plus_herald": 0.6957,
+      "n_with": 7842,
+      "wr_grubs_no_herald": 0.4016,
+      "n_without": 3683,
+      "delta_pp": 29.42
+    }
+  },
+  "baron_proxies": {
+    "blue_firstbaron_wr_by_gold20_state": [
+      {
+        "gold20_when_blue_firstbaron": "behind2k",
+        "n": 1509,
+        "wr": 0.4997,
+        "mean_gold20": -3666.0,
+        "mean_length": 35.33,
+        "mean_gold25": -2251.3
+      },
+      {
+        "gold20_when_blue_firstbaron": "behind",
+        "n": 1579,
+        "wr": 0.7011,
+        "mean_gold20": -1192.2,
+        "mean_length": 35.15,
+        "mean_gold25": 431.9
+      },
+      {
+        "gold20_when_blue_firstbaron": "even",
+        "n": 1469,
+        "wr": 0.7849,
+        "mean_gold20": 16.9,
+        "mean_length": 34.54,
+        "mean_gold25": 1770.6
+      },
+      {
+        "gold20_when_blue_firstbaron": "ahead",
+        "n": 2605,
+        "wr": 0.8641,
+        "mean_gold20": 1275.6,
+        "mean_length": 33.46,
+        "mean_gold25": 3127.0
+      },
+      {
+        "gold20_when_blue_firstbaron": "ahead2k",
+        "n": 8938,
+        "wr": 0.9519,
+        "mean_gold20": 5179.5,
+        "mean_length": 29.94,
+        "mean_gold25": 7523.0
+      }
+    ],
+    "note": "gold@20 is a proxy for 'around first baron window', not exact baron minute",
+    "red_baron_while_blue_ahead20": {
+      "n": 2940,
+      "blue_wr_still": 0.4378,
+      "contrast_n": 11540,
+      "blue_wr_when_red_baron_not_ahead": 0.092
+    },
+    "blue_baron_after_15to20_flip": {
+      "n": 672,
+      "wr": 0.8929
+    },
+    "blue_baron_after_15to20_collapse": {
+      "n": 304,
+      "wr": 0.6579
+    },
+    "short_game_with_any_baron": {
+      "n": 12142,
+      "blue_wr_if_blue_baron": 0.973
+    }
+  },
+  "sequences": {
+    "blue_fb_then_fd": {
+      "n": 8383,
+      "wr": 0.7262
+    },
+    "blue_fb_no_fd": {
+      "n": 10992,
+      "wr": 0.5469
+    },
+    "delta_pp_fd_after_fb": 17.93,
+    "blue_side_wr_by_league_top": [
+      {
+        "key": "IC",
+        "n": 169,
+        "wr_blue": 0.5917,
+        "mean_kills": 33.56,
+        "mean_length": 28.99
+      },
+      {
+        "key": "HW",
+        "n": 301,
+        "wr_blue": 0.5914,
+        "mean_kills": 37.51,
+        "mean_length": 31.31
+      },
+      {
+        "key": "FST",
+        "n": 80,
+        "wr_blue": 0.575,
+        "mean_kills": 28.57,
+        "mean_length": 30.8
+      },
+      {
+        "key": "CDF",
+        "n": 141,
+        "wr_blue": 0.5745,
+        "mean_kills": 38.42,
+        "mean_length": 28.69
+      },
+      {
+        "key": "GLL",
+        "n": 318,
+        "wr_blue": 0.5723,
+        "mean_kills": 30.86,
+        "mean_length": 30.84
+      },
+      {
+        "key": "WLDs",
+        "n": 365,
+        "wr_blue": 0.5671,
+        "mean_kills": 26.78,
+        "mean_length": 32.14
+      },
+      {
+        "key": "MSI",
+        "n": 305,
+        "wr_blue": 0.5639,
+        "mean_kills": 29.61,
+        "mean_length": 31.54
+      },
+      {
+        "key": "DCup",
+        "n": 137,
+        "wr_blue": 0.438,
+        "mean_kills": 30.61,
+        "mean_length": 31.34
+      },
+      {
+        "key": "LMF",
+        "n": 86,
+        "wr_blue": 0.4419,
+        "mean_kills": 25.06,
+        "mean_length": 32.17
+      },
+      {
+        "key": "VL",
+        "n": 88,
+        "wr_blue": 0.5568,
+        "mean_kills": 29.38,
+        "mean_length": 29.65
+      },
+      {
+        "key": "LEC",
+        "n": 1134,
+        "wr_blue": 0.5538,
+        "mean_kills": 27.53,
+        "mean_length": 32.8
+      },
+      {
+        "key": "EM",
+        "n": 1393,
+        "wr_blue": 0.5513,
+        "mean_kills": 31.9,
+        "mean_length": 31.73
+      }
+    ]
+  },
+  "correlation_board": [
+    {
+      "feature": "gold15",
+      "outcome": "gold20",
+      "r": 0.8903,
+      "n": 33150,
+      "abs_r": 0.8902645054289499
+    },
+    {
+      "feature": "gold10",
+      "outcome": "gold20",
+      "r": 0.7403,
+      "n": 33150,
+      "abs_r": 0.7403388090822222
+    },
+    {
+      "feature": "blue_firstbaron",
+      "outcome": "y_blue_win",
+      "r": 0.6287,
+      "n": 33237,
+      "abs_r": 0.6286815677391653
+    },
+    {
+      "feature": "gold20",
+      "outcome": "y_blue_win",
+      "r": 0.6173,
+      "n": 33150,
+      "abs_r": 0.6173473922472256
+    },
+    {
+      "feature": "gold15",
+      "outcome": "y_blue_win",
+      "r": 0.5312,
+      "n": 33234,
+      "abs_r": 0.5311714222391499
+    },
+    {
+      "feature": "herald_diff",
+      "outcome": "gold20",
+      "r": 0.4673,
+      "n": 33150,
+      "abs_r": 0.4672695646176465
+    },
+    {
+      "feature": "blue_firstbaron",
+      "outcome": "gold20",
+      "r": 0.4457,
+      "n": 33150,
+      "abs_r": 0.4457042664575423
+    },
+    {
+      "feature": "gold10",
+      "outcome": "y_blue_win",
+      "r": 0.4424,
+      "n": 33235,
+      "abs_r": 0.44236066455213185
+    },
+    {
+      "feature": "blue_firstherald",
+      "outcome": "gold20",
+      "r": 0.416,
+      "n": 33150,
+      "abs_r": 0.4159821619785469
+    },
+    {
+      "feature": "soul_blue",
+      "outcome": "y_blue_win",
+      "r": 0.3235,
+      "n": 37635,
+      "abs_r": 0.3235006763650759
+    },
+    {
+      "feature": "blue_grubs_and_herald",
+      "outcome": "gold20",
+      "r": 0.2954,
+      "n": 33150,
+      "abs_r": 0.2954301649565769
+    },
+    {
+      "feature": "herald_diff",
+      "outcome": "y_blue_win",
+      "r": 0.2785,
+      "n": 37635,
+      "abs_r": 0.27848698836245733
+    },
+    {
+      "feature": "infernals_diff",
+      "outcome": "y_blue_win",
+      "r": 0.2719,
+      "n": 37635,
+      "abs_r": 0.27193951471244127
+    },
+    {
+      "feature": "blue_fb_then_fd",
+      "outcome": "gold20",
+      "r": 0.2681,
+      "n": 33150,
+      "abs_r": 0.268090444396943
+    },
+    {
+      "feature": "blue_firstherald",
+      "outcome": "y_blue_win",
+      "r": 0.26,
+      "n": 33237,
+      "abs_r": 0.2600043226581083
+    },
+    {
+      "feature": "grub_diff",
+      "outcome": "gold20",
+      "r": 0.2507,
+      "n": 33150,
+      "abs_r": 0.25071199148623147
+    },
+    {
+      "feature": "infernals_diff",
+      "outcome": "gold20",
+      "r": 0.2423,
+      "n": 33150,
+      "abs_r": 0.2423077763365753
+    },
+    {
+      "feature": "blue_fb_then_fd",
+      "outcome": "y_blue_win",
+      "r": 0.2085,
+      "n": 37635,
+      "abs_r": 0.20851743034507522
+    },
+    {
+      "feature": "soul_blue",
+      "outcome": "gold20",
+      "r": 0.2066,
+      "n": 33150,
+      "abs_r": 0.20658811762859627
+    },
+    {
+      "feature": "blue_firstdragon",
+      "outcome": "y_blue_win",
+      "r": 0.2035,
+      "n": 36090,
+      "abs_r": 0.2035345710860371
+    },
+    {
+      "feature": "blue_firstdragon",
+      "outcome": "gold20",
+      "r": 0.1912,
+      "n": 33150,
+      "abs_r": 0.19122590058811456
+    },
+    {
+      "feature": "blue_grubs_and_herald",
+      "outcome": "y_blue_win",
+      "r": 0.1685,
+      "n": 37635,
+      "abs_r": 0.1684872752668141
+    },
+    {
+      "feature": "soul_blue",
+      "outcome": "long_35",
+      "r": 0.1449,
+      "n": 37635,
+      "abs_r": 0.14490726607008175
+    },
+    {
+      "feature": "grub_diff",
+      "outcome": "y_blue_win",
+      "r": 0.1327,
+      "n": 37635,
+      "abs_r": 0.13274855420609022
+    },
+    {
+      "feature": "blue_grubs_no_herald",
+      "outcome": "gold20",
+      "r": -0.1165,
+      "n": 33150,
+      "abs_r": 0.11646478419218032
+    },
+    {
+      "feature": "blue_grubs_no_herald",
+      "outcome": "y_blue_win",
+      "r": -0.0678,
+      "n": 37635,
+      "abs_r": 0.06784203495529637
+    },
+    {
+      "feature": "flipped_15_to_20",
+      "outcome": "y_blue_win",
+      "r": 0.065,
+      "n": 37635,
+      "abs_r": 0.06504846029800039
+    },
+    {
+      "feature": "flipped_15_to_20",
+      "outcome": "total_kills",
+      "r": 0.0546,
+      "n": 37635,
+      "abs_r": 0.05457036001338447
+    },
+    {
+      "feature": "hextech_map",
+      "outcome": "total_kills",
+      "r": 0.0515,
+      "n": 37635,
+      "abs_r": 0.0515337838340384
+    }
+  ],
+  "creative_findings": [
+    "Blue-side baseline WR 53.2% but first-dragon rate only 40.2% while first-herald 60.0% and mean grub_diff +0.68 \u2014 blue wins the *grub/herald* layer more than the *drake* layer.",
+    "First-obj \u0394WR (blue takes vs misses): firstblood +19.1pp, firstdragon +20.7pp, firstherald +26.5pp, firstbaron +62.8pp, firsttower +39.1pp \u2014 Herald (+26pp) punches above FD (+21pp); Baron is the nuke (+63pp).",
+    "Void grub edge (\u2265+2) WITHOUT Herald: blue WR 40.2% (n=3683) vs WITH Herald 69.6% (n=7842, \u0394 +29.4pp). Live read: grubs alone are often a *trap lead*.",
+    "Grub ladder WR: red_sweep 40.8% (FT 34%) \u00b7 red_edge 48.3% (FT 44%) \u00b7 even 52.6% (FT 53%) \u00b7 blue_edge 57.3% (FT 62%) \u00b7 blue_sweep 62.9% (FT 71%)",
+    "Map dragon diet \u2192 pace: dominant hextechs averages 32.3 kills / 32.4m; mountains 30.6k; longest diet = chemtechs (33.2m, under29 47.6%).",
+    "After blue FD, stacking oceans adds +13.6pp WR vs FD without that type; chemtechs adds +10.3pp \u2014 type path matters after the first take.",
+    "Ahead@15 conversion with blue holding type: best blue_has_oceans +8.6pp vs no-type; worst blue_has_chemtechs +5.6pp.",
+    "Blue Infernal count ladder: 0\u219248.5% (n=29088) \u00b7 1\u219265.1% (n=6373) \u00b7 2\u219280.0% (n=1601) \u00b7 3\u219285.4% (n=528)",
+    "Blue first Baron \u2260 auto-win: WR 95.2% if gold@20 ahead2k vs 50.0% if behind2k (same first-Baron flag \u2014 OE has no baron minute, @20 is the window proxy).",
+    "Red Baron while blue ahead@20: blue still wins 43.8% (n=2940) vs 9.2% when red Baron and blue not ahead \u2014 theft hurts but isn't free.",
+    "Blue Baron after 15\u219220 gold flip: WR 89.3% (n=672); after 15\u219220 collapse still taking Baron: WR 65.8% (n=304).",
+    "Sequence: blue FB+FD WR 72.6% vs FB without FD 54.7% (\u0394 +17.9pp).",
+    "Blue soul (4+ elementals): WR 91.3% (n=5721).",
+    "Blue Elder: WR 77.5% (n=1298) \u2014 high but not 95%+; Elder games are often already decided both ways."
+  ]
+}

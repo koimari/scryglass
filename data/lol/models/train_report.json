@@ -1,0 +1,484 @@
+{
+  "win": {
+    "status": "ok",
+    "name": "win",
+    "feature_cols": [
+      "elo_blue",
+      "elo_red",
+      "elo_diff",
+      "mu_blue",
+      "mu_red",
+      "mu_diff",
+      "sigma_pair",
+      "p_dual_elo",
+      "form_wr_blue",
+      "form_wr_red",
+      "form_wr_diff",
+      "form_kills_blue",
+      "form_kills_red",
+      "form_kills_diff",
+      "form_ka_blue",
+      "form_ka_red",
+      "form_ckpm_blue",
+      "form_ckpm_red",
+      "form_ckpm_avg",
+      "h2h_blue_edge",
+      "draft_kills_shift",
+      "draft_win_logit_blue",
+      "draft_unknown_frac",
+      "draft_n_champs",
+      "draft_expected_kills",
+      "league_strength",
+      "roll_fb_blue",
+      "roll_fb_red",
+      "roll_fb_diff",
+      "roll_g10_blue",
+      "roll_g10_red",
+      "roll_g10_diff",
+      "roster_changed",
+      "player_mu_diff",
+      "p_player_elo",
+      "p_strength_blend",
+      "map_index",
+      "league_id"
+    ],
+    "calibrated": true,
+    "iso_skipped": false,
+    "holdout": {
+      "name": "win",
+      "n": 1849,
+      "brier": 0.21030202470482168,
+      "log_loss": 0.6313855100946187,
+      "ece": 0.024317002716847776,
+      "reliability": [
+        {
+          "bin": 0,
+          "n": 10,
+          "conf": 1.0000000000000002e-06,
+          "acc": 0.1
+        },
+        {
+          "bin": 1,
+          "n": 24,
+          "conf": 0.1875,
+          "acc": 0.125
+        },
+        {
+          "bin": 2,
+          "n": 239,
+          "conf": 0.2314121437898298,
+          "acc": 0.2594142259414226
+        },
+        {
+          "bin": 3,
+          "n": 150,
+          "conf": 0.3026248594840947,
+          "acc": 0.37333333333333335
+        },
+        {
+          "bin": 4,
+          "n": 359,
+          "conf": 0.4276947331723546,
+          "acc": 0.415041782729805
+        },
+        {
+          "bin": 5,
+          "n": 31,
+          "conf": 0.5,
+          "acc": 0.5161290322580645
+        },
+        {
+          "bin": 6,
+          "n": 423,
+          "conf": 0.6200738006039846,
+          "acc": 0.6099290780141844
+        },
+        {
+          "bin": 7,
+          "n": 324,
+          "conf": 0.7289914203097814,
+          "acc": 0.6975308641975309
+        },
+        {
+          "bin": 8,
+          "n": 262,
+          "conf": 0.8296314531789882,
+          "acc": 0.8396946564885496
+        },
+        {
+          "bin": 9,
+          "n": 27,
+          "conf": 0.9999989999999999,
+          "acc": 0.8888888888888888
+        }
+      ],
+      "baseline_mean_brier": 0.2476043501800778
+    },
+    "cv_brier_mean": 0.2210590932359906,
+    "baselines": {
+      "mean_brier": 0.24811185701455366,
+      "elo_brier": 0.22021044644807342,
+      "elo_log_loss": 0.6309530644390728
+    },
+    "conformal_q90": 0.71875,
+    "n_train": 10353,
+    "n_holdout": 1849
+  },
+  "kills": {
+    "status": "ok",
+    "name": "kills",
+    "feature_cols": [
+      "elo_blue",
+      "elo_red",
+      "elo_diff",
+      "mu_blue",
+      "mu_red",
+      "mu_diff",
+      "sigma_pair",
+      "p_dual_elo",
+      "form_wr_blue",
+      "form_wr_red",
+      "form_wr_diff",
+      "form_kills_blue",
+      "form_kills_red",
+      "form_kills_diff",
+      "form_ka_blue",
+      "form_ka_red",
+      "form_ckpm_blue",
+      "form_ckpm_red",
+      "form_ckpm_avg",
+      "h2h_blue_edge",
+      "draft_kills_shift",
+      "draft_win_logit_blue",
+      "draft_unknown_frac",
+      "draft_n_champs",
+      "draft_expected_kills",
+      "league_strength",
+      "roll_fb_blue",
+      "roll_fb_red",
+      "roll_fb_diff",
+      "roll_g10_blue",
+      "roll_g10_red",
+      "roll_g10_diff",
+      "roster_changed",
+      "player_mu_diff",
+      "p_player_elo",
+      "p_strength_blend",
+      "map_index",
+      "league_id"
+    ],
+    "selected_model": "ridge",
+    "holdout": {
+      "name": "ridge",
+      "n": 1849,
+      "rmse": 8.659076650080333,
+      "mae": 6.718034770990719,
+      "crps": 4.796062499392849
+    },
+    "baselines": {
+      "ridge_crps": 4.796062499392849,
+      "ridge_rmse": 8.659076650080333,
+      "quantile_crps": 4.869448192207052,
+      "mean_gbm_crps": 4.882962852600082
+    },
+    "all_holdout": {
+      "ridge": {
+        "name": "ridge",
+        "n": 1849,
+        "rmse": 8.659076650080333,
+        "mae": 6.718034770990719,
+        "crps": 4.796062499392849
+      },
+      "quantile": {
+        "name": "quantile_gbm",
+        "n": 1849,
+        "rmse": 8.80719015420438,
+        "mae": 6.770034683823308,
+        "crps": 4.869448192207052
+      },
+      "mean_gbm": {
+        "name": "mean_gbm",
+        "n": 1849,
+        "rmse": 8.816619269453502,
+        "mae": 6.835591296554795,
+        "crps": 4.882962852600082
+      }
+    },
+    "residual_sd": 8.647721542428794,
+    "conformal_q90": 13.780782262179867,
+    "n_train": 10353,
+    "n_holdout": 1849
+  },
+  "firstblood": {
+    "status": "ok",
+    "name": "firstblood",
+    "feature_cols": [
+      "elo_blue",
+      "elo_red",
+      "elo_diff",
+      "mu_blue",
+      "mu_red",
+      "mu_diff",
+      "sigma_pair",
+      "p_dual_elo",
+      "form_wr_blue",
+      "form_wr_red",
+      "form_wr_diff",
+      "form_kills_blue",
+      "form_kills_red",
+      "form_kills_diff",
+      "form_ka_blue",
+      "form_ka_red",
+      "form_ckpm_blue",
+      "form_ckpm_red",
+      "form_ckpm_avg",
+      "h2h_blue_edge",
+      "draft_kills_shift",
+      "draft_win_logit_blue",
+      "draft_unknown_frac",
+      "draft_n_champs",
+      "draft_expected_kills",
+      "league_strength",
+      "roll_fb_blue",
+      "roll_fb_red",
+      "roll_fb_diff",
+      "roll_g10_blue",
+      "roll_g10_red",
+      "roll_g10_diff",
+      "roster_changed",
+      "player_mu_diff",
+      "p_player_elo",
+      "p_strength_blend",
+      "map_index",
+      "league_id"
+    ],
+    "calibrated": true,
+    "iso_skipped": false,
+    "holdout": {
+      "name": "firstblood",
+      "n": 1849,
+      "brier": 0.24617566632019872,
+      "log_loss": 0.6848481559661989,
+      "ece": 0.014291346241766546,
+      "reliability": [
+        {
+          "bin": 0,
+          "n": 4,
+          "conf": 1e-06,
+          "acc": 0.0
+        },
+        {
+          "bin": 3,
+          "n": 14,
+          "conf": 0.33908429016988395,
+          "acc": 0.5
+        },
+        {
+          "bin": 4,
+          "n": 100,
+          "conf": 0.4290355069079276,
+          "acc": 0.46
+        },
+        {
+          "bin": 5,
+          "n": 1624,
+          "conf": 0.5381669556153348,
+          "acc": 0.5277093596059114
+        },
+        {
+          "bin": 6,
+          "n": 96,
+          "conf": 0.6589598859684137,
+          "acc": 0.6354166666666666
+        },
+        {
+          "bin": 7,
+          "n": 1,
+          "conf": 0.7678620180738798,
+          "acc": 1.0
+        },
+        {
+          "bin": 8,
+          "n": 7,
+          "conf": 0.7999999999999999,
+          "acc": 0.5714285714285714
+        },
+        {
+          "bin": 9,
+          "n": 3,
+          "conf": 0.999999,
+          "acc": 1.0
+        }
+      ],
+      "baseline_mean_brier": 0.2491312012603249
+    },
+    "cv_brier_mean": 0.2606006060332679,
+    "baselines": {
+      "mean_brier": 0.2497267759112938,
+      "elo_brier": 0.24844893142163257,
+      "elo_log_loss": 0.6900359812358964
+    },
+    "conformal_q90": 0.5757575757575758,
+    "n_train": 10353,
+    "n_holdout": 1849
+  },
+  "first_inhib": {
+    "status": "ok",
+    "name": "first_inhib",
+    "feature_cols": [
+      "elo_blue",
+      "elo_red",
+      "elo_diff",
+      "mu_blue",
+      "mu_red",
+      "mu_diff",
+      "sigma_pair",
+      "p_dual_elo",
+      "form_wr_blue",
+      "form_wr_red",
+      "form_wr_diff",
+      "form_kills_blue",
+      "form_kills_red",
+      "form_kills_diff",
+      "form_ka_blue",
+      "form_ka_red",
+      "form_ckpm_blue",
+      "form_ckpm_red",
+      "form_ckpm_avg",
+      "h2h_blue_edge",
+      "draft_kills_shift",
+      "draft_win_logit_blue",
+      "draft_unknown_frac",
+      "draft_n_champs",
+      "draft_expected_kills",
+      "league_strength",
+      "roll_fb_blue",
+      "roll_fb_red",
+      "roll_fb_diff",
+      "roll_g10_blue",
+      "roll_g10_red",
+      "roll_g10_diff",
+      "roster_changed",
+      "player_mu_diff",
+      "p_player_elo",
+      "p_strength_blend",
+      "map_index",
+      "league_id"
+    ],
+    "calibrated": true,
+    "iso_skipped": false,
+    "holdout": {
+      "name": "first_inhib",
+      "n": 157,
+      "brier": 0.2210712088317252,
+      "log_loss": 1.0477520688663864,
+      "ece": 0.11436797995520814,
+      "reliability": [
+        {
+          "bin": 0,
+          "n": 3,
+          "conf": 0.023578045575131292,
+          "acc": 0.0
+        },
+        {
+          "bin": 1,
+          "n": 19,
+          "conf": 0.16890492092108436,
+          "acc": 0.3157894736842105
+        },
+        {
+          "bin": 2,
+          "n": 22,
+          "conf": 0.25,
+          "acc": 0.36363636363636365
+        },
+        {
+          "bin": 3,
+          "n": 1,
+          "conf": 0.345315963705604,
+          "acc": 0.0
+        },
+        {
+          "bin": 5,
+          "n": 63,
+          "conf": 0.588708220475598,
+          "acc": 0.6507936507936508
+        },
+        {
+          "bin": 7,
+          "n": 7,
+          "conf": 0.75,
+          "acc": 0.5714285714285714
+        },
+        {
+          "bin": 8,
+          "n": 10,
+          "conf": 0.8087566139999955,
+          "acc": 0.7
+        },
+        {
+          "bin": 9,
+          "n": 32,
+          "conf": 0.999999,
+          "acc": 0.8125
+        }
+      ],
+      "baseline_mean_brier": 0.24260619092052416
+    },
+    "cv_brier_mean": 0.23289015604441826,
+    "baselines": {
+      "mean_brier": 0.24523672578155445,
+      "elo_brier": 0.20859982156593435,
+      "elo_log_loss": 0.6060159883907887
+    },
+    "conformal_q90": 0.75,
+    "n_train": 879,
+    "n_holdout": 157
+  },
+  "stack": {
+    "ablations_brier_oof": {
+      "strength_blend": 0.21885596844354294,
+      "team_elo": 0.22056358447790467,
+      "player_elo": 0.22360886142165756,
+      "draft_only": 0.2580481972005392,
+      "gbm_only": 0.2194913734367146,
+      "full_stack": 0.2145250077445356
+    },
+    "ablations_brier_holdout": {
+      "strength_blend": 0.21828561457003787,
+      "team_elo": 0.22018227869521573,
+      "player_elo": 0.2216525867996031,
+      "draft_only": 0.25152519674943713,
+      "gbm_only": 0.21213632375539673,
+      "full_stack": 0.2104086362063123
+    },
+    "ablations_brier": {
+      "strength_blend": 0.21828561457003787,
+      "team_elo": 0.22018227869521573,
+      "player_elo": 0.2216525867996031,
+      "draft_only": 0.25152519674943713,
+      "gbm_only": 0.21213632375539673,
+      "full_stack": 0.2104086362063123
+    },
+    "stack_coef": [
+      2.1711229177152727,
+      1.038549877562661,
+      1.938940751570924,
+      -0.02807124585506828
+    ],
+    "stack_intercept": -2.5855964632470707,
+    "feature_order": [
+      "p_strength_blend",
+      "p_draft",
+      "p_gbm",
+      "sigma_z"
+    ],
+    "regularization_C": 0.5,
+    "n_oof": 7395,
+    "n_stack_train": 5546,
+    "n_stack_holdout": 1849,
+    "full_beats_draft": true,
+    "full_beats_strength": true
+  },
+  "n_maps": 12325
+}

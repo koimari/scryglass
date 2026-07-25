@@ -1,0 +1,64 @@
+# Secrets & env
+.env
+.env.*
+!.env.example
+*.pem
+credentials.json
+**/secrets/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Cursor local state (keep rules/skills if explicitly tracked elsewhere)
+.cursor/hooks/state/
+.cursor/projects/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Next (Scryglass)
+node_modules/
+.next/
+out/
+.vercel/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Large / regenerable warehouse & binaries
+data/lol/warehouse/
+data/lol/odds_journal.parquet
+**/*.joblib
+**/*.parquet
+!apps/lol-atlas/public/packs/**/*.parquet
+
+# Local scratch
+tmp/
+output/
+results/
+data/bets/
+data/legs.json
+
+# Misc regenerable JSON dumps at data/lol root (keep models/)
+data/lol/draft_games.json
+data/lol/draft_model.json
+data/lol/draft_players.json
+data/lol/features/
+data/lol/games_raw.json
+data/lol/kill_models.json
+data/lol/markets_model.json

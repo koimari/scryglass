@@ -1,0 +1,131 @@
+{
+  "version": 2,
+  "year": 2026,
+  "n_disagree": 440,
+  "baseline_fade_wr": 0.4864,
+  "note": "approx_ev assumes books price the soft-public favorite at public_conf (proxy for public-shaded moneylines). Real books differ \u2014 use as ranking, not bankroll.",
+  "playbook": [
+    {
+      "rule": "C: Intl event disagreement, model\u226560%",
+      "n": 36,
+      "wr": 0.6389,
+      "avg_dog_decimal_if_book_equals_public": 2.301,
+      "approx_ev": 0.4702,
+      "holdout_n": 11,
+      "holdout_wr": 0.4545,
+      "train_wr": 0.72
+    },
+    {
+      "rule": "E: Recent form WR with dog (not just heat label)",
+      "n": 71,
+      "wr": 0.6338,
+      "avg_dog_decimal_if_book_equals_public": 2.269,
+      "approx_ev": 0.438,
+      "holdout_n": 22,
+      "holdout_wr": 0.6818,
+      "train_wr": 0.6122
+    },
+    {
+      "rule": "A: Fade heat-chase \u2014 take brand side (model\u226560%)",
+      "n": 66,
+      "wr": 0.6061,
+      "avg_dog_decimal_if_book_equals_public": 2.31,
+      "approx_ev": 0.4001,
+      "holdout_n": 20,
+      "holdout_wr": 0.5,
+      "train_wr": 0.6522
+    },
+    {
+      "rule": "D: Player-Elo strongly with dog (|\u0394|>40)",
+      "n": 133,
+      "wr": 0.6015,
+      "avg_dog_decimal_if_book_equals_public": 2.258,
+      "approx_ev": 0.358,
+      "holdout_n": 40,
+      "holdout_wr": 0.55,
+      "train_wr": 0.6237
+    },
+    {
+      "rule": "A+: Fade heat + model more confident than public by \u22655pp",
+      "n": 55,
+      "wr": 0.6182,
+      "avg_dog_decimal_if_book_equals_public": 2.171,
+      "approx_ev": 0.3419,
+      "holdout_n": 17,
+      "holdout_wr": 0.5294,
+      "train_wr": 0.6579
+    },
+    {
+      "rule": "B: Model conf beats public soft conf by \u226510pp (and \u226560%)",
+      "n": 107,
+      "wr": 0.6168,
+      "avg_dog_decimal_if_book_equals_public": 2.127,
+      "approx_ev": 0.3121,
+      "holdout_n": 33,
+      "holdout_wr": 0.5758,
+      "train_wr": 0.6351
+    },
+    {
+      "rule": "F: Public has brand+heat, but draft favors dog, model\u226560%",
+      "n": 42,
+      "wr": 0.5952,
+      "avg_dog_decimal_if_book_equals_public": 2.171,
+      "approx_ev": 0.292,
+      "holdout_n": 13,
+      "holdout_wr": 0.6154,
+      "train_wr": 0.5862
+    },
+    {
+      "rule": "G: Recent roster change on the board, model\u226555%",
+      "n": 41,
+      "wr": 0.5122,
+      "avg_dog_decimal_if_book_equals_public": 2.271,
+      "approx_ev": 0.163,
+      "holdout_n": 13,
+      "holdout_wr": 0.4615,
+      "train_wr": 0.5357
+    },
+    {
+      "rule": "Baseline: all disagreements (blind fade)",
+      "n": 440,
+      "wr": 0.4864,
+      "avg_dog_decimal_if_book_equals_public": 2.305,
+      "approx_ev": 0.121,
+      "holdout_n": 132,
+      "holdout_wr": 0.4621,
+      "train_wr": 0.4968
+    },
+    {
+      "rule": "X (avoid): Fade brand \u2014 take heat side",
+      "n": 30,
+      "wr": 0.4667,
+      "avg_dog_decimal_if_book_equals_public": 2.301,
+      "approx_ev": 0.0738,
+      "holdout_n": 9,
+      "holdout_wr": 0.5556,
+      "train_wr": 0.4286
+    }
+  ],
+  "aspects": {
+    "successful_fades_more_often_have": {
+      "model_takes_brand_not_heat": 0.388,
+      "vs_misses": 0.358,
+      "intl_share": 0.159,
+      "intl_share_misses": 0.133,
+      "mean_conf_gap": 0.051,
+      "mean_conf_gap_misses": 0.027,
+      "mean_player_for_dog": 33.81,
+      "mean_player_for_dog_misses": 21.16,
+      "mean_form_for_dog": -0.058,
+      "mean_form_for_dog_misses": -0.104,
+      "mean_draft_for_dog": 0.06,
+      "mean_draft_for_dog_misses": -0.034
+    },
+    "narrative": [
+      "Unlikely-on-paper wins for the model dog cluster when the public lean is mostly HEAT (recent form chase) while brand/pedigree sits with the dog.",
+      "International brackets (EWC/MSI) amplify this \u2014 public brands/narratives misprice relative to sequential strength.",
+      "Player-aggregate Elo and draft logit tipping toward the dog are the strongest micro confirms.",
+      "Fading a pure brand favorite to take a hot underdog (heat) is the losing pattern \u2014 avoid."
+    ]
+  }
+}

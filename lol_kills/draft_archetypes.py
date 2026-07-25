@@ -32,6 +32,8 @@ ARCHETYPE_TAGS: dict[str, set[str]] = {
     # --- Burst / assassin mages ---
     "Ahri": {"burst_mage", "roam", "pick"},
     "LeBlanc": {"burst_mage", "assassin", "pick", "early_snowball"},
+    # Patch 26.13 — mid AP assassin (Ashen Exorcist); no OE history yet
+    "Locke": {"burst_mage", "assassin", "pick", "early_snowball"},
     "Zoe": {"burst_mage", "poke_siege", "pick"},
     "Veigar": {"burst_mage", "scaling_late", "pick"},
     "Annie": {"burst_mage", "engage", "teamfight_aoe"},

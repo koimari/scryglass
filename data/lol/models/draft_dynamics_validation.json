@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "n_maps": 12325,
+  "checks": [
+    {
+      "name": "tempo_inev_length",
+      "claim": "inev-tempo lean \u2192 longer games",
+      "r": 0.0304,
+      "n": 12325,
+      "sign_ok": true
+    },
+    {
+      "name": "tempo_inev_under29",
+      "claim": "inev-tempo lean \u2192 more unders (low kill pace)",
+      "r": 0.119,
+      "n": 12325,
+      "sign_ok": true
+    },
+    {
+      "name": "chaos_kills",
+      "claim": "chaos sum \u2192 more kills",
+      "r": 0.0664,
+      "n": 12325,
+      "sign_ok": true
+    },
+    {
+      "name": "init_firstblood",
+      "claim": "initiative diff \u2192 first blood",
+      "r": 0.0159,
+      "n": 12325,
+      "sign_ok": true
+    },
+    {
+      "name": "init_firsttower",
+      "claim": "initiative diff \u2192 first tower",
+      "r": 0.0143,
+      "n": 12322,
+      "sign_ok": true
+    },
+    {
+      "name": "tf_long35",
+      "claim": "teamfight sum \u2192 long games",
+      "r": 0.0165,
+      "n": 12325,
+      "sign_ok": true
+    },
+    {
+      "name": "combo_ahead_length",
+      "claim": "combo-fair when ahead \u2192 shorter (neg r)",
+      "r": -0.0541,
+      "n": 3589,
+      "sign_ok": true
+    }
+  ],
+  "pilot_behind": {
+    "behind_hyper_wr": 0.2009,
+    "behind_hyper_n": 901,
+    "behind_committee_wr": 0.1889,
+    "behind_committee_n": 1996,
+    "gap_pp": 1.2
+  },
+  "summary": "7/7 directional OE checks passed; pilot behind gap_pp=1.2 (hyper WR 0.2009 vs committee 0.1889)",
+  "note": "Elo-residualized correlations where noted. Directional validation for betting lenses \u2014 not causal proof."
+}

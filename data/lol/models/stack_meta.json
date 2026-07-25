@@ -1,0 +1,45 @@
+{
+  "ablations_brier_oof": {
+    "strength_blend": 0.21885596844354294,
+    "team_elo": 0.22056358447790467,
+    "player_elo": 0.22360886142165756,
+    "draft_only": 0.2580481972005392,
+    "gbm_only": 0.2194913734367146,
+    "full_stack": 0.2145250077445356
+  },
+  "ablations_brier_holdout": {
+    "strength_blend": 0.21828561457003787,
+    "team_elo": 0.22018227869521573,
+    "player_elo": 0.2216525867996031,
+    "draft_only": 0.25152519674943713,
+    "gbm_only": 0.21213632375539673,
+    "full_stack": 0.2104086362063123
+  },
+  "ablations_brier": {
+    "strength_blend": 0.21828561457003787,
+    "team_elo": 0.22018227869521573,
+    "player_elo": 0.2216525867996031,
+    "draft_only": 0.25152519674943713,
+    "gbm_only": 0.21213632375539673,
+    "full_stack": 0.2104086362063123
+  },
+  "stack_coef": [
+    2.1711229177152727,
+    1.038549877562661,
+    1.938940751570924,
+    -0.02807124585506828
+  ],
+  "stack_intercept": -2.5855964632470707,
+  "feature_order": [
+    "p_strength_blend",
+    "p_draft",
+    "p_gbm",
+    "sigma_z"
+  ],
+  "regularization_C": 0.5,
+  "n_oof": 7395,
+  "n_stack_train": 5546,
+  "n_stack_holdout": 1849,
+  "full_beats_draft": true,
+  "full_beats_strength": true
+}
