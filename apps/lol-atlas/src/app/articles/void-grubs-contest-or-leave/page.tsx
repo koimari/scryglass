@@ -1,7 +1,10 @@
 import { promises as fs } from "fs";
 import path from "path";
+import type { Metadata } from "next";
 import { ArticleContestCharts } from "@/components/ArticleContestCharts";
+import { ArticleShell, EvidenceFigure } from "@/components/ArticleShell";
 import { PdfEmbed } from "@/components/PdfEmbed";
+import { getArticle } from "@/lib/articles";
 import { blockMathHtml } from "@/lib/formulaHtml";
 import type { PackManifest } from "@/lib/pack";
 import { packUrl } from "@/lib/pack";
@@ -79,7 +82,14 @@ function pp(x: number) {
   return `${sign}${x.toFixed(2)}pp`;
 }
 
-export default async function GrubsPage() {
+const META = getArticle("void-grubs-contest-or-leave")!;
+
+export const metadata: Metadata = {
+  title: `${META.title} — Scryglass`,
+  description: META.dek,
+};
+
+export default async function VoidGrubsArticlePage() {
   const man = JSON.parse(
     await fs.readFile(path.join(process.cwd(), "public", "packs", "manifest.json"), "utf8"),
   ) as PackManifest;
@@ -101,17 +111,37 @@ export default async function GrubsPage() {
   };
 
   return (
-    <div className="space-y-[var(--space-5)]">
-      <header className="page-header">
-        <p className="blog-kicker">Article · Void grubs</p>
-        <h1 className="font-display mt-3 text-[2.25rem] leading-tight text-[var(--ink)] sm:text-[2.75rem]">
-          The <span className="olive">contest bar</span>
-        </h1>
-        <p className="lede">
-          How often do you need to win the river fight before contesting beats leaving for two
-          waves of farm? At even gold that bar sits at{" "}
-          <span className="font-mono text-[var(--ink)]">{article.p_star_pct}%</span>. At a coin-flip
-          fight the model still prefers leave
+    <ArticleShell
+      meta={META}
+      packId={man.pack_id}
+      kicker={`Article · ${META.topic}`}
+      stats={
+        <>
+          <span>
+            <strong>Contest bar</strong> {article.p_star_pct}%
+            <sup>
+              <a href="#fn-contest-bar" className="article-fn-ref">
+                1
+              </a>
+            </sup>
+          </span>
+          <span>
+            <strong>At 50/50</strong> leave preferred
+          </span>
+        </>
+      }
+    >
+      <section className="article-prose">
+        <p>
+          How often do you need to win the river fight before contesting beats leaving for two waves
+          of farm? At even gold that bar sits at{" "}
+          <span className="font-mono text-[var(--ink)]">{article.p_star_pct}%</span>
+          <sup>
+            <a href="#fn-contest-bar" className="article-fn-ref">
+              1
+            </a>
+          </sup>
+          . At a coin-flip fight the model still prefers leave
           {at50 ? (
             <>
               {" "}
@@ -119,50 +149,49 @@ export default async function GrubsPage() {
               <span className="font-mono text-[var(--danger)]">
                 {pp(Math.abs(at50.edge_contest_minus_leave_pp))}
               </span>
-              {" "}
-              (pp = percentage points of map win rate)
+              <sup>
+                <a href="#fn-pp" className="article-fn-ref">
+                  2
+                </a>
+              </sup>
             </>
           ) : null}
           .
         </p>
-        <div className="mt-4">
+
+        <aside className="article-callout">
+          <p className="blog-kicker">Headline</p>
+          <p>
+            Quote this: contest bar ≈ {article.p_star_pct}% at even gold (two-wave leave). Below that
+            fight-win chance, leave; above it, contest can be worth it.
+          </p>
+        </aside>
+
+        <div className="mt-4 flex flex-wrap gap-2">
           <PdfEmbed src={pdfHref} title="Void grubs scrap value PDF" />
-        </div>
-        <div className="mt-3">
-          <a href={articleHref} className="status-pill ghost" style={{ padding: "0.55rem 0.9rem" }}>
-            article_contest_ev.json
+          <a href={articleHref} className="status-pill ghost pill-btn">
+            Download the numbers (JSON)
           </a>
         </div>
-        <div className="micro-log mt-6">
-          <span>
-            <strong>Contest bar</strong> {article.p_star_pct}%
-          </span>
-          <span>
-            <strong>Pack</strong> {man.pack_id}
-          </span>
-        </div>
-      </header>
+      </section>
 
-      <p className="max-w-[68ch] border-t border-[var(--line)] pt-4 text-sm text-[var(--ink-muted)]">
-        <span className="status-pill" style={{ marginBottom: "0.5rem" }}>
-          Headline
-        </span>
-        <br />
-        Quote this: contest bar ≈ {article.p_star_pct}% at even gold (two-wave leave). Below that
-        fight-win chance, leave; above it, contest can be worth it. (pp = percentage points of map
-        win rate.)
-      </p>
+      <EvidenceFigure
+        id="fig-contest-surface"
+        caption="Figure 1. Leave vs contest by fight-win chance, leave-farm package, and pre-contest gold lead. The dashed line is the article contest bar at even gold."
+      >
+        <ArticleContestCharts
+          curve={article.curve}
+          pStar={article.p_star}
+          byLeaveFarm={article.by_leave_farm_F}
+          byGoldB={article.by_precontest_gold_B_two_wave_leave}
+          formulaHtml={formulaHtml}
+        />
+      </EvidenceFigure>
 
-      <ArticleContestCharts
-        curve={article.curve}
-        pStar={article.p_star}
-        byLeaveFarm={article.by_leave_farm_F}
-        byGoldB={article.by_precontest_gold_B_two_wave_leave}
-        formulaHtml={formulaHtml}
-      />
-
-      <section className="space-y-3">
-        <h2 className="font-display text-xl">Article curve (table)</h2>
+      <EvidenceFigure
+        id="fig-article-curve"
+        caption="Figure 2. Article curve table — contest value, leave value, and edge in percentage points of map win rate."
+      >
         <div className="table-scroll">
           <table className="data-table">
             <thead>
@@ -189,24 +218,37 @@ export default async function GrubsPage() {
             </tbody>
           </table>
         </div>
-      </section>
+      </EvidenceFigure>
 
-      <section className="border-t border-[var(--line)] pt-5 space-y-3 max-w-[68ch]">
-        <h2 className="font-display text-lg">Why you also see ~24%</h2>
-        <p className="text-sm text-[var(--ink-muted)]">
-          That number is <strong className="text-[var(--ink)]">not</strong> the article contest
-          bar. It comes from a different question on Oracle&apos;s Elixir trailing-team maps: among
-          teams that actually contested while behind, what fight-win rate would make contesting
-          break even versus the historical leave mix those teams took. That other break-even is
-          about{" "}
+      <section className="article-prose border-t border-[var(--line)] pt-5">
+        <h2 className="article-section-title">Why you also see ~24%</h2>
+        <p>
+          That number is <strong className="text-[var(--ink)]">not</strong> the article contest bar
+          <sup>
+            <a href="#fn-24" className="article-fn-ref">
+              3
+            </a>
+          </sup>
+          . It comes from a different question on Oracle&apos;s Elixir trailing-team maps: among teams
+          that actually contested while behind, what fight-win rate would make contesting break even
+          versus the historical leave mix those teams took. That other break-even is about{" "}
           <span className="font-mono text-[var(--ink)]">
             {pct(numbers.breakeven_p_win_fight.vs_leave_mix)}
           </span>
-          . Use it only when you care about that OE leave-mix sample — never as a substitute for
-          the two-wave contest bar ({article.p_star_pct}%).
+          . Use it only when you care about that OE leave-mix sample — never as a substitute for the
+          two-wave contest bar ({article.p_star_pct}%).
         </p>
-        <details>
-          <summary className="cursor-pointer text-sm font-medium text-[var(--accent)]">
+        <p>
+          The gold-at-10 conversion behind the article estimand is associational
+          <sup>
+            <a href="#fn-assoc" className="article-fn-ref">
+              4
+            </a>
+          </sup>
+          — not a claim about draft-true win probability.
+        </p>
+        <details className="mt-3">
+          <summary className="cursor-pointer text-sm font-medium text-[var(--accent-ink)]">
             Show OE leave-mix curve (optional)
           </summary>
           <p className="mt-3 text-sm text-[var(--ink-muted)]">
@@ -238,15 +280,6 @@ export default async function GrubsPage() {
           </div>
         </details>
       </section>
-
-      <section className="border-t border-[var(--line)] pt-5 space-y-2 max-w-[68ch]">
-        <h2 className="font-display text-lg">Reproduce</h2>
-        <ol className="list-decimal pl-5 text-sm text-[var(--ink-muted)] space-y-1">
-          <li>Pin pack {man.pack_id}</li>
-          <li>Start at studies/grubs/grubs_article_contest_ev.json</li>
-          <li>PDF above for scrap-value narrative</li>
-        </ol>
-      </section>
-    </div>
+    </ArticleShell>
   );
 }

@@ -12,6 +12,10 @@ const nextConfig: NextConfig = {
         destination: "/articles/void-grubs-contest-or-leave",
         permanent: true,
       },
+      { source: "/ratings", destination: "/elo", permanent: true },
+      { source: "/matches", destination: "/browse", permanent: true },
+      { source: "/matches/head-to-head", destination: "/browse/head-to-head", permanent: true },
+      { source: "/data", destination: "/reproduce", permanent: true },
     ];
   },
   async headers() {
