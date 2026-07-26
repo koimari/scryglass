@@ -16,8 +16,24 @@ Do not ship betting tooling, fair-odds boards, or timelines in the default pack.
 
 ## Scheduled refresh
 
-`.github/workflows/refresh-public-pack.yml` runs every 15 minutes and can also
-be started manually. Configure these repository secrets first:
+`.github/workflows/refresh-public-pack.yml` runs as a continuous successor
+chain: each run queues exactly one replacement after it finishes. This avoids
+depending on GitHub's best-effort scheduled start times. An hourly schedule at
+minute 7 is only a watchdog that restarts the chain if it is ever cancelled.
+
+Start or restart the chain manually with:
+
+```bash
+gh workflow run refresh-public-pack.yml \
+  --repo koimari/scryglass \
+  --ref main
+```
+
+Set the repository variable `PACK_REFRESH_CHAIN=paused` to stop successor
+dispatches. A run already in progress will finish normally. Remove the variable
+or set it to another value, then use the command above to restart the chain.
+
+Configure these repository secrets first:
 
 - `GRID_API_KEY`
 - `BLOB_READ_WRITE_TOKEN`
