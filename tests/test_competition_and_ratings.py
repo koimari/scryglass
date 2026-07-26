@@ -50,6 +50,18 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertFalse(label.is_international)
         self.assertTrue(label.is_interregional)
 
+    def test_challenger_circuit_is_tier_two(self) -> None:
+        label = classify_competition("CD", "CD 2026 Split 1")
+        self.assertEqual(label.scope, "tier2")
+        self.assertEqual(label.tier, "tier2")
+        self.assertFalse(label.is_international)
+
+    def test_worlds_abbreviation_is_not_a_domestic_tier(self) -> None:
+        label = classify_competition("WLDs", None)
+        self.assertEqual(label.league, "WORLDS")
+        self.assertEqual(label.tier, "international")
+        self.assertTrue(label.is_international)
+
     def test_road_to_msi_does_not_become_international(self) -> None:
         label = classify_competition("LCK", "LCK 2026 Road to MSI")
         self.assertEqual(label.league, "LCK")
@@ -109,6 +121,19 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertEqual(records["Bot"]["primary"], "CBLOL")
         self.assertEqual(records["Bot"]["leagues"], ["AMERICAS", "CBLOL"])
         self.assertTrue(records["Bot"]["interregional"])
+
+    def test_player_current_affiliation_does_not_promote_tier_two_to_cblol(self) -> None:
+        players = pd.DataFrame(
+            [
+                {"date": "2025-06-01", "league": "CBLOL", "playername": "Guigs", "position": "sup", "teamname": "FURIA", "result": 1},
+                {"date": "2026-06-01", "league": "CD", "playername": "Guigs", "position": "sup", "teamname": "KaBuM! Ilha das Lendas", "result": 1},
+            ]
+        )
+        records = build_player_records(players)
+        self.assertEqual(records["Guigs"]["primary"], "CD")
+        self.assertEqual(records["Guigs"]["current_league"], "CD")
+        self.assertEqual(records["Guigs"]["current_tier"], "tier2")
+        self.assertEqual(records["Guigs"]["current_team"], "KaBuM! Ilha das Lendas")
 
 
 class HierarchicalRatingTests(unittest.TestCase):

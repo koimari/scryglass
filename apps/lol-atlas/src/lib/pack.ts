@@ -69,6 +69,10 @@ export type TeamRecord = {
   primary: string | null;
   intl: boolean;
   interregional?: boolean;
+  current_league?: string | null;
+  current_tier?: CompetitionTier | null;
+  current_team?: string | null;
+  current_date?: string | null;
   wins: number;
   games: number;
   wr: number | null;
@@ -83,7 +87,19 @@ export type PlayerRecord = {
   primary?: string | null;
   intl?: boolean;
   interregional?: boolean;
+  current_league?: string | null;
+  current_tier?: CompetitionTier | null;
+  current_team?: string | null;
+  current_date?: string | null;
 };
+
+export type CompetitionTier = "tier1" | "tier2" | "tier3";
+
+export const TIER_FILTERS = [
+  { value: "TIER1", label: "Tier 1", description: "Major regional leagues" },
+  { value: "TIER2", label: "Tier 2", description: "Challenger and academy circuits" },
+  { value: "TIER3", label: "Tier 3", description: "Other domestic and developmental circuits" },
+] as const;
 
 /** Dual Elo σ floors from ratings_meta / player_ratings_meta. */
 export const TEAM_SIGMA_MIN = 25;
@@ -297,7 +313,13 @@ export function isIntlLeague(league: string): boolean {
 }
 
 export function recordMatchesLeagues(
-  rec: { leagues?: string[]; intl?: boolean; primary?: string | null } | undefined,
+  rec: {
+    leagues?: string[];
+    intl?: boolean;
+    primary?: string | null;
+    current_league?: string | null;
+    current_tier?: CompetitionTier | null;
+  } | undefined,
   selected: string[],
 ): boolean {
   if (!selected.length) return true;
@@ -307,9 +329,9 @@ export function recordMatchesLeagues(
     if (rec.intl) return true;
     if ((rec.leagues || []).some(isIntlLeague)) return true;
   }
-  const leagues = rec.leagues || [];
-  if (leagues.some((L) => set.has(L))) return true;
-  if (rec.primary && set.has(rec.primary)) return true;
+  const currentLeague = rec.current_league ?? rec.primary;
+  if (currentLeague && set.has(currentLeague)) return true;
+  if (rec.current_tier && set.has(rec.current_tier.toUpperCase())) return true;
   return false;
 }
 

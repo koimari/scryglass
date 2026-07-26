@@ -427,6 +427,7 @@ def export_public_pack(
             "taxonomy_version": TAXONOMY_VERSION,
             "team_key": "one canonical organization identity across regional and international events",
             "league_source": "raw source label retained on rows for auditability",
+            "competition_tier": "tier1/tier2/tier3 assigned from the canonical league taxonomy; international and interregional are separate scopes",
             "deprecated_leagues": {
                 "LTA": "AMERICAS",
                 "LTA N": "LCS",

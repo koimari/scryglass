@@ -22,7 +22,7 @@ import pandas as pd
 from lol_kills.etl.aliases import normalize_team
 
 
-TAXONOMY_VERSION = "2026-07-26.2"
+TAXONOMY_VERSION = "2026-07-26.3"
 
 # LTA was the 2025 Americas competition.  North and South were distinct
 # domestic circuits, while an unqualified LTA row is an Americas cross-region
@@ -52,6 +52,31 @@ REGIONAL_LEAGUES = frozenset(
 
 INTERNATIONAL_LEAGUES = frozenset({"MSI", "EWC", "FST", "WORLDS", "IWC", "MSC"})
 INTERREGIONAL_LEAGUES = frozenset({"AMERICAS"})
+
+# Riot/Leaguepedia's second-tier circuits and academy/challenger equivalents.
+# Anything non-international that is not a named Tier 1 or Tier 2 circuit is
+# retained as Tier 3 rather than silently being mixed into a major league.
+TIER2_LEAGUES = frozenset(
+    {
+        "AC",
+        "AL",
+        "ASCI",
+        "BRCC",
+        "CBLOLA",
+        "CD",
+        "CS",
+        "LCKC",
+        "LDL",
+        "LFL2",
+        "LJLA",
+        "LRN",
+        "LRS",
+        "NACL",
+        "PRMP",
+    }
+)
+
+COMPETITION_TIERS = frozenset({"tier1", "tier2", "tier3"})
 
 _EVENT_TOKENS: tuple[tuple[str, str], ...] = (
     ("FIRST STAND", "FST"),
@@ -86,7 +111,7 @@ def canonical_league(value: Any) -> str:
     raw = source_league(value)
     if raw in DEPRECATED_LEAGUE_MAP:
         return DEPRECATED_LEAGUE_MAP[raw]
-    if raw in {"WORLD", "WORLD CHAMPIONSHIP", "WORLDS"}:
+    if raw in {"WORLD", "WORLD CHAMPIONSHIP", "WORLDS", "WLD", "WLDS"}:
         return "WORLDS"
     if raw == "FIRST STAND":
         return "FST"
@@ -101,6 +126,22 @@ class CompetitionLabel:
     event_kind: str
     is_international: bool
     is_interregional: bool = False
+    tier: str = "tier3"
+
+
+def competition_tier(league: Any) -> str:
+    """Return the public competitive tier for a canonical/source league."""
+
+    canonical = canonical_league(league)
+    if canonical in REGIONAL_LEAGUES:
+        return "tier1"
+    if canonical in TIER2_LEAGUES:
+        return "tier2"
+    if canonical in INTERNATIONAL_LEAGUES:
+        return "international"
+    if canonical in INTERREGIONAL_LEAGUES:
+        return "interregional"
+    return "tier3" if canonical else "other"
 
 
 def classify_competition(league: Any, tournament: Any = None) -> CompetitionLabel:
@@ -115,18 +156,21 @@ def classify_competition(league: Any, tournament: Any = None) -> CompetitionLabe
     source = source_league(league)
     canonical = canonical_league(source)
     if canonical in REGIONAL_LEAGUES:
-        return CompetitionLabel(source, canonical, "regional", "domestic", False)
+        return CompetitionLabel(source, canonical, "regional", "domestic", False, False, "tier1")
     if canonical in INTERNATIONAL_LEAGUES:
-        return CompetitionLabel(source, canonical, "international", canonical.lower(), True)
+        return CompetitionLabel(source, canonical, "international", canonical.lower(), True, False, "international")
     if canonical in INTERREGIONAL_LEAGUES:
-        return CompetitionLabel(source, canonical, "interregional", "americas_cross_region", False, True)
+        return CompetitionLabel(source, canonical, "interregional", "americas_cross_region", False, True, "interregional")
 
     tournament_text = source_league(tournament)
     for token, event in _EVENT_TOKENS:
         if re.search(rf"(?<![A-Z0-9]){re.escape(token)}(?![A-Z0-9])", tournament_text):
-            return CompetitionLabel(source, event, "international", event.lower(), True)
+            return CompetitionLabel(source, event, "international", event.lower(), True, False, "international")
 
-    return CompetitionLabel(source, canonical or "UNKNOWN", "other", "other", False, False)
+    tier = competition_tier(canonical)
+    scope = tier if tier in {"tier2", "tier3"} else "other"
+    event_kind = "developmental" if scope in {"tier2", "tier3"} else "other"
+    return CompetitionLabel(source, canonical or "UNKNOWN", scope, event_kind, False, False, tier)
 
 
 def team_identity_key(name: Any) -> str:
@@ -166,6 +210,7 @@ def canonicalize_competition_frame(frame: pd.DataFrame) -> pd.DataFrame:
         out["event_kind"] = [label.event_kind for label in labels]
         out["is_international"] = [label.is_international for label in labels]
         out["is_interregional"] = [label.is_interregional for label in labels]
+        out["competition_tier"] = [label.tier for label in labels]
 
     team_columns = ("teamname", "blue_team", "red_team", "blue_teamname", "red_teamname")
     for column in team_columns:

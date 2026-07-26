@@ -21,8 +21,7 @@ def _primary_league(group: pd.DataFrame) -> str | None:
     as LTA South → CBLOL and PCS → LCP in the public label.
     """
 
-    domestic = group[group["competition_scope"].eq("regional")]
-    candidates = domestic if not domestic.empty else group[~group["is_international"]]
+    candidates = group[group["competition_tier"].isin({"tier1", "tier2", "tier3"})]
     if candidates.empty:
         candidates = group
     dates = (
@@ -48,6 +47,7 @@ def _team_rows(maps: pd.DataFrame) -> pd.DataFrame:
         intl = bool(row.get("is_international", False))
         scope = str(row.get("competition_scope") or ("international" if intl else "other"))
         interregional = bool(row.get("is_interregional", False))
+        tier = str(row.get("competition_tier") or ("international" if intl else "tier3"))
         for side, team in (("blue", row.get("blue_team")), ("red", row.get("red_team"))):
             if not team or pd.isna(team):
                 continue
@@ -61,6 +61,7 @@ def _team_rows(maps: pd.DataFrame) -> pd.DataFrame:
                     "is_international": intl,
                     "competition_scope": scope,
                     "is_interregional": interregional,
+                    "competition_tier": tier,
                     "date": row.get("date"),
                     "win": win,
                 }
@@ -89,6 +90,8 @@ def build_team_records(maps: pd.DataFrame) -> dict[str, dict[str, Any]]:
             by_league[str(league)] = {"wins": wins, "games": games, "wr": _wr(wins, games)}
 
         primary = _primary_league(group)
+        current = group[group["competition_tier"].isin({"tier1", "tier2", "tier3"})]
+        current_row = current.loc[pd.to_datetime(current["date"], errors="coerce").idxmax()] if not current.empty and pd.to_datetime(current["date"], errors="coerce").notna().any() else None
         wins = int(round(float(group["win"].sum())))
         games = int(len(group))
         records[display] = {
@@ -96,6 +99,10 @@ def build_team_records(maps: pd.DataFrame) -> dict[str, dict[str, Any]]:
             "leagues": sorted(str(x) for x in group["league"].unique()),
             "source_leagues": sorted(str(x) for x in group["league_source"].unique() if x),
             "primary": primary,
+            "current_league": str(current_row["league"]) if current_row is not None else primary,
+            "current_tier": str(current_row["competition_tier"]) if current_row is not None else None,
+            "current_team": display,
+            "current_date": str(current_row["date"]) if current_row is not None else None,
             "intl": bool(group["is_international"].any()),
             "interregional": bool(group["is_interregional"].any()),
             "wins": wins,
@@ -127,13 +134,23 @@ def build_player_records(players: pd.DataFrame) -> dict[str, dict[str, Any]]:
         wins = int(round(float(group["result"].sum())))
         games = int(len(group))
         leagues = sorted(str(x) for x in group["league"].dropna().unique())
-        primary = _primary_league(group) if not group.empty else (leagues[0] if leagues else None)
+        current = group[group["competition_tier"].isin({"tier1", "tier2", "tier3"})]
+        current_row = None
+        if not current.empty:
+            dates = pd.to_datetime(current["date"], errors="coerce") if "date" in current.columns else pd.Series(pd.NaT, index=current.index)
+            if dates.notna().any():
+                current_row = current.loc[dates.idxmax()]
+        primary = str(current_row["league"]) if current_row is not None else (leagues[0] if leagues else None)
         records[player] = {
             "wins": wins,
             "games": games,
             "wr": _wr(wins, games),
             "leagues": leagues,
             "primary": primary,
+            "current_league": primary,
+            "current_tier": str(current_row["competition_tier"]) if current_row is not None else None,
+            "current_team": str(current_row["teamname"]) if current_row is not None and pd.notna(current_row.get("teamname")) else None,
+            "current_date": str(current_row["date"]) if current_row is not None else None,
             "intl": bool(group["is_international"].any()),
             "interregional": bool(group.get("is_interregional", pd.Series(dtype=bool)).any()),
         }

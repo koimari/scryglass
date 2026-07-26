@@ -1,7 +1,7 @@
 {
   "pack_id": "v2026.07.26",
   "schema_version": "1.2.0",
-  "created_utc": "2026-07-26T12:57:07.259616+00:00",
+  "created_utc": "2026-07-26T13:09:26.552368+00:00",
   "filters": {
     "years": [
       2025,
@@ -11,9 +11,10 @@
     "leagues_note": "All canonical leagues present in OE for years 2025\u20132026. Legacy LTA North/South source labels are retained as provenance and mapped to LCS/CBLOL; unqualified LTA is an Americas cross-region event. International events remain separate."
   },
   "identity": {
-    "taxonomy_version": "2026-07-26.2",
+    "taxonomy_version": "2026-07-26.3",
     "team_key": "one canonical organization identity across regional and international events",
     "league_source": "raw source label retained on rows for auditability",
+    "competition_tier": "tier1/tier2/tier3 assigned from the canonical league taxonomy; international and interregional are separate scopes",
     "deprecated_leagues": {
       "LTA": "AMERICAS",
       "LTA N": "LCS",
@@ -408,16 +409,16 @@
     }
   },
   "base_url": null,
-  "total_bytes": 29479981,
+  "total_bytes": 30053641,
   "total_files": 49,
   "files": [
     {
       "path": "team_games/year=2025/part.parquet",
       "relative": "team_games/year=2025/part.parquet",
       "rows": 20312,
-      "cols": 140,
-      "bytes": 3270448,
-      "sha256": "3f94b65764d5e6ce2af626e1dce21865c5739135955fcc1d9a5023b443bc9c6f",
+      "cols": 141,
+      "bytes": 3274591,
+      "sha256": "9bf2ebd24b371b684b6b576d8e6a5dd2d22cbdcd6651cb1a06d6839bd2b8f509",
       "columns": [
         "gameid",
         "datacompleteness",
@@ -427,6 +428,7 @@
         "event_kind",
         "is_international",
         "is_interregional",
+        "competition_tier",
         "year",
         "split",
         "playoffs",
@@ -565,9 +567,9 @@
       "path": "team_games/year=2026/part.parquet",
       "relative": "team_games/year=2026/part.parquet",
       "rows": 13082,
-      "cols": 140,
-      "bytes": 2283092,
-      "sha256": "1c56e596ac5c638bbb6a96162ee487e8c6baefa0a1ddb65476ba4cc4df8608cd",
+      "cols": 141,
+      "bytes": 2285526,
+      "sha256": "13d60ddfb2c9c36cbdef3a7db2918c23d9ad3b9bf51a8889292de30a30564b98",
       "columns": [
         "gameid",
         "datacompleteness",
@@ -577,6 +579,7 @@
         "event_kind",
         "is_international",
         "is_interregional",
+        "competition_tier",
         "year",
         "split",
         "playoffs",
@@ -715,9 +718,9 @@
       "path": "player_games/year=2025/part.parquet",
       "relative": "player_games/year=2025/part.parquet",
       "rows": 101560,
-      "cols": 146,
-      "bytes": 10925534,
-      "sha256": "7e6d69169a9d091ed42c74b249bafdc982f1eaafd3791bd901d8796a11991761",
+      "cols": 147,
+      "bytes": 10928982,
+      "sha256": "284a28efd325057095d39e13bfed2a3ae82d1046b27d926607a17c017287bbce",
       "columns": [
         "gameid",
         "datacompleteness",
@@ -727,6 +730,7 @@
         "event_kind",
         "is_international",
         "is_interregional",
+        "competition_tier",
         "year",
         "split",
         "playoffs",
@@ -871,9 +875,9 @@
       "path": "player_games/year=2026/part.parquet",
       "relative": "player_games/year=2026/part.parquet",
       "rows": 65410,
-      "cols": 146,
-      "bytes": 7449359,
-      "sha256": "ed6bf24fd4c85834318f61c5c6b13f8ef41f7e2c8269240109f5c76ddd54acf7",
+      "cols": 147,
+      "bytes": 7451798,
+      "sha256": "e31d0e98ccca6c7015ec60798246ead412d0adc3201b9de0908feff4a90ee25c",
       "columns": [
         "gameid",
         "datacompleteness",
@@ -883,6 +887,7 @@
         "event_kind",
         "is_international",
         "is_interregional",
+        "competition_tier",
         "year",
         "split",
         "playoffs",
@@ -1027,9 +1032,9 @@
       "path": "maps/year=2025/part.parquet",
       "relative": "maps/year=2025/part.parquet",
       "rows": 3567,
-      "cols": 99,
-      "bytes": 594920,
-      "sha256": "4b250c5519a478cda1809f18dbbbc1b2bae6225483c8b0183b5254117917fdb3",
+      "cols": 100,
+      "bytes": 595659,
+      "sha256": "9c03921c1790604e6dc75cd6a921cb788aa350494434b6ef5324186f93cda438",
       "columns": [
         "oe_gameid",
         "game_uid",
@@ -1039,6 +1044,7 @@
         "event_kind",
         "is_international",
         "is_interregional",
+        "competition_tier",
         "year",
         "split",
         "playoffs",
@@ -1136,9 +1142,9 @@
       "path": "maps/year=2026/part.parquet",
       "relative": "maps/year=2026/part.parquet",
       "rows": 2629,
-      "cols": 99,
-      "bytes": 490957,
-      "sha256": "49087d689fad49655824f6a287e689a94193ab8460c8f6f9f36a2faf19e40035",
+      "cols": 100,
+      "bytes": 491690,
+      "sha256": "7cec4caad8d9919fd93771ffdec37223d8bde750feb2e2f44b236ae237c6a6bf",
       "columns": [
         "oe_gameid",
         "game_uid",
@@ -1148,6 +1154,7 @@
         "event_kind",
         "is_international",
         "is_interregional",
+        "competition_tier",
         "year",
         "split",
         "playoffs",
@@ -1244,8 +1251,8 @@
     {
       "rows": 175,
       "cols": null,
-      "bytes": 74526,
-      "sha256": "20fcaed1ada1802a2d6c50cdcbd85aa4f40d24951e761536e5709b042f1ef499",
+      "bytes": 98611,
+      "sha256": "316d59af2c03695a436977ea905d6431293f4dcbc6c995e181fb636a7536c922",
       "columns": null,
       "relative": "features/team_records.json",
       "path": "features/team_records.json"
@@ -1253,8 +1260,8 @@
     {
       "rows": 3846,
       "cols": null,
-      "bytes": 706810,
-      "sha256": "02d73daed32b7b3f9153613a8e8e66f5fbe06129d8b1de2fa0d6bf1b1810c277",
+      "bytes": 1242449,
+      "sha256": "649b2a9eb205362588f7f2389d119b87ba9868698b781cb569a86622e01fffbc",
       "columns": null,
       "relative": "features/player_records.json",
       "path": "features/player_records.json"
@@ -1387,7 +1394,7 @@
       "rows": null,
       "cols": null,
       "bytes": 2474,
-      "sha256": "aabbe378a4cea43d3af897943e0044618724fdd03c1f4685637182f1454dac6c",
+      "sha256": "6e88cf4b5cd1cb3d86ae3b590a777762107d8b5aac9dea8cfc49e99eab444ed2",
       "columns": null,
       "relative": "features/ratings_meta.json",
       "path": "features/ratings_meta.json"
