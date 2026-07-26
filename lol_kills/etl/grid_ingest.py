@@ -789,10 +789,14 @@ def merge_source_frames(
     frames = []
     if primary is not None and not primary.empty:
         p = primary.copy()
+        if "date" in p.columns:
+            p["date"] = pd.to_datetime(p["date"], errors="coerce", utc=True).dt.tz_localize(None)
         p["_source_priority"] = 2
         frames.append(p)
     if supplement is not None and not supplement.empty:
         s = supplement.copy()
+        if "date" in s.columns:
+            s["date"] = pd.to_datetime(s["date"], errors="coerce", utc=True).dt.tz_localize(None)
         s["_source_priority"] = 1
         frames.append(s)
     if not frames:

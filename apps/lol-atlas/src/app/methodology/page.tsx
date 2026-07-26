@@ -84,6 +84,13 @@ export default async function MethodologyPage() {
           fully sampled Bayesian posterior.
         </p>
         <p>
+          Player and team affiliation filters use the latest observed non-international competition,
+          not career league history. Tier 1 is the major regional circuit; Tier 2 contains named
+          challenger and academy circuits such as CD/NACL; Tier 3 is the remaining domestic or
+          developmental population. A Tier 2 player therefore cannot enter a Tier 1 league view merely
+          because they played there in an older season.
+        </p>
+        <p>
           The validation contract is chronological, series-level holdouts: report log loss, Brier
           score, calibration, interval coverage, and rank stability before changing the published
           hyperparameters. Random map splits are not used because maps within a series are

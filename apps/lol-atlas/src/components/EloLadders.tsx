@@ -17,6 +17,7 @@ import {
   REGION_LEAGUES,
   scopedTeamWr,
   softMu,
+  TIER_FILTERS,
   TEAM_SIGMA_MIN,
   teamMatchesQuery,
   teamSlug,
@@ -36,6 +37,23 @@ type PlayerCol = "player" | "last_team" | "league" | "soft" | "mu" | "trust" | "
 type Dir = "asc" | "desc";
 
 const CHIP_ORDER = [...REGION_LEAGUES, ...INTERREGIONAL_LEAGUES, "INTL", ...INTL_LEAGUES];
+
+function formatTier(tier: string | null | undefined): string {
+  if (tier === "tier1") return "Tier 1";
+  if (tier === "tier2") return "Tier 2";
+  if (tier === "tier3") return "Tier 3";
+  return "—";
+}
+
+function formatAffiliation(tier: string | null | undefined, league: string | null | undefined): string {
+  if (!league) return "—";
+  const tierLabel = formatTier(tier);
+  return tierLabel === "—" ? league : `${tierLabel} · ${league}`;
+}
+
+function formatScope(scope: string): string {
+  return TIER_FILTERS.find((tier) => tier.value === scope)?.label ?? scope;
+}
 
 function SortTh({
   label,
@@ -206,22 +224,25 @@ export function EloLadders({
   const sortedPlayers = useMemo(() => {
     let list = players
       .filter((p) => (p.n_maps ?? 0) >= minGames)
-      .filter((p) => playerMatchesQuery(p.player, p.last_team, q))
+      .filter((p) => {
+        const currentTeam = playerRecords[p.player]?.current_team ?? p.last_team;
+        return playerMatchesQuery(p.player, currentTeam, q);
+      })
       .filter((p) => {
         const rec = playerRecords[p.player];
-        const fromTeam = p.last_team ? teamRecords[p.last_team] : undefined;
-        return (
-          recordMatchesLeagues(rec, leagues) ||
-          recordMatchesLeagues(fromTeam, leagues) ||
-          (!rec && !fromTeam && !leagues.length)
-        );
+        const currentTeam = rec?.current_team ?? p.last_team;
+        const fromTeam = currentTeam ? teamRecords[currentTeam] : undefined;
+        return rec
+          ? recordMatchesLeagues(rec, leagues)
+          : recordMatchesLeagues(fromTeam, leagues) || (!fromTeam && !leagues.length);
       });
     // if leagues selected and no player record match via team
     if (leagues.length) {
       list = list.filter((p) => {
         const rec = playerRecords[p.player];
-        const fromTeam = p.last_team ? teamRecords[p.last_team] : undefined;
-        return recordMatchesLeagues(rec, leagues) || recordMatchesLeagues(fromTeam, leagues);
+        const currentTeam = rec?.current_team ?? p.last_team;
+        const fromTeam = currentTeam ? teamRecords[currentTeam] : undefined;
+        return rec ? recordMatchesLeagues(rec, leagues) : recordMatchesLeagues(fromTeam, leagues);
       });
     }
     const sign = playerDir === "asc" ? 1 : -1;
@@ -264,7 +285,7 @@ export function EloLadders({
   const visibleTeams = expanded ? sortedTeams : sortedTeams.slice(0, 20);
   const visiblePlayers = expanded ? sortedPlayers : sortedPlayers.slice(0, 20);
   const intlSet = new Set<string>(["INTL", ...INTL_LEAGUES]);
-  const scopeSummary = leagues.length ? leagues.join(" + ") : "All pack leagues";
+  const scopeSummary = leagues.length ? leagues.map(formatScope).join(" + ") : "All pack leagues";
   const liveSummary =
     tab === "teams"
       ? `${sortedTeams.length} teams shown in ${scopeSummary}, sorted by ${teamCol === "soft" ? "adjusted rating" : teamCol}`
@@ -273,8 +294,8 @@ export function EloLadders({
   return (
     <div className="space-y-6">
       <p className="text-sm text-[var(--ink-muted)] max-w-[62ch]">
-        Scope the ladder by regional league or international event. Selected chips define the visible
-        comparison sample and its win rate; each row keeps its published Dual Elo rating.
+        Scope the ladder by current competitive tier, regional league, or international event. Selected
+        chips define the visible comparison sample and its win rate; each row keeps its published Dual Elo rating.
       </p>
       <p className="method-note max-w-[62ch]">
           Scope: <strong>{scopeSummary}</strong>. Adjusted rating = raw rating minus rating spread
@@ -337,7 +358,21 @@ export function EloLadders({
           All
         </button>
         <div className="chip-group">
-          <span className="chip-group-label">Regional</span>
+          <span className="chip-group-label">Competitive tier</span>
+          {TIER_FILTERS.map((tier) => (
+            <button
+              key={tier.value}
+              type="button"
+              className={`chip ${leagues.includes(tier.value) ? "is-on" : ""}`}
+              onClick={() => toggleLeague(tier.value)}
+              title={tier.description}
+            >
+              {tier.label}
+            </button>
+          ))}
+        </div>
+        <div className="chip-group">
+          <span className="chip-group-label">Major / cross-region</span>
           {chips
             .filter((lg) => !intlSet.has(lg))
             .map((lg) => (
@@ -384,7 +419,7 @@ export function EloLadders({
                     col="league"
                     active={teamCol === "league"}
                     dir={teamDir}
-                    title="Primary regional league in the pack (INTL tournaments listed on the profile)."
+                    title="Current competition affiliation and tier; international appearances stay on the profile."
                     onSort={onTeamSort}
                   />
                   <SortTh
@@ -455,7 +490,7 @@ export function EloLadders({
                           {t.team}
                         </Link>
                       </td>
-                      <td>{rec?.primary ?? "—"}</td>
+                      <td>{formatAffiliation(rec?.current_tier, rec?.current_league ?? rec?.primary)}</td>
                       <td className="num">{adjustedRating(t, TEAM_SIGMA_MIN).toFixed(1)}</td>
                       <td className="num">{t.mu_total.toFixed(1)}</td>
                       <td className="num">{t.mu_meta.toFixed(1)}</td>
@@ -480,7 +515,7 @@ export function EloLadders({
                     <span className="elo-card-rank">#{i + 1}</span>
                     <span className="elo-card-title">{t.team}</span>
                     <span className="elo-card-meta">
-                      {rec?.primary ?? "—"} · Evidence {formatTrustCell(trust)} · Win rate{" "}
+                      {formatAffiliation(rec?.current_tier, rec?.current_league ?? rec?.primary)} · Evidence {formatTrustCell(trust)} · Win rate{" "}
                       {formatWr(scopedTeamWr(rec, leagues))}
                     </span>
                     <span className="elo-card-rating">
@@ -546,7 +581,9 @@ export function EloLadders({
                 {visiblePlayers.map((p, i) => {
                   const rec = playerRecords[p.player];
                   const trust = trustInfo(p.sigma, PLAYER_SIGMA_MIN, p.n_maps);
-                  const league = rec?.primary ?? teamRecords[p.last_team || ""]?.primary ?? "—";
+                  const fromTeam = p.last_team ? teamRecords[p.last_team] : undefined;
+                  const league = rec?.current_league ?? rec?.primary ?? fromTeam?.current_league ?? fromTeam?.primary;
+                  const currentTeam = rec?.current_team ?? p.last_team;
                   return (
                     <tr
                       key={p.player}
@@ -564,19 +601,19 @@ export function EloLadders({
                         </Link>
                       </td>
                       <td>
-                        {p.last_team ? (
+                        {currentTeam ? (
                           <Link
-                            href={`/elo/team/${teamSlug(p.last_team)}`}
+                            href={`/elo/team/${teamSlug(currentTeam)}`}
                             className="row-link"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {p.last_team}
+                            {currentTeam}
                           </Link>
                         ) : (
                           "—"
                         )}
                       </td>
-                      <td>{league}</td>
+                      <td>{formatAffiliation(rec?.current_tier ?? fromTeam?.current_tier, league)}</td>
                       <td className="num">
                         {softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(1)}
                       </td>
@@ -594,14 +631,17 @@ export function EloLadders({
 
           <ul className="elo-cards elo-mobile">
             {visiblePlayers.map((p, i) => {
+              const rec = playerRecords[p.player];
+              const fromTeam = p.last_team ? teamRecords[p.last_team] : undefined;
               const trust = trustInfo(p.sigma, PLAYER_SIGMA_MIN, p.n_maps);
+              const currentTeam = rec?.current_team ?? p.last_team;
               return (
                 <li key={p.player}>
                   <Link href={`/elo/player/${playerSlug(p.player)}`} className="elo-card">
                     <span className="elo-card-rank">#{i + 1}</span>
                     <span className="elo-card-title">{p.player}</span>
                     <span className="elo-card-meta">
-                      {p.last_team ?? "—"} · Evidence {formatTrustCell(trust)} · {p.n_maps} games
+                      {currentTeam ?? "—"} · {formatAffiliation(rec?.current_tier ?? fromTeam?.current_tier, rec?.current_league ?? rec?.primary ?? fromTeam?.primary)} · Evidence {formatTrustCell(trust)} · {p.n_maps} games
                     </span>
                     <span className="elo-card-rating">
                       {softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(1)}
