@@ -702,11 +702,31 @@ def _download_recent(
     now = datetime.now(timezone.utc)
     start = (now - timedelta(days=max(days, 1))).strftime("%Y-%m-%dT%H:%M:%SZ")
     end = (now + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    series_rows = _series_rows(key, start, end, max(limit, 1))
+    try:
+        series_rows = _series_rows(key, start, end, max(limit, 1))
+    except GridIngestError as exc:
+        result = {
+            "fetched_at": now.isoformat(),
+            "window": {"start": start, "end": end},
+            "series_seen": 0,
+            "files_downloaded": 0,
+            "files_existing": 0,
+            "files_not_ready": 0,
+            "files_failed": 1,
+            "file_list_failures": 0,
+            "rate_limited": "429" in str(exc),
+            "provider_error": str(exc),
+            "pro_only": True,
+        }
+        RAW_GRID_DIR.mkdir(parents=True, exist_ok=True)
+        (RAW_GRID_DIR / "grid_fetch_meta.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+        print(f"[grid] discovery unavailable; keeping cached rows: {exc}")
+        return result
     downloaded = 0
     existing = 0
     not_ready = 0
     failed = 0
+    file_list_failures = 0
     rate_limited = False
     for series in series_rows:
         series_id = str(series["id"])
@@ -714,7 +734,15 @@ def _download_recent(
         (RAW_GRID_DIR / f"series_{series_id}.json").write_text(
             json.dumps(series, indent=2), encoding="utf-8"
         )
-        files = _file_list(key, series_id)
+        try:
+            files = _file_list(key, series_id)
+        except GridIngestError as exc:
+            file_list_failures += 1
+            rate_limited = "429" in str(exc)
+            print(f"[grid] file list unavailable for {series_id}; skipping: {exc}")
+            if rate_limited:
+                break
+            continue
         riot_files = [
             file
             for file in files
@@ -747,6 +775,7 @@ def _download_recent(
         "files_existing": existing,
         "files_not_ready": not_ready,
         "files_failed": failed,
+        "file_list_failures": file_list_failures,
         "rate_limited": rate_limited,
         "pro_only": True,
     }
