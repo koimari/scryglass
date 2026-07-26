@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { PlayerRating, PlayerRecord, TeamRating, TeamRecord } from "@/lib/pack";
 import {
+  adjustedRating,
   formatTrustCell,
   formatWr,
   INTL_LEAGUES,
@@ -176,8 +177,7 @@ export function EloLadders({
           break;
         case "soft":
           cmp =
-            softMu(a.mu_total, a.sigma, TEAM_SIGMA_MIN) -
-            softMu(b.mu_total, b.sigma, TEAM_SIGMA_MIN);
+            adjustedRating(a, TEAM_SIGMA_MIN) - adjustedRating(b, TEAM_SIGMA_MIN);
           break;
         case "mu":
           cmp = a.mu_total - b.mu_total;
@@ -391,7 +391,7 @@ export function EloLadders({
                     active={teamCol === "soft"}
                     dir={teamDir}
                     align="num"
-                    title="Raw rating with a soft penalty when evidence is still thin. Default sort. See Method."
+                    title="One-sided 90% conservative rating bound; wider when the team lacks an international bridge. Default sort. See Method."
                     onSort={onTeamSort}
                   />
                   <SortTh
@@ -454,7 +454,7 @@ export function EloLadders({
                         </Link>
                       </td>
                       <td>{rec?.primary ?? "—"}</td>
-                      <td className="num">{softMu(t.mu_total, t.sigma, TEAM_SIGMA_MIN).toFixed(1)}</td>
+                      <td className="num">{adjustedRating(t, TEAM_SIGMA_MIN).toFixed(1)}</td>
                       <td className="num">{t.mu_total.toFixed(1)}</td>
                       <td className="num">{t.mu_meta.toFixed(1)}</td>
                       <td className="num" title={trust.layman}>
@@ -482,7 +482,7 @@ export function EloLadders({
                       {formatWr(scopedTeamWr(rec, leagues))}
                     </span>
                     <span className="elo-card-rating">
-                      {softMu(t.mu_total, t.sigma, TEAM_SIGMA_MIN).toFixed(1)}
+                      {adjustedRating(t, TEAM_SIGMA_MIN).toFixed(1)}
                     </span>
                   </Link>
                 </li>

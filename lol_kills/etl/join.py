@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from lol_kills.etl.aliases import normalize_team
+from lol_kills.etl.competition import canonicalize_competition_frame
 from lol_kills.etl.paths import PARQUET_DIR, SCHEMA_PATH, WAREHOUSE_DIR
 
 # Focus leagues for research models (still OE-primary, not LP-capped)
@@ -16,9 +17,6 @@ MAJOR_LEAGUES = {
     "LPL",
     "LEC",
     "LCS",
-    "LTA",
-    "LTA N",
-    "LTA S",
     "CBLOL",
     "PCS",
     "VCS",
@@ -56,6 +54,10 @@ def _oe_wide(oe_team: pd.DataFrame) -> pd.DataFrame:
         "gameid",
         "date",
         "league",
+        "league_source",
+        "competition_scope",
+        "event_kind",
+        "is_international",
         "patch",
         "year",
         "split",
@@ -128,7 +130,7 @@ def _normalize_oe_maps(oe_w: pd.DataFrame) -> pd.DataFrame:
         return oe_w
     m = oe_w.copy()
     m["game_uid"] = m["oe_gameid"].astype(str)
-    m["league"] = m["league"].astype(str).str.upper()
+    m = canonicalize_competition_frame(m)
 
     # kills / result
     bk = m.get("blue_kills", m.get("blue_teamkills"))
@@ -182,8 +184,9 @@ def _normalize_oe_maps(oe_w: pd.DataFrame) -> pd.DataFrame:
 def _lp_wide(lp_team: pd.DataFrame) -> pd.DataFrame:
     if lp_team.empty:
         return pd.DataFrame()
-    blue = lp_team[lp_team["side"] == "Blue"].copy()
-    red = lp_team[lp_team["side"] == "Red"].copy()
+    source = canonicalize_competition_frame(lp_team)
+    blue = source[source["side"] == "Blue"].copy()
+    red = source[source["side"] == "Red"].copy()
     b = blue.rename(
         columns={
             "teamname": "blue_team",
@@ -223,7 +226,7 @@ def _lp_wide(lp_team: pd.DataFrame) -> pd.DataFrame:
     m = b[cols_b].merge(r[cols_r], on="lp_game_id", how="inner")
     m["game_uid"] = m["lp_game_id"]
     m["source_lp"] = True
-    return m
+    return canonicalize_competition_frame(m)
 
 
 def _attach_lp_to_oe(oe_maps: pd.DataFrame, lp_w: pd.DataFrame, window_hours: float = 18.0) -> pd.DataFrame:
@@ -234,7 +237,8 @@ def _attach_lp_to_oe(oe_maps: pd.DataFrame, lp_w: pd.DataFrame, window_hours: fl
         return out
 
     lp = lp_w.copy()
-    lp["league"] = lp["league"].astype(str).str.upper()
+    lp = canonicalize_competition_frame(lp)
+    out = canonicalize_competition_frame(out)
     lp["blue_team"] = lp["blue_team"].map(normalize_team)
     lp["red_team"] = lp["red_team"].map(normalize_team)
     out["_league"] = out["league"].astype(str).str.upper()
@@ -334,7 +338,7 @@ def build_map_warehouse(
             u = str(lg).upper()
             if u in MAJOR_LEAGUES:
                 return True
-            return any(x in u for x in ("WORLD", "MSI", "EWC", "FIRST STAND", "LTA"))
+            return any(x in u for x in ("WORLD", "MSI", "EWC", "FIRST STAND"))
 
         mask = maps["league"].map(is_major)
         maps = maps[mask].copy()
@@ -345,7 +349,7 @@ def build_map_warehouse(
         maps = _attach_lp_to_oe(maps, lp_w)
     elif not lp_w.empty:
         # Fallback if no OE
-        maps = lp_w.copy()
+        maps = canonicalize_competition_frame(lp_w.copy())
         maps["y_blue_win"] = maps["blue_result"]
         maps["y_total_kills"] = maps["total_kills"]
         maps["y_blue_firstblood"] = maps.get("blue_firstblood")
@@ -364,15 +368,18 @@ def build_map_warehouse(
         if not oe_players.empty:
             oe_players = oe_players.rename(columns={"gameid": "game_uid"})
             oe_players["game_uid"] = oe_players["game_uid"].astype(str)
-            oe_players["teamname"] = oe_players["teamname"].map(
-                lambda x: normalize_team(str(x)) if pd.notna(x) else x
-            )
+            oe_players = canonicalize_competition_frame(oe_players)
             oe_players.to_parquet(PARQUET_DIR / "players.parquet", index=False)
             print(f"[join] wrote OE players n={len(oe_players)}")
     elif lp_players is not None and not lp_players.empty:
         lp_players.to_parquet(PARQUET_DIR / "players.parquet", index=False)
 
     schema = {
+        "identity": {
+            "taxonomy_version": "2026-07-26.1",
+            "team_key": "canonical organization identity, independent of league/event",
+            "league_source": "original source label retained for audit",
+        },
         "maps": {
             "n_rows": int(len(maps)),
             "primary": "oracle_elixir",

@@ -20,6 +20,9 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from lol_kills.export import pack_spec as spec
+from lol_kills.export.pack_records import build_player_records, build_team_records
+from lol_kills.etl.competition import TAXONOMY_VERSION, canonicalize_competition_frame
+from lol_kills.ratings.hierarchical_bt import fit_hierarchical_bt
 
 ROOT = Path(__file__).resolve().parents[2]
 WAREHOUSE = ROOT / "data" / "lol" / "warehouse" / "parquet"
@@ -154,9 +157,16 @@ def export_public_pack(
     # --- maps ---
     maps_path = WAREHOUSE / "maps.parquet"
     maps = pq.read_table(maps_path)
+    # Re-apply the canonical map contract at export time as a safety net for
+    # packs built from an older local warehouse refresh.
+    maps = pa.Table.from_pandas(canonicalize_competition_frame(maps.to_pandas()), preserve_index=False)
     map_cols = spec.maps_columns(maps.column_names)
     maps = maps.select(map_cols)
     maps = _filter_years(maps, years, ("year", "oe_year"))
+    maps_for_records = maps.to_pandas()
+    public_ratings, public_ratings_meta = fit_hierarchical_bt(maps_for_records, write=False)
+    public_ratings_meta["pack_years"] = list(years)
+    public_ratings_meta["rating_window"] = "same canonical map window as this pack"
     for y in years:
         if "year" in maps.column_names:
             part = maps.filter(pc.equal(pc.cast(maps["year"], pa.int64(), safe=False), y))
@@ -167,9 +177,31 @@ def export_public_pack(
             continue
         register(_write_parquet(part, dest), f"maps/year={y}/part.parquet")
 
-    # --- features snapshots (full — small) ---
+    # --- features snapshots (team ladder uses the same pack window; player
+    # snapshot remains the full roster-history artifact) ---
     feat_dir = pack_dir / "features"
     feat_dir.mkdir(parents=True, exist_ok=True)
+
+    # These records are intentionally built from the same year-filtered
+    # canonical rows that are exported above.  This avoids mixing a full
+    # history snapshot with a different pack-window win rate.
+    for filename, payload in (
+        ("team_records.json", build_team_records(maps_for_records)),
+        ("player_records.json", build_player_records(player.to_pandas())),
+    ):
+        dest = feat_dir / filename
+        dest.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        register(
+            {
+                "rows": len(payload),
+                "cols": None,
+                "bytes": dest.stat().st_size,
+                "sha256": _sha256(dest),
+                "columns": None,
+            },
+            f"features/{filename}",
+        )
+
     for src_name, cols, out_name in (
         ("ratings_snapshot.parquet", spec.RATINGS_SNAPSHOT_COLS, "ratings_snapshot.parquet"),
         (
@@ -179,9 +211,12 @@ def export_public_pack(
         ),
     ):
         src = FEATURES / src_name
-        if not src.exists():
+        if src_name == "ratings_snapshot.parquet":
+            t = pa.Table.from_pandas(public_ratings, preserve_index=False)
+        elif not src.exists():
             continue
-        t = pq.read_table(src)
+        else:
+            t = pq.read_table(src)
         t = t.select(_present(cols, t.column_names))
         dest = feat_dir / out_name
         register(_write_parquet(t, dest), f"features/{out_name}")
@@ -224,6 +259,20 @@ def export_public_pack(
         register(_write_parquet(t, dest), f"features/{out_name}")
 
     for meta_name in ("ratings_meta.json", "player_ratings_meta.json"):
+        if meta_name == "ratings_meta.json":
+            dest = feat_dir / meta_name
+            dest.write_text(json.dumps(public_ratings_meta, indent=2), encoding="utf-8")
+            register(
+                {
+                    "rows": None,
+                    "cols": None,
+                    "bytes": dest.stat().st_size,
+                    "sha256": _sha256(dest),
+                    "columns": None,
+                },
+                f"features/{meta_name}",
+            )
+            continue
         src = FEATURES / meta_name
         if src.exists():
             dest = feat_dir / meta_name
@@ -371,6 +420,12 @@ def export_public_pack(
             "years": list(years),
             "leagues": "all_in_year_window",
             "leagues_note": spec.DEFAULT_LEAGUES_NOTE,
+        },
+        "identity": {
+            "taxonomy_version": TAXONOMY_VERSION,
+            "team_key": "one canonical organization identity across regional and international events",
+            "league_source": "raw source label retained on rows for auditability",
+            "deprecated_leagues": {"LTA": "LCS", "LTA N": "LCS", "LTA S": "LCS"},
         },
         "attribution": spec.ATTRIBUTION,
         "excluded": [

@@ -62,13 +62,42 @@ export default async function MethodologyPage() {
         </p>
       </aside>
 
-      <MethodSection id="dual-elo" title="Dual Elo (teams)" defaultOpen>
+      <MethodSection id="hierarchical-ladder" title="Current public ladder" defaultOpen>
         <p>
+          The published team ladder uses a regularized hierarchical Bradley–Terry fit. It estimates
+          one organization effect across every event, plus a partially pooled home-league effect.
+          The same Team Liquid identity is therefore used in LCS, MSI, and EWC; an event label never
+          creates a second team.
+        </p>
+        <p>
+          Bo3 and Bo5 maps are collapsed to one series observation so a long series cannot count as
+          five independent matches. Historical LTA, LTA N, and LTA S source labels are retained for
+          audit, but the public regional scope is LCS. International events are classified from
+          their source competition, so a title such as “LCK Road to MSI” remains LCK.
+        </p>
+        <p>
+          The default adjusted rating is the one-sided 90% lower bound of the fitted rating. Teams
+          without an international bridge receive wider uncertainty; this is why a thin domestic
+          win streak does not automatically outrank an established LPL or LCK team. The fit is a
+          penalized MAP estimate with a local Laplace uncertainty approximation, not a claim of a
+          fully sampled Bayesian posterior.
+        </p>
+        <p>
+          The validation contract is chronological, series-level holdouts: report log loss, Brier
+          score, calibration, interval coverage, and rank stability before changing the published
+          hyperparameters. Random map splits are not used because maps within a series are
+          correlated. The design follows the dynamic Bradley–Terry and state-space literature: <a className="row-link" href="https://arxiv.org/abs/2003.00083">dynamic BT</a>,
+          <a className="row-link" href="https://arxiv.org/abs/2308.02414"> state-space skill models</a>, and
+          <a className="row-link" href="https://arxiv.org/abs/2106.11397"> team-skill aggregation evidence</a>.
+        </p>
+      </MethodSection>
+
+      <MethodSection id="dual-elo" title="Sequential Dual Elo benchmark">
+        <p>
+          The sequential Dual Elo track remains available as a time-safe pre-match feature benchmark.
           Each team carries a regional component and an international (meta) component. They sum to
           a total rating μ with a spread σ. Outcomes in the Oracle&apos;s Elixir pack update both.
-          League chips on the Ratings page filter who appears while μ stays shared. The pack
-          uses Oracle&apos;s Elixir as its reconciled baseline and can include a recent completed
-          GRID game while the next OE export is pending.
+          League chips on the Ratings page filter who appears while μ stays shared.
         </p>
         <p>
           σ shrinks toward a floor as informative games arrive. Team floor is 25. When σ sits on that
@@ -76,7 +105,7 @@ export default async function MethodologyPage() {
           above the floor is what the adjusted rating penalizes:
         </p>
         <p className="font-mono text-sm">
-          adjusted rating = μ − max(0, σ − σ_min)
+          benchmark adjusted rating = μ − max(0, σ − σ_min)
         </p>
         <p>
           That soft penalty stops a thin regional spike from outranking a settled major org on the

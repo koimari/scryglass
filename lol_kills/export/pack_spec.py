@@ -6,7 +6,7 @@ are out of the default pack.
 
 from __future__ import annotations
 
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.2.0"
 
 # Inclusive calendar years on OE `year` / `oe_year`.
 DEFAULT_YEARS: tuple[int, ...] = (2025, 2026)
@@ -14,14 +14,16 @@ DEFAULT_YEARS: tuple[int, ...] = (2025, 2026)
 # Optional major-event leagues always kept even if year filter alone would
 # drop edge cases (year column is primary; this is documentation + soft hint).
 DEFAULT_LEAGUES_NOTE = (
-    "All leagues present in OE for years 2025–2026. "
-    "Regional scopes used in public writeups: LEC, LCS, LCK, LPL, MSI, EWC, Worlds."
+    "All canonical leagues present in OE for years 2025–2026. "
+    "Legacy LTA/LTA N/LTA S source labels are retained as provenance and exposed "
+    "under the current LCS public scope. International events remain separate."
 )
 
 ATTRIBUTION = (
     "Map and player rows are derived from Oracle's Elixir public match data. "
     "Obtain raw CSVs from Oracle's Elixir; this pack is a filtered parquet subset "
-    "for reproducing published research. Dual Elo and calibration are our own."
+    "for reproducing published research. Hierarchical Bradley–Terry, Dual Elo benchmark, "
+    "and calibration are our own."
 )
 
 # --- OE team / player game columns (allowlist) ---
@@ -31,6 +33,10 @@ TEAM_PLAYER_SHARED_COLS: tuple[str, ...] = (
     "gameid",
     "datacompleteness",
     "league",
+    "league_source",
+    "competition_scope",
+    "event_kind",
+    "is_international",
     "year",
     "split",
     "playoffs",
@@ -43,6 +49,7 @@ TEAM_PLAYER_SHARED_COLS: tuple[str, ...] = (
     "playername",
     "playerid",
     "teamname",
+    "team_key",
     "teamid",
     "firstPick",
     "champion",
@@ -190,6 +197,10 @@ MAPS_IDENTITY: tuple[str, ...] = (
     "oe_gameid",
     "game_uid",
     "league",
+    "league_source",
+    "competition_scope",
+    "event_kind",
+    "is_international",
     "year",
     "split",
     "playoffs",
@@ -200,6 +211,8 @@ MAPS_IDENTITY: tuple[str, ...] = (
     "red_team",
     "blue_teamname",
     "red_teamname",
+    "blue_team_key",
+    "red_team_key",
     "total_kills",
     "y_blue_win",
     "y_total_kills",
@@ -265,7 +278,20 @@ def maps_columns(available: list[str] | None = None) -> list[str]:
 
 
 # Features Elo
-RATINGS_SNAPSHOT_COLS = ("team", "mu_total", "mu_regional", "mu_meta", "sigma")
+RATINGS_SNAPSHOT_COLS = (
+    "team",
+    "team_key",
+    "mu_total",
+    "mu_regional",
+    "mu_meta",
+    "sigma",
+    "rating_p10",
+    "n_series",
+    "n_maps",
+    "international_series",
+    "home_league",
+    "model",
+)
 PLAYER_RATINGS_SNAPSHOT_COLS = (
     "player",
     "mu_total",

@@ -12,6 +12,7 @@ import {
 import { champIconUrl, formatGold } from "@/lib/format";
 import type { PlayerRating, TeamRating, TeamRecord } from "@/lib/pack";
 import {
+  adjustedRating,
   formatTrustCell,
   formatWr,
   packUpdatedLabel,
@@ -304,7 +305,7 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
           </span>
           <span>
             <strong>Adjusted rating</strong>{" "}
-            {softMu(team.mu_total, team.sigma, TEAM_SIGMA_MIN).toFixed(1)}
+            {adjustedRating(team, TEAM_SIGMA_MIN).toFixed(1)}
           </span>
           <span title={trust.layman}>
             <strong>Evidence</strong> {formatTrustCell(trust)}
