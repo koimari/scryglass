@@ -11,23 +11,29 @@ on:
       grid_limit:
         description: "Maximum recent GRID series to inspect"
         required: false
-        default: "8"
+        default: "40"
         type: string
       grid_tournament:
         description: "Optional tournament substring for a targeted manual catch-up"
         required: false
         default: ""
         type: string
+      continuous:
+        description: "Keep dispatching one successor run after this run finishes"
+        required: false
+        default: true
+        type: boolean
   schedule:
-    # GRID supplies the freshness bridge. OE reconciliation runs separately
-    # so a Google Drive quota response cannot block current match rows.
-    - cron: "*/15 * * * *"
+    # Watchdog only. The primary cadence is the authenticated successor
+    # dispatch at the end of each run, avoiding GitHub's best-effort scheduler.
+    - cron: "7 * * * *"
 
 concurrency:
   group: refresh-public-pack
   cancel-in-progress: false
 
 permissions:
+  actions: write
   contents: read
 
 jobs:
@@ -96,3 +102,33 @@ jobs:
             data/lol/features
             data/lol/models
           key: scryglass-warehouse-${{ runner.os }}-${{ github.run_id }}
+
+      - name: Continue the refresh chain
+        if: ${{ always() && (github.event_name == 'schedule' || inputs.continuous) && vars.PACK_REFRESH_CHAIN != 'paused' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GRID_DAYS: ${{ inputs.grid_days || '3' }}
+          GRID_LIMIT: ${{ inputs.grid_limit || '40' }}
+          GRID_TOURNAMENT: ${{ inputs.grid_tournament || '' }}
+        run: |
+          queued="$(
+            gh api \
+              --method GET \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/refresh-public-pack.yml/runs" \
+              -f status=queued \
+              -f branch="$GITHUB_REF_NAME" \
+              -f per_page=1 \
+              --jq '.total_count'
+          )"
+          if [ "$queued" -gt 0 ]; then
+            echo "A successor is already queued; not dispatching another."
+            exit 0
+          fi
+
+          gh workflow run refresh-public-pack.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF_NAME" \
+            -f grid_days="$GRID_DAYS" \
+            -f grid_limit="$GRID_LIMIT" \
+            -f grid_tournament="$GRID_TOURNAMENT" \
+            -f continuous=true
