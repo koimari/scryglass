@@ -10,7 +10,7 @@ export type SeriesCard = {
   teamB: string;
   winsA: number;
   winsB: number;
-  bestOf: number;
+  bestOf: 1 | 3 | 5 | null;
   games: SeriesRow[];
   year: number;
   source: "oe" | "grid" | "mixed" | "unknown";
@@ -45,15 +45,13 @@ function explicitSeriesKey(row: SeriesRow): string | null {
   return null;
 }
 
-function inferBestOf(games: SeriesRow[]): number {
-  const maxGame = Math.max(...games.map((g) => Number(g.game) || 1), games.length);
-  if (maxGame >= 5 || games.length >= 5) return 5;
-  if (maxGame >= 3 || games.length >= 3) return 3;
-  // A live/GRID result can contain only the games already completed. Two
-  // games in one identified pro series are therefore a partial or completed
-  // Bo3, not evidence that the match was Bo1.
-  if (games.length >= 2) return 3;
-  return 1;
+function inferBestOf(games: SeriesRow[], winsA: number, winsB: number): 1 | 3 | 5 | null {
+  const winningScore = Math.max(winsA, winsB);
+  if (winningScore >= 3) return 5;
+  if (winningScore >= 2) return 3;
+  if (games.length === 1) return 1;
+  // A tied multi-map group is not enough evidence to claim a completed Bo3.
+  return null;
 }
 
 /** Group OE/GRID map rows into Bo1/Bo3/Bo5 series using stable IDs first. */
@@ -112,7 +110,7 @@ export function groupMapsIntoSeries(rows: SeriesRow[]): SeriesCard[] {
       teamB,
       winsA,
       winsB,
-      bestOf: inferBestOf(games),
+      bestOf: inferBestOf(games, winsA, winsB),
       games,
       year:
         Number(first._year ?? first.year ?? 0) ||
