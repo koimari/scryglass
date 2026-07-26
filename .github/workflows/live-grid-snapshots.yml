@@ -2,10 +2,6 @@ name: Publish live GRID snapshots
 
 on:
   workflow_dispatch:
-  schedule:
-    # Short-lived overlapping listeners approximate a persistent worker while
-    # keeping the public page sourced only from verified Blob snapshots.
-    - cron: "*/5 * * * *"
 
 concurrency:
   group: live-grid-snapshots

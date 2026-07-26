@@ -106,6 +106,7 @@ function SeriesTile({
   open: boolean;
   onToggle: () => void;
 }) {
+  const sourceLabel = s.source === "grid" ? "GRID freshness" : s.source === "mixed" ? "OE + GRID" : null;
   return (
     <article className={`series-card ${open ? "is-open" : ""}`}>
       <button type="button" className="series-card-head" onClick={onToggle}>
@@ -113,6 +114,7 @@ function SeriesTile({
           <p className="series-kicker">
             {s.date} · {s.league}
             {s.patch ? ` · ${s.patch}` : ""} · Bo{s.bestOf}
+            {sourceLabel ? ` · ${sourceLabel}` : ""}
           </p>
           <h3 className="series-title">
             <Link

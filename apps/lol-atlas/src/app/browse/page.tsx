@@ -13,8 +13,9 @@ export default async function BrowsePage() {
         <p className="blog-kicker">Matches · Series</p>
         <h1 className="font-display mt-2 text-3xl">Matches</h1>
         <p className="lede">
-          Find a series, open a board. Bo3 and Bo5 keep their games together. Dual Elo favorite hit
-          rate for the year sits at the top.
+          Find a completed series, open a board. Bo3 and Bo5 keep their games together. Recent GRID
+          rows fill the freshness gap until Oracle&apos;s Elixir catches up; Dual Elo favorite hit rate
+          for the year sits at the top.
         </p>
         <div className="micro-log mt-4">
           <span>
