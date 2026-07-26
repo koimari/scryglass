@@ -508,7 +508,8 @@ export function HeadToHead({ baseUrl, years }: Props) {
                   >
                     <td className="font-mono text-xs">{s.date}</td>
                     <td>
-                      Bo{s.bestOf} · {s.teamA} {s.winsA}–{s.winsB} {s.teamB}
+                      {s.bestOf ? `Bo${s.bestOf}` : "Incomplete series"} · {s.teamA} {s.winsA}–
+                      {s.winsB} {s.teamB}
                       <div className="muted text-xs">{s.league}</div>
                     </td>
                     <td className="num font-mono">{kills}</td>

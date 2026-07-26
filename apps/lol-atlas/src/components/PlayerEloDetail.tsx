@@ -423,7 +423,8 @@ export function PlayerEloDetail({
               const id = String(g0?.oe_gameid ?? "");
               return (
                 <li key={s.key} className="text-sm">
-                  <span className="font-mono muted">{s.date}</span> · {s.league} · Bo{s.bestOf}{" "}
+                  <span className="font-mono muted">{s.date}</span> · {s.league} ·{" "}
+                  {s.bestOf ? `Bo${s.bestOf}` : "Incomplete series"}{" "}
                   {s.teamA} {s.winsA}–{s.winsB} {s.teamB}{" "}
                   {id && (
                     <Link

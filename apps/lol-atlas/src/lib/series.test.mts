@@ -64,4 +64,44 @@ test("a real GRID series id keeps side-swapped games together", () => {
   assert.equal(grouped[0].games.length, 2);
   assert.equal(grouped[0].winsA, 0);
   assert.equal(grouped[0].winsB, 2);
+  assert.equal(grouped[0].bestOf, 3);
+});
+
+function seriesWithWinners(winners: Array<"Alpha" | "Beta">) {
+  return groupMapsIntoSeries(
+    winners.map((winner, index) =>
+      gridMap({
+        grid_series_id: "format-series",
+        game_uid: `game-${index + 1}`,
+        game: index + 1,
+        blue_teamname: "Alpha",
+        red_teamname: "Beta",
+        blue_result: winner === "Alpha" ? 1 : 0,
+        y_blue_win: winner === "Alpha" ? 1 : 0,
+      }),
+    ),
+  )[0];
+}
+
+test("series format follows the score required to close the match", () => {
+  const cases: Array<[Array<"Alpha" | "Beta">, number, number, 3 | 5]> = [
+    [["Alpha", "Alpha"], 2, 0, 3],
+    [["Alpha", "Beta", "Alpha"], 2, 1, 3],
+    [["Alpha", "Alpha", "Alpha"], 3, 0, 5],
+    [["Alpha", "Beta", "Alpha", "Alpha"], 3, 1, 5],
+    [["Alpha", "Beta", "Alpha", "Beta", "Alpha"], 3, 2, 5],
+  ];
+  for (const [winners, winsA, winsB, bestOf] of cases) {
+    const series = seriesWithWinners(winners);
+    assert.equal(series.winsA, winsA);
+    assert.equal(series.winsB, winsB);
+    assert.equal(series.bestOf, bestOf);
+  }
+});
+
+test("a tied two-map group is marked incomplete instead of claimed as Bo3", () => {
+  const series = seriesWithWinners(["Alpha", "Beta"]);
+  assert.equal(series.winsA, 1);
+  assert.equal(series.winsB, 1);
+  assert.equal(series.bestOf, null);
 });
