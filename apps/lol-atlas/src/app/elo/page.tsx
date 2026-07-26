@@ -1,8 +1,10 @@
 import { Suspense } from "react";
 import { EloLadders } from "@/components/EloLadders";
 import type {
+  PlayerMetadata,
   PlayerRating,
   PlayerRecord,
+  PlayerWeeklyRanks,
   TeamRating,
   TeamRecord,
 } from "@/lib/pack";
@@ -35,6 +37,8 @@ export default async function EloPage() {
 
   let teamRecords: Record<string, TeamRecord> = {};
   let playerRecords: Record<string, PlayerRecord> = {};
+  let playerWeeklyRanks: PlayerWeeklyRanks = { as_of: null, previous_as_of: null, by_player: {} };
+  let playerMetadata: Record<string, PlayerMetadata> = {};
   try {
     teamRecords = await readPackJson(man, "features/team_records.json");
   } catch {
@@ -44,6 +48,16 @@ export default async function EloPage() {
     playerRecords = await readPackJson(man, "features/player_records.json");
   } catch {
     playerRecords = {};
+  }
+  try {
+    playerWeeklyRanks = await readPackJson<PlayerWeeklyRanks>(man, "features/player_weekly_ranks.json");
+  } catch {
+    playerWeeklyRanks = { as_of: null, previous_as_of: null, by_player: {} };
+  }
+  try {
+    playerMetadata = await readPackJson<Record<string, PlayerMetadata>>(man, "features/player_metadata.json");
+  } catch {
+    playerMetadata = {};
   }
 
   const leagueSet = new Set<string>();
@@ -84,6 +98,8 @@ export default async function EloPage() {
           players={players}
           teamRecords={teamRecords}
           playerRecords={playerRecords}
+          playerWeeklyRanks={playerWeeklyRanks}
+          playerMetadata={playerMetadata}
           availableLeagues={availableLeagues}
         />
       </Suspense>

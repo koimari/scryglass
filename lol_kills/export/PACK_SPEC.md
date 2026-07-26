@@ -9,7 +9,7 @@ Canonical machine-readable allowlists and defaults live in
 |-------|--------|
 | Years | **2025, 2026** (inclusive, OE `year` / `oe_year`) |
 | Leagues | All leagues present in that year window |
-| Schema | `1.0.0` |
+| Schema | `1.3.0` |
 
 ## Tables
 
@@ -19,6 +19,8 @@ Canonical machine-readable allowlists and defaults live in
 | `player_games/year=Y/part.parquet` | `oe_player_games.parquet` | One player table; no duplicate `players.parquet`; source is retained |
 | `maps/year=Y/part.parquet` | `maps.parquet` | Trimmed identity + both-side draft/obj/@10–25; `source_oe` / `source_grid` preserve provenance |
 | `features/*_snapshot.*` | Hierarchical team ladder and player Dual Elo snapshots | Parquet + JSON twins for ladders |
+| `features/player_weekly_ranks.json` | Weekly player rank movement | Current rank and Δ versus the prior Sunday 00:00 UTC, by competitive tier |
+| `features/player_metadata.json` | Player display metadata | Leaguepedia nationality/country code/flag when available |
 | `features/*_history.parquet` | Elo history | Rows whose `game_uid` is in year-filtered maps |
 | `models/` | Pinned calibration / tierlist CSV | See `PINNED_MODEL_FILES` |
 | `studies/grubs/` | Void-grubs decision + PDF + figures | See `GRUBS_MODEL_FILES` / `GRUBS_PDF_FILES` |

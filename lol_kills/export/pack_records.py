@@ -13,6 +13,50 @@ def _wr(wins: int, games: int) -> float | None:
     return round(wins / games, 4) if games else None
 
 
+def build_maps_frame_from_team_games(team_games: pd.DataFrame) -> pd.DataFrame:
+    """Build one canonical map row per OE team-game pair.
+
+    ``maps.parquet`` is intentionally a feature-focused major-event artifact,
+    so it cannot be the population for the public team ladder.  The full OE
+    team feed has one aggregate row per side for every domestic and
+    developmental game; this adapter restores that coverage without pulling
+    player rows or feature columns into the rating fit.
+    """
+
+    if team_games is None or team_games.empty:
+        return pd.DataFrame()
+    frame = team_games.copy()
+    if "position" in frame.columns:
+        frame = frame[frame["position"].astype(str).str.lower().eq("team")]
+    if frame.empty or "teamname" not in frame.columns or "side" not in frame.columns:
+        return pd.DataFrame()
+    game_column = "game_uid" if "game_uid" in frame.columns else "gameid"
+    if game_column not in frame.columns:
+        return pd.DataFrame()
+    frame["_game_uid"] = frame[game_column].astype(str)
+    frame["_side"] = frame["side"].astype(str).str.title()
+    frame = frame[frame["_side"].isin({"Blue", "Red"})]
+    blue = frame[frame["_side"].eq("Blue")].drop_duplicates("_game_uid")
+    red = frame[frame["_side"].eq("Red")].drop_duplicates("_game_uid")
+    if blue.empty or red.empty:
+        return pd.DataFrame()
+
+    blue_columns = [c for c in ("_game_uid", "date", "league", "tournament", "result", "teamname") if c in blue.columns]
+    red_columns = [c for c in ("_game_uid", "teamname") if c in red.columns]
+    maps = blue[blue_columns].rename(
+        columns={"_game_uid": "game_uid", "result": "y_blue_win", "teamname": "blue_team"}
+    )
+    maps = maps.merge(
+        red[red_columns].rename(columns={"_game_uid": "game_uid", "teamname": "red_team"}),
+        on="game_uid",
+        how="inner",
+    )
+    maps["date"] = pd.to_datetime(maps.get("date"), errors="coerce")
+    maps["y_blue_win"] = pd.to_numeric(maps.get("y_blue_win"), errors="coerce")
+    maps = maps.dropna(subset=["date", "y_blue_win", "blue_team", "red_team"])
+    return canonicalize_competition_frame(maps).sort_values("date").reset_index(drop=True)
+
+
 def _primary_league(group: pd.DataFrame) -> str | None:
     """Return the latest domestic affiliation, with a frequency fallback.
 

@@ -3,7 +3,14 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import type { PlayerRating, PlayerRecord, TeamRating, TeamRecord } from "@/lib/pack";
+import type {
+  PlayerMetadata,
+  PlayerRating,
+  PlayerRecord,
+  PlayerWeeklyRanks,
+  TeamRating,
+  TeamRecord,
+} from "@/lib/pack";
 import {
   adjustedRating,
   formatTrustCell,
@@ -29,6 +36,8 @@ type Props = {
   players: PlayerRating[];
   teamRecords: Record<string, TeamRecord>;
   playerRecords: Record<string, PlayerRecord>;
+  playerWeeklyRanks: PlayerWeeklyRanks;
+  playerMetadata: Record<string, PlayerMetadata>;
   availableLeagues: string[];
 };
 
@@ -53,6 +62,16 @@ function formatAffiliation(tier: string | null | undefined, league: string | nul
 
 function formatScope(scope: string): string {
   return TIER_FILTERS.find((tier) => tier.value === scope)?.label ?? scope;
+}
+
+function rankDeltaLabel(delta: number | null | undefined): string {
+  if (delta == null || delta === 0) return "—";
+  return delta > 0 ? `↑${delta}` : `↓${Math.abs(delta)}`;
+}
+
+function rankDeltaClass(delta: number | null | undefined): string {
+  if (delta == null || delta === 0) return "text-[var(--ink-faint)]";
+  return delta > 0 ? "text-[var(--accent-ink)]" : "text-[var(--danger)]";
 }
 
 function SortTh({
@@ -106,6 +125,8 @@ export function EloLadders({
   players,
   teamRecords,
   playerRecords,
+  playerWeeklyRanks,
+  playerMetadata,
   availableLeagues,
 }: Props) {
   const router = useRouter();
@@ -116,7 +137,10 @@ export function EloLadders({
     searchParams.get("tab") === "players" ? "players" : "teams",
   );
   const [q, setQ] = useState(searchParams.get("q") || "");
-  const [leagues, setLeagues] = useState<string[]>(() => parseLeagues(searchParams.get("leagues")));
+  const [leagues, setLeagues] = useState<string[]>(() => {
+    const parsed = parseLeagues(searchParams.get("leagues"));
+    return parsed.length ? parsed : ["TIER1"];
+  });
   const [minGames, setMinGames] = useState(Math.max(5, Number(searchParams.get("min") || 20)));
   const [expanded, setExpanded] = useState(false);
   const [teamCol, setTeamCol] = useState<TeamCol>("soft");
@@ -126,7 +150,7 @@ export function EloLadders({
 
   const chips = useMemo(() => {
     const present = new Set(availableLeagues);
-    const core = ["LCK", "LPL", "LEC", "LCS", "CBLOL", "PCS", "VCS"];
+    const core = [...REGION_LEAGUES];
     const shown = [
       ...core.filter((L) => availableLeagues.includes(L) || present.has(L)),
       ...REGION_LEAGUES.filter((L) => !(core as readonly string[]).includes(L) && availableLeagues.includes(L)),
@@ -285,7 +309,17 @@ export function EloLadders({
   const visibleTeams = expanded ? sortedTeams : sortedTeams.slice(0, 20);
   const visiblePlayers = expanded ? sortedPlayers : sortedPlayers.slice(0, 20);
   const intlSet = new Set<string>(["INTL", ...INTL_LEAGUES]);
-  const scopeSummary = leagues.length ? leagues.map(formatScope).join(" + ") : "All pack leagues";
+  const scopeSummary = leagues.length ? leagues.map(formatScope).join(" + ") : "All tiers";
+  const rankScopeFor = (tier: string | null | undefined): "all" | "tier1" | "tier2" | "tier3" => {
+    const selectedTiers = leagues.filter((scope) => scope.startsWith("TIER")).map((scope) => scope.toLowerCase()) as Array<"tier1" | "tier2" | "tier3">;
+    if (selectedTiers.length === 1) return selectedTiers[0];
+    if (tier === "tier1" || tier === "tier2" || tier === "tier3") return tier;
+    return "all";
+  };
+  const playerRankDelta = (player: string, tier: string | null | undefined): number | null | undefined => {
+    const scope = rankScopeFor(tier);
+    return playerWeeklyRanks.by_player[player]?.[scope]?.delta;
+  };
   const liveSummary =
     tab === "teams"
       ? `${sortedTeams.length} teams shown in ${scopeSummary}, sorted by ${teamCol === "soft" ? "adjusted rating" : teamCol}`
@@ -301,6 +335,11 @@ export function EloLadders({
           Scope: <strong>{scopeSummary}</strong>. Adjusted rating = raw rating minus rating spread
           above the settled floor. Evidence labels summarize the match history behind the estimate.
       </p>
+      {tab === "players" && (
+        <p className="method-note max-w-[62ch]">
+          Rank Δ compares with the previous Sunday at 00:00 UTC; flags use Leaguepedia country metadata when available.
+        </p>
+      )}
       <p className="sr-only" aria-live="polite">
         {liveSummary}
       </p>
@@ -372,7 +411,7 @@ export function EloLadders({
           ))}
         </div>
         <div className="chip-group">
-          <span className="chip-group-label">Major / cross-region</span>
+          <span className="chip-group-label">Regional leagues</span>
           {chips
             .filter((lg) => !intlSet.has(lg))
             .map((lg) => (
@@ -552,6 +591,7 @@ export function EloLadders({
               <thead>
                 <tr>
                   <th scope="col">#</th>
+                  <th scope="col" title="Rank movement since the previous Sunday 00:00 UTC">Δ</th>
                   <SortTh label="Player" col="player" active={playerCol === "player"} dir={playerDir} onSort={onPlayerSort} />
                   <SortTh label="Team" col="last_team" active={playerCol === "last_team"} dir={playerDir} onSort={onPlayerSort} />
                   <SortTh label="League" col="league" active={playerCol === "league"} dir={playerDir} onSort={onPlayerSort} />
@@ -584,6 +624,8 @@ export function EloLadders({
                   const fromTeam = p.last_team ? teamRecords[p.last_team] : undefined;
                   const league = rec?.current_league ?? rec?.primary ?? fromTeam?.current_league ?? fromTeam?.primary;
                   const currentTeam = rec?.current_team ?? p.last_team;
+                  const rankDelta = playerRankDelta(p.player, rec?.current_tier ?? fromTeam?.current_tier);
+                  const metadata = playerMetadata[p.player];
                   return (
                     <tr
                       key={p.player}
@@ -591,12 +633,20 @@ export function EloLadders({
                       onClick={() => router.push(`/elo/player/${playerSlug(p.player)}`)}
                     >
                       <td className="font-mono text-[var(--ink-muted)]">{i + 1}</td>
+                      <td className={`font-mono ${rankDeltaClass(rankDelta)}`} title="Change since the previous Sunday 00:00 UTC">
+                        {rankDeltaLabel(rankDelta)}
+                      </td>
                       <td className="font-medium">
                         <Link
                           href={`/elo/player/${playerSlug(p.player)}`}
                           className="row-link"
                           onClick={(e) => e.stopPropagation()}
                         >
+                          {metadata?.flag ? (
+                            <span className="player-country" title={metadata.country || undefined} aria-label={metadata.country || undefined}>
+                              {metadata.flag}
+                            </span>
+                          ) : null}
                           {p.player}
                         </Link>
                       </td>
@@ -635,11 +685,16 @@ export function EloLadders({
               const fromTeam = p.last_team ? teamRecords[p.last_team] : undefined;
               const trust = trustInfo(p.sigma, PLAYER_SIGMA_MIN, p.n_maps);
               const currentTeam = rec?.current_team ?? p.last_team;
+              const rankDelta = playerRankDelta(p.player, rec?.current_tier ?? fromTeam?.current_tier);
+              const metadata = playerMetadata[p.player];
               return (
                 <li key={p.player}>
                   <Link href={`/elo/player/${playerSlug(p.player)}`} className="elo-card">
-                    <span className="elo-card-rank">#{i + 1}</span>
-                    <span className="elo-card-title">{p.player}</span>
+                    <span className="elo-card-rank">#{i + 1} <span className={rankDeltaClass(rankDelta)}>{rankDeltaLabel(rankDelta)}</span></span>
+                    <span className="elo-card-title">
+                      {metadata?.flag ? <span className="player-country" title={metadata.country || undefined}>{metadata.flag}</span> : null}
+                      {p.player}
+                    </span>
                     <span className="elo-card-meta">
                       {currentTeam ?? "—"} · {formatAffiliation(rec?.current_tier ?? fromTeam?.current_tier, rec?.current_league ?? rec?.primary ?? fromTeam?.primary)} · Evidence {formatTrustCell(trust)} · {p.n_maps} games
                     </span>

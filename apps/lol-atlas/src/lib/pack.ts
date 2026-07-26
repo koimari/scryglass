@@ -58,6 +58,23 @@ export type PlayerRating = {
   last_team: string | null;
 };
 
+export type PlayerWeeklyRank = {
+  rank: number;
+  delta: number | null;
+};
+
+export type PlayerWeeklyRanks = {
+  as_of: string | null;
+  previous_as_of: string | null;
+  by_player: Record<string, Partial<Record<CompetitionTier | "all", PlayerWeeklyRank>>>;
+};
+
+export type PlayerMetadata = {
+  country?: string | null;
+  country_code?: string | null;
+  flag?: string | null;
+};
+
 export type EloCalibration = {
   team: { intercept: number; coef: number; temperature_400?: number };
   player: { intercept: number; coef: number; temperature_400?: number };

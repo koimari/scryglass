@@ -5,9 +5,14 @@ import unittest
 import pandas as pd
 
 from lol_kills.etl.competition import canonicalize_competition_frame, classify_competition
-from lol_kills.export.pack_records import build_player_records, build_team_records
+from lol_kills.export.pack_records import (
+    build_maps_frame_from_team_games,
+    build_player_records,
+    build_team_records,
+)
 from lol_kills.ratings.dual_elo import _is_intl
 from lol_kills.ratings.hierarchical_bt import fit_hierarchical_bt
+from lol_kills.ratings.player_elo import build_maps_frame_from_players, build_player_weekly_ranks
 from lol_kills.ratings.validation import audit_rating_inputs
 
 
@@ -55,6 +60,11 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertEqual(label.scope, "tier2")
         self.assertEqual(label.tier, "tier2")
         self.assertFalse(label.is_international)
+
+    def test_national_leagues_do_not_enter_tier_one(self) -> None:
+        self.assertEqual(classify_competition("TCL").tier, "tier2")
+        self.assertEqual(classify_competition("LJL").tier, "tier2")
+        self.assertEqual(classify_competition("EM").tier, "international")
 
     def test_worlds_abbreviation_is_not_a_domestic_tier(self) -> None:
         label = classify_competition("WLDs", None)
@@ -134,6 +144,52 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertEqual(records["Guigs"]["current_league"], "CD")
         self.assertEqual(records["Guigs"]["current_tier"], "tier2")
         self.assertEqual(records["Guigs"]["current_team"], "KaBuM! Ilha das Lendas")
+
+    def test_full_team_feed_adapter_keeps_developmental_games(self) -> None:
+        team_games = pd.DataFrame(
+            [
+                {"gameid": "g1", "date": "2026-01-01", "league": "TCL", "side": "Blue", "position": "team", "teamname": "Misa Esports", "result": 1},
+                {"gameid": "g1", "date": "2026-01-01", "league": "TCL", "side": "Red", "position": "team", "teamname": "Other", "result": 0},
+                {"gameid": "g2", "date": "2026-01-02", "league": "CD", "side": "Blue", "position": "team", "teamname": "KaBuM! Ilha das Lendas", "result": 1},
+                {"gameid": "g2", "date": "2026-01-02", "league": "CD", "side": "Red", "position": "team", "teamname": "Other 2", "result": 0},
+            ]
+        )
+        maps = build_maps_frame_from_team_games(team_games)
+        self.assertEqual(len(maps), 2)
+        self.assertEqual(set(maps["competition_tier"]), {"tier2"})
+
+    def test_weekly_player_rank_payload_uses_sunday_baseline(self) -> None:
+        players = []
+        roles = ["top", "jng", "mid", "bot", "sup"]
+        for game, date, winner in (
+            ("g1", "2026-07-10", "A"),
+            ("g2", "2026-07-20", "B"),
+        ):
+            for side, team, result in (("Blue", "A", int(winner == "A")), ("Red", "B", int(winner == "B"))):
+                for role_index, role in enumerate(roles):
+                    players.append(
+                        {
+                            "gameid": game,
+                            "date": date,
+                            "league": "LCS",
+                            "side": side,
+                            "position": role,
+                            "playername": f"{team}{role_index}",
+                            "teamname": team,
+                            "result": result,
+                        }
+                    )
+        frame = pd.DataFrame(players)
+        payload = build_player_weekly_ranks(
+            build_maps_frame_from_players(frame),
+            frame,
+            as_of=pd.Timestamp("2026-07-26T12:00:00Z"),
+            min_games=1,
+        )
+        self.assertEqual(payload["as_of"], "2026-07-26T00:00:00Z")
+        self.assertEqual(payload["previous_as_of"], "2026-07-19T00:00:00Z")
+        self.assertIn("A0", payload["by_player"])
+        self.assertIn("tier1", payload["by_player"]["A0"])
 
 
 class HierarchicalRatingTests(unittest.TestCase):

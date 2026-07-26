@@ -6,7 +6,7 @@ are out of the default pack.
 
 from __future__ import annotations
 
-SCHEMA_VERSION = "1.2.0"
+SCHEMA_VERSION = "1.3.0"
 
 # Inclusive calendar years on OE `year` / `oe_year`.
 DEFAULT_YEARS: tuple[int, ...] = (2025, 2026)
