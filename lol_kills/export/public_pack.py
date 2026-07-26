@@ -124,6 +124,7 @@ def export_public_pack(
     # --- team games (partition by year) ---
     team_path = WAREHOUSE / "oe_team_games.parquet"
     team = pq.read_table(team_path)
+    team = pa.Table.from_pandas(canonicalize_competition_frame(team.to_pandas()), preserve_index=False)
     team_cols = _present(spec.TEAM_COLS, team.column_names)
     team = team.select(team_cols)
     team = _filter_years(team, years, ("year", "oe_year"))
@@ -141,6 +142,7 @@ def export_public_pack(
     # --- player games ---
     player_path = WAREHOUSE / "oe_player_games.parquet"
     player = pq.read_table(player_path)
+    player = pa.Table.from_pandas(canonicalize_competition_frame(player.to_pandas()), preserve_index=False)
     player_cols = _present(spec.PLAYER_COLS, player.column_names)
     player = player.select(player_cols)
     player = _filter_years(player, years, ("year", "oe_year"))
@@ -425,7 +427,13 @@ def export_public_pack(
             "taxonomy_version": TAXONOMY_VERSION,
             "team_key": "one canonical organization identity across regional and international events",
             "league_source": "raw source label retained on rows for auditability",
-            "deprecated_leagues": {"LTA": "LCS", "LTA N": "LCS", "LTA S": "LCS"},
+            "deprecated_leagues": {
+                "LTA": "AMERICAS",
+                "LTA N": "LCS",
+                "LTA NORTH": "LCS",
+                "LTA S": "CBLOL",
+                "LTA SOUTH": "CBLOL",
+            },
         },
         "attribution": spec.ATTRIBUTION,
         "excluded": [

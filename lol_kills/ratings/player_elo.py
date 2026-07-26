@@ -19,6 +19,7 @@ from collections import defaultdict
 import pandas as pd
 
 from lol_kills.etl.aliases import normalize_team
+from lol_kills.etl.competition import canonicalize_competition_frame
 from lol_kills.etl.paths import FEATURES_DIR, PARQUET_DIR
 from lol_kills.ratings.dual_elo import DualEloConfig, _is_intl, expected_score
 
@@ -182,7 +183,9 @@ def build_player_ratings(
     Player ratings travel across org changes.
     """
     cfg = cfg or PlayerEloConfig()
-    df = maps.sort_values("date").copy().reset_index(drop=True)
+    # Apply the same source-preserving competition taxonomy as team ratings so
+    # player regional/meta updates cannot drift from the public team contract.
+    df = canonicalize_competition_frame(maps).sort_values("date").copy().reset_index(drop=True)
     df["game_uid"] = df["game_uid"].astype(str)
     lineups = _lineups_by_game(players)
     states: dict[str, PlayerState] = {}

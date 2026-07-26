@@ -13,6 +13,30 @@ def _wr(wins: int, games: int) -> float | None:
     return round(wins / games, 4) if games else None
 
 
+def _primary_league(group: pd.DataFrame) -> str | None:
+    """Return the latest domestic affiliation, with a frequency fallback.
+
+    Cross-region events provide useful evidence but must not overwrite the
+    team's domestic league.  A latest-date rule also reflects migrations such
+    as LTA South → CBLOL and PCS → LCP in the public label.
+    """
+
+    domestic = group[group["competition_scope"].eq("regional")]
+    candidates = domestic if not domestic.empty else group[~group["is_international"]]
+    if candidates.empty:
+        candidates = group
+    dates = (
+        pd.to_datetime(candidates["date"], errors="coerce")
+        if "date" in candidates.columns
+        else pd.Series(pd.NaT, index=candidates.index)
+    )
+    if dates.notna().any():
+        latest = candidates.loc[dates.idxmax()]
+        return str(latest["league"])
+    counts = candidates["league"].value_counts()
+    return str(counts.index[0]) if not counts.empty else None
+
+
 def _team_rows(maps: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for _, row in maps.iterrows():
@@ -22,6 +46,8 @@ def _team_rows(maps: pd.DataFrame) -> pd.DataFrame:
         source_league = str(row.get("league_source") or row.get("league") or "")
         league = str(row.get("league") or "UNKNOWN")
         intl = bool(row.get("is_international", False))
+        scope = str(row.get("competition_scope") or ("international" if intl else "other"))
+        interregional = bool(row.get("is_interregional", False))
         for side, team in (("blue", row.get("blue_team")), ("red", row.get("red_team"))):
             if not team or pd.isna(team):
                 continue
@@ -33,6 +59,9 @@ def _team_rows(maps: pd.DataFrame) -> pd.DataFrame:
                     "league": league,
                     "league_source": source_league,
                     "is_international": intl,
+                    "competition_scope": scope,
+                    "is_interregional": interregional,
+                    "date": row.get("date"),
                     "win": win,
                 }
             )
@@ -59,11 +88,7 @@ def build_team_records(maps: pd.DataFrame) -> dict[str, dict[str, Any]]:
             games = int(len(lg))
             by_league[str(league)] = {"wins": wins, "games": games, "wr": _wr(wins, games)}
 
-        regional = group[~group["is_international"]]
-        if regional.empty:
-            primary = str(group["league"].value_counts().index[0])
-        else:
-            primary = str(regional["league"].value_counts().index[0])
+        primary = _primary_league(group)
         wins = int(round(float(group["win"].sum())))
         games = int(len(group))
         records[display] = {
@@ -72,12 +97,14 @@ def build_team_records(maps: pd.DataFrame) -> dict[str, dict[str, Any]]:
             "source_leagues": sorted(str(x) for x in group["league_source"].unique() if x),
             "primary": primary,
             "intl": bool(group["is_international"].any()),
+            "interregional": bool(group["is_interregional"].any()),
             "wins": wins,
             "games": games,
             "wr": _wr(wins, games),
             "by_league": by_league,
         }
-  return records
+    return records
+
 
 def build_player_records(players: pd.DataFrame) -> dict[str, dict[str, Any]]:
     """Aggregate player results from one pack window without team aggregate rows."""
@@ -100,8 +127,7 @@ def build_player_records(players: pd.DataFrame) -> dict[str, dict[str, Any]]:
         wins = int(round(float(group["result"].sum())))
         games = int(len(group))
         leagues = sorted(str(x) for x in group["league"].dropna().unique())
-        regional = group[~group["is_international"]]
-        primary = str(regional["league"].value_counts().index[0]) if not regional.empty else (leagues[0] if leagues else None)
+        primary = _primary_league(group) if not group.empty else (leagues[0] if leagues else None)
         records[player] = {
             "wins": wins,
             "games": games,
@@ -109,5 +135,6 @@ def build_player_records(players: pd.DataFrame) -> dict[str, dict[str, Any]]:
             "leagues": leagues,
             "primary": primary,
             "intl": bool(group["is_international"].any()),
+            "interregional": bool(group.get("is_interregional", pd.Series(dtype=bool)).any()),
         }
     return records

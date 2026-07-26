@@ -9,6 +9,7 @@ import {
   formatTrustCell,
   formatWr,
   INTL_LEAGUES,
+  INTERREGIONAL_LEAGUES,
   PLAYER_SIGMA_MIN,
   playerMatchesQuery,
   playerSlug,
@@ -34,7 +35,7 @@ type TeamCol = "team" | "league" | "soft" | "mu" | "meta" | "trust" | "wr";
 type PlayerCol = "player" | "last_team" | "league" | "soft" | "mu" | "trust" | "games";
 type Dir = "asc" | "desc";
 
-const CHIP_ORDER = [...REGION_LEAGUES, "INTL", ...INTL_LEAGUES];
+const CHIP_ORDER = [...REGION_LEAGUES, ...INTERREGIONAL_LEAGUES, "INTL", ...INTL_LEAGUES];
 
 function SortTh({
   label,
@@ -107,10 +108,11 @@ export function EloLadders({
 
   const chips = useMemo(() => {
     const present = new Set(availableLeagues);
-    const core = ["LCK", "LPL", "LEC", "LCS", "LTA", "CBLOL", "PCS", "VCS"];
+    const core = ["LCK", "LPL", "LEC", "LCS", "CBLOL", "PCS", "VCS"];
     const shown = [
       ...core.filter((L) => availableLeagues.includes(L) || present.has(L)),
       ...REGION_LEAGUES.filter((L) => !(core as readonly string[]).includes(L) && availableLeagues.includes(L)),
+      ...INTERREGIONAL_LEAGUES.filter((L) => availableLeagues.includes(L)),
       "INTL",
       ...INTL_LEAGUES.filter((L) => availableLeagues.includes(L)),
     ];

@@ -391,6 +391,10 @@ def _league_for(tournament: str) -> str:
         return "WORLDS"
     if "FIRST STAND" in blob:
         return "FST"
+    if re.search(r"\bLTA\s+N(?:ORTH)?\b", blob):
+        return "LTA N"
+    if re.search(r"\bLTA\s+S(?:OUTH)?\b", blob):
+        return "LTA S"
     for league in ("LCK", "LPL", "LEC", "LCS", "LTA", "CBLOL", "PCS", "VCS", "LJL", "LCP", "TCL"):
         if league in blob:
             return league

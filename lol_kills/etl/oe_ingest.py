@@ -26,6 +26,46 @@ def list_local_oe_csvs() -> list[Path]:
     return sorted(RAW_OE_DIR.glob("*_LoL_esports_match_data_from_OraclesElixir.csv"))
 
 
+def load_cached_oe(
+    years: Iterable[str | int] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load the last successful normalized OE cache, if one exists.
+
+    CI workers do not retain the raw annual CSVs between runs.  The normalized
+    parquet cache is the durable hand-off between the fast GRID refresh and a
+    slower OE reconciliation.  An empty pair is returned when no cache exists.
+    """
+    team_path = PARQUET_DIR / "oe_team_games.parquet"
+    player_path = PARQUET_DIR / "oe_player_games.parquet"
+    if not team_path.exists() or not player_path.exists():
+        return pd.DataFrame(), pd.DataFrame()
+
+    try:
+        team = pd.read_parquet(team_path)
+        players = pd.read_parquet(player_path)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[oe] cached parquet could not be read: {exc}")
+        return pd.DataFrame(), pd.DataFrame()
+
+    if years:
+        wanted = {int(y) for y in years}
+
+        def keep_years(frame: pd.DataFrame) -> pd.DataFrame:
+            if frame.empty:
+                return frame
+            year_col = next(
+                (c for c in ("oe_year", "year") if c in frame.columns),
+                None,
+            )
+            if year_col is None:
+                return frame
+            return frame[pd.to_numeric(frame[year_col], errors="coerce").isin(wanted)].copy()
+
+        team = keep_years(team)
+        players = keep_years(players)
+    return team, players
+
+
 def download_oe_years(years: Iterable[str | int], force: bool = False) -> list[Path]:
     """
     Attempt Google Drive download via gdown.
@@ -153,6 +193,13 @@ def ingest_oe(
         paths = [p for p in paths if any(p.name.startswith(y) for y in want)]
 
     if not paths:
+        cached_team, cached_players = load_cached_oe(years)
+        if not cached_team.empty or not cached_players.empty:
+            print(
+                "[oe] no annual CSV available; preserving the last normalized "
+                f"cache (team={len(cached_team)} player={len(cached_players)})"
+            )
+            return cached_team, cached_players
         print(
             "[oe] no CSVs found. Put annual files in "
             f"{RAW_OE_DIR} (from {OE_FOLDER}) or pass --download-oe"
@@ -168,6 +215,28 @@ def ingest_oe(
         t, pl = parse_oe_csv(p)
         teams.append(t)
         players.append(pl)
+
+    # A partial Google Drive recovery must not erase years whose annual file
+    # was still quota-blocked. Keep cached rows only for those missing years;
+    # newly parsed OE rows remain authoritative for years we did download.
+    cached_team, cached_players = load_cached_oe()
+    parsed_years = {_year_from_name(p.name) for p in paths}
+    parsed_years.discard(None)
+    if parsed_years:
+        for cached, target in (
+            (cached_team, teams),
+            (cached_players, players),
+        ):
+            if cached.empty:
+                continue
+            year_col = "oe_year" if "oe_year" in cached.columns else "year"
+            if year_col not in cached.columns:
+                continue
+            missing = cached[
+                ~pd.to_numeric(cached[year_col], errors="coerce").isin(parsed_years)
+            ]
+            if not missing.empty:
+                target.insert(0, missing)
 
     # Outer-union columns across years (older dumps may lack newer fields).
     team_df = pd.concat(teams, ignore_index=True, sort=False)

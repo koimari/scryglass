@@ -71,9 +71,10 @@ export default async function MethodologyPage() {
         </p>
         <p>
           Bo3 and Bo5 maps are collapsed to one series observation so a long series cannot count as
-          five independent matches. Historical LTA, LTA N, and LTA S source labels are retained for
-          audit, but the public regional scope is LCS. International events are classified from
-          their source competition, so a title such as “LCK Road to MSI” remains LCK.
+          five independent matches. Historical LTA source labels are retained for audit: LTA North
+          maps to LCS, LTA South maps to CBLOL, and an unqualified LTA row is treated as an Americas
+          cross-region event. International events are classified from their source competition,
+          so a title such as “LCK Road to MSI” remains LCK.
         </p>
         <p>
           The default adjusted rating is the one-sided 90% lower bound of the fitted rating. Teams
