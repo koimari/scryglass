@@ -61,7 +61,6 @@ jobs:
             --years 2025,2026 \
             --skip-oe \
             --download-grid \
-            --grid-required \
             --allow-missing-lp \
             --publish
 
