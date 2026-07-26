@@ -40,6 +40,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--skip-grid", action="store_true")
     parser.add_argument("--grid-days", type=int, default=3)
     parser.add_argument("--grid-limit", type=int, default=40)
+    parser.add_argument("--grid-tournament", default=None)
     parser.add_argument("--grid-env-file", type=Path, default=None)
     parser.add_argument("--grid-required", action="store_true")
     parser.add_argument("--skip-lp", action="store_true")
@@ -72,6 +73,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.skip_grid:
         refresh_args.append("--skip-grid")
     refresh_args.extend(["--grid-days", str(args.grid_days), "--grid-limit", str(args.grid_limit)])
+    if args.grid_tournament:
+        refresh_args.extend(["--grid-tournament", args.grid_tournament])
     if args.grid_env_file:
         refresh_args.extend(["--grid-env-file", str(args.grid_env_file)])
     if args.grid_required:

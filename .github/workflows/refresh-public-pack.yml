@@ -13,6 +13,11 @@ on:
         required: false
         default: "8"
         type: string
+      grid_tournament:
+        description: "Optional tournament substring for a targeted manual catch-up"
+        required: false
+        default: ""
+        type: string
   schedule:
     # GRID supplies the freshness bridge. OE reconciliation runs separately
     # so a Google Drive quota response cannot block current match rows.
@@ -74,6 +79,7 @@ jobs:
             --download-grid \
             --grid-days "${{ inputs.grid_days || '3' }}" \
             --grid-limit "${{ inputs.grid_limit || '8' }}" \
+            ${{ inputs.grid_tournament && format('--grid-tournament "{0}"', inputs.grid_tournament) || '' }} \
             --allow-missing-lp \
             --publish
 

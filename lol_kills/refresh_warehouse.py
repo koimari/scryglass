@@ -45,6 +45,12 @@ def main() -> None:
     )
     ap.add_argument("--grid-days", type=int, default=3, help="GRID lookback window")
     ap.add_argument("--grid-limit", type=int, default=40, help="Maximum recent GRID series to inspect")
+    ap.add_argument(
+        "--grid-tournament",
+        type=str,
+        default=None,
+        help="Optional case-insensitive tournament substring filter for manual GRID catch-up",
+    )
     ap.add_argument("--grid-env-file", type=str, default=None, help="Optional local .env containing GRID_API_KEY")
     ap.add_argument(
         "--grid-required",
@@ -73,6 +79,7 @@ def main() -> None:
             download=args.download_grid,
             days=args.grid_days,
             limit=args.grid_limit,
+            tournament=args.grid_tournament,
             env_file=Path(args.grid_env_file) if args.grid_env_file else None,
             required=args.grid_required,
         )

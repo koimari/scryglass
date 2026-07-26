@@ -696,6 +696,7 @@ def _download_recent(
     *,
     days: int,
     limit: int,
+    tournament: str | None,
     env_file: Path | None,
 ) -> dict[str, Any]:
     key = _api_key(env_file)
@@ -703,7 +704,15 @@ def _download_recent(
     start = (now - timedelta(days=max(days, 1))).strftime("%Y-%m-%dT%H:%M:%SZ")
     end = (now + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        series_rows = _series_rows(key, start, end, max(limit, 1))
+        discovery_limit = max(limit, 100) if tournament else max(limit, 1)
+        series_rows = _series_rows(key, start, end, discovery_limit)
+        if tournament:
+            needle = tournament.strip().casefold()
+            series_rows = [
+                row
+                for row in series_rows
+                if needle in str(row.get("tournament") or "").casefold()
+            ][: max(limit, 1)]
     except GridIngestError as exc:
         result = {
             "fetched_at": now.isoformat(),
@@ -771,6 +780,7 @@ def _download_recent(
         "fetched_at": now.isoformat(),
         "window": {"start": start, "end": end},
         "series_seen": len(series_rows),
+        "tournament_filter": tournament or "",
         "files_downloaded": downloaded,
         "files_existing": existing,
         "files_not_ready": not_ready,
@@ -788,13 +798,19 @@ def ingest_grid(
     download: bool = False,
     days: int = 3,
     limit: int = 40,
+    tournament: str | None = None,
     env_file: Path | None = None,
     required: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Download recent completed pro files optionally, then build local parquet."""
     fetch_meta: dict[str, Any] = {}
     if download:
-        fetch_meta = _download_recent(days=days, limit=limit, env_file=env_file)
+        fetch_meta = _download_recent(
+            days=days,
+            limit=limit,
+            tournament=tournament,
+            env_file=env_file,
+        )
     team_df, player_df, parse_meta = _parse_local_grid()
     cached_team, cached_player = _load_cached_grid()
     if not cached_team.empty or not cached_player.empty:
@@ -860,6 +876,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--download", action="store_true")
     parser.add_argument("--days", type=int, default=3)
     parser.add_argument("--limit", type=int, default=40)
+    parser.add_argument("--tournament", type=str, default=None)
     parser.add_argument("--grid-env-file", type=Path, default=None)
     parser.add_argument("--required", action="store_true")
     args = parser.parse_args(argv)
@@ -867,6 +884,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         download=args.download,
         days=args.days,
         limit=args.limit,
+        tournament=args.tournament,
         env_file=args.grid_env_file,
         required=args.required,
     )
