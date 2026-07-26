@@ -173,27 +173,51 @@ def _aggregate(
     return mu, sig, known, details
 
 
-def build_player_ratings(
+def _snapshot_rows(states: dict[str, PlayerState]) -> list[dict[str, object]]:
+    return [
+        {
+            "player": name,
+            "mu_total": total_mu(st),
+            "mu_regional": st.mu_regional,
+            "mu_meta": st.mu_meta,
+            "sigma": st.sigma,
+            "n_maps": st.n_maps,
+            "last_team": st.last_team,
+        }
+        for name, st in states.items()
+    ]
+
+
+def _run_player_elo(
     maps: pd.DataFrame,
     players: pd.DataFrame,
-    cfg: PlayerEloConfig | None = None,
-) -> pd.DataFrame:
-    """
-    Sequential player Elo. Pre-match team μ = role-weighted mean of lineup.
-    Player ratings travel across org changes.
-    """
-    cfg = cfg or PlayerEloConfig()
+    cfg: PlayerEloConfig,
+    checkpoint_dates: list[pd.Timestamp] | None = None,
+) -> tuple[pd.DataFrame, dict[str, PlayerState], dict[pd.Timestamp, list[dict[str, object]]]]:
+    """Run the sequential player model and optionally capture dated states."""
+
     # Apply the same source-preserving competition taxonomy as team ratings so
     # player regional/meta updates cannot drift from the public team contract.
     df = canonicalize_competition_frame(maps).sort_values("date").copy().reset_index(drop=True)
     df["game_uid"] = df["game_uid"].astype(str)
     lineups = _lineups_by_game(players)
     states: dict[str, PlayerState] = {}
+    targets = sorted({pd.Timestamp(value).tz_localize(None) for value in (checkpoint_dates or [])})
+    checkpoints: dict[pd.Timestamp, list[dict[str, object]]] = {}
+    target_idx = 0
+
+    def capture_before(date: pd.Timestamp | None) -> None:
+        nonlocal target_idx
+        while target_idx < len(targets) and (date is None or date > targets[target_idx]):
+            target = targets[target_idx]
+            checkpoints[target] = _snapshot_rows(states)
+            target_idx += 1
 
     rows = []
     for _, row in df.iterrows():
         gid = str(row.get("game_uid") or "")
         d = pd.Timestamp(row["date"]) if pd.notna(row.get("date")) else None
+        capture_before(d)
         blue_lu = lineups.get(gid, {}).get("Blue") or []
         red_lu = lineups.get(gid, {}).get("Red") or []
         bt = normalize_team(str(row.get("blue_team") or row.get("blue_teamname") or ""))
@@ -283,23 +307,27 @@ def build_player_ratings(
             st.last_team = rt
             states[name] = st
 
-    out = pd.DataFrame(rows)
+    while target_idx < len(targets):
+        target = targets[target_idx]
+        checkpoints[target] = _snapshot_rows(states)
+        target_idx += 1
+    return pd.DataFrame(rows), states, checkpoints
+
+
+def build_player_ratings(
+    maps: pd.DataFrame,
+    players: pd.DataFrame,
+    cfg: PlayerEloConfig | None = None,
+) -> pd.DataFrame:
+    """Sequential player Elo; player ratings travel across org changes."""
+
+    cfg = cfg or PlayerEloConfig()
+    out, states, _ = _run_player_elo(maps, players, cfg)
     FEATURES_DIR.mkdir(parents=True, exist_ok=True)
     path = FEATURES_DIR / "player_ratings.parquet"
     out.to_parquet(path, index=False)
 
-    snap = [
-        {
-            "player": name,
-            "mu_total": total_mu(st),
-            "mu_regional": st.mu_regional,
-            "mu_meta": st.mu_meta,
-            "sigma": st.sigma,
-            "n_maps": st.n_maps,
-            "last_team": st.last_team,
-        }
-        for name, st in states.items()
-    ]
+    snap = _snapshot_rows(states)
     snap_df = pd.DataFrame(snap).sort_values("mu_total", ascending=False)
     snap_df.to_parquet(FEATURES_DIR / "player_ratings_snapshot.parquet", index=False)
     (FEATURES_DIR / "player_ratings_meta.json").write_text(
@@ -315,6 +343,103 @@ def build_player_ratings(
     )
     print(f"[player_elo] wrote {path} n={len(out)} players={len(snap)}")
     return out
+
+
+def _sunday_utc(as_of: pd.Timestamp | None) -> pd.Timestamp:
+    stamp = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp.now(tz="UTC")
+    if stamp.tzinfo is not None:
+        stamp = stamp.tz_convert("UTC").tz_localize(None)
+    return stamp.normalize() - pd.Timedelta(days=(stamp.weekday() + 1) % 7)
+
+
+def build_player_weekly_ranks(
+    maps: pd.DataFrame,
+    players: pd.DataFrame,
+    cfg: PlayerEloConfig | None = None,
+    *,
+    as_of: pd.Timestamp | None = None,
+    min_games: int = 20,
+) -> dict[str, object]:
+    """Return current ranks and movement from the preceding Sunday snapshot.
+
+    The player ladder is still the current sequential Elo snapshot.  The
+    movement baseline is deliberately discrete: it is captured at Sunday
+    00:00 UTC and compared with the prior Sunday, which makes rank changes
+    auditable and avoids a noisy day-to-day pseudo-trend.
+    """
+
+    cfg = cfg or PlayerEloConfig()
+    week_start = _sunday_utc(as_of)
+    previous_start = week_start - pd.Timedelta(days=7)
+    frame = maps.copy()
+    frame["date"] = pd.to_datetime(frame.get("date"), errors="coerce")
+    if as_of is not None:
+        cutoff = pd.Timestamp(as_of)
+        if cutoff.tzinfo is not None:
+            cutoff = cutoff.tz_convert("UTC").tz_localize(None)
+        frame = frame[frame["date"].le(cutoff)]
+
+    _, states, checkpoints = _run_player_elo(
+        frame,
+        players,
+        cfg,
+        checkpoint_dates=[previous_start],
+    )
+    current_rows = _snapshot_rows(states)
+    previous_rows = checkpoints.get(previous_start, [])
+
+    # Current affiliation is the publication filter.  Historical matches in a
+    # different circuit remain evidence for the rating but cannot place a
+    # developmental player in the current Tier 1 board.
+    from lol_kills.export.pack_records import build_player_records
+
+    current_records = build_player_records(players)
+    current_tiers = {
+        player: record.get("current_tier")
+        for player, record in current_records.items()
+    }
+
+    def order(rows: list[dict[str, object]], scope: str) -> dict[str, int]:
+        eligible = []
+        for row in rows:
+            player = str(row["player"])
+            games = int(row.get("n_maps") or 0)
+            tier = current_tiers.get(player)
+            if games < max(1, int(min_games)):
+                continue
+            if scope != "all" and tier != scope:
+                continue
+            mu = float(row.get("mu_total") or 0)
+            sigma = float(row.get("sigma") or 0)
+            adjusted = mu - max(0.0, sigma - 28.0)
+            eligible.append((adjusted, player))
+        eligible.sort(key=lambda value: (-value[0], value[1].casefold()))
+        return {player: rank for rank, (_, player) in enumerate(eligible, start=1)}
+
+    scopes = ("all", "tier1", "tier2", "tier3")
+    current_rank = {scope: order(current_rows, scope) for scope in scopes}
+    previous_rank = {scope: order(previous_rows, scope) for scope in scopes}
+    by_player: dict[str, dict[str, dict[str, int | None]]] = {}
+    for player, rank in current_rank["all"].items():
+        values: dict[str, dict[str, int | None]] = {}
+        for scope in scopes:
+            current = current_rank[scope].get(player)
+            if current is None:
+                continue
+            prior = previous_rank[scope].get(player)
+            values[scope] = {
+                "rank": current,
+                "delta": (prior - current) if prior is not None else None,
+            }
+        by_player[player] = values
+
+    return {
+        "as_of": f"{week_start.isoformat()}Z",
+        "previous_as_of": f"{previous_start.isoformat()}Z",
+        "min_games": int(min_games),
+        "by_player": by_player,
+        "note": "Rank movement compares adjusted player Elo at Sunday 00:00 UTC snapshots; positive delta means a climb.",
+    }
 
 
 def build_maps_frame_from_players(players: pd.DataFrame) -> pd.DataFrame:

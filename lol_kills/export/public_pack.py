@@ -15,14 +15,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from lol_kills.export import pack_spec as spec
-from lol_kills.export.pack_records import build_player_records, build_team_records
+from lol_kills.export.pack_records import (
+    build_maps_frame_from_team_games,
+    build_player_records,
+    build_team_records,
+)
+from lol_kills.export.player_metadata import build_player_metadata
 from lol_kills.etl.competition import TAXONOMY_VERSION, canonicalize_competition_frame
 from lol_kills.ratings.hierarchical_bt import fit_hierarchical_bt
+from lol_kills.ratings.player_elo import build_maps_frame_from_players, build_player_weekly_ranks
 
 ROOT = Path(__file__).resolve().parents[2]
 WAREHOUSE = ROOT / "data" / "lol" / "warehouse" / "parquet"
@@ -138,6 +145,8 @@ def export_public_pack(
         if part.num_rows == 0:
             continue
         register(_write_parquet(part, dest), f"team_games/year={y}/part.parquet")
+    team_for_records = team.to_pandas()
+    team_maps_for_ratings = build_maps_frame_from_team_games(team_for_records)
 
     # --- player games ---
     player_path = WAREHOUSE / "oe_player_games.parquet"
@@ -166,9 +175,13 @@ def export_public_pack(
     maps = maps.select(map_cols)
     maps = _filter_years(maps, years, ("year", "oe_year"))
     maps_for_records = maps.to_pandas()
-    public_ratings, public_ratings_meta = fit_hierarchical_bt(maps_for_records, write=False)
+    # The feature-oriented maps table intentionally covers the major/public
+    # event slice.  Team ladders need the full OE team-game population so
+    # Tier 2 and Tier 3 organizations receive both records and estimates.
+    rating_input = team_maps_for_ratings if not team_maps_for_ratings.empty else maps_for_records
+    public_ratings, public_ratings_meta = fit_hierarchical_bt(rating_input, write=False)
     public_ratings_meta["pack_years"] = list(years)
-    public_ratings_meta["rating_window"] = "same canonical map window as this pack"
+    public_ratings_meta["rating_window"] = "full canonical OE team-game window as this pack"
     for y in years:
         if "year" in maps.column_names:
             part = maps.filter(pc.equal(pc.cast(maps["year"], pa.int64(), safe=False), y))
@@ -183,13 +196,54 @@ def export_public_pack(
     # snapshot remains the full roster-history artifact) ---
     feat_dir = pack_dir / "features"
     feat_dir.mkdir(parents=True, exist_ok=True)
+    player_frame = player.to_pandas()
+    player_records_payload = build_player_records(player_frame)
+
+    weekly_ranks = build_player_weekly_ranks(
+        build_maps_frame_from_players(player_frame),
+        player_frame,
+        as_of=pd.Timestamp.now(tz="UTC"),
+        min_games=20,
+    )
+    weekly_dest = feat_dir / "player_weekly_ranks.json"
+    weekly_dest.write_text(json.dumps(weekly_ranks, indent=2), encoding="utf-8")
+    register(
+        {
+            "rows": len(weekly_ranks.get("by_player", {})),
+            "cols": None,
+            "bytes": weekly_dest.stat().st_size,
+            "sha256": _sha256(weekly_dest),
+            "columns": None,
+        },
+        "features/player_weekly_ranks.json",
+    )
+
+    player_metadata = build_player_metadata(
+        player_frame["playername"].dropna().astype(str).unique(),
+        player_context={
+            player: record.get("current_team")
+            for player, record in player_records_payload.items()
+        },
+    )
+    metadata_dest = feat_dir / "player_metadata.json"
+    metadata_dest.write_text(json.dumps(player_metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    register(
+        {
+            "rows": len(player_metadata),
+            "cols": None,
+            "bytes": metadata_dest.stat().st_size,
+            "sha256": _sha256(metadata_dest),
+            "columns": None,
+        },
+        "features/player_metadata.json",
+    )
 
     # These records are intentionally built from the same year-filtered
     # canonical rows that are exported above.  This avoids mixing a full
     # history snapshot with a different pack-window win rate.
     for filename, payload in (
-        ("team_records.json", build_team_records(maps_for_records)),
-        ("player_records.json", build_player_records(player.to_pandas())),
+        ("team_records.json", build_team_records(rating_input)),
+        ("player_records.json", player_records_payload),
     ):
         dest = feat_dir / filename
         dest.write_text(json.dumps(payload, indent=2), encoding="utf-8")

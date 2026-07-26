@@ -22,7 +22,7 @@ import pandas as pd
 from lol_kills.etl.aliases import normalize_team
 
 
-TAXONOMY_VERSION = "2026-07-26.3"
+TAXONOMY_VERSION = "2026-07-26.4"
 
 # LTA was the 2025 Americas competition.  North and South were distinct
 # domestic circuits, while an unqualified LTA row is an Americas cross-region
@@ -42,15 +42,26 @@ REGIONAL_LEAGUES = frozenset(
         "LEC",
         "LCS",
         "CBLOL",
-        "PCS",
-        "VCS",
-        "LJL",
         "LCP",
-        "TCL",
     }
 )
 
-INTERNATIONAL_LEAGUES = frozenset({"MSI", "EWC", "FST", "WORLDS", "IWC", "MSC"})
+INTERNATIONAL_LEAGUES = frozenset(
+    {
+        "MSI",
+        "EWC",
+        "FST",
+        "WORLDS",
+        "IWC",
+        "MSC",
+        # Cross-league circuit finals are international evidence, not a
+        # player's domestic affiliation.  Keeping them here prevents a
+        # national-league ladder from being overwritten by an event label.
+        "EM",
+        "ASIA MASTER",
+        "ASIA MASTERS",
+    }
+)
 INTERREGIONAL_LEAGUES = frozenset({"AMERICAS"})
 
 # Riot/Leaguepedia's second-tier circuits and academy/challenger equivalents.
@@ -73,6 +84,24 @@ TIER2_LEAGUES = frozenset(
         "LRS",
         "NACL",
         "PRMP",
+        # Current national / established regional circuits below the six
+        # global top leagues.  These must not enter the Tier 1 ladder simply
+        # because they are the strongest league available in their country.
+        "PCS",
+        "VCS",
+        "LJL",
+        "TCL",
+        "LFL",
+        "NLC",
+        "PRM",
+        "LVP SL",
+        "LIT",
+        "EBL",
+        "HLL",
+        "HM",
+        "LPLOL",
+        "ROL",
+        "KESPA",
     }
 )
 
