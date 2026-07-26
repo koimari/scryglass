@@ -21,6 +21,7 @@ jobs:
     env:
       GRID_API_KEY: ${{ secrets.GRID_API_KEY }}
       BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+      BLOB_STORE_ID: store_97gKs2fObqKgpPWx
 
     steps:
       - name: Check out the publication
