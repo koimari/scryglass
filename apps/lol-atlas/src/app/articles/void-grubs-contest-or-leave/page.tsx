@@ -82,6 +82,11 @@ function pp(x: number) {
 
 const META = getArticle("void-grubs-contest-or-leave")!;
 
+// The published pack lives in Blob and may be newer than the repository's
+// checked-in local fallback. Keep this page out of the build-time prerender so
+// a refresh cannot race a Vercel deployment while the new pack is propagating.
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: `${META.title} — Scryglass`,
   description: META.dek,

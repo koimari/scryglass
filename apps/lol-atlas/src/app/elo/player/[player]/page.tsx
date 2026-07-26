@@ -7,6 +7,8 @@ import type {
 } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
+export const dynamic = "force-dynamic";
+
 type Props = { params: Promise<{ player: string }> };
 
 export default async function PlayerEloPage({ params }: Props) {

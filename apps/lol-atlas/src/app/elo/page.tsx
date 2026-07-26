@@ -9,6 +9,10 @@ import type {
 import { packUpdatedLabel, packUrl, softMu } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
+// Ratings are refreshed independently of the app deployment and are served
+// from the current Blob pack at request time.
+export const dynamic = "force-dynamic";
+
 function thinPlayers(players: PlayerRating[]): PlayerRating[] {
   return players
     .filter((p) => (p.n_maps ?? 0) >= 5)
