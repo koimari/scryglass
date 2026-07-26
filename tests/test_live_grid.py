@@ -11,6 +11,7 @@ import pandas as pd
 
 import lol_kills.etl.grid_ingest as grid_ingest
 from lol_kills.etl.grid_ingest import _download
+from lol_kills.etl.join import _canonical_player_game_key
 from lol_kills.etl.grid_series_events import (
     default_config,
     series_events_url,
@@ -22,6 +23,15 @@ from lol_kills.live_snapshots import LivePublisher, build_live_snapshot
 
 
 class GridSeriesEventsTests(unittest.TestCase):
+    def test_player_key_normalization_deduplicates_grid_game_uid(self) -> None:
+        players = _canonical_player_game_key(
+            pd.DataFrame(
+                [{"gameid": "oe-id", "game_uid": "grid-id", "playername": "Player"}]
+            )
+        )
+        self.assertEqual(list(players.columns), ["game_uid", "playername"])
+        self.assertEqual(players.iloc[0]["game_uid"], "grid-id")
+
     def test_source_merge_normalizes_oe_and_grid_date_types(self) -> None:
         merged = grid_ingest.merge_source_frames(
             pd.DataFrame(
