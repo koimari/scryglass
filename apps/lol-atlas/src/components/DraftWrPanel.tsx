@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { QueryRow } from "@/lib/duck";
-import { sortPlayersByRole } from "@/lib/format";
+import { resolveDraftLineup } from "@/lib/draftLineup";
 
 export type DraftWrResult = {
   p_blue_draft: number;
@@ -19,19 +19,6 @@ type Props = {
   eloDiff?: number | null;
 };
 
-function picksFromMap(map: QueryRow, side: "blue" | "red"): string[] {
-  return [1, 2, 3, 4, 5]
-    .map((i) => map[`${side}_pick${i}`])
-    .filter((x) => x != null && String(x).length > 0)
-    .map(String);
-}
-
-function rolesFromPlayers(players: QueryRow[], side: "Blue" | "Red"): string[] | null {
-  const ordered = sortPlayersByRole(players.filter((p) => String(p.side) === side));
-  if (ordered.length < 5) return null;
-  return ordered.map((p) => String(p.position).toLowerCase());
-}
-
 export function useDraftWr(
   map: QueryRow | null,
   players: QueryRow[],
@@ -44,13 +31,12 @@ export function useDraftWr(
   useEffect(() => {
     let cancelled = false;
     if (!map) return;
-    const blue = picksFromMap(map, "blue");
-    const red = picksFromMap(map, "red");
-    if (blue.length !== 5 || red.length !== 5) {
+    const lineup = resolveDraftLineup(map, players);
+    if (!lineup) {
       queueMicrotask(() => {
         if (cancelled) return;
         setDraft(null);
-        setError("Picks incomplete in pack row");
+        setError("Draft rating unavailable · champion lineup missing from source");
         setLoading(false);
       });
       return () => {
@@ -65,12 +51,12 @@ export function useDraftWr(
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            blue,
-            red,
+            blue: lineup.blue,
+            red: lineup.red,
             league: map.league ? String(map.league) : null,
             elo_diff: eloDiff ?? null,
-            blue_roles: rolesFromPlayers(players, "Blue"),
-            red_roles: rolesFromPlayers(players, "Red"),
+            blue_roles: lineup.blueRoles,
+            red_roles: lineup.redRoles,
           }),
         });
         const data = await res.json();
@@ -154,7 +140,7 @@ export function DraftWrPanel({ map, players, eloDiff }: Props) {
       <span>Draft WR:</span>
       {loading && <span className="status-hint">…</span>}
       {error && !loading && (
-        <span className="text-[var(--danger)]">{error}</span>
+        <span className="status-hint">{error}</span>
       )}
       {draft && !loading && (
         <>

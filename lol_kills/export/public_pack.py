@@ -103,6 +103,111 @@ def _join_history_years(
     return history.filter(pc.is_in(history["game_uid"], value_set=uids))
 
 
+def _draft_coverage(maps: pd.DataFrame, players: pd.DataFrame) -> dict[str, Any]:
+    """Require every public map to have a verified ten-champion composition.
+
+    OE's map-level pick columns preserve draft order, while GRID and a few OE
+    anomalies only carry the final champion lineup on participant rows. Both
+    are valid composition sources, but participant fallbacks must contain one
+    champion in each canonical role on both sides.
+    """
+
+    roles = ("top", "jng", "mid", "bot", "sup")
+
+    def known(value: Any) -> bool:
+        if pd.isna(value):
+            return False
+        return str(value).strip().lower() not in {"", "unknown", "nan", "none", "null"}
+
+    def role(value: Any) -> str | None:
+        raw = str(value or "").strip().lower()
+        if raw == "top" or raw.startswith("top"):
+            return "top"
+        if raw in {"jng", "jungle"} or raw.startswith("jungler"):
+            return "jng"
+        if raw == "mid" or raw.startswith("middle"):
+            return "mid"
+        if raw in {"bot", "adc"} or raw.startswith("bottom"):
+            return "bot"
+        if raw in {"sup", "utility"} or raw.startswith("support"):
+            return "sup"
+        return None
+
+    if maps.empty:
+        return {
+            "maps": 0,
+            "map_pick_rows": 0,
+            "participant_fallback_rows": 0,
+            "complete_rows": 0,
+            "coverage_rate": 1.0,
+        }
+
+    pick_columns = [
+        f"{side}_pick{index}"
+        for side in ("blue", "red")
+        for index in range(1, 6)
+    ]
+    map_pick_complete = pd.Series(False, index=maps.index)
+    if all(column in maps.columns for column in pick_columns):
+        map_pick_complete = maps[pick_columns].map(known).sum(axis=1).eq(10)
+
+    player_key = "gameid" if "gameid" in players.columns else "game_uid"
+    map_keys = (
+        maps.get("oe_gameid", pd.Series(index=maps.index, dtype=object))
+        .where(lambda values: values.map(known), maps.get("game_uid"))
+        .astype(str)
+    )
+    complete_participant_games: set[str] = set()
+    required_player_columns = {player_key, "side", "position", "champion"}
+    if not players.empty and required_player_columns.issubset(players.columns):
+        relevant = players[
+            players["champion"].map(known)
+            & players["side"].astype(str).str.title().isin(["Blue", "Red"])
+        ].copy()
+        relevant["_side"] = relevant["side"].astype(str).str.title()
+        relevant["_role"] = relevant["position"].map(role)
+        relevant = relevant[relevant["_role"].notna()]
+        side_summary = (
+            relevant.groupby([player_key, "_side"], sort=False)
+            .agg(
+                rows=("champion", "size"),
+                roles=("_role", "nunique"),
+                champions=("champion", "nunique"),
+            )
+            .reset_index()
+        )
+        complete_sides = side_summary[
+            side_summary["rows"].eq(5)
+            & side_summary["roles"].eq(len(roles))
+            & side_summary["champions"].eq(5)
+        ]
+        complete_games = complete_sides.groupby(player_key, sort=False)["_side"].agg(
+            lambda sides: set(sides) == {"Blue", "Red"}
+        )
+        complete_participant_games = {
+            str(game_id) for game_id, valid in complete_games.items() if valid
+        }
+
+    participant_complete = map_keys.isin(complete_participant_games)
+    complete = map_pick_complete | participant_complete
+    if not complete.all():
+        missing = map_keys[~complete].head(10).tolist()
+        raise ValueError(
+            "Public pack draft coverage failed: "
+            f"{int((~complete).sum())} map(s) have neither ten map picks nor "
+            f"five role-aligned participant champions per side; examples={missing}"
+        )
+
+    fallback = ~map_pick_complete & participant_complete
+    return {
+        "maps": int(len(maps)),
+        "map_pick_rows": int(map_pick_complete.sum()),
+        "participant_fallback_rows": int(fallback.sum()),
+        "complete_rows": int(complete.sum()),
+        "coverage_rate": float(complete.mean()),
+    }
+
+
 def export_public_pack(
     *,
     years: Sequence[int] | None = None,
@@ -155,6 +260,7 @@ def export_public_pack(
     player_cols = _present(spec.PLAYER_COLS, player.column_names)
     player = player.select(player_cols)
     player = _filter_years(player, years, ("year", "oe_year"))
+    player_frame = player.to_pandas()
     for y in years:
         if "year" in player.column_names:
             part = player.filter(pc.equal(pc.cast(player["year"], pa.int64(), safe=False), y))
@@ -175,6 +281,7 @@ def export_public_pack(
     maps = maps.select(map_cols)
     maps = _filter_years(maps, years, ("year", "oe_year"))
     maps_for_records = maps.to_pandas()
+    draft_coverage = _draft_coverage(maps_for_records, player_frame)
     # The feature-oriented maps table intentionally covers the major/public
     # event slice.  Team ladders need the full OE team-game population so
     # Tier 2 and Tier 3 organizations receive both records and estimates.
@@ -196,7 +303,6 @@ def export_public_pack(
     # snapshot remains the full roster-history artifact) ---
     feat_dir = pack_dir / "features"
     feat_dir.mkdir(parents=True, exist_ok=True)
-    player_frame = player.to_pandas()
     player_records_payload = build_player_records(player_frame)
 
     weekly_ranks = build_player_weekly_ranks(
@@ -491,6 +597,7 @@ def export_public_pack(
             },
         },
         "attribution": spec.ATTRIBUTION,
+        "quality": {"draft_coverage": draft_coverage},
         "excluded": [
             "warehouse/timelines",
             "warehouse/raw OE CSVs",
