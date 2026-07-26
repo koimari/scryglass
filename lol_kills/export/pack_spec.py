@@ -345,6 +345,7 @@ PINNED_MODEL_FILES: tuple[str, ...] = (
     "elo_wr_calibration.json",
     "elo_year_holdup.json",
     "draft_wr_calibration.json",
+    "draft_recommendation.json",
     "blade_chest_role_matchups.json",
 )
 
@@ -401,8 +402,8 @@ Versioned parquet + calibration for reproducing published LoL research findings.
 - `team_games/` — OE team-row maps (one file per year, zstd parquet)
 - `player_games/` — OE player rows (one file per year, zstd parquet)
 - `maps/` — wide map table (trimmed columns, per year)
-- `features/` — Dual Elo team/player snapshots + map-level history (year-filtered)
-- `models/` — pinned calibration / study JSON
+- `features/` — Dual Elo snapshots, draft team/player context, and map-level history
+- `models/` — pinned calibration, interaction, and study JSON
 - `studies/grubs/` — void-grubs decision numbers, briefs, PDF, key figures
 - `meta/teams.json` — team aliases for display
 - `manifest.json` — file list, row counts, sha256, schema_version

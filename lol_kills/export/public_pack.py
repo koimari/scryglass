@@ -30,6 +30,7 @@ from lol_kills.export.player_metadata import build_player_metadata
 from lol_kills.etl.competition import TAXONOMY_VERSION, canonicalize_competition_frame
 from lol_kills.ratings.hierarchical_bt import fit_hierarchical_bt
 from lol_kills.ratings.player_elo import build_maps_frame_from_players, build_player_weekly_ranks
+from lol_kills.draft_recommendation import build_draft_context
 
 ROOT = Path(__file__).resolve().parents[2]
 WAREHOUSE = ROOT / "data" / "lol" / "warehouse" / "parquet"
@@ -198,6 +199,7 @@ def export_public_pack(
     feat_dir.mkdir(parents=True, exist_ok=True)
     player_frame = player.to_pandas()
     player_records_payload = build_player_records(player_frame)
+    team_records_payload = build_team_records(rating_input)
 
     weekly_ranks = build_player_weekly_ranks(
         build_maps_frame_from_players(player_frame),
@@ -242,7 +244,7 @@ def export_public_pack(
     # canonical rows that are exported above.  This avoids mixing a full
     # history snapshot with a different pack-window win rate.
     for filename, payload in (
-        ("team_records.json", build_team_records(rating_input)),
+        ("team_records.json", team_records_payload),
         ("player_records.json", player_records_payload),
     ):
         dest = feat_dir / filename
@@ -256,6 +258,31 @@ def export_public_pack(
                 "columns": None,
             },
             f"features/{filename}",
+        )
+
+    player_rating_source = FEATURES / "player_ratings_snapshot.parquet"
+    if player_rating_source.exists():
+        draft_context = build_draft_context(
+            player_frame,
+            public_ratings.to_dict(orient="records"),
+            pd.read_parquet(player_rating_source).to_dict(orient="records"),
+            team_records_payload,
+            player_records_payload,
+        )
+        draft_context_dest = feat_dir / "draft_context.json"
+        draft_context_dest.write_text(
+            json.dumps(draft_context, separators=(",", ":"), ensure_ascii=False),
+            encoding="utf-8",
+        )
+        register(
+            {
+                "rows": len(draft_context.get("teams", [])),
+                "cols": None,
+                "bytes": draft_context_dest.stat().st_size,
+                "sha256": _sha256(draft_context_dest),
+                "columns": None,
+            },
+            "features/draft_context.json",
         )
 
     for src_name, cols, out_name in (

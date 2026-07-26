@@ -11,6 +11,33 @@ async function loadChangelog(): Promise<string> {
   }
 }
 
+type DraftEvaluation = {
+  selected_alpha?: number;
+  selected_half_life_days?: number;
+  rolling_validation_mean_brier?: number;
+  interaction_gates?: {
+    role_residual?: number;
+    ally_synergy?: number;
+    cross_counter?: number;
+    composition_counter?: number;
+    same_role?: number;
+  };
+  baseline_holdout?: { n?: number; brier?: number; log_loss?: number; auc?: number };
+  interaction_holdout?: { n?: number; brier?: number; log_loss?: number; auc?: number };
+};
+
+async function loadDraftEvaluation(): Promise<DraftEvaluation | null> {
+  try {
+    const raw = await fs.readFile(
+      path.join(process.cwd(), "data", "draft", "runtime.json"),
+      "utf8",
+    );
+    return (JSON.parse(raw) as { evaluation?: DraftEvaluation }).evaluation ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function MethodSection({
   id,
   title,
@@ -31,7 +58,10 @@ function MethodSection({
 }
 
 export default async function MethodologyPage() {
-  const changelog = await loadChangelog();
+  const [changelog, draftEvaluation] = await Promise.all([
+    loadChangelog(),
+    loadDraftEvaluation(),
+  ]);
 
   return (
     <article className="page-prose">
@@ -133,20 +163,105 @@ export default async function MethodologyPage() {
         </p>
       </MethodSection>
 
-      <MethodSection id="draft-score" title="Draft Score">
+      <MethodSection id="draft-score" title="Draft Sandbox evaluation">
         <p>
-          Draft Score maps five-on-five picks to a blue win probability with league-calibrated
-          temperature. The Elo-controlled bump (wr_bump_pp) is the residual ridge × draft edge ×
-          confidence. Draft favorites can disagree with Dual Elo favorites; Matches reports Elo hit
-          rate, while match boards also show Draft WR.
+          The sandbox ranks a legal next pick by its expected match-win probability after that pick.
+          It is not a global champion tier list. Every candidate is rescored against the champions
+          already selected, the open role, the two teams, and the assigned player. Changing an ally,
+          opponent, role, or lineup can therefore change both the order and the explanation.
+          Repeating the same state returns the same ranking for auditability; deterministic here
+          means reproducible, not context-free.
         </p>
         <p>
-          The Draft Sandbox applies the same regularized champion effects to incomplete pick states.
-          Unfilled seats contribute the fitted average, and known same-role matchups add a smaller
-          pair term. The displayed pick-to-pick change is therefore a counterfactual comparison
-          between branches at the same draft seat. Partial states are not separately calibrated
-          match-win probabilities, and recommendations do not include private champion pools, scrim
-          plans, or unannounced flex intent.
+          The draft component is an additive log-odds model. It contains regularized champion main
+          effects, validation-gated champion-by-role residuals, unordered allied-pair synergy,
+          directed cross-team counters, lower-dimensional composition responses, same-role
+          counters, and a player-champion comfort term. Exact
+          champion interactions share evidence with overlapping composition tags such as engage,
+          poke, scaling, frontline, and peel. During fitting, team and player identity enter as
+          nuisance controls. Their coefficients are not relabeled as champion value. At serving
+          time, current team Elo and the selected five-player lineup supply a separately calibrated
+          strength prior:
+        </p>
+        <p className="font-mono text-sm">
+          logit(Pblue) = strength prior + league scale × confidence ×
+          (champions + ally synergy + counters + lane + comfort)
+        </p>
+        <p>
+          The interaction model is fitted on 16,334 complete professional drafts from the 2025 and
+          2026 Oracle&apos;s Elixir warehouse. Features are sparse and L2-regularized. Model
+          selection uses three rolling-origin folds inside the first 85% of maps. Those folds choose
+          the regularization level, recency half-life, and separate serving gates for allied
+          champion-by-role residuals, synergy, exact counters, composition responses, and same-role
+          evidence. The chronologically
+          later 15% is then scored as the final temporal evaluation. Any family that does not reduce
+          rolling-validation Brier error is withheld from EV with a gate of zero.
+        </p>
+        {draftEvaluation ? (
+          <div className="method-note">
+            <strong>Current serving contract</strong>
+            <p>
+              Recency half-life {draftEvaluation.selected_half_life_days ?? "—"} days; L2 α{" "}
+              {draftEvaluation.selected_alpha ?? "—"}. Gates: champion-by-role{" "}
+              {draftEvaluation.interaction_gates?.role_residual ?? 0}, synergy{" "}
+              {draftEvaluation.interaction_gates?.ally_synergy ?? 0}, exact counter{" "}
+              {draftEvaluation.interaction_gates?.cross_counter ?? 0}, composition response{" "}
+              {draftEvaluation.interaction_gates?.composition_counter ?? 0}, same-role{" "}
+              {draftEvaluation.interaction_gates?.same_role ?? 0}.
+            </p>
+            <p>
+              Final temporal evaluation n = {draftEvaluation.interaction_holdout?.n ?? "—"}:
+              interaction Brier{" "}
+              {draftEvaluation.interaction_holdout?.brier?.toFixed(4) ?? "—"}, log loss{" "}
+              {draftEvaluation.interaction_holdout?.log_loss?.toFixed(4) ?? "—"}, AUC{" "}
+              {draftEvaluation.interaction_holdout?.auc?.toFixed(4) ?? "—"}. The no-interaction
+              comparator Brier is{" "}
+              {draftEvaluation.baseline_holdout?.brier?.toFixed(4) ?? "—"}.
+            </p>
+          </div>
+        ) : null}
+        <p>
+          Allied synergy and response terms are fitted jointly with champion strength. This matters:
+          a raw pair win rate can mistake a strong champion, team, or player for synergy. The terms
+          remain predictive associations, not causal claims about what would happen if a team were
+          forced onto a champion. The model design follows the separation of player preference and
+          match interaction in{" "}
+          <a className="row-link" href="https://arxiv.org/abs/2204.12750">DraftRec</a>, and the
+          cooperation-versus-competition framing in{" "}
+          <a className="row-link" href="https://ojs.aaai.org/index.php/AAAI/article/view/16528">
+            NeuralAC
+          </a>
+          . Full game-tree search, as in{" "}
+          <a className="row-link" href="https://arxiv.org/abs/2012.10171">JueWuDraft</a>, is a
+          future extension rather than something this page currently claims to run.
+        </p>
+        <p>
+          The champion pool contains all 173 champions in the current client roster. A champion
+          without professional evidence receives a zero-centered main effect and no invented
+          interaction or role evidence. It remains available for manual analysis and is labeled
+          <em> Neutral prior</em>. Missing evidence is never treated as proof that the champion is
+          average.
+        </p>
+        <p>
+          Player comfort is a recency-weighted champion result relative to that player&apos;s own
+          baseline after the champion&apos;s global strength is also removed. It is shrunk with a
+          Bayesian prior and capped before it reaches the draft model. The overall player Elo still
+          enters through lineup strength. Comfort is therefore a modest player-specific adjustment,
+          not a second unrestricted player rating or a duplicate champion prior.
+        </p>
+        <p>
+          A zero interaction gate is a result, not missing UI. It means the evidence family did not
+          generalize well enough to change professional recommendations in the current artifact.
+          The sandbox still shows the gate so an analyst can distinguish a neutral estimate from an
+          unsupported claim.
+        </p>
+        <p>
+          Unfilled seats contribute the fitted average. Pick-to-pick changes compare legal branches
+          at the same draft seat; partial states are not independently calibrated outcome
+          probabilities. Recommendations cannot observe scrim plans, communication, private
+          champion pools, planned role swaps, patch-day discoveries, or hidden flex intent. A
+          professional analyst should use the decomposition and evidence counts as a challenge list,
+          not treat the first row as an instruction.
         </p>
       </MethodSection>
 

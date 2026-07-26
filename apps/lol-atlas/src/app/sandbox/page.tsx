@@ -6,6 +6,7 @@ import {
   type DraftRole,
   type DraftSide,
 } from "@/lib/draftScore";
+import { readCurrentDraftContext } from "@/lib/draftServer";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +60,19 @@ export default async function SandboxPage({
 }) {
   const params = await searchParams;
   const catalog = draftCatalog();
+  const context = await readCurrentDraftContext();
+  const teamOptions = context.teams.map((team) => ({
+    team: team.team,
+    league: team.league,
+    tier: team.tier,
+    rating: team.rating,
+    roster: team.roster.map(({ player, role, rating, n_maps }) => ({
+      player,
+      role,
+      rating,
+      n_maps,
+    })),
+  }));
   const rawDraft = typeof params.draft === "string" ? params.draft : undefined;
   const scenario = parseScenario(rawDraft, new Set(catalog.map((champion) => champion.name)));
   const perspective =
@@ -67,14 +81,26 @@ export default async function SandboxPage({
     typeof params.league === "string" && LEAGUES.has(params.league)
       ? params.league
       : undefined;
+  const teamNames = new Set(teamOptions.map((team) => team.team));
+  const blueTeam =
+    typeof params.blueTeam === "string" && teamNames.has(params.blueTeam)
+      ? params.blueTeam
+      : undefined;
+  const redTeam =
+    typeof params.redTeam === "string" && teamNames.has(params.redTeam)
+      ? params.redTeam
+      : undefined;
 
   return (
     <DraftSandbox
       catalog={catalog}
+      teams={teamOptions}
       initialActions={scenario?.actions}
       initialExcluded={scenario?.excluded}
       initialPerspective={perspective}
       initialLeague={league}
+      initialBlueTeam={blueTeam}
+      initialRedTeam={redTeam}
     />
   );
 }

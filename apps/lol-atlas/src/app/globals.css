@@ -2833,3 +2833,635 @@ body {
     justify-self: start;
   }
 }
+
+/* —— Draft sandbox v4: professional decision hierarchy —— */
+.sandbox-page {
+  gap: clamp(2.5rem, 5vw, 5rem);
+}
+
+.sandbox-page > .page-header {
+  position: relative;
+  max-width: none;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.sandbox-page > .page-header h1 {
+  max-width: 12ch;
+  font-size: clamp(2.8rem, 7vw, 5.75rem);
+  line-height: 0.92;
+  letter-spacing: -0.045em;
+}
+
+.sandbox-page > .page-header .lede {
+  max-width: 62ch;
+  margin-top: 1.35rem;
+  font-size: 1.05rem;
+  line-height: 1.65;
+}
+
+.sandbox-model-stamp {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 1.75rem;
+  max-width: 65rem;
+  margin-top: 2rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--line);
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.67rem;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.sandbox-model-stamp strong {
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.sandbox-header-actions {
+  position: absolute;
+  right: 0;
+  bottom: 1.55rem;
+  margin: 0;
+}
+
+.sandbox-step {
+  margin: 0;
+  color: var(--accent-ink);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.63rem;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.sandbox-section-intro {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.32fr) minmax(0, 1fr);
+  gap: clamp(1.5rem, 4vw, 4rem);
+  align-items: start;
+  margin-bottom: 1.75rem;
+}
+
+.sandbox-section-intro h2,
+.sandbox-section-head h2,
+.sandbox-bans h2 {
+  margin: 0;
+  font-family: var(--font-ui), sans-serif;
+  font-size: clamp(1.4rem, 2.4vw, 2.15rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+}
+
+.sandbox-section-intro p:not(.sandbox-step) {
+  max-width: 60ch;
+  margin: 0.7rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+.sandbox-strength-section,
+.sandbox-draft-section {
+  padding-top: 1rem;
+  border-top: 1px solid var(--ink);
+}
+
+.sandbox-team-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(1rem, 3vw, 2.5rem);
+}
+
+.sandbox-team-context {
+  min-width: 0;
+  padding-top: 0.75rem;
+  border-top: 3px solid var(--side-blue);
+}
+
+.sandbox-team-context-red {
+  border-top-color: var(--side-red);
+}
+
+.sandbox-team-context > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: end;
+  margin-bottom: 0.8rem;
+}
+
+.sandbox-team-context > header > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.sandbox-team-context > header span,
+.sandbox-team-context > label > span,
+.sandbox-lineup label > span,
+.sandbox-ban-tools label > span {
+  color: var(--ink-faint);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sandbox-team-context > header strong {
+  color: var(--ink);
+  font-size: 1.05rem;
+}
+
+.sandbox-team-rating {
+  color: var(--ink) !important;
+  font-family: var(--font-mono), monospace !important;
+  font-size: 1rem !important;
+  letter-spacing: 0 !important;
+}
+
+.sandbox-team-rating small {
+  color: var(--ink-faint);
+  font-family: var(--font-ui), sans-serif;
+  font-size: 0.62rem;
+}
+
+.sandbox-team-context > label,
+.sandbox-lineup label,
+.sandbox-ban-tools label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.sandbox-team-context select,
+.sandbox-lineup select,
+.sandbox-ban-tools select,
+.sandbox-ban-tools input {
+  width: 100%;
+  min-width: 0;
+  height: 2.45rem;
+  padding: 0 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.76rem;
+}
+
+.sandbox-team-context > label > select {
+  height: 2.75rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.sandbox-lineup {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line);
+}
+
+.sandbox-lineup label small {
+  min-height: 2.2em;
+  color: var(--ink-faint);
+  font-size: 0.58rem;
+  line-height: 1.2;
+}
+
+.sandbox-team-empty {
+  min-height: 4.5rem;
+  margin: 0.9rem 0 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.sandbox-draft-section {
+  margin-bottom: -3rem;
+}
+
+.sandbox-context {
+  grid-template-columns: minmax(10rem, 1.1fr) repeat(3, minmax(9rem, 1fr));
+  border-color: var(--ink);
+  background: var(--ink);
+}
+
+.sandbox-next {
+  background: color-mix(in oklch, var(--accent) 10%, var(--surface));
+}
+
+.sandbox-next strong {
+  font-size: 1rem;
+}
+
+.sandbox-bans {
+  display: grid;
+  gap: 1rem;
+  padding: 1.1rem 0 1.4rem;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.sandbox-bans > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: end;
+}
+
+.sandbox-bans h2 {
+  margin-top: 0.3rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+
+.sandbox-ban-tray {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(4.25rem, 1fr));
+  gap: 0.4rem;
+  overflow-x: auto;
+}
+
+.sandbox-ban-empty,
+.sandbox-ban-token {
+  min-width: 4.25rem;
+  min-height: 4.7rem;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+}
+
+.sandbox-ban-empty {
+  display: grid;
+  place-items: end center;
+  padding: 0.4rem;
+  color: var(--ink-faint);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.54rem;
+  text-transform: uppercase;
+}
+
+.sandbox-ban-token {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr);
+  gap: 0.35rem;
+  align-items: center;
+  padding: 0.45rem;
+  border-style: solid;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.61rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sandbox-ban-token .sandbox-champion-portrait {
+  filter: grayscale(0.75);
+}
+
+.sandbox-ban-token em {
+  position: absolute;
+  top: 0.2rem;
+  right: 0.3rem;
+  color: var(--danger);
+  font-style: normal;
+}
+
+.sandbox-ban-pool {
+  display: grid;
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.sandbox-ban-tools {
+  display: grid;
+  grid-template-columns: minmax(14rem, 1fr) minmax(10rem, 0.35fr);
+  gap: 0.75rem;
+}
+
+.sandbox-champion-pool {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: 0.4rem;
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+.sandbox-champion-pool button {
+  display: grid;
+  grid-template-columns: 2.15rem minmax(0, 1fr);
+  gap: 0.45rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.67rem;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 180ms var(--ease-out),
+    border-color 180ms var(--ease-out),
+    background 180ms var(--ease-out);
+}
+
+.sandbox-champion-pool button:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+}
+
+.sandbox-champion-pool button.is-banned {
+  background: color-mix(in oklch, var(--danger) 9%, var(--surface));
+  border-color: color-mix(in oklch, var(--danger) 45%, var(--line));
+}
+
+.sandbox-champion-pool button > span:nth-child(2),
+.sandbox-champion-pool button small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sandbox-champion-pool button small {
+  grid-column: 2;
+  margin-top: -0.35rem;
+  color: var(--ink-faint);
+  font-size: 0.55rem;
+}
+
+.sandbox-workbench {
+  grid-template-columns: minmax(0, 1.45fr) minmax(18rem, 0.55fr);
+  gap: clamp(1.25rem, 4vw, 3.5rem);
+  align-items: start;
+}
+
+.sandbox-board {
+  border-top-color: var(--ink);
+}
+
+.sandbox-side-head {
+  padding: 0.9rem 0.8rem;
+}
+
+.sandbox-pick-list li {
+  min-height: 4.2rem;
+}
+
+.sandbox-read {
+  position: sticky;
+  top: 5rem;
+  padding: 1.25rem;
+  border: 1px solid var(--ink);
+  background: color-mix(in oklch, var(--accent) 7%, var(--surface));
+}
+
+.sandbox-current-number {
+  gap: 0.35rem;
+  margin-top: 1rem;
+  padding-bottom: 1rem;
+}
+
+.sandbox-current-number strong {
+  font-size: clamp(3.25rem, 6vw, 5.4rem);
+  line-height: 0.85;
+  letter-spacing: -0.07em;
+}
+
+.sandbox-current-number small {
+  color: var(--ink-faint);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+}
+
+.sandbox-shortlist {
+  margin: 1.25rem -0.45rem 0;
+  padding: 0.85rem 0.45rem 0;
+}
+
+.sandbox-shortlist button {
+  min-height: 3.7rem;
+  padding: 0.55rem 0;
+}
+
+.sandbox-shortlist button.is-primary {
+  grid-template-columns: 2.75rem minmax(0, 1fr) auto;
+  min-height: 5.15rem;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+}
+
+.sandbox-shortlist button.is-primary .sandbox-champion-portrait {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.sandbox-shortlist button.is-primary strong {
+  font-size: 0.9rem;
+}
+
+.sandbox-shortlist button small {
+  white-space: normal;
+}
+
+.sandbox-picker {
+  padding: 1.15rem 0;
+  border-top-color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.sandbox-ranking,
+.sandbox-audit {
+  padding-top: 1rem;
+  border-top: 1px solid var(--ink);
+}
+
+.sandbox-section-head {
+  align-items: start;
+  margin-bottom: 1.5rem;
+}
+
+.sandbox-section-head > p {
+  max-width: 45ch;
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.sandbox-recommendations th {
+  padding-top: 0.7rem;
+  padding-bottom: 0.7rem;
+}
+
+.sandbox-recommendations td {
+  padding-top: 0.8rem;
+  padding-bottom: 0.8rem;
+  vertical-align: middle;
+}
+
+.sandbox-recommendations td small,
+.sandbox-driver {
+  display: block;
+}
+
+.sandbox-recommendations td small {
+  margin-top: 0.18rem;
+  color: var(--ink-faint);
+  font-size: 0.58rem;
+}
+
+.sandbox-driver {
+  color: var(--ink);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.66rem;
+}
+
+.sandbox-recommendations th small {
+  display: block;
+  margin-top: 0.16rem;
+  color: var(--ink-faint);
+  font-size: 0.52rem;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+}
+
+.sandbox-driver-ledger {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(3.7rem, 1fr));
+  gap: 0.2rem;
+  min-width: 20rem;
+}
+
+.sandbox-driver-ledger span {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.3rem 0.35rem;
+  border-left: 2px solid var(--line);
+  background: color-mix(in oklch, var(--ink) 2%, transparent);
+}
+
+.sandbox-driver-ledger em {
+  color: var(--ink-faint);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.5rem;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sandbox-driver-ledger strong {
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.62rem;
+  font-weight: 600;
+}
+
+.sandbox-driver-ledger span.is-positive {
+  border-left-color: var(--secondary);
+}
+
+.sandbox-driver-ledger span.is-positive strong {
+  color: var(--secondary);
+}
+
+.sandbox-driver-ledger span.is-negative {
+  border-left-color: var(--danger);
+}
+
+.sandbox-driver-ledger span.is-negative strong {
+  color: var(--danger);
+}
+
+.sandbox-method {
+  margin-top: -2rem;
+}
+
+@media (max-width: 980px) {
+  .sandbox-header-actions {
+    position: static;
+    margin-top: 1.25rem;
+  }
+
+  .sandbox-team-grid,
+  .sandbox-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .sandbox-lineup {
+    grid-template-columns: repeat(5, minmax(6.5rem, 1fr));
+    overflow-x: auto;
+  }
+
+  .sandbox-read {
+    position: static;
+    order: -1;
+  }
+
+  .sandbox-ban-tray {
+    grid-template-columns: repeat(10, minmax(5.5rem, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .sandbox-page {
+    gap: 3rem;
+  }
+
+  .sandbox-page > .page-header h1 {
+    font-size: 3.25rem;
+  }
+
+  .sandbox-section-intro {
+    grid-template-columns: 1fr;
+    gap: 0.55rem;
+  }
+
+  .sandbox-context {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .sandbox-team-context > header,
+  .sandbox-bans > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .sandbox-ban-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .sandbox-champion-pool {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sandbox-draft-section {
+    margin-bottom: -1.5rem;
+  }
+}
+
+@media (max-width: 430px) {
+  .sandbox-context {
+    grid-template-columns: 1fr;
+  }
+
+  .sandbox-model-stamp {
+    display: grid;
+    gap: 0.45rem;
+  }
+
+  .sandbox-current-number strong {
+    font-size: 3.6rem;
+  }
+}

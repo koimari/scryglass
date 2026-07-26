@@ -82,6 +82,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     _run_module("lol_kills.refresh_warehouse", refresh_args)
 
     from lol_kills.draft_score import fit_draft_score_scaler
+    from lol_kills.draft_recommendation import write_recommendation_model
     from lol_kills.export.public_pack import export_public_pack
     from lol_kills.features.build import build_feature_store
     from lol_kills.ratings.calibrate_elo_wr import (
@@ -96,6 +97,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     apply_calibration_to_features()
     print("[update] refreshing draft-score scaler")
     fit_draft_score_scaler()
+    print("[update] fitting draft synergy, counter, and player-controlled interactions")
+    write_recommendation_model()
     print("[update] exporting public pack")
     manifest = export_public_pack(
         years=tuple(int(x.strip()) for x in args.years.split(",") if x.strip()),
