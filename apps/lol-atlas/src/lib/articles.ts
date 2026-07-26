@@ -40,7 +40,7 @@ export const ARTICLES: ArticleMeta[] = [
       },
       {
         id: "fn-assoc",
-        text: "Gold@10 → map-win is associational, not a causal or draft-true win probability.",
+        text: "Gold@10 → map-win uses a side-neutral associational logit conversion under the article estimand.",
       },
     ],
     related: [
@@ -57,7 +57,7 @@ export const ARTICLES: ArticleMeta[] = [
       {
         href: "/methodology",
         label: "Methodology",
-        blurb: "Estimands and what was not measured.",
+        blurb: "Estimands, Dual Elo, Draft Score, and pack years.",
       },
       {
         href: "/reproduce",

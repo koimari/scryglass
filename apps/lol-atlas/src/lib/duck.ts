@@ -97,9 +97,13 @@ const MAP_SELECT = `
   league,
   patch,
   split,
+  playoffs,
+  tournament,
   game,
   blue_teamname,
   red_teamname,
+  total_kills,
+  y_blue_win,
   blue_result,
   red_result,
   blue_teamkills,
@@ -130,24 +134,34 @@ const MAP_SELECT = `
 
 export type MapFilters = {
   league?: string;
+  leagues?: string[];
   team?: string;
+  teams?: string[];
   teamA?: string;
   teamB?: string;
+  patch?: string;
+  side?: "blue" | "red";
   limit?: number;
 };
 
-export async function queryMaps(
-  baseUrl: string,
-  year: number,
-  opts: MapFilters = {},
-): Promise<QueryRow[]> {
-  const url = mapsUrl(baseUrl, year);
-  const lim = opts.limit ?? 80;
+function mapFilterClauses(opts: MapFilters): string[] {
   const clauses: string[] = ["1=1"];
   if (opts.league) clauses.push(`league = '${esc(opts.league)}'`);
+  if (opts.leagues?.length) {
+    const list = opts.leagues.map((L) => `'${esc(L)}'`).join(", ");
+    clauses.push(`league IN (${list})`);
+  }
+  if (opts.patch) clauses.push(`CAST(patch AS VARCHAR) ILIKE '${esc(opts.patch)}%'`);
   if (opts.team) {
     const t = esc(opts.team);
     clauses.push(`(blue_teamname ILIKE '%${t}%' OR red_teamname ILIKE '%${t}%')`);
+  }
+  if (opts.teams?.length) {
+    const parts = opts.teams.map((t) => {
+      const e = esc(t);
+      return `(blue_teamname ILIKE '%${e}%' OR red_teamname ILIKE '%${e}%')`;
+    });
+    clauses.push(`(${parts.join(" OR ")})`);
   }
   if (opts.teamA && opts.teamB) {
     const a = esc(opts.teamA);
@@ -157,6 +171,23 @@ export async function queryMaps(
       OR (blue_teamname ILIKE '%${b}%' AND red_teamname ILIKE '%${a}%')
     )`);
   }
+  if (opts.side === "blue" && opts.teams?.[0]) {
+    clauses.push(`blue_teamname ILIKE '%${esc(opts.teams[0])}%'`);
+  }
+  if (opts.side === "red" && opts.teams?.[0]) {
+    clauses.push(`red_teamname ILIKE '%${esc(opts.teams[0])}%'`);
+  }
+  return clauses;
+}
+
+export async function queryMaps(
+  baseUrl: string,
+  year: number,
+  opts: MapFilters = {},
+): Promise<QueryRow[]> {
+  const url = mapsUrl(baseUrl, year);
+  const lim = opts.limit ?? 80;
+  const clauses = mapFilterClauses(opts);
   const sql = `
     SELECT ${MAP_SELECT}
     FROM read_parquet($PARQUET)
@@ -165,6 +196,145 @@ export async function queryMaps(
     LIMIT ${lim}
   `;
   return queryPackParquet(url, sql);
+}
+
+export async function queryMapsYears(
+  baseUrl: string,
+  years: number[],
+  opts: MapFilters = {},
+): Promise<QueryRow[]> {
+  const lim = opts.limit ?? 200;
+  const out: QueryRow[] = [];
+  for (const year of [...years].sort((a, b) => b - a)) {
+    const rows = await queryMaps(baseUrl, year, { ...opts, limit: lim });
+    for (const r of rows) out.push({ ...r, _year: year });
+    if (out.length >= lim) break;
+  }
+  return out.slice(0, lim);
+}
+
+export type SeriesCard = {
+  key: string;
+  date: string;
+  league: string;
+  patch: string;
+  tournament: string;
+  teamA: string;
+  teamB: string;
+  winsA: number;
+  winsB: number;
+  bestOf: number;
+  games: QueryRow[];
+  year: number;
+};
+
+function ymd(dateVal: unknown): string {
+  const s = String(dateVal ?? "");
+  const m = s.match(/(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : s.slice(0, 10);
+}
+
+function teamPairKey(a: string, b: string): string {
+  return [a, b].sort((x, y) => x.localeCompare(y)).join("||");
+}
+
+/** Group OE map rows into Bo1/Bo3/Bo5 series (infer from game index + date + teams). */
+export function groupMapsIntoSeries(rows: QueryRow[]): SeriesCard[] {
+  const buckets = new Map<string, QueryRow[]>();
+  for (const r of rows) {
+    const blue = String(r.blue_teamname ?? "");
+    const red = String(r.red_teamname ?? "");
+    if (!blue || !red) continue;
+    const day = ymd(r.date);
+    const league = String(r.league ?? "");
+    const tourney = String(r.tournament ?? "");
+    const key = `${teamPairKey(blue, red)}|${day}|${league}|${tourney}`;
+    const list = buckets.get(key) ?? [];
+    list.push(r);
+    buckets.set(key, list);
+  }
+
+  const series: SeriesCard[] = [];
+  for (const [key, games] of buckets) {
+    games.sort((a, b) => Number(a.game ?? 0) - Number(b.game ?? 0));
+    const first = games[0];
+    const blue = String(first.blue_teamname);
+    const red = String(first.red_teamname);
+    // Stable A/B by alphabetical for scoreline display
+    const [teamA, teamB] = [blue, red].sort((x, y) => x.localeCompare(y));
+    let winsA = 0;
+    let winsB = 0;
+    for (const g of games) {
+      const bName = String(g.blue_teamname);
+      const blueWon =
+        g.blue_result === 1 ||
+        g.blue_result === true ||
+        g.y_blue_win === 1 ||
+        Number(g.y_blue_win) >= 0.5;
+      const winner = blueWon ? bName : String(g.red_teamname);
+      if (winner === teamA) winsA += 1;
+      else if (winner === teamB) winsB += 1;
+    }
+    const maxGame = Math.max(...games.map((g) => Number(g.game) || 1), games.length);
+    const bestOf = maxGame >= 5 || games.length >= 5 ? 5 : maxGame >= 3 || games.length >= 3 ? 3 : 1;
+    series.push({
+      key,
+      date: ymd(first.date),
+      league: String(first.league ?? ""),
+      patch: String(first.patch ?? ""),
+      tournament: String(first.tournament ?? ""),
+      teamA,
+      teamB,
+      winsA,
+      winsB,
+      bestOf,
+      games,
+      year: Number(first._year ?? first.year ?? 0) || Number(String(first.date).slice(0, 4)) || 0,
+    });
+  }
+  series.sort((a, b) => b.date.localeCompare(a.date));
+  return series;
+}
+
+export type ModelAccuracySummary = {
+  n: number;
+  eloHits: number;
+  eloRate: number | null;
+  draftOverlapHits: number;
+  draftOverlapN: number;
+  draftOverlapRate: number | null;
+};
+
+/** Elo favorite accuracy from ratings_history for a year sample. */
+export async function queryEloAccuracy(
+  baseUrl: string,
+  year: number,
+  limit = 2000,
+): Promise<{ n: number; hits: number; rate: number | null }> {
+  const histUrl = `${baseUrl.replace(/\/$/, "")}/features/ratings_history.parquet`;
+  const mapsU = mapsUrl(baseUrl, year);
+  try {
+    const rows = await queryPackSql(
+      `
+      SELECT
+        COUNT(*)::INT AS n,
+        SUM(CASE
+          WHEN h.p_dual_elo >= 0.5 AND m.y_blue_win >= 0.5 THEN 1
+          WHEN h.p_dual_elo < 0.5 AND m.y_blue_win < 0.5 THEN 1
+          ELSE 0
+        END)::INT AS hits
+      FROM read_parquet($HIST) h
+      JOIN read_parquet($MAPS) m ON h.game_uid = m.game_uid
+      WHERE h.p_dual_elo IS NOT NULL AND m.y_blue_win IS NOT NULL
+      `,
+      { HIST: histUrl, MAPS: mapsU },
+    );
+    const n = Number(rows[0]?.n ?? 0);
+    const hits = Number(rows[0]?.hits ?? 0);
+    return { n, hits, rate: n ? hits / n : null };
+  } catch {
+    return { n: 0, hits: 0, rate: null };
+  }
 }
 
 export async function queryMapByGameId(

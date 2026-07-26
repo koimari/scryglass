@@ -1,47 +1,217 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { listLeagues, queryMaps, type QueryRow } from "@/lib/duck";
-import { formatClock, formatGold } from "@/lib/format";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  groupMapsIntoSeries,
+  listLeagues,
+  queryEloAccuracy,
+  queryMaps,
+  type QueryRow,
+  type SeriesCard,
+} from "@/lib/duck";
+import { expandTeamQuery, teamSlug } from "@/lib/pack";
 
-type Props = { baseUrl: string; years: number[] };
+type Props = {
+  baseUrl: string;
+  years: number[];
+};
 
-function encodeGameId(id: string): string {
-  return encodeURIComponent(id);
+function blueWon(m: QueryRow): boolean {
+  if (m.y_blue_win != null) return Number(m.y_blue_win) >= 0.5;
+  return m.blue_result === 1 || m.blue_result === true || m.blue_result === "1";
 }
 
-export function BrowseMaps({ baseUrl, years }: Props) {
-  const yearDefault = years.includes(2026) ? 2026 : years[years.length - 1] ?? 2026;
-  const [year, setYear] = useState(yearDefault);
-  const [league, setLeague] = useState("");
-  const [team, setTeam] = useState("");
-  const [teamQuery, setTeamQuery] = useState("");
+function TagInput({
+  tags,
+  onChange,
+  placeholder,
+}: {
+  tags: string[];
+  onChange: (tags: string[]) => void;
+  placeholder: string;
+}) {
+  const [draft, setDraft] = useState("");
+  const commit = (raw: string) => {
+    const parts = raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!parts.length) return;
+    const next = [...tags];
+    for (const p of parts) {
+      const expanded = expandTeamQuery(p)[1] || p;
+      // Prefer canonical display: if alias, use longer form from expand
+      const label = p.length <= 4 ? expanded : p;
+      const display =
+        label === p.toLowerCase()
+          ? p
+          : expandTeamQuery(p).find((x) => x !== p.toLowerCase() && x.length > 2) || p;
+      // Use original token if not alias; else title-case from known aliases via first match in expand list
+      const pretty = (() => {
+        const needles = expandTeamQuery(p);
+        // Find a needle that looks like a full name
+        const full = needles.find((n) => n.includes(" ") || n.length > 4);
+        if (full && full !== p.toLowerCase()) {
+          // recover casing from common pattern - capitalize words
+          return full.replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\bOf\b/, "of");
+        }
+        return p;
+      })();
+      if (!next.some((t) => t.toLowerCase() === pretty.toLowerCase())) next.push(pretty);
+    }
+    onChange(next);
+    setDraft("");
+  };
+
+  return (
+    <div className="tag-field">
+      <div className="tag-list">
+        {tags.map((t) => (
+          <span key={t} className="tag-chip">
+            {t}
+            <button
+              type="button"
+              aria-label={`Remove ${t}`}
+              onClick={() => onChange(tags.filter((x) => x !== t))}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      <input
+        value={draft}
+        placeholder={placeholder}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v.includes(",")) commit(v);
+          else setDraft(v);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === ",") {
+            e.preventDefault();
+            commit(draft);
+          }
+          if (e.key === "Backspace" && !draft && tags.length) {
+            onChange(tags.slice(0, -1));
+          }
+        }}
+      />
+    </div>
+  );
+}
+
+function SeriesTile({
+  s,
+  open,
+  onToggle,
+}: {
+  s: SeriesCard;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <article className={`series-card ${open ? "is-open" : ""}`}>
+      <button type="button" className="series-card-head" onClick={onToggle}>
+        <div className="series-card-main">
+          <p className="series-kicker">
+            {s.date} · {s.league}
+            {s.patch ? ` · ${s.patch}` : ""} · Bo{s.bestOf}
+          </p>
+          <h3 className="series-title">
+            <Link
+              href={`/elo/team/${teamSlug(s.teamA)}`}
+              className="row-link"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {s.teamA}
+            </Link>
+            <span className="series-score">
+              {s.winsA}–{s.winsB}
+            </span>
+            <Link
+              href={`/elo/team/${teamSlug(s.teamB)}`}
+              className="row-link"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {s.teamB}
+            </Link>
+          </h3>
+        </div>
+        <span className="series-claim muted">
+          {s.games.length} game{s.games.length === 1 ? "" : "s"}
+        </span>
+      </button>
+      {open && (
+        <ul className="series-games">
+          {s.games.map((g) => {
+            const id = String(g.oe_gameid ?? g.game_uid);
+            const year = s.year || Number(String(g.date).slice(0, 4));
+            const bw = blueWon(g);
+            const winner = bw ? String(g.blue_teamname) : String(g.red_teamname);
+            return (
+              <li key={id}>
+                <Link href={`/browse/match/${encodeURIComponent(id)}?year=${year}`}>
+                  <span className="font-mono">G{String(g.game ?? "?")}</span>
+                  <span className={bw ? "text-[var(--side-blue)]" : "text-[var(--side-red)]"}>
+                    {winner}
+                  </span>
+                  <span className="muted">
+                    {Number(g.blue_teamkills) || 0}–{Number(g.red_teamkills) || 0} ·{" "}
+                    {Number(g.length_min)?.toFixed?.(0) ?? "—"}m
+                  </span>
+                  <span className="row-link">Board »</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </article>
+  );
+}
+
+export function BrowseMatches({ baseUrl, years }: Props) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const yearDefault = years[years.length - 1] ?? 2026;
+  const [year, setYear] = useState(Number(searchParams.get("year") || yearDefault));
+  const [league, setLeague] = useState(searchParams.get("league") || "");
+  const [patch, setPatch] = useState(searchParams.get("patch") || "");
+  const [side, setSide] = useState<"" | "blue" | "red">(
+    (searchParams.get("side") as "" | "blue" | "red") || "",
+  );
+  const [tags, setTags] = useState<string[]>(() =>
+    (searchParams.get("teams") || "")
+      .split("|")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
   const [leagues, setLeagues] = useState<string[]>([]);
-  const [rows, setRows] = useState<QueryRow[]>([]);
+  const [series, setSeries] = useState<SeriesCard[]>([]);
+  const [page, setPage] = useState(0);
+  const [openKey, setOpenKey] = useState<string | null>(null);
   const [status, setStatus] = useState("Idle");
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [eloAcc, setEloAcc] = useState<{ n: number; hits: number; rate: number | null } | null>(
+    null,
+  );
 
-  useEffect(() => {
-    const t = window.setTimeout(() => setTeamQuery(team.trim()), 300);
-    return () => window.clearTimeout(t);
-  }, [team]);
+  const pageSize = 12;
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        setStatus("Loading leagues…");
         const L = await listLeagues(baseUrl, year);
-        if (!cancelled) {
-          setLeagues(L);
-          setStatus("Ready");
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : String(e));
-          setStatus("Error");
-        }
+        if (!cancelled) setLeagues(L);
+      } catch {
+        if (!cancelled) setLeagues([]);
       }
     })();
     return () => {
@@ -49,29 +219,85 @@ export function BrowseMaps({ baseUrl, years }: Props) {
     };
   }, [baseUrl, year]);
 
+  useEffect(() => {
+    const params = new URLSearchParams();
+    params.set("year", String(year));
+    if (league) params.set("league", league);
+    if (patch) params.set("patch", patch);
+    if (side) params.set("side", side);
+    if (tags.length) params.set("teams", tags.join("|"));
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [year, league, patch, side, tags, pathname, router]);
+
   const run = useCallback(async () => {
+    setLoading(true);
     setError(null);
-    setStatus("Querying maps parquet…");
+    setStatus("Fetching series…");
+    setPage(0);
     try {
       const data = await queryMaps(baseUrl, year, {
         league: league || undefined,
-        team: teamQuery || undefined,
-        limit: 100,
+        teams: tags.length ? tags : undefined,
+        patch: patch || undefined,
+        side: side || undefined,
+        limit: 400,
       });
-      setRows(data);
-      setStatus(`${data.length} maps`);
+      const grouped = groupMapsIntoSeries(data.map((r) => ({ ...r, _year: year })));
+      setSeries(grouped);
+      if (grouped[0]) setOpenKey(grouped[0].key);
+      setStatus(
+        grouped.length
+          ? `${grouped.length} series · ${data.length} games`
+          : "The warehouse shrugged. Try another chip.",
+      );
+      const acc = await queryEloAccuracy(baseUrl, year);
+      setEloAcc(acc);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setStatus("Error");
+      setError(
+        e instanceof Error
+          ? `${e.message} — DuckDB had a moment. Refresh usually works.`
+          : String(e),
+      );
+      setSeries([]);
+      setStatus("Idle");
+    } finally {
+      setLoading(false);
     }
-  }, [baseUrl, year, league, teamQuery]);
+  }, [baseUrl, year, league, tags, patch, side]);
 
   useEffect(() => {
-    void run();
+    const t = setTimeout(() => {
+      void run();
+    }, 200);
+    return () => clearTimeout(t);
   }, [run]);
 
+  const pageRows = useMemo(() => {
+    const start = page * pageSize;
+    return series.slice(start, start + pageSize);
+  }, [series, page]);
+
+  const pageCount = Math.max(1, Math.ceil(series.length / pageSize));
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      <div className="model-acc-strip">
+        <div>
+          <strong>Winner (Elo)</strong>{" "}
+          {eloAcc?.rate != null ? (
+            <>
+              {(100 * eloAcc.rate).toFixed(1)}% · {eloAcc.hits}/{eloAcc.n} games in {year}
+            </>
+          ) : (
+            "…"
+          )}
+        </div>
+        <div className="muted text-sm">
+          Draft∩Winner overlap is computed on match boards (Draft Score favorite vs actual winner).
+          Elo accuracy here is Dual Elo pre-match favorite vs result.
+        </div>
+      </div>
+
       <div className="filter-bar">
         <label className="field">
           <span>Year</span>
@@ -94,109 +320,79 @@ export function BrowseMaps({ baseUrl, years }: Props) {
             ))}
           </select>
         </label>
-        <label className="field grow">
-          <span>Team contains</span>
+        <label className="field">
+          <span>Patch</span>
           <input
-            value={team}
-            onChange={(e) => setTeam(e.target.value)}
-            placeholder="G2 / Karmine / VKS"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void run();
-            }}
+            value={patch}
+            onChange={(e) => setPatch(e.target.value)}
+            placeholder="16.1"
           />
         </label>
-        <button type="button" className="btn-primary" onClick={() => void run()}>
-          Refresh
-        </button>
-        <span className="status-hint">{status}</span>
+        <label className="field">
+          <span>Side</span>
+          <select value={side} onChange={(e) => setSide(e.target.value as "" | "blue" | "red")}>
+            <option value="">Any</option>
+            <option value="blue">Blue (tagged team)</option>
+            <option value="red">Red (tagged team)</option>
+          </select>
+        </label>
+        <label className="field grow">
+          <span>Teams</span>
+          <TagInput
+            tags={tags}
+            onChange={setTags}
+            placeholder="G2, then comma → chip"
+          />
+        </label>
       </div>
+
+      {loading && <div className="skeleton-block" aria-label="Loading" />}
       {error && <p className="error-banner">{error}</p>}
-      <div className="table-scroll">
-        <table className="data-table maps-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>League</th>
-              <th>Blue</th>
-              <th>Red</th>
-              <th className="num">Kills</th>
-              <th className="num">Gold</th>
-              <th className="num">DRG</th>
-              <th className="num">GRB</th>
-              <th className="num">TWR</th>
-              <th className="num">HLD</th>
-              <th className="num">BAR</th>
-              <th className="num">GD@15</th>
-              <th className="num">Len</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => {
-              const id = String(r.oe_gameid ?? r.game_uid ?? "");
-              const blueW = Number(r.blue_result) === 1;
-              const gd =
-                r.blue_golddiffat15 != null && Number.isFinite(Number(r.blue_golddiffat15))
-                  ? Number(r.blue_golddiffat15)
-                  : null;
-              return (
-                <tr key={id}>
-                  <td className="font-mono text-xs">{String(r.date ?? "").slice(0, 10)}</td>
-                  <td>{String(r.league ?? "")}</td>
-                  <td className={blueW ? "winner-cell" : undefined}>
-                    {String(r.blue_teamname ?? "")}
-                  </td>
-                  <td className={!blueW ? "winner-cell" : undefined}>
-                    {String(r.red_teamname ?? "")}
-                  </td>
-                  <td className="num font-mono">
-                    {String(r.blue_teamkills ?? 0)}–{String(r.red_teamkills ?? 0)}
-                  </td>
-                  <td className="num font-mono">
-                    {formatGold(r.blue_totalgold)} / {formatGold(r.red_totalgold)}
-                  </td>
-                  <td className="num font-mono">
-                    {String(r.blue_dragons ?? "—")}–{String(r.red_dragons ?? "—")}
-                  </td>
-                  <td className="num font-mono">
-                    {String(r.blue_void_grubs ?? "—")}–{String(r.red_void_grubs ?? "—")}
-                  </td>
-                  <td className="num font-mono">
-                    {String(r.blue_towers ?? "—")}–{String(r.red_towers ?? "—")}
-                  </td>
-                  <td className="num font-mono">
-                    {String(r.blue_heralds ?? "—")}–{String(r.red_heralds ?? "—")}
-                  </td>
-                  <td className="num font-mono">
-                    {String(r.blue_barons ?? "—")}–{String(r.red_barons ?? "—")}
-                  </td>
-                  <td
-                    className={`num font-mono ${
-                      gd == null ? "" : gd >= 0 ? "gd-blue" : "gd-red"
-                    }`}
-                  >
-                    {gd == null ? "—" : `${gd >= 0 ? "+" : ""}${Math.round(gd)}`}
-                  </td>
-                  <td className="num font-mono text-xs">
-                    {formatClock(r.gamelength, r.length_min)}
-                  </td>
-                  <td>
-                    <Link
-                      href={`/browse/match/${encodeGameId(id)}?year=${year}`}
-                      className="row-link"
-                    >
-                      Board
-                    </Link>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {rows.length === 0 && !error && status !== "Querying maps parquet…" && (
-          <p className="empty-hint">No maps match these filters.</p>
-        )}
+      {!loading && <p className="status-hint">{status}</p>}
+
+      <div className="series-gallery">
+        {pageRows.map((s) => (
+          <SeriesTile
+            key={s.key}
+            s={s}
+            open={openKey === s.key}
+            onToggle={() => setOpenKey((k) => (k === s.key ? null : s.key))}
+          />
+        ))}
       </div>
+
+      {!loading && series.length === 0 && !error && (
+        <p className="empty-hint">
+          No series under these filters. The map is empty — blame the chips, not the players.
+        </p>
+      )}
+
+      {series.length > pageSize && (
+        <div className="pager">
+          <button
+            type="button"
+            className="status-pill ghost"
+            disabled={page <= 0}
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+          >
+            Prev
+          </button>
+          <span className="status-hint">
+            Page {page + 1} / {pageCount}
+          </span>
+          <button
+            type="button"
+            className="status-pill ghost"
+            disabled={page + 1 >= pageCount}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   );
 }
+
+/** @deprecated name kept for imports */
+export { BrowseMatches as BrowseMaps };

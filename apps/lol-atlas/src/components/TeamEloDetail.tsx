@@ -2,119 +2,189 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { queryRosterChampStats, type ChampAgg } from "@/lib/duck";
+import {
+  groupMapsIntoSeries,
+  queryMapsYears,
+  queryRosterChampStats,
+  type ChampAgg,
+  type SeriesCard,
+} from "@/lib/duck";
 import { champIconUrl, formatGold } from "@/lib/format";
-import type { PlayerRating, TeamRating } from "@/lib/pack";
-import { softMu } from "@/lib/pack";
+import type { PlayerRating, TeamRating, TeamRecord } from "@/lib/pack";
+import {
+  formatTrustCell,
+  formatWr,
+  packUpdatedLabel,
+  PLAYER_SIGMA_MIN,
+  playerSlug,
+  softMu,
+  TEAM_SIGMA_MIN,
+  teamSlug,
+  trustInfo,
+  type PackManifest,
+} from "@/lib/pack";
 
 type Props = {
   team: TeamRating;
   roster: PlayerRating[];
+  record?: TeamRecord;
   baseUrl: string;
   years: number[];
+  manifest: PackManifest;
 };
 
-function ChampRow({ c }: { c: ChampAgg }) {
-  const src = champIconUrl(c.champion);
-  return (
-    <tr>
-      <td>
-        <span className="inline-flex items-center gap-2">
-          {src ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={src} alt="" width={22} height={22} className="champ-thumb" />
-          ) : null}
-          {c.champion}
-        </span>
-      </td>
-      <td className="num">{c.n}</td>
-      <td className="num">
-        {c.kills.toFixed(1)}/{c.deaths.toFixed(1)}/{c.assists.toFixed(1)}
-      </td>
-      <td className="num">{formatGold(c.gold)}</td>
-      <td className="num">{c.dpm != null ? c.dpm.toFixed(0) : "—"}</td>
-      <td className="num">{c.cs != null ? c.cs.toFixed(0) : "—"}</td>
-      <td className="num">{(100 * c.wr).toFixed(0)}%</td>
-    </tr>
-  );
-}
+type ChampCol = "n" | "wr" | "kda" | "gold" | "dpm" | "cs";
 
-function PlayerBlock({
-  player,
+function ChampTable({
   champs,
-  loading,
-  err,
+  limit,
 }: {
-  player: PlayerRating;
-  champs: ChampAgg[] | null;
-  loading: boolean;
-  err: string | null;
+  champs: ChampAgg[];
+  limit: number | null;
 }) {
+  const [col, setCol] = useState<ChampCol>("n");
+  const [dir, setDir] = useState<"asc" | "desc">("desc");
+  const sorted = useMemo(() => {
+    const list = [...champs];
+    const sign = dir === "asc" ? 1 : -1;
+    list.sort((a, b) => {
+      const kda = (c: ChampAgg) => (c.kills + c.assists) / Math.max(c.deaths, 1);
+      switch (col) {
+        case "wr":
+          return sign * (a.wr - b.wr);
+        case "kda":
+          return sign * (kda(a) - kda(b));
+        case "gold":
+          return sign * (a.gold - b.gold);
+        case "dpm":
+          return sign * ((a.dpm ?? 0) - (b.dpm ?? 0));
+        case "cs":
+          return sign * ((a.cs ?? 0) - (b.cs ?? 0));
+        default:
+          return sign * (a.n - b.n);
+      }
+    });
+    return limit == null ? list : list.slice(0, limit);
+  }, [champs, col, dir, limit]);
+
+  const th = (label: string, c: ChampCol) => (
+    <th className="num">
+      <button
+        type="button"
+        className={`sort-th ${col === c ? "is-active" : ""}`}
+        onClick={() => {
+          if (col === c) setDir((d) => (d === "desc" ? "asc" : "desc"));
+          else {
+            setCol(c);
+            setDir("desc");
+          }
+        }}
+      >
+        {label}
+      </button>
+    </th>
+  );
+
   return (
-    <section className="border-t border-[var(--line)] pt-4 space-y-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="font-display text-lg">{player.player}</h3>
-        <div className="micro-log">
-          <span>
-            <strong>raw</strong> {player.mu_total.toFixed(1)}
-          </span>
-          <span>
-            <strong>adj.</strong> {softMu(player.mu_total, player.sigma).toFixed(1)}
-          </span>
-          <span>
-            <strong>uncertainty</strong> {player.sigma.toFixed(1)}
-          </span>
-          <span>
-            <strong>maps</strong> {player.n_maps}
-          </span>
-        </div>
-      </div>
-      {err && <p className="error-banner">{err}</p>}
-      {loading && !err && <p className="status-hint">Loading top champions…</p>}
-      {champs && champs.length === 0 && (
-        <p className="empty-hint">No champion rows in pack years for this player.</p>
-      )}
-      {champs && champs.length > 0 && (
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Champion</th>
-                <th className="num">n</th>
-                <th className="num">KDA</th>
-                <th className="num">Gold</th>
-                <th className="num">DPM</th>
-                <th className="num">CS</th>
-                <th className="num">WR</th>
+    <div className="table-scroll">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Champion</th>
+            {th("n", "n")}
+            {th("KDA", "kda")}
+            {th("Gold", "gold")}
+            {th("DPM", "dpm")}
+            {th("CS", "cs")}
+            {th("WR", "wr")}
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((c) => {
+            const src = champIconUrl(c.champion);
+            return (
+              <tr key={c.champion}>
+                <td>
+                  <span className="inline-flex items-center gap-2">
+                    {src ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={src} alt="" width={22} height={22} className="champ-thumb" />
+                    ) : null}
+                    {c.champion}
+                  </span>
+                </td>
+                <td className="num">{c.n}</td>
+                <td className="num">
+                  {c.kills.toFixed(1)}/{c.deaths.toFixed(1)}/{c.assists.toFixed(1)}
+                </td>
+                <td className="num">{formatGold(c.gold)}</td>
+                <td className="num">{c.dpm != null ? c.dpm.toFixed(0) : "—"}</td>
+                <td className="num">{c.cs != null ? c.cs.toFixed(0) : "—"}</td>
+                <td className="num">{(100 * c.wr).toFixed(0)}%</td>
               </tr>
-            </thead>
-            <tbody>
-              {champs.map((c) => (
-                <ChampRow key={c.champion} c={c} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
-export function TeamEloDetail({ team, roster, baseUrl, years }: Props) {
-  const sorted = useMemo(
-    () => [...roster].sort((a, b) => softMu(b.mu_total, b.sigma) - softMu(a.mu_total, a.sigma)),
+function exportRosterCsv(team: string, roster: PlayerRating[]) {
+  const lines = [
+    "player,raw_elo,league_aware,trust_sigma,games,last_team",
+    ...roster.map(
+      (p) =>
+        `"${p.player}",${p.mu_total.toFixed(2)},${softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(2)},${p.sigma.toFixed(2)},${p.n_maps},"${p.last_team ?? ""}"`,
+    ),
+  ];
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${team.replace(/\s+/g, "_")}_roster.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }: Props) {
+  const starters = useMemo(
+    () =>
+      [...roster]
+        .sort(
+          (a, b) =>
+            softMu(b.mu_total, b.sigma, PLAYER_SIGMA_MIN) -
+            softMu(a.mu_total, a.sigma, PLAYER_SIGMA_MIN),
+        )
+        .slice(0, 5),
     [roster],
   );
-  const rosterKey = useMemo(() => sorted.map((p) => p.player).join("\0"), [sorted]);
+  const substitutes = useMemo(() => {
+    const starterSet = new Set(starters.map((p) => p.player));
+    return [...roster]
+      .filter((p) => !starterSet.has(p.player))
+      .sort(
+        (a, b) =>
+          softMu(b.mu_total, b.sigma, PLAYER_SIGMA_MIN) -
+          softMu(a.mu_total, a.sigma, PLAYER_SIGMA_MIN),
+      );
+  }, [roster, starters]);
+
+  const [showSubs, setShowSubs] = useState(false);
   const [byPlayer, setByPlayer] = useState<Record<string, ChampAgg[]> | null>(null);
+  const [champExpand, setChampExpand] = useState<Record<string, boolean>>({});
+  const [series, setSeries] = useState<SeriesCard[]>([]);
+  const [draftEdge, setDraftEdge] = useState<number | null>(null);
+  const [banPick, setBanPick] = useState<{ bans: string[]; picks: string[] } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const trust = trustInfo(team.sigma, TEAM_SIGMA_MIN, record?.games);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const names = rosterKey ? rosterKey.split("\0") : [];
-        const rows = await queryRosterChampStats(baseUrl, years, names, 5);
+        const names = roster.map((p) => p.player);
+        const rows = await queryRosterChampStats(baseUrl, years, names, 40);
         if (!cancelled) setByPlayer(rows);
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
@@ -123,52 +193,271 @@ export function TeamEloDetail({ team, roster, baseUrl, years }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [baseUrl, years, rosterKey]);
+  }, [baseUrl, years, roster]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const maps = await queryMapsYears(baseUrl, years, { team: team.team, limit: 80 });
+        const grouped = groupMapsIntoSeries(maps);
+        if (cancelled) return;
+        setSeries(grouped.slice(0, 8));
+
+        // Draft edge over recent games with full picks
+        const edges: number[] = [];
+        const banCount = new Map<string, number>();
+        const pickCount = new Map<string, number>();
+        const patches = [...new Set(maps.map((m) => String(m.patch ?? "")))].filter(Boolean);
+        patches.sort();
+        const recentPatches = new Set(patches.slice(-3));
+
+        for (const m of maps.slice(0, 25)) {
+          const blue = [1, 2, 3, 4, 5].map((i) => String(m[`blue_pick${i}`] ?? "")).filter(Boolean);
+          const red = [1, 2, 3, 4, 5].map((i) => String(m[`red_pick${i}`] ?? "")).filter(Boolean);
+          if (blue.length === 5 && red.length === 5 && edges.length < 12) {
+            try {
+              const res = await fetch("/api/draft-wr", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  blue,
+                  red,
+                  league: String(m.league ?? ""),
+                }),
+              });
+              if (res.ok) {
+                const ds = (await res.json()) as { draft_edge: number };
+                const isBlue = String(m.blue_teamname) === team.team;
+                edges.push(isBlue ? ds.draft_edge : -ds.draft_edge);
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+          if (recentPatches.has(String(m.patch ?? ""))) {
+            const side = String(m.blue_teamname) === team.team ? "blue" : "red";
+            for (let i = 1; i <= 5; i++) {
+              const b = String(m[`${side}_ban${i}`] ?? "");
+              const p = String(m[`${side}_pick${i}`] ?? "");
+              if (b) banCount.set(b, (banCount.get(b) ?? 0) + 1);
+              if (p) pickCount.set(p, (pickCount.get(p) ?? 0) + 1);
+            }
+          }
+        }
+        if (edges.length) {
+          setDraftEdge(edges.reduce((a, b) => a + b, 0) / edges.length);
+        }
+        const top = (m: Map<string, number>, n: number) =>
+          [...m.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, n)
+            .map(([k]) => k);
+        setBanPick({ bans: top(banCount, 8), picks: top(pickCount, 8) });
+      } catch {
+        if (!cancelled) {
+          setSeries([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl, years, team.team]);
+
+  const wl = record
+    ? `${record.wins}–${record.games - record.wins}`
+    : "—";
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 print-area">
       <p className="text-xs text-[var(--ink-muted)]">
         <Link href="/elo" className="row-link">
-          ← Elo ladders
+          ← Ratings
         </Link>
       </p>
       <header className="page-header">
-        <p className="blog-kicker">Team · Dual Elo</p>
+        <p className="blog-kicker">
+          Team · {record?.primary ?? "Dual Elo"}
+          {record?.intl ? " · INTL" : ""}
+        </p>
         <h1 className="font-display mt-2 text-3xl">{team.team}</h1>
+        <p className="lede text-sm">
+          Regional {team.mu_regional.toFixed(0)} · International {team.mu_meta.toFixed(0)}. Soft
+          penalty applies only while Trust is still Thin — see Method.
+        </p>
         <div className="micro-log mt-4">
           <span>
-            <strong>raw</strong> {team.mu_total.toFixed(1)}
+            <strong>Raw Elo</strong> {team.mu_total.toFixed(1)}
           </span>
           <span>
-            <strong>adj.</strong> {softMu(team.mu_total, team.sigma).toFixed(1)}
+            <strong>League-aware</strong>{" "}
+            {softMu(team.mu_total, team.sigma, TEAM_SIGMA_MIN).toFixed(1)}
+          </span>
+          <span title={trust.layman}>
+            <strong>Trust</strong> {formatTrustCell(trust)}
           </span>
           <span>
-            <strong>regional</strong> {team.mu_regional.toFixed(1)}
+            <strong>Games</strong> {record?.games ?? "—"}
           </span>
           <span>
-            <strong>intl.</strong> {team.mu_meta.toFixed(1)}
+            <strong>W–L</strong> {wl}
           </span>
           <span>
-            <strong>uncertainty</strong> {team.sigma.toFixed(1)}
+            <strong>WR</strong> {formatWr(record?.wr)}
           </span>
+          {draftEdge != null && (
+            <span>
+              <strong>Draft edge</strong> {draftEdge >= 0 ? "+" : ""}
+              {draftEdge.toFixed(1)}
+            </span>
+          )}
+          <span>
+            <strong>Last updated</strong> {packUpdatedLabel(manifest)}
+          </span>
+        </div>
+        <div className="filter-bar mt-4">
+          <Link
+            className="btn-primary"
+            href={`/browse/head-to-head?a=${encodeURIComponent(team.team)}`}
+          >
+            Head-to-head
+          </Link>
+          <button
+            type="button"
+            className="status-pill ghost"
+            onClick={() => exportRosterCsv(team.team, roster)}
+          >
+            Export CSV
+          </button>
+          <button type="button" className="status-pill ghost" onClick={() => window.print()}>
+            Print / PDF
+          </button>
         </div>
       </header>
 
-      {sorted.length === 0 ? (
-        <p className="empty-hint">
-          No players with last_team matching this org in the player snapshot.
-        </p>
-      ) : (
-        sorted.map((p) => (
-          <PlayerBlock
-            key={p.player}
-            player={p}
-            champs={byPlayer ? (byPlayer[p.player] ?? []) : null}
-            loading={!byPlayer && !err}
-            err={err}
-          />
-        ))
+      <section className="space-y-4">
+        <h2 className="font-display text-xl">Players</h2>
+        {roster.length === 0 ? (
+          <p className="empty-hint">
+            No players currently tagged to this org in the snapshot. Rosters move — try Matches for
+            recent lineups.
+          </p>
+        ) : (
+          starters.map((p) => {
+            const champs = byPlayer?.[p.player] ?? [];
+            const expanded = champExpand[p.player];
+            const pTrust = trustInfo(p.sigma, PLAYER_SIGMA_MIN, p.n_maps);
+            return (
+              <section key={p.player} className="border-t border-[var(--line)] pt-4 space-y-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h3 className="font-display text-lg">
+                    <Link href={`/elo/player/${playerSlug(p.player)}`} className="row-link">
+                      {p.player}
+                    </Link>
+                  </h3>
+                  <div className="micro-log">
+                    <span>
+                      <strong>Raw Elo</strong> {p.mu_total.toFixed(1)}
+                    </span>
+                    <span>
+                      <strong>League-aware</strong>{" "}
+                      {softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(1)}
+                    </span>
+                    <span title={pTrust.layman}>
+                      <strong>Trust</strong> {formatTrustCell(pTrust)}
+                    </span>
+                    <span>
+                      <strong>Games</strong> {p.n_maps}
+                    </span>
+                  </div>
+                </div>
+                {err && <p className="error-banner">{err}</p>}
+                {!byPlayer && !err && <div className="skeleton-block short" />}
+                {champs.length > 0 && (
+                  <>
+                    <ChampTable champs={champs} limit={expanded ? null : 3} />
+                    {champs.length > 3 && (
+                      <button
+                        type="button"
+                        className="status-pill ghost"
+                        onClick={() =>
+                          setChampExpand((s) => ({ ...s, [p.player]: !s[p.player] }))
+                        }
+                      >
+                        {expanded ? "Collapse champs" : "Expand champs"}
+                      </button>
+                    )}
+                  </>
+                )}
+              </section>
+            );
+          })
+        )}
+
+        {substitutes.length > 0 && (
+          <div className="pt-2">
+            <button
+              type="button"
+              className="status-pill ghost"
+              onClick={() => setShowSubs((x) => !x)}
+            >
+              {showSubs ? "Hide substitutes" : `Substitutes (${substitutes.length})`}
+            </button>
+            {showSubs &&
+              substitutes.map((p) => (
+                <p key={p.player} className="mt-2 text-sm">
+                  <span className="status-pill ghost" style={{ marginRight: 8 }}>
+                    Sub
+                  </span>
+                  <Link href={`/elo/player/${playerSlug(p.player)}`} className="row-link">
+                    {p.player}
+                  </Link>{" "}
+                  <span className="muted">
+                    · {softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(1)} · {p.n_maps} games
+                  </span>
+                </p>
+              ))}
+          </div>
+        )}
+      </section>
+
+      {banPick && (banPick.bans.length > 0 || banPick.picks.length > 0) && (
+        <section className="space-y-2 border-t border-[var(--line)] pt-4">
+          <h2 className="font-display text-xl">Ban / pick (last 3 patches)</h2>
+          <p className="text-sm">
+            <strong>Bans</strong> {banPick.bans.join(", ") || "—"}
+          </p>
+          <p className="text-sm">
+            <strong>Picks</strong> {banPick.picks.join(", ") || "—"}
+          </p>
+        </section>
       )}
+
+      <section className="space-y-3 border-t border-[var(--line)] pt-4">
+        <h2 className="font-display text-xl">Recent series</h2>
+        {series.length === 0 ? (
+          <p className="empty-hint">No recent series loaded yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {series.map((s) => (
+              <li key={s.key} className="text-sm">
+                <span className="font-mono muted">{s.date}</span> · {s.league} · Bo{s.bestOf}{" "}
+                <Link href={`/elo/team/${teamSlug(s.teamA)}`} className="row-link">
+                  {s.teamA}
+                </Link>{" "}
+                {s.winsA}–{s.winsB}{" "}
+                <Link href={`/elo/team/${teamSlug(s.teamB)}`} className="row-link">
+                  {s.teamB}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+        <Link className="row-link" href={`/browse?teams=${encodeURIComponent(team.team)}`}>
+          Open in Matches »
+        </Link>
+      </section>
     </div>
   );
 }

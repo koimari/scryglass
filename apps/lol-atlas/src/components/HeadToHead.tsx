@@ -2,50 +2,58 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  groupMapsIntoSeries,
   listLeagues,
   loadMatchBundle,
-  loadMatchModelPrior,
   queryMaps,
-  type MatchModelPrior,
+  queryMapsYears,
   type QueryRow,
+  type SeriesCard,
 } from "@/lib/duck";
 import { formatClock } from "@/lib/format";
+import { expandTeamQuery, teamSlug } from "@/lib/pack";
 import { MatchScoreboard } from "./MatchScoreboard";
-import { ModelChecklist } from "./ModelChecklist";
 import { useDraftWr } from "./DraftWrPanel";
 
 function H2HBoardPanel({
   map,
   players,
-  prior,
-  priorLoading,
   year,
 }: {
   map: QueryRow;
   players: QueryRow[];
-  prior: MatchModelPrior | null;
-  priorLoading: boolean;
   year: number;
 }) {
-  const eloDiff = prior?.muDiff ?? null;
-  const { draft } = useDraftWr(map, players, eloDiff);
+  const { draft } = useDraftWr(map, players, null);
   return (
     <>
+      <div className="micro-log mb-3">
+        {draft ? (
+          <span>
+            <strong>Draft</strong>{" "}
+            <span className="text-[var(--side-blue)]">
+              {(100 * draft.p_blue_draft).toFixed(0)}%
+            </span>
+            {" / "}
+            <span className="text-[var(--side-red)]">
+              {(100 * (1 - draft.p_blue_draft)).toFixed(0)}%
+            </span>
+            {" · score "}
+            {draft.draft_score_blue.toFixed(0)}–{draft.draft_score_red.toFixed(0)}
+          </span>
+        ) : (
+          <span className="muted">Draft …</span>
+        )}
+      </div>
       <MatchScoreboard map={map} players={players} draftPctBlue={draft?.p_blue_draft ?? null} />
-      <ModelChecklist
-        map={map}
-        players={players}
-        prior={prior}
-        loading={priorLoading}
-        eloDiff={eloDiff}
-      />
       <p className="mt-3 text-xs text-[var(--ink-muted)]">
         <Link
           href={`/browse/match/${encodeURIComponent(String(map.oe_gameid))}?year=${year}`}
           className="row-link"
         >
-          Open match page
+          Open match page (model checklist)
         </Link>
       </p>
     </>
@@ -53,24 +61,38 @@ function H2HBoardPanel({
 }
 
 type Props = { baseUrl: string; years: number[] };
+type SortCol = "date" | "kills" | "len";
+type Dir = "asc" | "desc";
+
+function ymd(d: unknown): string {
+  const s = String(d ?? "");
+  const m = s.match(/(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : s.slice(0, 10);
+}
 
 export function HeadToHead({ baseUrl, years }: Props) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   const yearDefault = years.includes(2026) ? 2026 : years[years.length - 1] ?? 2026;
-  const [year, setYear] = useState(yearDefault);
-  const [league, setLeague] = useState("");
-  const [teamA, setTeamA] = useState("");
-  const [teamB, setTeamB] = useState("");
+  const [allTime, setAllTime] = useState(searchParams.get("scope") === "all");
+  const [year, setYear] = useState(Number(searchParams.get("year") || yearDefault));
+  const [league, setLeague] = useState(searchParams.get("league") || "");
+  const [teamA, setTeamA] = useState(searchParams.get("a") || "");
+  const [teamB, setTeamB] = useState(searchParams.get("b") || "");
   const [leagues, setLeagues] = useState<string[]>([]);
-  const [rows, setRows] = useState<QueryRow[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [board, setBoard] = useState<{
-    map: QueryRow;
-    players: QueryRow[];
-  } | null>(null);
-  const [prior, setPrior] = useState<MatchModelPrior | null>(null);
-  const [priorLoading, setPriorLoading] = useState(false);
+  const [series, setSeries] = useState<SeriesCard[]>([]);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [board, setBoard] = useState<{ map: QueryRow; players: QueryRow[]; year: number } | null>(
+    null,
+  );
+  const [sortCol, setSortCol] = useState<SortCol>("date");
+  const [sortDir, setSortDir] = useState<Dir>("desc");
+  const [draftLean, setDraftLean] = useState<string | null>(null);
   const [status, setStatus] = useState("Idle");
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,113 +109,249 @@ export function HeadToHead({ baseUrl, years }: Props) {
     };
   }, [baseUrl, year]);
 
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (teamA.trim()) params.set("a", teamA.trim());
+    if (teamB.trim()) params.set("b", teamB.trim());
+    if (league) params.set("league", league);
+    if (allTime) params.set("scope", "all");
+    else params.set("year", String(year));
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [teamA, teamB, league, year, allTime, pathname, router]);
+
   const record = useMemo(() => {
     let a = 0;
     let b = 0;
-    const aNeedle = teamA.trim().toLowerCase();
-    const bNeedle = teamB.trim().toLowerCase();
-    if (!aNeedle || !bNeedle) return { a, b };
-    for (const r of rows) {
-      const blue = String(r.blue_teamname ?? "").toLowerCase();
-      const red = String(r.red_teamname ?? "").toLowerCase();
-      const blueIsA = blue.includes(aNeedle);
-      const redIsA = red.includes(aNeedle);
-      const blueIsB = blue.includes(bNeedle);
-      const redIsB = red.includes(bNeedle);
-      // Prefer exact-side pairing; skip ambiguous double-matches
-      const aOnBlue = blueIsA && redIsB && !(blueIsB || redIsA);
-      const aOnRed = redIsA && blueIsB && !(redIsB || blueIsA);
-      // Looser fallback when needles are unique enough
-      const looseBlueA = blueIsA && redIsB;
-      const looseRedA = redIsA && blueIsB;
-      const blueWin = Number(r.blue_result) === 1;
-      if (aOnBlue || (!aOnRed && looseBlueA && !(blueIsB && redIsA))) {
-        if (blueWin) a += 1;
-        else b += 1;
-      } else if (aOnRed || looseRedA) {
-        if (blueWin) b += 1;
-        else a += 1;
+    const aN = teamA.trim().toLowerCase();
+    const bN = teamB.trim().toLowerCase();
+    for (const s of series) {
+      if (s.teamA.toLowerCase().includes(aN) || s.teamB.toLowerCase().includes(aN)) {
+        // map wins onto A/B labels
+        const aIsTeamA = s.teamA.toLowerCase().includes(aN);
+        if (aIsTeamA) {
+          a += s.winsA;
+          b += s.winsB;
+        } else {
+          a += s.winsB;
+          b += s.winsA;
+        }
       }
     }
     return { a, b };
-  }, [rows, teamA, teamB]);
+  }, [series, teamA, teamB]);
+
+  const sortedSeries = useMemo(() => {
+    const list = [...series];
+    const sign = sortDir === "asc" ? 1 : -1;
+    list.sort((x, y) => {
+      if (sortCol === "date") return sign * x.date.localeCompare(y.date);
+      if (sortCol === "kills") {
+        const kx = x.games.reduce(
+          (s, g) => s + (Number(g.blue_teamkills) || 0) + (Number(g.red_teamkills) || 0),
+          0,
+        );
+        const ky = y.games.reduce(
+          (s, g) => s + (Number(g.blue_teamkills) || 0) + (Number(g.red_teamkills) || 0),
+          0,
+        );
+        return sign * (kx - ky);
+      }
+      const lx = x.games.reduce((s, g) => s + (Number(g.length_min) || 0), 0);
+      const ly = y.games.reduce((s, g) => s + (Number(g.length_min) || 0), 0);
+      return sign * (lx - ly);
+    });
+    return list;
+  }, [series, sortCol, sortDir]);
+
+  const resolveExact = (raw: string, sampleNames: string[]): string | null => {
+    const needles = expandTeamQuery(raw);
+    const hits = sampleNames.filter((n) =>
+      needles.some((nd) => n.toLowerCase().includes(nd) || nd.includes(n.toLowerCase())),
+    );
+    const uniq = [...new Set(hits)];
+    if (uniq.length === 1) return uniq[0];
+    if (uniq.length === 0) return null;
+    // prefer exact ignore-case
+    const exact = uniq.find((u) => u.toLowerCase() === raw.trim().toLowerCase());
+    return exact ?? null;
+  };
 
   const run = useCallback(async () => {
     if (!teamA.trim() || !teamB.trim()) {
-      setError("Enter both team names for head-to-head.");
+      setError("Need two teams — even rivals deserve a proper introduction.");
       return;
     }
     setError(null);
     setBoard(null);
-    setSelected(null);
-    setStatus("Searching maps…");
+    setSelectedKey(null);
+    setDraftLean(null);
+    setLoading(true);
+    setStatus("Searching series…");
     try {
-      const data = await queryMaps(baseUrl, year, {
-        league: league || undefined,
-        teamA: teamA.trim(),
-        teamB: teamB.trim(),
-        limit: 80,
+      const aQ = teamA.trim();
+      const bQ = teamB.trim();
+      const data = allTime
+        ? await queryMapsYears(baseUrl, years, {
+            teamA: aQ,
+            teamB: bQ,
+            league: league || undefined,
+            limit: 200,
+          })
+        : await queryMaps(baseUrl, year, {
+            league: league || undefined,
+            teamA: aQ,
+            teamB: bQ,
+            limit: 120,
+          });
+
+      const names = [
+        ...new Set(
+          data.flatMap((r) => [String(r.blue_teamname ?? ""), String(r.red_teamname ?? "")]),
+        ),
+      ].filter(Boolean);
+      const exactA = resolveExact(aQ, names);
+      const exactB = resolveExact(bQ, names);
+      if (!exactA || !exactB) {
+        setError(
+          `Ambiguous teams (${aQ} / ${bQ}). Pick clearer names — aliases like G2 work once they resolve to one org.`,
+        );
+        setSeries([]);
+        setStatus("Idle");
+        return;
+      }
+
+      const filtered = data.filter((r) => {
+        const blue = String(r.blue_teamname);
+        const red = String(r.red_teamname);
+        return (
+          (blue === exactA && red === exactB) || (blue === exactB && red === exactA)
+        );
       });
-      setRows(data);
-      setStatus(`${data.length} meetings`);
-      if (data[0]) {
-        const id = String(data[0].oe_gameid);
-        setSelected(id);
+      const grouped = groupMapsIntoSeries(
+        filtered.map((r) => ({
+          ...r,
+          _year: r._year ?? year,
+        })),
+      );
+      setSeries(grouped);
+      setStatus(`${grouped.length} series · ${filtered.length} games`);
+      if (grouped[0]) setSelectedKey(grouped[0].key);
+
+      // Draft lean: sample up to 8 games
+      let aEdge = 0;
+      let n = 0;
+      for (const g of filtered.slice(0, 8)) {
+        const blue = [1, 2, 3, 4, 5].map((i) => String(g[`blue_pick${i}`] ?? "")).filter(Boolean);
+        const red = [1, 2, 3, 4, 5].map((i) => String(g[`red_pick${i}`] ?? "")).filter(Boolean);
+        if (blue.length !== 5 || red.length !== 5) continue;
+        try {
+          const res = await fetch("/api/draft-wr", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ blue, red, league: String(g.league ?? "") }),
+          });
+          if (!res.ok) continue;
+          const ds = (await res.json()) as { draft_edge: number };
+          const aIsBlue = String(g.blue_teamname) === exactA;
+          aEdge += aIsBlue ? ds.draft_edge : -ds.draft_edge;
+          n += 1;
+        } catch {
+          /* ignore */
+        }
+      }
+      if (n) {
+        const mean = aEdge / n;
+        setDraftLean(
+          mean > 2
+            ? `${exactA} usually wins the draft axis in this H2H (${mean.toFixed(1)} mean edge).`
+            : mean < -2
+              ? `${exactB} usually wins the draft axis in this H2H (${Math.abs(mean).toFixed(1)} mean edge).`
+              : `Drafts in this H2H are roughly even (mean edge ${mean.toFixed(1)}).`,
+        );
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        e instanceof Error
+          ? `${e.message} — try again; DuckDB gets stage fright sometimes.`
+          : String(e),
+      );
       setStatus("Error");
+    } finally {
+      setLoading(false);
     }
-  }, [baseUrl, year, league, teamA, teamB]);
+  }, [baseUrl, year, years, league, teamA, teamB, allTime]);
 
   useEffect(() => {
-    if (!selected) return;
+    if (searchParams.get("a") && searchParams.get("b")) {
+      void run();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!selectedKey) return;
+    const s = series.find((x) => x.key === selectedKey);
+    if (!s?.games[0]) return;
+    const id = String(s.games[0].oe_gameid);
+    const y = s.year || year;
     let cancelled = false;
     (async () => {
-      setStatus("Loading scoreboard…");
-      setPrior(null);
+      setStatus("Loading board…");
       try {
-        const bundle = await loadMatchBundle(baseUrl, [year], selected);
+        const bundle = await loadMatchBundle(baseUrl, allTime ? years : [y], id);
         if (cancelled) return;
         if (!bundle) {
-          setError("No player rows for this map.");
+          setError("No player rows for this game — awkward.");
           setBoard(null);
           return;
         }
-        setBoard({ map: bundle.map, players: bundle.players });
+        setBoard({ map: bundle.map, players: bundle.players, year: bundle.year });
         setStatus("Ready");
-        setPriorLoading(true);
-        const p = await loadMatchModelPrior(baseUrl, bundle.year, bundle.map);
-        if (!cancelled) {
-          setPrior(p);
-          setPriorLoading(false);
-        }
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : String(e));
           setStatus("Error");
-          setPriorLoading(false);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [selected, baseUrl, year]);
+  }, [selectedKey, series, baseUrl, year, years, allTime]);
+
+  const onSort = (c: SortCol) => {
+    if (c === sortCol) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    else {
+      setSortCol(c);
+      setSortDir(c === "date" ? "desc" : "desc");
+    }
+  };
 
   return (
     <div className="space-y-6">
       <div className="filter-bar">
         <label className="field">
-          <span>Year</span>
-          <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
-            {years.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
+          <span>Scope</span>
+          <select
+            value={allTime ? "all" : "year"}
+            onChange={(e) => setAllTime(e.target.value === "all")}
+          >
+            <option value="year">Current year</option>
+            <option value="all">All time (pack)</option>
           </select>
         </label>
+        {!allTime && (
+          <label className="field">
+            <span>Year</span>
+            <select value={year} onChange={(e) => setYear(Number(e.target.value))}>
+              {years.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="field">
           <span>League</span>
           <select value={league} onChange={(e) => setLeague(e.target.value)}>
@@ -210,7 +368,8 @@ export function HeadToHead({ baseUrl, years }: Props) {
           <input
             value={teamA}
             onChange={(e) => setTeamA(e.target.value)}
-            placeholder="VKS Academy"
+            placeholder="G2"
+            list="h2h-teams"
             onKeyDown={(e) => {
               if (e.key === "Enter") void run();
             }}
@@ -221,25 +380,51 @@ export function HeadToHead({ baseUrl, years }: Props) {
           <input
             value={teamB}
             onChange={(e) => setTeamB(e.target.value)}
-            placeholder="KaBuM"
+            placeholder="FNC"
+            list="h2h-teams"
             onKeyDown={(e) => {
               if (e.key === "Enter") void run();
             }}
           />
         </label>
+        <datalist id="h2h-teams">
+          {/* lightweight — filled from last result names via series */}
+          {series.flatMap((s) => [s.teamA, s.teamB]).map((t) => (
+            <option key={t} value={t} />
+          ))}
+        </datalist>
         <button type="button" className="btn-primary" onClick={() => void run()}>
           Find H2H
         </button>
-        <span className="status-hint">{status}</span>
+        <Link
+          className="status-pill ghost"
+          href={`/browse?teams=${encodeURIComponent(teamA.trim())}|${encodeURIComponent(teamB.trim())}`}
+        >
+          Open Matches
+        </Link>
       </div>
 
+      {loading && <div className="skeleton-block" />}
       {error && <p className="error-banner">{error}</p>}
+      <p className="status-hint">{status}</p>
 
-      {rows.length > 0 && (
-        <p className="h2h-record font-mono">
-          {teamA.trim() || "A"} {record.a}–{record.b} {teamB.trim() || "B"}
-          <span className="muted"> · {rows.length} maps in pack</span>
-        </p>
+      {series.length > 0 && (
+        <>
+          <p className="h2h-record font-mono">
+            <Link href={`/elo/team/${teamSlug(teamA.trim())}`} className="row-link">
+              {teamA.trim() || "A"}
+            </Link>{" "}
+            {record.a}–{record.b}{" "}
+            <Link href={`/elo/team/${teamSlug(teamB.trim())}`} className="row-link">
+              {teamB.trim() || "B"}
+            </Link>
+            <span className="muted">
+              {" "}
+              · {series.length} series · {series.reduce((n, s) => n + s.games.length, 0)} games
+            </span>
+          </p>
+          {draftLean && <p className="text-sm text-[var(--ink-muted)] max-w-[68ch]">{draftLean}</p>}
+        </>
       )}
 
       <div className="h2h-layout">
@@ -247,62 +432,73 @@ export function HeadToHead({ baseUrl, years }: Props) {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Blue</th>
-                <th>Red</th>
-                <th className="num">K</th>
-                <th className="num">Len</th>
+                <th>
+                  <button type="button" className="sort-th" onClick={() => onSort("date")}>
+                    Date{sortCol === "date" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                  </button>
+                </th>
+                <th>Series</th>
+                <th className="num">
+                  <button type="button" className="sort-th" onClick={() => onSort("kills")}>
+                    Kills{sortCol === "kills" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                  </button>
+                </th>
+                <th className="num">
+                  <button type="button" className="sort-th" onClick={() => onSort("len")}>
+                    Len{sortCol === "len" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
-                const id = String(r.oe_gameid ?? "");
-                const active = id === selected;
+              {sortedSeries.map((s) => {
+                const active = s.key === selectedKey;
+                const kills = s.games.reduce(
+                  (n, g) => n + (Number(g.blue_teamkills) || 0) + (Number(g.red_teamkills) || 0),
+                  0,
+                );
+                const len = s.games.reduce((n, g) => n + (Number(g.length_min) || 0), 0);
                 return (
                   <tr
-                    key={id}
+                    key={s.key}
                     className={active ? "is-selected" : undefined}
                     tabIndex={0}
                     role="button"
-                    aria-pressed={active}
-                    onClick={() => setSelected(id)}
+                    onClick={() => setSelectedKey(s.key)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
-                        setSelected(id);
+                        setSelectedKey(s.key);
                       }
                     }}
                     style={{ cursor: "pointer" }}
                   >
-                    <td className="font-mono text-xs">{String(r.date ?? "").slice(0, 10)}</td>
-                    <td>{String(r.blue_teamname ?? "")}</td>
-                    <td>{String(r.red_teamname ?? "")}</td>
-                    <td className="num font-mono">
-                      {String(r.blue_teamkills ?? 0)}–{String(r.red_teamkills ?? 0)}
+                    <td className="font-mono text-xs">{s.date}</td>
+                    <td>
+                      Bo{s.bestOf} · {s.teamA} {s.winsA}–{s.winsB} {s.teamB}
+                      <div className="muted text-xs">{s.league}</div>
                     </td>
-                    <td className="num font-mono text-xs">
-                      {formatClock(r.gamelength, r.length_min)}
-                    </td>
+                    <td className="num font-mono">{kills}</td>
+                    <td className="num font-mono text-xs">{len.toFixed(0)}m</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          {rows.length === 0 && !error && (
-            <p className="empty-hint">Enter two teams and find meetings in the pack years.</p>
+          {series.length === 0 && !error && !loading && (
+            <p className="empty-hint">
+              Enter two teams and find meetings. Tip: aliases like KC work once they resolve cleanly.
+            </p>
           )}
         </div>
         <div className="h2h-board">
           {board ? (
-            <H2HBoardPanel
-              map={board.map}
-              players={board.players}
-              prior={prior}
-              priorLoading={priorLoading}
-              year={year}
-            />
+            <H2HBoardPanel map={board.map} players={board.players} year={board.year} />
           ) : (
-            <p className="empty-hint">Select a meeting to open the Leaguepedia-style scoreboard.</p>
+            <p className="empty-hint">
+              Click a series to open the board. The checklist lives on the match page — H2H stays
+              about the rivalry.
+            </p>
           )}
         </div>
       </div>

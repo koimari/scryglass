@@ -50,6 +50,56 @@ export type EloCalibration = {
   player: { intercept: number; coef: number; temperature_400?: number };
 };
 
+export type TeamRecord = {
+  leagues: string[];
+  primary: string | null;
+  intl: boolean;
+  wins: number;
+  games: number;
+  wr: number | null;
+  by_league?: Record<string, { wins: number; games: number; wr: number | null }>;
+};
+
+export type PlayerRecord = {
+  wins: number;
+  games: number;
+  wr: number | null;
+  leagues?: string[];
+  primary?: string | null;
+  intl?: boolean;
+};
+
+/** Dual Elo σ floors from ratings_meta / player_ratings_meta. */
+export const TEAM_SIGMA_MIN = 25;
+export const PLAYER_SIGMA_MIN = 28;
+
+export const INTL_LEAGUES = ["MSI", "EWC", "Worlds", "FST"] as const;
+
+export const REGION_LEAGUES = [
+  "LCK",
+  "LPL",
+  "LEC",
+  "LCS",
+  "LTA",
+  "CBLOL",
+  "PCS",
+  "VCS",
+  "LJL",
+  "LCP",
+  "TCL",
+] as const;
+
+export type TrustKind = "settled" | "thin" | "very_thin";
+
+export type TrustInfo = {
+  kind: TrustKind;
+  label: string;
+  headroom: number;
+  sigma: number;
+  floor: number;
+  layman: string;
+};
+
 export async function loadManifest(origin = ""): Promise<PackManifest> {
   const res = await fetch(`${origin}/packs/manifest.json`, { cache: "no-store" });
   if (!res.ok) throw new Error(`manifest ${res.status}`);
@@ -80,7 +130,180 @@ export function teamSlug(name: string): string {
   return encodeURIComponent(name.trim());
 }
 
-/** Soft ranking: penalize high-σ teams so thin regional ladders don't outrank majors. */
-export function softMu(mu: number, sigma: number, floor = 25): number {
+export function playerSlug(name: string): string {
+  return encodeURIComponent(name.trim());
+}
+
+export function packUpdatedLabel(manifest: PackManifest): string {
+  const raw = manifest.created_utc || "";
+  const d = raw.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+    const [y, m, day] = d.split("-");
+    return `${day}/${m}/${y}`;
+  }
+  // pack_id vYYYY.MM.DD
+  const m = /^v(\d{4})\.(\d{2})\.(\d{2})$/.exec(manifest.pack_id);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  return manifest.pack_id;
+}
+
+/** Soft ranking: penalize high-σ so thin ladders don't outrank settled orgs. */
+export function softMu(mu: number, sigma: number, floor = TEAM_SIGMA_MIN): number {
   return mu - Math.max(0, sigma - floor);
+}
+
+export function trustInfo(sigma: number, floor: number, games?: number | null): TrustInfo {
+  const headroom = Math.max(0, sigma - floor);
+  let kind: TrustKind = "settled";
+  if (headroom > 20) kind = "very_thin";
+  else if (headroom > 0.5) kind = "thin";
+  const label = kind === "settled" ? "Settled" : kind === "thin" ? "Thin" : "Very thin";
+  const gamesBit =
+    games != null && games > 0 ? ` · ${games} game${games === 1 ? "" : "s"} in sample` : "";
+  const layman =
+    kind === "settled"
+      ? `Rating is as settled as this model allows${gamesBit}.`
+      : kind === "thin"
+        ? `Still moving — fewer informative games than a settled org${gamesBit}.`
+        : `Very thin sample — treat the number gently${gamesBit}.`;
+  return { kind, label, headroom, sigma, floor, layman };
+}
+
+export function formatWr(wr: number | null | undefined): string {
+  if (wr == null || !Number.isFinite(wr)) return "—";
+  return `${(100 * wr).toFixed(1)}%`;
+}
+
+export function formatTrustCell(info: TrustInfo): string {
+  return info.label;
+}
+
+/** Common team aliases for fuzzy ladder / filter matching. */
+const TEAM_ALIASES: Record<string, string> = {
+  kc: "Karmine Corp",
+  "karmine corp": "Karmine Corp",
+  dk: "Dplus Kia",
+  "dplus kia": "Dplus Kia",
+  mkoi: "Movistar KOI",
+  koi: "Movistar KOI",
+  "movistar koi": "Movistar KOI",
+  t1: "T1",
+  gen: "Gen.G",
+  geng: "Gen.G",
+  "gen.g": "Gen.G",
+  hle: "Hanwha Life Esports",
+  "hanwha life": "Hanwha Life Esports",
+  g2: "G2 Esports",
+  fnc: "Fnatic",
+  c9: "Cloud9",
+  tl: "Team Liquid",
+  "100t": "100 Thieves",
+  "100 thieves": "100 Thieves",
+  blg: "Bilibili Gaming",
+  jdg: "JD Gaming",
+  tes: "Top Esports",
+  lng: "LNG Esports",
+  we: "Team WE",
+  ig: "Invictus Gaming",
+  rng: "Royal Never Give Up",
+  dwg: "Dplus Kia",
+  drx: "DRX",
+  ktz: "KT Rolster",
+  kt: "KT Rolster",
+  nsf: "Nongshim RedForce",
+  ns: "Nongshim RedForce",
+  bro: "OKSavingsBank BRION",
+  fox: "BNK FEARX",
+  fly: "FlyQuest",
+  sr: "Shopify Rebellion",
+  dig: "Dignitas",
+  lrx: "LOUD",
+  pai: "paiN Gaming",
+  fur: "FURIA",
+  red: "RED Canids",
+  vibe: "Vivo Keyd Stars",
+};
+
+function normKey(name: string): string {
+  return (name || "")
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/[’`]/g, "'")
+    .replace(/\s+/g, " ");
+}
+
+export function expandTeamQuery(q: string): string[] {
+  const raw = q.trim();
+  if (!raw) return [];
+  const key = normKey(raw);
+  const canon = TEAM_ALIASES[key];
+  const out = [raw.toLowerCase()];
+  if (canon) out.push(canon.toLowerCase(), normKey(canon));
+  out.push(key);
+  return [...new Set(out)];
+}
+
+export function teamMatchesQuery(team: string, q: string): boolean {
+  const needles = expandTeamQuery(q);
+  if (!needles.length) return true;
+  const hay = team.toLowerCase();
+  const hayKey = normKey(team);
+  return needles.some((n) => hay.includes(n) || hayKey.includes(n) || n.includes(hayKey));
+}
+
+export function playerMatchesQuery(player: string, lastTeam: string | null, q: string): boolean {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return true;
+  if (player.toLowerCase().includes(needle)) return true;
+  if (lastTeam && teamMatchesQuery(lastTeam, q)) return true;
+  return false;
+}
+
+export function isIntlLeague(league: string): boolean {
+  const u = league.toUpperCase();
+  return (
+    u === "MSI" ||
+    u === "EWC" ||
+    u === "FST" ||
+    u.includes("WORLD") ||
+    u.includes("FIRST STAND")
+  );
+}
+
+export function recordMatchesLeagues(
+  rec: { leagues?: string[]; intl?: boolean; primary?: string | null } | undefined,
+  selected: string[],
+): boolean {
+  if (!selected.length) return true;
+  if (!rec) return false;
+  const set = new Set(selected);
+  if (set.has("INTL")) {
+    if (rec.intl) return true;
+    if ((rec.leagues || []).some(isIntlLeague)) return true;
+  }
+  const leagues = rec.leagues || [];
+  if (leagues.some((L) => set.has(L))) return true;
+  if (rec.primary && set.has(rec.primary)) return true;
+  return false;
+}
+
+export function scopedTeamWr(
+  rec: TeamRecord | undefined,
+  selected: string[],
+): number | null {
+  if (!rec) return null;
+  if (!selected.length) return rec.wr;
+  let wins = 0;
+  let games = 0;
+  const by = rec.by_league || {};
+  for (const [lg, row] of Object.entries(by)) {
+    const want =
+      (selected.includes("INTL") && isIntlLeague(lg)) || selected.includes(lg);
+    if (!want) continue;
+    wins += row.wins;
+    games += row.games;
+  }
+  if (!games) return null;
+  return wins / games;
 }
