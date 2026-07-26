@@ -1,7 +1,7 @@
 {
-  "pack_id": "v2026.07.26.1456",
+  "pack_id": "v2026.07.26.1507",
   "schema_version": "1.3.0",
-  "created_utc": "2026-07-26T14:57:56.554850+00:00",
+  "created_utc": "2026-07-26T15:09:29.167675+00:00",
   "filters": {
     "years": [
       2025,
@@ -43,7 +43,7 @@
   },
   "ingest": {
     "refresh_meta": {
-      "refreshed_at": "2026-07-26T14:53:22.807035+00:00",
+      "refreshed_at": "2026-07-26T15:03:29.987761+00:00",
       "n_maps": 6284,
       "oe_rows": 32668,
       "grid_rows": 64,
@@ -57,30 +57,30 @@
       "oe_matched": 0
     },
     "grid_meta": {
-      "fetched_at": "2026-07-26T14:50:49.731685+00:00",
+      "fetched_at": "2026-07-26T15:01:09.778129+00:00",
       "window": {
-        "start": "2026-07-16T14:50:49Z",
-        "end": "2026-07-26T16:50:49Z"
+        "start": "2026-07-16T15:01:09Z",
+        "end": "2026-07-26T17:01:09Z"
       },
       "series_seen": 30,
-      "files_downloaded": 20,
-      "files_existing": 36,
+      "files_downloaded": 4,
+      "files_existing": 56,
       "files_not_ready": 0,
-      "files_failed": 1,
+      "files_failed": 0,
       "file_list_failures": 0,
-      "rate_limited": true,
+      "rate_limited": false,
       "pro_only": true,
       "source": "grid",
       "parsed_files": 32,
-      "skipped_files": 24,
+      "skipped_files": 28,
       "games": 32,
       "team_rows": 64,
       "player_rows": 320,
-      "cached_games": 22,
-      "refreshed_at": "2026-07-26T14:53:00.365318+00:00"
+      "cached_games": 32,
+      "refreshed_at": "2026-07-26T15:02:59.822780+00:00"
     }
   },
-  "base_url": "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/packs/v2026.07.26.1456",
+  "base_url": "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/packs/v2026.07.26.1507",
   "total_bytes": 29359334,
   "total_files": 43,
   "files": [
