@@ -181,6 +181,18 @@ def _normalize_oe_maps(oe_w: pd.DataFrame) -> pd.DataFrame:
     return m
 
 
+def _canonical_player_game_key(players: pd.DataFrame) -> pd.DataFrame:
+    """Keep one game UID when OE and GRID both provide a game identifier."""
+    out = players.copy()
+    if "gameid" in out.columns and "game_uid" in out.columns:
+        out["game_uid"] = out["game_uid"].fillna(out["gameid"])
+        out = out.drop(columns=["gameid"])
+    elif "gameid" in out.columns:
+        out = out.rename(columns={"gameid": "game_uid"})
+    out["game_uid"] = out["game_uid"].astype(str)
+    return out
+
+
 def _lp_wide(lp_team: pd.DataFrame) -> pd.DataFrame:
     if lp_team.empty:
         return pd.DataFrame()
@@ -366,8 +378,7 @@ def build_map_warehouse(
     if oe_pl.exists():
         oe_players = pd.read_parquet(oe_pl)
         if not oe_players.empty:
-            oe_players = oe_players.rename(columns={"gameid": "game_uid"})
-            oe_players["game_uid"] = oe_players["game_uid"].astype(str)
+            oe_players = _canonical_player_game_key(oe_players)
             oe_players = canonicalize_competition_frame(oe_players)
             oe_players.to_parquet(PARQUET_DIR / "players.parquet", index=False)
             print(f"[join] wrote OE players n={len(oe_players)}")
