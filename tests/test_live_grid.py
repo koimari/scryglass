@@ -12,7 +12,7 @@ import pandas as pd
 
 import lol_kills.etl.grid_ingest as grid_ingest
 from lol_kills.etl.grid_ingest import _download
-from lol_kills.etl.join import _canonical_player_game_key
+from lol_kills.etl.join import _canonical_player_game_key, _oe_wide
 from lol_kills.etl.grid_series_events import (
     default_config,
     series_events_url,
@@ -45,6 +45,30 @@ class GridSeriesEventsTests(unittest.TestCase):
         )
         self.assertTrue(pd.api.types.is_datetime64_dtype(merged["date"]))
         self.assertEqual(merged["patch"].tolist(), ["16.14", "16.14.794.9266"])
+
+    def test_grid_completion_provenance_survives_map_widening(self) -> None:
+        maps = _oe_wide(
+            pd.DataFrame(
+                [
+                    {
+                        "gameid": "g1",
+                        "side": "Blue",
+                        "teamname": "Blue Org",
+                        "source": "grid",
+                        "grid_completion_source": "end_state_summary",
+                    },
+                    {
+                        "gameid": "g1",
+                        "side": "Red",
+                        "teamname": "Red Org",
+                        "source": "grid",
+                        "grid_completion_source": "end_state_summary",
+                    },
+                ]
+            )
+        )
+        self.assertEqual(maps.iloc[0]["grid_completion_source"], "end_state_summary")
+        self.assertTrue(bool(maps.iloc[0]["source_grid"]))
 
     def test_grid_ingest_reuses_verified_cache_when_raw_files_are_missing(self) -> None:
         with TemporaryDirectory() as temp:
@@ -123,6 +147,105 @@ class GridSeriesEventsTests(unittest.TestCase):
         red = next(row for row in team_rows if row["side"] == "Red")
         self.assertEqual((blue["teamkills"], blue["teamdeaths"]), (4, 2))
         self.assertEqual((red["teamkills"], red["teamdeaths"]), (2, 4))
+        self.assertEqual(blue["grid_completion_source"], "events_game_end")
+
+    def test_complete_matching_summary_recovers_missing_game_end(self) -> None:
+        roles = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
+        participants = [
+            {
+                "teamID": team_id,
+                "riotId": {"displayName": f"{prefix} Player{index}"},
+                "role": role,
+                "championName": f"Champion{index}",
+            }
+            for team_id, prefix in ((100, "Blue"), (200, "Red"))
+            for index, role in enumerate(roles, start=1)
+        ]
+        events = [
+            {
+                "rfc461Schema": "game_info",
+                "rfc460Timestamp": "2026-07-26T12:00:00Z",
+                "gameID": 42,
+                "gameName": "game-42",
+                "gameVersion": "16.14.794.5912",
+                "platformID": "LOLTMNT01",
+                "participants": participants,
+            },
+            *[{"rfc461Schema": "champion_kill", "killerTeamID": 100} for _ in range(2)],
+            *[{"rfc461Schema": "champion_kill", "killerTeamID": 200} for _ in range(4)],
+        ]
+        summary = {
+            "endOfGameResult": "GameComplete",
+            "gameId": 42,
+            "gameDuration": 1_800,
+            "teams": [
+                {
+                    "teamId": 100,
+                    "win": False,
+                    "objectives": {"champion": {"kills": 2}},
+                },
+                {
+                    "teamId": 200,
+                    "win": True,
+                    "objectives": {"champion": {"kills": 4}},
+                },
+            ],
+        }
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            event_path = root / "events.jsonl"
+            summary_path = root / "summary.json"
+            event_path.write_text("\n".join(json.dumps(event) for event in events))
+            summary_path.write_text(json.dumps(summary))
+            parsed = grid_ingest._parse_events(
+                event_path,
+                series={
+                    "id": "series-42",
+                    "tournament": "LPL 2026",
+                    "teams": ["Blue Org", "Red Org"],
+                },
+                game_index=3,
+                summary_path=summary_path,
+            )
+
+        self.assertIsNotNone(parsed)
+        team_rows = parsed[0]["team_rows"]
+        self.assertEqual({row["grid_completion_source"] for row in team_rows}, {"end_state_summary"})
+        self.assertEqual(next(row for row in team_rows if row["side"] == "Red")["result"], 1)
+        self.assertEqual(next(row for row in team_rows if row["side"] == "Blue")["teamdeaths"], 4)
+
+    def test_summary_fallback_rejects_mismatched_or_incomplete_evidence(self) -> None:
+        game_info = {"gameID": 42}
+        kills = {100: 2, 200: 4}
+        base = {
+            "endOfGameResult": "GameComplete",
+            "gameId": 99,
+            "gameDuration": 1_800,
+            "teams": [
+                {"teamId": 100, "win": False, "objectives": {"champion": {"kills": 2}}},
+                {"teamId": 200, "win": True, "objectives": {"champion": {"kills": 4}}},
+            ],
+        }
+        with TemporaryDirectory() as temp:
+            summary_path = Path(temp) / "summary.json"
+            summary_path.write_text(json.dumps(base))
+            self.assertIsNone(
+                grid_ingest._verified_summary_game_end(
+                    summary_path,
+                    game_info=game_info,
+                    kills=kills,
+                )
+            )
+            base["gameId"] = 42
+            base["teams"][1]["objectives"]["champion"]["kills"] = 3
+            summary_path.write_text(json.dumps(base))
+            self.assertIsNone(
+                grid_ingest._verified_summary_game_end(
+                    summary_path,
+                    game_info=game_info,
+                    kills=kills,
+                )
+            )
 
     def test_grid_file_download_stops_after_bounded_429_retry(self) -> None:
         error = urllib.error.HTTPError(
@@ -166,6 +289,48 @@ class GridSeriesEventsTests(unittest.TestCase):
         self.assertEqual(file_list.call_args.args[1], "lpl-series")
         self.assertEqual(result["series_seen"], 1)
         self.assertEqual(result["tournament_filter"], "lpl")
+
+    def test_grid_download_includes_verified_end_state_summaries(self) -> None:
+        series = [{"id": "series-1", "tournament": "LEC - Summer 2026", "teams": ["A", "B"]}]
+        files = [
+            {
+                "id": "events-riot-game-1",
+                "status": "ready",
+                "fullURL": "https://example.test/events",
+                "fileName": "events_1_1_riot.jsonl",
+            },
+            {
+                "id": "state-summary-riot-game-1",
+                "status": "ready",
+                "fullURL": "https://example.test/summary",
+                "fileName": "end_state_summary_riot_1_1.json",
+            },
+            {
+                "id": "replay-riot-game-1",
+                "status": "ready",
+                "fullURL": "https://example.test/replay",
+                "fileName": "replay.rofl",
+            },
+        ]
+        with TemporaryDirectory() as temp:
+            old_raw = grid_ingest.RAW_GRID_DIR
+            try:
+                grid_ingest.RAW_GRID_DIR = Path(temp) / "raw_grid"
+                with patch("lol_kills.etl.grid_ingest._api_key", return_value="key"), patch(
+                    "lol_kills.etl.grid_ingest._series_rows", return_value=series
+                ), patch("lol_kills.etl.grid_ingest._file_list", return_value=files), patch(
+                    "lol_kills.etl.grid_ingest._download", return_value=True
+                ) as download:
+                    result = grid_ingest._download_recent(
+                        days=3,
+                        limit=40,
+                        tournament=None,
+                        env_file=None,
+                    )
+            finally:
+                grid_ingest.RAW_GRID_DIR = old_raw
+        self.assertEqual(download.call_count, 2)
+        self.assertEqual(result["files_downloaded"], 2)
 
     def test_url_uses_documented_key_query_without_logging_value(self) -> None:
         url = series_events_url("2970137", "secret", use_config=True, from_sequence_number=9)
