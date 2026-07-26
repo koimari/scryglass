@@ -83,6 +83,33 @@ class GridSeriesEventsTests(unittest.TestCase):
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 90)
         sleep.assert_called_once_with(30)
 
+    def test_grid_tournament_filter_expands_discovery_before_download(self) -> None:
+        series = [
+            {"id": "lpl-series", "tournament": "LPL - Split 3 2026", "teams": ["A", "B"]},
+            {"id": "other-series", "tournament": "LEC - Summer 2026", "teams": ["C", "D"]},
+        ]
+        with TemporaryDirectory() as temp:
+            old_raw = grid_ingest.RAW_GRID_DIR
+            try:
+                grid_ingest.RAW_GRID_DIR = Path(temp) / "raw_grid"
+                with patch("lol_kills.etl.grid_ingest._api_key", return_value="key"), patch(
+                    "lol_kills.etl.grid_ingest._series_rows", return_value=series
+                ) as series_rows, patch(
+                    "lol_kills.etl.grid_ingest._file_list", return_value=[]
+                ) as file_list:
+                    result = grid_ingest._download_recent(
+                        days=5,
+                        limit=10,
+                        tournament="lpl",
+                        env_file=None,
+                    )
+            finally:
+                grid_ingest.RAW_GRID_DIR = old_raw
+        self.assertEqual(series_rows.call_args.args[3], 100)
+        self.assertEqual(file_list.call_args.args[1], "lpl-series")
+        self.assertEqual(result["series_seen"], 1)
+        self.assertEqual(result["tournament_filter"], "lpl")
+
     def test_url_uses_documented_key_query_without_logging_value(self) -> None:
         url = series_events_url("2970137", "secret", use_config=True, from_sequence_number=9)
         self.assertIn("/live-data-feed/series/2970137", url)
