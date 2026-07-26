@@ -140,6 +140,14 @@ export default async function MethodologyPage() {
           confidence. Draft favorites can disagree with Dual Elo favorites; Matches reports Elo hit
           rate, while match boards also show Draft WR.
         </p>
+        <p>
+          The Draft Sandbox applies the same regularized champion effects to incomplete pick states.
+          Unfilled seats contribute the fitted average, and known same-role matchups add a smaller
+          pair term. The displayed pick-to-pick change is therefore a counterfactual comparison
+          between branches at the same draft seat. Partial states are not separately calibrated
+          match-win probabilities, and recommendations do not include private champion pools, scrim
+          plans, or unannounced flex intent.
+        </p>
       </MethodSection>
 
       <MethodSection id="kills" title="Expected kills">
