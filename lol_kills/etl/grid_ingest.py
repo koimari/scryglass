@@ -48,6 +48,8 @@ ALLOWED_SERIES_TYPE = "ESPORTS"
 USER_AGENT = "scryglass/grid-ingest (+pro-only; research publication)"
 GRID_429_RETRIES = 1
 GRID_429_MAX_DELAY_SECONDS = 30
+GRID_FILE_LIST_TIMEOUT_SECONDS = 30
+GRID_FILE_DOWNLOAD_TIMEOUT_SECONDS = 90
 
 SCRIM_MARKERS = (
     "scrim",
@@ -319,7 +321,11 @@ def _series_games(key: str, series_id: str) -> list[dict[str, Any]]:
 
 
 def _file_list(key: str, series_id: str) -> list[dict[str, Any]]:
-    payload = _request_json(f"{FILE_LIST_BASE}/{series_id}", key)
+    payload = _request_json(
+        f"{FILE_LIST_BASE}/{series_id}",
+        key,
+        timeout=GRID_FILE_LIST_TIMEOUT_SECONDS,
+    )
     files = payload.get("files")
     if not isinstance(files, list):
         raise GridIngestError(f"GRID file list for {series_id} has no files[]")
@@ -335,7 +341,10 @@ def _download(url: str, key: str, dest: Path) -> bool:
     dest.parent.mkdir(parents=True, exist_ok=True)
     for attempt in range(GRID_429_RETRIES + 1):
         try:
-            with urllib.request.urlopen(req, timeout=240) as response, dest.open("wb") as fh:
+            with urllib.request.urlopen(
+                req,
+                timeout=GRID_FILE_DOWNLOAD_TIMEOUT_SECONDS,
+            ) as response, dest.open("wb") as fh:
                 while chunk := response.read(1024 * 1024):
                     fh.write(chunk)
             return True
