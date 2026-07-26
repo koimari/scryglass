@@ -53,6 +53,7 @@ def _blob_put(
     allow_overwrite: bool = False,
 ) -> str:
     """Upload via Vercel Blob REST API; returns blob URL."""
+    store_id = os.environ.get("BLOB_STORE_ID") or os.environ.get("VERCEL_BLOB_STORE_ID")
     req = urllib.request.Request(
         f"https://blob.vercel-storage.com/{pathname}",
         data=data,
@@ -61,6 +62,7 @@ def _blob_put(
             "Authorization": f"Bearer {token}",
             "X-API-Version": "7",
             "x-vercel-blob-access": "public",
+            **({"x-vercel-blob-store-id": store_id} if store_id else {}),
             "Content-Type": content_type,
             "x-content-type": content_type,
             **({"Cache-Control": cache_control} if cache_control else {}),
