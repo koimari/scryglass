@@ -791,12 +791,16 @@ def merge_source_frames(
         p = primary.copy()
         if "date" in p.columns:
             p["date"] = pd.to_datetime(p["date"], errors="coerce", utc=True).dt.tz_localize(None)
+        if "patch" in p.columns:
+            p["patch"] = p["patch"].astype("string")
         p["_source_priority"] = 2
         frames.append(p)
     if supplement is not None and not supplement.empty:
         s = supplement.copy()
         if "date" in s.columns:
             s["date"] = pd.to_datetime(s["date"], errors="coerce", utc=True).dt.tz_localize(None)
+        if "patch" in s.columns:
+            s["patch"] = s["patch"].astype("string")
         s["_source_priority"] = 1
         frames.append(s)
     if not frames:
