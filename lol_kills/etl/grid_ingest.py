@@ -25,6 +25,7 @@ import argparse
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -45,6 +46,8 @@ RAW_GRID_DIR = WAREHOUSE_DIR / "raw_grid"
 LOL_TITLE_ID = 3
 ALLOWED_SERIES_TYPE = "ESPORTS"
 USER_AGENT = "scryglass/grid-ingest (+pro-only; research publication)"
+GRID_429_RETRIES = 1
+GRID_429_MAX_DELAY_SECONDS = 30
 
 SCRIM_MARKERS = (
     "scrim",
@@ -327,20 +330,39 @@ def _safe_filename(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._") or "events.jsonl"
 
 
-def _download(url: str, key: str, dest: Path) -> None:
+def _download(url: str, key: str, dest: Path) -> bool:
     req = urllib.request.Request(url, headers=_headers(key))
     dest.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with urllib.request.urlopen(req, timeout=240) as response, dest.open("wb") as fh:
-            while chunk := response.read(1024 * 1024):
-                fh.write(chunk)
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:500]
-        dest.unlink(missing_ok=True)
-        raise GridIngestError(f"GRID file download HTTP {exc.code}: {detail}") from exc
-    except Exception:
-        dest.unlink(missing_ok=True)
-        raise
+    for attempt in range(GRID_429_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=240) as response, dest.open("wb") as fh:
+                while chunk := response.read(1024 * 1024):
+                    fh.write(chunk)
+            return True
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:500]
+            dest.unlink(missing_ok=True)
+            if exc.code != 429:
+                raise GridIngestError(f"GRID file download HTTP {exc.code}: {detail}") from exc
+            if attempt >= GRID_429_RETRIES:
+                print(f"[grid] file download rate-limited after retries: {detail or 'HTTP 429'}")
+                return False
+            retry_after = None
+            if exc.headers:
+                try:
+                    retry_after = float(exc.headers.get("Retry-After", ""))
+                except (TypeError, ValueError):
+                    retry_after = None
+            delay = min(
+                max(retry_after if retry_after is not None else 5 * (2**attempt), 1),
+                GRID_429_MAX_DELAY_SECONDS,
+            )
+            print(f"[grid] file download HTTP 429; retrying in {delay:.0f}s")
+            time.sleep(delay)
+        except Exception:
+            dest.unlink(missing_ok=True)
+            raise
+    return False
 
 
 def _iter_jsonl(path: Path) -> Iterator[dict[str, Any]]:
@@ -648,6 +670,19 @@ def _parse_local_grid() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     return team_df, player_df, meta
 
 
+def _load_cached_grid() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load the last verified GRID parquet when raw event files are unavailable."""
+    team_path = PARQUET_DIR / "grid_team_games.parquet"
+    player_path = PARQUET_DIR / "grid_player_games.parquet"
+    if not team_path.exists() or not player_path.exists():
+        return pd.DataFrame(), pd.DataFrame()
+    try:
+        return pd.read_parquet(team_path), pd.read_parquet(player_path)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[grid] cached parquet could not be read: {exc}")
+        return pd.DataFrame(), pd.DataFrame()
+
+
 def _download_recent(
     *,
     days: int,
@@ -662,6 +697,8 @@ def _download_recent(
     downloaded = 0
     existing = 0
     not_ready = 0
+    failed = 0
+    rate_limited = False
     for series in series_rows:
         series_id = str(series["id"])
         RAW_GRID_DIR.mkdir(parents=True, exist_ok=True)
@@ -685,8 +722,14 @@ def _download_recent(
             if dest.exists() and dest.stat().st_size > 0:
                 existing += 1
                 continue
-            _download(url, key, dest)
+            if not _download(url, key, dest):
+                failed += 1
+                rate_limited = True
+                break
             downloaded += 1
+        if rate_limited:
+            print("[grid] stopping this fetch window after a provider rate limit")
+            break
     result = {
         "fetched_at": now.isoformat(),
         "window": {"start": start, "end": end},
@@ -694,6 +737,8 @@ def _download_recent(
         "files_downloaded": downloaded,
         "files_existing": existing,
         "files_not_ready": not_ready,
+        "files_failed": failed,
+        "rate_limited": rate_limited,
         "pro_only": True,
     }
     (RAW_GRID_DIR / "grid_fetch_meta.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -713,6 +758,17 @@ def ingest_grid(
     if download:
         fetch_meta = _download_recent(days=days, limit=limit, env_file=env_file)
     team_df, player_df, parse_meta = _parse_local_grid()
+    cached_team, cached_player = _load_cached_grid()
+    if not cached_team.empty or not cached_player.empty:
+        # Freshly parsed raw files win, while a provider throttle or a new
+        # worker still retains the last verified GRID rows for continuity.
+        team_df = merge_source_frames(team_df, cached_team, ["gameid", "side"])
+        player_df = merge_source_frames(
+            player_df,
+            cached_player,
+            ["gameid", "side", "position"],
+        )
+        parse_meta["cached_games"] = int(cached_team["gameid"].nunique()) if "gameid" in cached_team else 0
     meta = {**fetch_meta, **parse_meta, "refreshed_at": datetime.now(timezone.utc).isoformat()}
     PARQUET_DIR.mkdir(parents=True, exist_ok=True)
     team_df.to_parquet(PARQUET_DIR / "grid_team_games.parquet", index=False)

@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import io
 import unittest
+import urllib.error
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
+import pandas as pd
+
+import lol_kills.etl.grid_ingest as grid_ingest
+from lol_kills.etl.grid_ingest import _download
 from lol_kills.etl.grid_series_events import (
     default_config,
     series_events_url,
@@ -15,6 +22,43 @@ from lol_kills.live_snapshots import LivePublisher, build_live_snapshot
 
 
 class GridSeriesEventsTests(unittest.TestCase):
+    def test_grid_ingest_reuses_verified_cache_when_raw_files_are_missing(self) -> None:
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            old_raw = grid_ingest.RAW_GRID_DIR
+            old_parquet = grid_ingest.PARQUET_DIR
+            try:
+                grid_ingest.RAW_GRID_DIR = root / "raw_grid"
+                grid_ingest.PARQUET_DIR = root / "parquet"
+                grid_ingest.PARQUET_DIR.mkdir(parents=True)
+                pd.DataFrame([{"gameid": "g1", "side": "Blue"}]).to_parquet(
+                    grid_ingest.PARQUET_DIR / "grid_team_games.parquet", index=False
+                )
+                pd.DataFrame([{"gameid": "g1", "side": "Blue", "position": "top"}]).to_parquet(
+                    grid_ingest.PARQUET_DIR / "grid_player_games.parquet", index=False
+                )
+                teams, players = grid_ingest.ingest_grid(required=True)
+            finally:
+                grid_ingest.RAW_GRID_DIR = old_raw
+                grid_ingest.PARQUET_DIR = old_parquet
+        self.assertEqual(len(teams), 1)
+        self.assertEqual(len(players), 1)
+
+    def test_grid_file_download_stops_after_bounded_429_retry(self) -> None:
+        error = urllib.error.HTTPError(
+            "https://example.test/events.jsonl",
+            429,
+            "too many requests",
+            {"Retry-After": "120"},
+            io.BytesIO(b"too many requests"),
+        )
+        with TemporaryDirectory() as temp, patch(
+            "lol_kills.etl.grid_ingest.urllib.request.urlopen", side_effect=error
+        ) as urlopen, patch("lol_kills.etl.grid_ingest.time.sleep") as sleep:
+            self.assertFalse(_download("https://example.test/events.jsonl", "key", Path(temp) / "events.jsonl"))
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(30)
+
     def test_url_uses_documented_key_query_without_logging_value(self) -> None:
         url = series_events_url("2970137", "secret", use_config=True, from_sequence_number=9)
         self.assertIn("/live-data-feed/series/2970137", url)
