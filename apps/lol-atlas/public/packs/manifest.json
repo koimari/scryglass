@@ -1,7 +1,7 @@
 {
-  "pack_id": "v2026.07.26.1521",
+  "pack_id": "v2026.07.26.1548",
   "schema_version": "1.3.0",
-  "created_utc": "2026-07-26T15:22:55.450903+00:00",
+  "created_utc": "2026-07-26T15:50:05.882418+00:00",
   "filters": {
     "years": [
       2025,
@@ -43,45 +43,45 @@
   },
   "ingest": {
     "refresh_meta": {
-      "refreshed_at": "2026-07-26T15:19:27.034209+00:00",
-      "n_maps": 6288,
+      "refreshed_at": "2026-07-26T15:44:14.094487+00:00",
+      "n_maps": 6302,
       "oe_rows": 32668,
-      "grid_rows": 72,
-      "combined_team_rows": 32740,
-      "combined_player_rows": 163700,
+      "grid_rows": 100,
+      "combined_team_rows": 32768,
+      "combined_player_rows": 163840,
       "source_counts": {
         "oe": 32668,
-        "grid": 72
+        "grid": 100
       },
       "lp_side_rows": 0,
       "oe_matched": 0
     },
     "grid_meta": {
-      "fetched_at": "2026-07-26T15:12:58.083866+00:00",
+      "fetched_at": "2026-07-26T15:40:29.912198+00:00",
       "window": {
-        "start": "2026-07-16T15:12:58Z",
-        "end": "2026-07-26T17:12:58Z"
+        "start": "2026-07-22T15:40:29Z",
+        "end": "2026-07-26T17:40:29Z"
       },
       "series_seen": 60,
-      "files_downloaded": 52,
-      "files_existing": 60,
+      "files_downloaded": 1,
+      "files_existing": 111,
       "files_not_ready": 0,
       "files_failed": 0,
       "file_list_failures": 0,
       "rate_limited": false,
       "pro_only": true,
       "source": "grid",
-      "parsed_files": 36,
-      "skipped_files": 76,
-      "games": 36,
-      "team_rows": 72,
-      "player_rows": 360,
-      "cached_games": 32,
-      "refreshed_at": "2026-07-26T15:19:08.207083+00:00"
+      "parsed_files": 50,
+      "skipped_files": 63,
+      "games": 50,
+      "team_rows": 100,
+      "player_rows": 500,
+      "cached_games": 36,
+      "refreshed_at": "2026-07-26T15:43:43.619932+00:00"
     }
   },
-  "base_url": "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/packs/v2026.07.26.1521",
-  "total_bytes": 29368982,
+  "base_url": "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/packs/v2026.07.26.1548",
+  "total_bytes": 29380717,
   "total_files": 43,
   "files": [
     {
@@ -238,10 +238,10 @@
     {
       "path": "team_games/year=2026/part.parquet",
       "relative": "team_games/year=2026/part.parquet",
-      "rows": 13154,
+      "rows": 13182,
       "cols": 141,
-      "bytes": 2293646,
-      "sha256": "da835120f02b6ccd43615e7cd6115411153ccbbd3979f84ef72fb2383f75e608",
+      "bytes": 2294093,
+      "sha256": "0cebb44ca9fac9b6b020f826b898a03f1006ab68ff09d202635666ac59d43974",
       "columns": [
         "gameid",
         "datacompleteness",
@@ -546,10 +546,10 @@
     {
       "path": "player_games/year=2026/part.parquet",
       "relative": "player_games/year=2026/part.parquet",
-      "rows": 65770,
+      "rows": 65910,
       "cols": 147,
-      "bytes": 7486694,
-      "sha256": "941aada0b220c842d3de167d5be0ef0b4877920e71e2430cd2bfb0c7fcc07663",
+      "bytes": 7487486,
+      "sha256": "06b6d8a338ef4f2e92dd58833500683042d41de69ec973868f4a8c115bf11133",
       "columns": [
         "gameid",
         "datacompleteness",
@@ -813,10 +813,10 @@
     {
       "path": "maps/year=2026/part.parquet",
       "relative": "maps/year=2026/part.parquet",
-      "rows": 2665,
+      "rows": 2679,
       "cols": 100,
-      "bytes": 482362,
-      "sha256": "c9d7b733246c81420aa5595374d9a6138ca9840150facf1110d26c41a7664e09",
+      "bytes": 482931,
+      "sha256": "81ed6d3f5c6fc147d6273f23badaaacacf1c7ab960eeaf0a1b4eadbeba2af550",
       "columns": [
         "oe_gameid",
         "game_uid",
@@ -924,7 +924,7 @@
       "rows": 1898,
       "cols": null,
       "bytes": 289695,
-      "sha256": "03b94582e043249c0585d1f263cf7f03be480ef56ed311af28e4e50b86624cf6",
+      "sha256": "3b77c3632681ea0dbe58657ab0005c862ad61c87004b4d29ddfd8a3be6708240",
       "columns": null,
       "relative": "features/player_weekly_ranks.json",
       "path": "features/player_weekly_ranks.json"
@@ -941,17 +941,17 @@
     {
       "rows": 595,
       "cols": null,
-      "bytes": 415088,
-      "sha256": "3d69477072dc0cf789ed4ebaf8d1b25d6046d13f79a44256649e08b8fc94ad4b",
+      "bytes": 415111,
+      "sha256": "2ffbc4e82dcccb8adae688e34d6a4d29e3975aea3270f281fb7426b82b48808c",
       "columns": null,
       "relative": "features/team_records.json",
       "path": "features/team_records.json"
     },
     {
-      "rows": 3752,
+      "rows": 3767,
       "cols": null,
-      "bytes": 1209213,
-      "sha256": "f612b9294ad8d3fc22a29ed8fc4e396d8802ad376db9ec7b2749a8bb1cad2f38",
+      "bytes": 1213992,
+      "sha256": "eaa34fb2500387f59ca9a12c7a93d3405748dc1110e832451cb6aba8bbc158bc",
       "columns": null,
       "relative": "features/player_records.json",
       "path": "features/player_records.json"
@@ -961,8 +961,8 @@
       "relative": "features/ratings_snapshot.parquet",
       "rows": 595,
       "cols": 12,
-      "bytes": 41178,
-      "sha256": "91dad5f85b021f246d2ef988dedd4aff8b57cfd0f5a1e54700b7482124be7927",
+      "bytes": 41160,
+      "sha256": "a05e9aac356445e48cb91b05546fd5f06ec295743b3ea2ca1fa0b5040d86fb8c",
       "columns": [
         "team",
         "team_key",
@@ -981,8 +981,8 @@
     {
       "rows": 595,
       "cols": 12,
-      "bytes": 187155,
-      "sha256": "de634be080dce4206a3a260aaba529ab162db00d7e6306f35d5bdb4d1dc3d252",
+      "bytes": 187174,
+      "sha256": "df20dd24e88007645944bfa6bba37f78b282637650cd76d7df7601ecce5457ca",
       "columns": [
         "team",
         "team_key",
@@ -1003,10 +1003,10 @@
     {
       "path": "features/player_ratings_snapshot.parquet",
       "relative": "features/player_ratings_snapshot.parquet",
-      "rows": 3752,
+      "rows": 3767,
       "cols": 7,
-      "bytes": 128087,
-      "sha256": "9df88d176a3b8c723efe9763a2fb6cbceb8c4f5649f9a0055ec114aa768b2f4a",
+      "bytes": 128287,
+      "sha256": "9a5116a0e19eeeda7ffc1b144d834e2fe9bb680c0da8d027ea5d403e222f0d6c",
       "columns": [
         "player",
         "mu_total",
@@ -1018,10 +1018,10 @@
       ]
     },
     {
-      "rows": 3752,
+      "rows": 3767,
       "cols": 7,
-      "bytes": 669788,
-      "sha256": "fa9562dbc2cf8ee0f4ca318a7ea76aa0c39cee59a775bbfce70ce438787f3150",
+      "bytes": 672443,
+      "sha256": "52e61a63ca33cd6786ea82840b938a6cb16f29579965707248c85cf48fbcb38f",
       "columns": [
         "player",
         "mu_total",
@@ -1037,10 +1037,10 @@
     {
       "path": "features/ratings_history.parquet",
       "relative": "features/ratings_history.parquet",
-      "rows": 6288,
+      "rows": 6302,
       "cols": 15,
-      "bytes": 594460,
-      "sha256": "33fb6b8751e651e7595c76ee1f8615089188d3c9debf03fdeb15ee401ca64873",
+      "bytes": 595860,
+      "sha256": "0c17a0e6bc2d1dc99a7f3ec082e6130d73b769031c278fbbb10dffceeb853d7e",
       "columns": [
         "game_uid",
         "date",
@@ -1062,10 +1062,10 @@
     {
       "path": "features/player_ratings_history.parquet",
       "relative": "features/player_ratings_history.parquet",
-      "rows": 6288,
+      "rows": 6302,
       "cols": 11,
-      "bytes": 481528,
-      "sha256": "f22e2694d6b5b2da079e7af806403b346f66026505aef996f384927e9a5ed640",
+      "bytes": 482383,
+      "sha256": "7c1f7fc917cc7219645ceeb90cecf5ac08331ba09776118d619c5f018378e677",
       "columns": [
         "game_uid",
         "date",
@@ -1084,7 +1084,7 @@
       "rows": null,
       "cols": null,
       "bytes": 2985,
-      "sha256": "5a6eac0e44e6410ea71ce92340c950f013f40a4f41a2255bfd3aa348718c51be",
+      "sha256": "e953820d12191f68da86da04ced99948fcb615784bae43e9e1add149779e33f4",
       "columns": null,
       "relative": "features/ratings_meta.json",
       "path": "features/ratings_meta.json"
@@ -1093,7 +1093,7 @@
       "rows": null,
       "cols": null,
       "bytes": 390,
-      "sha256": "71cc09feadb09bc7bb7c862cb4a4b11f0959d600b95e59c48cbd531613c7c61c",
+      "sha256": "c53796cd27bdac9e555e08fe52b762663e3f23fe8e169c291bdc21c644f23e6c",
       "columns": null,
       "relative": "features/player_ratings_meta.json",
       "path": "features/player_ratings_meta.json"
@@ -1101,8 +1101,8 @@
     {
       "rows": null,
       "cols": null,
-      "bytes": 2162,
-      "sha256": "4cfa4a29a31a346d30841bfc13a2fac401e76c61aba4822dfd70a66c11dcb893",
+      "bytes": 2176,
+      "sha256": "36731f387091fc412239e95b7272ca81af3b7288266908edb6e3dd8740658085",
       "columns": null,
       "relative": "models/elo_wr_calibration.json",
       "path": "models/elo_wr_calibration.json"
