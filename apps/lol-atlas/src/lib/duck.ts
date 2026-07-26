@@ -125,7 +125,6 @@ const MAP_SELECT = `
   blue_golddiffat15,
   red_golddiffat15,
   source_oe,
-  source_grid,
   length_min,
   gamelength,
   blue_ban1, blue_ban2, blue_ban3, blue_ban4, blue_ban5,
@@ -145,6 +144,23 @@ export type MapFilters = {
   side?: "blue" | "red";
   limit?: number;
 };
+
+async function mapSelectForPack(parquetUrl: string): Promise<string> {
+  // Older public packs contain source_oe but predate source_grid. Keep the
+  // browser query compatible with both schemas while newer packs roll out.
+  let hasSourceGrid = false;
+  try {
+    const columns = await queryPackParquet(
+      parquetUrl,
+      "DESCRIBE SELECT * FROM read_parquet($PARQUET)",
+    );
+    hasSourceGrid = columns.some((row) => String(row.column_name ?? "") === "source_grid");
+  } catch {
+    // The main map query will report the actual pack failure if its stable
+    // columns are unavailable; optional provenance must not cause one.
+  }
+  return hasSourceGrid ? `${MAP_SELECT.trimEnd()}\n  ,source_grid` : MAP_SELECT;
+}
 
 function mapFilterClauses(opts: MapFilters): string[] {
   const clauses: string[] = ["1=1"];
@@ -190,8 +206,9 @@ export async function queryMaps(
   const url = mapsUrl(baseUrl, year);
   const lim = opts.limit ?? 80;
   const clauses = mapFilterClauses(opts);
+  const select = await mapSelectForPack(url);
   const sql = `
-    SELECT ${MAP_SELECT}
+    SELECT ${select}
     FROM read_parquet($PARQUET)
     WHERE ${clauses.join(" AND ")}
     ORDER BY date DESC
@@ -358,9 +375,10 @@ export async function queryMapByGameId(
   gameId: string,
 ): Promise<QueryRow | null> {
   const url = mapsUrl(baseUrl, year);
+  const select = await mapSelectForPack(url);
   const rows = await queryPackParquet(
     url,
-    `SELECT ${MAP_SELECT}
+    `SELECT ${select}
      FROM read_parquet($PARQUET)
      WHERE oe_gameid = '${esc(gameId)}' OR game_uid = '${esc(gameId)}'
      LIMIT 1`,
