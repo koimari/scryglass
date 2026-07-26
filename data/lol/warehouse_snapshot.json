@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "pathname": "state/scryglass-warehouse-v1.tar.gz",
+  "url": "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/state/scryglass-warehouse-v1.tar.gz",
+  "description": "Derived warehouse state for the Scryglass GRID freshness worker"
+}
