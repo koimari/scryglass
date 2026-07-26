@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   reconcile:
@@ -75,18 +75,3 @@ jobs:
             data/lol/warehouse
             data/lol/features
           key: scryglass-warehouse-${{ runner.os }}-${{ github.run_id }}
-
-      - name: Commit the small latest-pack pointers
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            apps/lol-atlas/public/packs/manifest.json \
-            apps/lol-atlas/public/packs/latest.json \
-            data/lol/warehouse_snapshot.json
-          if git diff --cached --quiet; then
-            echo "Pack and snapshot pointers did not change"
-            exit 0
-          fi
-          git commit -m "chore(data): reconcile OE baseline [skip ci]"
-          git push
