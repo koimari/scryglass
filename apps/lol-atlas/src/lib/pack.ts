@@ -68,6 +68,7 @@ export type TeamRecord = {
   source_leagues?: string[];
   primary: string | null;
   intl: boolean;
+  interregional?: boolean;
   wins: number;
   games: number;
   wr: number | null;
@@ -81,6 +82,7 @@ export type PlayerRecord = {
   leagues?: string[];
   primary?: string | null;
   intl?: boolean;
+  interregional?: boolean;
 };
 
 /** Dual Elo σ floors from ratings_meta / player_ratings_meta. */
@@ -101,6 +103,8 @@ export const REGION_LEAGUES = [
   "LCP",
   "TCL",
 ] as const;
+
+export const INTERREGIONAL_LEAGUES = ["AMERICAS"] as const;
 
 export type TrustKind = "settled" | "thin" | "very_thin";
 

@@ -9,6 +9,7 @@ Examples:
 
   python3 -m lol_kills.update_public_pack --download-oe --download-grid
   python3 -m lol_kills.update_public_pack --skip-oe --download-grid --publish
+  python3 -m lol_kills.update_public_pack --skip-oe --allow-missing-lp --download-grid --publish
 """
 
 from __future__ import annotations
@@ -36,11 +37,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--download-oe", action="store_true")
     parser.add_argument("--skip-oe", action="store_true")
     parser.add_argument("--download-grid", action="store_true")
+    parser.add_argument("--skip-grid", action="store_true")
     parser.add_argument("--grid-days", type=int, default=3)
     parser.add_argument("--grid-limit", type=int, default=40)
     parser.add_argument("--grid-env-file", type=Path, default=None)
     parser.add_argument("--grid-required", action="store_true")
     parser.add_argument("--skip-lp", action="store_true")
+    parser.add_argument(
+        "--allow-missing-lp",
+        action="store_true",
+        help="Continue with an empty Leaguepedia enrichment when draft caches are absent",
+    )
     parser.add_argument("--pack-id", default=None)
     parser.add_argument("--out", type=Path, default=ROOT / "output" / "public_pack")
     parser.add_argument(
@@ -58,8 +65,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         refresh_args.append("--skip-oe")
     if args.skip_lp:
         refresh_args.append("--skip-lp")
+    if args.allow_missing_lp:
+        refresh_args.append("--allow-missing-lp")
     if args.download_grid:
         refresh_args.append("--download-grid")
+    if args.skip_grid:
+        refresh_args.append("--skip-grid")
     refresh_args.extend(["--grid-days", str(args.grid_days), "--grid-limit", str(args.grid_limit)])
     if args.grid_env_file:
         refresh_args.extend(["--grid-env-file", str(args.grid_env_file)])

@@ -5,14 +5,14 @@ import unittest
 import pandas as pd
 
 from lol_kills.etl.competition import canonicalize_competition_frame, classify_competition
-from lol_kills.export.pack_records import build_team_records
+from lol_kills.export.pack_records import build_player_records, build_team_records
 from lol_kills.ratings.dual_elo import _is_intl
 from lol_kills.ratings.hierarchical_bt import fit_hierarchical_bt
 from lol_kills.ratings.validation import audit_rating_inputs
 
 
 class CompetitionIdentityTests(unittest.TestCase):
-    def test_legacy_lta_is_public_lcs_but_source_is_retained(self) -> None:
+    def test_lta_n_maps_to_lcs_but_source_is_retained(self) -> None:
         frame = canonicalize_competition_frame(
             pd.DataFrame(
                 [
@@ -30,7 +30,25 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertEqual(row["league_source"], "LTA N")
         self.assertEqual(row["competition_scope"], "regional")
         self.assertFalse(bool(row["is_international"]))
+        self.assertFalse(bool(row["is_interregional"]))
         self.assertEqual(row["blue_team_key"], "team-liquid")
+
+    def test_lta_s_maps_to_cblol(self) -> None:
+        row = canonicalize_competition_frame(
+            pd.DataFrame([{"league": "LTA S", "blue_team": "FURIA", "red_team": "LOUD"}])
+        ).iloc[0]
+        self.assertEqual(row["league"], "CBLOL")
+        self.assertEqual(row["league_source"], "LTA S")
+        self.assertEqual(row["competition_scope"], "regional")
+        self.assertFalse(bool(row["is_international"]))
+
+    def test_generic_lta_is_interregional_not_domestic(self) -> None:
+        label = classify_competition("LTA", None)
+        self.assertEqual(label.league, "AMERICAS")
+        self.assertEqual(label.scope, "interregional")
+        self.assertEqual(label.event_kind, "americas_cross_region")
+        self.assertFalse(label.is_international)
+        self.assertTrue(label.is_interregional)
 
     def test_road_to_msi_does_not_become_international(self) -> None:
         label = classify_competition("LCK", "LCK 2026 Road to MSI")
@@ -66,6 +84,31 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertEqual(records["Team Liquid"]["primary"], "LCS")
         self.assertEqual(records["Team Liquid"]["leagues"], ["EWC", "LCS"])
         self.assertEqual(records["Team Liquid"]["source_leagues"], ["EWC", "LTA N"])
+
+    def test_team_primary_uses_latest_domestic_affiliation(self) -> None:
+        maps = pd.DataFrame(
+            [
+                {"date": "2025-01-01", "league": "PCS", "blue_team": "A", "red_team": "B", "y_blue_win": 1},
+                {"date": "2026-01-01", "league": "LCP", "blue_team": "A", "red_team": "C", "y_blue_win": 1},
+                {"date": "2026-02-01", "league": "LTA", "blue_team": "A", "red_team": "D", "y_blue_win": 1},
+            ]
+        )
+        records = build_team_records(maps)
+        self.assertEqual(records["A"]["primary"], "LCP")
+        self.assertTrue(records["A"]["interregional"])
+
+    def test_player_records_use_canonical_latest_domestic_league(self) -> None:
+        players = pd.DataFrame(
+            [
+                {"date": "2025-01-01", "league": "LTA S", "playername": "Bot", "position": "bot", "result": 1},
+                {"date": "2026-01-01", "league": "CBLOL", "playername": "Bot", "position": "bot", "result": 0},
+                {"date": "2026-02-01", "league": "LTA", "playername": "Bot", "position": "bot", "result": 1},
+            ]
+        )
+        records = build_player_records(players)
+        self.assertEqual(records["Bot"]["primary"], "CBLOL")
+        self.assertEqual(records["Bot"]["leagues"], ["AMERICAS", "CBLOL"])
+        self.assertTrue(records["Bot"]["interregional"])
 
 
 class HierarchicalRatingTests(unittest.TestCase):

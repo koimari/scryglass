@@ -22,15 +22,17 @@ import pandas as pd
 from lol_kills.etl.aliases import normalize_team
 
 
-TAXONOMY_VERSION = "2026-07-26.1"
+TAXONOMY_VERSION = "2026-07-26.2"
 
-# LTA was the 2025 Americas competition.  LTA North/South are source labels,
-# not separate current public rating scopes; they are mapped to LCS while the
-# original value remains in league_source.
+# LTA was the 2025 Americas competition.  North and South were distinct
+# domestic circuits, while an unqualified LTA row is an Americas cross-region
+# event.  The original value remains in league_source for auditability.
 DEPRECATED_LEAGUE_MAP: dict[str, str] = {
-    "LTA": "LCS",
+    "LTA": "AMERICAS",
     "LTA N": "LCS",
-    "LTA S": "LCS",
+    "LTA NORTH": "LCS",
+    "LTA S": "CBLOL",
+    "LTA SOUTH": "CBLOL",
 }
 
 REGIONAL_LEAGUES = frozenset(
@@ -49,6 +51,7 @@ REGIONAL_LEAGUES = frozenset(
 )
 
 INTERNATIONAL_LEAGUES = frozenset({"MSI", "EWC", "FST", "WORLDS", "IWC", "MSC"})
+INTERREGIONAL_LEAGUES = frozenset({"AMERICAS"})
 
 _EVENT_TOKENS: tuple[tuple[str, str], ...] = (
     ("FIRST STAND", "FST"),
@@ -97,6 +100,7 @@ class CompetitionLabel:
     scope: str
     event_kind: str
     is_international: bool
+    is_interregional: bool = False
 
 
 def classify_competition(league: Any, tournament: Any = None) -> CompetitionLabel:
@@ -114,13 +118,15 @@ def classify_competition(league: Any, tournament: Any = None) -> CompetitionLabe
         return CompetitionLabel(source, canonical, "regional", "domestic", False)
     if canonical in INTERNATIONAL_LEAGUES:
         return CompetitionLabel(source, canonical, "international", canonical.lower(), True)
+    if canonical in INTERREGIONAL_LEAGUES:
+        return CompetitionLabel(source, canonical, "interregional", "americas_cross_region", False, True)
 
     tournament_text = source_league(tournament)
     for token, event in _EVENT_TOKENS:
         if re.search(rf"(?<![A-Z0-9]){re.escape(token)}(?![A-Z0-9])", tournament_text):
             return CompetitionLabel(source, event, "international", event.lower(), True)
 
-    return CompetitionLabel(source, canonical or "UNKNOWN", "other", "other", False)
+    return CompetitionLabel(source, canonical or "UNKNOWN", "other", "other", False, False)
 
 
 def team_identity_key(name: Any) -> str:
@@ -159,6 +165,7 @@ def canonicalize_competition_frame(frame: pd.DataFrame) -> pd.DataFrame:
         out["competition_scope"] = [label.scope for label in labels]
         out["event_kind"] = [label.event_kind for label in labels]
         out["is_international"] = [label.is_international for label in labels]
+        out["is_interregional"] = [label.is_interregional for label in labels]
 
     team_columns = ("teamname", "blue_team", "red_team", "blue_teamname", "red_teamname")
     for column in team_columns:

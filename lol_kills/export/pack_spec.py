@@ -15,8 +15,9 @@ DEFAULT_YEARS: tuple[int, ...] = (2025, 2026)
 # drop edge cases (year column is primary; this is documentation + soft hint).
 DEFAULT_LEAGUES_NOTE = (
     "All canonical leagues present in OE for years 2025–2026. "
-    "Legacy LTA/LTA N/LTA S source labels are retained as provenance and exposed "
-    "under the current LCS public scope. International events remain separate."
+    "Legacy LTA North/South source labels are retained as provenance and mapped "
+    "to LCS/CBLOL; unqualified LTA is an Americas cross-region event. "
+    "International events remain separate."
 )
 
 ATTRIBUTION = (
@@ -37,6 +38,7 @@ TEAM_PLAYER_SHARED_COLS: tuple[str, ...] = (
     "competition_scope",
     "event_kind",
     "is_international",
+    "is_interregional",
     "year",
     "split",
     "playoffs",
@@ -201,6 +203,7 @@ MAPS_IDENTITY: tuple[str, ...] = (
     "competition_scope",
     "event_kind",
     "is_international",
+    "is_interregional",
     "year",
     "split",
     "playoffs",

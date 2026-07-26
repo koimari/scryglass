@@ -3,8 +3,8 @@ name: Refresh public Scryglass pack
 on:
   workflow_dispatch:
   schedule:
-    # GRID supplies the freshness bridge; OE downloads are skipped when the
-    # cached annual CSV is already present.
+    # GRID supplies the freshness bridge. OE reconciliation runs separately
+    # so a Google Drive quota response cannot block current match rows.
     - cron: "*/15 * * * *"
 
 concurrency:
@@ -48,16 +48,27 @@ jobs:
       - name: Install data dependencies
         run: python -m pip install -r requirements.txt gdown
 
-      - name: Refresh OE baseline, GRID recent games, ratings, and pack
+      - name: Restore the durable derived warehouse snapshot
+        run: |
+          python3 -m lol_kills.export.warehouse_snapshot restore \
+            --pointer data/lol/warehouse_snapshot.json
+
+      - name: Refresh GRID recent games, ratings, and pack
         run: |
           test -n "$GRID_API_KEY" || (echo "GRID_API_KEY secret is required" && exit 1)
           test -n "$BLOB_READ_WRITE_TOKEN" || (echo "BLOB_READ_WRITE_TOKEN secret is required" && exit 1)
           python3 -m lol_kills.update_public_pack \
             --years 2025,2026 \
-            --download-oe \
+            --skip-oe \
             --download-grid \
             --grid-required \
+            --allow-missing-lp \
             --publish
+
+      - name: Save the durable derived warehouse snapshot
+        run: |
+          python3 -m lol_kills.export.warehouse_snapshot save \
+            --pointer data/lol/warehouse_snapshot.json
 
       - name: Save the refreshed warehouse cache
         uses: actions/cache/save@v4
@@ -72,7 +83,10 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/lol-atlas/public/packs/manifest.json apps/lol-atlas/public/packs/latest.json
+          git add \
+            apps/lol-atlas/public/packs/manifest.json \
+            apps/lol-atlas/public/packs/latest.json \
+            data/lol/warehouse_snapshot.json
           if git diff --cached --quiet; then
             echo "Pack pointer did not change"
             exit 0

@@ -14,7 +14,7 @@ from lol_kills.etl.grid_ingest import ingest_grid, merge_source_frames
 from lol_kills.etl.competition import canonicalize_competition_frame
 from lol_kills.etl.join import build_map_warehouse
 from lol_kills.etl.leaguepedia_ingest import ingest_leaguepedia
-from lol_kills.etl.oe_ingest import ingest_oe
+from lol_kills.etl.oe_ingest import ingest_oe, load_cached_oe
 from lol_kills.etl.paths import PARQUET_DIR, WAREHOUSE_DIR
 
 
@@ -33,6 +33,11 @@ def main() -> None:
     )
     ap.add_argument("--skip-oe", action="store_true", help="Skip OE ingest entirely")
     ap.add_argument("--skip-lp", action="store_true", help="Skip Leaguepedia ingest")
+    ap.add_argument(
+        "--allow-missing-lp",
+        action="store_true",
+        help="Continue with an empty LP enrichment when the draft cache is absent",
+    )
     ap.add_argument(
         "--download-grid",
         action="store_true",
@@ -55,6 +60,12 @@ def main() -> None:
     oe_team = oe_player = None
     if not args.skip_oe:
         oe_team, oe_player = ingest_oe(years=args.oe_years, download=args.download_oe)
+    else:
+        # Fast GRID workers restore this normalized cache from the durable
+        # snapshot, then layer newly completed GRID rows on top of it.
+        oe_team, oe_player = load_cached_oe(args.oe_years)
+        if oe_team.empty and oe_player.empty:
+            print("[oe] --skip-oe requested but no cached normalized OE rows exist")
 
     grid_team = grid_player = pd.DataFrame()
     if not args.skip_grid:
@@ -89,7 +100,13 @@ def main() -> None:
 
     lp_team = lp_player = None
     if not args.skip_lp:
-        lp_team, lp_player = ingest_leaguepedia()
+        try:
+            lp_team, lp_player = ingest_leaguepedia()
+        except FileNotFoundError as exc:
+            if not args.allow_missing_lp:
+                raise
+            print(f"[lp] optional enrichment unavailable; continuing: {exc}")
+            lp_team, lp_player = pd.DataFrame(), pd.DataFrame()
 
     maps = build_map_warehouse(
         lp_team=lp_team,
