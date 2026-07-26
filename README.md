@@ -1,6 +1,7 @@
 # Scryglass
 
-Independent League of Legends research publication by koi. Authored essays lead; Dual Elo ratings,
+Independent League of Legends research publication by Koi. 
+Authored essays lead; Dual Elo ratings,
 match explorer, and head-to-head boards support the claims with reproducible Oracle’s Elixir packs
 (2025–2026).
 
@@ -33,8 +34,3 @@ Open http://localhost:3000.
 python3 -m lol_kills.export.public_pack --years 2025,2026
 python3 -m lol_kills.export.upload_pack --local-only
 ```
-
-## Voice
-
-Hedges and full sentences. Plain labels for lay readers (“contest bar”, not bare math nicknames).
-Not a betting product.
