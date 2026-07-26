@@ -22,6 +22,14 @@ from lol_kills.live_snapshots import LivePublisher, build_live_snapshot
 
 
 class GridSeriesEventsTests(unittest.TestCase):
+    def test_source_merge_normalizes_oe_and_grid_date_types(self) -> None:
+        merged = grid_ingest.merge_source_frames(
+            pd.DataFrame([{"gameid": "g1", "side": "Blue", "date": pd.Timestamp("2026-07-26 12:00") }]),
+            pd.DataFrame([{"gameid": "g2", "side": "Blue", "date": "2026-07-26T13:00:00+00:00"}]),
+            ["gameid", "side"],
+        )
+        self.assertTrue(pd.api.types.is_datetime64_dtype(merged["date"]))
+
     def test_grid_ingest_reuses_verified_cache_when_raw_files_are_missing(self) -> None:
         with TemporaryDirectory() as temp:
             root = Path(temp)
