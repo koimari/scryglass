@@ -2,6 +2,17 @@ name: Refresh public Scryglass pack
 
 on:
   workflow_dispatch:
+    inputs:
+      grid_days:
+        description: "GRID lookback window for a manual catch-up run"
+        required: false
+        default: "3"
+        type: string
+      grid_limit:
+        description: "Maximum recent GRID series to inspect"
+        required: false
+        default: "8"
+        type: string
   schedule:
     # GRID supplies the freshness bridge. OE reconciliation runs separately
     # so a Google Drive quota response cannot block current match rows.
@@ -61,7 +72,8 @@ jobs:
             --years 2025,2026 \
             --skip-oe \
             --download-grid \
-            --grid-limit 8 \
+            --grid-days "${{ inputs.grid_days || '3' }}" \
+            --grid-limit "${{ inputs.grid_limit || '8' }}" \
             --allow-missing-lp \
             --publish
 
