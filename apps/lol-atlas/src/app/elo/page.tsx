@@ -1,19 +1,13 @@
 import { Suspense } from "react";
-import { promises as fs } from "fs";
-import path from "path";
 import { EloLadders } from "@/components/EloLadders";
 import type {
-  PackManifest,
   PlayerRating,
   PlayerRecord,
   TeamRating,
   TeamRecord,
 } from "@/lib/pack";
 import { packUpdatedLabel, packUrl, softMu } from "@/lib/pack";
-
-async function loadJson<T>(filePath: string): Promise<T> {
-  return JSON.parse(await fs.readFile(filePath, "utf8")) as T;
-}
+import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 function thinPlayers(players: PlayerRating[]): PlayerRating[] {
   return players
@@ -34,27 +28,20 @@ function thinPlayers(players: PlayerRating[]): PlayerRating[] {
 }
 
 export default async function EloPage() {
-  const man = await loadJson<PackManifest>(
-    path.join(process.cwd(), "public", "packs", "manifest.json"),
-  );
-  const base = path.join(process.cwd(), "public", "packs", man.pack_id);
-  const teams = await loadJson<TeamRating[]>(
-    path.join(base, "features", "ratings_snapshot.json"),
-  );
-  const playersRaw = await loadJson<PlayerRating[]>(
-    path.join(base, "features", "player_ratings_snapshot.json"),
-  );
+  const man = await readPackManifest();
+  const teams = await readPackJson<TeamRating[]>(man, "features/ratings_snapshot.json");
+  const playersRaw = await readPackJson<PlayerRating[]>(man, "features/player_ratings_snapshot.json");
   const players = thinPlayers(playersRaw);
 
   let teamRecords: Record<string, TeamRecord> = {};
   let playerRecords: Record<string, PlayerRecord> = {};
   try {
-    teamRecords = await loadJson(path.join(base, "features", "team_records.json"));
+    teamRecords = await readPackJson(man, "features/team_records.json");
   } catch {
     teamRecords = {};
   }
   try {
-    playerRecords = await loadJson(path.join(base, "features", "player_records.json"));
+    playerRecords = await readPackJson(man, "features/player_records.json");
   } catch {
     playerRecords = {};
   }
@@ -71,8 +58,8 @@ export default async function EloPage() {
         <p className="blog-kicker">Ratings · Dual Elo</p>
         <h1 className="font-display mt-2 text-3xl">Dual Elo ladders</h1>
         <p className="lede">
-          Open a team for the roster, or a player for their board. League-aware rating is the
-          default sort — Trust settles before thin samples climb the list.
+          Open a team for the roster, or a player for their board. Adjusted rating is the default
+          sort — it accounts for how much evidence supports the number.
         </p>
         <div className="micro-log mt-4">
           <span>

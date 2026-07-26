@@ -55,6 +55,7 @@ function SortTh({
   return (
     <th
       className={align === "num" ? "num" : undefined}
+      scope="col"
       aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
     >
       <button
@@ -96,7 +97,7 @@ export function EloLadders({
   );
   const [q, setQ] = useState(searchParams.get("q") || "");
   const [leagues, setLeagues] = useState<string[]>(() => parseLeagues(searchParams.get("leagues")));
-  const [minGames, setMinGames] = useState(Number(searchParams.get("min") || 20));
+  const [minGames, setMinGames] = useState(Math.max(5, Number(searchParams.get("min") || 20)));
   const [expanded, setExpanded] = useState(false);
   const [teamCol, setTeamCol] = useState<TeamCol>("soft");
   const [teamDir, setTeamDir] = useState<Dir>("desc");
@@ -260,13 +261,25 @@ export function EloLadders({
 
   const visibleTeams = expanded ? sortedTeams : sortedTeams.slice(0, 20);
   const visiblePlayers = expanded ? sortedPlayers : sortedPlayers.slice(0, 20);
+  const intlSet = new Set<string>(["INTL", ...INTL_LEAGUES]);
+  const scopeSummary = leagues.length ? leagues.join(" + ") : "All pack leagues";
+  const liveSummary =
+    tab === "teams"
+      ? `${sortedTeams.length} teams shown in ${scopeSummary}, sorted by ${teamCol === "soft" ? "adjusted rating" : teamCol}`
+      : `${sortedPlayers.length} players shown in ${scopeSummary}, sorted by ${playerCol === "soft" ? "adjusted rating" : playerCol}`;
 
   return (
     <div className="space-y-6">
       <p className="text-sm text-[var(--ink-muted)] max-w-[62ch]">
-        One Dual Elo ladder for every region. League chips only filter who appears — they do not
-        re-fit the numbers. Default sort is league-aware rating, so a thin spike cannot outrun a
-        settled org.
+        Scope the ladder by regional league or international event. Selected chips define the visible
+        comparison sample and its win rate; each row keeps its published Dual Elo rating.
+      </p>
+      <p className="method-note max-w-[62ch]">
+          Scope: <strong>{scopeSummary}</strong>. Adjusted rating = raw rating minus rating spread
+          above the settled floor. Evidence labels summarize the match history behind the estimate.
+      </p>
+      <p className="sr-only" aria-live="polite">
+        {liveSummary}
       </p>
 
       <div className="filter-bar">
@@ -305,15 +318,15 @@ export function EloLadders({
             <span>Min games</span>
             <input
               type="number"
-              min={0}
+              min={5}
               value={minGames}
-              onChange={(e) => setMinGames(Number(e.target.value) || 0)}
+              onChange={(e) => setMinGames(Math.max(5, Number(e.target.value) || 5))}
             />
           </label>
         )}
       </div>
 
-      <div className="league-chips" role="group" aria-label="League filter">
+      <div className="league-filter" role="group" aria-label="League filter">
         <button
           type="button"
           className={`chip ${leagues.length === 0 ? "is-on" : ""}`}
@@ -321,25 +334,48 @@ export function EloLadders({
         >
           All
         </button>
-        {chips.map((lg) => (
-          <button
-            key={lg}
-            type="button"
-            className={`chip ${leagues.includes(lg) ? "is-on" : ""}`}
-            onClick={() => toggleLeague(lg)}
-          >
-            {lg}
-          </button>
-        ))}
+        <div className="chip-group">
+          <span className="chip-group-label">Regional</span>
+          {chips
+            .filter((lg) => !intlSet.has(lg))
+            .map((lg) => (
+              <button
+                key={lg}
+                type="button"
+                className={`chip ${leagues.includes(lg) ? "is-on" : ""}`}
+                onClick={() => toggleLeague(lg)}
+              >
+                {lg}
+              </button>
+            ))}
+        </div>
+        <div className="chip-group">
+          <span className="chip-group-label">International</span>
+          {chips
+            .filter((lg) => intlSet.has(lg))
+            .map((lg) => (
+              <button
+                key={lg}
+                type="button"
+                className={`chip ${leagues.includes(lg) ? "is-on" : ""}`}
+                onClick={() => toggleLeague(lg)}
+              >
+                {lg}
+              </button>
+            ))}
+        </div>
       </div>
 
       {tab === "teams" ? (
         <>
-          <div className="table-scroll elo-desktop">
+          <div className="table-scroll elo-desktop" tabIndex={0} aria-label="Team ratings table; scroll horizontally if needed">
             <table className="data-table">
+              <caption className="sr-only">
+                Team ratings in the current pack. Default order is adjusted rating.
+              </caption>
               <thead>
                 <tr>
-                  <th>#</th>
+                  <th scope="col">#</th>
                   <SortTh label="Team" col="team" active={teamCol === "team"} dir={teamDir} onSort={onTeamSort} />
                   <SortTh
                     label="League"
@@ -350,43 +386,43 @@ export function EloLadders({
                     onSort={onTeamSort}
                   />
                   <SortTh
-                    label="League-aware"
+                    label="Adjusted rating"
                     col="soft"
                     active={teamCol === "soft"}
                     dir={teamDir}
                     align="num"
-                    title="Raw Elo with a soft penalty when Trust is still Thin. Default sort. See Method."
+                    title="Raw rating with a soft penalty when evidence is still thin. Default sort. See Method."
                     onSort={onTeamSort}
                   />
                   <SortTh
-                    label="Raw Elo"
+                    label="Raw rating"
                     col="mu"
                     active={teamCol === "mu"}
                     dir={teamDir}
                     align="num"
-                    title="Full Dual Elo rating (regional + international)."
+                    title="Full rating: regional plus international components."
                     onSort={onTeamSort}
                   />
                   <SortTh
-                    label="Intl."
+                    label="International"
                     col="meta"
                     active={teamCol === "meta"}
                     dir={teamDir}
                     align="num"
-                    title="International component (MSI / EWC / Worlds / FST)."
+                    title="International component from MSI, EWC, Worlds, or First Stand."
                     onSort={onTeamSort}
                   />
                   <SortTh
-                    label="Trust"
+                    label="Evidence"
                     col="trust"
                     active={teamCol === "trust"}
                     dir={teamDir}
                     align="num"
-                    title="Settled means the rating hit its floor. Thin means it is still moving. See Method."
+                    title="Settled means the estimate reached its floor; thin means it is still moving."
                     onSort={onTeamSort}
                   />
                   <SortTh
-                    label="WR"
+                    label="Win rate"
                     col="wr"
                     active={teamCol === "wr"}
                     dir={teamDir}
@@ -442,7 +478,7 @@ export function EloLadders({
                     <span className="elo-card-rank">#{i + 1}</span>
                     <span className="elo-card-title">{t.team}</span>
                     <span className="elo-card-meta">
-                      {rec?.primary ?? "—"} · {formatTrustCell(trust)} · WR{" "}
+                      {rec?.primary ?? "—"} · Evidence {formatTrustCell(trust)} · Win rate{" "}
                       {formatWr(scopedTeamWr(rec, leagues))}
                     </span>
                     <span className="elo-card-rating">
@@ -471,31 +507,34 @@ export function EloLadders({
         </>
       ) : (
         <>
-          <div className="table-scroll elo-desktop">
+          <div className="table-scroll elo-desktop" tabIndex={0} aria-label="Player ratings table; scroll horizontally if needed">
             <table className="data-table">
+              <caption className="sr-only">
+                Player ratings in the current pack. Default order is adjusted rating.
+              </caption>
               <thead>
                 <tr>
-                  <th>#</th>
+                  <th scope="col">#</th>
                   <SortTh label="Player" col="player" active={playerCol === "player"} dir={playerDir} onSort={onPlayerSort} />
                   <SortTh label="Team" col="last_team" active={playerCol === "last_team"} dir={playerDir} onSort={onPlayerSort} />
                   <SortTh label="League" col="league" active={playerCol === "league"} dir={playerDir} onSort={onPlayerSort} />
                   <SortTh
-                    label="League-aware"
+                    label="Adjusted rating"
                     col="soft"
                     active={playerCol === "soft"}
                     dir={playerDir}
                     align="num"
-                    title="Raw Elo with a soft penalty when Trust is still Thin."
+                    title="Raw rating with a soft penalty when evidence is still thin."
                     onSort={onPlayerSort}
                   />
-                  <SortTh label="Raw Elo" col="mu" active={playerCol === "mu"} dir={playerDir} align="num" onSort={onPlayerSort} />
+                  <SortTh label="Raw rating" col="mu" active={playerCol === "mu"} dir={playerDir} align="num" onSort={onPlayerSort} />
                   <SortTh
-                    label="Trust"
+                    label="Evidence"
                     col="trust"
                     active={playerCol === "trust"}
                     dir={playerDir}
                     align="num"
-                    title="Settled is the floor (often 28 for players). Thin means still moving."
+                    title="Settled is the evidence floor; thin means the estimate is still moving."
                     onSort={onPlayerSort}
                   />
                   <SortTh label="Games" col="games" active={playerCol === "games"} dir={playerDir} align="num" onSort={onPlayerSort} />
@@ -560,7 +599,7 @@ export function EloLadders({
                     <span className="elo-card-rank">#{i + 1}</span>
                     <span className="elo-card-title">{p.player}</span>
                     <span className="elo-card-meta">
-                      {p.last_team ?? "—"} · {formatTrustCell(trust)} · {p.n_maps} games
+                      {p.last_team ?? "—"} · Evidence {formatTrustCell(trust)} · {p.n_maps} games
                     </span>
                     <span className="elo-card-rating">
                       {softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(1)}
@@ -574,7 +613,7 @@ export function EloLadders({
           {sortedPlayers.length === 0 && (
             <p className="empty-hint">
               No players match these chips
-              {q.trim() ? ` and “${q.trim()}”` : ""}. Lower min games or clear a filter.
+              {q.trim() ? ` and “${q.trim()}”` : ""}. Try a different scope or clear a filter.
             </p>
           )}
           {sortedPlayers.length > 20 && (

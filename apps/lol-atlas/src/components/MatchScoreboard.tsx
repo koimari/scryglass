@@ -1,8 +1,6 @@
 "use client";
 
-import {
-  type QueryRow,
-} from "@/lib/duck";
+import { formatGameDate, type QueryRow } from "@/lib/duck";
 import { champIconUrl, formatClock, formatGold, playerCs, sortPlayersByRole } from "@/lib/format";
 
 type Props = {
@@ -216,7 +214,7 @@ export function MatchScoreboard({ map, players, draftPctBlue }: Props) {
       </footer>
 
       <div className="sb-meta font-mono">
-        <span>{String(map.date ?? "").slice(0, 16)}</span>
+        <span>{formatGameDate(map.date)}</span>
         <span>{String(map.league ?? "")}</span>
         <span>Patch {String(map.patch ?? "—")}</span>
         <span className="muted">{String(map.oe_gameid ?? map.game_uid ?? "")}</span>

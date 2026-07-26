@@ -132,7 +132,7 @@ function ChampTable({
 
 function exportRosterCsv(team: string, roster: PlayerRating[]) {
   const lines = [
-    "player,raw_elo,league_aware,trust_sigma,games,last_team",
+    "player,raw_rating,adjusted_rating,evidence_sigma,games,last_team",
     ...roster.map(
       (p) =>
         `"${p.player}",${p.mu_total.toFixed(2)},${softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(2)},${p.sigma.toFixed(2)},${p.n_maps},"${p.last_team ?? ""}"`,
@@ -148,7 +148,7 @@ function exportRosterCsv(team: string, roster: PlayerRating[]) {
 }
 
 export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }: Props) {
-  const starters = useMemo(
+  const topRatedPlayers = useMemo(
     () =>
       [...roster]
         .sort(
@@ -159,16 +159,16 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
         .slice(0, 5),
     [roster],
   );
-  const substitutes = useMemo(() => {
-    const starterSet = new Set(starters.map((p) => p.player));
+  const otherPlayers = useMemo(() => {
+    const topRatedSet = new Set(topRatedPlayers.map((p) => p.player));
     return [...roster]
-      .filter((p) => !starterSet.has(p.player))
+      .filter((p) => !topRatedSet.has(p.player))
       .sort(
         (a, b) =>
           softMu(b.mu_total, b.sigma, PLAYER_SIGMA_MIN) -
           softMu(a.mu_total, a.sigma, PLAYER_SIGMA_MIN),
       );
-  }, [roster, starters]);
+  }, [roster, topRatedPlayers]);
 
   const [showSubs, setShowSubs] = useState(false);
   const [byPlayer, setByPlayer] = useState<Record<string, ChampAgg[]> | null>(null);
@@ -177,17 +177,26 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
   const [draftEdge, setDraftEdge] = useState<number | null>(null);
   const [banPick, setBanPick] = useState<{ bans: string[]; picks: string[] } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [seriesLoaded, setSeriesLoaded] = useState(false);
+  const [seriesError, setSeriesError] = useState<string | null>(null);
+  const [seriesRetry, setSeriesRetry] = useState(0);
   const trust = trustInfo(team.sigma, TEAM_SIGMA_MIN, record?.games);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setSeriesError(null);
+      setSeriesLoaded(false);
       try {
         const names = roster.map((p) => p.player);
         const rows = await queryRosterChampStats(baseUrl, years, names, 40);
-        if (!cancelled) setByPlayer(rows);
+        if (!cancelled) {
+          setByPlayer(rows);
+        }
       } catch (e) {
-        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+        if (!cancelled) {
+          setErr(e instanceof Error ? e.message : String(e));
+        }
       }
     })();
     return () => {
@@ -203,6 +212,7 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
         const grouped = groupMapsIntoSeries(maps);
         if (cancelled) return;
         setSeries(grouped.slice(0, 8));
+        setSeriesLoaded(true);
 
         // Draft edge over recent games with full picks
         const edges: number[] = [];
@@ -257,13 +267,15 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
       } catch {
         if (!cancelled) {
           setSeries([]);
+          setSeriesError("Could not load recent series. Try again when the pack is available.");
+          setSeriesLoaded(true);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [baseUrl, years, team.team]);
+  }, [baseUrl, years, team.team, seriesRetry]);
 
   const wl = record
     ? `${record.wins}–${record.games - record.wins}`
@@ -283,19 +295,19 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
         </p>
         <h1 className="font-display mt-2 text-3xl">{team.team}</h1>
         <p className="lede text-sm">
-          Regional {team.mu_regional.toFixed(0)} · International {team.mu_meta.toFixed(0)}. Soft
-          penalty applies only while Trust is still Thin — see Method.
+          Player-aggregated strength for the current roster. Regional and international components
+          live under Method details; adjusted rating accounts for evidence while the roster settles.
         </p>
         <div className="micro-log mt-4">
           <span>
-            <strong>Raw Elo</strong> {team.mu_total.toFixed(1)}
+            <strong>Raw rating</strong> {team.mu_total.toFixed(1)}
           </span>
           <span>
-            <strong>League-aware</strong>{" "}
+            <strong>Adjusted rating</strong>{" "}
             {softMu(team.mu_total, team.sigma, TEAM_SIGMA_MIN).toFixed(1)}
           </span>
           <span title={trust.layman}>
-            <strong>Trust</strong> {formatTrustCell(trust)}
+            <strong>Evidence</strong> {formatTrustCell(trust)}
           </span>
           <span>
             <strong>Games</strong> {record?.games ?? "—"}
@@ -308,7 +320,7 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
           </span>
           {draftEdge != null && (
             <span>
-              <strong>Draft edge</strong> {draftEdge >= 0 ? "+" : ""}
+              <strong>Draft score edge</strong> {draftEdge >= 0 ? "+" : ""}
               {draftEdge.toFixed(1)}
             </span>
           )}
@@ -337,14 +349,18 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
       </header>
 
       <section className="space-y-4">
-        <h2 className="font-display text-xl">Players</h2>
+        <h2 className="font-display text-xl">Players by adjusted rating</h2>
+        <p className="text-sm muted">
+          The top five current-snapshot players appear first. This order reflects rating evidence;
+          the pack does not encode starter or substitute roles.
+        </p>
         {roster.length === 0 ? (
           <p className="empty-hint">
             No players currently tagged to this org in the snapshot. Rosters move — try Matches for
             recent lineups.
           </p>
         ) : (
-          starters.map((p) => {
+          topRatedPlayers.map((p) => {
             const champs = byPlayer?.[p.player] ?? [];
             const expanded = champExpand[p.player];
             const pTrust = trustInfo(p.sigma, PLAYER_SIGMA_MIN, p.n_maps);
@@ -358,14 +374,14 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
                   </h3>
                   <div className="micro-log">
                     <span>
-                      <strong>Raw Elo</strong> {p.mu_total.toFixed(1)}
+                      <strong>Raw rating</strong> {p.mu_total.toFixed(1)}
                     </span>
                     <span>
-                      <strong>League-aware</strong>{" "}
+                      <strong>Adjusted rating</strong>{" "}
                       {softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(1)}
                     </span>
                     <span title={pTrust.layman}>
-                      <strong>Trust</strong> {formatTrustCell(pTrust)}
+                      <strong>Evidence</strong> {formatTrustCell(pTrust)}
                     </span>
                     <span>
                       <strong>Games</strong> {p.n_maps}
@@ -373,7 +389,10 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
                   </div>
                 </div>
                 {err && <p className="error-banner">{err}</p>}
-                {!byPlayer && !err && <div className="skeleton-block short" />}
+                {!byPlayer && !err && <div className="skeleton-block short" aria-label="Loading champion rows" />}
+                {byPlayer && champs.length === 0 && !err && (
+                  <p className="empty-hint">Champion rows are unavailable in this pack.</p>
+                )}
                 {champs.length > 0 && (
                   <>
                     <ChampTable champs={champs} limit={expanded ? null : 3} />
@@ -395,20 +414,20 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
           })
         )}
 
-        {substitutes.length > 0 && (
+        {otherPlayers.length > 0 && (
           <div className="pt-2">
             <button
               type="button"
               className="status-pill ghost"
               onClick={() => setShowSubs((x) => !x)}
             >
-              {showSubs ? "Hide substitutes" : `Substitutes (${substitutes.length})`}
+              {showSubs ? "Hide remaining players" : `Show remaining players (${otherPlayers.length})`}
             </button>
             {showSubs &&
-              substitutes.map((p) => (
+              otherPlayers.map((p) => (
                 <p key={p.player} className="mt-2 text-sm">
                   <span className="status-pill ghost" style={{ marginRight: 8 }}>
-                    Sub
+                    Additional snapshot player
                   </span>
                   <Link href={`/elo/player/${playerSlug(p.player)}`} className="row-link">
                     {p.player}
@@ -436,8 +455,17 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
 
       <section className="space-y-3 border-t border-[var(--line)] pt-4">
         <h2 className="font-display text-xl">Recent series</h2>
-        {series.length === 0 ? (
-          <p className="empty-hint">No recent series loaded yet.</p>
+        {!seriesLoaded ? (
+          <div className="skeleton-block short" aria-label="Loading recent series" />
+        ) : seriesError ? (
+          <div className="space-y-2">
+            <p className="error-banner">{seriesError}</p>
+            <button type="button" className="status-pill ghost" onClick={() => setSeriesRetry((x) => x + 1)}>
+              Try again
+            </button>
+          </div>
+        ) : series.length === 0 ? (
+          <p className="empty-hint">No recent series found in the selected pack.</p>
         ) : (
           <ul className="space-y-2">
             {series.map((s) => (

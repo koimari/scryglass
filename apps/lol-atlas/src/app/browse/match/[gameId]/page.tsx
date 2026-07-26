@@ -1,7 +1,5 @@
-import { promises as fs } from "fs";
-import path from "path";
 import { MatchLoader } from "@/components/MatchLoader";
-import type { PackManifest } from "@/lib/pack";
+import { readPackManifest } from "@/lib/serverPack";
 
 type Props = {
   params: Promise<{ gameId: string }>;
@@ -14,9 +12,7 @@ export default async function MatchPage({ params, searchParams }: Props) {
   const gameId = decodeURIComponent(raw);
   const yearHint = sp.year ? Number(sp.year) : undefined;
 
-  const man = JSON.parse(
-    await fs.readFile(path.join(process.cwd(), "public", "packs", "manifest.json"), "utf8"),
-  ) as PackManifest;
+  const man = await readPackManifest();
   const baseUrl = man.base_url || `/packs/${man.pack_id}`;
 
   return (

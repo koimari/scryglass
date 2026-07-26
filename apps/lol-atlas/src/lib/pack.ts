@@ -141,8 +141,8 @@ export function packUpdatedLabel(manifest: PackManifest): string {
     const [y, m, day] = d.split("-");
     return `${day}/${m}/${y}`;
   }
-  // pack_id vYYYY.MM.DD
-  const m = /^v(\d{4})\.(\d{2})\.(\d{2})$/.exec(manifest.pack_id);
+  // pack_id vYYYY.MM.DD or the freshness-aware vYYYY.MM.DD.HHMM form
+  const m = /^v(\d{4})\.(\d{2})\.(\d{2})(?:\.\d{4})?$/.exec(manifest.pack_id);
   if (m) return `${m[3]}/${m[2]}/${m[1]}`;
   return manifest.pack_id;
 }

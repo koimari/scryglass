@@ -44,7 +44,7 @@ export function MatchLoader({ baseUrl, years, gameId, yearHint }: Props) {
         const bundle = await loadMatchBundle(baseUrl, order, gameId);
         if (cancelled) return;
         if (!bundle) {
-          setError("Map not found in pack years.");
+          setError("This game is outside the selected pack years.");
           setStatus("Missing");
           return;
         }
@@ -53,7 +53,7 @@ export function MatchLoader({ baseUrl, years, gameId, yearHint }: Props) {
         setStatus(
           bundle.players.length
             ? `Loaded · ${bundle.players.length} players`
-            : "Loaded · map only (no player rows)",
+            : "Loaded · game data only · player rows unavailable",
         );
         setPriorLoading(true);
         const p = await loadMatchModelPrior(baseUrl, bundle.year, bundle.map);

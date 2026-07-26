@@ -42,10 +42,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const stored = localStorage.getItem(STORAGE_KEY) as ThemeChoice | null;
     const initial =
       stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
-    setChoiceState(initial);
     const r = resolve(initial);
-    setResolved(r);
     applyDom(r);
+    queueMicrotask(() => {
+      setChoiceState(initial);
+      setResolved(r);
+    });
   }, []);
 
   useEffect(() => {

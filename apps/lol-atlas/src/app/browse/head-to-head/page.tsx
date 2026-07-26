@@ -1,14 +1,10 @@
 import { Suspense } from "react";
-import { promises as fs } from "fs";
-import path from "path";
 import { HeadToHead } from "@/components/HeadToHead";
-import type { PackManifest } from "@/lib/pack";
 import { packUpdatedLabel } from "@/lib/pack";
+import { readPackManifest } from "@/lib/serverPack";
 
 export default async function HeadToHeadPage() {
-  const man = JSON.parse(
-    await fs.readFile(path.join(process.cwd(), "public", "packs", "manifest.json"), "utf8"),
-  ) as PackManifest;
+  const man = await readPackManifest();
   const baseUrl = man.base_url || `/packs/${man.pack_id}`;
 
   return (
