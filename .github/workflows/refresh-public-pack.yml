@@ -111,17 +111,17 @@ jobs:
           GRID_LIMIT: ${{ inputs.grid_limit || '40' }}
           GRID_TOURNAMENT: ${{ inputs.grid_tournament || '' }}
         run: |
-          queued="$(
+          active_successors="$(
             gh api \
               --method GET \
               "repos/${GITHUB_REPOSITORY}/actions/workflows/refresh-public-pack.yml/runs" \
-              -f status=queued \
               -f branch="$GITHUB_REF_NAME" \
-              -f per_page=1 \
-              --jq '.total_count'
+              -f per_page=20 |
+              jq --arg run_id "$GITHUB_RUN_ID" \
+                '[.workflow_runs[] | select((.id | tostring) != $run_id and .status != "completed")] | length'
           )"
-          if [ "$queued" -gt 0 ]; then
-            echo "A successor is already queued; not dispatching another."
+          if [ "$active_successors" -gt 0 ]; then
+            echo "A successor is already active or pending; not dispatching another."
             exit 0
           fi
 
