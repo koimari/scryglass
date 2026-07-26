@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["@duckdb/duckdb-wasm"],
+  // Match Turbopack + NFT to the app package (silences monorepo root mismatch).
+  outputFileTracingRoot: __dirname,
   turbopack: {
     root: __dirname,
   },
