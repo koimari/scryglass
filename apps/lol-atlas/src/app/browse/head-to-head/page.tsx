@@ -1,7 +1,9 @@
+import { Suspense } from "react";
 import { promises as fs } from "fs";
 import path from "path";
 import { HeadToHead } from "@/components/HeadToHead";
 import type { PackManifest } from "@/lib/pack";
+import { packUpdatedLabel } from "@/lib/pack";
 
 export default async function HeadToHeadPage() {
   const man = JSON.parse(
@@ -12,14 +14,20 @@ export default async function HeadToHeadPage() {
   return (
     <div className="space-y-6">
       <header className="page-header">
-        <p className="blog-kicker">Warehouse · Meetings</p>
+        <p className="blog-kicker">Matches · Head-to-head</p>
         <h1 className="font-display mt-2 text-3xl">Head-to-head</h1>
         <p className="lede">
-          Find meetings between two teams, then open a ticker-style post-game board (KDA, gold, CS,
-          bans, objectives).
+          Series between two orgs, then the board. Model checklist lives on the match page.
         </p>
+        <div className="micro-log mt-4">
+          <span>
+            <strong>Last updated</strong> {packUpdatedLabel(man)}
+          </span>
+        </div>
       </header>
-      <HeadToHead baseUrl={baseUrl} years={man.filters.years} />
+      <Suspense fallback={<div className="skeleton-block" />}>
+        <HeadToHead baseUrl={baseUrl} years={man.filters.years} />
+      </Suspense>
     </div>
   );
 }

@@ -245,7 +245,7 @@ export default async function VoidGrubsArticlePage() {
               4
             </a>
           </sup>
-          — not a claim about draft-true win probability.
+          — the conversion estimates map-win association with gold@10 under the article estimand.
         </p>
         <details className="mt-3">
           <summary className="cursor-pointer text-sm font-medium text-[var(--accent-ink)]">

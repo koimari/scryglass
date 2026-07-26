@@ -1,12 +1,65 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { formatMb, type PackManifest } from "@/lib/pack";
-import { packUrl } from "@/lib/pack";
+import { formatMb, packUpdatedLabel, packUrl, type PackFile, type PackManifest } from "@/lib/pack";
+
+/** Hard allowlist: if it is not cited on-site, it does not appear here. */
+const ESSENTIALS: { group: string; paths: string[] }[] = [
+  {
+    group: "Data",
+    paths: [
+      "maps/year=2025/part.parquet",
+      "maps/year=2026/part.parquet",
+      "team_games/year=2025/part.parquet",
+      "team_games/year=2026/part.parquet",
+      "player_games/year=2025/part.parquet",
+      "player_games/year=2026/part.parquet",
+    ],
+  },
+  {
+    group: "Ratings",
+    paths: [
+      "features/ratings_snapshot.json",
+      "features/ratings_snapshot.parquet",
+      "features/ratings_history.parquet",
+      "features/ratings_meta.json",
+      "features/player_ratings_snapshot.json",
+      "features/player_ratings_snapshot.parquet",
+      "features/player_ratings_history.parquet",
+      "features/player_ratings_meta.json",
+      "features/team_records.json",
+      "features/player_records.json",
+      "features/major_teams.json",
+      "models/elo_wr_calibration.json",
+      "models/draft_wr_calibration.json",
+    ],
+  },
+  {
+    group: "Article inputs",
+    paths: [
+      "studies/grubs/grubs_article_contest_ev.json",
+      "studies/grubs/grubs_decision_numbers.json",
+      "studies/grubs/void_grubs_scrap_value_and_contest_rationality.pdf",
+    ],
+  },
+];
+
+function findFile(man: PackManifest, rel: string): PackFile | undefined {
+  return man.files.find((f) => f.path === rel || f.relative === rel);
+}
 
 export default async function ReproducePage() {
   const man = JSON.parse(
     await fs.readFile(path.join(process.cwd(), "public", "packs", "manifest.json"), "utf8"),
   ) as PackManifest;
+
+  const listed: { group: string; file: PackFile; path: string }[] = [];
+  for (const g of ESSENTIALS) {
+    for (const p of g.paths) {
+      const f = findFile(man, p);
+      if (f) listed.push({ group: g.group, file: f, path: p });
+    }
+  }
+  const listedBytes = listed.reduce((s, x) => s + x.file.bytes, 0);
 
   return (
     <div className="space-y-8">
@@ -14,13 +67,16 @@ export default async function ReproducePage() {
         <p className="blog-kicker">Pack · Reproduce</p>
         <h1 className="font-display mt-2 text-3xl">Reproduce</h1>
         <p className="lede">
-          Cite <span className="font-mono text-sm text-[var(--ink)]">{man.pack_id}</span> when
-          matching a published finding. Download files below or load the same parquet URLs in
-          DuckDB / Polars.
+          Cite <span className="font-mono text-sm text-[var(--ink)]">{man.pack_id}</span>. Only
+          finished files cited on Scryglass are listed. Rebuild from the GitHub repo when you need
+          the warehouse pipeline.
         </p>
         <div className="micro-log mt-4">
           <span>
-            <strong>Size</strong> {formatMb(man.total_bytes)}
+            <strong>Last updated</strong> {packUpdatedLabel(man)}
+          </span>
+          <span>
+            <strong>Listed</strong> {formatMb(listedBytes)}
           </span>
           <span>
             <strong>Schema</strong> {man.schema_version}
@@ -34,49 +90,66 @@ export default async function ReproducePage() {
       <section className="space-y-3 border-t border-[var(--line)] pt-5">
         <h2 className="font-display text-lg">Checklist</h2>
         <ol className="list-decimal space-y-2 pl-5 text-sm text-[var(--ink-muted)]">
-          <li>Pin this pack version (do not mix with a newer export).</li>
-          <li>Apply the same year / league / patch filters stated in the post.</li>
+          <li>Pin this pack id.</li>
+          <li>Use the same year / league / patch filters as the post.</li>
           <li>
-            Use pinned calibration under <span className="font-mono">models/</span> when the post
-            reports Elo→WR.
+            Elo→WR and Draft Score: use the pinned files under Ratings below.
           </li>
           <li>
-            Void grubs: use{" "}
-            <a className="row-link" href="/articles/void-grubs-contest-or-leave">
-              the void-grubs article
-            </a>{" "}
-            and <span className="font-mono">studies/grubs/</span> — do not mix leave-mix break-even
-            with the article contest bar.
-          </li>
-          <li>
-            Timelines / Live Stats are not in this pack unless a study add-on is linked separately.
+            Void grubs: article JSON + PDF under Article inputs — leave-mix (~24%) is a sister
+            estimand.
           </li>
         </ol>
       </section>
 
-      <section className="space-y-3">
-        <h2 className="font-display text-lg">Files</h2>
-        <ul className="text-sm">
-          {man.files.map((f) => (
-            <li
-              key={f.path}
-              className="flex flex-wrap items-baseline justify-between gap-2 py-2.5 border-b border-[var(--line)]"
-            >
-              <a className="font-mono text-xs underline sm:text-sm" href={packUrl(man, f.path)}>
-                {f.path}
-              </a>
-              <span className="font-mono text-xs text-[var(--ink-muted)]">
-                {(f.bytes / 1024).toFixed(0)} KB
-                {f.rows != null ? ` · ${f.rows} rows` : ""}
-              </span>
-            </li>
-          ))}
-        </ul>
-        <p className="text-xs text-[var(--ink-muted)]">
-          Manifest:{" "}
+      {ESSENTIALS.map((g) => (
+        <section key={g.group} className="space-y-3">
+          <h2 className="font-display text-lg">{g.group}</h2>
+          <ul className="text-sm">
+            {g.paths.map((p) => {
+              const f = findFile(man, p);
+              if (!f) {
+                return (
+                  <li key={p} className="py-2.5 border-b border-[var(--line)] muted text-xs">
+                    {p} <em>(missing from pack)</em>
+                  </li>
+                );
+              }
+              return (
+                <li
+                  key={p}
+                  className="flex flex-wrap items-baseline justify-between gap-2 py-2.5 border-b border-[var(--line)]"
+                >
+                  <a className="font-mono text-xs underline sm:text-sm" href={packUrl(man, f.path)}>
+                    {p}
+                  </a>
+                  <span className="font-mono text-xs text-[var(--ink-muted)]">
+                    {(f.bytes / 1024).toFixed(0)} KB
+                    {f.rows != null ? ` · ${f.rows} rows` : ""}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
+
+      <section className="space-y-2 text-sm text-[var(--ink-muted)] border-t border-[var(--line)] pt-5">
+        <h2 className="font-display text-lg text-[var(--ink)]">Power users</h2>
+        <p>
+          Full manifest:{" "}
           <a className="row-link" href="/packs/manifest.json">
             /packs/manifest.json
           </a>
+          . Pipeline &amp; rebuild:{" "}
+          <a className="row-link" href="https://github.com/koimari/scryglass">
+            github.com/koimari/scryglass
+          </a>
+          .
+        </p>
+        <p>
+          Zip of listed essentials: download individually for now (zip endpoint deferred), or pull
+          the pack directory from the repo.
         </p>
       </section>
 

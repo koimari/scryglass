@@ -61,8 +61,7 @@ export default function HomePage() {
       >
         <h2 className="font-display text-xl">Explore the data</h2>
         <p className="mt-2 text-sm text-[var(--ink-muted)] max-w-[62ch]">
-          Supporting tools for the essays — Dual Elo ratings, map ledgers, and head-to-head boards.
-          They answer analysis questions; they are not a tip sheet.
+          Supporting tools for the essays — Dual Elo ratings, series boards, and head-to-head records.
         </p>
         <nav className="research-index mt-4" aria-label="Analysis tools">
           <Link href="/elo">
@@ -75,8 +74,8 @@ export default function HomePage() {
           <Link href="/browse">
             <span className="idx-label">02</span>
             <span>
-              <span className="idx-title">Match explorer</span>
-              <span className="idx-blurb block">One row per OE map with objectives and gold.</span>
+              <span className="idx-title">Matches</span>
+              <span className="idx-blurb block">Bo-series gallery with model accuracy.</span>
             </span>
           </Link>
           <Link href="/browse/head-to-head">

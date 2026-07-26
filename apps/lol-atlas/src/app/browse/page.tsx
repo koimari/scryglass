@@ -1,28 +1,37 @@
-import Link from "next/link";
+import { Suspense } from "react";
 import { promises as fs } from "fs";
 import path from "path";
-import { BrowseMaps } from "@/components/BrowseMaps";
+import { BrowseMatches } from "@/components/BrowseMaps";
 import type { PackManifest } from "@/lib/pack";
+import { packUpdatedLabel } from "@/lib/pack";
 
 export default async function BrowsePage() {
-  const man = JSON.parse(
+  const man: PackManifest = JSON.parse(
     await fs.readFile(path.join(process.cwd(), "public", "packs", "manifest.json"), "utf8"),
-  ) as PackManifest;
+  );
   const baseUrl = man.base_url || `/packs/${man.pack_id}`;
 
   return (
     <div className="space-y-6">
       <header className="page-header">
-        <p className="blog-kicker">Warehouse · Maps</p>
-        <h1 className="font-display mt-2 text-3xl">Browse maps</h1>
+        <p className="blog-kicker">Matches · Series</p>
+        <h1 className="font-display mt-2 text-3xl">Matches</h1>
         <p className="lede">
-          One row per OE map ({man.filters.years.join("–")}). Filter, then open a ticker board.{" "}
-          <Link href="/browse/head-to-head" className="row-link">
-            Head-to-head →
-          </Link>
+          Find a series, open a board. Bo3 and Bo5 keep their games together. Dual Elo favorite hit
+          rate for the year sits at the top.
         </p>
+        <div className="micro-log mt-4">
+          <span>
+            <strong>Last updated</strong> {packUpdatedLabel(man)}
+          </span>
+          <span>
+            <strong>Pack</strong> {man.pack_id}
+          </span>
+        </div>
       </header>
-      <BrowseMaps baseUrl={baseUrl} years={man.filters.years} />
+      <Suspense fallback={<div className="skeleton-block" />}>
+        <BrowseMatches baseUrl={baseUrl} years={man.filters.years} />
+      </Suspense>
     </div>
   );
 }

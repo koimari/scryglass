@@ -2,7 +2,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { notFound } from "next/navigation";
 import { TeamEloDetail } from "@/components/TeamEloDetail";
-import type { PackManifest, PlayerRating, TeamRating } from "@/lib/pack";
+import type { PackManifest, PlayerRating, TeamRating, TeamRecord } from "@/lib/pack";
 
 type Props = { params: Promise<{ team: string }> };
 
@@ -23,6 +23,12 @@ export default async function TeamEloPage({ params }: Props) {
   const players = await loadJson<PlayerRating[]>(
     path.join(base, "features", "player_ratings_snapshot.json"),
   );
+  let teamRecords: Record<string, TeamRecord> = {};
+  try {
+    teamRecords = await loadJson(path.join(base, "features", "team_records.json"));
+  } catch {
+    teamRecords = {};
+  }
   const team = teams.find((t) => t.team.toLowerCase() === teamName.toLowerCase());
   if (!team) notFound();
 
@@ -32,6 +38,13 @@ export default async function TeamEloPage({ params }: Props) {
   const baseUrl = man.base_url || `/packs/${man.pack_id}`;
 
   return (
-    <TeamEloDetail team={team} roster={roster} baseUrl={baseUrl} years={man.filters.years} />
+    <TeamEloDetail
+      team={team}
+      roster={roster}
+      record={teamRecords[team.team]}
+      baseUrl={baseUrl}
+      years={man.filters.years}
+      manifest={man}
+    />
   );
 }

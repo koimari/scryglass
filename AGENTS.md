@@ -2,12 +2,12 @@
 
 - Public Scryglass is a non-betting research publication: authored essays lead; Dual Elo / match explorer / H2H support claims; plain-language labels over bare math nicknames (e.g. “contest bar”); formulas optional behind details; light/dark/system theme (system default); Leaguepedia-like H2H; Miller/editorial aesthetic (avoid clinical chrome and financial-dashboard slop); in-page PDF where useful; model-vs-actual browse checks must mark outcomes correctly
 - Research/external writeups & public posts (@ninarin00/koi): isolation-controlled ±pp (2 decimals, explicit +/-); adversarial multi-lens review before shipping (incl. chart/figure style+content); figures = type-only research aesthetic (no cartoon icons/champ portraits); voice = hedges + full sentences (no AI slogan/thesis cadence; follow `.cursor/rules/ninarin00-voice.mdc`); when drafting public replies, preserve the user’s draft structure/voice — fix facts, don’t wholesale rewrite format; keep reply drafts short and in the user’s register; LoL wiki–grounded item/stat mechanics over illustrative hypos; when a Live Stats dump exists prefer exact JSONL numbers over wiki ranges; champ tierlists = Elo-controlled ΔWR (not raw WR) with counterability; Blind/Counter is OE matchup-shape proxy (no pick-order); regional scopes Europe=LEC only, Americas=LCS only, INTL=MSI and EWC separated; public methodology copy must avoid internal module/function names; no internal tooling leaks; concise layman conclusions; PDF+LaTeX when delivering articles
-- Prefers player-aggregated team strength over static team Elo when rosters move; public Dual Elo ladders should be region/league-scoped with sortable columns and team→player→champ drilldown
-- Dual Elo ladders should use soft/adj. rating so high-σ orgs don’t outrank settled majors on raw μ alone
+- Prefers player-aggregated team strength over static team Elo when rosters move; Dual Elo ladders use soft/adj. rating so high-σ orgs don’t outrank settled majors on raw μ alone; public ladders should be region/league/INTL-scoped chips (multi-select OK, never conflate Elo across scopes), sortable columns with plain-language defs (no AI-slop blurbs), fuzzy alias search, Games (not Maps) labeling, and deep team→player→champ profiles with last-updated dates
+- Public Reproduce/Files should ship essentials only — strip internal or leaky artifacts from downloadable surfaces
 
 ## Learned Workspace Facts
 
-- Public Scryglass app at `apps/lol-atlas` (Vercel): Dual Elo ladders, OE parquet pack browse/H2H (pack years 2025–2026 under `public/packs/`), research articles under `/articles`; DuckDB-WASM needs absolute origin URLs for parquet (relative `/packs/...` fails)
+- Public Scryglass app at `apps/lol-atlas` (Vercel: https://scryglass.vercel.app): Dual Elo ladders, OE parquet pack browse/H2H (pack years 2025–2026 under `public/packs/`), research articles under `/articles`; DuckDB-WASM needs absolute origin URLs for parquet (relative `/packs/...` fails)
 - Research / pack pipeline lives in `lol_kills` (ETL, Dual Elo, draft score, grubs studies, `lol_kills.export.public_pack`); agent-only warehouse refresh via `lol_kills.refresh_warehouse` / `lol_kills.pipeline`
 - Team aliases include KC → Karmine Corp, DK → Dplus Kia, and MKOI/KOI → Movistar KOI (`lol_kills/etl/aliases.py`); Locke stays in champ coverage with neutral OE prior until warehouse coverage exists
 - Primary warehouse is Oracle’s Elixir CSVs; Riot Match-V5 timeline cache at `data/lol/warehouse/timelines/` (rate limits ~20/1s, 100/2min per routing value)
@@ -15,3 +15,4 @@
 - Soft public-favorite / form-heat research: `lol_kills/research/public_soft_signal.py` (analysis framing, not a tip sheet)
 - Riot Live Stats JSONL (rfc461) via `lol_kills/etl/riot_esports_events.py`: ~1s champ positions + contest/kill events; pro `LOLTMNT*` population needs partner/GRID access
 - `/grubs` permanently redirects to `/articles/void-grubs-contest-or-leave`
+- Browse/H2H Draft WR comes from league-calibrated Draft Score via `/api/draft-wr` (not raw pick win rate)
