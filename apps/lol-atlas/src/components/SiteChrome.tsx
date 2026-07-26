@@ -16,6 +16,7 @@ const GROUPS = [
       { href: "/elo", label: "Ratings" },
       { href: "/browse", label: "Matches" },
       { href: "/browse/head-to-head", label: "H2H" },
+      { href: "/sandbox", label: "Sandbox" },
     ],
   },
   {

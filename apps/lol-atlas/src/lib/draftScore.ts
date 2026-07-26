@@ -9,6 +9,10 @@ const DEFAULT_TEMP = 1.4;
 const BLUE_SIDE_BONUS = 0.03;
 const PRIOR_N = 25;
 
+export const DRAFT_ROLES = ["top", "jng", "mid", "bot", "sup"] as const;
+export type DraftRole = (typeof DRAFT_ROLES)[number];
+export type DraftSide = "blue" | "red";
+
 const LEAGUE_TIER: Record<string, string> = {
   LCK: "tier1",
   LPL: "tier1",
@@ -129,7 +133,55 @@ export type DraftScoreResult = {
   note: string;
 };
 
+export type DraftChampion = {
+  name: string;
+  roles: DraftRole[];
+  games: number;
+};
+
+export type DraftAction = {
+  side: DraftSide;
+  champion: string;
+  role?: DraftRole | null;
+};
+
+export type DraftCandidateRole = DraftRole | "open" | "any";
+
+export type DraftRecommendation = {
+  champion: string;
+  role: DraftRole | null;
+  projected_wr: number;
+  delta_pp: number;
+  confidence: number;
+  sample_games: number;
+  evidence: "Settled" | "Observed" | "Thin";
+};
+
+export type DraftTimelineRow = DraftAction & {
+  pick_number: number;
+  projected_wr: number;
+  delta_pp: number;
+  confidence: number;
+};
+
+export type DraftSandboxResult = {
+  perspective: DraftSide;
+  recommendation_side: DraftSide;
+  next_side: DraftSide;
+  candidate_role: DraftCandidateRole;
+  current: {
+    projected_wr: number;
+    confidence: number;
+    score: DraftScoreResult;
+  };
+  timeline: DraftTimelineRow[];
+  recommendations: DraftRecommendation[];
+  open_roles: DraftRole[];
+  note: string;
+};
+
 let cached: DraftRuntime | null = null;
+let catalogCached: DraftChampion[] | null = null;
 
 function loadRuntime(): DraftRuntime {
   if (cached) return cached;
@@ -147,7 +199,7 @@ function normKey(name: string): string {
     .replace(/\s+/g, " ");
 }
 
-function normalizeChamp(name: string): string {
+export function normalizeDraftChampion(name: string): string {
   const key = normKey(name);
   if (key in CHAMP_ALIASES) return CHAMP_ALIASES[key];
   return (name || "").trim();
@@ -227,7 +279,7 @@ function scoreSide(
   confidence: number;
   posterior_width: number;
 } {
-  const champs = champsIn.map(normalizeChamp);
+  const champs = champsIn.map(normalizeDraftChampion);
   let winLogit = sidePrior;
   let pace = 0;
   let known = 0;
@@ -269,21 +321,60 @@ function normRole(r: string): string {
   return s.slice(0, 3);
 }
 
+function isDraftRole(value: string): value is DraftRole {
+  return DRAFT_ROLES.includes(value as DraftRole);
+}
+
+function roleMap(
+  champs: string[],
+  roles: string[] | null | undefined,
+): Map<DraftRole, string> {
+  const output = new Map<DraftRole, string>();
+  if (!roles?.length) {
+    if (champs.length !== 5) return output;
+    champs.forEach((champion, index) => output.set(DRAFT_ROLES[index], champion));
+    return output;
+  }
+  champs.forEach((champion, index) => {
+    const role = normRole(roles[index] || "");
+    if (isDraftRole(role) && !output.has(role)) output.set(role, champion);
+  });
+  return output;
+}
+
+function rolePairScore(
+  blue: string[],
+  red: string[],
+  blueRoles: string[] | null | undefined,
+  redRoles: string[] | null | undefined,
+  rt: DraftRuntime,
+): number {
+  const blueByRole = roleMap(blue, blueRoles);
+  const redByRole = roleMap(red, redRoles);
+  let pairLogit = 0;
+  for (const role of DRAFT_ROLES) {
+    const blueChampion = blueByRole.get(role);
+    const redChampion = redByRole.get(role);
+    if (!blueChampion || !redChampion) continue;
+    const row = rt.role_pairs[`${role}|${blueChampion}|${redChampion}`];
+    if (row) pairLogit += 0.35 * Number(row.logit);
+  }
+  return pairLogit;
+}
+
 export function draftScore(input: DraftScoreInput): DraftScoreResult {
   const rt = loadRuntime();
   const scale = draftTemperature(input.league, rt);
   const b = scoreSide(input.blue, rt, BLUE_SIDE_BONUS);
   const r = scoreSide(input.red, rt, 0);
 
-  let pairLogit = 0;
-  const roles = (input.blue_roles ?? ["top", "jng", "mid", "bot", "sup"]).map(normRole);
-  if (b.champs.length === 5 && r.champs.length === 5) {
-    for (let i = 0; i < 5; i++) {
-      const key = `${roles[i]}|${b.champs[i]}|${r.champs[i]}`;
-      const row = rt.role_pairs[key];
-      if (row) pairLogit += 0.35 * Number(row.logit);
-    }
-  }
+  const pairLogit = rolePairScore(
+    b.champs,
+    r.champs,
+    input.blue_roles,
+    input.red_roles,
+    rt,
+  );
 
   const winEdge = b.win_logit - r.win_logit + pairLogit;
   const temp = scale.temp;
@@ -338,6 +429,165 @@ export function draftScore(input: DraftScoreInput): DraftScoreResult {
     red: r.champs,
     note:
       "Draft Score v3: league-calibrated WR temperature from OE study; one input among several on a board. wr_bump_pp ≈ Elo-controlled ΔP from residual ridge × edge × conf.",
+  };
+}
+
+export function draftCatalog(): DraftChampion[] {
+  if (catalogCached) return catalogCached;
+  const rt = loadRuntime();
+  const roleSets = new Map<string, Set<DraftRole>>();
+  for (const key of Object.keys(rt.role_pairs)) {
+    const [roleRaw, blueChampion, redChampion] = key.split("|");
+    if (!isDraftRole(roleRaw)) continue;
+    for (const champion of [blueChampion, redChampion]) {
+      const roles = roleSets.get(champion) ?? new Set<DraftRole>();
+      roles.add(roleRaw);
+      roleSets.set(champion, roles);
+    }
+  }
+  catalogCached = Object.keys(rt.champ_game_counts)
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => ({
+      name,
+      roles: DRAFT_ROLES.filter((role) => roleSets.get(name)?.has(role)),
+      games: Number(rt.champ_game_counts[name] ?? 0),
+    }));
+  return catalogCached;
+}
+
+function sideProbability(score: DraftScoreResult, side: DraftSide): number {
+  return side === "blue" ? score.p_blue_draft : 1 - score.p_blue_draft;
+}
+
+function scoreActions(
+  actions: DraftAction[],
+  league: string | null | undefined,
+  eloDiff: number | null | undefined,
+): DraftScoreResult {
+  const blue = actions.filter((action) => action.side === "blue");
+  const red = actions.filter((action) => action.side === "red");
+  return draftScore({
+    blue: blue.map((action) => action.champion),
+    red: red.map((action) => action.champion),
+    league,
+    elo_diff: eloDiff,
+    blue_roles: blue.map((action) => action.role || ""),
+    red_roles: red.map((action) => action.role || ""),
+  });
+}
+
+function evidenceLabel(games: number): DraftRecommendation["evidence"] {
+  if (games >= 200) return "Settled";
+  if (games >= 75) return "Observed";
+  return "Thin";
+}
+
+export function analyzeDraftSandbox(input: {
+  actions: DraftAction[];
+  perspective: DraftSide;
+  next_side: DraftSide;
+  candidate_role?: DraftCandidateRole;
+  excluded?: string[];
+  league?: string | null;
+  elo_diff?: number | null;
+  limit?: number;
+}): DraftSandboxResult {
+  const actions = input.actions.map((action) => ({
+    ...action,
+    champion: normalizeDraftChampion(action.champion),
+  }));
+  const perspective = input.perspective;
+  const currentScore = scoreActions(actions, input.league, input.elo_diff);
+  const currentProbability = sideProbability(currentScore, perspective);
+  const currentRecommendationProbability = sideProbability(currentScore, input.next_side);
+  const timeline: DraftTimelineRow[] = [];
+  const prefix: DraftAction[] = [];
+  let previousProbability = 0.5;
+
+  actions.forEach((action, index) => {
+    prefix.push(action);
+    const score = scoreActions(prefix, input.league, input.elo_diff);
+    const probability = sideProbability(score, perspective);
+    timeline.push({
+      ...action,
+      pick_number: index + 1,
+      projected_wr: round(probability, 4),
+      delta_pp: round(100 * (probability - previousProbability), 2),
+      confidence: score.confidence,
+    });
+    previousProbability = probability;
+  });
+
+  const occupied = new Set(
+    actions
+      .filter((action) => action.side === input.next_side)
+      .map((action) => action.role)
+      .filter((role): role is DraftRole => Boolean(role)),
+  );
+  const openRoles = DRAFT_ROLES.filter((role) => !occupied.has(role));
+  const selected = new Set(actions.map((action) => normKey(action.champion)));
+  const excluded = new Set((input.excluded || []).map((champion) => normKey(normalizeDraftChampion(champion))));
+  const candidateRole = input.candidate_role ?? "open";
+  const catalog = draftCatalog();
+  const recommendations: DraftRecommendation[] = [];
+
+  for (const candidate of catalog) {
+    if (selected.has(normKey(candidate.name)) || excluded.has(normKey(candidate.name))) continue;
+    let roles: Array<DraftRole | null>;
+    if (candidateRole === "any") {
+      roles = candidate.roles.length ? candidate.roles : [null];
+    } else if (candidateRole === "open") {
+      roles = candidate.roles.filter((role) => openRoles.includes(role));
+      if (!roles.length) continue;
+    } else {
+      if (!candidate.roles.includes(candidateRole)) continue;
+      roles = [candidateRole];
+    }
+
+    let best: DraftRecommendation | null = null;
+    for (const role of roles) {
+      const score = scoreActions(
+        [...actions, { side: input.next_side, champion: candidate.name, role }],
+        input.league,
+        input.elo_diff,
+      );
+      const projected = sideProbability(score, input.next_side);
+      const row: DraftRecommendation = {
+        champion: candidate.name,
+        role,
+        projected_wr: round(projected, 4),
+        delta_pp: round(100 * (projected - currentRecommendationProbability), 2),
+        confidence: score.confidence,
+        sample_games: candidate.games,
+        evidence: evidenceLabel(candidate.games),
+      };
+      if (!best || row.projected_wr > best.projected_wr) best = row;
+    }
+    if (best) recommendations.push(best);
+  }
+
+  recommendations.sort(
+    (a, b) =>
+      b.projected_wr - a.projected_wr ||
+      b.sample_games - a.sample_games ||
+      a.champion.localeCompare(b.champion),
+  );
+
+  return {
+    perspective,
+    recommendation_side: input.next_side,
+    next_side: input.next_side,
+    candidate_role: candidateRole,
+    current: {
+      projected_wr: round(currentProbability, 4),
+      confidence: currentScore.confidence,
+      score: currentScore,
+    },
+    timeline,
+    recommendations: recommendations.slice(0, clip(input.limit ?? 12, 1, 30)),
+    open_roles: openRoles,
+    note:
+      "Partial-draft counterfactual. Unfilled seats contribute the fitted average (zero-centered); pick-to-pick changes are model comparisons, not separately calibrated live win probabilities.",
   };
 }
 
