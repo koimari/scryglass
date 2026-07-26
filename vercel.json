@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "npm ci --prefix apps/lol-atlas",
+  "buildCommand": "npm run build --prefix apps/lol-atlas",
+  "outputDirectory": "apps/lol-atlas/.next"
+}
