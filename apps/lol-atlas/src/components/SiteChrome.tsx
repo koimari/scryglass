@@ -13,7 +13,6 @@ const GROUPS = [
   {
     label: "Explore",
     links: [
-      { href: "/live", label: "Live" },
       { href: "/elo", label: "Ratings" },
       { href: "/browse", label: "Matches" },
       { href: "/browse/head-to-head", label: "H2H" },

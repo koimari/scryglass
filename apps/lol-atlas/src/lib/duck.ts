@@ -124,6 +124,8 @@ const MAP_SELECT = `
   red_inhibitors,
   blue_golddiffat15,
   red_golddiffat15,
+  source_oe,
+  source_grid,
   length_min,
   gamelength,
   blue_ban1, blue_ban2, blue_ban3, blue_ban4, blue_ban5,
@@ -226,6 +228,7 @@ export type SeriesCard = {
   bestOf: number;
   games: QueryRow[];
   year: number;
+  source: "oe" | "grid" | "mixed" | "unknown";
 };
 
 export function formatGameDate(dateVal: unknown): string {
@@ -287,6 +290,8 @@ export function groupMapsIntoSeries(rows: QueryRow[]): SeriesCard[] {
     }
     const maxGame = Math.max(...games.map((g) => Number(g.game) || 1), games.length);
     const bestOf = maxGame >= 5 || games.length >= 5 ? 5 : maxGame >= 3 || games.length >= 3 ? 3 : 1;
+    const hasGrid = games.some((g) => g.source_grid === true || Number(g.source_grid) === 1);
+    const hasOe = games.some((g) => g.source_oe === true || Number(g.source_oe) === 1);
     series.push({
       key,
       date: formatGameDate(first.date),
@@ -300,6 +305,7 @@ export function groupMapsIntoSeries(rows: QueryRow[]): SeriesCard[] {
       bestOf,
       games,
       year: Number(first._year ?? first.year ?? 0) || Number(formatGameDate(first.date).slice(0, 4)) || 0,
+      source: hasGrid && hasOe ? "mixed" : hasGrid ? "grid" : hasOe ? "oe" : "unknown",
     });
   }
   series.sort((a, b) => b.date.localeCompare(a.date));
