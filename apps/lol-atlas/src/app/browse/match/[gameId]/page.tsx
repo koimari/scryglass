@@ -1,6 +1,8 @@
 import { MatchLoader } from "@/components/MatchLoader";
 import { readPackManifest } from "@/lib/serverPack";
 
+export const dynamic = "force-dynamic";
+
 type Props = {
   params: Promise<{ gameId: string }>;
   searchParams: Promise<{ year?: string }>;

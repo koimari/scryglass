@@ -598,6 +598,8 @@ def _parse_events(
                 "teamname": normalize_team(team),
                 "team_id": team_id,
                 "kills": kills[team_id],
+                "teamkills": kills[team_id],
+                "teamdeaths": kills[200 if team_id == 100 else 100],
                 "result": 1 if winner == team_id else 0,
                 "total_kills": kills[100] + kills[200],
                 "length_min": base["gamelength"] / 60.0,

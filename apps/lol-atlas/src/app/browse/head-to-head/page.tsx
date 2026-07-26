@@ -3,6 +3,8 @@ import { HeadToHead } from "@/components/HeadToHead";
 import { packUpdatedLabel } from "@/lib/pack";
 import { readPackManifest } from "@/lib/serverPack";
 
+export const dynamic = "force-dynamic";
+
 export default async function HeadToHeadPage() {
   const man = await readPackManifest();
   const baseUrl = man.base_url || `/packs/${man.pack_id}`;

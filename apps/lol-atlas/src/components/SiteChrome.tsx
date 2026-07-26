@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -47,25 +47,38 @@ function relativeFreshness(raw: string | undefined): string | null {
 
 export function SiteHeader() {
   const pathname = usePathname();
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [updated, setUpdated] = useState<string | null>(null);
+  const latestPackRef = useRef<string | null>(null);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/packs/manifest.json", { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((manifest: { created_utc?: string } | null) => {
-        if (!cancelled) setUpdated(relativeFreshness(manifest?.created_utc));
-      })
-      .catch(() => {
-        if (!cancelled) setUpdated(null);
-      });
+    const refresh = () => {
+      fetch("/api/pack-manifest", { cache: "no-store" })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((manifest: { pack_id?: string; created_utc?: string } | null) => {
+          if (cancelled) return;
+          setUpdated(relativeFreshness(manifest?.created_utc));
+          const nextPack = manifest?.pack_id ?? null;
+          if (latestPackRef.current && nextPack && latestPackRef.current !== nextPack) {
+            router.refresh();
+          }
+          latestPackRef.current = nextPack;
+        })
+        .catch(() => {
+          if (!cancelled) setUpdated(null);
+        });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 60_000);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!menuOpen) return;
