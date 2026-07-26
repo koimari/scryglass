@@ -15,9 +15,9 @@ Canonical machine-readable allowlists and defaults live in
 
 | Path | Source | Notes |
 |------|--------|--------|
-| `team_games/year=Y/part.parquet` | `warehouse/parquet/oe_team_games.parquet` | Column allowlist `TEAM_COLS` |
-| `player_games/year=Y/part.parquet` | `oe_player_games.parquet` | One player table; no duplicate `players.parquet` |
-| `maps/year=Y/part.parquet` | `maps.parquet` | Trimmed identity + both-side draft/obj/@10–25 |
+| `team_games/year=Y/part.parquet` | `warehouse/parquet/oe_team_games.parquet` | Column allowlist `TEAM_COLS`; `source` is `oe`, `grid`, or `mixed` |
+| `player_games/year=Y/part.parquet` | `oe_player_games.parquet` | One player table; no duplicate `players.parquet`; source is retained |
+| `maps/year=Y/part.parquet` | `maps.parquet` | Trimmed identity + both-side draft/obj/@10–25; `source_oe` / `source_grid` preserve provenance |
 | `features/*_snapshot.*` | Dual Elo snapshots | Parquet + JSON twins for ladders |
 | `features/*_history.parquet` | Elo history | Rows whose `game_uid` is in year-filtered maps |
 | `models/` | Pinned calibration / tierlist CSV | See `PINNED_MODEL_FILES` |
@@ -32,6 +32,8 @@ Canonical machine-readable allowlists and defaults live in
 ## Build
 
 ```bash
+python3 -m lol_kills.update_public_pack --years 2025,2026 --download-oe --download-grid --grid-required --publish
+# Or, when the warehouse is already current:
 python3 -m lol_kills.export.public_pack --years 2025,2026
 python3 -m lol_kills.export.upload_pack --local-only   # or Blob with token
 ```

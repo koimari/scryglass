@@ -43,7 +43,15 @@ def copy_to_atlas(pack_dir: Path, pack_id: str) -> Path:
     return dest
 
 
-def _blob_put(token: str, pathname: str, data: bytes, content_type: str) -> str:
+def _blob_put(
+    token: str,
+    pathname: str,
+    data: bytes,
+    content_type: str,
+    *,
+    cache_control: str | None = None,
+    allow_overwrite: bool = False,
+) -> str:
     """Upload via Vercel Blob REST API; returns blob URL."""
     req = urllib.request.Request(
         f"https://blob.vercel-storage.com/{pathname}",
@@ -55,6 +63,8 @@ def _blob_put(token: str, pathname: str, data: bytes, content_type: str) -> str:
             "x-vercel-blob-access": "public",
             "Content-Type": content_type,
             "x-content-type": content_type,
+            **({"Cache-Control": cache_control} if cache_control else {}),
+            **({"x-allow-overwrite": "true"} if allow_overwrite else {}),
         },
     )
     try:

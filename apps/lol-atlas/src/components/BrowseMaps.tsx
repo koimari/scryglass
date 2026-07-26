@@ -8,6 +8,7 @@ import {
   listLeagues,
   queryEloAccuracy,
   queryMaps,
+  formatGameDate,
   type QueryRow,
   type SeriesCard,
 } from "@/lib/duck";
@@ -41,13 +42,6 @@ function TagInput({
     if (!parts.length) return;
     const next = [...tags];
     for (const p of parts) {
-      const expanded = expandTeamQuery(p)[1] || p;
-      // Prefer canonical display: if alias, use longer form from expand
-      const label = p.length <= 4 ? expanded : p;
-      const display =
-        label === p.toLowerCase()
-          ? p
-          : expandTeamQuery(p).find((x) => x !== p.toLowerCase() && x.length > 2) || p;
       // Use original token if not alias; else title-case from known aliases via first match in expand list
       const pretty = (() => {
         const needles = expandTeamQuery(p);
@@ -148,7 +142,7 @@ function SeriesTile({
         <ul className="series-games">
           {s.games.map((g) => {
             const id = String(g.oe_gameid ?? g.game_uid);
-            const year = s.year || Number(String(g.date).slice(0, 4));
+            const year = s.year || Number(formatGameDate(g.date).slice(0, 4));
             const bw = blueWon(g);
             const winner = bw ? String(g.blue_teamname) : String(g.red_teamname);
             return (
@@ -198,6 +192,7 @@ export function BrowseMatches({ baseUrl, years }: Props) {
   const [status, setStatus] = useState("Idle");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [eloAcc, setEloAcc] = useState<{ n: number; hits: number; rate: number | null } | null>(
     null,
   );
@@ -232,7 +227,8 @@ export function BrowseMatches({ baseUrl, years }: Props) {
   const run = useCallback(async () => {
     setLoading(true);
     setError(null);
-    setStatus("Fetching series…");
+    setHasLoaded(false);
+    setStatus(`Loading ${year} matches…`);
     setPage(0);
     try {
       const data = await queryMaps(baseUrl, year, {
@@ -248,18 +244,16 @@ export function BrowseMatches({ baseUrl, years }: Props) {
       setStatus(
         grouped.length
           ? `${grouped.length} series · ${data.length} games`
-          : "The warehouse shrugged. Try another chip.",
+          : "No matches found for these filters.",
       );
       const acc = await queryEloAccuracy(baseUrl, year);
       setEloAcc(acc);
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? `${e.message} — DuckDB had a moment. Refresh usually works.`
-          : String(e),
-      );
+      setHasLoaded(true);
+    } catch {
+      setError("Could not load matches for this selection. Try again or choose another year.");
       setSeries([]);
-      setStatus("Idle");
+      setStatus("Could not load matches.");
+      setHasLoaded(true);
     } finally {
       setLoading(false);
     }
@@ -283,7 +277,7 @@ export function BrowseMatches({ baseUrl, years }: Props) {
     <div className="space-y-6">
       <div className="model-acc-strip">
         <div>
-          <strong>Winner (Elo)</strong>{" "}
+          <strong>Model check · Elo favorite</strong>{" "}
           {eloAcc?.rate != null ? (
             <>
               {(100 * eloAcc.rate).toFixed(1)}% · {eloAcc.hits}/{eloAcc.n} games in {year}
@@ -293,8 +287,8 @@ export function BrowseMatches({ baseUrl, years }: Props) {
           )}
         </div>
         <div className="muted text-sm">
-          Draft∩Winner overlap is computed on match boards (Draft Score favorite vs actual winner).
-          Elo accuracy here is Dual Elo pre-match favorite vs result.
+          Elo accuracy is the pre-match favorite against the final result. Draft overlap appears on
+          individual match boards.
         </div>
       </div>
 
@@ -346,9 +340,16 @@ export function BrowseMatches({ baseUrl, years }: Props) {
         </label>
       </div>
 
-      {loading && <div className="skeleton-block" aria-label="Loading" />}
-      {error && <p className="error-banner">{error}</p>}
-      {!loading && <p className="status-hint">{status}</p>}
+      {loading && <div className="skeleton-block" aria-label={`Loading ${year} matches`} />}
+      {error && (
+        <div className="error-banner">
+          <p>{error}</p>
+          <button type="button" className="status-pill ghost mt-2" onClick={() => void run()}>
+            Try again
+          </button>
+        </div>
+      )}
+      {!loading && <p className="status-hint" aria-live="polite">{status}</p>}
 
       <div className="series-gallery">
         {pageRows.map((s) => (
@@ -361,9 +362,9 @@ export function BrowseMatches({ baseUrl, years }: Props) {
         ))}
       </div>
 
-      {!loading && series.length === 0 && !error && (
+      {!loading && hasLoaded && series.length === 0 && !error && (
         <p className="empty-hint">
-          No series under these filters. The map is empty — blame the chips, not the players.
+          No matches found for these filters. Clear a chip or try another league.
         </p>
       )}
 

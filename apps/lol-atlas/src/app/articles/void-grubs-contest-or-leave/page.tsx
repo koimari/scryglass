@@ -1,15 +1,13 @@
-import { promises as fs } from "fs";
-import path from "path";
 import type { Metadata } from "next";
 import { ArticleContestCharts } from "@/components/ArticleContestCharts";
 import { ArticleShell, EvidenceFigure } from "@/components/ArticleShell";
 import { PdfEmbed } from "@/components/PdfEmbed";
 import { getArticle } from "@/lib/articles";
 import { blockMathHtml } from "@/lib/formulaHtml";
-import type { PackManifest } from "@/lib/pack";
 import { packUrl } from "@/lib/pack";
 import { PSTAR_TEX } from "@/lib/pstar";
 import "katex/dist/katex.min.css";
+import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 type ArticleEv = {
   p_star: number;
@@ -90,16 +88,9 @@ export const metadata: Metadata = {
 };
 
 export default async function VoidGrubsArticlePage() {
-  const man = JSON.parse(
-    await fs.readFile(path.join(process.cwd(), "public", "packs", "manifest.json"), "utf8"),
-  ) as PackManifest;
-  const base = path.join(process.cwd(), "public", "packs", man.pack_id, "studies", "grubs");
-  const article = JSON.parse(
-    await fs.readFile(path.join(base, "grubs_article_contest_ev.json"), "utf8"),
-  ) as ArticleEv;
-  const numbers = JSON.parse(
-    await fs.readFile(path.join(base, "grubs_decision_numbers.json"), "utf8"),
-  ) as DecisionNumbers;
+  const man = await readPackManifest();
+  const article = await readPackJson<ArticleEv>(man, "studies/grubs/grubs_article_contest_ev.json");
+  const numbers = await readPackJson<DecisionNumbers>(man, "studies/grubs/grubs_decision_numbers.json");
 
   const pdfHref = packUrl(man, "studies/grubs/void_grubs_scrap_value_and_contest_rationality.pdf");
   const articleHref = packUrl(man, "studies/grubs/grubs_article_contest_ev.json");
@@ -131,6 +122,23 @@ export default async function VoidGrubsArticlePage() {
         </>
       }
     >
+      <aside className="article-reader-brief" aria-label="Reader's brief">
+        <p className="blog-kicker">Reader&apos;s brief</p>
+        <dl>
+          <div>
+            <dt>Question</dt>
+            <dd>When does contesting beat leaving for two waves of farm?</dd>
+          </div>
+          <div>
+            <dt>Result</dt>
+            <dd>At even gold, the contest bar is about {article.p_star_pct}%.</dd>
+          </div>
+          <div>
+            <dt>Decision rule</dt>
+            <dd>Research estimate of the opportunity cost between contesting and taking two waves of farm.</dd>
+          </div>
+        </dl>
+      </aside>
       <section className="article-prose">
         <p>
           How often do you need to win the river fight before contesting beats leaving for two waves
@@ -223,7 +231,7 @@ export default async function VoidGrubsArticlePage() {
       <section className="article-prose border-t border-[var(--line)] pt-5">
         <h2 className="article-section-title">Why you also see ~24%</h2>
         <p>
-          That number is <strong className="text-[var(--ink)]">not</strong> the article contest bar
+          That number answers a different Oracle&apos;s Elixir question from the article contest bar
           <sup>
             <a href="#fn-24" className="article-fn-ref">
               3
@@ -235,8 +243,8 @@ export default async function VoidGrubsArticlePage() {
           <span className="font-mono text-[var(--ink)]">
             {pct(numbers.breakeven_p_win_fight.vs_leave_mix)}
           </span>
-          . Use it only when you care about that OE leave-mix sample — never as a substitute for the
-          two-wave contest bar ({article.p_star_pct}%).
+          . Keep it alongside the two-wave contest bar ({article.p_star_pct}%) when you are studying
+          the OE leave-mix sample.
         </p>
         <p>
           The gold-at-10 conversion behind the article estimand is associational

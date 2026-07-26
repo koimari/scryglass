@@ -29,6 +29,7 @@ MAJOR_LEAGUES = {
     "MSI",
     "EWC",
     "FST",
+    "INTL",
     "WLDs",
     "IWCs",
 }
@@ -64,6 +65,11 @@ def _oe_wide(oe_team: pd.DataFrame) -> pd.DataFrame:
         "url",
         "source",
         "oe_year",
+        "game_uid",
+        "tournament",
+        "grid_series_id",
+        "grid_game_id",
+        "grid_game_index",
     ]
     rename_b = {c: f"blue_{c}" for c in blue.columns if c not in meta}
     rename_r = {c: f"red_{c}" for c in red.columns if c not in meta}
@@ -71,6 +77,8 @@ def _oe_wide(oe_team: pd.DataFrame) -> pd.DataFrame:
     red = red.rename(columns=rename_r)
 
     merged = blue.merge(red, on=["gameid"], how="inner", suffixes=("", "_r"))
+    source_blue = merged.get("source")
+    source_red = merged.get("source_r")
     for col in meta:
         if col == "gameid":
             continue
@@ -88,7 +96,29 @@ def _oe_wide(oe_team: pd.DataFrame) -> pd.DataFrame:
     merged["red_team"] = merged.get("red_teamname", pd.Series(dtype=object)).map(
         lambda x: normalize_team(str(x)) if pd.notna(x) else x
     )
-    merged["source_oe"] = True
+    # Preserve provenance when GRID temporarily fills the OE freshness gap.
+    # OE remains the primary source when both contain the same game, but a
+    # current GRID row must not be mislabeled as Oracle's Elixir data. A
+    # partially overlapping game is explicitly marked mixed.
+    if source_blue is None:
+        merged["source_oe"] = True
+        merged["source_grid"] = False
+    else:
+        blue_is_oe = source_blue.astype(str).str.lower().eq("oe")
+        blue_is_grid = source_blue.astype(str).str.lower().eq("grid")
+        if source_red is None:
+            merged["source_oe"] = blue_is_oe
+            merged["source_grid"] = blue_is_grid
+        else:
+            red_is_oe = source_red.astype(str).str.lower().eq("oe")
+            red_is_grid = source_red.astype(str).str.lower().eq("grid")
+            merged["source_oe"] = blue_is_oe & red_is_oe
+            merged["source_grid"] = blue_is_grid | red_is_grid
+            merged["source"] = np.select(
+                [merged["source_oe"], blue_is_grid & red_is_grid, merged["source_grid"]],
+                ["oe", "grid", "mixed"],
+                default=source_blue,
+            )
     return merged
 
 

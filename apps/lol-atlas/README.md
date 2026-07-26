@@ -27,6 +27,7 @@ python3 -m lol_kills.export.upload_pack --local-only
 - `/elo` — Dual Elo ratings
 - `/browse` — match explorer
 - `/browse/head-to-head` — head-to-head
+- `/live` — verified live game state and conditional model estimate
 - `/reproduce` — pack download
 - `/methodology` — estimands
 

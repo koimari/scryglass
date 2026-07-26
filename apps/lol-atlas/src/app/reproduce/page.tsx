@@ -1,6 +1,5 @@
-import { promises as fs } from "fs";
-import path from "path";
 import { formatMb, packUpdatedLabel, packUrl, type PackFile, type PackManifest } from "@/lib/pack";
+import { readPackManifest } from "@/lib/serverPack";
 
 /** Hard allowlist: if it is not cited on-site, it does not appear here. */
 const ESSENTIALS: { group: string; paths: string[] }[] = [
@@ -48,9 +47,7 @@ function findFile(man: PackManifest, rel: string): PackFile | undefined {
 }
 
 export default async function ReproducePage() {
-  const man = JSON.parse(
-    await fs.readFile(path.join(process.cwd(), "public", "packs", "manifest.json"), "utf8"),
-  ) as PackManifest;
+  const man = await readPackManifest();
 
   const listed: { group: string; file: PackFile; path: string }[] = [];
   for (const g of ESSENTIALS) {
@@ -67,9 +64,14 @@ export default async function ReproducePage() {
         <p className="blog-kicker">Pack · Reproduce</p>
         <h1 className="font-display mt-2 text-3xl">Reproduce</h1>
         <p className="lede">
-          Cite <span className="font-mono text-sm text-[var(--ink)]">{man.pack_id}</span>. Only
-          finished files cited on Scryglass are listed. Rebuild from the GitHub repo when you need
+          Cite <span className="font-mono text-sm text-[var(--ink)]">{man.pack_id}</span>. This list
+          contains the finished files cited on Scryglass. Rebuild from the GitHub repo when you need
           the warehouse pipeline.
+        </p>
+        <p className="method-note">
+          Source order: Oracle&apos;s Elixir is the reconciled baseline; completed GRID games may
+          bridge the gap until OE publishes them. The refresh metadata records which rows came from
+          each source.
         </p>
         <div className="micro-log mt-4">
           <span>
@@ -120,7 +122,7 @@ export default async function ReproducePage() {
                   key={p}
                   className="flex flex-wrap items-baseline justify-between gap-2 py-2.5 border-b border-[var(--line)]"
                 >
-                  <a className="font-mono text-xs underline sm:text-sm" href={packUrl(man, f.path)}>
+                  <a className="font-mono break-all text-xs underline sm:text-sm" href={packUrl(man, f.path)}>
                     {p}
                   </a>
                   <span className="font-mono text-xs text-[var(--ink-muted)]">
@@ -146,10 +148,6 @@ export default async function ReproducePage() {
             github.com/koimari/scryglass
           </a>
           .
-        </p>
-        <p>
-          Zip of listed essentials: download individually for now (zip endpoint deferred), or pull
-          the pack directory from the repo.
         </p>
       </section>
 

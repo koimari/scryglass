@@ -17,7 +17,20 @@ def cmd_refresh(args: argparse.Namespace) -> None:
     from lol_kills.refresh_warehouse import main as refresh_main
     import sys
 
-    sys.argv = ["lol_kills.refresh_warehouse"] + (["--oe-years"] + args.oe_years if args.oe_years else [])
+    forwarded = ["lol_kills.refresh_warehouse"]
+    if args.oe_years:
+        forwarded += ["--oe-years", *args.oe_years]
+    if args.download_oe:
+        forwarded.append("--download-oe")
+    if args.skip_oe:
+        forwarded.append("--skip-oe")
+    if args.download_grid:
+        forwarded.append("--download-grid")
+    if args.grid_required:
+        forwarded.append("--grid-required")
+    if args.grid_env_file:
+        forwarded += ["--grid-env-file", args.grid_env_file]
+    sys.argv = forwarded
     refresh_main()
 
 
@@ -57,8 +70,13 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p_r = sub.add_parser("refresh", help="Refresh OE+LP warehouse")
+    p_r = sub.add_parser("refresh", help="Refresh OE+GRID+LP warehouse")
     p_r.add_argument("--oe-years", nargs="*", default=None)
+    p_r.add_argument("--download-oe", action="store_true")
+    p_r.add_argument("--skip-oe", action="store_true")
+    p_r.add_argument("--download-grid", action="store_true")
+    p_r.add_argument("--grid-required", action="store_true")
+    p_r.add_argument("--grid-env-file", default=None)
     p_r.set_defaults(func=cmd_refresh)
 
     p_t = sub.add_parser("train", help="Features + ratings + train + gates")

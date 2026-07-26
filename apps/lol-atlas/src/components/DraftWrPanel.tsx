@@ -42,15 +42,21 @@ export function useDraftWr(
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     if (!map) return;
     const blue = picksFromMap(map, "blue");
     const red = picksFromMap(map, "red");
     if (blue.length !== 5 || red.length !== 5) {
-      setDraft(null);
-      setError("Picks incomplete in pack row");
-      return;
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setDraft(null);
+        setError("Picks incomplete in pack row");
+        setLoading(false);
+      });
+      return () => {
+        cancelled = true;
+      };
     }
-    let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);

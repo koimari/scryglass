@@ -1,18 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   groupMapsIntoSeries,
   listLeagues,
   loadMatchBundle,
+  listTeams,
   queryMaps,
   queryMapsYears,
   type QueryRow,
   type SeriesCard,
 } from "@/lib/duck";
-import { formatClock } from "@/lib/format";
 import { expandTeamQuery, teamSlug } from "@/lib/pack";
 import { MatchScoreboard } from "./MatchScoreboard";
 import { useDraftWr } from "./DraftWrPanel";
@@ -64,12 +64,6 @@ type Props = { baseUrl: string; years: number[] };
 type SortCol = "date" | "kills" | "len";
 type Dir = "asc" | "desc";
 
-function ymd(d: unknown): string {
-  const s = String(d ?? "");
-  const m = s.match(/(\d{4}-\d{2}-\d{2})/);
-  return m ? m[1] : s.slice(0, 10);
-}
-
 export function HeadToHead({ baseUrl, years }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -82,6 +76,7 @@ export function HeadToHead({ baseUrl, years }: Props) {
   const [teamA, setTeamA] = useState(searchParams.get("a") || "");
   const [teamB, setTeamB] = useState(searchParams.get("b") || "");
   const [leagues, setLeagues] = useState<string[]>([]);
+  const [teamDirectory, setTeamDirectory] = useState<string[]>([]);
   const [series, setSeries] = useState<SeriesCard[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [board, setBoard] = useState<{ map: QueryRow; players: QueryRow[]; year: number } | null>(
@@ -93,6 +88,7 @@ export function HeadToHead({ baseUrl, years }: Props) {
   const [status, setStatus] = useState("Idle");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const autoRunKey = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,6 +106,20 @@ export function HeadToHead({ baseUrl, years }: Props) {
   }, [baseUrl, year]);
 
   useEffect(() => {
+    let cancelled = false;
+    listTeams(baseUrl, years)
+      .then((names) => {
+        if (!cancelled) setTeamDirectory(names);
+      })
+      .catch(() => {
+        if (!cancelled) setTeamDirectory([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl, years]);
+
+  useEffect(() => {
     const params = new URLSearchParams();
     if (teamA.trim()) params.set("a", teamA.trim());
     if (teamB.trim()) params.set("b", teamB.trim());
@@ -123,7 +133,6 @@ export function HeadToHead({ baseUrl, years }: Props) {
     let a = 0;
     let b = 0;
     const aN = teamA.trim().toLowerCase();
-    const bN = teamB.trim().toLowerCase();
     for (const s of series) {
       if (s.teamA.toLowerCase().includes(aN) || s.teamB.toLowerCase().includes(aN)) {
         // map wins onto A/B labels
@@ -138,7 +147,7 @@ export function HeadToHead({ baseUrl, years }: Props) {
       }
     }
     return { a, b };
-  }, [series, teamA, teamB]);
+  }, [series, teamA]);
 
   const sortedSeries = useMemo(() => {
     const list = [...series];
@@ -163,17 +172,16 @@ export function HeadToHead({ baseUrl, years }: Props) {
     return list;
   }, [series, sortCol, sortDir]);
 
-  const resolveExact = (raw: string, sampleNames: string[]): string | null => {
+  const teamCandidates = (raw: string, sampleNames: string[]): string[] => {
     const needles = expandTeamQuery(raw);
-    const hits = sampleNames.filter((n) =>
+    return [...new Set(sampleNames.filter((n) =>
       needles.some((nd) => n.toLowerCase().includes(nd) || nd.includes(n.toLowerCase())),
-    );
-    const uniq = [...new Set(hits)];
-    if (uniq.length === 1) return uniq[0];
-    if (uniq.length === 0) return null;
-    // prefer exact ignore-case
-    const exact = uniq.find((u) => u.toLowerCase() === raw.trim().toLowerCase());
-    return exact ?? null;
+    ))];
+  };
+
+  const resolveExact = (raw: string, candidates: string[]): string | null => {
+    if (candidates.length === 1) return candidates[0];
+    return candidates.find((u) => u.toLowerCase() === raw.trim().toLowerCase()) ?? null;
   };
 
   const run = useCallback(async () => {
@@ -190,30 +198,51 @@ export function HeadToHead({ baseUrl, years }: Props) {
     try {
       const aQ = teamA.trim();
       const bQ = teamB.trim();
-      const data = allTime
-        ? await queryMapsYears(baseUrl, years, {
-            teamA: aQ,
-            teamB: bQ,
-            league: league || undefined,
-            limit: 200,
-          })
-        : await queryMaps(baseUrl, year, {
-            league: league || undefined,
-            teamA: aQ,
-            teamB: bQ,
-            limit: 120,
-          });
+      const variants = (q: string) => [...new Set(expandTeamQuery(q))].slice(0, 2);
+      const pairs = variants(aQ).flatMap((a) => variants(bQ).map((b) => [a, b] as const));
+      const datasets = await Promise.all(
+        pairs.map(([a, b]) =>
+          allTime
+            ? queryMapsYears(baseUrl, years, {
+                teamA: a,
+                teamB: b,
+                league: league || undefined,
+                limit: 200,
+              })
+            : queryMaps(baseUrl, year, {
+                league: league || undefined,
+                teamA: a,
+                teamB: b,
+                limit: 120,
+              }),
+        ),
+      );
+      const data = [
+        ...new Map(
+          datasets
+            .flat()
+            .map((row) => [String(row.game_uid ?? row.oe_gameid ?? `${row.date}-${row.game}`), row] as const),
+        ).values(),
+      ];
 
       const names = [
         ...new Set(
           data.flatMap((r) => [String(r.blue_teamname ?? ""), String(r.red_teamname ?? "")]),
         ),
       ].filter(Boolean);
-      const exactA = resolveExact(aQ, names);
-      const exactB = resolveExact(bQ, names);
+      const candidatesA = teamCandidates(aQ, names);
+      const candidatesB = teamCandidates(bQ, names);
+      const exactA = resolveExact(aQ, candidatesA);
+      const exactB = resolveExact(bQ, candidatesB);
       if (!exactA || !exactB) {
+        const missing = [
+          candidatesA.length ? null : aQ,
+          candidatesB.length ? null : bQ,
+        ].filter(Boolean);
         setError(
-          `Ambiguous teams (${aQ} / ${bQ}). Pick clearer names — aliases like G2 work once they resolve to one org.`,
+          missing.length
+            ? `No matching team found for ${missing.join(" and ")}. Try the full org name or an alias.`
+            : `Multiple teams match ${aQ} or ${bQ}. Pick a full org name from the suggestions.`,
         );
         setSeries([]);
         setStatus("Idle");
@@ -282,11 +311,14 @@ export function HeadToHead({ baseUrl, years }: Props) {
   }, [baseUrl, year, years, league, teamA, teamB, allTime]);
 
   useEffect(() => {
-    if (searchParams.get("a") && searchParams.get("b")) {
-      void run();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const a = searchParams.get("a")?.trim() ?? "";
+    const b = searchParams.get("b")?.trim() ?? "";
+    if (!a || !b) return;
+    const key = `${a}|${b}|${searchParams.get("year") ?? ""}|${searchParams.get("scope") ?? ""}`;
+    if (autoRunKey.current === key) return;
+    autoRunKey.current = key;
+    void run();
+  }, [run, searchParams]);
 
   useEffect(() => {
     if (!selectedKey) return;
@@ -388,20 +420,21 @@ export function HeadToHead({ baseUrl, years }: Props) {
           />
         </label>
         <datalist id="h2h-teams">
-          {/* lightweight — filled from last result names via series */}
-          {series.flatMap((s) => [s.teamA, s.teamB]).map((t) => (
+          {[...new Set([...teamDirectory, ...series.flatMap((s) => [s.teamA, s.teamB])])].map((t) => (
             <option key={t} value={t} />
           ))}
         </datalist>
         <button type="button" className="btn-primary" onClick={() => void run()}>
           Find H2H
         </button>
-        <Link
-          className="status-pill ghost"
-          href={`/browse?teams=${encodeURIComponent(teamA.trim())}|${encodeURIComponent(teamB.trim())}`}
-        >
-          Open Matches
-        </Link>
+        {teamA.trim() && teamB.trim() ? (
+          <Link
+            className="status-pill ghost"
+            href={`/browse?teams=${encodeURIComponent(teamA.trim())}|${encodeURIComponent(teamB.trim())}`}
+          >
+            Open Matches
+          </Link>
+        ) : null}
       </div>
 
       {loading && <div className="skeleton-block" />}

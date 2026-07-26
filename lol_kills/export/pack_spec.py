@@ -209,6 +209,7 @@ MAPS_IDENTITY: tuple[str, ...] = (
     "length_min",
     "ckpm",
     "source_oe",
+    "source_grid",
     "oe_year",
     "tournament",
     "lp_matched",

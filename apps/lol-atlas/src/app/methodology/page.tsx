@@ -66,15 +66,17 @@ export default async function MethodologyPage() {
         <p>
           Each team carries a regional component and an international (meta) component. They sum to
           a total rating μ with a spread σ. Outcomes in the Oracle&apos;s Elixir pack update both.
-          League chips on the Ratings page only filter who appears; they do not re-fit μ.
+          League chips on the Ratings page filter who appears while μ stays shared. The pack
+          uses Oracle&apos;s Elixir as its reconciled baseline and can include a recent completed
+          GRID game while the next OE export is pending.
         </p>
         <p>
           σ shrinks toward a floor as informative games arrive. Team floor is 25. When σ sits on that
-          floor, Trust reads <em>Settled</em> — the rating is as tight as this model allows. Headroom
-          above the floor is what Soft / League-aware rating penalizes:
+          floor, the Evidence label reads <em>Settled</em> — the rating is as tight as this model allows. Headroom
+          above the floor is what the adjusted rating penalizes:
         </p>
         <p className="font-mono text-sm">
-          league-aware = μ − max(0, σ − σ_min)
+          adjusted rating = μ − max(0, σ − σ_min)
         </p>
         <p>
           That soft penalty stops a thin regional spike from outranking a settled major org on the
@@ -86,8 +88,8 @@ export default async function MethodologyPage() {
         <p>
           Players are rated on their own Dual Elo track (player floor σ_min = 28). A team&apos;s
           player-aggregated strength is a role-weighted blend of the five on the rift. Prefer player
-          ladders when rosters move. Trust on a player at 28 is usually Settled, not “uncertain” —
-          that number is the floor.
+          ladders when rosters move. Evidence on a player at 28 is usually Settled because 28 is the
+          floor.
         </p>
       </MethodSection>
 
@@ -107,9 +109,9 @@ export default async function MethodologyPage() {
         </p>
       </MethodSection>
 
-      <MethodSection id="trust" title="Trust labels">
+      <MethodSection id="evidence" title="Evidence labels">
         <p>
-          Trust is a layman view of σ relative to its floor. Settled = at floor. Thin / Very thin =
+          Evidence is a plain-language view of σ relative to its floor. Settled = at floor. Thin / Very thin =
           headroom above the floor. Games counts sit beside it. Method owns the formula; the ladder
           owns the sentence.
         </p>
@@ -135,6 +137,20 @@ export default async function MethodologyPage() {
         </p>
       </MethodSection>
 
+      <MethodSection id="freshness" title="Freshness and sources">
+        <p>
+          Scryglass publishes versioned packs, with each rating file preserved as a dated snapshot. OE is
+          the canonical source when the same game appears in both feeds. GRID is a pro-only bridge
+          for completed games that have already finished while the next OE export is pending.
+          Scheduled or scrim-like series stay outside the result set.
+        </p>
+        <p>
+          A new pack is built by the refresh workflow, then the public pointer is updated. The
+          pack date is publication time; source metadata identifies the newest match. Use the details
+          in Reproduce when the distinction matters.
+        </p>
+      </MethodSection>
+
       <MethodSection id="void-grubs" title="Void grubs">
         <p>
           The{" "}
@@ -150,11 +166,12 @@ export default async function MethodologyPage() {
 
       <MethodSection id="faq" title="FAQ">
         <p>
-          <strong>Why is Trust “Settled” at 28 for players?</strong> Because 28 is the player σ
-          floor. The model will not shrink further.
+          <strong>Why is Evidence “Settled” at 28 for players?</strong> Because 28 is the player σ
+          floor, the model&apos;s minimum spread.
         </p>
         <p>
-          <strong>Do league chips change Elo?</strong> No. They filter the ladder roster only.
+          <strong>Do league chips change Elo?</strong> They filter the ladder roster while the shared
+          Elo stays fixed.
         </p>
         <p>
           <strong>Where is model accuracy?</strong> Matches shows Dual Elo favorite hit rate for the

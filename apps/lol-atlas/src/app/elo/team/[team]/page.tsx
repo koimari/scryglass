@@ -1,31 +1,19 @@
-import { promises as fs } from "fs";
-import path from "path";
 import { notFound } from "next/navigation";
 import { TeamEloDetail } from "@/components/TeamEloDetail";
-import type { PackManifest, PlayerRating, TeamRating, TeamRecord } from "@/lib/pack";
+import type { PlayerRating, TeamRating, TeamRecord } from "@/lib/pack";
+import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 type Props = { params: Promise<{ team: string }> };
-
-async function loadJson<T>(filePath: string): Promise<T> {
-  return JSON.parse(await fs.readFile(filePath, "utf8")) as T;
-}
 
 export default async function TeamEloPage({ params }: Props) {
   const { team: raw } = await params;
   const teamName = decodeURIComponent(raw);
-  const man = await loadJson<PackManifest>(
-    path.join(process.cwd(), "public", "packs", "manifest.json"),
-  );
-  const base = path.join(process.cwd(), "public", "packs", man.pack_id);
-  const teams = await loadJson<TeamRating[]>(
-    path.join(base, "features", "ratings_snapshot.json"),
-  );
-  const players = await loadJson<PlayerRating[]>(
-    path.join(base, "features", "player_ratings_snapshot.json"),
-  );
+  const man = await readPackManifest();
+  const teams = await readPackJson<TeamRating[]>(man, "features/ratings_snapshot.json");
+  const players = await readPackJson<PlayerRating[]>(man, "features/player_ratings_snapshot.json");
   let teamRecords: Record<string, TeamRecord> = {};
   try {
-    teamRecords = await loadJson(path.join(base, "features", "team_records.json"));
+    teamRecords = await readPackJson(man, "features/team_records.json");
   } catch {
     teamRecords = {};
   }

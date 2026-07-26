@@ -1,36 +1,23 @@
-import { promises as fs } from "fs";
-import path from "path";
 import { notFound } from "next/navigation";
 import { PlayerEloDetail } from "@/components/PlayerEloDetail";
 import type {
-  PackManifest,
   PlayerRating,
   PlayerRecord,
   TeamRating,
 } from "@/lib/pack";
+import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 type Props = { params: Promise<{ player: string }> };
-
-async function loadJson<T>(filePath: string): Promise<T> {
-  return JSON.parse(await fs.readFile(filePath, "utf8")) as T;
-}
 
 export default async function PlayerEloPage({ params }: Props) {
   const { player: raw } = await params;
   const name = decodeURIComponent(raw);
-  const man = await loadJson<PackManifest>(
-    path.join(process.cwd(), "public", "packs", "manifest.json"),
-  );
-  const base = path.join(process.cwd(), "public", "packs", man.pack_id);
-  const players = await loadJson<PlayerRating[]>(
-    path.join(base, "features", "player_ratings_snapshot.json"),
-  );
-  const teams = await loadJson<TeamRating[]>(
-    path.join(base, "features", "ratings_snapshot.json"),
-  );
+  const man = await readPackManifest();
+  const players = await readPackJson<PlayerRating[]>(man, "features/player_ratings_snapshot.json");
+  const teams = await readPackJson<TeamRating[]>(man, "features/ratings_snapshot.json");
   let playerRecords: Record<string, PlayerRecord> = {};
   try {
-    playerRecords = await loadJson(path.join(base, "features", "player_records.json"));
+    playerRecords = await readPackJson(man, "features/player_records.json");
   } catch {
     playerRecords = {};
   }
@@ -52,6 +39,9 @@ export default async function PlayerEloPage({ params }: Props) {
   } else if (player.last_team) {
     peers = peers.filter((p) => p.last_team === player.last_team);
   }
+  const intlPeers = players.filter(
+    (p) => (p.n_maps ?? 0) >= 20 && Boolean(playerRecords[p.player]?.intl),
+  );
 
   const baseUrl = man.base_url || `/packs/${man.pack_id}`;
 
@@ -61,6 +51,7 @@ export default async function PlayerEloPage({ params }: Props) {
       record={rec}
       team={team}
       peers={peers}
+      intlPeers={intlPeers}
       baseUrl={baseUrl}
       years={man.filters.years}
       manifest={man}

@@ -6,6 +6,7 @@ import {
   groupMapsIntoSeries,
   queryMapsYears,
   queryPlayerChampStats,
+  queryPlayerRole,
   queryPlayersForGame,
   type ChampAgg,
   type QueryRow,
@@ -28,6 +29,7 @@ type Props = {
   record?: PlayerRecord;
   team?: TeamRating | null;
   peers: PlayerRating[];
+  intlPeers: PlayerRating[];
   baseUrl: string;
   years: number[];
   manifest: PackManifest;
@@ -48,6 +50,7 @@ export function PlayerEloDetail({
   record,
   team,
   peers,
+  intlPeers,
   baseUrl,
   years,
   manifest,
@@ -65,6 +68,8 @@ export function PlayerEloDetail({
     red: null,
   });
   const [err, setErr] = useState<string | null>(null);
+  const [seriesLoaded, setSeriesLoaded] = useState(false);
+  const [role, setRole] = useState<string | null>(null);
 
   const trust = trustInfo(player.sigma, PLAYER_SIGMA_MIN, player.n_maps);
   const leagueAware = softMu(player.mu_total, player.sigma, PLAYER_SIGMA_MIN);
@@ -72,12 +77,12 @@ export function PlayerEloDetail({
   const peerMedian = useMemo(() => {
     const pool =
       compare === "intl"
-        ? peers.filter((p) => (p.mu_meta ?? 0) !== 0 || true)
+        ? intlPeers
         : peers;
     // crude: same last_team primary league via peers list already scoped by page
     const vals = pool.map((p) => softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN));
     return median(vals);
-  }, [peers, compare]);
+  }, [intlPeers, peers, compare]);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,9 +101,20 @@ export function PlayerEloDetail({
 
   useEffect(() => {
     let cancelled = false;
+    queryPlayerRole(baseUrl, years, player.player).then((value) => {
+      if (!cancelled) setRole(value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [baseUrl, years, player.player]);
+
+  useEffect(() => {
+    let cancelled = false;
     (async () => {
       if (!player.last_team) {
         setSeries([]);
+        setSeriesLoaded(true);
         return;
       }
       try {
@@ -143,9 +159,13 @@ export function PlayerEloDetail({
             blue: blueN ? blueW / blueN : null,
             red: redN ? redW / redN : null,
           });
+          setSeriesLoaded(true);
         }
       } catch (e) {
-        if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
+        if (!cancelled) {
+          setErr(e instanceof Error ? e.message : String(e));
+          setSeriesLoaded(true);
+        }
       }
     })();
     return () => {
@@ -178,6 +198,18 @@ export function PlayerEloDetail({
   }, [champs, col, dir, expandChamps]);
 
   const leagues = record?.leagues ?? [];
+  const roleLabel = role
+    ? ({
+        top: "Top",
+        jungle: "Jungle",
+        jng: "Jungle",
+        mid: "Mid",
+        bot: "Bot",
+        adc: "Bot",
+        sup: "Support",
+      }[role.toLowerCase()] ?? role)
+    : null;
+  const teamLabel = team?.team ?? player.last_team ?? null;
 
   return (
     <div className="space-y-6">
@@ -201,27 +233,35 @@ export function PlayerEloDetail({
           {record?.intl ? " · INTL" : ""}
         </p>
         <h1 className="font-display mt-2 text-3xl">{player.player}</h1>
+        <p className="text-sm muted">
+          Current team <strong className="text-[var(--ink)]">{teamLabel ?? "—"}</strong>
+          {roleLabel ? (
+            <>
+              {" · "}Role <strong className="text-[var(--ink)]">{roleLabel}</strong>
+            </>
+          ) : null}
+        </p>
         <p className="lede text-sm" title={trust.layman}>
           {trust.layman}
         </p>
         <div className="micro-log mt-4">
           <span>
-            <strong>Raw Elo</strong> {player.mu_total.toFixed(1)}
+            <strong>Raw rating</strong> {player.mu_total.toFixed(1)}
           </span>
           <span>
-            <strong>League-aware</strong> {leagueAware.toFixed(1)}
+            <strong>Adjusted rating</strong> {leagueAware.toFixed(1)}
           </span>
           <span>
-            <strong>Trust</strong> {formatTrustCell(trust)}
+            <strong>Evidence</strong> {formatTrustCell(trust)}
           </span>
           <span>
             <strong>Games</strong> {player.n_maps}
           </span>
           <span>
-            <strong>Regional</strong> {player.mu_regional.toFixed(1)}
+            <strong>Regional Elo</strong> {player.mu_regional.toFixed(1)}
           </span>
           <span>
-            <strong>Intl.</strong> {player.mu_meta.toFixed(1)}
+            <strong>International Elo</strong> {player.mu_meta.toFixed(1)}
           </span>
           <span>
             <strong>WR</strong> {formatWr(record?.wr)}
@@ -245,13 +285,13 @@ export function PlayerEloDetail({
               onChange={(e) => setCompare(e.target.value as "league" | "intl")}
             >
               <option value="league">League median</option>
-              <option value="intl">Peer median</option>
+              <option value="intl">International median</option>
             </select>
           </label>
           <div className="status-hint">
             {peerMedian != null
-              ? `Median ${peerMedian.toFixed(1)} · Δ ${(leagueAware - peerMedian).toFixed(1)}`
-              : "Median —"}
+              ? `${compare === "intl" ? "International" : record?.primary ?? "League"} median ${peerMedian.toFixed(1)} · difference ${(leagueAware - peerMedian).toFixed(1)} Elo`
+              : "Comparison median unavailable"}
           </div>
         </div>
       </header>
@@ -370,9 +410,11 @@ export function PlayerEloDetail({
             </select>
           </label>
         </div>
-        {series.length === 0 ? (
+        {!seriesLoaded ? (
+          <div className="skeleton-block short" aria-label="Loading recent series" />
+        ) : series.length === 0 ? (
           <p className="empty-hint">
-            No series found with this player tagged yet — try clearing the league filter.
+            No recent series found with this player in the selected pack scope.
           </p>
         ) : (
           <ul className="space-y-2">

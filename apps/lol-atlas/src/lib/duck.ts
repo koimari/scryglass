@@ -228,10 +228,20 @@ export type SeriesCard = {
   year: number;
 };
 
-function ymd(dateVal: unknown): string {
-  const s = String(dateVal ?? "");
-  const m = s.match(/(\d{4}-\d{2}-\d{2})/);
-  return m ? m[1] : s.slice(0, 10);
+export function formatGameDate(dateVal: unknown): string {
+  const raw = String(dateVal ?? "").trim();
+  const iso = raw.match(/(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1];
+
+  if (/^\d{10,13}$/.test(raw)) {
+    const numeric = Number(raw);
+    const date = new Date(raw.length === 13 ? numeric : numeric * 1000);
+    if (Number.isFinite(date.getTime())) return date.toISOString().slice(0, 10);
+  }
+
+  const parsed = Date.parse(raw);
+  if (Number.isFinite(parsed)) return new Date(parsed).toISOString().slice(0, 10);
+  return raw.slice(0, 10);
 }
 
 function teamPairKey(a: string, b: string): string {
@@ -245,7 +255,7 @@ export function groupMapsIntoSeries(rows: QueryRow[]): SeriesCard[] {
     const blue = String(r.blue_teamname ?? "");
     const red = String(r.red_teamname ?? "");
     if (!blue || !red) continue;
-    const day = ymd(r.date);
+    const day = formatGameDate(r.date);
     const league = String(r.league ?? "");
     const tourney = String(r.tournament ?? "");
     const key = `${teamPairKey(blue, red)}|${day}|${league}|${tourney}`;
@@ -279,7 +289,7 @@ export function groupMapsIntoSeries(rows: QueryRow[]): SeriesCard[] {
     const bestOf = maxGame >= 5 || games.length >= 5 ? 5 : maxGame >= 3 || games.length >= 3 ? 3 : 1;
     series.push({
       key,
-      date: ymd(first.date),
+      date: formatGameDate(first.date),
       league: String(first.league ?? ""),
       patch: String(first.patch ?? ""),
       tournament: String(first.tournament ?? ""),
@@ -289,7 +299,7 @@ export function groupMapsIntoSeries(rows: QueryRow[]): SeriesCard[] {
       winsB,
       bestOf,
       games,
-      year: Number(first._year ?? first.year ?? 0) || Number(String(first.date).slice(0, 4)) || 0,
+      year: Number(first._year ?? first.year ?? 0) || Number(formatGameDate(first.date).slice(0, 4)) || 0,
     });
   }
   series.sort((a, b) => b.date.localeCompare(a.date));
@@ -309,7 +319,6 @@ export type ModelAccuracySummary = {
 export async function queryEloAccuracy(
   baseUrl: string,
   year: number,
-  limit = 2000,
 ): Promise<{ n: number; hits: number; rate: number | null }> {
   const histUrl = `${baseUrl.replace(/\/$/, "")}/features/ratings_history.parquet`;
   const mapsU = mapsUrl(baseUrl, year);
@@ -543,6 +552,35 @@ export async function queryPlayerChampStats(
   return byPlayer[playername] ?? [];
 }
 
+/** Most-played role for a player across the selected pack years. */
+export async function queryPlayerRole(
+  baseUrl: string,
+  years: number[],
+  playername: string,
+): Promise<string | null> {
+  const counts = new Map<string, number>();
+  for (const year of years) {
+    try {
+      const rows = await queryPackParquet(
+        playersUrl(baseUrl, year),
+        `SELECT position, COUNT(*) AS n
+         FROM read_parquet($PARQUET)
+         WHERE playername = '${esc(playername)}'
+           AND position IS NOT NULL
+           AND position <> ''
+         GROUP BY position`,
+      );
+      for (const row of rows) {
+        const position = String(row.position ?? "").trim();
+        if (position) counts.set(position, (counts.get(position) ?? 0) + Number(row.n ?? 0));
+      }
+    } catch {
+      // A missing year partition should not block the rest of a player profile.
+    }
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
 /** One scan per year for the whole roster (avoids N× full parquet passes). */
 export async function queryRosterChampStats(
   baseUrl: string,
@@ -622,6 +660,21 @@ export async function listLeagues(baseUrl: string, year: number): Promise<string
   return rows.map((r) => String(r.league)).filter(Boolean);
 }
 
+export async function listTeams(baseUrl: string, years: number[]): Promise<string[]> {
+  const names = new Set<string>();
+  for (const year of years) {
+    const rows = await queryPackParquet(
+      mapsUrl(baseUrl, year),
+      `SELECT DISTINCT blue_teamname, red_teamname FROM read_parquet($PARQUET)`,
+    );
+    for (const row of rows) {
+      if (row.blue_teamname) names.add(String(row.blue_teamname));
+      if (row.red_teamname) names.add(String(row.red_teamname));
+    }
+  }
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
 /** @deprecated Prefer queryMaps — kept for any leftover callers */
 export async function queryTeamGames(
   baseUrl: string,
@@ -650,4 +703,3 @@ export {
   playerCs,
   sortPlayersByRole,
 } from "@/lib/format";
-

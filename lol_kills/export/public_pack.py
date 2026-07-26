@@ -100,7 +100,9 @@ def export_public_pack(
     pack_id: str | None = None,
 ) -> dict[str, Any]:
     years = tuple(years or spec.DEFAULT_YEARS)
-    stamp = datetime.now(timezone.utc).strftime("%Y.%m.%d")
+    # Include UTC time so the 15-minute freshness workflow can publish more
+    # than one immutable pack per day without colliding in Blob storage.
+    stamp = datetime.now(timezone.utc).strftime("%Y.%m.%d.%H%M")
     pack_id = pack_id or f"v{stamp}"
     out_root = Path(out_root or DEFAULT_OUT)
     pack_dir = out_root / pack_id
@@ -352,7 +354,8 @@ def export_public_pack(
     oe_meta = WAREHOUSE / "oe_meta.json"
     refresh_meta = WAREHOUSE / "refresh_meta.json"
     ingest = {}
-    for p in (oe_meta, refresh_meta):
+    grid_meta = WAREHOUSE / "grid_meta.json"
+    for p in (oe_meta, refresh_meta, grid_meta):
         if p.exists():
             try:
                 ingest[p.stem] = json.loads(p.read_text())

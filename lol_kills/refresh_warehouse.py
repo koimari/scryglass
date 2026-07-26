@@ -6,7 +6,11 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
+import pandas as pd
+
+from lol_kills.etl.grid_ingest import ingest_grid, merge_source_frames
 from lol_kills.etl.join import build_map_warehouse
 from lol_kills.etl.leaguepedia_ingest import ingest_leaguepedia
 from lol_kills.etl.oe_ingest import ingest_oe
@@ -28,6 +32,20 @@ def main() -> None:
     )
     ap.add_argument("--skip-oe", action="store_true", help="Skip OE ingest entirely")
     ap.add_argument("--skip-lp", action="store_true", help="Skip Leaguepedia ingest")
+    ap.add_argument(
+        "--download-grid",
+        action="store_true",
+        help="Download recent completed professional series from GRID",
+    )
+    ap.add_argument("--grid-days", type=int, default=3, help="GRID lookback window")
+    ap.add_argument("--grid-limit", type=int, default=40, help="Maximum recent GRID series to inspect")
+    ap.add_argument("--grid-env-file", type=str, default=None, help="Optional local .env containing GRID_API_KEY")
+    ap.add_argument(
+        "--grid-required",
+        action="store_true",
+        help="Fail the refresh if GRID was requested but no completed games are available",
+    )
+    ap.add_argument("--skip-grid", action="store_true", help="Skip local GRID rows entirely")
     args = ap.parse_args()
 
     WAREHOUSE_DIR.mkdir(parents=True, exist_ok=True)
@@ -37,16 +55,56 @@ def main() -> None:
     if not args.skip_oe:
         oe_team, oe_player = ingest_oe(years=args.oe_years, download=args.download_oe)
 
+    grid_team = grid_player = pd.DataFrame()
+    if not args.skip_grid:
+        grid_team, grid_player = ingest_grid(
+            download=args.download_grid,
+            days=args.grid_days,
+            limit=args.grid_limit,
+            env_file=Path(args.grid_env_file) if args.grid_env_file else None,
+            required=args.grid_required,
+        )
+
+    # OE is the reconciled primary source. GRID fills the freshness gap until
+    # the next OE export includes the same game; duplicate game/side rows are
+    # therefore resolved in OE's favor.
+    combined_team = merge_source_frames(oe_team, grid_team, ["gameid", "side"])
+    combined_player = merge_source_frames(
+        oe_player,
+        grid_player,
+        ["gameid", "side", "position"],
+    )
+
+    # Keep the join module's established input paths while making the source
+    # precedence explicit in the rows themselves.
+    combined_team.to_parquet(PARQUET_DIR / "oe_team_games.parquet", index=False)
+    combined_player.to_parquet(PARQUET_DIR / "oe_player_games.parquet", index=False)
+
     lp_team = lp_player = None
     if not args.skip_lp:
         lp_team, lp_player = ingest_leaguepedia()
 
-    maps = build_map_warehouse(lp_team=lp_team, oe_team=oe_team, lp_players=lp_player)
+    maps = build_map_warehouse(
+        lp_team=lp_team,
+        oe_team=combined_team,
+        lp_players=lp_player,
+    )
+
+    source_counts = {}
+    if "source" in combined_team.columns:
+        source_counts = {
+            str(source): int(count)
+            for source, count in combined_team["source"].value_counts(dropna=False).items()
+        }
 
     meta = {
         "refreshed_at": datetime.now(timezone.utc).isoformat(),
         "n_maps": int(len(maps)),
         "oe_rows": int(len(oe_team)) if oe_team is not None else 0,
+        "grid_rows": int(len(grid_team)),
+        "combined_team_rows": int(len(combined_team)),
+        "combined_player_rows": int(len(combined_player)),
+        "source_counts": source_counts,
         "lp_side_rows": int(len(lp_team)) if lp_team is not None else 0,
         "oe_matched": int(maps["oe_matched"].sum()) if "oe_matched" in maps.columns else 0,
     }
