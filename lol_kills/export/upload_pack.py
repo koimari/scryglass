@@ -63,6 +63,7 @@ def _blob_put(
             "X-API-Version": "7",
             "x-vercel-blob-access": "public",
             **({"x-vercel-blob-store-id": store_id} if store_id else {}),
+            "x-add-random-suffix": "0",
             "Content-Type": content_type,
             "x-content-type": content_type,
             **({"Cache-Control": cache_control} if cache_control else {}),
