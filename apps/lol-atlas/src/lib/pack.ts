@@ -14,6 +14,11 @@ export type PackManifest = {
   pack_id: string;
   schema_version: string;
   created_utc: string;
+  data_as_of?: string | null;
+  recent_activity_window_days?: number;
+  current_tournament_as_of?: string | null;
+  current_tournaments?: Record<string, string>;
+  membership_note?: string;
   filters: {
     years: number[];
     leagues: string;
@@ -90,11 +95,13 @@ export type TeamRecord = {
   current_tier?: CompetitionTier | null;
   current_team?: string | null;
   current_date?: string | null;
+  current_tournament?: string | null;
   wins: number;
   games: number;
   wr: number | null;
   by_league?: Record<string, { wins: number; games: number; wr: number | null }>;
   by_tier?: Record<string, { wins: number; games: number; wr: number | null }>;
+  by_tournament?: Record<string, { wins: number; games: number; wr: number | null }>;
 };
 
 export type PlayerRecord = {
@@ -109,6 +116,7 @@ export type PlayerRecord = {
   current_tier?: CompetitionTier | null;
   current_team?: string | null;
   current_date?: string | null;
+  current_tournament?: string | null;
 };
 
 export type CompetitionTier = "tier1" | "tier2" | "tier3";
@@ -210,6 +218,25 @@ export function packUpdatedLabel(manifest: PackManifest): string {
   const m = /^v(\d{4})\.(\d{2})\.(\d{2})(?:\.\d{4})?$/.exec(manifest.pack_id);
   if (m) return `${m[3]}/${m[2]}/${m[1]}`;
   return manifest.pack_id;
+}
+
+function dateMs(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** True only when a record has a dated observation inside the pack's guard window. */
+export function recordIsRecent(
+  rec: { current_date?: string | null } | undefined,
+  dataAsOf: string | null | undefined,
+  windowDays = 90,
+): boolean {
+  const observedMs = dateMs(rec?.current_date);
+  const asOfMs = dateMs(dataAsOf);
+  if (observedMs == null || asOfMs == null) return false;
+  const ageDays = (asOfMs - observedMs) / 86_400_000;
+  return ageDays >= 0 && ageDays <= Math.max(0, windowDays);
 }
 
 /** Soft ranking: penalize high-σ so thin ladders don't outrank settled orgs. */
@@ -346,11 +373,24 @@ export function recordMatchesLeagues(
     primary?: string | null;
     current_league?: string | null;
     current_tier?: CompetitionTier | null;
+    current_date?: string | null;
+    current_tournament?: string | null;
   } | undefined,
   selected: string[],
+  options?: {
+    dataAsOf?: string | null;
+    recentActivityWindowDays?: number;
+    currentTournaments?: Record<string, string>;
+  },
 ): boolean {
   if (!selected.length) return true;
   if (!rec) return false;
+  if (
+    options?.dataAsOf &&
+    !recordIsRecent(rec, options.dataAsOf, options.recentActivityWindowDays ?? 90)
+  ) {
+    return false;
+  }
   const tierSet = new Set(selected.filter((scope) => scope.startsWith("TIER")));
   const regionalSet = new Set(selected.filter((scope) => REGION_LEAGUES.includes(scope as (typeof REGION_LEAGUES)[number])));
   const crossRegionSet = new Set(selected.filter((scope) => INTERREGIONAL_LEAGUES.includes(scope as (typeof INTERREGIONAL_LEAGUES)[number])));
@@ -363,6 +403,8 @@ export function recordMatchesLeagues(
   // from being silently overridden by a Tier 2 regional chip.
   const tierMatches = !tierSet.size || (!!currentTier && tierSet.has(currentTier));
   const regionalMatches = !regionalSet.size || (!!currentLeague && regionalSet.has(currentLeague));
+  const expectedTournament = currentLeague ? options?.currentTournaments?.[currentLeague] : undefined;
+  const currentTournamentMatches = !expectedTournament || rec.current_tournament === expectedTournament;
   const crossRegionMatches = !crossRegionSet.size && !internationalSet.size
     ? true
     : !crossRegionSet.size || (!!rec.interregional && crossRegionSet.has("AMERICAS"));
@@ -370,12 +412,25 @@ export function recordMatchesLeagues(
     ? true
     : (internationalSet.has("INTL") && (rec.intl || (rec.leagues || []).some(isIntlLeague))) ||
       [...internationalSet].some((event) => event !== "INTL" && (rec.leagues || []).some((league) => league === event));
-  return tierMatches && regionalMatches && crossRegionMatches && internationalMatches;
+  const domesticScopeMatches = (!tierSet.size && !regionalSet.size) || currentTournamentMatches;
+  return tierMatches && regionalMatches && domesticScopeMatches && crossRegionMatches && internationalMatches;
+}
+
+function scopedTournamentRow(
+  rec: TeamRecord,
+  league: string,
+  currentTournaments?: Record<string, string>,
+): { wins: number; games: number; wr: number | null } | null {
+  const expected = currentTournaments?.[league];
+  if (!expected) return rec.by_league?.[league] ?? null;
+  if (rec.current_league !== league || rec.current_tournament !== expected) return null;
+  return rec.by_tournament?.[`${league}|${expected}`] ?? null;
 }
 
 export function scopedTeamWr(
   rec: TeamRecord | undefined,
   selected: string[],
+  options?: { currentTournaments?: Record<string, string> },
 ): number | null {
   if (!rec) return null;
   if (!selected.length) return rec.wr;
@@ -383,11 +438,10 @@ export function scopedTeamWr(
   const regionalSelected = selected.filter((scope) => REGION_LEAGUES.includes(scope as (typeof REGION_LEAGUES)[number]));
   const internationalSelected = selected.filter((scope) => scope === "INTL" || isIntlLeague(scope));
   if (regionalSelected.length) {
-    const by = rec.by_league || {};
     let wins = 0;
     let games = 0;
     for (const league of regionalSelected) {
-      const row = by[league];
+      const row = scopedTournamentRow(rec, league, options?.currentTournaments);
       if (!row) continue;
       wins += row.wins;
       games += row.games;
@@ -407,6 +461,12 @@ export function scopedTeamWr(
     return games ? wins / games : null;
   }
   if (tierSelected.length && rec.by_tier) {
+    const expected = rec.current_league ? options?.currentTournaments?.[rec.current_league] : undefined;
+    if (expected) {
+      const row = scopedTournamentRow(rec, rec.current_league!, options?.currentTournaments);
+      if (!row) return null;
+      return row.games ? row.wins / row.games : null;
+    }
     let wins = 0;
     let games = 0;
     for (const tier of tierSelected) {

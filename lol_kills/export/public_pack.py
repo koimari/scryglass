@@ -22,6 +22,7 @@ import pyarrow.parquet as pq
 
 from lol_kills.export import pack_spec as spec
 from lol_kills.export.pack_records import (
+    build_current_tournament_membership,
     build_maps_frame_from_team_games,
     build_player_records,
     build_team_records,
@@ -50,6 +51,16 @@ def _sha256(path: Path) -> str:
 def _present(cols: Sequence[str], available: Iterable[str]) -> list[str]:
     avail = set(available)
     return [c for c in cols if c in avail]
+
+
+def _ensure_columns(table: pa.Table, columns: Sequence[str]) -> pa.Table:
+    """Materialize stable public columns even when an older warehouse omits them."""
+
+    out = table
+    for column in columns:
+        if column not in out.column_names:
+            out = out.append_column(column, pa.nulls(out.num_rows))
+    return out
 
 
 def _filter_years(table: pa.Table, years: Sequence[int], year_cols: Sequence[str]) -> pa.Table:
@@ -277,6 +288,7 @@ def export_public_pack(
     # Re-apply the canonical map contract at export time as a safety net for
     # packs built from an older local warehouse refresh.
     maps = pa.Table.from_pandas(canonicalize_competition_frame(maps.to_pandas()), preserve_index=False)
+    maps = _ensure_columns(maps, spec.maps_columns())
     map_cols = spec.maps_columns(maps.column_names)
     maps = maps.select(map_cols)
     maps = _filter_years(maps, years, ("year", "oe_year"))
@@ -303,7 +315,24 @@ def export_public_pack(
     # snapshot remains the full roster-history artifact) ---
     feat_dir = pack_dir / "features"
     feat_dir.mkdir(parents=True, exist_ok=True)
-    player_records_payload = build_player_records(player_frame)
+    data_dates = pd.concat(
+        [
+            pd.to_datetime(rating_input.get("date"), errors="coerce", utc=True)
+            if "date" in rating_input.columns
+            else pd.Series(dtype="datetime64[ns, UTC]"),
+            pd.to_datetime(maps_for_records.get("date"), errors="coerce", utc=True)
+            if "date" in maps_for_records.columns
+            else pd.Series(dtype="datetime64[ns, UTC]"),
+        ],
+        ignore_index=True,
+    )
+    data_as_of = data_dates.max().isoformat() if not data_dates.dropna().empty else None
+    current_membership = build_current_tournament_membership(
+        maps_for_records,
+        as_of=data_as_of,
+        window_days=90,
+    )
+    player_records_payload = build_player_records(player_frame, current_membership)
 
     weekly_ranks = build_player_weekly_ranks(
         build_maps_frame_from_players(player_frame),
@@ -348,7 +377,14 @@ def export_public_pack(
     # canonical rows that are exported above.  This avoids mixing a full
     # history snapshot with a different pack-window win rate.
     for filename, payload in (
-        ("team_records.json", build_team_records(rating_input)),
+        (
+            "team_records.json",
+            build_team_records(
+                rating_input,
+                current_membership,
+                tournament_maps=maps_for_records,
+            ),
+        ),
         ("player_records.json", player_records_payload),
     ):
         dest = feat_dir / filename
@@ -400,6 +436,7 @@ def export_public_pack(
 
     # --- features history year-filtered via maps game_uid ---
     maps_all = pq.read_table(maps_path)
+    maps_all = _ensure_columns(maps_all, spec.maps_columns())
     maps_all = maps_all.select(spec.maps_columns(maps_all.column_names))
     maps_all = _filter_years(maps_all, years, ("year", "oe_year"))
 
@@ -578,6 +615,17 @@ def export_public_pack(
         "pack_id": pack_id,
         "schema_version": spec.SCHEMA_VERSION,
         "created_utc": datetime.now(timezone.utc).isoformat(),
+        "data_as_of": data_as_of,
+        "recent_activity_window_days": 90,
+        "current_tournament_as_of": current_membership.get("as_of"),
+        "current_tournaments": current_membership.get("leagues", {}),
+        "membership_note": (
+            "Scoped ladders use a 90-day recent-observation guard over the latest "
+            "canonical affiliation and, where the pack has a labeled current "
+            "domestic tournament, require participation in that tournament. "
+            "This is a pack-derived membership signal, not an authoritative "
+            "league-membership registry. Historical rows remain available."
+        ),
         "filters": {
             "years": list(years),
             "leagues": "all_in_year_window",

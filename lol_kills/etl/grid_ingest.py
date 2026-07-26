@@ -428,12 +428,26 @@ def _league_for(tournament: str) -> str:
         return "LTA N"
     if re.search(r"\bLTA\s+S(?:OUTH)?\b", blob):
         return "LTA S"
+    # Developmental circuits must be classified before their parent token
+    # (for example, ``LCK Challengers`` must not become LCK).  Unknown GRID
+    # tournaments are deliberately not promoted to INTL: that would leak
+    # unverified events into the international ladder.
+    if re.search(r"\bNACL\b|NORTH AMERICA(?:N)?\s+CHALLENGERS|LCS\s+CHALLENGERS", blob):
+        return "NACL"
+    if re.search(r"\bLCKC\b|LCK\s+(?:CHALLENGERS|CL)", blob):
+        return "LCKC"
+    if re.search(r"\bLDL\b|LPL\s+(?:CHALLENGERS|ACADEMY)", blob):
+        return "LDL"
+    if re.search(r"\bCBLOLA\b|CBLOL\s+ACADEMY", blob):
+        return "CBLOLA"
+    if "CIRCUITO DESAFIANTE" in blob:
+        return "CD"
     for league in ("LCK", "LPL", "LEC", "LCS", "LTA", "CBLOL", "PCS", "VCS", "LJL", "LCP", "TCL"):
-        if league in blob:
+        if re.search(rf"(?<![A-Z0-9]){re.escape(league)}(?![A-Z0-9])", blob):
             return league
     if "KESPA" in blob:
-        return "LCK"
-    return "INTL"
+        return "KESPA"
+    return "UNKNOWN"
 
 
 def _compact(text: str) -> str:

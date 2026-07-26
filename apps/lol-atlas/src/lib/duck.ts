@@ -39,7 +39,7 @@ function esc(s: string): string {
 }
 
 export type QueryRow = Record<string, unknown>;
-export { formatGameDate, groupMapsIntoSeries } from "./series";
+export { formatCompletionSource, formatGameDate, groupMapsIntoSeries } from "./series";
 export type { SeriesCard } from "./series";
 
 export async function queryPackParquet(
@@ -157,7 +157,12 @@ async function mapSelectForPack(parquetUrl: string): Promise<string> {
       "DESCRIBE SELECT * FROM read_parquet($PARQUET)",
     );
     const available = new Set(columns.map((row) => String(row.column_name ?? "")));
-    for (const column of ["source_grid", "grid_series_id", "grid_game_index"]) {
+    for (const column of [
+      "source_grid",
+      "grid_series_id",
+      "grid_game_index",
+      "grid_completion_source",
+    ]) {
       if (available.has(column)) optionalColumns.push(column);
     }
   } catch {

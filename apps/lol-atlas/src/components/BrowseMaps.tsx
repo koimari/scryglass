@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   groupMapsIntoSeries,
+  formatCompletionSource,
   listLeagues,
   queryEloAccuracy,
   queryMaps,
@@ -107,6 +108,7 @@ function SeriesTile({
   onToggle: () => void;
 }) {
   const sourceLabel = s.source === "grid" ? "GRID freshness" : s.source === "mixed" ? "OE + GRID" : null;
+  const completionLabel = formatCompletionSource(s.completionSource);
   return (
     <article className={`series-card ${open ? "is-open" : ""}`}>
       <button type="button" className="series-card-head" onClick={onToggle}>
@@ -116,6 +118,7 @@ function SeriesTile({
             {s.patch ? ` · ${s.patch}` : ""} ·{" "}
             {s.bestOf ? `Bo${s.bestOf}` : "Incomplete series"}
             {sourceLabel ? ` · ${sourceLabel}` : ""}
+            {completionLabel ? ` · ${completionLabel}` : ""}
           </p>
           <h3 className="series-title">
             <Link

@@ -14,7 +14,15 @@ export type SeriesCard = {
   games: SeriesRow[];
   year: number;
   source: "oe" | "grid" | "mixed" | "unknown";
+  completionSource: string | null;
 };
+
+export function formatCompletionSource(source: string | null | undefined): string | null {
+  if (source === "events_game_end") return "GRID game-end event";
+  if (source === "end_state_summary") return "GRID verified end-state summary";
+  if (source === "mixed") return "GRID mixed completion evidence";
+  return null;
+}
 
 export function formatGameDate(dateVal: unknown): string {
   const raw = String(dateVal ?? "").trim();
@@ -45,7 +53,20 @@ function explicitSeriesKey(row: SeriesRow): string | null {
   return null;
 }
 
-function inferBestOf(games: SeriesRow[], winsA: number, winsB: number): 1 | 3 | 5 | null {
+function contiguousGridIndices(games: SeriesRow[]): boolean {
+  const indices = games.map((game) => Number(game.grid_game_index));
+  if (indices.some((index) => !Number.isInteger(index) || index < 1)) return false;
+  const unique = [...new Set(indices)].sort((a, b) => a - b);
+  return unique.length === games.length && unique.every((index, offset) => index === offset + 1);
+}
+
+function inferBestOf(
+  games: SeriesRow[],
+  winsA: number,
+  winsB: number,
+  strictGridSeries: boolean,
+): 1 | 3 | 5 | null {
+  if (strictGridSeries && (games.length === 1 || !contiguousGridIndices(games))) return null;
   const winningScore = Math.max(winsA, winsB);
   if (winningScore >= 3) return 5;
   if (winningScore >= 2) return 3;
@@ -75,7 +96,10 @@ export function groupMapsIntoSeries(rows: SeriesRow[]): SeriesCard[] {
 
   const series: SeriesCard[] = [];
   for (const [key, games] of buckets) {
-    games.sort((a, b) => Number(a.game ?? 0) - Number(b.game ?? 0));
+    games.sort(
+      (a, b) =>
+        Number(a.grid_game_index ?? a.game ?? 0) - Number(b.grid_game_index ?? b.game ?? 0),
+    );
     const first = games[0];
     const blue = String(first.blue_teamname);
     const red = String(first.red_teamname);
@@ -100,6 +124,14 @@ export function groupMapsIntoSeries(rows: SeriesRow[]): SeriesCard[] {
     const hasOe = games.some(
       (game) => game.source_oe === true || Number(game.source_oe) === 1,
     );
+    const completionSources = [
+      ...new Set(
+        games
+          .map((game) => String(game.grid_completion_source ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+    const strictGridSeries = games.some((game) => String(game.grid_series_id ?? "").trim());
     series.push({
       key,
       date: formatGameDate(first.date),
@@ -110,15 +142,21 @@ export function groupMapsIntoSeries(rows: SeriesRow[]): SeriesCard[] {
       teamB,
       winsA,
       winsB,
-      bestOf: inferBestOf(games, winsA, winsB),
+      bestOf: inferBestOf(games, winsA, winsB, strictGridSeries),
       games,
       year:
         Number(first._year ?? first.year ?? 0) ||
         Number(formatGameDate(first.date).slice(0, 4)) ||
         0,
       source: hasGrid && hasOe ? "mixed" : hasGrid ? "grid" : hasOe ? "oe" : "unknown",
+      completionSource:
+        completionSources.length === 1
+          ? completionSources[0]
+          : completionSources.length > 1
+            ? "mixed"
+            : null,
     });
   }
-  series.sort((a, b) => b.date.localeCompare(a.date));
+  series.sort((a, b) => b.date.localeCompare(a.date) || a.key.localeCompare(b.key));
   return series;
 }

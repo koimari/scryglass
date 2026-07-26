@@ -6,7 +6,7 @@ are out of the default pack.
 
 from __future__ import annotations
 
-SCHEMA_VERSION = "1.3.0"
+SCHEMA_VERSION = "1.4.0"
 
 # Inclusive calendar years on OE `year` / `oe_year`.
 DEFAULT_YEARS: tuple[int, ...] = (2025, 2026)
@@ -35,6 +35,7 @@ TEAM_PLAYER_SHARED_COLS: tuple[str, ...] = (
     "datacompleteness",
     "league",
     "league_source",
+    "tournament",
     "competition_scope",
     "event_kind",
     "is_international",

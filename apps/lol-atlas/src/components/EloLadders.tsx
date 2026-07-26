@@ -41,6 +41,9 @@ type Props = {
   playerWeeklyRanks: PlayerWeeklyRanks;
   playerMetadata: Record<string, PlayerMetadata>;
   availableLeagues: string[];
+  dataAsOf: string;
+  recentActivityWindowDays: number;
+  currentTournaments: Record<string, string>;
 };
 
 type TeamCol = "team" | "league" | "soft" | "mu" | "meta" | "trust" | "wr";
@@ -130,6 +133,9 @@ export function EloLadders({
   playerWeeklyRanks,
   playerMetadata,
   availableLeagues,
+  dataAsOf,
+  recentActivityWindowDays,
+  currentTournaments,
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -207,7 +213,11 @@ export function EloLadders({
   const sortedTeams = useMemo(() => {
     let list = teams.filter((t) => {
       if (!teamMatchesQuery(t.team, q)) return false;
-      return recordMatchesLeagues(teamRecords[t.team], leagues);
+      return recordMatchesLeagues(teamRecords[t.team], leagues, {
+        dataAsOf,
+        recentActivityWindowDays,
+        currentTournaments,
+      });
     });
     const sign = teamDir === "asc" ? 1 : -1;
     list = [...list].sort((a, b) => {
@@ -236,16 +246,16 @@ export function EloLadders({
             Math.max(0, a.sigma - TEAM_SIGMA_MIN) - Math.max(0, b.sigma - TEAM_SIGMA_MIN);
           break;
         case "wr": {
-          const wa = scopedTeamWr(ra, leagues) ?? -1;
-          const wb = scopedTeamWr(rb, leagues) ?? -1;
+          const wa = scopedTeamWr(ra, leagues, { currentTournaments }) ?? -1;
+          const wb = scopedTeamWr(rb, leagues, { currentTournaments }) ?? -1;
           cmp = wa - wb;
           break;
         }
       }
-      return sign * cmp;
+      return cmp !== 0 ? sign * cmp : a.team.localeCompare(b.team);
     });
     return list;
-  }, [teams, q, leagues, teamRecords, teamCol, teamDir]);
+  }, [teams, q, leagues, teamRecords, teamCol, teamDir, dataAsOf, recentActivityWindowDays, currentTournaments]);
 
   const sortedPlayers = useMemo(() => {
     let list = players
@@ -259,8 +269,8 @@ export function EloLadders({
         const currentTeam = rec?.current_team ?? p.last_team;
         const fromTeam = currentTeam ? teamRecords[currentTeam] : undefined;
         return rec
-          ? recordMatchesLeagues(rec, leagues)
-          : recordMatchesLeagues(fromTeam, leagues) || (!fromTeam && !leagues.length);
+          ? recordMatchesLeagues(rec, leagues, { dataAsOf, recentActivityWindowDays, currentTournaments })
+          : recordMatchesLeagues(fromTeam, leagues, { dataAsOf, recentActivityWindowDays, currentTournaments }) || (!fromTeam && !leagues.length);
       });
     // if leagues selected and no player record match via team
     if (leagues.length) {
@@ -268,7 +278,9 @@ export function EloLadders({
         const rec = playerRecords[p.player];
         const currentTeam = rec?.current_team ?? p.last_team;
         const fromTeam = currentTeam ? teamRecords[currentTeam] : undefined;
-        return rec ? recordMatchesLeagues(rec, leagues) : recordMatchesLeagues(fromTeam, leagues);
+        return rec
+          ? recordMatchesLeagues(rec, leagues, { dataAsOf, recentActivityWindowDays, currentTournaments })
+          : recordMatchesLeagues(fromTeam, leagues, { dataAsOf, recentActivityWindowDays, currentTournaments });
       });
     }
     const sign = playerDir === "asc" ? 1 : -1;
@@ -303,10 +315,22 @@ export function EloLadders({
           cmp = (a.n_maps ?? 0) - (b.n_maps ?? 0);
           break;
       }
-      return sign * cmp;
+      return cmp !== 0 ? sign * cmp : a.player.localeCompare(b.player);
     });
     return list;
-  }, [players, q, minGames, leagues, playerRecords, teamRecords, playerCol, playerDir]);
+  }, [
+    players,
+    q,
+    minGames,
+    leagues,
+    playerRecords,
+    teamRecords,
+    playerCol,
+    playerDir,
+    dataAsOf,
+    recentActivityWindowDays,
+    currentTournaments,
+  ]);
 
   const visibleTeams = expanded ? sortedTeams : sortedTeams.slice(0, 20);
   const visiblePlayers = expanded ? sortedPlayers : sortedPlayers.slice(0, 20);
@@ -334,8 +358,10 @@ export function EloLadders({
         chips define the visible comparison sample and its win rate; each row keeps its published Dual Elo rating.
       </p>
       <p className="method-note max-w-[62ch]">
-          Scope: <strong>{scopeSummary}</strong>. Adjusted rating = raw rating minus rating spread
-          above the settled floor. Evidence labels summarize the match history behind the estimate.
+          Scope: <strong>{scopeSummary}</strong>. Scoped views require an observation within the last {recentActivityWindowDays} days
+          of the pack data ({dataAsOf.slice(0, 10)}) and, where labeled, participation in the pack’s current
+          tournament for that league. This is a recency and pack-membership guard, not an official registry.
+          Adjusted rating = raw rating minus rating spread above the settled floor.
       </p>
       {tab === "players" && (
         <p className="method-note max-w-[62ch]">
@@ -548,7 +574,7 @@ export function EloLadders({
                 {visibleTeams.map((t, i) => {
                   const rec = teamRecords[t.team];
                   const trust = trustInfo(t.sigma, TEAM_SIGMA_MIN, rec?.games);
-                  const wr = scopedTeamWr(rec, leagues);
+                  const wr = scopedTeamWr(rec, leagues, { currentTournaments });
                   return (
                     <tr
                       key={t.team}
@@ -565,7 +591,10 @@ export function EloLadders({
                           {t.team}
                         </Link>
                       </td>
-                      <td>{formatAffiliation(rec?.current_tier, rec?.current_league ?? rec?.primary)}</td>
+                      <td>
+                        {formatAffiliation(rec?.current_tier, rec?.current_league ?? rec?.primary)}
+                        {rec?.current_tournament ? <span className="block text-xs text-[var(--ink-faint)]">{rec.current_tournament}</span> : null}
+                      </td>
                       <td className="num">{adjustedRating(t, TEAM_SIGMA_MIN).toFixed(1)}</td>
                       <td className="num">{t.mu_total.toFixed(1)}</td>
                       <td className="num">{t.mu_meta.toFixed(1)}</td>
@@ -591,7 +620,7 @@ export function EloLadders({
                     <span className="elo-card-title">{t.team}</span>
                     <span className="elo-card-meta">
                       {formatAffiliation(rec?.current_tier, rec?.current_league ?? rec?.primary)} · Evidence {formatTrustCell(trust)} · Win rate{" "}
-                      {formatWr(scopedTeamWr(rec, leagues))}
+                      {formatWr(scopedTeamWr(rec, leagues, { currentTournaments }))}
                     </span>
                     <span className="elo-card-rating">
                       {adjustedRating(t, TEAM_SIGMA_MIN).toFixed(1)}
@@ -699,7 +728,10 @@ export function EloLadders({
                           "—"
                         )}
                       </td>
-                      <td>{formatAffiliation(rec?.current_tier ?? fromTeam?.current_tier, league)}</td>
+                      <td>
+                        {formatAffiliation(rec?.current_tier ?? fromTeam?.current_tier, league)}
+                        {rec?.current_tournament ? <span className="block text-xs text-[var(--ink-faint)]">{rec.current_tournament}</span> : null}
+                      </td>
                       <td className="num">
                         {softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(1)}
                       </td>

@@ -29,7 +29,8 @@ function thinPlayers(players: PlayerRating[]): PlayerRating[] {
     }))
     .sort(
       (a, b) =>
-        softMu(b.mu_total, b.sigma, 28) - softMu(a.mu_total, a.sigma, 28),
+        softMu(b.mu_total, b.sigma, 28) - softMu(a.mu_total, a.sigma, 28) ||
+        a.player.localeCompare(b.player),
     );
 }
 
@@ -105,6 +106,9 @@ export default async function EloPage() {
           playerWeeklyRanks={playerWeeklyRanks}
           playerMetadata={playerMetadata}
           availableLeagues={availableLeagues}
+          dataAsOf={man.data_as_of ?? man.created_utc}
+          recentActivityWindowDays={man.recent_activity_window_days ?? 90}
+          currentTournaments={man.current_tournaments ?? {}}
         />
       </Suspense>
     </div>

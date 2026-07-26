@@ -87,7 +87,7 @@ def _observations(
     frame = frame.dropna(subset=["date", "y_blue_win"]).copy()
     if as_of is not None:
         frame = frame[frame["date"] <= pd.Timestamp(as_of)].copy()
-    frame = frame.sort_values("date")
+    frame = frame.sort_values(["date", "game_uid"] if "game_uid" in frame.columns else ["date"], kind="mergesort")
     if frame.empty:
         return pd.DataFrame()
 
@@ -121,6 +121,7 @@ def _observations(
                 "league": source_league,
                 "is_international": bool(row.get("is_international", source_league in INTERNATIONAL_LEAGUES)),
                 "blue_side": 1.0,
+                "grid_game_index": row.get("grid_game_index"),
             }
         )
         if source_league in REGIONAL_LEAGUES:
@@ -129,15 +130,30 @@ def _observations(
 
     frame_rows = pd.DataFrame(records)
     collapsed: list[dict[str, Any]] = []
+    skipped_tied_series = 0
+    skipped_gapped_series = 0
     for _, group in frame_rows.groupby("series_key", sort=False):
         first = group.iloc[0]
+        grid_indices = pd.to_numeric(group["grid_game_index"], errors="coerce")
+        if grid_indices.notna().any():
+            ordered_indices = sorted(int(value) for value in grid_indices.dropna())
+            if (
+                not grid_indices.notna().all()
+                or len(ordered_indices) != len(group)
+                or ordered_indices != list(range(1, len(ordered_indices) + 1))
+            ):
+                skipped_gapped_series += 1
+                continue
         a, b = sorted((str(first["blue"]), str(first["red"])))
         a_rows = group[group["blue"].eq(a)]
         a_wins = float(a_rows["y_blue"].sum()) + float((group[group["red"].eq(a)]["y_blue"] == 0).sum())
         n_maps = len(group)
-        # Complete series normally have an odd number of maps.  For an
-        # incomplete/duplicate feed, use the first map only on a tie.
-        y_a = 1.0 if a_wins > n_maps / 2 else 0.0 if a_wins < n_maps / 2 else (float(first["y_blue"]) if first["blue"] == a else 1.0 - float(first["y_blue"]))
+        # A tied map group cannot establish a series winner.  The previous
+        # fallback to the first map made the estimate depend on feed order.
+        if a_wins == n_maps / 2:
+            skipped_tied_series += 1
+            continue
+        y_a = 1.0 if a_wins > n_maps / 2 else 0.0
         a_row = group[group["blue"].eq(a)]
         b_row = group[group["blue"].eq(b)]
         source_a = a_row.iloc[0] if not a_row.empty else first
@@ -158,7 +174,12 @@ def _observations(
                 "a_was_blue": 1.0 if first["blue"] == a else -1.0,
             }
         )
-    out = pd.DataFrame(collapsed).sort_values("date").reset_index(drop=True)
+    if not collapsed:
+        out = pd.DataFrame()
+    else:
+        out = pd.DataFrame(collapsed).sort_values("date", kind="mergesort").reset_index(drop=True)
+    out.attrs["skipped_tied_series"] = skipped_tied_series
+    out.attrs["skipped_gapped_series"] = skipped_gapped_series
     if not out.empty:
         cutoff = out["date"].max()
         out["weight"] = np.exp(
@@ -202,6 +223,8 @@ def fit_hierarchical_bt(
         return empty, {
             "model": "hierarchical_bt",
             "n_series": 0,
+            "skipped_tied_series": int(obs.attrs.get("skipped_tied_series", 0)),
+            "skipped_gapped_series": int(obs.attrs.get("skipped_gapped_series", 0)),
             "taxonomy_version": TAXONOMY_VERSION,
             "input_audit": input_audit,
         }
@@ -301,6 +324,8 @@ def fit_hierarchical_bt(
         "taxonomy_version": TAXONOMY_VERSION,
         "n_series": int(len(obs)),
         "n_maps": int(obs["n_maps"].sum()),
+        "skipped_tied_series": int(obs.attrs.get("skipped_tied_series", 0)),
+        "skipped_gapped_series": int(obs.attrs.get("skipped_gapped_series", 0)),
         "n_teams": int(len(teams)),
         "n_leagues": int(len(leagues)),
         "as_of": str(obs["date"].max()),

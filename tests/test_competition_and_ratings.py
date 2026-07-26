@@ -6,9 +6,11 @@ import pandas as pd
 
 from lol_kills.etl.competition import canonicalize_competition_frame, classify_competition
 from lol_kills.export.pack_records import (
+    build_current_tournament_membership,
     build_maps_frame_from_team_games,
     build_player_records,
     build_team_records,
+    tournament_family,
 )
 from lol_kills.ratings.dual_elo import _is_intl
 from lol_kills.ratings.hierarchical_bt import fit_hierarchical_bt
@@ -71,6 +73,25 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertEqual(label.league, "WORLDS")
         self.assertEqual(label.tier, "international")
         self.assertTrue(label.is_international)
+
+    def test_legacy_intl_fallback_is_unknown_not_an_international_league(self) -> None:
+        label = classify_competition("INTL", "NACL - Summer 2026")
+        self.assertEqual(label.league, "UNKNOWN")
+        self.assertEqual(label.tier, "tier3")
+        self.assertFalse(label.is_international)
+        membership = build_current_tournament_membership(
+            pd.DataFrame(
+                [{
+                    "date": "2026-07-20",
+                    "league": "INTL",
+                    "tournament": "NACL - Summer 2026",
+                    "blue_team": "Academy A",
+                    "red_team": "Academy B",
+                }]
+            ),
+            as_of="2026-07-26T00:00:00Z",
+        )
+        self.assertEqual(membership["leagues"], {})
 
     def test_road_to_msi_does_not_become_international(self) -> None:
         label = classify_competition("LCK", "LCK 2026 Road to MSI")
@@ -171,6 +192,76 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertEqual(records["A"]["by_tier"]["tier1"]["games"], 1)
         self.assertEqual(records["A"]["by_tier"]["tier2"]["games"], 1)
 
+    def test_current_tournament_membership_merges_stage_labels_and_excludes_old_teams(self) -> None:
+        maps = pd.DataFrame(
+            [
+                {
+                    "date": "2026-07-20",
+                    "league": "LPL",
+                    "tournament": "LPL - Split 3 2026 (Group Ascend)",
+                    "blue_team": "Current A",
+                    "red_team": "Current B",
+                    "y_blue_win": 1,
+                },
+                {
+                    "date": "2026-07-21",
+                    "league": "LPL",
+                    "tournament": "LPL - Split 3 2026 (Group Nirvana)",
+                    "blue_team": "Current C",
+                    "red_team": "Current D",
+                    "y_blue_win": 0,
+                },
+                {
+                    "date": "2026-06-01",
+                    "league": "LPL",
+                    "tournament": "LPL - Split 2 2026 (Regular Season)",
+                    "blue_team": "Former",
+                    "red_team": "Current A",
+                    "y_blue_win": 0,
+                },
+            ]
+        )
+        membership = build_current_tournament_membership(maps, as_of="2026-07-26T00:00:00Z")
+        self.assertEqual(tournament_family("LPL - Split 3 2026 (Group Ascend)"), "LPL - Split 3 2026")
+        self.assertEqual(membership["leagues"], {"LPL": "LPL - Split 3 2026"})
+        self.assertEqual(membership["team_leagues"]["current-a"]["LPL"], "LPL - Split 3 2026")
+        self.assertNotIn("former", membership["team_leagues"])
+
+        records = build_team_records(maps, membership, tournament_maps=maps)
+        self.assertEqual(records["Current A"]["current_tournament"], "LPL - Split 3 2026")
+        self.assertIsNone(records["Former"]["current_tournament"])
+        self.assertEqual(records["Current A"]["by_tournament"]["LPL|LPL - Split 3 2026"]["games"], 1)
+
+    def test_player_records_inherit_current_tournament_from_current_team(self) -> None:
+        maps = pd.DataFrame(
+            [
+                {
+                    "date": "2026-07-20",
+                    "league": "LPL",
+                    "tournament": "LPL - Split 3 2026 (Group Ascend)",
+                    "blue_team": "Current A",
+                    "red_team": "Current B",
+                    "y_blue_win": 1,
+                }
+            ]
+        )
+        players = pd.DataFrame(
+            [
+                {
+                    "date": "2026-07-20",
+                    "league": "LPL",
+                    "tournament": "LPL - Split 3 2026 (Group Ascend)",
+                    "teamname": "Current A",
+                    "playername": "Player A",
+                    "position": "mid",
+                    "result": 1,
+                }
+            ]
+        )
+        membership = build_current_tournament_membership(maps, as_of="2026-07-26T00:00:00Z")
+        records = build_player_records(players, membership)
+        self.assertEqual(records["Player A"]["current_tournament"], "LPL - Split 3 2026")
+
     def test_weekly_player_rank_payload_uses_sunday_baseline(self) -> None:
         players = []
         roles = ["top", "jng", "mid", "bot", "sup"]
@@ -233,6 +324,33 @@ class HierarchicalRatingTests(unittest.TestCase):
         self.assertEqual(meta["n_maps"], 3)
         self.assertTrue((snapshot["rating_p10"] < snapshot["mu_total"]).all())
         self.assertTrue(set(snapshot["model"]) == {"hierarchical_bt"})
+
+    def test_gapped_explicit_grid_series_are_excluded_from_rating_fit(self) -> None:
+        maps = pd.DataFrame(
+            [
+                {
+                    "date": "2026-01-01 10:00",
+                    "league": "LCS",
+                    "blue_team": "A",
+                    "red_team": "B",
+                    "y_blue_win": 1,
+                    "grid_series_id": "gapped",
+                    "grid_game_index": 1,
+                },
+                {
+                    "date": "2026-01-01 10:35",
+                    "league": "LCS",
+                    "blue_team": "A",
+                    "red_team": "B",
+                    "y_blue_win": 1,
+                    "grid_series_id": "gapped",
+                    "grid_game_index": 3,
+                },
+            ]
+        )
+        _, meta = fit_hierarchical_bt(maps, write=False)
+        self.assertEqual(meta["n_series"], 0)
+        self.assertEqual(meta["skipped_gapped_series"], 1)
 
 
 if __name__ == "__main__":

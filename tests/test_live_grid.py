@@ -24,6 +24,13 @@ from lol_kills.live_snapshots import LivePublisher, build_live_snapshot
 
 
 class GridSeriesEventsTests(unittest.TestCase):
+    def test_grid_tournament_classification_keeps_developmental_and_unknown_scopes_safe(self) -> None:
+        self.assertEqual(grid_ingest._league_for("NACL Summer 2026"), "NACL")
+        self.assertEqual(grid_ingest._league_for("LCK Challengers 2026"), "LCKC")
+        self.assertEqual(grid_ingest._league_for("LPL Split 3 2026"), "LPL")
+        self.assertEqual(grid_ingest._league_for("Circuito Desafiante - Split 2 2026"), "CD")
+        self.assertEqual(grid_ingest._league_for("Nonsense Invitational"), "UNKNOWN")
+
     def test_player_key_normalization_deduplicates_grid_game_uid(self) -> None:
         players = _canonical_player_game_key(
             pd.DataFrame(

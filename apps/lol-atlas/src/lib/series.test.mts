@@ -46,6 +46,7 @@ test("a real GRID series id keeps side-swapped games together", () => {
       grid_series_id: "series-42",
       game_uid: "LDL_91841",
       game: 1,
+      grid_game_index: 1,
       blue_teamname: "Bilibili Gaming",
       red_teamname: "Anyone's Legend",
     }),
@@ -53,6 +54,7 @@ test("a real GRID series id keeps side-swapped games together", () => {
       grid_series_id: "series-42",
       game_uid: "LDL_91845",
       game: 2,
+      grid_game_index: 2,
       blue_teamname: "Anyone's Legend",
       red_teamname: "Bilibili Gaming",
       blue_result: 0,
@@ -74,6 +76,7 @@ function seriesWithWinners(winners: Array<"Alpha" | "Beta">) {
         grid_series_id: "format-series",
         game_uid: `game-${index + 1}`,
         game: index + 1,
+        grid_game_index: index + 1,
         blue_teamname: "Alpha",
         red_teamname: "Beta",
         blue_result: winner === "Alpha" ? 1 : 0,
@@ -104,4 +107,66 @@ test("a tied two-map group is marked incomplete instead of claimed as Bo3", () =
   assert.equal(series.winsA, 1);
   assert.equal(series.winsB, 1);
   assert.equal(series.bestOf, null);
+});
+
+test("a GRID series with a missing map index is marked incomplete", () => {
+  const grouped = groupMapsIntoSeries([
+    gridMap({
+      grid_series_id: "gap-series",
+      grid_game_index: 1,
+      game_uid: "gap-1",
+      blue_teamname: "Alpha",
+      red_teamname: "Beta",
+    }),
+    gridMap({
+      grid_series_id: "gap-series",
+      grid_game_index: 3,
+      game_uid: "gap-3",
+      blue_teamname: "Alpha",
+      red_teamname: "Beta",
+    }),
+    gridMap({
+      grid_series_id: "gap-series",
+      grid_game_index: 4,
+      game_uid: "gap-4",
+      blue_teamname: "Alpha",
+      red_teamname: "Beta",
+    }),
+  ]);
+  assert.equal(grouped[0].bestOf, null);
+});
+
+test("a lone explicit GRID game is not promoted to a completed Bo1", () => {
+  const grouped = groupMapsIntoSeries([
+    gridMap({
+      grid_series_id: "partial-series",
+      grid_game_index: 2,
+      game_uid: "partial-2",
+      blue_teamname: "Alpha",
+      red_teamname: "Beta",
+    }),
+  ]);
+  assert.equal(grouped[0].bestOf, null);
+});
+
+test("GRID completion provenance survives grouping", () => {
+  const grouped = groupMapsIntoSeries([
+    gridMap({
+      grid_series_id: "provenance-series",
+      grid_game_index: 1,
+      grid_completion_source: "end_state_summary",
+      game_uid: "provenance-1",
+      blue_teamname: "Alpha",
+      red_teamname: "Beta",
+    }),
+    gridMap({
+      grid_series_id: "provenance-series",
+      grid_game_index: 2,
+      grid_completion_source: "end_state_summary",
+      game_uid: "provenance-2",
+      blue_teamname: "Alpha",
+      red_teamname: "Beta",
+    }),
+  ]);
+  assert.equal(grouped[0].completionSource, "end_state_summary");
 });
