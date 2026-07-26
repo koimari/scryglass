@@ -11,6 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 from lol_kills.etl.grid_ingest import ingest_grid, merge_source_frames
+from lol_kills.etl.competition import canonicalize_competition_frame
 from lol_kills.etl.join import build_map_warehouse
 from lol_kills.etl.leaguepedia_ingest import ingest_leaguepedia
 from lol_kills.etl.oe_ingest import ingest_oe
@@ -74,6 +75,12 @@ def main() -> None:
         grid_player,
         ["gameid", "side", "position"],
     )
+
+    # Canonical identity is applied after source precedence is resolved.  This
+    # keeps OE/GRID provenance intact while ensuring one team key across LCS,
+    # MSI, EWC, and legacy LTA labels.
+    combined_team = canonicalize_competition_frame(combined_team)
+    combined_player = canonicalize_competition_frame(combined_player)
 
     # Keep the join module's established input paths while making the source
     # precedence explicit in the rows themselves.

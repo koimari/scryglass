@@ -1,7 +1,7 @@
 # Scryglass
 
 Independent League of Legends research publication by Koi. 
-Authored essays lead; Dual Elo ratings,
+Authored essays lead; hierarchical team ratings with a sequential Dual Elo benchmark,
 match explorer, and head-to-head boards support the claims with reproducible Oracle’s Elixir packs
 (2025–2026).
 

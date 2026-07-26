@@ -1,0 +1,121 @@
+{
+  "model": "hierarchical_bt",
+  "taxonomy_version": "2026-07-26.1",
+  "n_series": 3484,
+  "n_maps": 6214,
+  "n_teams": 179,
+  "n_leagues": 10,
+  "as_of": "2026-07-18 16:33:48",
+  "config": {
+    "base_rating": 1500.0,
+    "half_life_days": 365.0,
+    "team_l2": 40.0,
+    "league_l2": 100.0,
+    "side_l2": 100.0,
+    "min_sigma": 20.0,
+    "unbridged_league_sigma": 45.0,
+    "bridge_target_series": 8,
+    "conservative_z": 1.6448536269514722,
+    "max_iter": 500
+  },
+  "optimizer_success": true,
+  "optimizer_message": "CONVERGENCE: REL_REDUCTION_OF_F_<=_FACTR*EPSMCH",
+  "input_audit": {
+    "ok": true,
+    "n_rows": 6214,
+    "date_min": "2024-09-02T15:11:47",
+    "date_max": "2026-07-18T16:33:48",
+    "n_duplicate_game_uid_rows": 0,
+    "n_team_identity_collisions": 0,
+    "team_identity_collisions": {},
+    "deprecated_source_rows": 476,
+    "canonical_leagues": [
+      "CBLOL",
+      "EWC",
+      "FST",
+      "LCK",
+      "LCP",
+      "LCS",
+      "LEC",
+      "LJL",
+      "LPL",
+      "MSI",
+      "PCS",
+      "TCL",
+      "VCS"
+    ],
+    "regional_rows": 5725,
+    "international_rows": 489,
+    "international_bridge_pairs": [
+      [
+        "CBLOL",
+        "LCK"
+      ],
+      [
+        "CBLOL",
+        "LCS"
+      ],
+      [
+        "CBLOL",
+        "LEC"
+      ],
+      [
+        "CBLOL",
+        "LPL"
+      ],
+      [
+        "LCK",
+        "LCP"
+      ],
+      [
+        "LCK",
+        "LCS"
+      ],
+      [
+        "LCK",
+        "LEC"
+      ],
+      [
+        "LCK",
+        "LPL"
+      ],
+      [
+        "LCP",
+        "LCS"
+      ],
+      [
+        "LCP",
+        "LEC"
+      ],
+      [
+        "LCP",
+        "LPL"
+      ],
+      [
+        "LCS",
+        "LEC"
+      ],
+      [
+        "LCS",
+        "LPL"
+      ],
+      [
+        "LEC",
+        "LPL"
+      ]
+    ],
+    "n_international_bridge_pairs": 14,
+    "temporal_cutoffs": [
+      "2025-05-01 15:36:14",
+      "2025-08-20 12:01:21",
+      "2026-03-29 10:09:45"
+    ],
+    "note": "Use chronological series-level holdouts and cluster uncertainty by series/event; random map splits are not valid."
+  },
+  "note": "Series-collapsed penalized MAP Bradley-Terry with local Laplace uncertainty plus explicit uncertainty inflation for teams without international bridges; use rating_p10 for conservative rank.",
+  "pack_years": [
+    2025,
+    2026
+  ],
+  "rating_window": "same canonical map window as this pack"
+}

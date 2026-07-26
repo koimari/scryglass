@@ -19,6 +19,12 @@ export type PackManifest = {
     leagues: string;
     leagues_note?: string;
   };
+  identity?: {
+    taxonomy_version?: string;
+    team_key?: string;
+    league_source?: string;
+    deprecated_leagues?: Record<string, string>;
+  };
   attribution: string;
   excluded: string[];
   base_url: string | null;
@@ -29,10 +35,17 @@ export type PackManifest = {
 
 export type TeamRating = {
   team: string;
+  team_key?: string;
   mu_total: number;
   mu_regional: number;
   mu_meta: number;
   sigma: number;
+  rating_p10?: number;
+  n_series?: number;
+  n_maps?: number;
+  international_series?: number;
+  home_league?: string;
+  model?: string;
 };
 
 export type PlayerRating = {
@@ -52,6 +65,7 @@ export type EloCalibration = {
 
 export type TeamRecord = {
   leagues: string[];
+  source_leagues?: string[];
   primary: string | null;
   intl: boolean;
   wins: number;
@@ -73,14 +87,13 @@ export type PlayerRecord = {
 export const TEAM_SIGMA_MIN = 25;
 export const PLAYER_SIGMA_MIN = 28;
 
-export const INTL_LEAGUES = ["MSI", "EWC", "Worlds", "FST"] as const;
+export const INTL_LEAGUES = ["MSI", "EWC", "FST", "WORLDS"] as const;
 
 export const REGION_LEAGUES = [
   "LCK",
   "LPL",
   "LEC",
   "LCS",
-  "LTA",
   "CBLOL",
   "PCS",
   "VCS",
@@ -150,6 +163,14 @@ export function packUpdatedLabel(manifest: PackManifest): string {
 /** Soft ranking: penalize high-σ so thin ladders don't outrank settled orgs. */
 export function softMu(mu: number, sigma: number, floor = TEAM_SIGMA_MIN): number {
   return mu - Math.max(0, sigma - floor);
+}
+
+/** Conservative posterior display value for the hierarchical public ladder. */
+export function adjustedRating(
+  rating: Pick<TeamRating, "mu_total" | "sigma" | "rating_p10">,
+  floor = TEAM_SIGMA_MIN,
+): number {
+  return Number.isFinite(rating.rating_p10) ? Number(rating.rating_p10) : softMu(rating.mu_total, rating.sigma, floor);
 }
 
 export function trustInfo(sigma: number, floor: number, games?: number | null): TrustInfo {

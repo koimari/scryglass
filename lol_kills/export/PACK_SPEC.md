@@ -18,7 +18,7 @@ Canonical machine-readable allowlists and defaults live in
 | `team_games/year=Y/part.parquet` | `warehouse/parquet/oe_team_games.parquet` | Column allowlist `TEAM_COLS`; `source` is `oe`, `grid`, or `mixed` |
 | `player_games/year=Y/part.parquet` | `oe_player_games.parquet` | One player table; no duplicate `players.parquet`; source is retained |
 | `maps/year=Y/part.parquet` | `maps.parquet` | Trimmed identity + both-side draft/obj/@10–25; `source_oe` / `source_grid` preserve provenance |
-| `features/*_snapshot.*` | Dual Elo snapshots | Parquet + JSON twins for ladders |
+| `features/*_snapshot.*` | Hierarchical team ladder and player Dual Elo snapshots | Parquet + JSON twins for ladders |
 | `features/*_history.parquet` | Elo history | Rows whose `game_uid` is in year-filtered maps |
 | `models/` | Pinned calibration / tierlist CSV | See `PINNED_MODEL_FILES` |
 | `studies/grubs/` | Void-grubs decision + PDF + figures | See `GRUBS_MODEL_FILES` / `GRUBS_PDF_FILES` |

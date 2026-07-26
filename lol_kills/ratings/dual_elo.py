@@ -17,14 +17,12 @@ import numpy as np
 import pandas as pd
 
 from lol_kills.etl.aliases import normalize_team
+from lol_kills.etl.competition import classify_competition
 from lol_kills.etl.paths import FEATURES_DIR, PARQUET_DIR
-
-INTL_TOKENS = ("WORLD", "MSI", "EWC", "FIRST STAND", "FST", "IWC", "MSC")
 
 
 def _is_intl(league: str, tournament: str | None = None) -> bool:
-    blob = f"{league or ''} {tournament or ''}".upper()
-    return any(t in blob for t in INTL_TOKENS)
+    return classify_competition(league, tournament).is_international
 
 
 @dataclass
@@ -170,6 +168,7 @@ def build_dual_ratings(
         for t, s in states.items()
     ]
     snap_df = pd.DataFrame(snap).sort_values("mu_total", ascending=False)
+    snap_df.to_parquet(FEATURES_DIR / "ratings_dual_snapshot.parquet", index=False)
     snap_df.to_parquet(FEATURES_DIR / "ratings_snapshot.parquet", index=False)
     (FEATURES_DIR / "ratings_meta.json").write_text(
         json.dumps({"n_maps": len(out), "n_teams": len(snap), "config": cfg.__dict__}, indent=2)
