@@ -133,6 +133,12 @@ def build_team_records(maps: pd.DataFrame) -> dict[str, dict[str, Any]]:
             games = int(len(lg))
             by_league[str(league)] = {"wins": wins, "games": games, "wr": _wr(wins, games)}
 
+        by_tier: dict[str, dict[str, Any]] = {}
+        for tier, tg in group[group["competition_tier"].isin({"tier1", "tier2", "tier3"})].groupby("competition_tier", sort=True):
+            wins = int(round(float(tg["win"].sum())))
+            games = int(len(tg))
+            by_tier[str(tier)] = {"wins": wins, "games": games, "wr": _wr(wins, games)}
+
         primary = _primary_league(group)
         current = group[group["competition_tier"].isin({"tier1", "tier2", "tier3"})]
         current_row = current.loc[pd.to_datetime(current["date"], errors="coerce").idxmax()] if not current.empty and pd.to_datetime(current["date"], errors="coerce").notna().any() else None
@@ -153,6 +159,7 @@ def build_team_records(maps: pd.DataFrame) -> dict[str, dict[str, Any]]:
             "games": games,
             "wr": _wr(wins, games),
             "by_league": by_league,
+            "by_tier": by_tier,
         }
     return records
 

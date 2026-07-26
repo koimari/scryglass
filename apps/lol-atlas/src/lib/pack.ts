@@ -94,6 +94,7 @@ export type TeamRecord = {
   games: number;
   wr: number | null;
   by_league?: Record<string, { wins: number; games: number; wr: number | null }>;
+  by_tier?: Record<string, { wins: number; games: number; wr: number | null }>;
 };
 
 export type PlayerRecord = {
@@ -113,8 +114,8 @@ export type PlayerRecord = {
 export type CompetitionTier = "tier1" | "tier2" | "tier3";
 
 export const TIER_FILTERS = [
-  { value: "TIER1", label: "Tier 1", description: "Major regional leagues" },
-  { value: "TIER2", label: "Tier 2", description: "Challenger and academy circuits" },
+  { value: "TIER1", label: "Tier 1", description: "LCK, LPL, LEC, LCS, CBLOL, and LCP" },
+  { value: "TIER2", label: "Tier 2", description: "Established regional and challenger circuits" },
   { value: "TIER3", label: "Tier 3", description: "Other domestic and developmental circuits" },
 ] as const;
 
@@ -122,7 +123,21 @@ export const TIER_FILTERS = [
 export const TEAM_SIGMA_MIN = 25;
 export const PLAYER_SIGMA_MIN = 28;
 
-export const INTL_LEAGUES = ["MSI", "EWC", "FST", "WORLDS"] as const;
+export const INTL_LEAGUES = [
+  "MSI",
+  "EWC",
+  "FST",
+  "WORLDS",
+  "IWC",
+  "MSC",
+  "EM",
+  "ASIA MASTER",
+  "ASIA MASTERS",
+] as const;
+
+export const MAJOR_REGIONAL_LEAGUES = ["LCK", "LPL", "LEC", "LCS", "CBLOL", "LCP"] as const;
+
+export const SECONDARY_REGIONAL_LEAGUES = ["PCS", "VCS", "LJL", "TCL"] as const;
 
 export const REGION_LEAGUES = [
   "LCK",
@@ -320,19 +335,14 @@ export function playerMatchesQuery(player: string, lastTeam: string | null, q: s
 
 export function isIntlLeague(league: string): boolean {
   const u = league.toUpperCase();
-  return (
-    u === "MSI" ||
-    u === "EWC" ||
-    u === "FST" ||
-    u.includes("WORLD") ||
-    u.includes("FIRST STAND")
-  );
+  return INTL_LEAGUES.some((event) => u === event || u.includes(event)) || u.includes("WORLD") || u.includes("FIRST STAND");
 }
 
 export function recordMatchesLeagues(
   rec: {
     leagues?: string[];
     intl?: boolean;
+    interregional?: boolean;
     primary?: string | null;
     current_league?: string | null;
     current_tier?: CompetitionTier | null;
@@ -341,15 +351,26 @@ export function recordMatchesLeagues(
 ): boolean {
   if (!selected.length) return true;
   if (!rec) return false;
-  const set = new Set(selected);
-  if (set.has("INTL")) {
-    if (rec.intl) return true;
-    if ((rec.leagues || []).some(isIntlLeague)) return true;
-  }
+  const tierSet = new Set(selected.filter((scope) => scope.startsWith("TIER")));
+  const regionalSet = new Set(selected.filter((scope) => REGION_LEAGUES.includes(scope as (typeof REGION_LEAGUES)[number])));
+  const crossRegionSet = new Set(selected.filter((scope) => INTERREGIONAL_LEAGUES.includes(scope as (typeof INTERREGIONAL_LEAGUES)[number])));
+  const internationalSet = new Set(selected.filter((scope) => scope === "INTL" || isIntlLeague(scope)));
   const currentLeague = rec.current_league ?? rec.primary;
-  if (currentLeague && set.has(currentLeague)) return true;
-  if (rec.current_tier && set.has(rec.current_tier.toUpperCase())) return true;
-  return false;
+  const currentTier = rec.current_tier?.toUpperCase();
+
+  // Filters in one group are alternatives; filters across groups narrow the
+  // same current affiliation/evidence record. This prevents selecting Tier 1
+  // from being silently overridden by a Tier 2 regional chip.
+  const tierMatches = !tierSet.size || (!!currentTier && tierSet.has(currentTier));
+  const regionalMatches = !regionalSet.size || (!!currentLeague && regionalSet.has(currentLeague));
+  const crossRegionMatches = !crossRegionSet.size && !internationalSet.size
+    ? true
+    : !crossRegionSet.size || (!!rec.interregional && crossRegionSet.has("AMERICAS"));
+  const internationalMatches = !internationalSet.size
+    ? true
+    : (internationalSet.has("INTL") && (rec.intl || (rec.leagues || []).some(isIntlLeague))) ||
+      [...internationalSet].some((event) => event !== "INTL" && (rec.leagues || []).some((league) => league === event));
+  return tierMatches && regionalMatches && crossRegionMatches && internationalMatches;
 }
 
 export function scopedTeamWr(
@@ -358,6 +379,44 @@ export function scopedTeamWr(
 ): number | null {
   if (!rec) return null;
   if (!selected.length) return rec.wr;
+  const tierSelected = selected.filter((scope) => scope.startsWith("TIER")).map((scope) => scope.toLowerCase().replace("tier", ""));
+  const regionalSelected = selected.filter((scope) => REGION_LEAGUES.includes(scope as (typeof REGION_LEAGUES)[number]));
+  const internationalSelected = selected.filter((scope) => scope === "INTL" || isIntlLeague(scope));
+  if (regionalSelected.length) {
+    const by = rec.by_league || {};
+    let wins = 0;
+    let games = 0;
+    for (const league of regionalSelected) {
+      const row = by[league];
+      if (!row) continue;
+      wins += row.wins;
+      games += row.games;
+    }
+    return games ? wins / games : null;
+  }
+  if (internationalSelected.length) {
+    const by = rec.by_league || {};
+    let wins = 0;
+    let games = 0;
+    for (const [league, row] of Object.entries(by)) {
+      const wanted = internationalSelected.includes("INTL") || internationalSelected.includes(league);
+      if (!wanted || !isIntlLeague(league)) continue;
+      wins += row.wins;
+      games += row.games;
+    }
+    return games ? wins / games : null;
+  }
+  if (tierSelected.length && rec.by_tier) {
+    let wins = 0;
+    let games = 0;
+    for (const tier of tierSelected) {
+      const row = rec.by_tier[tier];
+      if (!row) continue;
+      wins += row.wins;
+      games += row.games;
+    }
+    return games ? wins / games : null;
+  }
   let wins = 0;
   let games = 0;
   const by = rec.by_league || {};

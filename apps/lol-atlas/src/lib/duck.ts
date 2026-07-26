@@ -148,18 +148,21 @@ export type MapFilters = {
 async function mapSelectForPack(parquetUrl: string): Promise<string> {
   // Older public packs contain source_oe but predate source_grid. Keep the
   // browser query compatible with both schemas while newer packs roll out.
-  let hasSourceGrid = false;
+  const optionalColumns: string[] = [];
   try {
     const columns = await queryPackParquet(
       parquetUrl,
       "DESCRIBE SELECT * FROM read_parquet($PARQUET)",
     );
-    hasSourceGrid = columns.some((row) => String(row.column_name ?? "") === "source_grid");
+    const available = new Set(columns.map((row) => String(row.column_name ?? "")));
+    for (const column of ["source_grid", "grid_series_id", "grid_game_index"]) {
+      if (available.has(column)) optionalColumns.push(column);
+    }
   } catch {
     // The main map query will report the actual pack failure if its stable
     // columns are unavailable; optional provenance must not cause one.
   }
-  return hasSourceGrid ? `${MAP_SELECT.trimEnd()}\n  ,source_grid` : MAP_SELECT;
+  return optionalColumns.length ? `${MAP_SELECT.trimEnd()}\n  ,${optionalColumns.join(",\n  ")}` : MAP_SELECT;
 }
 
 function mapFilterClauses(opts: MapFilters): string[] {
@@ -268,7 +271,31 @@ function teamPairKey(a: string, b: string): string {
   return [a, b].sort((x, y) => x.localeCompare(y)).join("||");
 }
 
-/** Group OE map rows into Bo1/Bo3/Bo5 series (infer from game index + date + teams). */
+function explicitSeriesKey(row: QueryRow): string | null {
+  const gridSeries = String(row.grid_series_id ?? "").trim();
+  if (gridSeries) return `grid:${gridSeries}`;
+  const uid = String(row.game_uid ?? row.oe_gameid ?? "").trim();
+  const match = uid.match(/^(.*?)(?:_game_\d+)$/i);
+  if (match?.[1]) return `oe:${match[1]}`;
+  // GRID's live-stats gameVersion is the stable series identifier in older
+  // packs, while OE patch values remain conventional 16.x/25.x strings.
+  const patch = String(row.patch ?? "").trim();
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(patch)) return `grid:${patch}`;
+  return null;
+}
+
+function inferBestOf(games: QueryRow[]): number {
+  const maxGame = Math.max(...games.map((g) => Number(g.game) || 1), games.length);
+  if (maxGame >= 5 || games.length >= 5) return 5;
+  if (maxGame >= 3 || games.length >= 3) return 3;
+  // A live/GRID result can contain only the games already completed. Two
+  // games in one identified pro series are therefore a partial or completed
+  // Bo3, not evidence that the match was Bo1.
+  if (games.length >= 2) return 3;
+  return 1;
+}
+
+/** Group OE/GRID map rows into Bo1/Bo3/Bo5 series using stable IDs first. */
 export function groupMapsIntoSeries(rows: QueryRow[]): SeriesCard[] {
   const buckets = new Map<string, QueryRow[]>();
   for (const r of rows) {
@@ -278,7 +305,10 @@ export function groupMapsIntoSeries(rows: QueryRow[]): SeriesCard[] {
     const day = formatGameDate(r.date);
     const league = String(r.league ?? "");
     const tourney = String(r.tournament ?? "");
-    const key = `${teamPairKey(blue, red)}|${day}|${league}|${tourney}`;
+    const seriesId = explicitSeriesKey(r);
+    const key = seriesId
+      ? `${seriesId}|${league}|${tourney}`
+      : `${teamPairKey(blue, red)}|${day}|${league}|${tourney}`;
     const list = buckets.get(key) ?? [];
     list.push(r);
     buckets.set(key, list);
@@ -305,8 +335,7 @@ export function groupMapsIntoSeries(rows: QueryRow[]): SeriesCard[] {
       if (winner === teamA) winsA += 1;
       else if (winner === teamB) winsB += 1;
     }
-    const maxGame = Math.max(...games.map((g) => Number(g.game) || 1), games.length);
-    const bestOf = maxGame >= 5 || games.length >= 5 ? 5 : maxGame >= 3 || games.length >= 3 ? 3 : 1;
+    const bestOf = inferBestOf(games);
     const hasGrid = games.some((g) => g.source_grid === true || Number(g.source_grid) === 1);
     const hasOe = games.some((g) => g.source_oe === true || Number(g.source_oe) === 1);
     series.push({

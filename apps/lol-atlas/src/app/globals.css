@@ -1533,11 +1533,31 @@ body {
   align-items: center;
   gap: 0.65rem;
 }
+.scope-filter-head {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.7rem;
+  width: 100%;
+  padding-bottom: 0.15rem;
+}
+.scope-filter-help {
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  max-width: 56ch;
+}
+.scope-filter-head .chip {
+  margin-left: auto;
+}
 .chip-group {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
+}
+.chip-group-tier {
+  padding-right: 0.25rem;
 }
 .chip-group-label {
   color: var(--ink-faint);

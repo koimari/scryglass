@@ -37,6 +37,13 @@
         "games": 5,
         "wr": 0.2
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 29,
+        "games": 51,
+        "wr": 0.5686
+      }
     }
   },
   "3BL Esports": {
@@ -70,6 +77,13 @@
         "games": 4,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 29,
+        "games": 73,
+        "wr": 0.3973
+      }
     }
   },
   "3v Team": {
@@ -92,6 +106,13 @@
     "wr": 0.7273,
     "by_league": {
       "LRN": {
+        "wins": 8,
+        "games": 11,
+        "wr": 0.7273
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 8,
         "games": 11,
         "wr": 0.7273
@@ -122,6 +143,13 @@
         "games": 12,
         "wr": 0.75
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 9,
+        "games": 12,
+        "wr": 0.75
+      }
     }
   },
   "4 Swines & A Bum": {
@@ -144,6 +172,13 @@
     "wr": 0.1429,
     "by_league": {
       "NLC": {
+        "wins": 1,
+        "games": 7,
+        "wr": 0.1429
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 7,
         "wr": 0.1429
@@ -174,6 +209,13 @@
         "games": 14,
         "wr": 0.2857
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 4,
+        "games": 14,
+        "wr": 0.2857
+      }
     }
   },
   "5M Esports": {
@@ -196,6 +238,13 @@
     "wr": 0.5,
     "by_league": {
       "LPLOL": {
+        "wins": 1,
+        "games": 2,
+        "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 2,
         "wr": 0.5
@@ -226,6 +275,13 @@
         "games": 24,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 12,
+        "games": 24,
+        "wr": 0.5
+      }
     }
   },
   "9Gaming Esports": {
@@ -252,6 +308,13 @@
         "games": 30,
         "wr": 0.3667
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 11,
+        "games": 30,
+        "wr": 0.3667
+      }
     }
   },
   "9z Globant": {
@@ -274,6 +337,13 @@
     "wr": 0.6136,
     "by_league": {
       "LRS": {
+        "wins": 27,
+        "games": 44,
+        "wr": 0.6136
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 27,
         "games": 44,
         "wr": 0.6136
@@ -310,6 +380,18 @@
         "wins": 19,
         "games": 48,
         "wr": 0.3958
+      }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 19,
+        "games": 48,
+        "wr": 0.3958
+      },
+      "tier3": {
+        "wins": 1,
+        "games": 2,
+        "wr": 0.5
       }
     }
   },
@@ -351,6 +433,18 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 5,
+        "games": 15,
+        "wr": 0.3333
+      },
+      "tier3": {
+        "wins": 2,
+        "games": 4,
+        "wr": 0.5
+      }
     }
   },
   "A One Man Army Prime Academy": {
@@ -373,6 +467,13 @@
     "wr": 0.0,
     "by_league": {
       "PRMP": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -403,6 +504,13 @@
         "games": 4,
         "wr": 0.25
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 4,
+        "wr": 0.25
+      }
     }
   },
   "Absolved": {
@@ -425,6 +533,13 @@
     "wr": 1.0,
     "by_league": {
       "NLC": {
+        "wins": 2,
+        "games": 2,
+        "wr": 1.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 2,
         "wr": 1.0
@@ -462,6 +577,18 @@
         "games": 45,
         "wr": 0.3111
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 14,
+        "games": 45,
+        "wr": 0.3111
+      },
+      "tier3": {
+        "wins": 6,
+        "games": 10,
+        "wr": 0.6
+      }
     }
   },
   "Aegis": {
@@ -484,6 +611,13 @@
     "wr": 0.5714,
     "by_league": {
       "LFL": {
+        "wins": 4,
+        "games": 7,
+        "wr": 0.5714
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 7,
         "wr": 0.5714
@@ -514,6 +648,13 @@
         "games": 16,
         "wr": 0.4375
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 7,
+        "games": 16,
+        "wr": 0.4375
+      }
     }
   },
   "AG.AL": {
@@ -540,7 +681,8 @@
         "games": 1,
         "wr": 1.0
       }
-    }
+    },
+    "by_tier": {}
   },
   "AKA HERO": {
     "team_key": "aka-hero",
@@ -562,6 +704,13 @@
     "wr": 0.3333,
     "by_league": {
       "PRMP": {
+        "wins": 1,
+        "games": 3,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 3,
         "wr": 0.3333
@@ -592,6 +741,13 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
     }
   },
   "ALMO Players": {
@@ -614,6 +770,13 @@
     "wr": 0.3171,
     "by_league": {
       "HLL": {
+        "wins": 13,
+        "games": 41,
+        "wr": 0.3171
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 13,
         "games": 41,
         "wr": 0.3171
@@ -651,6 +814,18 @@
         "games": 26,
         "wr": 0.5769
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 6,
+        "games": 15,
+        "wr": 0.4
+      },
+      "tier2": {
+        "wins": 15,
+        "games": 26,
+        "wr": 0.5769
+      }
     }
   },
   "aNc Legends": {
@@ -684,6 +859,13 @@
         "games": 28,
         "wr": 0.25
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 7,
+        "games": 28,
+        "wr": 0.25
+      }
     }
   },
   "Ancient Ones": {
@@ -706,6 +888,13 @@
     "wr": 1.0,
     "by_league": {
       "NL": {
+        "wins": 1,
+        "games": 1,
+        "wr": 1.0
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 1,
         "games": 1,
         "wr": 1.0
@@ -743,6 +932,13 @@
         "games": 8,
         "wr": 0.375
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 24,
+        "games": 58,
+        "wr": 0.4138
+      }
     }
   },
   "Ankora Gaming": {
@@ -769,6 +965,13 @@
         "games": 5,
         "wr": 0.2
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 5,
+        "wr": 0.2
+      }
     }
   },
   "Anonymo Esports": {
@@ -791,6 +994,13 @@
     "wr": 0.3735,
     "by_league": {
       "RL": {
+        "wins": 31,
+        "games": 83,
+        "wr": 0.3735
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 31,
         "games": 83,
         "wr": 0.3735
@@ -827,6 +1037,13 @@
         "wins": 3,
         "games": 7,
         "wr": 0.4286
+      }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 75,
+        "games": 135,
+        "wr": 0.5556
       }
     }
   },
@@ -882,6 +1099,18 @@
         "games": 10,
         "wr": 0.6
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 142,
+        "games": 228,
+        "wr": 0.6228
+      },
+      "tier3": {
+        "wins": 0,
+        "games": 3,
+        "wr": 0.0
+      }
     }
   },
   "Anyone's Legend.Young": {
@@ -908,7 +1137,8 @@
         "games": 11,
         "wr": 0.4545
       }
-    }
+    },
+    "by_tier": {}
   },
   "Apex Mission Impossible": {
     "team_key": "apex-mission-impossible",
@@ -930,6 +1160,13 @@
     "wr": 0.2623,
     "by_league": {
       "NACL": {
+        "wins": 16,
+        "games": 61,
+        "wr": 0.2623
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 16,
         "games": 61,
         "wr": 0.2623
@@ -956,6 +1193,13 @@
     "wr": 1.0,
     "by_league": {
       "VCS": {
+        "wins": 5,
+        "games": 5,
+        "wr": 1.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 5,
         "games": 5,
         "wr": 1.0
@@ -993,6 +1237,13 @@
         "games": 27,
         "wr": 0.6296
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 17,
+        "games": 27,
+        "wr": 0.6296
+      }
     }
   },
   "Area of Effect Esports": {
@@ -1015,6 +1266,13 @@
     "wr": 0.5556,
     "by_league": {
       "NACL": {
+        "wins": 5,
+        "games": 9,
+        "wr": 0.5556
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 5,
         "games": 9,
         "wr": 0.5556
@@ -1052,6 +1310,13 @@
         "games": 49,
         "wr": 0.5918
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 29,
+        "games": 49,
+        "wr": 0.5918
+      }
     }
   },
   "Aurora": {
@@ -1084,6 +1349,18 @@
         "wins": 7,
         "games": 44,
         "wr": 0.1591
+      }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 7,
+        "games": 44,
+        "wr": 0.1591
+      },
+      "tier3": {
+        "wins": 5,
+        "games": 8,
+        "wr": 0.625
       }
     }
   },
@@ -1118,6 +1395,13 @@
         "games": 6,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 27,
+        "games": 64,
+        "wr": 0.4219
+      }
     }
   },
   "Axolotl": {
@@ -1151,6 +1435,13 @@
         "games": 69,
         "wr": 0.4783
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 33,
+        "games": 69,
+        "wr": 0.4783
+      }
     }
   },
   "B2U": {
@@ -1173,6 +1464,13 @@
     "wr": 0.5,
     "by_league": {
       "NLC": {
+        "wins": 4,
+        "games": 8,
+        "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 8,
         "wr": 0.5
@@ -1210,6 +1508,13 @@
         "games": 6,
         "wr": 0.3333
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 65,
+        "games": 147,
+        "wr": 0.4422
+      }
     }
   },
   "Back2TheGame": {
@@ -1236,6 +1541,13 @@
         "games": 67,
         "wr": 0.5373
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 36,
+        "games": 67,
+        "wr": 0.5373
+      }
     }
   },
   "Bamboo Juice": {
@@ -1258,6 +1570,13 @@
     "wr": 0.4091,
     "by_league": {
       "LJL": {
+        "wins": 18,
+        "games": 44,
+        "wr": 0.4091
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 18,
         "games": 44,
         "wr": 0.4091
@@ -1309,6 +1628,18 @@
         "games": 77,
         "wr": 0.5065
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 39,
+        "games": 77,
+        "wr": 0.5065
+      },
+      "tier3": {
+        "wins": 19,
+        "games": 42,
+        "wr": 0.4524
+      }
     }
   },
   "Barcz\u0105ca Esports": {
@@ -1342,6 +1673,13 @@
         "games": 63,
         "wr": 0.5556
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 35,
+        "games": 63,
+        "wr": 0.5556
+      }
     }
   },
   "Barulhinhos": {
@@ -1364,6 +1702,13 @@
     "wr": 0.5263,
     "by_league": {
       "CD": {
+        "wins": 10,
+        "games": 19,
+        "wr": 0.5263
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 10,
         "games": 19,
         "wr": 0.5263
@@ -1394,6 +1739,13 @@
         "games": 4,
         "wr": 0.25
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 4,
+        "wr": 0.25
+      }
     }
   },
   "BBL Dark Passage": {
@@ -1416,6 +1768,13 @@
     "wr": 0.3962,
     "by_league": {
       "TCL": {
+        "wins": 21,
+        "games": 53,
+        "wr": 0.3962
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 21,
         "games": 53,
         "wr": 0.3962
@@ -1446,6 +1805,13 @@
         "games": 66,
         "wr": 0.4545
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 30,
+        "games": 66,
+        "wr": 0.4545
+      }
     }
   },
   "Berimbados": {
@@ -1468,6 +1834,13 @@
     "wr": 0.0,
     "by_league": {
       "LPLOL": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -1519,6 +1892,18 @@
         "games": 12,
         "wr": 0.9167
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 96,
+        "games": 129,
+        "wr": 0.7442
+      },
+      "tier3": {
+        "wins": 10,
+        "games": 15,
+        "wr": 0.6667
+      }
     }
   },
   "BERZLOY": {
@@ -1541,6 +1926,13 @@
     "wr": 0.75,
     "by_league": {
       "HLL": {
+        "wins": 3,
+        "games": 4,
+        "wr": 0.75
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 4,
         "wr": 0.75
@@ -1574,6 +1966,13 @@
         "wr": 0.4
       },
       "TCL": {
+        "wins": 26,
+        "games": 55,
+        "wr": 0.4727
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 26,
         "games": 55,
         "wr": 0.4727
@@ -1639,6 +2038,18 @@
         "games": 8,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 161,
+        "games": 242,
+        "wr": 0.6653
+      },
+      "tier3": {
+        "wins": 3,
+        "games": 9,
+        "wr": 0.3333
+      }
     }
   },
   "Bilibili Gaming Junior": {
@@ -1665,7 +2076,8 @@
         "games": 20,
         "wr": 0.3
       }
-    }
+    },
+    "by_tier": {}
   },
   "Bitfix Gaming": {
     "team_key": "bitfix-gaming",
@@ -1687,6 +2099,13 @@
     "wr": 0.3333,
     "by_league": {
       "NLC": {
+        "wins": 2,
+        "games": 6,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 6,
         "wr": 0.3333
@@ -1724,6 +2143,13 @@
         "games": 87,
         "wr": 0.5517
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 48,
+        "games": 87,
+        "wr": 0.5517
+      }
     }
   },
   "Black Dog": {
@@ -1746,6 +2172,13 @@
     "wr": 0.2,
     "by_league": {
       "LJL": {
+        "wins": 2,
+        "games": 10,
+        "wr": 0.2
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 10,
         "wr": 0.2
@@ -1776,6 +2209,13 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
     }
   },
   "BloomStorm": {
@@ -1798,6 +2238,13 @@
     "wr": 0.0,
     "by_league": {
       "LJL": {
+        "wins": 0,
+        "games": 10,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 10,
         "wr": 0.0
@@ -1828,6 +2275,13 @@
         "games": 84,
         "wr": 0.4048
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 34,
+        "games": 84,
+        "wr": 0.4048
+      }
     }
   },
   "BlueWhites": {
@@ -1850,6 +2304,13 @@
     "wr": 0.4,
     "by_league": {
       "NLC": {
+        "wins": 10,
+        "games": 25,
+        "wr": 0.4
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 10,
         "games": 25,
         "wr": 0.4
@@ -1908,6 +2369,23 @@
         "games": 177,
         "wr": 0.4407
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 78,
+        "games": 177,
+        "wr": 0.4407
+      },
+      "tier2": {
+        "wins": 4,
+        "games": 8,
+        "wr": 0.5
+      },
+      "tier3": {
+        "wins": 13,
+        "games": 18,
+        "wr": 0.7222
+      }
     }
   },
   "BNK FEARX Academy": {
@@ -1930,6 +2408,13 @@
     "wr": 0.3922,
     "by_league": {
       "LAS": {
+        "wins": 20,
+        "games": 51,
+        "wr": 0.3922
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 20,
         "games": 51,
         "wr": 0.3922
@@ -1967,6 +2452,13 @@
         "games": 199,
         "wr": 0.4925
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 98,
+        "games": 199,
+        "wr": 0.4925
+      }
     }
   },
   "Bohemian Guardians": {
@@ -1989,6 +2481,13 @@
     "wr": 0.1667,
     "by_league": {
       "HM": {
+        "wins": 3,
+        "games": 18,
+        "wr": 0.1667
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 18,
         "wr": 0.1667
@@ -2026,6 +2525,13 @@
         "games": 40,
         "wr": 0.725
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 29,
+        "games": 40,
+        "wr": 0.725
+      }
     }
   },
   "BoostGate Esports": {
@@ -2059,6 +2565,13 @@
         "games": 88,
         "wr": 0.4659
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 41,
+        "games": 88,
+        "wr": 0.4659
+      }
     }
   },
   "BraVeLY": {
@@ -2085,6 +2598,13 @@
         "games": 42,
         "wr": 0.2857
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 12,
+        "games": 42,
+        "wr": 0.2857
+      }
     }
   },
   "Brod n Friends": {
@@ -2107,6 +2627,13 @@
     "wr": 0.5,
     "by_league": {
       "NLC": {
+        "wins": 3,
+        "games": 6,
+        "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 6,
         "wr": 0.5
@@ -2151,6 +2678,18 @@
         "games": 30,
         "wr": 0.6
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 8,
+        "games": 47,
+        "wr": 0.1702
+      },
+      "tier3": {
+        "wins": 18,
+        "games": 30,
+        "wr": 0.6
+      }
     }
   },
   "Bubliki": {
@@ -2184,6 +2723,13 @@
         "games": 18,
         "wr": 0.5556
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 10,
+        "games": 18,
+        "wr": 0.5556
+      }
     }
   },
   "Bulldog Esports": {
@@ -2206,6 +2752,13 @@
     "wr": 0.4638,
     "by_league": {
       "NLC": {
+        "wins": 32,
+        "games": 69,
+        "wr": 0.4638
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 32,
         "games": 69,
         "wr": 0.4638
@@ -2243,6 +2796,13 @@
         "games": 46,
         "wr": 0.5652
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 26,
+        "games": 46,
+        "wr": 0.5652
+      }
     }
   },
   "Bushido Wildcats": {
@@ -2276,6 +2836,13 @@
         "games": 104,
         "wr": 0.5288
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 55,
+        "games": 104,
+        "wr": 0.5288
+      }
     }
   },
   "BWE Esports": {
@@ -2298,6 +2865,13 @@
     "wr": 0.3333,
     "by_league": {
       "LPLOL": {
+        "wins": 1,
+        "games": 3,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 3,
         "wr": 0.3333
@@ -2328,6 +2902,13 @@
         "games": 6,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 3,
+        "games": 6,
+        "wr": 0.5
+      }
     }
   },
   "CAG OSAKA": {
@@ -2350,6 +2931,13 @@
     "wr": 0.3077,
     "by_league": {
       "LJL": {
+        "wins": 8,
+        "games": 26,
+        "wr": 0.3077
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 8,
         "games": 26,
         "wr": 0.3077
@@ -2394,6 +2982,18 @@
         "games": 22,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 7,
+        "games": 19,
+        "wr": 0.3684
+      },
+      "tier3": {
+        "wins": 11,
+        "games": 22,
+        "wr": 0.5
+      }
     }
   },
   "CCG Esports": {
@@ -2420,6 +3020,13 @@
         "games": 86,
         "wr": 0.5698
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 49,
+        "games": 86,
+        "wr": 0.5698
+      }
     }
   },
   "Ceuta Guardians": {
@@ -2442,6 +3049,13 @@
     "wr": 0.1667,
     "by_league": {
       "NEXO": {
+        "wins": 1,
+        "games": 6,
+        "wr": 0.1667
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 1,
         "games": 6,
         "wr": 0.1667
@@ -2486,6 +3100,13 @@
         "games": 4,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 19,
+        "games": 32,
+        "wr": 0.5938
+      }
     }
   },
   "Chiefs Esports Club": {
@@ -2512,6 +3133,13 @@
         "games": 51,
         "wr": 0.1961
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 10,
+        "games": 51,
+        "wr": 0.1961
+      }
     }
   },
   "Chinese Taipei (National Team)": {
@@ -2534,6 +3162,13 @@
     "wr": 0.4444,
     "by_league": {
       "KESPA": {
+        "wins": 4,
+        "games": 9,
+        "wr": 0.4444
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 9,
         "wr": 0.4444
@@ -2585,6 +3220,18 @@
         "games": 39,
         "wr": 0.4615
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 22,
+        "games": 26,
+        "wr": 0.8462
+      },
+      "tier3": {
+        "wins": 37,
+        "games": 67,
+        "wr": 0.5522
+      }
     }
   },
   "CITA Kaizen Academy": {
@@ -2611,6 +3258,13 @@
         "games": 25,
         "wr": 0.48
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 12,
+        "games": 25,
+        "wr": 0.48
+      }
     }
   },
   "Citadel Gaming": {
@@ -2633,6 +3287,13 @@
     "wr": 0.475,
     "by_league": {
       "NACL": {
+        "wins": 19,
+        "games": 40,
+        "wr": 0.475
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 19,
         "games": 40,
         "wr": 0.475
@@ -2691,6 +3352,18 @@
         "games": 105,
         "wr": 0.6571
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 69,
+        "games": 105,
+        "wr": 0.6571
+      },
+      "tier2": {
+        "wins": 12,
+        "games": 23,
+        "wr": 0.5217
+      }
     }
   },
   "CNG Royal": {
@@ -2713,6 +3386,13 @@
     "wr": 0.25,
     "by_league": {
       "NLC": {
+        "wins": 1,
+        "games": 4,
+        "wr": 0.25
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 4,
         "wr": 0.25
@@ -2750,6 +3430,13 @@
         "games": 75,
         "wr": 0.6267
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 47,
+        "games": 75,
+        "wr": 0.6267
+      }
     }
   },
   "Comanchero Gaming": {
@@ -2772,6 +3459,13 @@
     "wr": 0.4545,
     "by_league": {
       "TCL": {
+        "wins": 5,
+        "games": 11,
+        "wr": 0.4545
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 5,
         "games": 11,
         "wr": 0.4545
@@ -2802,6 +3496,13 @@
         "games": 16,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 16,
+        "wr": 0.0
+      }
     }
   },
   "Contingent Esports": {
@@ -2828,6 +3529,13 @@
         "games": 9,
         "wr": 0.7778
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 7,
+        "games": 9,
+        "wr": 0.7778
+      }
     }
   },
   "Contrata Logo Meu Time": {
@@ -2850,6 +3558,13 @@
     "wr": 0.5,
     "by_league": {
       "CD": {
+        "wins": 7,
+        "games": 14,
+        "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 7,
         "games": 14,
         "wr": 0.5
@@ -2887,6 +3602,18 @@
         "games": 92,
         "wr": 0.5978
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 2,
+        "games": 5,
+        "wr": 0.4
+      },
+      "tier2": {
+        "wins": 55,
+        "games": 92,
+        "wr": 0.5978
+      }
     }
   },
   "CORE 128": {
@@ -2920,6 +3647,13 @@
         "games": 24,
         "wr": 0.5417
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 13,
+        "games": 27,
+        "wr": 0.4815
+      }
     }
   },
   "Corinthians Esports": {
@@ -2942,6 +3676,13 @@
     "wr": 0.4231,
     "by_league": {
       "CD": {
+        "wins": 22,
+        "games": 52,
+        "wr": 0.4231
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 22,
         "games": 52,
         "wr": 0.4231
@@ -2972,6 +3713,13 @@
         "games": 21,
         "wr": 0.4286
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 9,
+        "games": 21,
+        "wr": 0.4286
+      }
     }
   },
   "Crusaders": {
@@ -2994,6 +3742,13 @@
     "wr": 0.4884,
     "by_league": {
       "LPLOL": {
+        "wins": 21,
+        "games": 43,
+        "wr": 0.4884
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 21,
         "games": 43,
         "wr": 0.4884
@@ -3031,6 +3786,13 @@
         "games": 11,
         "wr": 0.0909
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 58,
+        "games": 88,
+        "wr": 0.6591
+      }
     }
   },
   "Crystal Rose": {
@@ -3053,6 +3815,13 @@
     "wr": 0.1333,
     "by_league": {
       "NL": {
+        "wins": 2,
+        "games": 15,
+        "wr": 0.1333
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 2,
         "games": 15,
         "wr": 0.1333
@@ -3111,6 +3880,13 @@
         "games": 12,
         "wr": 0.4167
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 78,
+        "games": 122,
+        "wr": 0.6393
+      }
     }
   },
   "CTBC Flying Oyster Academy": {
@@ -3144,6 +3920,13 @@
         "games": 78,
         "wr": 0.4872
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 38,
+        "games": 78,
+        "wr": 0.4872
+      }
     }
   },
   "Cuban Raft Raiders": {
@@ -3166,6 +3949,13 @@
     "wr": 0.3333,
     "by_league": {
       "LPLOL": {
+        "wins": 1,
+        "games": 3,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 3,
         "wr": 0.3333
@@ -3196,6 +3986,13 @@
         "games": 19,
         "wr": 0.4211
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 8,
+        "games": 19,
+        "wr": 0.4211
+      }
     }
   },
   "Cusprills": {
@@ -3218,6 +4015,13 @@
     "wr": 0.6667,
     "by_league": {
       "CD": {
+        "wins": 10,
+        "games": 15,
+        "wr": 0.6667
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 10,
         "games": 15,
         "wr": 0.6667
@@ -3248,6 +4052,13 @@
         "games": 28,
         "wr": 0.2143
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 6,
+        "games": 28,
+        "wr": 0.2143
+      }
     }
   },
   "Dark Roses": {
@@ -3270,6 +4081,13 @@
     "wr": 0.3333,
     "by_league": {
       "CD": {
+        "wins": 2,
+        "games": 6,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 6,
         "wr": 0.3333
@@ -3300,6 +4118,13 @@
         "games": 53,
         "wr": 0.6415
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 34,
+        "games": 53,
+        "wr": 0.6415
+      }
     }
   },
   "DCT eSports": {
@@ -3322,6 +4147,13 @@
     "wr": 0.4,
     "by_league": {
       "LRN": {
+        "wins": 4,
+        "games": 10,
+        "wr": 0.4
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 10,
         "wr": 0.4
@@ -3352,6 +4184,13 @@
         "games": 15,
         "wr": 0.4
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 6,
+        "games": 15,
+        "wr": 0.4
+      }
     }
   },
   "DeathMark E-Sports": {
@@ -3378,6 +4217,13 @@
         "games": 13,
         "wr": 0.4615
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 6,
+        "games": 13,
+        "wr": 0.4615
+      }
     }
   },
   "DECOY 21": {
@@ -3400,6 +4246,13 @@
     "wr": 0.7,
     "by_league": {
       "LIT": {
+        "wins": 7,
+        "games": 10,
+        "wr": 0.7
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 7,
         "games": 10,
         "wr": 0.7
@@ -3458,6 +4311,18 @@
         "games": 96,
         "wr": 0.7396
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 50,
+        "games": 85,
+        "wr": 0.5882
+      },
+      "tier2": {
+        "wins": 71,
+        "games": 96,
+        "wr": 0.7396
+      }
     }
   },
   "Deer Gaming": {
@@ -3480,6 +4345,13 @@
     "wr": 0.5,
     "by_league": {
       "NLC": {
+        "wins": 13,
+        "games": 26,
+        "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 13,
         "games": 26,
         "wr": 0.5
@@ -3524,6 +4396,18 @@
         "games": 4,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 7,
+        "wr": 0.1429
+      },
+      "tier3": {
+        "wins": 14,
+        "games": 43,
+        "wr": 0.3256
+      }
     }
   },
   "DELTALAND": {
@@ -3550,6 +4434,13 @@
         "games": 9,
         "wr": 0.3333
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 3,
+        "games": 9,
+        "wr": 0.3333
+      }
     }
   },
   "Deltan Gaming": {
@@ -3572,6 +4463,13 @@
     "wr": 0.6486,
     "by_league": {
       "LJL": {
+        "wins": 24,
+        "games": 37,
+        "wr": 0.6486
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 24,
         "games": 37,
         "wr": 0.6486
@@ -3609,6 +4507,13 @@
         "games": 86,
         "wr": 0.2209
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 19,
+        "games": 86,
+        "wr": 0.2209
+      }
     }
   },
   "DetonatioN FocusMe Academy": {
@@ -3642,6 +4547,13 @@
         "games": 65,
         "wr": 0.4462
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 29,
+        "games": 65,
+        "wr": 0.4462
+      }
     }
   },
   "devils.one inStreamly": {
@@ -3664,6 +4576,13 @@
     "wr": 0.2632,
     "by_league": {
       "RL": {
+        "wins": 10,
+        "games": 38,
+        "wr": 0.2632
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 10,
         "games": 38,
         "wr": 0.2632
@@ -3701,6 +4620,13 @@
         "games": 63,
         "wr": 0.2381
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 15,
+        "games": 63,
+        "wr": 0.2381
+      }
     }
   },
   "Disguised": {
@@ -3734,6 +4660,13 @@
         "games": 80,
         "wr": 0.375
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 30,
+        "games": 80,
+        "wr": 0.375
+      }
     }
   },
   "Disruptors": {
@@ -3760,6 +4693,13 @@
         "games": 5,
         "wr": 0.8
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 4,
+        "games": 5,
+        "wr": 0.8
+      }
     }
   },
   "Diver (Portuguese Team)": {
@@ -3782,6 +4722,13 @@
     "wr": 0.25,
     "by_league": {
       "LPLOL": {
+        "wins": 2,
+        "games": 8,
+        "wr": 0.25
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 8,
         "wr": 0.25
@@ -3819,6 +4766,13 @@
         "games": 29,
         "wr": 0.5172
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 21,
+        "games": 46,
+        "wr": 0.4565
+      }
     }
   },
   "Diversion Gaming": {
@@ -3851,6 +4805,13 @@
         "wins": 11,
         "games": 21,
         "wr": 0.5238
+      }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 54,
+        "games": 103,
+        "wr": 0.5243
       }
     }
   },
@@ -3885,6 +4846,13 @@
         "games": 6,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 8,
+        "games": 18,
+        "wr": 0.4444
+      }
     }
   },
   "DMG Esports": {
@@ -3914,6 +4882,13 @@
         "wr": 0.4
       },
       "NLC": {
+        "wins": 25,
+        "games": 63,
+        "wr": 0.3968
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 25,
         "games": 63,
         "wr": 0.3968
@@ -3958,6 +4933,18 @@
         "games": 158,
         "wr": 0.2468
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 39,
+        "games": 158,
+        "wr": 0.2468
+      },
+      "tier2": {
+        "wins": 3,
+        "games": 13,
+        "wr": 0.2308
+      }
     }
   },
   "DN SOOPers Academy": {
@@ -3980,6 +4967,13 @@
     "wr": 0.5337,
     "by_league": {
       "LAS": {
+        "wins": 95,
+        "games": 178,
+        "wr": 0.5337
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 95,
         "games": 178,
         "wr": 0.5337
@@ -4017,6 +5011,13 @@
         "games": 187,
         "wr": 0.5401
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 101,
+        "games": 187,
+        "wr": 0.5401
+      }
     }
   },
   "DOCISK": {
@@ -4039,6 +5040,13 @@
     "wr": 0.3667,
     "by_league": {
       "RL": {
+        "wins": 22,
+        "games": 60,
+        "wr": 0.3667
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 22,
         "games": 60,
         "wr": 0.3667
@@ -4069,6 +5077,13 @@
         "games": 17,
         "wr": 0.4706
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 8,
+        "games": 17,
+        "wr": 0.4706
+      }
     }
   },
   "Dopamina E-Sport": {
@@ -4095,6 +5110,13 @@
         "games": 33,
         "wr": 0.5758
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 19,
+        "games": 33,
+        "wr": 0.5758
+      }
     }
   },
   "Dorado Gaming": {
@@ -4117,6 +5139,13 @@
     "wr": 0.4167,
     "by_league": {
       "NACL": {
+        "wins": 20,
+        "games": 48,
+        "wr": 0.4167
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 20,
         "games": 48,
         "wr": 0.4167
@@ -4168,6 +5197,23 @@
         "games": 216,
         "wr": 0.5556
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 120,
+        "games": 216,
+        "wr": 0.5556
+      },
+      "tier2": {
+        "wins": 19,
+        "games": 32,
+        "wr": 0.5938
+      },
+      "tier3": {
+        "wins": 10,
+        "games": 15,
+        "wr": 0.6667
+      }
     }
   },
   "Dplus Kia Academy": {
@@ -4190,6 +5236,13 @@
     "wr": 0.598,
     "by_league": {
       "LAS": {
+        "wins": 119,
+        "games": 199,
+        "wr": 0.598
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 119,
         "games": 199,
         "wr": 0.598
@@ -4227,6 +5280,13 @@
         "games": 142,
         "wr": 0.4718
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 67,
+        "games": 142,
+        "wr": 0.4718
+      }
     }
   },
   "Dragons Esports": {
@@ -4249,6 +5309,13 @@
     "wr": 0.6082,
     "by_league": {
       "AL": {
+        "wins": 59,
+        "games": 97,
+        "wr": 0.6082
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 59,
         "games": 97,
         "wr": 0.6082
@@ -4279,6 +5346,13 @@
         "games": 8,
         "wr": 0.375
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 3,
+        "games": 8,
+        "wr": 0.375
+      }
     }
   },
   "Dream Esports": {
@@ -4301,6 +5375,13 @@
     "wr": 0.4286,
     "by_league": {
       "LPLOL": {
+        "wins": 3,
+        "games": 7,
+        "wr": 0.4286
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 7,
         "wr": 0.4286
@@ -4331,6 +5412,13 @@
         "games": 40,
         "wr": 0.725
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 29,
+        "games": 40,
+        "wr": 0.725
+      }
     }
   },
   "Dream Makers": {
@@ -4353,6 +5441,13 @@
     "wr": 0.4091,
     "by_league": {
       "NEXO": {
+        "wins": 9,
+        "games": 22,
+        "wr": 0.4091
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 9,
         "games": 22,
         "wr": 0.4091
@@ -4383,6 +5478,13 @@
         "games": 93,
         "wr": 0.0538
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 5,
+        "games": 93,
+        "wr": 0.0538
+      }
     }
   },
   "DUCKIE GETTERS": {
@@ -4405,6 +5507,13 @@
     "wr": 0.4286,
     "by_league": {
       "NACL": {
+        "wins": 3,
+        "games": 7,
+        "wr": 0.4286
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 7,
         "wr": 0.4286
@@ -4442,6 +5551,13 @@
         "games": 3,
         "wr": 0.6667
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 15,
+        "games": 26,
+        "wr": 0.5769
+      }
     }
   },
   "Dutch Community Team": {
@@ -4464,6 +5580,13 @@
     "wr": 0.0,
     "by_league": {
       "ESLOL": {
+        "wins": 0,
+        "games": 3,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 0,
         "games": 3,
         "wr": 0.0
@@ -4501,6 +5624,18 @@
         "games": 12,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 8,
+        "games": 23,
+        "wr": 0.3478
+      },
+      "tier3": {
+        "wins": 6,
+        "games": 12,
+        "wr": 0.5
+      }
     }
   },
   "Dynamo Eclot Talents": {
@@ -4534,6 +5669,13 @@
         "games": 6,
         "wr": 0.3333
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 11,
+        "games": 29,
+        "wr": 0.3793
+      }
     }
   },
   "Dynasty": {
@@ -4560,6 +5702,13 @@
         "games": 37,
         "wr": 0.3784
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 14,
+        "games": 37,
+        "wr": 0.3784
+      }
     }
   },
   "e-Champ Gaming": {
@@ -4582,6 +5731,13 @@
     "wr": 0.4118,
     "by_league": {
       "CD": {
+        "wins": 7,
+        "games": 17,
+        "wr": 0.4118
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 7,
         "games": 17,
         "wr": 0.4118
@@ -4633,6 +5789,18 @@
         "games": 6,
         "wr": 0.6667
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 60,
+        "games": 119,
+        "wr": 0.5042
+      },
+      "tier3": {
+        "wins": 4,
+        "games": 9,
+        "wr": 0.4444
+      }
     }
   },
   "EDG Youth Team": {
@@ -4659,7 +5827,8 @@
         "games": 19,
         "wr": 0.3158
       }
-    }
+    },
+    "by_tier": {}
   },
   "Edward Gaming": {
     "team_key": "edward-gaming",
@@ -4692,6 +5861,18 @@
         "games": 112,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 56,
+        "games": 112,
+        "wr": 0.5
+      },
+      "tier3": {
+        "wins": 9,
+        "games": 14,
+        "wr": 0.6429
+      }
     }
   },
   "Ei Nerd Esports": {
@@ -4714,6 +5895,13 @@
     "wr": 0.3571,
     "by_league": {
       "CD": {
+        "wins": 5,
+        "games": 14,
+        "wr": 0.3571
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 5,
         "games": 14,
         "wr": 0.3571
@@ -4757,6 +5945,18 @@
         "wins": 2,
         "games": 4,
         "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 31,
+        "games": 86,
+        "wr": 0.3605
+      },
+      "tier3": {
+        "wins": 3,
+        "games": 9,
+        "wr": 0.3333
       }
     }
   },
@@ -4805,6 +6005,18 @@
         "games": 5,
         "wr": 0.4
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 50,
+        "games": 99,
+        "wr": 0.5051
+      },
+      "tier3": {
+        "wins": 2,
+        "games": 6,
+        "wr": 0.3333
+      }
     }
   },
   "EKO Esports": {
@@ -4827,6 +6039,13 @@
     "wr": 0.3125,
     "by_league": {
       "LIT": {
+        "wins": 20,
+        "games": 64,
+        "wr": 0.3125
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 20,
         "games": 64,
         "wr": 0.3125
@@ -4857,6 +6076,13 @@
         "games": 4,
         "wr": 0.25
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 4,
+        "wr": 0.25
+      }
     }
   },
   "Elegance": {
@@ -4883,6 +6109,13 @@
         "games": 5,
         "wr": 0.4
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 2,
+        "games": 5,
+        "wr": 0.4
+      }
     }
   },
   "emBRAZA! Esports": {
@@ -4905,6 +6138,13 @@
     "wr": 0.6,
     "by_league": {
       "CD": {
+        "wins": 3,
+        "games": 5,
+        "wr": 0.6
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 5,
         "wr": 0.6
@@ -4949,6 +6189,18 @@
         "games": 18,
         "wr": 0.5556
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 35,
+        "games": 60,
+        "wr": 0.5833
+      },
+      "tier3": {
+        "wins": 10,
+        "games": 18,
+        "wr": 0.5556
+      }
     }
   },
   "Epic Avalanche": {
@@ -4971,6 +6223,13 @@
     "wr": 0.5556,
     "by_league": {
       "NLC": {
+        "wins": 5,
+        "games": 9,
+        "wr": 0.5556
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 5,
         "games": 9,
         "wr": 0.5556
@@ -5001,6 +6260,13 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
     }
   },
   "Epitomy Esports": {
@@ -5023,6 +6289,13 @@
     "wr": 0.55,
     "by_league": {
       "LIT": {
+        "wins": 11,
+        "games": 20,
+        "wr": 0.55
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 11,
         "games": 20,
         "wr": 0.55
@@ -5053,6 +6326,13 @@
         "games": 10,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 5,
+        "games": 10,
+        "wr": 0.5
+      }
     }
   },
   "Epitomy Warriors": {
@@ -5075,6 +6355,13 @@
     "wr": 0.0,
     "by_league": {
       "LIT": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -5105,6 +6392,13 @@
         "games": 4,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 4,
+        "wr": 0.0
+      }
     }
   },
   "eQuizers": {
@@ -5127,6 +6421,13 @@
     "wr": 0.6538,
     "by_league": {
       "NEXO": {
+        "wins": 17,
+        "games": 26,
+        "wr": 0.6538
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 17,
         "games": 26,
         "wr": 0.6538
@@ -5157,6 +6458,13 @@
         "games": 4,
         "wr": 0.25
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 4,
+        "wr": 0.25
+      }
     }
   },
   "eSports Cologne e.V.": {
@@ -5179,6 +6487,13 @@
     "wr": 0.0,
     "by_league": {
       "PRMP": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -5215,6 +6530,13 @@
         "wins": 46,
         "games": 67,
         "wr": 0.6866
+      }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 58,
+        "games": 94,
+        "wr": 0.617
       }
     }
   },
@@ -5256,6 +6578,18 @@
         "games": 18,
         "wr": 0.6667
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 7,
+        "games": 15,
+        "wr": 0.4667
+      },
+      "tier2": {
+        "wins": 30,
+        "games": 44,
+        "wr": 0.6818
+      }
     }
   },
   "eSuba": {
@@ -5296,6 +6630,18 @@
         "games": 33,
         "wr": 0.6667
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 68,
+        "games": 100,
+        "wr": 0.68
+      },
+      "tier3": {
+        "wins": 22,
+        "games": 33,
+        "wr": 0.6667
+      }
     }
   },
   "Eternal Fire": {
@@ -5318,6 +6664,13 @@
     "wr": 0.5278,
     "by_league": {
       "TCL": {
+        "wins": 19,
+        "games": 36,
+        "wr": 0.5278
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 19,
         "games": 36,
         "wr": 0.5278
@@ -5355,6 +6708,13 @@
         "games": 18,
         "wr": 0.4444
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 54,
+        "games": 99,
+        "wr": 0.5455
+      }
     }
   },
   "Evil genius": {
@@ -5381,6 +6741,13 @@
         "games": 7,
         "wr": 0.2857
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 2,
+        "games": 7,
+        "wr": 0.2857
+      }
     }
   },
   "Evolve eSports": {
@@ -5403,6 +6770,13 @@
     "wr": 0.0,
     "by_league": {
       "LPLOL": {
+        "wins": 0,
+        "games": 4,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 4,
         "wr": 0.0
@@ -5447,6 +6821,18 @@
         "games": 22,
         "wr": 0.4091
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 12,
+        "games": 37,
+        "wr": 0.3243
+      },
+      "tier3": {
+        "wins": 12,
+        "games": 38,
+        "wr": 0.3158
+      }
     }
   },
   "EXILE esports Academy": {
@@ -5469,6 +6855,13 @@
     "wr": 0.5357,
     "by_league": {
       "HC": {
+        "wins": 15,
+        "games": 28,
+        "wr": 0.5357
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 15,
         "games": 28,
         "wr": 0.5357
@@ -5520,6 +6913,13 @@
         "games": 37,
         "wr": 0.5946
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 33,
+        "games": 76,
+        "wr": 0.4342
+      }
     }
   },
   "Fantastic Esports": {
@@ -5542,6 +6942,13 @@
     "wr": 0.5,
     "by_league": {
       "EBL": {
+        "wins": 3,
+        "games": 6,
+        "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 6,
         "wr": 0.5
@@ -5579,6 +6986,18 @@
         "games": 49,
         "wr": 0.6735
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 3,
+        "games": 9,
+        "wr": 0.3333
+      },
+      "tier2": {
+        "wins": 33,
+        "games": 49,
+        "wr": 0.6735
+      }
     }
   },
   "Fast8": {
@@ -5601,6 +7020,13 @@
     "wr": 0.4516,
     "by_league": {
       "LJL": {
+        "wins": 14,
+        "games": 31,
+        "wr": 0.4516
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 14,
         "games": 31,
         "wr": 0.4516
@@ -5638,6 +7064,13 @@
         "games": 38,
         "wr": 0.8684
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 33,
+        "games": 38,
+        "wr": 0.8684
+      }
     }
   },
   "FlameHard": {
@@ -5667,6 +7100,13 @@
         "wr": 0.375
       },
       "LPLOL": {
+        "wins": 34,
+        "games": 41,
+        "wr": 0.8293
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 34,
         "games": 41,
         "wr": 0.8293
@@ -5704,6 +7144,18 @@
         "games": 59,
         "wr": 0.4746
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 10,
+        "games": 18,
+        "wr": 0.5556
+      },
+      "tier2": {
+        "wins": 28,
+        "games": 59,
+        "wr": 0.4746
+      }
     }
   },
   "Fluxo W7M": {
@@ -5736,6 +7188,13 @@
         "wins": 2,
         "games": 7,
         "wr": 0.2857
+      }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 21,
+        "games": 69,
+        "wr": 0.3043
       }
     }
   },
@@ -5791,6 +7250,13 @@
         "games": 8,
         "wr": 0.375
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 66,
+        "games": 99,
+        "wr": 0.6667
+      }
     }
   },
   "FN Esports": {
@@ -5823,6 +7289,13 @@
         "wins": 3,
         "games": 12,
         "wr": 0.25
+      }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 57,
+        "games": 84,
+        "wr": 0.6786
       }
     }
   },
@@ -5864,6 +7337,13 @@
         "games": 5,
         "wr": 0.2
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 65,
+        "games": 118,
+        "wr": 0.5508
+      }
     }
   },
   "Fog Esports": {
@@ -5897,6 +7377,13 @@
         "games": 7,
         "wr": 0.2857
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 32,
+        "games": 60,
+        "wr": 0.5333
+      }
     }
   },
   "Footprint Gaming": {
@@ -5919,6 +7406,13 @@
     "wr": 0.3333,
     "by_league": {
       "PRMP": {
+        "wins": 1,
+        "games": 3,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 3,
         "wr": 0.3333
@@ -5956,6 +7450,13 @@
         "games": 22,
         "wr": 0.5455
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 12,
+        "games": 22,
+        "wr": 0.5455
+      }
     }
   },
   "Forsaken": {
@@ -5989,6 +7490,13 @@
         "games": 116,
         "wr": 0.5776
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 67,
+        "games": 116,
+        "wr": 0.5776
+      }
     }
   },
   "Fortress Esports": {
@@ -6011,6 +7519,13 @@
     "wr": 0.4286,
     "by_league": {
       "NLC": {
+        "wins": 6,
+        "games": 14,
+        "wr": 0.4286
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 6,
         "games": 14,
         "wr": 0.4286
@@ -6041,6 +7556,13 @@
         "games": 8,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 4,
+        "games": 8,
+        "wr": 0.5
+      }
     }
   },
   "Fox Gaming": {
@@ -6063,6 +7585,13 @@
     "wr": 0.4364,
     "by_league": {
       "AL": {
+        "wins": 24,
+        "games": 55,
+        "wr": 0.4364
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 24,
         "games": 55,
         "wr": 0.4364
@@ -6093,6 +7622,13 @@
         "games": 12,
         "wr": 0.25
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 3,
+        "games": 12,
+        "wr": 0.25
+      }
     }
   },
   "Francesinhas": {
@@ -6115,6 +7651,13 @@
     "wr": 0.4615,
     "by_league": {
       "LPLOL": {
+        "wins": 6,
+        "games": 13,
+        "wr": 0.4615
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 6,
         "games": 13,
         "wr": 0.4615
@@ -6152,6 +7695,13 @@
         "games": 114,
         "wr": 0.6316
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 72,
+        "games": 114,
+        "wr": 0.6316
+      }
     }
   },
   "French Flair": {
@@ -6181,6 +7731,13 @@
         "wr": 0.7333
       },
       "LFL": {
+        "wins": 17,
+        "games": 25,
+        "wr": 0.68
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 17,
         "games": 25,
         "wr": 0.68
@@ -6218,6 +7775,13 @@
         "games": 41,
         "wr": 0.9756
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 40,
+        "games": 41,
+        "wr": 0.9756
+      }
     }
   },
   "FRK": {
@@ -6244,6 +7808,13 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
     }
   },
   "Fuego": {
@@ -6266,6 +7837,13 @@
     "wr": 0.7125,
     "by_league": {
       "LRN": {
+        "wins": 57,
+        "games": 80,
+        "wr": 0.7125
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 57,
         "games": 80,
         "wr": 0.7125
@@ -6303,6 +7881,13 @@
         "games": 106,
         "wr": 0.3962
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 42,
+        "games": 106,
+        "wr": 0.3962
+      }
     }
   },
   "FunPlus Phoenix": {
@@ -6325,6 +7910,13 @@
     "wr": 0.3217,
     "by_league": {
       "LPL": {
+        "wins": 37,
+        "games": 115,
+        "wr": 0.3217
+      }
+    },
+    "by_tier": {
+      "tier1": {
         "wins": 37,
         "games": 115,
         "wr": 0.3217
@@ -6376,6 +7968,18 @@
         "games": 16,
         "wr": 0.25
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 64,
+        "games": 104,
+        "wr": 0.6154
+      },
+      "tier2": {
+        "wins": 8,
+        "games": 8,
+        "wr": 1.0
+      }
     }
   },
   "Furious Gaming": {
@@ -6402,6 +8006,13 @@
         "games": 3,
         "wr": 1.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 3,
+        "games": 3,
+        "wr": 1.0
+      }
     }
   },
   "FUSION (Latin American Team)": {
@@ -6424,6 +8035,13 @@
     "wr": 0.6667,
     "by_league": {
       "LRN": {
+        "wins": 6,
+        "games": 9,
+        "wr": 0.6667
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 6,
         "games": 9,
         "wr": 0.6667
@@ -6482,6 +8100,13 @@
         "games": 10,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 90,
+        "games": 131,
+        "wr": 0.687
+      }
     }
   },
   "G2 Hel": {
@@ -6514,6 +8139,13 @@
         "wins": 10,
         "games": 18,
         "wr": 0.5556
+      }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 16,
+        "games": 31,
+        "wr": 0.5161
       }
     }
   },
@@ -6555,6 +8187,18 @@
         "games": 54,
         "wr": 0.6667
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 36,
+        "games": 54,
+        "wr": 0.6667
+      },
+      "tier3": {
+        "wins": 11,
+        "games": 14,
+        "wr": 0.7857
+      }
     }
   },
   "G3V E-sports": {
@@ -6581,6 +8225,13 @@
         "games": 31,
         "wr": 0.4839
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 15,
+        "games": 31,
+        "wr": 0.4839
+      }
     }
   },
   "Galakticos": {
@@ -6603,6 +8254,13 @@
     "wr": 0.8571,
     "by_league": {
       "TCL": {
+        "wins": 6,
+        "games": 7,
+        "wr": 0.8571
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 6,
         "games": 7,
         "wr": 0.8571
@@ -6647,6 +8305,13 @@
         "games": 120,
         "wr": 0.6167
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 74,
+        "games": 120,
+        "wr": 0.6167
+      }
     }
   },
   "Galions Sharks": {
@@ -6676,6 +8341,18 @@
         "wr": 0.0
       },
       "NL": {
+        "wins": 6,
+        "games": 15,
+        "wr": 0.4
+      }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      },
+      "tier3": {
         "wins": 6,
         "games": 15,
         "wr": 0.4
@@ -6727,6 +8404,18 @@
         "games": 13,
         "wr": 0.3846
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 69,
+        "games": 129,
+        "wr": 0.5349
+      },
+      "tier3": {
+        "wins": 2,
+        "games": 6,
+        "wr": 0.3333
+      }
     }
   },
   "Gamespace Mediterranean College Esports": {
@@ -6760,6 +8449,13 @@
         "games": 107,
         "wr": 0.5514
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 59,
+        "games": 107,
+        "wr": 0.5514
+      }
     }
   },
   "GameWard": {
@@ -6782,6 +8478,13 @@
     "wr": 0.2558,
     "by_league": {
       "LFL": {
+        "wins": 11,
+        "games": 43,
+        "wr": 0.2558
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 11,
         "games": 43,
         "wr": 0.2558
@@ -6819,6 +8522,13 @@
         "games": 14,
         "wr": 0.2143
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 3,
+        "games": 18,
+        "wr": 0.1667
+      }
     }
   },
   "Garden Gaming": {
@@ -6845,6 +8555,13 @@
         "games": 16,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 8,
+        "games": 16,
+        "wr": 0.5
+      }
     }
   },
   "GD Esports": {
@@ -6867,6 +8584,13 @@
     "wr": 0.3333,
     "by_league": {
       "LPLOL": {
+        "wins": 1,
+        "games": 3,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 3,
         "wr": 0.3333
@@ -6903,6 +8627,13 @@
         "wins": 17,
         "games": 31,
         "wr": 0.5484
+      }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 62,
+        "games": 64,
+        "wr": 0.9688
       }
     }
   },
@@ -6965,6 +8696,18 @@
         "games": 13,
         "wr": 0.6154
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 145,
+        "games": 192,
+        "wr": 0.7552
+      },
+      "tier2": {
+        "wins": 7,
+        "games": 13,
+        "wr": 0.5385
+      }
     }
   },
   "Gen.G Global Academy": {
@@ -6998,6 +8741,13 @@
         "games": 168,
         "wr": 0.3452
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 58,
+        "games": 168,
+        "wr": 0.3452
+      }
     }
   },
   "Gen.G Scholars": {
@@ -7020,6 +8770,13 @@
     "wr": 0.4815,
     "by_league": {
       "LAS": {
+        "wins": 78,
+        "games": 162,
+        "wr": 0.4815
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 78,
         "games": 162,
         "wr": 0.4815
@@ -7057,6 +8814,13 @@
         "games": 70,
         "wr": 0.5286
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 37,
+        "games": 70,
+        "wr": 0.5286
+      }
     }
   },
   "GenZ Gaming": {
@@ -7083,6 +8847,13 @@
         "games": 14,
         "wr": 0.2857
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 4,
+        "games": 14,
+        "wr": 0.2857
+      }
     }
   },
   "Gera\u00e7\u00e3o Estrutura": {
@@ -7105,6 +8876,13 @@
     "wr": 0.0,
     "by_league": {
       "CD": {
+        "wins": 0,
+        "games": 4,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 4,
         "wr": 0.0
@@ -7138,6 +8916,13 @@
         "wr": 0.5
       },
       "LEC": {
+        "wins": 51,
+        "games": 107,
+        "wr": 0.4766
+      }
+    },
+    "by_tier": {
+      "tier1": {
         "wins": 51,
         "games": 107,
         "wr": 0.4766
@@ -7182,6 +8967,18 @@
         "games": 66,
         "wr": 0.7273
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 48,
+        "games": 66,
+        "wr": 0.7273
+      },
+      "tier3": {
+        "wins": 12,
+        "games": 23,
+        "wr": 0.5217
+      }
     }
   },
   "Gity Meavedronu": {
@@ -7204,6 +9001,13 @@
     "wr": 0.2,
     "by_league": {
       "HW": {
+        "wins": 1,
+        "games": 5,
+        "wr": 0.2
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 1,
         "games": 5,
         "wr": 0.2
@@ -7248,6 +9052,18 @@
         "games": 14,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 8,
+        "games": 33,
+        "wr": 0.2424
+      },
+      "tier3": {
+        "wins": 8,
+        "games": 31,
+        "wr": 0.2581
+      }
     }
   },
   "GMBLERS Esports": {
@@ -7277,6 +9093,13 @@
         "wr": 0.2143
       },
       "LIT": {
+        "wins": 61,
+        "games": 112,
+        "wr": 0.5446
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 61,
         "games": 112,
         "wr": 0.5446
@@ -7314,6 +9137,13 @@
         "games": 17,
         "wr": 0.3529
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 66,
+        "games": 143,
+        "wr": 0.4615
+      }
     }
   },
   "GOAL": {
@@ -7347,6 +9177,13 @@
         "games": 71,
         "wr": 0.5634
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 40,
+        "games": 71,
+        "wr": 0.5634
+      }
     }
   },
   "Golden Lions": {
@@ -7369,6 +9206,13 @@
     "wr": 0.625,
     "by_league": {
       "LRS": {
+        "wins": 40,
+        "games": 64,
+        "wr": 0.625
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 40,
         "games": 64,
         "wr": 0.625
@@ -7399,6 +9243,13 @@
         "games": 36,
         "wr": 0.4444
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 16,
+        "games": 36,
+        "wr": 0.4444
+      }
     }
   },
   "Ground Zero Academy": {
@@ -7421,6 +9272,13 @@
     "wr": 0.0,
     "by_league": {
       "PCS": {
+        "wins": 0,
+        "games": 4,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 4,
         "wr": 0.0
@@ -7465,6 +9323,18 @@
         "games": 56,
         "wr": 0.2857
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 19,
+        "games": 48,
+        "wr": 0.3958
+      },
+      "tier2": {
+        "wins": 16,
+        "games": 56,
+        "wr": 0.2857
+      }
     }
   },
   "Grow uP eSports": {
@@ -7487,6 +9357,13 @@
     "wr": 0.4167,
     "by_league": {
       "LPLOL": {
+        "wins": 5,
+        "games": 12,
+        "wr": 0.4167
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 5,
         "games": 12,
         "wr": 0.4167
@@ -7517,6 +9394,13 @@
         "games": 42,
         "wr": 0.4286
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 18,
+        "games": 42,
+        "wr": 0.4286
+      }
     }
   },
   "Guasones": {
@@ -7539,6 +9423,13 @@
     "wr": 0.2353,
     "by_league": {
       "LVP SL": {
+        "wins": 8,
+        "games": 34,
+        "wr": 0.2353
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 8,
         "games": 34,
         "wr": 0.2353
@@ -7576,6 +9467,13 @@
         "games": 30,
         "wr": 0.4667
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 18,
+        "games": 39,
+        "wr": 0.4615
+      }
     }
   },
   "Gwenchana": {
@@ -7602,6 +9500,13 @@
         "games": 10,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 5,
+        "games": 10,
+        "wr": 0.5
+      }
     }
   },
   "Hands": {
@@ -7624,6 +9529,13 @@
     "wr": 0.1429,
     "by_league": {
       "LJL": {
+        "wins": 4,
+        "games": 28,
+        "wr": 0.1429
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 28,
         "wr": 0.1429
@@ -7668,6 +9580,18 @@
         "games": 163,
         "wr": 0.3742
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 61,
+        "games": 163,
+        "wr": 0.3742
+      },
+      "tier2": {
+        "wins": 10,
+        "games": 18,
+        "wr": 0.5556
+      }
     }
   },
   "HANJIN BRION Academy": {
@@ -7690,6 +9614,13 @@
     "wr": 0.3229,
     "by_league": {
       "LAS": {
+        "wins": 31,
+        "games": 96,
+        "wr": 0.3229
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 31,
         "games": 96,
         "wr": 0.3229
@@ -7727,6 +9658,13 @@
         "games": 149,
         "wr": 0.3289
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 49,
+        "games": 149,
+        "wr": 0.3289
+      }
     }
   },
   "Hannover Esports e.V.": {
@@ -7753,6 +9691,13 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
     }
   },
   "Hanoi Rookies Esports": {
@@ -7775,6 +9720,13 @@
     "wr": 0.3333,
     "by_league": {
       "VCS": {
+        "wins": 4,
+        "games": 12,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 12,
         "wr": 0.3333
@@ -7840,6 +9792,18 @@
         "games": 9,
         "wr": 0.5556
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 116,
+        "games": 182,
+        "wr": 0.6374
+      },
+      "tier2": {
+        "wins": 18,
+        "games": 29,
+        "wr": 0.6207
+      }
     }
   },
   "Hanwha Life Esports Academy": {
@@ -7862,6 +9826,13 @@
     "wr": 0.6117,
     "by_league": {
       "LAS": {
+        "wins": 115,
+        "games": 188,
+        "wr": 0.6117
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 115,
         "games": 188,
         "wr": 0.6117
@@ -7899,6 +9870,13 @@
         "games": 165,
         "wr": 0.4242
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 70,
+        "games": 165,
+        "wr": 0.4242
+      }
     }
   },
   "HELL PIGS": {
@@ -7921,6 +9899,13 @@
     "wr": 0.2143,
     "by_league": {
       "PCS": {
+        "wins": 12,
+        "games": 56,
+        "wr": 0.2143
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 12,
         "games": 56,
         "wr": 0.2143
@@ -7958,6 +9943,13 @@
         "games": 32,
         "wr": 0.9688
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 31,
+        "games": 32,
+        "wr": 0.9688
+      }
     }
   },
   "Howl Esports": {
@@ -7980,6 +9972,13 @@
     "wr": 0.3333,
     "by_league": {
       "HLL": {
+        "wins": 7,
+        "games": 21,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 7,
         "games": 21,
         "wr": 0.3333
@@ -8010,6 +10009,13 @@
         "games": 4,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 4,
+        "wr": 0.0
+      }
     }
   },
   "htp eSport Akademie Hannover": {
@@ -8032,6 +10038,13 @@
     "wr": 0.5,
     "by_league": {
       "PRMP": {
+        "wins": 2,
+        "games": 4,
+        "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 4,
         "wr": 0.5
@@ -8062,6 +10075,13 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
     }
   },
   "Human Apex Predator": {
@@ -8084,6 +10104,13 @@
     "wr": 0.5,
     "by_league": {
       "PRMP": {
+        "wins": 2,
+        "games": 4,
+        "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 4,
         "wr": 0.5
@@ -8114,6 +10141,13 @@
         "games": 18,
         "wr": 0.0556
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 18,
+        "wr": 0.0556
+      }
     }
   },
   "Hurricane of Feathers": {
@@ -8136,6 +10170,13 @@
     "wr": 0.2,
     "by_league": {
       "LPLOL": {
+        "wins": 3,
+        "games": 15,
+        "wr": 0.2
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 15,
         "wr": 0.2
@@ -8166,6 +10207,13 @@
         "games": 15,
         "wr": 0.5333
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 8,
+        "games": 15,
+        "wr": 0.5333
+      }
     }
   },
   "HUTECH CHICKEN": {
@@ -8192,6 +10240,13 @@
         "games": 5,
         "wr": 0.2
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 5,
+        "wr": 0.2
+      }
     }
   },
   "Hyper Vortex Esports": {
@@ -8214,6 +10269,13 @@
     "wr": 0.7857,
     "by_league": {
       "VCS": {
+        "wins": 11,
+        "games": 14,
+        "wr": 0.7857
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 11,
         "games": 14,
         "wr": 0.7857
@@ -8251,6 +10313,13 @@
         "games": 88,
         "wr": 0.4773
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 42,
+        "games": 88,
+        "wr": 0.4773
+      }
     }
   },
   "Icon Esports": {
@@ -8273,6 +10342,13 @@
     "wr": 0.3103,
     "by_league": {
       "LRN": {
+        "wins": 9,
+        "games": 29,
+        "wr": 0.3103
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 9,
         "games": 29,
         "wr": 0.3103
@@ -8303,6 +10379,13 @@
         "games": 29,
         "wr": 0.6552
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 19,
+        "games": 29,
+        "wr": 0.6552
+      }
     }
   },
   "Inferno Drive Tokyo": {
@@ -8325,6 +10408,13 @@
     "wr": 0.7,
     "by_league": {
       "LJL": {
+        "wins": 28,
+        "games": 40,
+        "wr": 0.7
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 28,
         "games": 40,
         "wr": 0.7
@@ -8355,6 +10445,13 @@
         "games": 7,
         "wr": 0.4286
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 3,
+        "games": 7,
+        "wr": 0.4286
+      }
     }
   },
   "Inside Games": {
@@ -8377,6 +10474,13 @@
     "wr": 0.3077,
     "by_league": {
       "HW": {
+        "wins": 4,
+        "games": 13,
+        "wr": 0.3077
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 4,
         "games": 13,
         "wr": 0.3077
@@ -8407,6 +10511,13 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
     }
   },
   "INTZ": {
@@ -8429,6 +10540,13 @@
     "wr": 0.5,
     "by_league": {
       "CD": {
+        "wins": 10,
+        "games": 20,
+        "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 10,
         "games": 20,
         "wr": 0.5
@@ -8473,6 +10591,18 @@
         "games": 12,
         "wr": 0.4167
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 109,
+        "games": 213,
+        "wr": 0.5117
+      },
+      "tier3": {
+        "wins": 4,
+        "games": 6,
+        "wr": 0.6667
+      }
     }
   },
   "Invokers": {
@@ -8499,6 +10629,13 @@
         "games": 19,
         "wr": 0.5789
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 11,
+        "games": 19,
+        "wr": 0.5789
+      }
     }
   },
   "Isurus": {
@@ -8521,6 +10658,13 @@
     "wr": 0.5833,
     "by_league": {
       "CBLOL": {
+        "wins": 14,
+        "games": 24,
+        "wr": 0.5833
+      }
+    },
+    "by_tier": {
+      "tier1": {
         "wins": 14,
         "games": 24,
         "wr": 0.5833
@@ -8558,6 +10702,13 @@
         "games": 35,
         "wr": 0.5143
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 18,
+        "games": 35,
+        "wr": 0.5143
+      }
     }
   },
   "IziDream": {
@@ -8591,6 +10742,13 @@
         "games": 63,
         "wr": 0.5397
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 35,
+        "games": 67,
+        "wr": 0.5224
+      }
     }
   },
   "Japan (National Team)": {
@@ -8613,6 +10771,13 @@
     "wr": 0.0,
     "by_league": {
       "KESPA": {
+        "wins": 0,
+        "games": 3,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 3,
         "wr": 0.0
@@ -8678,6 +10843,18 @@
         "games": 8,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 124,
+        "games": 232,
+        "wr": 0.5345
+      },
+      "tier3": {
+        "wins": 10,
+        "games": 19,
+        "wr": 0.5263
+      }
     }
   },
   "Joblife": {
@@ -8704,6 +10881,13 @@
         "games": 76,
         "wr": 0.3816
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 29,
+        "games": 76,
+        "wr": 0.3816
+      }
     }
   },
   "Jolly Rogers": {
@@ -8726,6 +10910,13 @@
     "wr": 0.5455,
     "by_league": {
       "NACL": {
+        "wins": 6,
+        "games": 11,
+        "wr": 0.5455
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 6,
         "games": 11,
         "wr": 0.5455
@@ -8763,6 +10954,18 @@
         "games": 44,
         "wr": 0.4318
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 19,
+        "games": 44,
+        "wr": 0.4318
+      },
+      "tier3": {
+        "wins": 6,
+        "games": 6,
+        "wr": 1.0
+      }
     }
   },
   "JSK Esports": {
@@ -8785,6 +10988,13 @@
     "wr": 0.4222,
     "by_league": {
       "AL": {
+        "wins": 19,
+        "games": 45,
+        "wr": 0.4222
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 19,
         "games": 45,
         "wr": 0.4222
@@ -8815,6 +11025,13 @@
         "games": 8,
         "wr": 0.75
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 6,
+        "games": 8,
+        "wr": 0.75
+      }
     }
   },
   "JY Gaming": {
@@ -8837,6 +11054,13 @@
     "wr": 0.0,
     "by_league": {
       "PCS": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -8867,6 +11091,13 @@
         "games": 79,
         "wr": 0.557
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 44,
+        "games": 79,
+        "wr": 0.557
+      }
     }
   },
   "Kaeru Gyuangu": {
@@ -8889,6 +11120,13 @@
     "wr": 0.4667,
     "by_league": {
       "LFL2": {
+        "wins": 7,
+        "games": 15,
+        "wr": 0.4667
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 7,
         "games": 15,
         "wr": 0.4667
@@ -8919,6 +11157,13 @@
         "games": 50,
         "wr": 0.38
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 19,
+        "games": 50,
+        "wr": 0.38
+      }
     }
   },
   "Karam El Sham": {
@@ -8945,6 +11190,13 @@
         "games": 3,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 3,
+        "wr": 0.0
+      }
     }
   },
   "Kareha Children": {
@@ -8967,6 +11219,13 @@
     "wr": 0.3953,
     "by_league": {
       "LJL": {
+        "wins": 17,
+        "games": 43,
+        "wr": 0.3953
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 17,
         "games": 43,
         "wr": 0.3953
@@ -9018,6 +11277,13 @@
         "games": 9,
         "wr": 0.3333
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 102,
+        "games": 160,
+        "wr": 0.6375
+      }
     }
   },
   "Karmine Corp Blue": {
@@ -9058,6 +11324,18 @@
         "games": 99,
         "wr": 0.596
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 2,
+        "games": 11,
+        "wr": 0.1818
+      },
+      "tier2": {
+        "wins": 59,
+        "games": 99,
+        "wr": 0.596
+      }
     }
   },
   "Karmine Corp Blue Stars": {
@@ -9094,6 +11372,18 @@
         "wr": 0.381
       },
       "NL": {
+        "wins": 20,
+        "games": 24,
+        "wr": 0.8333
+      }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 17,
+        "games": 45,
+        "wr": 0.3778
+      },
+      "tier3": {
         "wins": 20,
         "games": 24,
         "wr": 0.8333
@@ -9145,6 +11435,18 @@
         "games": 8,
         "wr": 0.75
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 55,
+        "games": 112,
+        "wr": 0.4911
+      },
+      "tier3": {
+        "wins": 0,
+        "games": 4,
+        "wr": 0.0
+      }
     }
   },
   "Kawaii Kiwis": {
@@ -9185,6 +11487,13 @@
         "games": 32,
         "wr": 0.5625
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 24,
+        "games": 46,
+        "wr": 0.5217
+      }
     }
   },
   "Keypulse Esports": {
@@ -9207,6 +11516,13 @@
     "wr": 0.4167,
     "by_league": {
       "LPLOL": {
+        "wins": 10,
+        "games": 24,
+        "wr": 0.4167
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 10,
         "games": 24,
         "wr": 0.4167
@@ -9244,6 +11560,13 @@
         "games": 29,
         "wr": 0.4483
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 58,
+        "games": 102,
+        "wr": 0.5686
+      }
     }
   },
   "Kiedy\u015b Mia\u0142em Fun": {
@@ -9270,6 +11593,13 @@
         "games": 26,
         "wr": 0.6923
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 18,
+        "games": 26,
+        "wr": 0.6923
+      }
     }
   },
   "Kits Esports": {
@@ -9292,6 +11622,13 @@
     "wr": 0.3333,
     "by_league": {
       "LRN": {
+        "wins": 4,
+        "games": 12,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 12,
         "wr": 0.3333
@@ -9336,6 +11673,18 @@
         "games": 174,
         "wr": 0.3966
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 69,
+        "games": 174,
+        "wr": 0.3966
+      },
+      "tier2": {
+        "wins": 4,
+        "games": 9,
+        "wr": 0.4444
+      }
     }
   },
   "Kiwoom DRX Challengers": {
@@ -9369,6 +11718,13 @@
         "games": 188,
         "wr": 0.5372
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 101,
+        "games": 188,
+        "wr": 0.5372
+      }
     }
   },
   "Klanik Esport": {
@@ -9391,6 +11747,13 @@
     "wr": 0.4444,
     "by_league": {
       "LFL2": {
+        "wins": 4,
+        "games": 9,
+        "wr": 0.4444
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 9,
         "wr": 0.4444
@@ -9421,6 +11784,13 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
     }
   },
   "KrabbelGruppeAlpha": {
@@ -9443,6 +11813,13 @@
     "wr": 0.0,
     "by_league": {
       "PRMP": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -9494,6 +11871,18 @@
         "games": 16,
         "wr": 0.75
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 89,
+        "games": 180,
+        "wr": 0.4944
+      },
+      "tier2": {
+        "wins": 5,
+        "games": 12,
+        "wr": 0.4167
+      }
     }
   },
   "KT Rolster Academy": {
@@ -9516,6 +11905,13 @@
     "wr": 0.5039,
     "by_league": {
       "LAS": {
+        "wins": 64,
+        "games": 127,
+        "wr": 0.5039
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 64,
         "games": 127,
         "wr": 0.5039
@@ -9553,6 +11949,13 @@
         "games": 180,
         "wr": 0.6667
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 120,
+        "games": 180,
+        "wr": 0.6667
+      }
     }
   },
   "Kuma e-Sports": {
@@ -9575,6 +11978,13 @@
     "wr": 0.2143,
     "by_league": {
       "CD": {
+        "wins": 3,
+        "games": 14,
+        "wr": 0.2143
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 14,
         "wr": 0.2143
@@ -9605,6 +12015,13 @@
         "games": 7,
         "wr": 0.4286
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 3,
+        "games": 7,
+        "wr": 0.4286
+      }
     }
   },
   "L Guide Gaming": {
@@ -9631,6 +12048,13 @@
         "games": 45,
         "wr": 0.5556
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 25,
+        "games": 45,
+        "wr": 0.5556
+      }
     }
   },
   "La BOMBAS": {
@@ -9653,6 +12077,13 @@
     "wr": 0.2222,
     "by_league": {
       "NLC": {
+        "wins": 2,
+        "games": 9,
+        "wr": 0.2222
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 9,
         "wr": 0.2222
@@ -9690,6 +12121,18 @@
         "games": 15,
         "wr": 0.3333
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 3,
+        "wr": 0.3333
+      },
+      "tier3": {
+        "wins": 5,
+        "games": 15,
+        "wr": 0.3333
+      }
     }
   },
   "Lazy In Life": {
@@ -9712,6 +12155,13 @@
     "wr": 0.5714,
     "by_league": {
       "NLC": {
+        "wins": 8,
+        "games": 14,
+        "wr": 0.5714
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 8,
         "games": 14,
         "wr": 0.5714
@@ -9742,6 +12192,13 @@
         "games": 16,
         "wr": 0.5625
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 9,
+        "games": 16,
+        "wr": 0.5625
+      }
     }
   },
   "LEGACY5": {
@@ -9764,6 +12221,13 @@
     "wr": 0.0,
     "by_league": {
       "IC": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -9794,6 +12258,13 @@
         "games": 53,
         "wr": 0.3774
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 20,
+        "games": 53,
+        "wr": 0.3774
+      }
     }
   },
   "Le\u00f5es Porto Salvo Esports": {
@@ -9816,6 +12287,13 @@
     "wr": 0.5714,
     "by_league": {
       "LPLOL": {
+        "wins": 16,
+        "games": 28,
+        "wr": 0.5714
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 16,
         "games": 28,
         "wr": 0.5714
@@ -9860,6 +12338,13 @@
         "games": 4,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 27,
+        "games": 75,
+        "wr": 0.36
+      }
     }
   },
   "LGD Gaming": {
@@ -9893,6 +12378,18 @@
         "games": 107,
         "wr": 0.4486
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 48,
+        "games": 107,
+        "wr": 0.4486
+      },
+      "tier3": {
+        "wins": 12,
+        "games": 19,
+        "wr": 0.6316
+      }
     }
   },
   "LGD Gaming Young Team": {
@@ -9919,7 +12416,8 @@
         "games": 9,
         "wr": 0.6667
       }
-    }
+    },
+    "by_tier": {}
   },
   "Ligre Gaming": {
     "team_key": "ligre-gaming",
@@ -9941,6 +12439,13 @@
     "wr": 0.2,
     "by_league": {
       "CD": {
+        "wins": 1,
+        "games": 5,
+        "wr": 0.2
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 5,
         "wr": 0.2
@@ -9985,6 +12490,18 @@
         "games": 18,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 21,
+        "games": 53,
+        "wr": 0.3962
+      },
+      "tier3": {
+        "wins": 9,
+        "games": 18,
+        "wr": 0.5
+      }
     }
   },
   "LittleSans": {
@@ -10007,6 +12524,13 @@
     "wr": 0.4,
     "by_league": {
       "NEXO": {
+        "wins": 2,
+        "games": 5,
+        "wr": 0.4
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 2,
         "games": 5,
         "wr": 0.4
@@ -10037,7 +12561,8 @@
         "games": 10,
         "wr": 0.7
       }
-    }
+    },
+    "by_tier": {}
   },
   "LNG Esports": {
     "team_key": "lng-esports",
@@ -10069,6 +12594,18 @@
         "wins": 42,
         "games": 89,
         "wr": 0.4719
+      }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 42,
+        "games": 89,
+        "wr": 0.4719
+      },
+      "tier3": {
+        "wins": 11,
+        "games": 18,
+        "wr": 0.6111
       }
     }
   },
@@ -10102,6 +12639,13 @@
         "wins": 5,
         "games": 13,
         "wr": 0.3846
+      }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 22,
+        "games": 68,
+        "wr": 0.3235
       }
     }
   },
@@ -10143,6 +12687,18 @@
         "games": 49,
         "wr": 0.9184
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 5,
+        "games": 11,
+        "wr": 0.4545
+      },
+      "tier2": {
+        "wins": 45,
+        "games": 49,
+        "wr": 0.9184
+      }
     }
   },
   "Lotus": {
@@ -10165,6 +12721,13 @@
     "wr": 0.3913,
     "by_league": {
       "NACL": {
+        "wins": 9,
+        "games": 23,
+        "wr": 0.3913
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 9,
         "games": 23,
         "wr": 0.3913
@@ -10216,6 +12779,13 @@
         "games": 8,
         "wr": 0.25
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 57,
+        "games": 103,
+        "wr": 0.5534
+      }
     }
   },
   "L\u00d8S": {
@@ -10255,6 +12825,18 @@
         "wins": 12,
         "games": 19,
         "wr": 0.6316
+      }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 32,
+        "games": 57,
+        "wr": 0.5614
+      },
+      "tier2": {
+        "wins": 24,
+        "games": 45,
+        "wr": 0.5333
       }
     }
   },
@@ -10296,6 +12878,18 @@
         "games": 44,
         "wr": 0.4545
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 20,
+        "games": 44,
+        "wr": 0.4545
+      },
+      "tier3": {
+        "wins": 17,
+        "games": 33,
+        "wr": 0.5152
+      }
     }
   },
   "Luminosity Gaming": {
@@ -10329,6 +12923,18 @@
         "games": 51,
         "wr": 0.8039
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 7,
+        "games": 13,
+        "wr": 0.5385
+      },
+      "tier2": {
+        "wins": 41,
+        "games": 51,
+        "wr": 0.8039
+      }
     }
   },
   "Lund Esports Organization": {
@@ -10355,6 +12961,13 @@
         "games": 32,
         "wr": 0.625
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 20,
+        "games": 32,
+        "wr": 0.625
+      }
     }
   },
   "Lundqvist Lightside": {
@@ -10377,6 +12990,13 @@
     "wr": 0.36,
     "by_league": {
       "NLC": {
+        "wins": 18,
+        "games": 50,
+        "wr": 0.36
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 18,
         "games": 50,
         "wr": 0.36
@@ -10414,6 +13034,13 @@
         "games": 4,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 23,
+        "games": 62,
+        "wr": 0.371
+      }
     }
   },
   "Lynch Esports": {
@@ -10436,6 +13063,13 @@
     "wr": 0.0,
     "by_league": {
       "TCL": {
+        "wins": 0,
+        "games": 6,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 6,
         "wr": 0.0
@@ -10487,6 +13121,13 @@
         "games": 17,
         "wr": 0.6471
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 47,
+        "games": 84,
+        "wr": 0.5595
+      }
     }
   },
   "LYON Academy": {
@@ -10513,6 +13154,13 @@
         "games": 58,
         "wr": 0.3448
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 20,
+        "games": 58,
+        "wr": 0.3448
+      }
     }
   },
   "Macko Academy": {
@@ -10535,6 +13183,13 @@
     "wr": 0.2,
     "by_league": {
       "LIT": {
+        "wins": 1,
+        "games": 5,
+        "wr": 0.2
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 5,
         "wr": 0.2
@@ -10572,6 +13227,13 @@
         "games": 12,
         "wr": 1.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 12,
+        "games": 12,
+        "wr": 1.0
+      }
     }
   },
   "Magaza Esports": {
@@ -10605,6 +13267,13 @@
         "games": 3,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 17,
+        "games": 38,
+        "wr": 0.4474
+      }
     }
   },
   "Malvinas Gaming": {
@@ -10627,6 +13296,13 @@
     "wr": 0.5,
     "by_league": {
       "LRS": {
+        "wins": 30,
+        "games": 60,
+        "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 30,
         "games": 60,
         "wr": 0.5
@@ -10657,6 +13333,13 @@
         "games": 8,
         "wr": 0.25
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 2,
+        "games": 8,
+        "wr": 0.25
+      }
     }
   },
   "Marere Invokers": {
@@ -10679,6 +13362,13 @@
     "wr": 0.8889,
     "by_league": {
       "CD": {
+        "wins": 8,
+        "games": 9,
+        "wr": 0.8889
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 8,
         "games": 9,
         "wr": 0.8889
@@ -10709,6 +13399,13 @@
         "games": 32,
         "wr": 0.625
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 20,
+        "games": 32,
+        "wr": 0.625
+      }
     }
   },
   "Maverix": {
@@ -10735,6 +13432,13 @@
         "games": 11,
         "wr": 0.6364
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 7,
+        "games": 11,
+        "wr": 0.6364
+      }
     }
   },
   "Maze Gaming": {
@@ -10757,6 +13461,13 @@
     "wr": 0.5541,
     "by_league": {
       "LRS": {
+        "wins": 41,
+        "games": 74,
+        "wr": 0.5541
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 41,
         "games": 74,
         "wr": 0.5541
@@ -10790,6 +13501,13 @@
         "wr": 0.25
       },
       "ROL": {
+        "wins": 67,
+        "games": 120,
+        "wr": 0.5583
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 67,
         "games": 120,
         "wr": 0.5583
@@ -10834,6 +13552,18 @@
         "games": 36,
         "wr": 0.5278
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 11,
+        "games": 25,
+        "wr": 0.44
+      },
+      "tier3": {
+        "wins": 54,
+        "games": 101,
+        "wr": 0.5347
+      }
     }
   },
   "Melilla Titans": {
@@ -10856,6 +13586,13 @@
     "wr": 0.3077,
     "by_league": {
       "NEXO": {
+        "wins": 4,
+        "games": 13,
+        "wr": 0.3077
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 4,
         "games": 13,
         "wr": 0.3077
@@ -10886,6 +13623,13 @@
         "games": 10,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 5,
+        "games": 10,
+        "wr": 0.5
+      }
     }
   },
   "Metin2 Enjoyers": {
@@ -10908,6 +13652,13 @@
     "wr": 0.0,
     "by_league": {
       "PRMP": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -10945,6 +13696,13 @@
         "games": 18,
         "wr": 0.6111
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 11,
+        "games": 18,
+        "wr": 0.6111
+      }
     }
   },
   "MGN Vikings Esports": {
@@ -10978,6 +13736,18 @@
         "games": 80,
         "wr": 0.575
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 46,
+        "games": 80,
+        "wr": 0.575
+      },
+      "tier3": {
+        "wins": 1,
+        "games": 7,
+        "wr": 0.1429
+      }
     }
   },
   "Mighty Eagles": {
@@ -11004,6 +13774,13 @@
         "games": 8,
         "wr": 0.375
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 3,
+        "games": 8,
+        "wr": 0.375
+      }
     }
   },
   "Mila Gaming": {
@@ -11026,6 +13803,13 @@
     "wr": 0.5,
     "by_league": {
       "VCS": {
+        "wins": 8,
+        "games": 16,
+        "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 8,
         "games": 16,
         "wr": 0.5
@@ -11063,6 +13847,13 @@
         "games": 107,
         "wr": 0.7477
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 80,
+        "games": 107,
+        "wr": 0.7477
+      }
     }
   },
   "Monta Club": {
@@ -11096,6 +13887,13 @@
         "games": 30,
         "wr": 0.3667
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 12,
+        "games": 34,
+        "wr": 0.3529
+      }
     }
   },
   "MOUZ NXT": {
@@ -11118,6 +13916,13 @@
     "wr": 0.25,
     "by_league": {
       "PRM": {
+        "wins": 2,
+        "games": 8,
+        "wr": 0.25
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 8,
         "wr": 0.25
@@ -11169,6 +13974,13 @@
         "games": 10,
         "wr": 0.4
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 81,
+        "games": 142,
+        "wr": 0.5704
+      }
     }
   },
   "Movistar KOI F\u00e9nix": {
@@ -11216,6 +14028,18 @@
         "games": 46,
         "wr": 0.4565
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 21,
+        "games": 46,
+        "wr": 0.4565
+      },
+      "tier3": {
+        "wins": 28,
+        "games": 40,
+        "wr": 0.7
+      }
     }
   },
   "M\u00fcnster Esports - Golden Goats": {
@@ -11238,6 +14062,13 @@
     "wr": 0.0,
     "by_league": {
       "PRMP": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -11275,6 +14106,13 @@
         "games": 47,
         "wr": 0.4681
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 22,
+        "games": 47,
+        "wr": 0.4681
+      }
     }
   },
   "MVK Esports Academy": {
@@ -11297,6 +14135,13 @@
     "wr": 0.6875,
     "by_league": {
       "VCS": {
+        "wins": 22,
+        "games": 32,
+        "wr": 0.6875
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 22,
         "games": 32,
         "wr": 0.6875
@@ -11327,6 +14172,13 @@
         "games": 33,
         "wr": 0.3636
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 12,
+        "games": 33,
+        "wr": 0.3636
+      }
     }
   },
   "Myth Esports": {
@@ -11353,6 +14205,13 @@
         "games": 89,
         "wr": 0.427
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 38,
+        "games": 89,
+        "wr": 0.427
+      }
     }
   },
   "Nameless (French Team)": {
@@ -11375,6 +14234,13 @@
     "wr": 0.6364,
     "by_league": {
       "LFL2": {
+        "wins": 7,
+        "games": 11,
+        "wr": 0.6364
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 7,
         "games": 11,
         "wr": 0.6364
@@ -11412,6 +14278,13 @@
         "games": 53,
         "wr": 0.434
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 23,
+        "games": 53,
+        "wr": 0.434
+      }
     }
   },
   "NCG Esports": {
@@ -11434,6 +14307,13 @@
     "wr": 0.4444,
     "by_league": {
       "LRN": {
+        "wins": 12,
+        "games": 27,
+        "wr": 0.4444
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 12,
         "games": 27,
         "wr": 0.4444
@@ -11464,6 +14344,13 @@
         "games": 38,
         "wr": 0.6316
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 24,
+        "games": 38,
+        "wr": 0.6316
+      }
     }
   },
   "NEO ZEPHYR": {
@@ -11486,6 +14373,13 @@
     "wr": 0.4,
     "by_league": {
       "LFL2": {
+        "wins": 2,
+        "games": 5,
+        "wr": 0.4
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 5,
         "wr": 0.4
@@ -11516,6 +14410,13 @@
         "games": 12,
         "wr": 0.5833
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 7,
+        "games": 12,
+        "wr": 0.5833
+      }
     }
   },
   "Never Give Up": {
@@ -11538,6 +14439,13 @@
     "wr": 0.3462,
     "by_league": {
       "VCS": {
+        "wins": 9,
+        "games": 26,
+        "wr": 0.3462
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 9,
         "games": 26,
         "wr": 0.3462
@@ -11568,6 +14476,13 @@
         "games": 60,
         "wr": 0.6167
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 37,
+        "games": 60,
+        "wr": 0.6167
+      }
     }
   },
   "NextGeneration Esports": {
@@ -11590,6 +14505,13 @@
     "wr": 0.2955,
     "by_league": {
       "AL": {
+        "wins": 13,
+        "games": 44,
+        "wr": 0.2955
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 13,
         "games": 44,
         "wr": 0.2955
@@ -11620,6 +14542,13 @@
         "games": 3,
         "wr": 1.0
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 3,
+        "games": 3,
+        "wr": 1.0
+      }
     }
   },
   "Ng\u1ef1a H\u00ed Esports": {
@@ -11642,6 +14571,13 @@
     "wr": 0.2727,
     "by_league": {
       "VCS": {
+        "wins": 3,
+        "games": 11,
+        "wr": 0.2727
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 11,
         "wr": 0.2727
@@ -11672,6 +14608,13 @@
         "games": 9,
         "wr": 0.4444
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 4,
+        "games": 9,
+        "wr": 0.4444
+      }
     }
   },
   "Night Cap": {
@@ -11694,6 +14637,13 @@
     "wr": 0.4167,
     "by_league": {
       "LJL": {
+        "wins": 5,
+        "games": 12,
+        "wr": 0.4167
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 5,
         "games": 12,
         "wr": 0.4167
@@ -11738,6 +14688,18 @@
         "games": 32,
         "wr": 0.9062
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 60,
+        "games": 80,
+        "wr": 0.75
+      },
+      "tier3": {
+        "wins": 29,
+        "games": 32,
+        "wr": 0.9062
+      }
     }
   },
   "Nigma Galaxy": {
@@ -11764,6 +14726,13 @@
         "games": 29,
         "wr": 0.2069
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 6,
+        "games": 29,
+        "wr": 0.2069
+      }
     }
   },
   "Nine Lives Esports": {
@@ -11786,6 +14755,13 @@
     "wr": 0.2,
     "by_league": {
       "NACL": {
+        "wins": 1,
+        "games": 5,
+        "wr": 0.2
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 5,
         "wr": 0.2
@@ -11830,6 +14806,18 @@
         "games": 178,
         "wr": 0.4944
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 88,
+        "games": 178,
+        "wr": 0.4944
+      },
+      "tier3": {
+        "wins": 6,
+        "games": 15,
+        "wr": 0.4
+      }
     }
   },
   "No Barry Berry": {
@@ -11852,6 +14840,13 @@
     "wr": 0.4,
     "by_league": {
       "PCS": {
+        "wins": 2,
+        "games": 5,
+        "wr": 0.4
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 5,
         "wr": 0.4
@@ -11903,6 +14898,18 @@
         "games": 14,
         "wr": 0.9286
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 4,
+        "games": 10,
+        "wr": 0.4
+      },
+      "tier3": {
+        "wins": 32,
+        "games": 40,
+        "wr": 0.8
+      }
     }
   },
   "NONAME": {
@@ -11925,6 +14932,13 @@
     "wr": 0.5833,
     "by_league": {
       "TCL": {
+        "wins": 7,
+        "games": 12,
+        "wr": 0.5833
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 7,
         "games": 12,
         "wr": 0.5833
@@ -11958,6 +14972,13 @@
         "wr": 0.5882
       },
       "LCKC": {
+        "wins": 92,
+        "games": 177,
+        "wr": 0.5198
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 92,
         "games": 177,
         "wr": 0.5198
@@ -12009,6 +15030,23 @@
         "games": 179,
         "wr": 0.3743
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 67,
+        "games": 179,
+        "wr": 0.3743
+      },
+      "tier2": {
+        "wins": 10,
+        "games": 20,
+        "wr": 0.5
+      },
+      "tier3": {
+        "wins": 7,
+        "games": 14,
+        "wr": 0.5
+      }
     }
   },
   "Nongshim RedForce Academy": {
@@ -12031,6 +15069,13 @@
     "wr": 0.3289,
     "by_league": {
       "LAS": {
+        "wins": 50,
+        "games": 152,
+        "wr": 0.3289
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 50,
         "games": 152,
         "wr": 0.3289
@@ -12068,6 +15113,13 @@
         "games": 53,
         "wr": 0.6038
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 32,
+        "games": 53,
+        "wr": 0.6038
+      }
     }
   },
   "NORTHS FURY": {
@@ -12090,6 +15142,13 @@
     "wr": 0.3333,
     "by_league": {
       "LPLOL": {
+        "wins": 3,
+        "games": 9,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 9,
         "wr": 0.3333
@@ -12120,6 +15179,13 @@
         "games": 37,
         "wr": 0.5676
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 21,
+        "games": 37,
+        "wr": 0.5676
+      }
     }
   },
   "NRG": {
@@ -12142,6 +15208,13 @@
     "wr": 0.6207,
     "by_league": {
       "NACL": {
+        "wins": 18,
+        "games": 29,
+        "wr": 0.6207
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 18,
         "games": 29,
         "wr": 0.6207
@@ -12172,6 +15245,13 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
     }
   },
   "Observant Force": {
@@ -12194,6 +15274,13 @@
     "wr": 0.0,
     "by_league": {
       "HW": {
+        "wins": 0,
+        "games": 4,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 0,
         "games": 4,
         "wr": 0.0
@@ -12224,6 +15311,13 @@
         "games": 6,
         "wr": 0.3333
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 2,
+        "games": 6,
+        "wr": 0.3333
+      }
     }
   },
   "ODD Esports": {
@@ -12246,6 +15340,13 @@
     "wr": 0.25,
     "by_league": {
       "LRN": {
+        "wins": 9,
+        "games": 36,
+        "wr": 0.25
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 9,
         "games": 36,
         "wr": 0.25
@@ -12283,6 +15384,13 @@
         "games": 42,
         "wr": 0.5952
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 25,
+        "games": 42,
+        "wr": 0.5952
+      }
     }
   },
   "Oh My God": {
@@ -12316,6 +15424,18 @@
         "games": 66,
         "wr": 0.3333
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 22,
+        "games": 66,
+        "wr": 0.3333
+      },
+      "tier3": {
+        "wins": 13,
+        "games": 21,
+        "wr": 0.619
+      }
     }
   },
   "Oh My God Academy": {
@@ -12342,7 +15462,8 @@
         "games": 7,
         "wr": 0.7143
       }
-    }
+    },
+    "by_tier": {}
   },
   "Once Upon A Team": {
     "team_key": "once-upon-a-team",
@@ -12364,6 +15485,13 @@
     "wr": 0.4468,
     "by_league": {
       "ROL": {
+        "wins": 42,
+        "games": 94,
+        "wr": 0.4468
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 42,
         "games": 94,
         "wr": 0.4468
@@ -12394,6 +15522,13 @@
         "games": 124,
         "wr": 0.371
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 46,
+        "games": 124,
+        "wr": 0.371
+      }
     }
   },
   "One Round Specialists": {
@@ -12416,6 +15551,13 @@
     "wr": 0.3333,
     "by_league": {
       "PCS": {
+        "wins": 2,
+        "games": 6,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 6,
         "wr": 0.3333
@@ -12453,6 +15595,18 @@
         "games": 11,
         "wr": 0.2727
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 4,
+        "games": 17,
+        "wr": 0.2353
+      },
+      "tier3": {
+        "wins": 3,
+        "games": 11,
+        "wr": 0.2727
+      }
     }
   },
   "Orze\u0142 Barcz\u0105ca Esports": {
@@ -12475,6 +15629,13 @@
     "wr": 0.2,
     "by_league": {
       "RL": {
+        "wins": 1,
+        "games": 5,
+        "wr": 0.2
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 1,
         "games": 5,
         "wr": 0.2
@@ -12512,6 +15673,13 @@
         "games": 41,
         "wr": 0.878
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 36,
+        "games": 41,
+        "wr": 0.878
+      }
     }
   },
   "Ovos Moles eSports": {
@@ -12534,6 +15702,13 @@
     "wr": 0.0,
     "by_league": {
       "LPLOL": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -12585,6 +15760,18 @@
         "games": 38,
         "wr": 0.6579
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 3,
+        "wr": 0.0
+      },
+      "tier3": {
+        "wins": 31,
+        "games": 51,
+        "wr": 0.6078
+      }
     }
   },
   "Ozarox Esports": {
@@ -12607,6 +15794,13 @@
     "wr": 0.5,
     "by_league": {
       "TCL": {
+        "wins": 10,
+        "games": 20,
+        "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 10,
         "games": 20,
         "wr": 0.5
@@ -12637,6 +15831,13 @@
         "games": 34,
         "wr": 0.5294
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 18,
+        "games": 34,
+        "wr": 0.5294
+      }
     }
   },
   "Packmiko E-Sports": {
@@ -12663,6 +15864,13 @@
         "games": 8,
         "wr": 0.625
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 5,
+        "games": 8,
+        "wr": 0.625
+      }
     }
   },
   "PaiDA Miwan Bao": {
@@ -12685,6 +15893,13 @@
     "wr": 0.0,
     "by_league": {
       "PCS": {
+        "wins": 0,
+        "games": 1,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 1,
         "wr": 0.0
@@ -12729,6 +15944,13 @@
         "games": 7,
         "wr": 0.4286
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 41,
+        "games": 87,
+        "wr": 0.4713
+      }
     }
   },
   "paiN Gaming Academy": {
@@ -12755,6 +15977,13 @@
         "games": 30,
         "wr": 0.5667
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 17,
+        "games": 30,
+        "wr": 0.5667
+      }
     }
   },
   "Pandinhas": {
@@ -12777,6 +16006,13 @@
     "wr": 0.0,
     "by_league": {
       "CD": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -12814,6 +16050,13 @@
         "games": 59,
         "wr": 0.4746
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 28,
+        "games": 59,
+        "wr": 0.4746
+      }
     }
   },
   "Papo Secos": {
@@ -12836,6 +16079,13 @@
     "wr": 0.4286,
     "by_league": {
       "LPLOL": {
+        "wins": 3,
+        "games": 7,
+        "wr": 0.4286
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 7,
         "wr": 0.4286
@@ -12866,6 +16116,13 @@
         "games": 5,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 5,
+        "wr": 0.0
+      }
     }
   },
   "Paranormal Invaders": {
@@ -12892,6 +16149,13 @@
         "games": 4,
         "wr": 0.25
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 4,
+        "wr": 0.25
+      }
     }
   },
   "Partizan Esports": {
@@ -12914,6 +16178,13 @@
     "wr": 0.5556,
     "by_league": {
       "EBL": {
+        "wins": 5,
+        "games": 9,
+        "wr": 0.5556
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 5,
         "games": 9,
         "wr": 0.5556
@@ -12951,6 +16222,13 @@
         "games": 36,
         "wr": 0.4167
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 72,
+        "games": 85,
+        "wr": 0.8471
+      }
     }
   },
   "PCIFIC Esports": {
@@ -12984,6 +16262,13 @@
         "games": 45,
         "wr": 0.5111
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 23,
+        "games": 45,
+        "wr": 0.5111
+      }
     }
   },
   "P\u00caEK Gaming": {
@@ -13006,6 +16291,13 @@
     "wr": 0.4348,
     "by_league": {
       "LRN": {
+        "wins": 10,
+        "games": 23,
+        "wr": 0.4348
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 10,
         "games": 23,
         "wr": 0.4348
@@ -13036,6 +16328,13 @@
         "games": 4,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 2,
+        "games": 4,
+        "wr": 0.5
+      }
     }
   },
   "Permitta eSports": {
@@ -13058,6 +16357,13 @@
     "wr": 0.4,
     "by_league": {
       "PRMP": {
+        "wins": 2,
+        "games": 5,
+        "wr": 0.4
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 5,
         "wr": 0.4
@@ -13088,6 +16394,13 @@
         "games": 11,
         "wr": 0.2727
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 3,
+        "games": 11,
+        "wr": 0.2727
+      }
     }
   },
   "Pirates IDV": {
@@ -13110,6 +16423,13 @@
     "wr": 0.0,
     "by_league": {
       "LRN": {
+        "wins": 0,
+        "games": 3,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 3,
         "wr": 0.0
@@ -13140,6 +16460,13 @@
         "games": 29,
         "wr": 0.2414
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 7,
+        "games": 29,
+        "wr": 0.2414
+      }
     }
   },
   "PREDIQT": {
@@ -13166,6 +16493,13 @@
         "games": 5,
         "wr": 0.2
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 5,
+        "wr": 0.2
+      }
     }
   },
   "PRINCIPALITY": {
@@ -13188,6 +16522,13 @@
     "wr": 0.3125,
     "by_league": {
       "NEXO": {
+        "wins": 5,
+        "games": 16,
+        "wr": 0.3125
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 5,
         "games": 16,
         "wr": 0.3125
@@ -13225,6 +16566,13 @@
         "games": 17,
         "wr": 0.4706
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 36,
+        "games": 71,
+        "wr": 0.507
+      }
     }
   },
   "Prodigy Invokers": {
@@ -13247,6 +16595,13 @@
     "wr": 0.0,
     "by_league": {
       "CD": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -13291,6 +16646,18 @@
         "games": 26,
         "wr": 0.6538
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 43,
+        "games": 77,
+        "wr": 0.5584
+      },
+      "tier3": {
+        "wins": 17,
+        "games": 26,
+        "wr": 0.6538
+      }
     }
   },
   "PSG Talon": {
@@ -13324,6 +16691,13 @@
         "games": 5,
         "wr": 0.2
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 48,
+        "games": 87,
+        "wr": 0.5517
+      }
     }
   },
   "PSG Talon Academy": {
@@ -13346,6 +16720,13 @@
     "wr": 0.5,
     "by_league": {
       "PCS": {
+        "wins": 35,
+        "games": 70,
+        "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 35,
         "games": 70,
         "wr": 0.5
@@ -13376,6 +16757,13 @@
         "games": 45,
         "wr": 0.3111
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 14,
+        "games": 45,
+        "wr": 0.3111
+      }
     }
   },
   "Pyramid IV Esports": {
@@ -13398,6 +16786,13 @@
     "wr": 0.3333,
     "by_league": {
       "AL": {
+        "wins": 4,
+        "games": 12,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 12,
         "wr": 0.3333
@@ -13442,6 +16837,18 @@
         "games": 53,
         "wr": 0.717
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 0,
+        "games": 3,
+        "wr": 0.0
+      },
+      "tier2": {
+        "wins": 38,
+        "games": 53,
+        "wr": 0.717
+      }
     }
   },
   "RA'AD": {
@@ -13464,6 +16871,13 @@
     "wr": 0.0,
     "by_league": {
       "AL": {
+        "wins": 0,
+        "games": 6,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 6,
         "wr": 0.0
@@ -13494,6 +16908,13 @@
         "games": 22,
         "wr": 0.0909
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 2,
+        "games": 22,
+        "wr": 0.0909
+      }
     }
   },
   "Rage Bait e-Sports": {
@@ -13516,6 +16937,13 @@
     "wr": 0.4,
     "by_league": {
       "LPLOL": {
+        "wins": 4,
+        "games": 10,
+        "wr": 0.4
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 10,
         "wr": 0.4
@@ -13553,6 +16981,18 @@
         "games": 44,
         "wr": 0.4773
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 21,
+        "games": 44,
+        "wr": 0.4773
+      },
+      "tier3": {
+        "wins": 2,
+        "games": 5,
+        "wr": 0.4
+      }
     }
   },
   "RAMPAGE": {
@@ -13575,6 +17015,13 @@
     "wr": 0.375,
     "by_league": {
       "CD": {
+        "wins": 3,
+        "games": 8,
+        "wr": 0.375
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 8,
         "wr": 0.375
@@ -13605,6 +17052,13 @@
         "games": 29,
         "wr": 0.3448
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 10,
+        "games": 29,
+        "wr": 0.3448
+      }
     }
   },
   "RAYN Clocks": {
@@ -13631,6 +17085,13 @@
         "games": 97,
         "wr": 0.5155
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 50,
+        "games": 97,
+        "wr": 0.5155
+      }
     }
   },
   "RED Academy": {
@@ -13653,6 +17114,13 @@
     "wr": 0.6557,
     "by_league": {
       "CD": {
+        "wins": 40,
+        "games": 61,
+        "wr": 0.6557
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 40,
         "games": 61,
         "wr": 0.6557
@@ -13704,6 +17172,18 @@
         "games": 9,
         "wr": 0.6667
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 56,
+        "games": 101,
+        "wr": 0.5545
+      },
+      "tier2": {
+        "wins": 2,
+        "games": 7,
+        "wr": 0.2857
+      }
     }
   },
   "REDPack Esports": {
@@ -13730,6 +17210,13 @@
         "games": 9,
         "wr": 0.1111
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 9,
+        "wr": 0.1111
+      }
     }
   },
   "regnum4games": {
@@ -13752,6 +17239,13 @@
     "wr": 0.3333,
     "by_league": {
       "PRMP": {
+        "wins": 1,
+        "games": 3,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 3,
         "wr": 0.3333
@@ -13789,6 +17283,13 @@
         "games": 54,
         "wr": 0.8519
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 46,
+        "games": 54,
+        "wr": 0.8519
+      }
     }
   },
   "Revolution Victory X": {
@@ -13811,6 +17312,13 @@
     "wr": 0.0769,
     "by_league": {
       "LJL": {
+        "wins": 1,
+        "games": 13,
+        "wr": 0.0769
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 13,
         "wr": 0.0769
@@ -13848,6 +17356,13 @@
         "games": 45,
         "wr": 0.4889
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 22,
+        "games": 45,
+        "wr": 0.4889
+      }
     }
   },
   "Rise Gaming": {
@@ -13870,6 +17385,13 @@
     "wr": 0.2368,
     "by_league": {
       "CD": {
+        "wins": 9,
+        "games": 38,
+        "wr": 0.2368
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 9,
         "games": 38,
         "wr": 0.2368
@@ -13900,6 +17422,13 @@
         "games": 56,
         "wr": 0.6607
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 37,
+        "games": 56,
+        "wr": 0.6607
+      }
     }
   },
   "RMD Gaming": {
@@ -13922,6 +17451,13 @@
     "wr": 0.2667,
     "by_league": {
       "CD": {
+        "wins": 4,
+        "games": 15,
+        "wr": 0.2667
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 15,
         "wr": 0.2667
@@ -13952,6 +17488,13 @@
         "games": 29,
         "wr": 0.2069
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 6,
+        "games": 29,
+        "wr": 0.2069
+      }
     }
   },
   "Ronaldo Team": {
@@ -13974,6 +17517,13 @@
     "wr": 0.4545,
     "by_league": {
       "LPLOL": {
+        "wins": 5,
+        "games": 11,
+        "wr": 0.4545
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 5,
         "games": 11,
         "wr": 0.4545
@@ -14025,6 +17575,18 @@
         "games": 10,
         "wr": 0.7
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 47,
+        "games": 112,
+        "wr": 0.4196
+      },
+      "tier3": {
+        "wins": 1,
+        "games": 4,
+        "wr": 0.25
+      }
     }
   },
   "Royal Never Give Up": {
@@ -14047,6 +17609,13 @@
     "wr": 0.3226,
     "by_league": {
       "LPL": {
+        "wins": 10,
+        "games": 31,
+        "wr": 0.3226
+      }
+    },
+    "by_tier": {
+      "tier1": {
         "wins": 10,
         "games": 31,
         "wr": 0.3226
@@ -14084,6 +17653,13 @@
         "games": 68,
         "wr": 0.3824
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 26,
+        "games": 68,
+        "wr": 0.3824
+      }
     }
   },
   "Rugby Club Hav\u00ed\u0159ov": {
@@ -14106,6 +17682,13 @@
     "wr": 0.1765,
     "by_league": {
       "HC": {
+        "wins": 3,
+        "games": 17,
+        "wr": 0.1765
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 3,
         "games": 17,
         "wr": 0.1765
@@ -14136,6 +17719,13 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
     }
   },
   "Ruzeh Esports": {
@@ -14158,6 +17748,13 @@
     "wr": 0.4,
     "by_league": {
       "NLC": {
+        "wins": 4,
+        "games": 10,
+        "wr": 0.4
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 10,
         "wr": 0.4
@@ -14195,6 +17792,13 @@
         "games": 20,
         "wr": 0.6
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 12,
+        "games": 20,
+        "wr": 0.6
+      }
     }
   },
   "SabOOr T1": {
@@ -14217,6 +17821,13 @@
     "wr": 0.0,
     "by_league": {
       "CD": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -14261,6 +17872,18 @@
         "games": 92,
         "wr": 0.5652
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 1,
+        "games": 4,
+        "wr": 0.25
+      },
+      "tier2": {
+        "wins": 52,
+        "games": 92,
+        "wr": 0.5652
+      }
     }
   },
   "Saigon Secret": {
@@ -14290,6 +17913,13 @@
         "wr": 0.0
       },
       "VCS": {
+        "wins": 17,
+        "games": 35,
+        "wr": 0.4857
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 17,
         "games": 35,
         "wr": 0.4857
@@ -14327,6 +17957,13 @@
         "games": 48,
         "wr": 0.6875
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 33,
+        "games": 48,
+        "wr": 0.6875
+      }
     }
   },
   "SAMCLAN Esports Club": {
@@ -14353,6 +17990,13 @@
         "games": 3,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 3,
+        "wr": 0.0
+      }
     }
   },
   "Saving OCE": {
@@ -14375,6 +18019,13 @@
     "wr": 0.25,
     "by_league": {
       "LCP": {
+        "wins": 1,
+        "games": 4,
+        "wr": 0.25
+      }
+    },
+    "by_tier": {
+      "tier1": {
         "wins": 1,
         "games": 4,
         "wr": 0.25
@@ -14412,6 +18063,18 @@
         "games": 74,
         "wr": 0.6081
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 0,
+        "games": 6,
+        "wr": 0.0
+      },
+      "tier2": {
+        "wins": 45,
+        "games": 74,
+        "wr": 0.6081
+      }
     }
   },
   "Senshi eSports": {
@@ -14441,6 +18104,13 @@
         "wr": 0.375
       },
       "ROL": {
+        "wins": 47,
+        "games": 90,
+        "wr": 0.5222
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 47,
         "games": 90,
         "wr": 0.5222
@@ -14485,6 +18155,18 @@
         "games": 41,
         "wr": 0.439
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 18,
+        "games": 41,
+        "wr": 0.439
+      },
+      "tier2": {
+        "wins": 3,
+        "games": 9,
+        "wr": 0.3333
+      }
     }
   },
   "Seven Dark": {
@@ -14511,6 +18193,13 @@
         "games": 67,
         "wr": 0.2985
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 20,
+        "games": 67,
+        "wr": 0.2985
+      }
     }
   },
   "Shadow Keepers Esports": {
@@ -14533,6 +18222,13 @@
     "wr": 0.5455,
     "by_league": {
       "PCS": {
+        "wins": 6,
+        "games": 11,
+        "wr": 0.5455
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 6,
         "games": 11,
         "wr": 0.5455
@@ -14566,6 +18262,13 @@
         "wr": 0.4286
       },
       "LEC": {
+        "wins": 11,
+        "games": 33,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier1": {
         "wins": 11,
         "games": 33,
         "wr": 0.3333
@@ -14610,6 +18313,13 @@
         "games": 82,
         "wr": 0.3537
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 29,
+        "games": 82,
+        "wr": 0.3537
+      }
     }
   },
   "Sicar Esports": {
@@ -14643,6 +18353,18 @@
         "games": 36,
         "wr": 0.5556
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 0,
+        "games": 3,
+        "wr": 0.0
+      },
+      "tier2": {
+        "wins": 20,
+        "games": 36,
+        "wr": 0.5556
+      }
     }
   },
   "Silent Storm Esports": {
@@ -14665,6 +18387,13 @@
     "wr": 0.3,
     "by_league": {
       "VCS": {
+        "wins": 3,
+        "games": 10,
+        "wr": 0.3
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 10,
         "wr": 0.3
@@ -14702,6 +18431,13 @@
         "games": 17,
         "wr": 0.6471
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 11,
+        "games": 17,
+        "wr": 0.6471
+      }
     }
   },
   "SINS Esports": {
@@ -14734,6 +18470,18 @@
         "wins": 6,
         "games": 8,
         "wr": 0.75
+      }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 6,
+        "games": 8,
+        "wr": 0.75
+      },
+      "tier3": {
+        "wins": 1,
+        "games": 4,
+        "wr": 0.25
       }
     }
   },
@@ -14768,6 +18516,13 @@
         "games": 69,
         "wr": 0.2609
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 18,
+        "games": 69,
+        "wr": 0.2609
+      }
     }
   },
   "SK Gaming Avarosa": {
@@ -14790,6 +18545,13 @@
     "wr": 0.0,
     "by_league": {
       "PRMP": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -14827,6 +18589,13 @@
         "games": 52,
         "wr": 0.3077
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 24,
+        "games": 75,
+        "wr": 0.32
+      }
     }
   },
   "SN CyberCore Esports": {
@@ -14853,6 +18622,13 @@
         "games": 60,
         "wr": 0.35
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 21,
+        "games": 60,
+        "wr": 0.35
+      }
     }
   },
   "SNOOZE Esports": {
@@ -14875,6 +18651,13 @@
     "wr": 0.25,
     "by_league": {
       "ROL": {
+        "wins": 1,
+        "games": 4,
+        "wr": 0.25
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 4,
         "wr": 0.25
@@ -14919,6 +18702,13 @@
         "games": 100,
         "wr": 0.63
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 63,
+        "games": 100,
+        "wr": 0.63
+      }
     }
   },
   "Soul's Heart Esport": {
@@ -14941,6 +18731,13 @@
     "wr": 0.4,
     "by_league": {
       "ROL": {
+        "wins": 2,
+        "games": 5,
+        "wr": 0.4
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 5,
         "wr": 0.4
@@ -14971,6 +18768,13 @@
         "games": 20,
         "wr": 0.4
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 8,
+        "games": 20,
+        "wr": 0.4
+      }
     }
   },
   "SPAXFAMILY": {
@@ -14993,6 +18797,13 @@
     "wr": 0.3571,
     "by_league": {
       "HW": {
+        "wins": 5,
+        "games": 14,
+        "wr": 0.3571
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 5,
         "games": 14,
         "wr": 0.3571
@@ -15030,6 +18841,13 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 43,
+        "games": 87,
+        "wr": 0.4943
+      }
     }
   },
   "Spinebusters E-Sport": {
@@ -15052,6 +18870,13 @@
     "wr": 0.5714,
     "by_league": {
       "PRM": {
+        "wins": 4,
+        "games": 7,
+        "wr": 0.5714
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 7,
         "wr": 0.5714
@@ -15082,6 +18907,13 @@
         "games": 34,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 17,
+        "games": 34,
+        "wr": 0.5
+      }
     }
   },
   "Sponge Gaming": {
@@ -15104,6 +18936,13 @@
     "wr": 0.4,
     "by_league": {
       "PCS": {
+        "wins": 4,
+        "games": 10,
+        "wr": 0.4
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 10,
         "wr": 0.4
@@ -15134,6 +18973,13 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
     }
   },
   "STAINED": {
@@ -15156,6 +19002,13 @@
     "wr": 0.1667,
     "by_league": {
       "CD": {
+        "wins": 1,
+        "games": 6,
+        "wr": 0.1667
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 6,
         "wr": 0.1667
@@ -15186,6 +19039,13 @@
         "games": 46,
         "wr": 0.5652
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 26,
+        "games": 46,
+        "wr": 0.5652
+      }
     }
   },
   "StoneHenge Esports": {
@@ -15208,6 +19068,13 @@
     "wr": 0.2222,
     "by_league": {
       "LIT": {
+        "wins": 4,
+        "games": 18,
+        "wr": 0.2222
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 18,
         "wr": 0.2222
@@ -15238,6 +19105,13 @@
         "games": 4,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 4,
+        "wr": 0.0
+      }
     }
   },
   "Stormbringers": {
@@ -15260,6 +19134,13 @@
     "wr": 0.0,
     "by_league": {
       "LVP SL": {
+        "wins": 0,
+        "games": 3,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 3,
         "wr": 0.0
@@ -15297,6 +19178,13 @@
         "games": 52,
         "wr": 0.6154
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 32,
+        "games": 52,
+        "wr": 0.6154
+      }
     }
   },
   "Str1ve eSports": {
@@ -15319,6 +19207,13 @@
     "wr": 0.0,
     "by_league": {
       "LPLOL": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -15349,6 +19244,13 @@
         "games": 45,
         "wr": 0.5111
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 23,
+        "games": 45,
+        "wr": 0.5111
+      }
     }
   },
   "Super Stars": {
@@ -15375,6 +19277,13 @@
         "games": 10,
         "wr": 0.7
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 7,
+        "games": 10,
+        "wr": 0.7
+      }
     }
   },
   "Supernova": {
@@ -15397,6 +19306,13 @@
     "wr": 0.4933,
     "by_league": {
       "NACL": {
+        "wins": 37,
+        "games": 75,
+        "wr": 0.4933
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 37,
         "games": 75,
         "wr": 0.4933
@@ -15455,6 +19371,18 @@
         "games": 24,
         "wr": 0.7083
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 120,
+        "games": 187,
+        "wr": 0.6417
+      },
+      "tier2": {
+        "wins": 12,
+        "games": 23,
+        "wr": 0.5217
+      }
     }
   },
   "T1 Esports Academy": {
@@ -15488,6 +19416,13 @@
         "games": 205,
         "wr": 0.6049
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 124,
+        "games": 205,
+        "wr": 0.6049
+      }
     }
   },
   "T1 Esports Academy Rookies": {
@@ -15514,6 +19449,13 @@
         "games": 186,
         "wr": 0.7473
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 139,
+        "games": 186,
+        "wr": 0.7473
+      }
     }
   },
   "Tan'i eSports": {
@@ -15536,6 +19478,13 @@
     "wr": 0.5714,
     "by_league": {
       "NEXO": {
+        "wins": 4,
+        "games": 7,
+        "wr": 0.5714
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 4,
         "games": 7,
         "wr": 0.5714
@@ -15573,6 +19522,18 @@
         "games": 5,
         "wr": 0.2
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 26,
+        "games": 53,
+        "wr": 0.4906
+      },
+      "tier3": {
+        "wins": 1,
+        "games": 5,
+        "wr": 0.2
+      }
     }
   },
   "Team Anomaly Breaker": {
@@ -15595,6 +19556,13 @@
     "wr": 1.0,
     "by_league": {
       "LRN": {
+        "wins": 3,
+        "games": 3,
+        "wr": 1.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 3,
         "games": 3,
         "wr": 1.0
@@ -15625,6 +19593,13 @@
         "games": 50,
         "wr": 0.36
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 18,
+        "games": 50,
+        "wr": 0.36
+      }
     }
   },
   "Team BDS Academy": {
@@ -15647,6 +19622,13 @@
     "wr": 0.2979,
     "by_league": {
       "LFL": {
+        "wins": 14,
+        "games": 47,
+        "wr": 0.2979
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 14,
         "games": 47,
         "wr": 0.2979
@@ -15677,6 +19659,13 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
     }
   },
   "Team Evermeet": {
@@ -15703,6 +19692,13 @@
         "games": 22,
         "wr": 0.2273
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 5,
+        "games": 22,
+        "wr": 0.2273
+      }
     }
   },
   "Team Flash": {
@@ -15725,6 +19721,13 @@
     "wr": 0.5641,
     "by_league": {
       "VCS": {
+        "wins": 22,
+        "games": 39,
+        "wr": 0.5641
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 22,
         "games": 39,
         "wr": 0.5641
@@ -15758,6 +19761,13 @@
         "wr": 0.0
       },
       "LEC": {
+        "wins": 30,
+        "games": 90,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier1": {
         "wins": 30,
         "games": 90,
         "wr": 0.3333
@@ -15809,6 +19819,18 @@
         "games": 72,
         "wr": 0.6389
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 46,
+        "games": 72,
+        "wr": 0.6389
+      },
+      "tier3": {
+        "wins": 28,
+        "games": 39,
+        "wr": 0.7179
+      }
     }
   },
   "Team High Ground": {
@@ -15838,6 +19860,18 @@
         "wr": 0.2
       },
       "NL": {
+        "wins": 1,
+        "games": 1,
+        "wr": 1.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 5,
+        "wr": 0.2
+      },
+      "tier3": {
         "wins": 1,
         "games": 1,
         "wr": 1.0
@@ -15881,6 +19915,18 @@
         "wins": 49,
         "games": 98,
         "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 49,
+        "games": 98,
+        "wr": 0.5
+      },
+      "tier3": {
+        "wins": 6,
+        "games": 6,
+        "wr": 1.0
       }
     }
   },
@@ -15943,6 +19989,18 @@
         "games": 12,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 52,
+        "games": 98,
+        "wr": 0.5306
+      },
+      "tier2": {
+        "wins": 1,
+        "games": 3,
+        "wr": 0.3333
+      }
     }
   },
   "Team Meliora": {
@@ -15969,6 +20027,13 @@
         "games": 6,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 0,
+        "games": 6,
+        "wr": 0.0
+      }
     }
   },
   "Team Mentality": {
@@ -15991,6 +20056,13 @@
     "wr": 0.4,
     "by_league": {
       "PRMP": {
+        "wins": 2,
+        "games": 5,
+        "wr": 0.4
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 5,
         "wr": 0.4
@@ -16028,6 +20100,13 @@
         "games": 114,
         "wr": 0.7456
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 85,
+        "games": 114,
+        "wr": 0.7456
+      }
     }
   },
   "Team Phoenix": {
@@ -16050,6 +20129,13 @@
     "wr": 0.2174,
     "by_league": {
       "TCL": {
+        "wins": 5,
+        "games": 23,
+        "wr": 0.2174
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 5,
         "games": 23,
         "wr": 0.2174
@@ -16080,6 +20166,13 @@
         "games": 18,
         "wr": 0.1667
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 3,
+        "games": 18,
+        "wr": 0.1667
+      }
     }
   },
   "Team Revolta": {
@@ -16102,6 +20195,13 @@
     "wr": 0.0,
     "by_league": {
       "CD": {
+        "wins": 0,
+        "games": 1,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 1,
         "wr": 0.0
@@ -16132,7 +20232,8 @@
         "games": 8,
         "wr": 0.5
       }
-    }
+    },
+    "by_tier": {}
   },
   "Team Secret Whales": {
     "team_key": "team-secret-whales",
@@ -16186,6 +20287,13 @@
         "games": 6,
         "wr": 0.3333
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 86,
+        "games": 129,
+        "wr": 0.6667
+      }
     }
   },
   "Team Solid": {
@@ -16208,6 +20316,13 @@
     "wr": 0.4286,
     "by_league": {
       "CD": {
+        "wins": 9,
+        "games": 21,
+        "wr": 0.4286
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 9,
         "games": 21,
         "wr": 0.4286
@@ -16238,6 +20353,13 @@
         "games": 7,
         "wr": 0.2857
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 2,
+        "games": 7,
+        "wr": 0.2857
+      }
     }
   },
   "Team Tockers": {
@@ -16260,6 +20382,13 @@
     "wr": 1.0,
     "by_league": {
       "CD": {
+        "wins": 1,
+        "games": 1,
+        "wr": 1.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 1,
         "wr": 1.0
@@ -16297,6 +20426,18 @@
         "games": 8,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 19,
+        "games": 45,
+        "wr": 0.4222
+      },
+      "tier3": {
+        "wins": 4,
+        "games": 8,
+        "wr": 0.5
+      }
     }
   },
   "Team Valiant": {
@@ -16319,6 +20460,13 @@
     "wr": 0.6522,
     "by_league": {
       "LFL2": {
+        "wins": 30,
+        "games": 46,
+        "wr": 0.6522
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 30,
         "games": 46,
         "wr": 0.6522
@@ -16356,6 +20504,13 @@
         "games": 100,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 50,
+        "games": 100,
+        "wr": 0.5
+      }
     }
   },
   "Team WE": {
@@ -16389,6 +20544,18 @@
         "games": 211,
         "wr": 0.3886
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 82,
+        "games": 211,
+        "wr": 0.3886
+      },
+      "tier3": {
+        "wins": 3,
+        "games": 14,
+        "wr": 0.2143
+      }
     }
   },
   "Team WE Academy": {
@@ -16415,7 +20582,8 @@
         "games": 6,
         "wr": 0.8333
       }
-    }
+    },
+    "by_tier": {}
   },
   "TeamOrangeGaming": {
     "team_key": "teamorangegaming",
@@ -16462,6 +20630,18 @@
         "games": 6,
         "wr": 0.6667
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 58,
+        "games": 110,
+        "wr": 0.5273
+      },
+      "tier3": {
+        "wins": 3,
+        "games": 6,
+        "wr": 0.5
+      }
     }
   },
   "TeamOrangeGaming Academy": {
@@ -16484,6 +20664,13 @@
     "wr": 0.5714,
     "by_league": {
       "PRMP": {
+        "wins": 4,
+        "games": 7,
+        "wr": 0.5714
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 7,
         "wr": 0.5714
@@ -16514,6 +20701,13 @@
         "games": 3,
         "wr": 1.0
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 3,
+        "games": 3,
+        "wr": 1.0
+      }
     }
   },
   "The AstroDucks": {
@@ -16536,6 +20730,13 @@
     "wr": 0.0,
     "by_league": {
       "LIT": {
+        "wins": 0,
+        "games": 4,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 4,
         "wr": 0.0
@@ -16573,6 +20774,13 @@
         "games": 54,
         "wr": 0.5741
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 31,
+        "games": 54,
+        "wr": 0.5741
+      }
     }
   },
   "The Forbidden Five": {
@@ -16595,6 +20803,13 @@
     "wr": 0.0,
     "by_league": {
       "TCL": {
+        "wins": 0,
+        "games": 14,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 14,
         "wr": 0.0
@@ -16625,6 +20840,13 @@
         "games": 8,
         "wr": 0.375
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 3,
+        "games": 8,
+        "wr": 0.375
+      }
     }
   },
   "The New Kings": {
@@ -16647,6 +20869,13 @@
     "wr": 0.3333,
     "by_league": {
       "LRS": {
+        "wins": 7,
+        "games": 21,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 7,
         "games": 21,
         "wr": 0.3333
@@ -16677,6 +20906,13 @@
         "games": 93,
         "wr": 0.3656
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 34,
+        "games": 93,
+        "wr": 0.3656
+      }
     }
   },
   "The Secret Club": {
@@ -16699,6 +20935,13 @@
     "wr": 0.4559,
     "by_league": {
       "EBL": {
+        "wins": 31,
+        "games": 68,
+        "wr": 0.4559
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 31,
         "games": 68,
         "wr": 0.4559
@@ -16736,6 +20979,18 @@
         "games": 140,
         "wr": 0.35
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 49,
+        "games": 140,
+        "wr": 0.35
+      },
+      "tier3": {
+        "wins": 3,
+        "games": 7,
+        "wr": 0.4286
+      }
     }
   },
   "ThunderTalk Gaming Young": {
@@ -16762,7 +21017,8 @@
         "games": 7,
         "wr": 0.2857
       }
-    }
+    },
+    "by_tier": {}
   },
   "Tigers eSports": {
     "team_key": "tigers-esports",
@@ -16784,6 +21040,13 @@
     "wr": 0.1667,
     "by_league": {
       "CD": {
+        "wins": 1,
+        "games": 6,
+        "wr": 0.1667
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 6,
         "wr": 0.1667
@@ -16814,6 +21077,13 @@
         "games": 10,
         "wr": 0.2
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 2,
+        "games": 10,
+        "wr": 0.2
+      }
     }
   },
   "TLN Pirates": {
@@ -16836,6 +21106,13 @@
     "wr": 0.5854,
     "by_league": {
       "LFL": {
+        "wins": 24,
+        "games": 41,
+        "wr": 0.5854
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 24,
         "games": 41,
         "wr": 0.5854
@@ -16887,6 +21164,13 @@
         "games": 20,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 150,
+        "games": 238,
+        "wr": 0.6303
+      }
     }
   },
   "Top Esports Challenger": {
@@ -16913,7 +21197,8 @@
         "games": 22,
         "wr": 0.4545
       }
-    }
+    },
+    "by_tier": {}
   },
   "TQ DURPA KASHLQ": {
     "team_key": "tq-durpa-kashlq",
@@ -16935,6 +21220,13 @@
     "wr": 0.1818,
     "by_league": {
       "EBL": {
+        "wins": 2,
+        "games": 11,
+        "wr": 0.1818
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 11,
         "wr": 0.1818
@@ -16965,6 +21257,13 @@
         "games": 4,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 2,
+        "games": 4,
+        "wr": 0.5
+      }
     }
   },
   "Tu Pap\u00e1 Esports": {
@@ -16987,6 +21286,13 @@
     "wr": 0.0769,
     "by_league": {
       "LRS": {
+        "wins": 1,
+        "games": 13,
+        "wr": 0.0769
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 13,
         "wr": 0.0769
@@ -17017,6 +21323,13 @@
         "games": 6,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 3,
+        "games": 6,
+        "wr": 0.5
+      }
     }
   },
   "UB Alma Mater": {
@@ -17039,6 +21352,13 @@
     "wr": 0.0952,
     "by_league": {
       "LES": {
+        "wins": 2,
+        "games": 21,
+        "wr": 0.0952
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 2,
         "games": 21,
         "wr": 0.0952
@@ -17090,6 +21410,18 @@
         "games": 52,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 26,
+        "games": 52,
+        "wr": 0.5
+      },
+      "tier3": {
+        "wins": 29,
+        "games": 48,
+        "wr": 0.6042
+      }
     }
   },
   "UEC eSports PlusPlus": {
@@ -17116,6 +21448,13 @@
         "games": 14,
         "wr": 0.0714
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 14,
+        "wr": 0.0714
+      }
     }
   },
   "Ukrainian Glory Team": {
@@ -17138,6 +21477,13 @@
     "wr": 0.0,
     "by_league": {
       "UL": {
+        "wins": 0,
+        "games": 3,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier3": {
         "wins": 0,
         "games": 3,
         "wr": 0.0
@@ -17175,6 +21521,13 @@
         "games": 69,
         "wr": 0.4928
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 34,
+        "games": 69,
+        "wr": 0.4928
+      }
     }
   },
   "Ultra Prime": {
@@ -17208,6 +21561,18 @@
         "games": 95,
         "wr": 0.3579
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 34,
+        "games": 95,
+        "wr": 0.3579
+      },
+      "tier3": {
+        "wins": 4,
+        "games": 6,
+        "wr": 0.6667
+      }
     }
   },
   "Underworld Esports": {
@@ -17230,6 +21595,13 @@
     "wr": 0.4375,
     "by_league": {
       "LIT": {
+        "wins": 7,
+        "games": 16,
+        "wr": 0.4375
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 7,
         "games": 16,
         "wr": 0.4375
@@ -17281,6 +21653,18 @@
         "games": 13,
         "wr": 0.6923
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 60,
+        "games": 113,
+        "wr": 0.531
+      },
+      "tier3": {
+        "wins": 3,
+        "games": 7,
+        "wr": 0.4286
+      }
     }
   },
   "UniQ Esports Club": {
@@ -17303,6 +21687,13 @@
     "wr": 0.5455,
     "by_league": {
       "NLC": {
+        "wins": 12,
+        "games": 22,
+        "wr": 0.5455
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 12,
         "games": 22,
         "wr": 0.5455
@@ -17340,6 +21731,13 @@
         "games": 32,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 20,
+        "games": 41,
+        "wr": 0.4878
+      }
     }
   },
   "University of Mississippi": {
@@ -17362,6 +21760,13 @@
     "wr": 1.0,
     "by_league": {
       "NACL": {
+        "wins": 2,
+        "games": 2,
+        "wr": 1.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 2,
         "wr": 1.0
@@ -17392,6 +21797,13 @@
         "games": 4,
         "wr": 0.25
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 4,
+        "wr": 0.25
+      }
     }
   },
   "UTeSports": {
@@ -17414,6 +21826,13 @@
     "wr": 0.0833,
     "by_league": {
       "LJL": {
+        "wins": 1,
+        "games": 12,
+        "wr": 0.0833
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 1,
         "games": 12,
         "wr": 0.0833
@@ -17444,6 +21863,13 @@
         "games": 52,
         "wr": 0.5577
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 29,
+        "games": 52,
+        "wr": 0.5577
+      }
     }
   },
   "V3 Esports": {
@@ -17466,6 +21892,13 @@
     "wr": 0.1923,
     "by_league": {
       "LJL": {
+        "wins": 10,
+        "games": 52,
+        "wr": 0.1923
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 10,
         "games": 52,
         "wr": 0.1923
@@ -17496,6 +21929,13 @@
         "games": 6,
         "wr": 0.8333
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 5,
+        "games": 6,
+        "wr": 0.8333
+      }
     }
   },
   "Vancouver Impact": {
@@ -17518,6 +21958,13 @@
     "wr": 0.1429,
     "by_league": {
       "NACL": {
+        "wins": 2,
+        "games": 14,
+        "wr": 0.1429
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 14,
         "wr": 0.1429
@@ -17555,6 +22002,13 @@
         "games": 12,
         "wr": 0.6667
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 8,
+        "games": 12,
+        "wr": 0.6667
+      }
     }
   },
   "VARREL YOUTH": {
@@ -17577,6 +22031,13 @@
     "wr": 0.5658,
     "by_league": {
       "LJL": {
+        "wins": 43,
+        "games": 76,
+        "wr": 0.5658
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 43,
         "games": 76,
         "wr": 0.5658
@@ -17607,6 +22068,13 @@
         "games": 12,
         "wr": 0.6667
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 8,
+        "games": 12,
+        "wr": 0.6667
+      }
     }
   },
   "VelbeliKaizokudan": {
@@ -17633,6 +22101,13 @@
         "games": 64,
         "wr": 0.2812
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 18,
+        "games": 64,
+        "wr": 0.2812
+      }
     }
   },
   "VeLocitY (Japanese Team)": {
@@ -17655,6 +22130,13 @@
     "wr": 0.0,
     "by_league": {
       "LJL": {
+        "wins": 0,
+        "games": 9,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 9,
         "wr": 0.0
@@ -17699,6 +22181,18 @@
         "games": 64,
         "wr": 0.5312
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 34,
+        "games": 64,
+        "wr": 0.5312
+      },
+      "tier3": {
+        "wins": 2,
+        "games": 5,
+        "wr": 0.4
+      }
     }
   },
   "Venomcrest Esports": {
@@ -17721,6 +22215,13 @@
     "wr": 0.2903,
     "by_league": {
       "NLC": {
+        "wins": 9,
+        "games": 31,
+        "wr": 0.2903
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 9,
         "games": 31,
         "wr": 0.2903
@@ -17751,6 +22252,13 @@
         "games": 4,
         "wr": 0.5
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 2,
+        "games": 4,
+        "wr": 0.5
+      }
     }
   },
   "Venus Gaming": {
@@ -17773,6 +22281,13 @@
     "wr": 0.6667,
     "by_league": {
       "VCS": {
+        "wins": 4,
+        "games": 6,
+        "wr": 0.6667
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 6,
         "wr": 0.6667
@@ -17810,6 +22325,13 @@
         "games": 87,
         "wr": 0.6897
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 60,
+        "games": 87,
+        "wr": 0.6897
+      }
     }
   },
   "VfB eSports": {
@@ -17843,6 +22365,13 @@
         "games": 3,
         "wr": 0.3333
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 6,
+        "games": 30,
+        "wr": 0.2
+      }
     }
   },
   "Vietnam (National Team)": {
@@ -17865,6 +22394,13 @@
     "wr": 0.2222,
     "by_league": {
       "KESPA": {
+        "wins": 2,
+        "games": 9,
+        "wr": 0.2222
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 9,
         "wr": 0.2222
@@ -17895,6 +22431,13 @@
         "games": 3,
         "wr": 0.3333
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 3,
+        "wr": 0.3333
+      }
     }
   },
   "Viper Night Raider": {
@@ -17917,6 +22460,13 @@
     "wr": 0.3333,
     "by_league": {
       "PCS": {
+        "wins": 2,
+        "games": 6,
+        "wr": 0.3333
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 2,
         "games": 6,
         "wr": 0.3333
@@ -17954,6 +22504,13 @@
         "games": 99,
         "wr": 0.4949
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 49,
+        "games": 99,
+        "wr": 0.4949
+      }
     }
   },
   "Vitality Rising Bees": {
@@ -17976,6 +22533,13 @@
     "wr": 0.0,
     "by_league": {
       "LFL": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -18027,6 +22591,13 @@
         "games": 7,
         "wr": 0.2857
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 46,
+        "games": 90,
+        "wr": 0.5111
+      }
     }
   },
   "Vivo Keyd Stars Academy": {
@@ -18049,6 +22620,13 @@
     "wr": 0.6456,
     "by_league": {
       "CD": {
+        "wins": 51,
+        "games": 79,
+        "wr": 0.6456
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 51,
         "games": 79,
         "wr": 0.6456
@@ -18079,6 +22657,13 @@
         "games": 3,
         "wr": 0.3333
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 3,
+        "wr": 0.3333
+      }
     }
   },
   "Volticons": {
@@ -18105,6 +22690,13 @@
         "games": 50,
         "wr": 0.66
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 33,
+        "games": 50,
+        "wr": 0.66
+      }
     }
   },
   "Vortex (Japanese Team)": {
@@ -18127,6 +22719,13 @@
     "wr": 0.3529,
     "by_league": {
       "LJL": {
+        "wins": 6,
+        "games": 17,
+        "wr": 0.3529
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 6,
         "games": 17,
         "wr": 0.3529
@@ -18164,6 +22763,13 @@
         "games": 56,
         "wr": 0.4821
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 27,
+        "games": 56,
+        "wr": 0.4821
+      }
     }
   },
   "WAP Esports": {
@@ -18186,6 +22792,13 @@
     "wr": 0.4375,
     "by_league": {
       "LRS": {
+        "wins": 14,
+        "games": 32,
+        "wr": 0.4375
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 14,
         "games": 32,
         "wr": 0.4375
@@ -18216,6 +22829,13 @@
         "games": 5,
         "wr": 0.2
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 1,
+        "games": 5,
+        "wr": 0.2
+      }
     }
   },
   "Way Gaming Esports": {
@@ -18242,6 +22862,13 @@
         "games": 2,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
     }
   },
   "We Can Win": {
@@ -18264,6 +22891,13 @@
     "wr": 0.6364,
     "by_league": {
       "LJL": {
+        "wins": 7,
+        "games": 11,
+        "wr": 0.6364
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 7,
         "games": 11,
         "wr": 0.6364
@@ -18315,6 +22949,18 @@
         "games": 4,
         "wr": 0.25
       }
+    },
+    "by_tier": {
+      "tier1": {
+        "wins": 104,
+        "games": 219,
+        "wr": 0.4749
+      },
+      "tier3": {
+        "wins": 9,
+        "games": 21,
+        "wr": 0.4286
+      }
     }
   },
   "Weibo Gaming Youth Team": {
@@ -18341,7 +22987,8 @@
         "games": 16,
         "wr": 0.375
       }
-    }
+    },
+    "by_tier": {}
   },
   "West Point Esports": {
     "team_key": "west-point-esports",
@@ -18374,6 +23021,13 @@
         "games": 79,
         "wr": 0.6076
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 48,
+        "games": 79,
+        "wr": 0.6076
+      }
     }
   },
   "White Dragons": {
@@ -18396,6 +23050,13 @@
     "wr": 0.5714,
     "by_league": {
       "LPLOL": {
+        "wins": 4,
+        "games": 7,
+        "wr": 0.5714
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 7,
         "wr": 0.5714
@@ -18426,6 +23087,13 @@
         "games": 6,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 0,
+        "games": 6,
+        "wr": 0.0
+      }
     }
   },
   "Winthrop University": {
@@ -18448,6 +23116,13 @@
     "wr": 0.4382,
     "by_league": {
       "NACL": {
+        "wins": 39,
+        "games": 89,
+        "wr": 0.4382
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 39,
         "games": 89,
         "wr": 0.4382
@@ -18478,7 +23153,8 @@
         "games": 10,
         "wr": 0.6
       }
-    }
+    },
+    "by_tier": {}
   },
   "WLGaming Esports": {
     "team_key": "wlgaming-esports",
@@ -18511,6 +23187,13 @@
         "games": 93,
         "wr": 0.6237
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 58,
+        "games": 93,
+        "wr": 0.6237
+      }
     }
   },
   "Xibalb\u00e1 Esports": {
@@ -18533,6 +23216,13 @@
     "wr": 0.0,
     "by_league": {
       "LRN": {
+        "wins": 0,
+        "games": 5,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 5,
         "wr": 0.0
@@ -18563,6 +23253,13 @@
         "games": 4,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 4,
+        "wr": 0.0
+      }
     }
   },
   "XV eSports": {
@@ -18585,6 +23282,13 @@
     "wr": 0.4444,
     "by_league": {
       "CD": {
+        "wins": 4,
+        "games": 9,
+        "wr": 0.4444
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 9,
         "wr": 0.4444
@@ -18615,6 +23319,13 @@
         "games": 73,
         "wr": 0.5342
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 39,
+        "games": 73,
+        "wr": 0.5342
+      }
     }
   },
   "Yumeea": {
@@ -18637,6 +23348,13 @@
     "wr": 0.0,
     "by_league": {
       "LFL": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 0,
         "games": 2,
         "wr": 0.0
@@ -18674,6 +23392,13 @@
         "games": 24,
         "wr": 0.4583
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 15,
+        "games": 41,
+        "wr": 0.3659
+      }
     }
   },
   "Zena Esports": {
@@ -18703,6 +23428,13 @@
         "wr": 0.1667
       },
       "LIT": {
+        "wins": 37,
+        "games": 74,
+        "wr": 0.5
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 37,
         "games": 74,
         "wr": 0.5
@@ -18740,6 +23472,13 @@
         "games": 96,
         "wr": 0.5833
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 56,
+        "games": 96,
+        "wr": 0.5833
+      }
     }
   },
   "Zenshi Gaming": {
@@ -18762,6 +23501,13 @@
     "wr": 0.4545,
     "by_league": {
       "NACL": {
+        "wins": 5,
+        "games": 11,
+        "wr": 0.4545
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 5,
         "games": 11,
         "wr": 0.4545
@@ -18799,6 +23545,18 @@
         "games": 15,
         "wr": 0.2667
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 0,
+        "games": 2,
+        "wr": 0.0
+      },
+      "tier3": {
+        "wins": 4,
+        "games": 15,
+        "wr": 0.2667
+      }
     }
   },
   "Zer0 Trein0": {
@@ -18825,6 +23583,13 @@
         "games": 10,
         "wr": 0.3
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 3,
+        "games": 10,
+        "wr": 0.3
+      }
     }
   },
   "Zerance": {
@@ -18847,6 +23612,13 @@
     "wr": 0.3404,
     "by_league": {
       "LFL2": {
+        "wins": 16,
+        "games": 47,
+        "wr": 0.3404
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 16,
         "games": 47,
         "wr": 0.3404
@@ -18884,6 +23656,13 @@
         "games": 79,
         "wr": 0.7342
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 58,
+        "games": 79,
+        "wr": 0.7342
+      }
     }
   },
   "Zerolag Esports": {
@@ -18906,6 +23685,13 @@
     "wr": 0.283,
     "by_league": {
       "HLL": {
+        "wins": 15,
+        "games": 53,
+        "wr": 0.283
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 15,
         "games": 53,
         "wr": 0.283
@@ -18936,6 +23722,13 @@
         "games": 33,
         "wr": 0.2121
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 7,
+        "games": 33,
+        "wr": 0.2121
+      }
     }
   },
   "ZETA": {
@@ -18958,6 +23751,13 @@
     "wr": 0.2286,
     "by_league": {
       "LVP SL": {
+        "wins": 8,
+        "games": 35,
+        "wr": 0.2286
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 8,
         "games": 35,
         "wr": 0.2286
@@ -18988,6 +23788,13 @@
         "games": 83,
         "wr": 0.5542
       }
+    },
+    "by_tier": {
+      "tier2": {
+        "wins": 46,
+        "games": 83,
+        "wr": 0.5542
+      }
     }
   },
   "ZGDX Gaming": {
@@ -19010,6 +23817,13 @@
     "wr": 0.4,
     "by_league": {
       "CD": {
+        "wins": 4,
+        "games": 10,
+        "wr": 0.4
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 4,
         "games": 10,
         "wr": 0.4
@@ -19040,6 +23854,13 @@
         "games": 6,
         "wr": 0.0
       }
+    },
+    "by_tier": {
+      "tier3": {
+        "wins": 0,
+        "games": 6,
+        "wr": 0.0
+      }
     }
   },
   "ZYB Esport": {
@@ -19062,6 +23883,13 @@
     "wr": 0.3462,
     "by_league": {
       "LFL": {
+        "wins": 9,
+        "games": 26,
+        "wr": 0.3462
+      }
+    },
+    "by_tier": {
+      "tier2": {
         "wins": 9,
         "games": 26,
         "wr": 0.3462

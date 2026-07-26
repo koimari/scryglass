@@ -158,6 +158,19 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertEqual(len(maps), 2)
         self.assertEqual(set(maps["competition_tier"]), {"tier2"})
 
+    def test_team_records_publish_tier_aggregates(self) -> None:
+        records = build_team_records(
+            pd.DataFrame(
+                [
+                    {"date": "2026-01-01", "league": "LCK", "blue_team": "A", "red_team": "B", "y_blue_win": 1},
+                    {"date": "2026-01-02", "league": "TCL", "blue_team": "A", "red_team": "C", "y_blue_win": 0},
+                ]
+            )
+        )
+        self.assertEqual(records["A"]["current_tier"], "tier2")
+        self.assertEqual(records["A"]["by_tier"]["tier1"]["games"], 1)
+        self.assertEqual(records["A"]["by_tier"]["tier2"]["games"], 1)
+
     def test_weekly_player_rank_payload_uses_sunday_baseline(self) -> None:
         players = []
         roles = ["top", "jng", "mid", "bot", "sup"]

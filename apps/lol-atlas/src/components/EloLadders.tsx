@@ -17,11 +17,13 @@ import {
   formatWr,
   INTL_LEAGUES,
   INTERREGIONAL_LEAGUES,
+  MAJOR_REGIONAL_LEAGUES,
   PLAYER_SIGMA_MIN,
   playerMatchesQuery,
   playerSlug,
   recordMatchesLeagues,
   REGION_LEAGUES,
+  SECONDARY_REGIONAL_LEAGUES,
   scopedTeamWr,
   softMu,
   TIER_FILTERS,
@@ -309,7 +311,7 @@ export function EloLadders({
   const visibleTeams = expanded ? sortedTeams : sortedTeams.slice(0, 20);
   const visiblePlayers = expanded ? sortedPlayers : sortedPlayers.slice(0, 20);
   const intlSet = new Set<string>(["INTL", ...INTL_LEAGUES]);
-  const scopeSummary = leagues.length ? leagues.map(formatScope).join(" + ") : "All tiers";
+  const scopeSummary = leagues.length ? leagues.map(formatScope).join(" + ") : "All competitive tiers and event scopes";
   const rankScopeFor = (tier: string | null | undefined): "all" | "tier1" | "tier2" | "tier3" => {
     const selectedTiers = leagues.filter((scope) => scope.startsWith("TIER")).map((scope) => scope.toLowerCase()) as Array<"tier1" | "tier2" | "tier3">;
     if (selectedTiers.length === 1) return selectedTiers[0];
@@ -388,15 +390,19 @@ export function EloLadders({
         )}
       </div>
 
-      <div className="league-filter" role="group" aria-label="League filter">
-        <button
-          type="button"
-          className={`chip ${leagues.length === 0 ? "is-on" : ""}`}
-          onClick={() => setLeagues([])}
-        >
-          All
-        </button>
-        <div className="chip-group">
+      <div className="league-filter" role="group" aria-label="Rating scope filters">
+        <div className="scope-filter-head">
+          <span className="chip-group-label">Scope filters</span>
+          <span className="scope-filter-help">Tier sets current competitive level; leagues and events narrow within it. Groups combine with AND.</span>
+          <button
+            type="button"
+            className={`chip ${leagues.length === 0 ? "is-on" : ""}`}
+            onClick={() => setLeagues([])}
+          >
+            All scopes
+          </button>
+        </div>
+        <div className="chip-group chip-group-tier">
           <span className="chip-group-label">Competitive tier</span>
           {TIER_FILTERS.map((tier) => (
             <button
@@ -411,9 +417,9 @@ export function EloLadders({
           ))}
         </div>
         <div className="chip-group">
-          <span className="chip-group-label">Regional leagues</span>
+          <span className="chip-group-label">Major regional</span>
           {chips
-            .filter((lg) => !intlSet.has(lg))
+            .filter((lg) => (MAJOR_REGIONAL_LEAGUES as readonly string[]).includes(lg))
             .map((lg) => (
               <button
                 key={lg}
@@ -426,9 +432,39 @@ export function EloLadders({
             ))}
         </div>
         <div className="chip-group">
-          <span className="chip-group-label">International</span>
+          <span className="chip-group-label">Other regional</span>
           {chips
-            .filter((lg) => intlSet.has(lg))
+            .filter((lg) => (SECONDARY_REGIONAL_LEAGUES as readonly string[]).includes(lg))
+            .map((lg) => (
+              <button
+                key={lg}
+                type="button"
+                className={`chip ${leagues.includes(lg) ? "is-on" : ""}`}
+                onClick={() => toggleLeague(lg)}
+              >
+                {lg}
+              </button>
+          ))}
+        </div>
+        <div className="chip-group">
+          <span className="chip-group-label">Cross-region</span>
+          {chips
+            .filter((lg) => INTERREGIONAL_LEAGUES.includes(lg as (typeof INTERREGIONAL_LEAGUES)[number]))
+            .map((lg) => (
+              <button
+                key={lg}
+                type="button"
+                className={`chip ${leagues.includes(lg) ? "is-on" : ""}`}
+                onClick={() => toggleLeague(lg)}
+              >
+                {lg}
+              </button>
+            ))}
+        </div>
+        <div className="chip-group">
+          <span className="chip-group-label">International events</span>
+          {chips
+            .filter((lg) => intlSet.has(lg) || (INTL_LEAGUES as readonly string[]).includes(lg))
             .map((lg) => (
               <button
                 key={lg}
