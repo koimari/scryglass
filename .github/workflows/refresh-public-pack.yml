@@ -28,7 +28,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   refresh:
@@ -96,24 +96,3 @@ jobs:
             data/lol/features
             data/lol/models
           key: scryglass-warehouse-${{ runner.os }}-${{ github.run_id }}
-
-      - name: Commit the small latest-pack pointers
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            apps/lol-atlas/public/packs/manifest.json \
-            apps/lol-atlas/public/packs/latest.json \
-            data/lol/warehouse_snapshot.json
-          if git diff --cached --quiet; then
-            echo "Pack pointer did not change"
-            exit 0
-          fi
-          git commit -m "chore(data): refresh public pack [skip ci]"
-          git push
-
-      - name: Trigger an optional Vercel deploy hook
-        if: ${{ vars.VERCEL_DEPLOY_HOOK_URL != '' }}
-        run: curl --fail --silent --show-error -X POST "$VERCEL_DEPLOY_HOOK_URL"
-        env:
-          VERCEL_DEPLOY_HOOK_URL: ${{ vars.VERCEL_DEPLOY_HOOK_URL }}

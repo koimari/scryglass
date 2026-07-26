@@ -39,6 +39,8 @@ function esc(s: string): string {
 }
 
 export type QueryRow = Record<string, unknown>;
+export { formatGameDate, groupMapsIntoSeries } from "./series";
+export type { SeriesCard } from "./series";
 
 export async function queryPackParquet(
   parquetUrl: string,
@@ -233,129 +235,6 @@ export async function queryMapsYears(
     if (out.length >= lim) break;
   }
   return out.slice(0, lim);
-}
-
-export type SeriesCard = {
-  key: string;
-  date: string;
-  league: string;
-  patch: string;
-  tournament: string;
-  teamA: string;
-  teamB: string;
-  winsA: number;
-  winsB: number;
-  bestOf: number;
-  games: QueryRow[];
-  year: number;
-  source: "oe" | "grid" | "mixed" | "unknown";
-};
-
-export function formatGameDate(dateVal: unknown): string {
-  const raw = String(dateVal ?? "").trim();
-  const iso = raw.match(/(\d{4}-\d{2}-\d{2})/);
-  if (iso) return iso[1];
-
-  if (/^\d{10,13}$/.test(raw)) {
-    const numeric = Number(raw);
-    const date = new Date(raw.length === 13 ? numeric : numeric * 1000);
-    if (Number.isFinite(date.getTime())) return date.toISOString().slice(0, 10);
-  }
-
-  const parsed = Date.parse(raw);
-  if (Number.isFinite(parsed)) return new Date(parsed).toISOString().slice(0, 10);
-  return raw.slice(0, 10);
-}
-
-function teamPairKey(a: string, b: string): string {
-  return [a, b].sort((x, y) => x.localeCompare(y)).join("||");
-}
-
-function explicitSeriesKey(row: QueryRow): string | null {
-  const gridSeries = String(row.grid_series_id ?? "").trim();
-  if (gridSeries) return `grid:${gridSeries}`;
-  const uid = String(row.game_uid ?? row.oe_gameid ?? "").trim();
-  const match = uid.match(/^(.*?)(?:_game_\d+)$/i);
-  if (match?.[1]) return `oe:${match[1]}`;
-  // GRID's live-stats gameVersion is the stable series identifier in older
-  // packs, while OE patch values remain conventional 16.x/25.x strings.
-  const patch = String(row.patch ?? "").trim();
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(patch)) return `grid:${patch}`;
-  return null;
-}
-
-function inferBestOf(games: QueryRow[]): number {
-  const maxGame = Math.max(...games.map((g) => Number(g.game) || 1), games.length);
-  if (maxGame >= 5 || games.length >= 5) return 5;
-  if (maxGame >= 3 || games.length >= 3) return 3;
-  // A live/GRID result can contain only the games already completed. Two
-  // games in one identified pro series are therefore a partial or completed
-  // Bo3, not evidence that the match was Bo1.
-  if (games.length >= 2) return 3;
-  return 1;
-}
-
-/** Group OE/GRID map rows into Bo1/Bo3/Bo5 series using stable IDs first. */
-export function groupMapsIntoSeries(rows: QueryRow[]): SeriesCard[] {
-  const buckets = new Map<string, QueryRow[]>();
-  for (const r of rows) {
-    const blue = String(r.blue_teamname ?? "");
-    const red = String(r.red_teamname ?? "");
-    if (!blue || !red) continue;
-    const day = formatGameDate(r.date);
-    const league = String(r.league ?? "");
-    const tourney = String(r.tournament ?? "");
-    const seriesId = explicitSeriesKey(r);
-    const key = seriesId
-      ? `${seriesId}|${league}|${tourney}`
-      : `${teamPairKey(blue, red)}|${day}|${league}|${tourney}`;
-    const list = buckets.get(key) ?? [];
-    list.push(r);
-    buckets.set(key, list);
-  }
-
-  const series: SeriesCard[] = [];
-  for (const [key, games] of buckets) {
-    games.sort((a, b) => Number(a.game ?? 0) - Number(b.game ?? 0));
-    const first = games[0];
-    const blue = String(first.blue_teamname);
-    const red = String(first.red_teamname);
-    // Stable A/B by alphabetical for scoreline display
-    const [teamA, teamB] = [blue, red].sort((x, y) => x.localeCompare(y));
-    let winsA = 0;
-    let winsB = 0;
-    for (const g of games) {
-      const bName = String(g.blue_teamname);
-      const blueWon =
-        g.blue_result === 1 ||
-        g.blue_result === true ||
-        g.y_blue_win === 1 ||
-        Number(g.y_blue_win) >= 0.5;
-      const winner = blueWon ? bName : String(g.red_teamname);
-      if (winner === teamA) winsA += 1;
-      else if (winner === teamB) winsB += 1;
-    }
-    const bestOf = inferBestOf(games);
-    const hasGrid = games.some((g) => g.source_grid === true || Number(g.source_grid) === 1);
-    const hasOe = games.some((g) => g.source_oe === true || Number(g.source_oe) === 1);
-    series.push({
-      key,
-      date: formatGameDate(first.date),
-      league: String(first.league ?? ""),
-      patch: String(first.patch ?? ""),
-      tournament: String(first.tournament ?? ""),
-      teamA,
-      teamB,
-      winsA,
-      winsB,
-      bestOf,
-      games,
-      year: Number(first._year ?? first.year ?? 0) || Number(formatGameDate(first.date).slice(0, 4)) || 0,
-      source: hasGrid && hasOe ? "mixed" : hasGrid ? "grid" : hasOe ? "oe" : "unknown",
-    });
-  }
-  series.sort((a, b) => b.date.localeCompare(a.date));
-  return series;
 }
 
 export type ModelAccuracySummary = {

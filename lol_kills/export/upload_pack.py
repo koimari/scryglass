@@ -121,6 +121,39 @@ def write_atlas_manifest(
     return out
 
 
+def publish_blob_pointers(
+    token: str,
+    pack_id: str,
+    manifest: dict[str, Any],
+    *,
+    base_url: str,
+) -> dict[str, str]:
+    """Publish mutable discovery files after the immutable pack is complete."""
+    published_manifest = dict(manifest)
+    published_manifest["base_url"] = base_url.rstrip("/")
+    latest = {
+        "pack_id": pack_id,
+        "base_url": published_manifest["base_url"],
+        "created_utc": published_manifest.get("created_utc"),
+    }
+    payloads = {
+        "packs/manifest.json": published_manifest,
+        "packs/latest.json": latest,
+    }
+    urls: dict[str, str] = {}
+    for pathname, payload in payloads.items():
+        urls[pathname] = _blob_put(
+            token,
+            pathname,
+            (json.dumps(payload, indent=2) + "\n").encode("utf-8"),
+            "application/json",
+            cache_control="public, max-age=60, must-revalidate",
+            allow_overwrite=True,
+        )
+        print(f"  published {pathname}")
+    return urls
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Publish public pack to atlas / Vercel Blob")
     ap.add_argument("--pack-root", type=Path, default=DEFAULT_PACK_ROOT)
@@ -158,6 +191,7 @@ def main(argv: list[str] | None = None) -> int:
         # Still copy locally for offline/dev
         copy_to_atlas(pack_dir, pack_id)
         write_atlas_manifest(pack_id, manifest, base_url=base)
+        publish_blob_pointers(token, pack_id, manifest, base_url=base)
         print(f"Blob base_url: {base}")
     else:
         if not token:

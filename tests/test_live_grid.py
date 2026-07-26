@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import unittest
 import urllib.error
 from pathlib import Path
@@ -66,6 +67,62 @@ class GridSeriesEventsTests(unittest.TestCase):
                 grid_ingest.PARQUET_DIR = old_parquet
         self.assertEqual(len(teams), 1)
         self.assertEqual(len(players), 1)
+
+    def test_completed_grid_events_use_public_teamkill_columns(self) -> None:
+        roles = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
+        participants = [
+            {
+                "teamID": team_id,
+                "riotId": {"displayName": f"{prefix} Player{index}"},
+                "role": role,
+                "championName": f"Champion{index}",
+            }
+            for team_id, prefix in ((100, "Blue"), (200, "Red"))
+            for index, role in enumerate(roles, start=1)
+        ]
+        events = [
+            {
+                "rfc461Schema": "game_info",
+                "rfc460Timestamp": "2026-07-26T12:00:00Z",
+                "gameID": 42,
+                "gameName": "game-42",
+                "gameVersion": "16.14.794.5912",
+                "platformID": "LOLTMNT01",
+                "participants": participants,
+            },
+            *[
+                {"rfc461Schema": "champion_kill", "killerTeamID": 100}
+                for _ in range(4)
+            ],
+            *[
+                {"rfc461Schema": "champion_kill", "killerTeamID": 200}
+                for _ in range(2)
+            ],
+            {
+                "rfc461Schema": "game_end",
+                "winningTeam": 100,
+                "gameTime": 1_800_000,
+            },
+        ]
+        with TemporaryDirectory() as temp:
+            path = Path(temp) / "events.jsonl"
+            path.write_text("\n".join(json.dumps(event) for event in events))
+            parsed = grid_ingest._parse_events(
+                path,
+                series={
+                    "id": "series-42",
+                    "tournament": "LPL 2026",
+                    "teams": ["Blue Org", "Red Org"],
+                },
+                game_index=1,
+            )
+
+        self.assertIsNotNone(parsed)
+        team_rows = parsed[0]["team_rows"]
+        blue = next(row for row in team_rows if row["side"] == "Blue")
+        red = next(row for row in team_rows if row["side"] == "Red")
+        self.assertEqual((blue["teamkills"], blue["teamdeaths"]), (4, 2))
+        self.assertEqual((red["teamkills"], red["teamdeaths"]), (2, 4))
 
     def test_grid_file_download_stops_after_bounded_429_retry(self) -> None:
         error = urllib.error.HTTPError(
