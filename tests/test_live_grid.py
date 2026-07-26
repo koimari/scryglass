@@ -80,6 +80,7 @@ class GridSeriesEventsTests(unittest.TestCase):
         ) as urlopen, patch("lol_kills.etl.grid_ingest.time.sleep") as sleep:
             self.assertFalse(_download("https://example.test/events.jsonl", "key", Path(temp) / "events.jsonl"))
         self.assertEqual(urlopen.call_count, 2)
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], 90)
         sleep.assert_called_once_with(30)
 
     def test_url_uses_documented_key_query_without_logging_value(self) -> None:
