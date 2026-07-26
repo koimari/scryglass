@@ -103,6 +103,8 @@ TEAM_TAGS: dict[str, set[str]] = {
     "Relove Deep Cross Gaming": {"rdcg", "dcg"},
     "Team Vitality": {"vit", "vitality"},
     "Pain Gaming": {"png", "pain"},
+    "Arneb": {"arb"},
+    "RAYN Clocks": {"rck"},
 }
 
 
