@@ -18,14 +18,9 @@ on:
         required: false
         default: ""
         type: string
-      continuous:
-        description: "Keep dispatching one successor run after this run finishes"
-        required: false
-        default: true
-        type: boolean
   schedule:
-    # Watchdog only. The primary cadence is the authenticated successor
-    # dispatch at the end of each run, avoiding GitHub's best-effort scheduler.
+    # Hourly freshness is enough for completed-match ratings. Ad hoc runs
+    # remain available through workflow_dispatch when a series just ended.
     - cron: "7 * * * *"
 
 concurrency:
@@ -33,7 +28,6 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  actions: write
   contents: read
 
 jobs:
@@ -84,7 +78,7 @@ jobs:
             --skip-oe \
             --download-grid \
             --grid-days "${{ inputs.grid_days || '3' }}" \
-            --grid-limit "${{ inputs.grid_limit || '8' }}" \
+            --grid-limit "${{ inputs.grid_limit || '40' }}" \
             ${{ inputs.grid_tournament && format('--grid-tournament "{0}"', inputs.grid_tournament) || '' }} \
             --allow-missing-lp \
             --publish
@@ -102,33 +96,3 @@ jobs:
             data/lol/features
             data/lol/models
           key: scryglass-warehouse-${{ runner.os }}-${{ github.run_id }}
-
-      - name: Continue the refresh chain
-        if: ${{ always() && (github.event_name == 'schedule' || inputs.continuous) && vars.PACK_REFRESH_CHAIN != 'paused' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GRID_DAYS: ${{ inputs.grid_days || '3' }}
-          GRID_LIMIT: ${{ inputs.grid_limit || '40' }}
-          GRID_TOURNAMENT: ${{ inputs.grid_tournament || '' }}
-        run: |
-          active_successors="$(
-            gh api \
-              --method GET \
-              "repos/${GITHUB_REPOSITORY}/actions/workflows/refresh-public-pack.yml/runs" \
-              -f branch="$GITHUB_REF_NAME" \
-              -f per_page=20 |
-              jq --arg run_id "$GITHUB_RUN_ID" \
-                '[.workflow_runs[] | select((.id | tostring) != $run_id and .status != "completed")] | length'
-          )"
-          if [ "$active_successors" -gt 0 ]; then
-            echo "A successor is already active or pending; not dispatching another."
-            exit 0
-          fi
-
-          gh workflow run refresh-public-pack.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref "$GITHUB_REF_NAME" \
-            -f grid_days="$GRID_DAYS" \
-            -f grid_limit="$GRID_LIMIT" \
-            -f grid_tournament="$GRID_TOURNAMENT" \
-            -f continuous=true

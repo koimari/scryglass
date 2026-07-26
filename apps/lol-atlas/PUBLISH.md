@@ -16,22 +16,17 @@ Do not ship betting tooling, fair-odds boards, or timelines in the default pack.
 
 ## Scheduled refresh
 
-`.github/workflows/refresh-public-pack.yml` runs as a continuous successor
-chain: each run queues exactly one replacement after it finishes. This avoids
-depending on GitHub's best-effort scheduled start times. An hourly schedule at
-minute 7 is only a watchdog that restarts the chain if it is ever cancelled.
+`.github/workflows/refresh-public-pack.yml` runs hourly at minute 7 UTC. It can
+also be started ad hoc from the GitHub Actions **Run workflow** menu or with:
 
-Start or restart the chain manually with:
-
-```bash
+```sh
 gh workflow run refresh-public-pack.yml \
   --repo koimari/scryglass \
   --ref main
 ```
 
-Set the repository variable `PACK_REFRESH_CHAIN=paused` to stop successor
-dispatches. A run already in progress will finish normally. Remove the variable
-or set it to another value, then use the command above to restart the chain.
+Optional manual inputs allow a wider lookback or tournament-specific catch-up.
+Concurrency keeps an ad hoc request from overlapping an hourly refresh.
 
 Configure these repository secrets first:
 
