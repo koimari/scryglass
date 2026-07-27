@@ -82,6 +82,7 @@ TEAM_ALIASES: dict[str, str] = {
     "lng": "LNG Esports",
     "anyone's legend": "Anyone's Legend",
     "al": "Anyone's Legend",
+    "ag.al": "Anyone's Legend",
     "edward gaming": "Edward Gaming",
     "edg": "Edward Gaming",
     "invictus gaming": "Invictus Gaming",

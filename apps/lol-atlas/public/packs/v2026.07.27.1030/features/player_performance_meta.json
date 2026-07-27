@@ -1,0 +1,116 @@
+{
+  "artifact_schema_version": "1.0.0",
+  "model_family": "role_relative_15_minute_resource_performance",
+  "display_name": "15-minute resource performance",
+  "publication_status": "validated_narrow_descriptive_view",
+  "model_id": "player-performance-v1-b68f5668d226",
+  "model_hash": "b68f5668d2268752127ae2359c744d589f9847fda4357f486b3902b1df4d5c25",
+  "model_hash_scope": "canonical public player-role coefficient snapshot, predeclared configuration, chronological splits, and frozen-test metrics",
+  "grain": "one stable player ID by canonical role",
+  "source_contract": {
+    "provider": "Oracle's Elixir",
+    "source": "oe",
+    "datacompleteness": "complete",
+    "years": [
+      2025,
+      2026
+    ],
+    "identity_key": "provider playerid",
+    "name_is_identity": false,
+    "selection_audit": {
+      "input_rows": 163340,
+      "selected_complete_oe_rows": 150610,
+      "outside_year_window_rows": 0,
+      "non_oe_rows": 0,
+      "incomplete_rows": 12730
+    }
+  },
+  "estimand": "Descriptive role-relative 15-minute resource performance: the equal-weight mean of training-only robust standardized gold, experience, and creep-score differentials at 15 minutes.",
+  "target_components": [
+    "gold differential at 15 minutes",
+    "experience differential at 15 minutes",
+    "creep-score differential at 15 minutes"
+  ],
+  "target_combination": "equal-weight mean after training-only robust standardization within role, league, and patch with declared fallbacks",
+  "roles": [
+    "top",
+    "jng",
+    "mid",
+    "bot",
+    "sup"
+  ],
+  "effective_sample": {
+    "eligible_role_matchups": 72801,
+    "stable_identity_matchups": 72801,
+    "published_player_role_rows": 3147,
+    "test_player_rows": 35062
+  },
+  "fit_through": "2026-03-31 23:10:39+00:00",
+  "test_window": {
+    "start": "2026-04-01 08:11:43+00:00",
+    "end": "2026-07-18 16:33:48+00:00"
+  },
+  "uncertainty": {
+    "methods": [
+      "hutchinson_gaussian_ridge_covariance_12_probes"
+    ],
+    "conservative_z": 1.645,
+    "lower_bound": "mean minus 1.645 times the local Gaussian ridge standard deviation",
+    "interpretation": "prior-conditioned local coefficient uncertainty; not causal uncertainty and not a full Bayesian posterior"
+  },
+  "test_metrics": {
+    "rows": 35062,
+    "rmse": 1.0091657964616845,
+    "mae": 0.784639038152443,
+    "r2": 0.13440121596787202,
+    "spearman": 0.3477942690888258,
+    "zero_baseline_rmse": 1.0846864220727568,
+    "relative_rmse_lift": 0.06962438551296503
+  },
+  "context_only_test_metrics": {
+    "rows": 35062,
+    "rmse": 1.0307084399755169,
+    "mae": 0.8013072360974234,
+    "r2": 0.0970509257959955,
+    "spearman": 0.29737195674924044,
+    "zero_baseline_rmse": 1.0846864220727568,
+    "relative_rmse_lift": 0.04976367455037551
+  },
+  "player_incremental_test_contrast": {
+    "rows": 35062,
+    "calendar_day_blocks": 102,
+    "candidate_rmse": 1.0091657964616847,
+    "baseline_rmse": 1.0307084399755166,
+    "relative_rmse_lift": 0.020900812177635484,
+    "ci_low": 0.01736419159375319,
+    "ci_high": 0.02443795825066281,
+    "confidence_level": 0.95,
+    "bootstrap_replicates": 5000,
+    "resampling_unit": "calendar_day"
+  },
+  "non_estimands": [
+    "causal player skill",
+    "match-win probability",
+    "win contribution",
+    "roster-independent player value",
+    "complete-game performance"
+  ],
+  "limitations": [
+    "The target covers only 15-minute resource performance.",
+    "The target is observational and can reflect draft, lane, and team context.",
+    "Provider numeric patch values can lose trailing-zero precision.",
+    "Gaussian ridge uncertainty is an approximation, not a full Bayesian posterior.",
+    "Player/team/champion effects remain prior-sensitive when exposure is collinear.",
+    "GRID-only rows are excluded because the target fields are OE-derived."
+  ],
+  "research_anchors": [
+    "SIDO: arXiv:2403.04873",
+    "PandaSkill: arXiv:2501.10049"
+  ],
+  "ranking": {
+    "scope": "within canonical role",
+    "score": "lower_bound",
+    "ties": "minimum competition rank on exact unrounded values"
+  },
+  "validation_artifact": "features/player_performance_validation.json"
+}

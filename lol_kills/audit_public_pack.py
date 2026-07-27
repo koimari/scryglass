@@ -522,6 +522,52 @@ def _audit_side_grains(root: Path, maps: pd.DataFrame, findings: list[dict[str, 
                 )
             out[f"{label}_games_missing_maps"] = len(missing_maps)
             out[f"maps_missing_{label}_games"] = len(missing_side_rows)
+
+        if {"blue_team_key", "red_team_key"}.issubset(maps.columns):
+            expected = pd.concat(
+                [
+                    maps[[map_key, "blue_team_key"]].rename(
+                        columns={map_key: "gameid", "blue_team_key": "expected_team_key"}
+                    ).assign(side="Blue"),
+                    maps[[map_key, "red_team_key"]].rename(
+                        columns={map_key: "gameid", "red_team_key": "expected_team_key"}
+                    ).assign(side="Red"),
+                ],
+                ignore_index=True,
+            )
+            expected["gameid"] = expected["gameid"].astype(str)
+            for label, frame in (("team", team), ("player", player)):
+                if frame.empty or not {"gameid", "side", "team_key"}.issubset(frame.columns):
+                    continue
+                observed = frame[["gameid", "side", "team_key"]].copy()
+                observed["gameid"] = observed["gameid"].astype(str)
+                observed["side"] = observed["side"].astype(str).str.title()
+                compared = observed.merge(
+                    expected,
+                    on=["gameid", "side"],
+                    how="inner",
+                    validate="many_to_one",
+                )
+                mismatch = compared["team_key"].astype(str).ne(
+                    compared["expected_team_key"].astype(str)
+                )
+                mismatch_games = compared.loc[mismatch, "gameid"].drop_duplicates()
+                if not mismatch_games.empty:
+                    _add(
+                        findings,
+                        severity="launch blocker",
+                        code=f"{label}_map_team_identity_mismatch",
+                        grain=f"{label}-game/map organization",
+                        evidence=(
+                            f"The published {label} grain and map grain assign "
+                            "different canonical organizations to the same game side."
+                        ),
+                        count=int(len(mismatch_games)),
+                        examples=_examples(mismatch_games),
+                    )
+                out[f"{label}_map_team_identity_mismatch_games"] = int(
+                    len(mismatch_games)
+                )
     return out
 
 

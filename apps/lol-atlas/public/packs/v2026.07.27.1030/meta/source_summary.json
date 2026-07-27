@@ -1,0 +1,59 @@
+{
+  "schema_version": 2,
+  "data_as_of": "2026-07-18T16:33:48+00:00",
+  "sources": {
+    "team_games": {
+      "oe": {
+        "rows": 32668,
+        "maps": 16334
+      }
+    },
+    "player_games": {
+      "oe": {
+        "rows": 163340,
+        "maps": 16334
+      }
+    },
+    "canonical_map_inclusion": {
+      "oe": {
+        "rows": 16334,
+        "maps": 16334
+      }
+    },
+    "map_detail_enrichment": {
+      "oe_team_aggregate": {
+        "rows": 10138,
+        "maps": 10138
+      },
+      "oe_wide_feature_map": {
+        "rows": 6196,
+        "maps": 6196
+      }
+    }
+  },
+  "canonicalization": {
+    "identity_grain": "canonical game identity",
+    "overlap_precedence": "oracle_elixir_then_verified_grid_gap_fill",
+    "canonical_inclusion_field": "canonical_map_source",
+    "detail_enrichment_field": "map_detail_source",
+    "completion_requirement": [
+      "events_game_end",
+      "end_state_summary"
+    ],
+    "source_fields_retained": [
+      "source",
+      "source_oe",
+      "source_grid",
+      "canonical_map_source",
+      "map_detail_source",
+      "grid_completion_source"
+    ]
+  },
+  "completion_gate": {
+    "grid_games_seen": 0,
+    "grid_games_retained": 0,
+    "grid_games_excluded_unverified": 0,
+    "excluded_examples": []
+  },
+  "attribution": "Rows derive from Oracle's Elixir public match data. Obtain the raw CSVs from Oracle's Elixir; Scryglass canonicalizes identities and competition labels. Ratings, validation, and calibration are Scryglass calculations."
+}

@@ -272,7 +272,9 @@ def canonicalize_competition_frame(frame: pd.DataFrame) -> pd.DataFrame:
             "blue_teamname": "blue_team_key",
             "red_teamname": "red_team_key",
         }[column]
-        if key_column not in out.columns or column in ("blue_teamname", "red_teamname"):
-            out[key_column] = out[column].map(team_identity_key)
+        # Identity keys are derived data.  Always recompute them from the
+        # normalized display value so stale upstream keys cannot disagree
+        # with the canonical organization used by other public grains.
+        out[key_column] = out[column].map(team_identity_key)
 
     return out

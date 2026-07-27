@@ -1,0 +1,205 @@
+{
+  "schema_version": "scryglass.grubs.article.v1",
+  "publication_id": "void-grubs-contest-or-leave.patch-26.11",
+  "estimand": "article_opportunity_cost_sensitivity",
+  "units": "edge values are percentage points of associational map-win probability; p_star values are probabilities",
+  "mechanics": {
+    "patch": "26.11+",
+    "grub_cash_gold": 90.0,
+    "brief_touch_seconds": 8,
+    "touch_true_damage": 256,
+    "first_plate_hp": 900,
+    "first_plate_gold": 120,
+    "brief_touch_progress_gold_equivalent": 34.13,
+    "objective_gold_equivalent": 124.13,
+    "valuation": "upper_bound_plate_progress_equivalent_not_guaranteed_gold",
+    "hunger_mite_included": false
+  },
+  "model": {
+    "conversion": "side_neutral_gold10_associational_logit",
+    "intercept": 0.1611182873782888,
+    "gold_coefficient": 0.000666860223609559,
+    "fight_swing_gold": 600.0,
+    "secure_if_win": 1.0,
+    "secure_if_lose": 0.0
+  },
+  "reference_knobs": {
+    "baseline_gold": 0.0,
+    "objective_gold_equivalent": 124.13,
+    "two_wave_leave_farm_gold": 241.33,
+    "fight_swing_gold": 600.0
+  },
+  "p_star": 0.582420118348,
+  "p_star_pct": 58.24,
+  "edge_at_50_pp": -1.94,
+  "interpretation": "Within this fixed sensitivity comparison, contest and two-wave leave have equal modeled value at p_star. This is not an identified action threshold or universal shotcalling rule.",
+  "curve": [
+    {
+      "p_win_fight": 0.15,
+      "ev_contest_pp": -8.24,
+      "ev_leave_pp": 1.94,
+      "edge_contest_minus_leave_pp": -10.18,
+      "model_preference": "LEAVE"
+    },
+    {
+      "p_win_fight": 0.2,
+      "ev_contest_pp": -7.06,
+      "ev_leave_pp": 1.94,
+      "edge_contest_minus_leave_pp": -9.0,
+      "model_preference": "LEAVE"
+    },
+    {
+      "p_win_fight": 0.25,
+      "ev_contest_pp": -5.89,
+      "ev_leave_pp": 1.94,
+      "edge_contest_minus_leave_pp": -7.83,
+      "model_preference": "LEAVE"
+    },
+    {
+      "p_win_fight": 0.3,
+      "ev_contest_pp": -4.71,
+      "ev_leave_pp": 1.94,
+      "edge_contest_minus_leave_pp": -6.65,
+      "model_preference": "LEAVE"
+    },
+    {
+      "p_win_fight": 0.35,
+      "ev_contest_pp": -3.53,
+      "ev_leave_pp": 1.94,
+      "edge_contest_minus_leave_pp": -5.47,
+      "model_preference": "LEAVE"
+    },
+    {
+      "p_win_fight": 0.4,
+      "ev_contest_pp": -2.35,
+      "ev_leave_pp": 1.94,
+      "edge_contest_minus_leave_pp": -4.29,
+      "model_preference": "LEAVE"
+    },
+    {
+      "p_win_fight": 0.45,
+      "ev_contest_pp": -1.18,
+      "ev_leave_pp": 1.94,
+      "edge_contest_minus_leave_pp": -3.12,
+      "model_preference": "LEAVE"
+    },
+    {
+      "p_win_fight": 0.5,
+      "ev_contest_pp": 0.0,
+      "ev_leave_pp": 1.94,
+      "edge_contest_minus_leave_pp": -1.94,
+      "model_preference": "LEAVE"
+    },
+    {
+      "p_win_fight": 0.6,
+      "ev_contest_pp": 2.35,
+      "ev_leave_pp": 1.94,
+      "edge_contest_minus_leave_pp": 0.41,
+      "model_preference": "CONTEST"
+    },
+    {
+      "p_win_fight": 0.7,
+      "ev_contest_pp": 4.71,
+      "ev_leave_pp": 1.94,
+      "edge_contest_minus_leave_pp": 2.77,
+      "model_preference": "CONTEST"
+    },
+    {
+      "p_win_fight": 0.75,
+      "ev_contest_pp": 5.89,
+      "ev_leave_pp": 1.94,
+      "edge_contest_minus_leave_pp": 3.95,
+      "model_preference": "CONTEST"
+    }
+  ],
+  "by_leave_farm_F": [
+    {
+      "label": "no_farm",
+      "leave_farm_gold": 0.0,
+      "p_star_at_parity": 0.412712,
+      "p_star_at_parity_pct": 41.27,
+      "p_star_at_B_plus_1183": 0.455746,
+      "p_star_at_B_plus_1183_pct": 45.57
+    },
+    {
+      "label": "one_wave",
+      "leave_farm_gold": 120.67,
+      "p_star_at_parity": 0.497566,
+      "p_star_at_parity_pct": 49.76,
+      "p_star_at_B_plus_1183": 0.5413,
+      "p_star_at_B_plus_1183_pct": 54.13
+    },
+    {
+      "label": "two_waves",
+      "leave_farm_gold": 241.33,
+      "p_star_at_parity": 0.58242,
+      "p_star_at_parity_pct": 58.24,
+      "p_star_at_B_plus_1183": 0.624353,
+      "p_star_at_B_plus_1183_pct": 62.44
+    }
+  ],
+  "by_precontest_gold_B_two_wave_leave": [
+    {
+      "B_gold": 0.0,
+      "leave_farm_gold": 241.33,
+      "objective_gold": 124.13,
+      "p_star": 0.58242,
+      "p_star_pct": 58.24
+    },
+    {
+      "B_gold": -500.0,
+      "leave_farm_gold": 241.33,
+      "objective_gold": 124.13,
+      "p_star": 0.563617,
+      "p_star_pct": 56.36
+    },
+    {
+      "B_gold": -1000.0,
+      "leave_farm_gold": 241.33,
+      "objective_gold": 124.13,
+      "p_star": 0.54554,
+      "p_star_pct": 54.55
+    },
+    {
+      "B_gold": -2000.0,
+      "leave_farm_gold": 241.33,
+      "objective_gold": 124.13,
+      "p_star": 0.514592,
+      "p_star_pct": 51.46
+    },
+    {
+      "B_gold": 500.0,
+      "leave_farm_gold": 241.33,
+      "objective_gold": 124.13,
+      "p_star": 0.60099,
+      "p_star_pct": 60.1
+    },
+    {
+      "B_gold": 1000.0,
+      "leave_farm_gold": 241.33,
+      "objective_gold": 124.13,
+      "p_star": 0.618411,
+      "p_star_pct": 61.84
+    },
+    {
+      "B_gold": 1183.0,
+      "leave_farm_gold": 241.33,
+      "objective_gold": 124.13,
+      "p_star": 0.624353,
+      "p_star_pct": 62.44
+    },
+    {
+      "B_gold": 1200.0,
+      "leave_farm_gold": 241.33,
+      "objective_gold": 124.13,
+      "p_star": 0.624891,
+      "p_star_pct": 62.49
+    }
+  ],
+  "limitations": [
+    "Gold-at-10 to map-win is an associational conversion, not a causal effect.",
+    "Fight-win probability is exogenous rather than estimated from champions, position, vision, cooldowns, or player form.",
+    "The 34.13g Touch term is an upper-bound plate-progress equivalent, not guaranteed immediate gold.",
+    "The comparison does not identify a live action policy and should not be used as a universal contest threshold."
+  ]
+}

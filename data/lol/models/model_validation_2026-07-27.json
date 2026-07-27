@@ -187,7 +187,7 @@
         "candidate_minus_dual_elo_brier": -0.00293,
         "brier_interval_95": [
           -0.005868,
-          -0.0000473
+          -4.73e-05
         ]
       }
     },
@@ -265,7 +265,7 @@
         "candidate_minus_old_dual_elo_brier": -0.003091371,
         "candidate_minus_old_dual_elo_brier_interval_95": [
           -0.006120845,
-          0.000037714
+          3.7714e-05
         ]
       }
     },
@@ -354,10 +354,10 @@
   },
   "team_rating": {
     "model_id": "series_dynamic_bt",
-    "model_version": "series_dynamic_bt:0b1dfe5c1df0:83ebfc407c17",
-    "model_code_sha256": "0b1dfe5c1df0909cf955a1d17423f76c5c4d832b28a33ac4d0ceff4227abef4d",
+    "model_version": "series_dynamic_bt:1cdf4c94fa24:83ebfc407c17",
+    "model_code_sha256": "1cdf4c94fa242fbd4a0ef31d59d44d9323f4b7b7b18fe927d02bc6fba24dd571",
     "model_config_sha256": "83ebfc407c17a4023ae3fe88fce7476d28b062df97e60635c2a7ead636c7c43c",
-    "observation_rows_sha256": "793f82846e92453a47bbdeda9d91f474df444688a452758b9bdbf08b9d388f42",
+    "observation_rows_sha256": "80cb60bc11afb1e267983c487ac20129ad95e42a7c0a38fc27df3dabff65db1b",
     "estimand": "pre_series_organization_strength_probability",
     "gate_status": "passed",
     "temporal_audit": {
@@ -367,16 +367,16 @@
       "test_labels_used_for_selection": false
     },
     "final_test": {
-      "series": 1771,
-      "log_loss": 0.586208143573173,
-      "brier": 0.20006934263591877,
-      "ece_10_equal_width": 0.02778108015715976,
+      "series": 1630,
+      "log_loss": 0.5849059308587136,
+      "brier": 0.19947890579834743,
+      "ece_10_equal_width": 0.02920068736769051,
       "format_stratified_calibration": {
         "Bo1": {
-          "n": 526,
-          "log_loss": 0.6099541442737934,
-          "brier": 0.2097555475277954,
-          "ece": 0.044591320832259376,
+          "n": 446,
+          "log_loss": 0.6045721027849533,
+          "brier": 0.20727027525022124,
+          "ece": 0.0447370408138057,
           "ece_bins": 10,
           "calibration_bins": [
             {
@@ -392,189 +392,189 @@
               "bin": 1,
               "lower": 0.1,
               "upper": 0.2,
-              "n": 15,
-              "mean_probability": 0.16073041017527218,
-              "observed_rate": 0.26666666666666666,
-              "absolute_gap": 0.10593625649139449
+              "n": 11,
+              "mean_probability": 0.16749560368173413,
+              "observed_rate": 0.2727272727272727,
+              "absolute_gap": 0.10523166904553857
             },
             {
               "bin": 2,
               "lower": 0.2,
               "upper": 0.3,
-              "n": 50,
-              "mean_probability": 0.25187691300483267,
-              "observed_rate": 0.2,
-              "absolute_gap": 0.05187691300483266
+              "n": 42,
+              "mean_probability": 0.25464898878075826,
+              "observed_rate": 0.19047619047619047,
+              "absolute_gap": 0.06417279830456779
             },
             {
               "bin": 3,
               "lower": 0.3,
               "upper": 0.4,
-              "n": 73,
-              "mean_probability": 0.3505954229747375,
-              "observed_rate": 0.3698630136986301,
-              "absolute_gap": 0.019267590723892614
+              "n": 63,
+              "mean_probability": 0.34867646993321244,
+              "observed_rate": 0.3492063492063492,
+              "absolute_gap": 0.0005298792731367463
             },
             {
               "bin": 4,
               "lower": 0.4,
               "upper": 0.5,
-              "n": 92,
-              "mean_probability": 0.45694886470528906,
-              "observed_rate": 0.45652173913043476,
-              "absolute_gap": 0.00042712557485430347
+              "n": 79,
+              "mean_probability": 0.45644264572024107,
+              "observed_rate": 0.46835443037974683,
+              "absolute_gap": 0.011911784659505764
             },
             {
               "bin": 5,
               "lower": 0.5,
               "upper": 0.6,
-              "n": 109,
-              "mean_probability": 0.5523781239639459,
-              "observed_rate": 0.6055045871559633,
-              "absolute_gap": 0.053126463192017415
+              "n": 88,
+              "mean_probability": 0.5542613502310899,
+              "observed_rate": 0.5795454545454546,
+              "absolute_gap": 0.025284104314364675
             },
             {
               "bin": 6,
               "lower": 0.6,
               "upper": 0.7,
-              "n": 89,
-              "mean_probability": 0.6453106457862806,
-              "observed_rate": 0.7078651685393258,
-              "absolute_gap": 0.06255452275304518
+              "n": 79,
+              "mean_probability": 0.645073157181621,
+              "observed_rate": 0.7341772151898734,
+              "absolute_gap": 0.0891040580082525
             },
             {
               "bin": 7,
               "lower": 0.7,
               "upper": 0.8,
-              "n": 58,
-              "mean_probability": 0.7510673074377585,
-              "observed_rate": 0.8448275862068966,
-              "absolute_gap": 0.09376027876913806
+              "n": 50,
+              "mean_probability": 0.7489448120204892,
+              "observed_rate": 0.84,
+              "absolute_gap": 0.09105518797951073
             },
             {
               "bin": 8,
               "lower": 0.8,
               "upper": 0.9,
-              "n": 36,
-              "mean_probability": 0.8391328003978423,
-              "observed_rate": 0.8333333333333334,
-              "absolute_gap": 0.005799467064508956
+              "n": 31,
+              "mean_probability": 0.8400259509413788,
+              "observed_rate": 0.8064516129032258,
+              "absolute_gap": 0.03357433803815302
             },
             {
               "bin": 9,
               "lower": 0.9,
               "upper": 1.0,
-              "n": 3,
-              "mean_probability": 0.9089354957801383,
-              "observed_rate": 0.6666666666666666,
-              "absolute_gap": 0.2422688291134717
+              "n": 2,
+              "mean_probability": 0.9133899046598885,
+              "observed_rate": 1.0,
+              "absolute_gap": 0.08661009534011155
             }
           ]
         },
         "Bo3": {
-          "n": 1019,
-          "log_loss": 0.5593469167003378,
-          "brier": 0.1885836787630189,
-          "ece": 0.035485996531764,
+          "n": 963,
+          "log_loss": 0.5597932435947447,
+          "brier": 0.1887597883284713,
+          "ece": 0.03505898018698291,
           "ece_bins": 10,
           "calibration_bins": [
             {
               "bin": 0,
               "lower": 0.0,
               "upper": 0.1,
-              "n": 35,
-              "mean_probability": 0.06983756226264701,
-              "observed_rate": 0.14285714285714285,
-              "absolute_gap": 0.07301958059449584
+              "n": 34,
+              "mean_probability": 0.06891894173770957,
+              "observed_rate": 0.14705882352941177,
+              "absolute_gap": 0.0781398817917022
             },
             {
               "bin": 1,
               "lower": 0.1,
               "upper": 0.2,
-              "n": 85,
-              "mean_probability": 0.15071477087949758,
-              "observed_rate": 0.08235294117647059,
-              "absolute_gap": 0.068361829703027
+              "n": 79,
+              "mean_probability": 0.15048354243844086,
+              "observed_rate": 0.08860759493670886,
+              "absolute_gap": 0.061875947501732004
             },
             {
               "bin": 2,
               "lower": 0.2,
               "upper": 0.3,
-              "n": 133,
-              "mean_probability": 0.2522993114756828,
-              "observed_rate": 0.22556390977443608,
-              "absolute_gap": 0.02673540170124672
+              "n": 127,
+              "mean_probability": 0.25252503717959074,
+              "observed_rate": 0.23622047244094488,
+              "absolute_gap": 0.01630456473864586
             },
             {
               "bin": 3,
               "lower": 0.3,
               "upper": 0.4,
-              "n": 129,
-              "mean_probability": 0.346270675421978,
-              "observed_rate": 0.2868217054263566,
-              "absolute_gap": 0.05944896999562138
+              "n": 124,
+              "mean_probability": 0.34582964088592594,
+              "observed_rate": 0.28225806451612906,
+              "absolute_gap": 0.06357157636979688
             },
             {
               "bin": 4,
               "lower": 0.4,
               "upper": 0.5,
-              "n": 134,
-              "mean_probability": 0.45060066308712476,
-              "observed_rate": 0.417910447761194,
-              "absolute_gap": 0.03269021532593075
+              "n": 127,
+              "mean_probability": 0.4494953026051575,
+              "observed_rate": 0.4330708661417323,
+              "absolute_gap": 0.01642443646342523
             },
             {
               "bin": 5,
               "lower": 0.5,
               "upper": 0.6,
-              "n": 141,
-              "mean_probability": 0.5521725070437402,
-              "observed_rate": 0.5673758865248227,
-              "absolute_gap": 0.015203379481082524
+              "n": 127,
+              "mean_probability": 0.5513598924787714,
+              "observed_rate": 0.5748031496062992,
+              "absolute_gap": 0.023443257127527817
             },
             {
               "bin": 6,
               "lower": 0.6,
               "upper": 0.7,
-              "n": 143,
-              "mean_probability": 0.6532385973863051,
-              "observed_rate": 0.7062937062937062,
-              "absolute_gap": 0.05305510890740117
+              "n": 136,
+              "mean_probability": 0.6522917265918918,
+              "observed_rate": 0.7058823529411765,
+              "absolute_gap": 0.05359062634928469
             },
             {
               "bin": 7,
               "lower": 0.7,
               "upper": 0.8,
-              "n": 98,
-              "mean_probability": 0.7482733258954681,
-              "observed_rate": 0.7346938775510204,
-              "absolute_gap": 0.013579448344447687
+              "n": 94,
+              "mean_probability": 0.7479236080014411,
+              "observed_rate": 0.7340425531914894,
+              "absolute_gap": 0.01388105480995172
             },
             {
               "bin": 8,
               "lower": 0.8,
               "upper": 0.9,
-              "n": 89,
-              "mean_probability": 0.8508140256768381,
-              "observed_rate": 0.8539325842696629,
-              "absolute_gap": 0.0031185585928248383
+              "n": 85,
+              "mean_probability": 0.8510532741453918,
+              "observed_rate": 0.8705882352941177,
+              "absolute_gap": 0.019534961148725882
             },
             {
               "bin": 9,
               "lower": 0.9,
               "upper": 1.0,
-              "n": 32,
-              "mean_probability": 0.9328025149318404,
-              "observed_rate": 0.90625,
-              "absolute_gap": 0.02655251493184041
+              "n": 30,
+              "mean_probability": 0.9315491258505364,
+              "observed_rate": 0.9,
+              "absolute_gap": 0.031549125850536375
             }
           ]
         },
         "Bo5": {
-          "n": 226,
-          "log_loss": 0.6520541339045567,
-          "brier": 0.22931247411095365,
-          "ece": 0.09993243072221224,
+          "n": 221,
+          "log_loss": 0.6546453207053151,
+          "brier": 0.23046333723705778,
+          "ece": 0.09662082931842568,
           "ece_bins": 10,
           "calibration_bins": [
             {
@@ -617,28 +617,28 @@
               "bin": 4,
               "lower": 0.4,
               "upper": 0.5,
-              "n": 45,
-              "mean_probability": 0.45274024441177124,
-              "observed_rate": 0.6666666666666666,
-              "absolute_gap": 0.2139264222548954
+              "n": 43,
+              "mean_probability": 0.4514372048956731,
+              "observed_rate": 0.6511627906976745,
+              "absolute_gap": 0.19972558580200134
             },
             {
               "bin": 5,
               "lower": 0.5,
               "upper": 0.6,
-              "n": 55,
-              "mean_probability": 0.5557204293964464,
-              "observed_rate": 0.5636363636363636,
-              "absolute_gap": 0.00791593423991721
+              "n": 54,
+              "mean_probability": 0.5549831468426957,
+              "observed_rate": 0.5555555555555556,
+              "absolute_gap": 0.0005724087128599065
             },
             {
               "bin": 6,
               "lower": 0.6,
               "upper": 0.7,
-              "n": 32,
-              "mean_probability": 0.6453249869280255,
-              "observed_rate": 0.46875,
-              "absolute_gap": 0.17657498692802553
+              "n": 31,
+              "mean_probability": 0.6466161418147,
+              "observed_rate": 0.45161290322580644,
+              "absolute_gap": 0.1950032385888935
             },
             {
               "bin": 7,
@@ -653,10 +653,10 @@
               "bin": 8,
               "lower": 0.8,
               "upper": 0.9,
-              "n": 8,
-              "mean_probability": 0.8502008430929986,
-              "observed_rate": 0.875,
-              "absolute_gap": 0.024799156907001407
+              "n": 7,
+              "mean_probability": 0.8549826426379299,
+              "observed_rate": 0.8571428571428571,
+              "absolute_gap": 0.002160214504927205
             },
             {
               "bin": 9,
@@ -675,14 +675,14 @@
       "baseline_model_id": "rolling_series_elo",
       "primary_score": "log_loss",
       "score": "log_loss",
-      "series": 1771,
-      "candidate_score": 0.586208143573173,
-      "baseline_score": 0.6216632899478263,
-      "candidate_minus_baseline": -0.03545514637465325,
+      "series": 1630,
+      "candidate_score": 0.5849059308587136,
+      "baseline_score": 0.6190452367842632,
+      "candidate_minus_baseline": -0.03413930592554961,
       "confidence_level": 0.95,
       "confidence_interval": [
-        -0.04806724122039632,
-        -0.021905156099792565
+        -0.04701428607124107,
+        -0.020867912221588545
       ],
       "noninferiority_margin": 0.005,
       "decision": "superior",
@@ -695,14 +695,14 @@
     },
     "secondary_comparison": {
       "score": "log_loss",
-      "series": 1771,
-      "candidate_score": 0.586208143573173,
-      "baseline_score": 0.6931471805599454,
-      "candidate_minus_baseline": -0.1069390369867723,
+      "series": 1630,
+      "candidate_score": 0.5849059308587136,
+      "baseline_score": 0.6931471805599453,
+      "candidate_minus_baseline": -0.1082412497012318,
       "confidence_level": 0.95,
       "confidence_interval": [
-        -0.1273104469478964,
-        -0.08640603304598699
+        -0.12806789788595993,
+        -0.08723582009865158
       ],
       "noninferiority_margin": 0.005,
       "decision": "superior",

@@ -1,0 +1,146 @@
+{
+  "artifact_schema_version": "1.0.0",
+  "model_id": "player-performance-v1-b68f5668d226",
+  "model_hash": "b68f5668d2268752127ae2359c744d589f9847fda4357f486b3902b1df4d5c25",
+  "model_hash_scope": "canonical public player-role coefficient snapshot, predeclared configuration, chronological splits, and frozen-test metrics",
+  "evaluation_target": "held-out role-relative 15-minute resource performance",
+  "estimand": "Descriptive role-relative 15-minute resource performance: the equal-weight mean of training-only robust standardized gold, experience, and creep-score differentials at 15 minutes.",
+  "non_estimands": [
+    "causal player skill",
+    "match-win probability",
+    "win contribution",
+    "roster-independent player value",
+    "complete-game performance"
+  ],
+  "roles": [
+    "top",
+    "jng",
+    "mid",
+    "bot",
+    "sup"
+  ],
+  "effective_sample": {
+    "eligible_role_matchups": 72801,
+    "stable_identity_matchups": 72801,
+    "test_player_rows": 35062
+  },
+  "test_gate_passed": true,
+  "split_boundaries": {
+    "train_start": "2025-01-11 11:11:24+00:00",
+    "train_end": "2025-12-06 13:10:13+00:00",
+    "validation_start": "2025-12-07 06:06:14+00:00",
+    "validation_end": "2026-03-31 23:10:39+00:00",
+    "test_start": "2026-04-01 08:11:43+00:00",
+    "test_end": "2026-07-18 16:33:48+00:00"
+  },
+  "selected_base_penalty": 8.0,
+  "selected_context_base_penalty": 8.0,
+  "validation_candidates": [
+    {
+      "base_penalty": 8.0,
+      "validation_rows": 22210,
+      "validation_rmse": 1.0624674890989119,
+      "validation_mae": 0.8204164681501152,
+      "validation_r2": 0.08273510856728994,
+      "validation_spearman": 0.27283353633979773,
+      "zero_baseline_rmse": 1.109349173692019,
+      "relative_rmse_lift": 0.04226053050283561,
+      "context_validation_rmse": 1.0773871691213461,
+      "context_validation_mae": 0.8312446000574419,
+      "context_validation_r2": 0.056792881451851684,
+      "context_validation_spearman": 0.22833506734441994
+    },
+    {
+      "base_penalty": 32.0,
+      "validation_rows": 22210,
+      "validation_rmse": 1.0663995354405134,
+      "validation_mae": 0.8221879158708952,
+      "validation_r2": 0.07593320243753854,
+      "validation_spearman": 0.2658776703555081,
+      "zero_baseline_rmse": 1.109349173692019,
+      "relative_rmse_lift": 0.03871606818668742,
+      "context_validation_rmse": 1.0779791016292248,
+      "context_validation_mae": 0.8314100388908724,
+      "context_validation_r2": 0.05575617274693956,
+      "context_validation_spearman": 0.2309642837080804
+    },
+    {
+      "base_penalty": 2.0,
+      "validation_rows": 22210,
+      "validation_rmse": 1.0674736071228714,
+      "validation_mae": 0.8268861452459154,
+      "validation_r2": 0.07407083514620316,
+      "validation_spearman": 0.27076479518086505,
+      "zero_baseline_rmse": 1.109349173692019,
+      "relative_rmse_lift": 0.03774786835580509,
+      "context_validation_rmse": 1.0833375465218817,
+      "context_validation_mae": 0.8365654486312478,
+      "context_validation_r2": 0.046345500698150244,
+      "context_validation_spearman": 0.22167137316041144
+    },
+    {
+      "base_penalty": 128.0,
+      "validation_rows": 22210,
+      "validation_rmse": 1.0770391948511824,
+      "validation_mae": 0.8306114583658146,
+      "validation_r2": 0.05740205671438792,
+      "validation_spearman": 0.25079525509241246,
+      "zero_baseline_rmse": 1.109349173692019,
+      "relative_rmse_lift": 0.02912516600459156,
+      "context_validation_rmse": 1.0853223897351105,
+      "context_validation_mae": 0.8374491734065383,
+      "context_validation_r2": 0.042847812153803067,
+      "context_validation_spearman": 0.2163337231435952
+    }
+  ],
+  "test_metrics": {
+    "rows": 35062,
+    "rmse": 1.0091657964616845,
+    "mae": 0.784639038152443,
+    "r2": 0.13440121596787202,
+    "spearman": 0.3477942690888258,
+    "zero_baseline_rmse": 1.0846864220727568,
+    "relative_rmse_lift": 0.06962438551296503
+  },
+  "test_context_baseline_metrics": {
+    "rows": 35062,
+    "rmse": 1.0307084399755169,
+    "mae": 0.8013072360974234,
+    "r2": 0.0970509257959955,
+    "spearman": 0.29737195674924044,
+    "zero_baseline_rmse": 1.0846864220727568,
+    "relative_rmse_lift": 0.04976367455037551
+  },
+  "player_incremental_test_rmse_lift": 0.02090081217763591,
+  "player_incremental_test_contrast": {
+    "rows": 35062,
+    "calendar_day_blocks": 102,
+    "candidate_rmse": 1.0091657964616847,
+    "baseline_rmse": 1.0307084399755166,
+    "relative_rmse_lift": 0.020900812177635484,
+    "ci_low": 0.01736419159375319,
+    "ci_high": 0.02443795825066281,
+    "confidence_level": 0.95,
+    "bootstrap_replicates": 5000,
+    "resampling_unit": "calendar_day"
+  },
+  "future_patch_test_metrics": {
+    "rows": 33808,
+    "rmse": 1.0092124107996212,
+    "mae": 0.7851558355542327,
+    "r2": 0.13290352056574806,
+    "spearman": 0.34597156481787344,
+    "zero_baseline_rmse": 1.0837993124425138,
+    "relative_rmse_lift": 0.06881984587607755
+  },
+  "roster_move_test_metrics": {
+    "rows": 7491,
+    "rmse": 1.0202620300454934,
+    "mae": 0.7963462151367976,
+    "r2": 0.12094928574454467,
+    "spearman": 0.3279195074409118,
+    "zero_baseline_rmse": 1.0882898291832264,
+    "relative_rmse_lift": 0.0625088991126459
+  },
+  "large_prediction_ledger_exported": false
+}

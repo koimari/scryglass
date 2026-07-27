@@ -120,6 +120,24 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertEqual(row["red_team_source"], "DRX")
         self.assertEqual(row["red_team_key"], "drx")
 
+    def test_event_alias_replaces_stale_upstream_team_key(self) -> None:
+        row = canonicalize_competition_frame(
+            pd.DataFrame(
+                [
+                    {
+                        "league": "EWC",
+                        "blue_team": "AG.AL",
+                        "blue_team_key": "ag-al",
+                        "red_team": "Dplus Kia",
+                        "red_team_key": "dplus-kia",
+                    }
+                ]
+            )
+        ).iloc[0]
+        self.assertEqual(row["blue_team_source"], "AG.AL")
+        self.assertEqual(row["blue_team"], "Anyone's Legend")
+        self.assertEqual(row["blue_team_key"], "anyone-s-legend")
+
     def test_generic_lta_is_interregional_not_domestic(self) -> None:
         label = classify_competition("LTA", None)
         self.assertEqual(label.league, "AMERICAS")
