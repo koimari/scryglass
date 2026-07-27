@@ -11,6 +11,7 @@ import type {
   DraftSide,
 } from "@/lib/draftScore";
 import { champIconUrl } from "@/lib/format";
+import styles from "./DraftSandbox.module.css";
 
 const DRAFT_ROLES: DraftRole[] = ["top", "jng", "mid", "bot", "sup"];
 
@@ -169,81 +170,82 @@ function RecommendationTable({
   perspective: DraftSide;
   onPick: (row: DraftRecommendation) => void;
 }) {
+  const [showAll, setShowAll] = useState(false);
   if (!rows.length) {
     return <p className="sandbox-empty">No legal candidates match this role filter.</p>;
   }
+  const visibleRows = showAll ? rows : rows.slice(0, 8);
   return (
-    <div className="table-scroll sandbox-recommendation-scroll">
-      <table className="data-table sandbox-recommendations">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Candidate</th>
-            <th>Role</th>
-            <th>{sideLabel(perspective)} projected WR</th>
-            <th>Change</th>
-            <th>Pro games</th>
-            <th>Model decomposition <small>log-odds</small></th>
-            <th>Player fit</th>
-            <th><span className="sr-only">Select</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={`${row.champion}-${row.role}`}>
-              <td className="font-mono">{index + 1}</td>
-              <td>
-                <span className="sandbox-candidate-name">
-                  <span
-                    className="sandbox-champion-portrait"
-                    aria-hidden
-                    style={{ backgroundImage: `url("${champIconUrl(row.champion)}")` }}
-                  />
-                  <strong>{row.champion}</strong>
+    <>
+      <ol className="sandbox-recommendations" aria-label="Ranked draft responses">
+        {visibleRows.map((row, index) => (
+          <li key={`${row.champion}-${row.role}`}>
+          <span className="sandbox-recommendation-rank" aria-label={`Rank ${index + 1}`}>
+            {index + 1}
+          </span>
+          <span className="sandbox-candidate-name">
+            <span
+              className="sandbox-champion-portrait"
+              aria-hidden
+              style={{ backgroundImage: `url("${champIconUrl(row.champion)}")` }}
+            />
+            <span>
+              <strong>{row.champion}</strong>
+              <small>
+                {row.role ? ROLE_LABEL[row.role] : "Unassigned"} · {row.sample_games} pro games
+                {row.player ? ` · ${row.player}` : ""}
+              </small>
+            </span>
+          </span>
+          <span className="sandbox-recommendation-value">
+            <small>{sideLabel(perspective)} projected WR</small>
+            <strong>{(100 * row.projected_wr).toFixed(2)}%</strong>
+          </span>
+          <span
+            className={`sandbox-recommendation-change ${
+              row.delta_pp >= 0 ? "sandbox-positive" : "sandbox-negative"
+            }`}
+          >
+            <small>Change</small>
+            <strong>{signedPp(row.delta_pp)}</strong>
+          </span>
+          <button type="button" className="sandbox-use-pick" onClick={() => onPick(row)}>
+            Use pick
+          </button>
+          <details className="sandbox-recommendation-detail">
+            <summary>Why this pick</summary>
+            <div className="sandbox-driver-ledger">
+              {componentEntries(row).map(([label, value]) => (
+                <span
+                  className={value > 0 ? "is-positive" : value < 0 ? "is-negative" : ""}
+                  key={label}
+                >
+                  <em>{label}</em>
+                  <strong>{signedModel(value)}</strong>
                 </span>
-              </td>
-              <td>{row.role ? ROLE_LABEL[row.role] : "Unassigned"}</td>
-              <td className="font-mono">{(100 * row.projected_wr).toFixed(2)}%</td>
-              <td className={`font-mono ${row.delta_pp >= 0 ? "sandbox-positive" : "sandbox-negative"}`}>
-                {signedPp(row.delta_pp)}
-              </td>
-              <td className="font-mono">{row.sample_games}</td>
-              <td>
-                <div className="sandbox-driver-ledger">
-                  {componentEntries(row).map(([label, value]) => (
-                    <span
-                      className={value > 0 ? "is-positive" : value < 0 ? "is-negative" : ""}
-                      key={label}
-                    >
-                      <em>{label}</em>
-                      <strong>{signedModel(value)}</strong>
-                    </span>
-                  ))}
-                </div>
-                <small>{row.evidence} champion prior</small>
-              </td>
-              <td>
-                {row.player ? (
-                  <>
-                    <strong>{row.player}</strong>
-                    <small>
-                      {row.player_games > 0
-                        ? `${row.player_games} games on champion`
-                        : "Neutral comfort prior"}
-                    </small>
-                  </>
-                ) : "No lineup"}
-              </td>
-              <td>
-                <button type="button" className="sandbox-use-pick" onClick={() => onPick(row)}>
-                  Use pick
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+              ))}
+            </div>
+            <p>
+              {row.evidence} champion prior
+              {row.player
+                ? ` · ${row.player_games > 0 ? `${row.player_games} player games` : "neutral comfort prior"}`
+                : " · no lineup selected"}
+            </p>
+          </details>
+          </li>
+        ))}
+      </ol>
+      {rows.length > 8 ? (
+        <button
+          type="button"
+          className="sandbox-more-responses"
+          onClick={() => setShowAll((current) => !current)}
+          aria-expanded={showAll}
+        >
+          {showAll ? "Show top 8 only" : `Show ${rows.length - 8} more responses`}
+        </button>
+      ) : null}
+    </>
   );
 }
 
@@ -285,6 +287,10 @@ function TeamContextPanel({
     tier2: teams.filter((candidate) => candidate.tier === "tier2"),
     tier3: teams.filter((candidate) => candidate.tier === "tier3"),
   };
+  const lineupSummary = DRAFT_ROLES
+    .map((role) => lineup[role])
+    .filter((player): player is string => Boolean(player))
+    .join(" · ");
   return (
     <section className={`sandbox-team-context sandbox-team-context-${side}`}>
       <header>
@@ -314,33 +320,39 @@ function TeamContextPanel({
         </select>
       </label>
       {team ? (
-        <div className="sandbox-lineup">
-          {DRAFT_ROLES.map((role) => {
-            const candidates = team.roster.filter((player) => player.role === role);
-            const current = candidates.find((player) => player.player === lineup[role]);
-            return (
-              <label key={role}>
-                <span>{ROLE_LABEL[role]}</span>
-                <select
-                  value={lineup[role] ?? ""}
-                  onChange={(event) => onPlayer(role, event.target.value)}
-                >
-                  <option value="">Unassigned</option>
-                  {candidates.map((player) => (
-                    <option value={player.player} key={player.player}>
-                      {player.player}
-                    </option>
-                  ))}
-                </select>
-                <small>
-                  {current
-                    ? `${current.rating.toFixed(0)} Elo · ${current.n_maps} maps`
-                    : "Neutral player prior"}
-                </small>
-              </label>
-            );
-          })}
-        </div>
+        <details className="sandbox-lineup-details">
+          <summary>
+            <span>Lineup</span>
+            <strong>{lineupSummary || "Set players"}</strong>
+          </summary>
+          <div className="sandbox-lineup">
+            {DRAFT_ROLES.map((role) => {
+              const candidates = team.roster.filter((player) => player.role === role);
+              const current = candidates.find((player) => player.player === lineup[role]);
+              return (
+                <label key={role}>
+                  <span>{ROLE_LABEL[role]}</span>
+                  <select
+                    value={lineup[role] ?? ""}
+                    onChange={(event) => onPlayer(role, event.target.value)}
+                  >
+                    <option value="">Unassigned</option>
+                    {candidates.map((player) => (
+                      <option value={player.player} key={player.player}>
+                        {player.player}
+                      </option>
+                    ))}
+                  </select>
+                  <small>
+                    {current
+                      ? `${current.rating.toFixed(0)} Elo · ${current.n_maps} maps`
+                      : "Neutral player prior"}
+                  </small>
+                </label>
+              );
+            })}
+          </div>
+        </details>
       ) : (
         <p className="sandbox-team-empty">
           Select both teams to add the calibrated strength prior. Lineups supply role-specific
@@ -643,20 +655,21 @@ export function DraftSandbox({
   };
 
   return (
-    <div className="sandbox-page">
-      <header className="page-header">
-        <p className="blog-kicker">Professional draft analysis</p>
-        <h1 className="font-display mt-2 text-3xl">Draft sandbox</h1>
-        <p className="lede">
-          Compare legal responses against the exact draft state. Recommendations separate champion
-          strength, allied synergy, enemy counters, player comfort, and team strength.
-        </p>
-        <div className="sandbox-model-stamp">
-          <span><strong>{catalog.length}</strong> current champions</span>
-          <span><strong>{analysis?.model.maps?.toLocaleString() ?? "16,334"}</strong> professional maps</span>
-          <span><strong>Rolling-time</strong> interaction validation</span>
+    <div className={`${styles.root} sandbox-page`}>
+      <header className={styles.header}>
+        <div className={styles.headerCopy}>
+          <h1>Draft analysis</h1>
+          <p>
+            Compare legal picks for the current draft. Composition, team strength, player rating,
+            and champion comfort remain separate.
+          </p>
+          <div className={styles.headerMeta}>
+            <span>{catalog.length} champions</span>
+            <span>{analysis?.model.maps?.toLocaleString() ?? "16,334"} professional maps</span>
+            <span>Rolling-time validation</span>
+          </div>
         </div>
-        <div className="sandbox-header-actions">
+        <div className={styles.headerActions}>
           <button type="button" className="sandbox-secondary-button" onClick={() => {
             setActions([]);
             setExcluded([]);
@@ -675,9 +688,8 @@ export function DraftSandbox({
 
       <section className="sandbox-strength-section" aria-labelledby="strength-context-heading">
         <div className="sandbox-section-intro">
-          <p className="sandbox-step">01 · Strength context</p>
           <div>
-            <h2 id="strength-context-heading">Who is playing?</h2>
+            <h2 id="strength-context-heading">Match context</h2>
             <p>
               Team Elo sets the match prior. The selected lineup adds role-weighted player Elo and
               champion-specific comfort.
@@ -710,9 +722,8 @@ export function DraftSandbox({
 
       <section className="sandbox-draft-section" aria-labelledby="draft-state-heading">
         <div className="sandbox-section-intro">
-          <p className="sandbox-step">02 · Draft state</p>
           <div>
-            <h2 id="draft-state-heading">Build the current board</h2>
+            <h2 id="draft-state-heading">Draft state</h2>
             <p>The next legal seat and the evaluation perspective stay visible while you branch.</p>
           </div>
         </div>
@@ -758,19 +769,6 @@ export function DraftSandbox({
         </div>
       </section>
 
-      <BanWorkbench
-        catalog={catalog}
-        selected={selected}
-        excluded={excluded}
-        open={banPoolOpen}
-        search={banSearch}
-        role={banRole}
-        onOpen={() => setBanPoolOpen((currentOpen) => !currentOpen)}
-        onSearch={setBanSearch}
-        onRole={setBanRole}
-        onToggle={toggleUnavailable}
-      />
-
       <section className="sandbox-workbench">
         <div className="sandbox-board">
           <DraftSideColumn
@@ -789,7 +787,7 @@ export function DraftSandbox({
         </div>
 
         <aside className="sandbox-read" aria-live="polite">
-          <p className="sandbox-step">Model position</p>
+          <p className="sandbox-step">Current projection</p>
           {loading && !current ? (
             <div className="sandbox-skeleton" aria-label="Loading analysis" />
           ) : error ? (
@@ -811,7 +809,7 @@ export function DraftSandbox({
               {nextSide && analysis?.recommendations.length ? (
                 <div className="sandbox-shortlist">
                   <div className="sandbox-shortlist-head">
-                    <span>Best {sideLabel(analysis.recommendation_side)} responses</span>
+                    <span>Top next picks for {sideLabel(analysis.recommendation_side)}</span>
                     <small>Projected change</small>
                   </div>
                   {analysis.recommendations.slice(0, 3).map((row, index) => (
@@ -855,10 +853,22 @@ export function DraftSandbox({
         </aside>
       </section>
 
+      <BanWorkbench
+        catalog={catalog}
+        selected={selected}
+        excluded={excluded}
+        open={banPoolOpen}
+        search={banSearch}
+        role={banRole}
+        onOpen={() => setBanPoolOpen((currentOpen) => !currentOpen)}
+        onSearch={setBanSearch}
+        onRole={setBanRole}
+        onToggle={toggleUnavailable}
+      />
+
       {nextSide && (
         <section className="sandbox-picker" aria-labelledby="manual-pick-heading">
           <div>
-            <p className="blog-kicker">Manual branch</p>
             <h2 id="manual-pick-heading" className="font-display text-lg">
               Add {sideLabel(nextSide)}&apos;s next pick
             </h2>
@@ -886,9 +896,8 @@ export function DraftSandbox({
       <section className="sandbox-ranking" aria-labelledby="ranking-heading">
         <div className="sandbox-section-head">
           <div>
-            <p className="sandbox-step">03 · Counterfactual ranking</p>
             <h2 id="ranking-heading">
-              Best next responses for {sideLabel(analysis?.recommendation_side ?? nextSide ?? perspective)}
+              Recommended next picks for {sideLabel(analysis?.recommendation_side ?? nextSide ?? perspective)}
             </h2>
           </div>
           <p>
@@ -912,8 +921,7 @@ export function DraftSandbox({
       <section className="sandbox-audit" aria-labelledby="audit-heading">
         <div className="sandbox-section-head">
           <div>
-            <p className="sandbox-step">04 · Decision trace</p>
-            <h2 id="audit-heading">Where the model moved</h2>
+            <h2 id="audit-heading">How the estimate changed</h2>
           </div>
           <p>Every row uses the selected side&apos;s perspective.</p>
         </div>

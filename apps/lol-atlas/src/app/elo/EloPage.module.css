@@ -1,0 +1,79 @@
+.page {
+  display: grid;
+  gap: 1rem;
+}
+
+.header {
+  display: flex;
+  gap: 1.5rem 3rem;
+  align-items: end;
+  justify-content: space-between;
+  padding: 1.15rem 0 1rem;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.header h1 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-ui), system-ui, sans-serif;
+  font-size: 2.25rem;
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+}
+
+.header p {
+  max-width: 60ch;
+  margin: 0.45rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  align-items: baseline;
+  justify-content: flex-end;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.provenance a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 0.2em;
+}
+
+.provenance a:hover {
+  text-decoration-color: var(--accent);
+}
+
+@media (max-width: 760px) {
+  .page {
+    gap: 0.75rem;
+  }
+
+  .header {
+    display: block;
+    padding-top: 0.65rem;
+  }
+
+  .header h1 {
+    font-size: 1.8rem;
+  }
+
+  .provenance {
+    display: grid;
+    grid-template-columns: max-content max-content;
+    gap: 0.35rem 1rem;
+    justify-content: flex-start;
+    margin-top: 0.75rem;
+    font-size: 0.875rem;
+    white-space: normal;
+  }
+}

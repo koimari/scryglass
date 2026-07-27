@@ -1,20 +1,14 @@
 import type { Metadata } from "next";
-import { Unbounded, IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeScript } from "@/components/ThemeScript";
 import "./globals.css";
 
-const display = Unbounded({
-  variable: "--font-display",
-  subsets: ["latin"],
-  weight: ["600", "700"],
-});
-
 const ui = IBM_Plex_Sans({
   variable: "--font-ui",
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "500", "600", "700"],
 });
 
 const mono = IBM_Plex_Mono({
@@ -38,7 +32,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${display.variable} ${ui.variable} ${mono.variable} h-full antialiased`}
+      className={`${ui.variable} ${mono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>
@@ -47,7 +41,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <ThemeProvider>
           <SiteHeader />
-          <main className="mx-auto w-full max-w-5xl flex-1 px-5 py-[var(--space-5)]">{children}</main>
+          <main className="site-main">{children}</main>
           <SiteFooter />
         </ThemeProvider>
       </body>

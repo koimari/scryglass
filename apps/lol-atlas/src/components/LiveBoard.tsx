@@ -9,6 +9,7 @@ import {
   type LivePointer,
   type LiveSnapshot,
 } from "@/lib/liveClient";
+import { OperationalHeader } from "./OperationalHeader";
 
 type Props = {
   initialIndex: LiveIndex | null;
@@ -68,7 +69,6 @@ function CompareModel({ snapshot }: { snapshot: LiveSnapshot }) {
   return (
     <section className="live-compare" aria-labelledby="compare-heading">
       <div>
-        <p className="blog-kicker">Audit surface</p>
         <h2 id="compare-heading" className="font-display text-lg">Compare another model</h2>
         <p className="live-muted">
           This compares outputs and the fields supplied by the other model. It does not decide which model is correct when the inputs differ.
@@ -98,7 +98,10 @@ function CompareModel({ snapshot }: { snapshot: LiveSnapshot }) {
               <tbody>{rows.map(([label, ours, theirs]) => <tr key={label}><td>{label}</td><td>{String(ours)}</td><td>{String(theirs)}</td></tr>)}</tbody>
             </table>
           </div>
-          <p className="live-footnote">Next diagnostic step: supply the other model&apos;s rating source, gold field, objective fields, and calibration horizon.</p>
+          <p className="live-footnote">
+            The comparison is only meaningful when both models use the same game state, rating
+            source, and calibration horizon.
+          </p>
         </div>
       )}
     </section>
@@ -167,8 +170,26 @@ function SnapshotBoard({ snapshot, now }: { snapshot: LiveSnapshot; now: number 
         </div>
       </section>
       <div className="live-detail-grid">
-        <section className="live-detail"><p className="blog-kicker">Explanation</p><h2 className="font-display text-lg">Why this number moved</h2><ContributionList snapshot={snapshot} /></section>
-        <section className="live-detail"><p className="blog-kicker">Trust ledger</p><h2 className="font-display text-lg">What the feed supplied</h2><dl className="live-ledger"><div><dt>Model</dt><dd>{snapshot.evaluation.model}</dd></div><div><dt>Clock</dt><dd>{snapshot.evaluation.minute == null ? "missing" : `${snapshot.evaluation.minute.toFixed(1)} min`}</dd></div><div><dt>Ratings</dt><dd>{snapshot.provenance.rating_pack_id || "not supplied"}</dd></div><div><dt>Missing</dt><dd>{snapshot.evaluation.missing.length ? snapshot.evaluation.missing.join(", ") : "none"}</dd></div></dl>{snapshot.evaluation.warnings.length > 0 && <ul className="live-warnings">{snapshot.evaluation.warnings.slice(0, 3).map((warning) => <li key={warning}>{warning}</li>)}</ul>}</section>
+        <section className="live-detail">
+          <h2 className="font-display text-lg">Model contributions</h2>
+          <ContributionList snapshot={snapshot} />
+        </section>
+        <section className="live-detail">
+          <h2 className="font-display text-lg">Feed coverage</h2>
+          <dl className="live-ledger">
+            <div><dt>Model</dt><dd>{snapshot.evaluation.model}</dd></div>
+            <div><dt>Clock</dt><dd>{snapshot.evaluation.minute == null ? "missing" : `${snapshot.evaluation.minute.toFixed(1)} min`}</dd></div>
+            <div><dt>Ratings</dt><dd>{snapshot.provenance.rating_pack_id || "not supplied"}</dd></div>
+            <div><dt>Missing</dt><dd>{snapshot.evaluation.missing.length ? snapshot.evaluation.missing.join(", ") : "none"}</dd></div>
+          </dl>
+          {snapshot.evaluation.warnings.length > 0 && (
+            <ul className="live-warnings">
+              {snapshot.evaluation.warnings.slice(0, 3).map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          )}
+        </section>
       </div>
       <CompareModel snapshot={snapshot} />
     </>
@@ -212,7 +233,56 @@ export function LiveBoard({ initialIndex, initialSnapshots, liveIndexUrl }: Prop
 
   const pointers = useMemo(() => index?.series || [], [index]);
   if (!selectedSnapshot) {
-    return <section className="live-empty"><p className="blog-kicker">Live · GRID Series Events</p><h2 className="font-display text-xl">No verified live feed is published yet.</h2><p>When the worker discovers an entitled professional series, it will write a verified snapshot here. The page does not connect to GRID directly.</p><div className="live-empty-log"><span>Feed <strong>waiting</strong></span><span>API key <strong>server-side only</strong></span><span>Ratings <strong>unchanged during live play</strong></span></div></section>;
+    return (
+      <div className="live-page">
+        <OperationalHeader
+          title="Live game state"
+          description="Verified GRID Series Events snapshots and provisional game-state estimates."
+        />
+        <section className="live-empty">
+          <h2 className="font-display text-xl">No verified live game is available.</h2>
+          <p>
+            A snapshot appears here when the server receives an entitled professional series. The
+            browser does not connect to GRID directly.
+          </p>
+          <div className="live-empty-log">
+            <span>Feed <strong>waiting</strong></span>
+            <span>API key <strong>server-side only</strong></span>
+            <span>Ratings <strong>unchanged during play</strong></span>
+          </div>
+        </section>
+      </div>
+    );
   }
-  return <div className="live-page"><header className="page-header"><p className="blog-kicker">Live · Verified game state</p><h1 className="font-display mt-2 text-3xl">What is happening now?</h1><p className="lede">Low-latency GRID state, a provisional game-state win chance, and an audit trail for comparing another model&apos;s answer.</p><div className="micro-log mt-4"><span><strong>Last verified state</strong> {relativeLiveTime(selectedSnapshot.emitted_utc)}</span><span><strong>Series</strong> {pointers.length}</span><span><strong>Refresh</strong> every 5s</span></div></header>{pointers.length > 1 && <nav className="live-series-tabs" aria-label="Live series">{pointers.map((pointer) => <button type="button" className={pointer.series_id === selected ? "is-selected" : ""} key={pointer.series_id} onClick={() => setSelected(pointer.series_id)}>{pointer.teams?.blue?.name || "Blue"} <span>vs</span> {pointer.teams?.red?.name || "Red"}</button>)}</nav>}<SnapshotBoard snapshot={selectedSnapshot} now={now} /></div>;
+  return (
+    <div className="live-page">
+      <OperationalHeader
+        title="Live game state"
+        description="Verified GRID state and a provisional game-state win estimate."
+        meta={
+          <>
+            <span><strong>Verified</strong> {relativeLiveTime(selectedSnapshot.emitted_utc)}</span>
+            <span><strong>Series</strong> {pointers.length}</span>
+            <span><strong>Refresh</strong> 5s</span>
+          </>
+        }
+      />
+      {pointers.length > 1 && (
+        <nav className="live-series-tabs" aria-label="Live series">
+          {pointers.map((pointer) => (
+            <button
+              type="button"
+              className={pointer.series_id === selected ? "is-selected" : ""}
+              key={pointer.series_id}
+              onClick={() => setSelected(pointer.series_id)}
+            >
+              {pointer.teams?.blue?.name || "Blue"} <span>vs</span>{" "}
+              {pointer.teams?.red?.name || "Red"}
+            </button>
+          ))}
+        </nav>
+      )}
+      <SnapshotBoard snapshot={selectedSnapshot} now={now} />
+    </div>
+  );
 }

@@ -24,6 +24,7 @@ import {
   trustInfo,
   type PackManifest,
 } from "@/lib/pack";
+import profileStyles from "./ProfileHeader.module.css";
 
 type Props = {
   team: TeamRating;
@@ -283,29 +284,31 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
     : "—";
 
   return (
-    <div className="space-y-6 print-area">
+    <div className="profile-page team-profile-page space-y-6 print-area">
       <p className="text-xs text-[var(--ink-muted)]">
         <Link href="/elo" className="row-link">
           ← Ratings
         </Link>
       </p>
-      <header className="page-header">
-        <p className="blog-kicker">
-          Team · {record?.primary ?? "Dual Elo"}
-          {record?.intl ? " · INTL" : ""}
-        </p>
-        <h1 className="font-display mt-2 text-3xl">{team.team}</h1>
-        <p className="lede text-sm">
-          Player-aggregated strength for the current roster. Regional and international components
-          live under Method details; adjusted rating accounts for evidence while the roster settles.
-        </p>
-        <div className="micro-log mt-4">
-          <span>
-            <strong>Raw rating</strong> {team.mu_total.toFixed(1)}
+      <header className={profileStyles.header}>
+        <div className={profileStyles.identity}>
+          <p className={profileStyles.scope}>
+            Team · {record?.primary ?? "Dual Elo"}
+            {record?.intl ? " · International" : ""}
+          </p>
+          <h1>{team.team}</h1>
+          <p className={profileStyles.summary}>
+            Current-roster strength. The adjusted rating accounts for uncertainty while the roster
+            evidence settles.
+          </p>
+        </div>
+        <div className={profileStyles.metrics}>
+          <span className={profileStyles.primary}>
+            <strong>Adjusted rating</strong>{" "}
+            <em>{adjustedRating(team, TEAM_SIGMA_MIN).toFixed(1)}</em>
           </span>
           <span>
-            <strong>Adjusted rating</strong>{" "}
-            {adjustedRating(team, TEAM_SIGMA_MIN).toFixed(1)}
+            <strong>Raw rating</strong> {team.mu_total.toFixed(1)}
           </span>
           <span title={trust.layman}>
             <strong>Evidence</strong> {formatTrustCell(trust)}
@@ -326,10 +329,10 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
             </span>
           )}
           <span>
-            <strong>Last updated</strong> {packUpdatedLabel(manifest)}
+            <strong>Updated</strong> {packUpdatedLabel(manifest)}
           </span>
         </div>
-        <div className="filter-bar mt-4">
+        <div className={profileStyles.actions}>
           <Link
             className="btn-primary"
             href={`/browse/head-to-head?a=${encodeURIComponent(team.team)}`}

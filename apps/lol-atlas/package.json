@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@duckdb/duckdb-wasm": "^1.33.1-dev57.0",
+    "@phosphor-icons/react": "^2.1.10",
     "katex": "^0.18.1",
     "next": "16.2.11",
     "react": "19.2.4",

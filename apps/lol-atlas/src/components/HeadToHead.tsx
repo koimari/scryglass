@@ -16,6 +16,7 @@ import {
 import { expandTeamQuery, teamSlug } from "@/lib/pack";
 import { MatchScoreboard } from "./MatchScoreboard";
 import { useDraftWr } from "./DraftWrPanel";
+import styles from "./HeadToHead.module.css";
 
 function H2HBoardPanel({
   map,
@@ -53,7 +54,7 @@ function H2HBoardPanel({
           href={`/browse/match/${encodeURIComponent(String(map.oe_gameid))}?year=${year}`}
           className="row-link"
         >
-          Open match page (model checklist)
+          Open match
         </Link>
       </p>
     </>
@@ -85,7 +86,7 @@ export function HeadToHead({ baseUrl, years }: Props) {
   const [sortCol, setSortCol] = useState<SortCol>("date");
   const [sortDir, setSortDir] = useState<Dir>("desc");
   const [draftLean, setDraftLean] = useState<string | null>(null);
-  const [status, setStatus] = useState("Idle");
+  const [status, setStatus] = useState("Enter two teams to compare their series.");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const autoRunKey = useRef<string | null>(null);
@@ -186,7 +187,7 @@ export function HeadToHead({ baseUrl, years }: Props) {
 
   const run = useCallback(async () => {
     if (!teamA.trim() || !teamB.trim()) {
-      setError("Need two teams — even rivals deserve a proper introduction.");
+      setError("Enter two teams.");
       return;
     }
     setError(null);
@@ -292,18 +293,14 @@ export function HeadToHead({ baseUrl, years }: Props) {
         const mean = aEdge / n;
         setDraftLean(
           mean > 2
-            ? `${exactA} usually wins the draft axis in this H2H (${mean.toFixed(1)} mean edge).`
+            ? `${exactA} had the higher mean Draft Score in this sample (${mean.toFixed(1)} points).`
             : mean < -2
-              ? `${exactB} usually wins the draft axis in this H2H (${Math.abs(mean).toFixed(1)} mean edge).`
-              : `Drafts in this H2H are roughly even (mean edge ${mean.toFixed(1)}).`,
+              ? `${exactB} had the higher mean Draft Score in this sample (${Math.abs(mean).toFixed(1)} points).`
+              : `Mean Draft Score difference in this sample: ${mean.toFixed(1)} points.`,
         );
       }
     } catch (e) {
-      setError(
-        e instanceof Error
-          ? `${e.message} — try again; DuckDB gets stage fright sometimes.`
-          : String(e),
-      );
+      setError(e instanceof Error ? `${e.message} Try again.` : String(e));
       setStatus("Error");
     } finally {
       setLoading(false);
@@ -328,12 +325,12 @@ export function HeadToHead({ baseUrl, years }: Props) {
     const y = s.year || year;
     let cancelled = false;
     (async () => {
-      setStatus("Loading board…");
+      setStatus("Loading game…");
       try {
         const bundle = await loadMatchBundle(baseUrl, allTime ? years : [y], id);
         if (cancelled) return;
         if (!bundle) {
-          setError("No player rows for this game — awkward.");
+          setError("No player data is available for this game.");
           setBoard(null);
           return;
         }
@@ -360,7 +357,7 @@ export function HeadToHead({ baseUrl, years }: Props) {
   };
 
   return (
-    <div className="space-y-6">
+    <div className={styles.root}>
       <div className="filter-bar">
         <label className="field">
           <span>Scope</span>
@@ -425,25 +422,25 @@ export function HeadToHead({ baseUrl, years }: Props) {
           ))}
         </datalist>
         <button type="button" className="btn-primary" onClick={() => void run()}>
-          Find H2H
+          Compare
         </button>
         {teamA.trim() && teamB.trim() ? (
           <Link
             className="status-pill ghost"
             href={`/browse?teams=${encodeURIComponent(teamA.trim())}|${encodeURIComponent(teamB.trim())}`}
           >
-            Open Matches
+            Open in Matches
           </Link>
         ) : null}
       </div>
 
       {loading && <div className="skeleton-block" />}
       {error && <p className="error-banner">{error}</p>}
-      <p className="status-hint">{status}</p>
+      {(loading || series.length > 0) && <p className="status-hint">{status}</p>}
 
       {series.length > 0 && (
         <>
-          <p className="h2h-record font-mono">
+          <p className={styles.record}>
             <Link href={`/elo/team/${teamSlug(teamA.trim())}`} className="row-link">
               {teamA.trim() || "A"}
             </Link>{" "}
@@ -460,6 +457,12 @@ export function HeadToHead({ baseUrl, years }: Props) {
         </>
       )}
 
+      {series.length === 0 && !loading && !error ? (
+        <section className={styles.empty} aria-labelledby="h2h-empty-title">
+          <h2 id="h2h-empty-title">No series selected</h2>
+          <p>Enter two team names above to compare their completed series.</p>
+        </section>
+      ) : (
       <div className="h2h-layout">
         <div className="h2h-list table-scroll">
           <table className="data-table">
@@ -495,21 +498,18 @@ export function HeadToHead({ baseUrl, years }: Props) {
                   <tr
                     key={s.key}
                     className={active ? "is-selected" : undefined}
-                    tabIndex={0}
-                    role="button"
-                    onClick={() => setSelectedKey(s.key)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setSelectedKey(s.key);
-                      }
-                    }}
-                    style={{ cursor: "pointer" }}
                   >
                     <td className="font-mono text-xs">{s.date}</td>
                     <td>
-                      Bo{s.bestOf} · {s.teamA} {s.winsA}–{s.winsB} {s.teamB}
-                      <div className="muted text-xs">{s.league}</div>
+                      <button
+                        type="button"
+                        className={styles.seriesButton}
+                        aria-pressed={active}
+                        onClick={() => setSelectedKey(s.key)}
+                      >
+                        Bo{s.bestOf} · {s.teamA} {s.winsA}–{s.winsB} {s.teamB}
+                        <span className="muted text-xs block">{s.league}</span>
+                      </button>
                     </td>
                     <td className="num font-mono">{kills}</td>
                     <td className="num font-mono text-xs">{len.toFixed(0)}m</td>
@@ -518,23 +518,18 @@ export function HeadToHead({ baseUrl, years }: Props) {
               })}
             </tbody>
           </table>
-          {series.length === 0 && !error && !loading && (
-            <p className="empty-hint">
-              Enter two teams and find meetings. Tip: aliases like KC work once they resolve cleanly.
-            </p>
-          )}
         </div>
         <div className="h2h-board">
           {board ? (
             <H2HBoardPanel map={board.map} players={board.players} year={board.year} />
           ) : (
             <p className="empty-hint">
-              Click a series to open the board. The checklist lives on the match page — H2H stays
-              about the rivalry.
+              Select a series to inspect a game. Model checks are available on the match page.
             </p>
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

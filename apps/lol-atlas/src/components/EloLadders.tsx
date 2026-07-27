@@ -17,13 +17,11 @@ import {
   formatWr,
   INTL_LEAGUES,
   INTERREGIONAL_LEAGUES,
-  MAJOR_REGIONAL_LEAGUES,
   PLAYER_SIGMA_MIN,
   playerMatchesQuery,
   playerSlug,
   recordMatchesLeagues,
   REGION_LEAGUES,
-  SECONDARY_REGIONAL_LEAGUES,
   scopedTeamWr,
   softMu,
   TIER_FILTERS,
@@ -32,6 +30,7 @@ import {
   teamSlug,
   trustInfo,
 } from "@/lib/pack";
+import styles from "./EloLadders.module.css";
 
 type Props = {
   teams: TeamRating[];
@@ -72,8 +71,8 @@ function rankDeltaLabel(delta: number | null | undefined): string {
 }
 
 function rankDeltaClass(delta: number | null | undefined): string {
-  if (delta == null || delta === 0) return "text-[var(--ink-faint)]";
-  return delta > 0 ? "text-[var(--accent-ink)]" : "text-[var(--danger)]";
+  if (delta == null || delta === 0) return styles.rankFlat;
+  return delta > 0 ? styles.rankUp : styles.rankDown;
 }
 
 function SortTh({
@@ -95,13 +94,13 @@ function SortTh({
 }) {
   return (
     <th
-      className={align === "num" ? "num" : undefined}
+      className={align === "num" ? styles.numeric : undefined}
       scope="col"
       aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
     >
       <button
         type="button"
-        className={`sort-th ${active ? "is-active" : ""}`}
+        className={`${styles.sortButton} ${active ? styles.sortActive : ""}`}
         onClick={() => onSort(col)}
         title={title}
       >
@@ -175,6 +174,14 @@ export function EloLadders({
 
   const toggleLeague = (lg: string) => {
     setLeagues((prev) => (prev.includes(lg) ? prev.filter((x) => x !== lg) : [...prev, lg]));
+    setExpanded(false);
+  };
+
+  const setTier = (tier: string | null) => {
+    setLeagues((prev) => [
+      ...prev.filter((scope) => !scope.startsWith("TIER")),
+      ...(tier ? [tier] : []),
+    ]);
     setExpanded(false);
   };
 
@@ -311,7 +318,21 @@ export function EloLadders({
   const visibleTeams = expanded ? sortedTeams : sortedTeams.slice(0, 20);
   const visiblePlayers = expanded ? sortedPlayers : sortedPlayers.slice(0, 20);
   const intlSet = new Set<string>(["INTL", ...INTL_LEAGUES]);
-  const scopeSummary = leagues.length ? leagues.map(formatScope).join(" + ") : "All competitive tiers and event scopes";
+  const tierScopes = leagues.filter((scope) => scope.startsWith("TIER"));
+  const refinementScopes = leagues.filter((scope) => !scope.startsWith("TIER"));
+  const scopeSummary = leagues.length ? leagues.map(formatScope).join(", ") : "All tiers";
+  const regionalChips = chips.filter((lg) =>
+    (REGION_LEAGUES as readonly string[]).includes(lg),
+  );
+  const crossRegionChips = chips.filter((lg) =>
+    INTERREGIONAL_LEAGUES.includes(lg as (typeof INTERREGIONAL_LEAGUES)[number]),
+  );
+  const internationalChips = chips.filter(
+    (lg) => intlSet.has(lg) || (INTL_LEAGUES as readonly string[]).includes(lg),
+  );
+  const teamWinRateAvailable = sortedTeams.some(
+    (team) => scopedTeamWr(teamRecords[team.team], leagues) != null,
+  );
   const rankScopeFor = (tier: string | null | undefined): "all" | "tier1" | "tier2" | "tier3" => {
     const selectedTiers = leagues.filter((scope) => scope.startsWith("TIER")).map((scope) => scope.toLowerCase()) as Array<"tier1" | "tier2" | "tier3">;
     if (selectedTiers.length === 1) return selectedTiers[0];
@@ -328,29 +349,18 @@ export function EloLadders({
       : `${sortedPlayers.length} players shown in ${scopeSummary}, sorted by ${playerCol === "soft" ? "adjusted rating" : playerCol}`;
 
   return (
-    <div className="space-y-6">
-      <p className="text-sm text-[var(--ink-muted)] max-w-[62ch]">
-        Scope the ladder by current competitive tier, regional league, or international event. Selected
-        chips define the visible comparison sample and its win rate; each row keeps its published Dual Elo rating.
-      </p>
-      <p className="method-note max-w-[62ch]">
-          Scope: <strong>{scopeSummary}</strong>. Adjusted rating = raw rating minus rating spread
-          above the settled floor. Evidence labels summarize the match history behind the estimate.
-      </p>
-      {tab === "players" && (
-        <p className="method-note max-w-[62ch]">
-          Rank Δ compares with the previous Sunday at 00:00 UTC; flags use Leaguepedia country metadata when available.
-        </p>
-      )}
+    <div className={styles.root}>
       <p className="sr-only" aria-live="polite">
         {liveSummary}
       </p>
 
-      <div className="filter-bar">
-        <div className="flex gap-1">
+      <section className={styles.controls} aria-label="Rating controls">
+        <div className={styles.toolbar}>
+          <div className={styles.tabs} aria-label="Rating type">
           <button
             type="button"
-            className={tab === "teams" ? "btn-primary" : "status-pill ghost"}
+            className={`${styles.tab} ${tab === "teams" ? styles.tabActive : ""}`}
+            aria-pressed={tab === "teams"}
             onClick={() => {
               setTab("teams");
               setExpanded(false);
@@ -360,7 +370,8 @@ export function EloLadders({
           </button>
           <button
             type="button"
-            className={tab === "players" ? "btn-primary" : "status-pill ghost"}
+            className={`${styles.tab} ${tab === "players" ? styles.tabActive : ""}`}
+            aria-pressed={tab === "players"}
             onClick={() => {
               setTab("players");
               setExpanded(false);
@@ -368,17 +379,18 @@ export function EloLadders({
           >
             Players
           </button>
-        </div>
-        <label className="field grow">
-          <span>Search</span>
+          </div>
+          <label className={styles.search}>
+          <span className="sr-only">Search</span>
           <input
+            type="search"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder={tab === "teams" ? "Team or alias (G2, KC…)" : "Player or team"}
           />
         </label>
         {tab === "players" && (
-          <label className="field">
+          <label className={styles.minGames}>
             <span>Min games</span>
             <input
               type="number"
@@ -388,100 +400,129 @@ export function EloLadders({
             />
           </label>
         )}
-      </div>
+        </div>
 
-      <div className="league-filter" role="group" aria-label="Rating scope filters">
-        <div className="scope-filter-head">
-          <span className="chip-group-label">Scope filters</span>
-          <span className="scope-filter-help">Tier sets current competitive level; leagues and events narrow within it. Groups combine with AND.</span>
+        <div className={styles.scopeBar} role="group" aria-label="Competitive tier">
+          <span className={styles.scopeLabel}>Level</span>
           <button
             type="button"
-            className={`chip ${leagues.length === 0 ? "is-on" : ""}`}
-            onClick={() => setLeagues([])}
+            className={`${styles.scopeButton} ${tierScopes.length === 0 ? styles.scopeButtonActive : ""}`}
+            aria-pressed={tierScopes.length === 0}
+            onClick={() => setTier(null)}
           >
-            All scopes
+            All
           </button>
-        </div>
-        <div className="chip-group chip-group-tier">
-          <span className="chip-group-label">Competitive tier</span>
           {TIER_FILTERS.map((tier) => (
             <button
               key={tier.value}
               type="button"
-              className={`chip ${leagues.includes(tier.value) ? "is-on" : ""}`}
-              onClick={() => toggleLeague(tier.value)}
+              className={`${styles.scopeButton} ${leagues.includes(tier.value) ? styles.scopeButtonActive : ""}`}
+              aria-pressed={leagues.includes(tier.value)}
+              onClick={() => setTier(tier.value)}
               title={tier.description}
             >
               {tier.label}
             </button>
           ))}
         </div>
-        <div className="chip-group">
-          <span className="chip-group-label">Major regional</span>
-          {chips
-            .filter((lg) => (MAJOR_REGIONAL_LEAGUES as readonly string[]).includes(lg))
-            .map((lg) => (
+        <details className={styles.refine}>
+            <summary>
+              Leagues and events
+              {refinementScopes.length > 0 ? ` (${refinementScopes.length})` : ""}
+            </summary>
+            <div className={styles.refinementPanel}>
+              <p>Selections within a row are alternatives. Rows combine.</p>
+              <div className={styles.refinementRow}>
+                <span>Regional leagues</span>
+                <div>
+                  {regionalChips.map((lg) => (
+                    <button
+                      key={lg}
+                      type="button"
+                      className={`${styles.scopeButton} ${leagues.includes(lg) ? styles.scopeButtonActive : ""}`}
+                      aria-pressed={leagues.includes(lg)}
+                      onClick={() => toggleLeague(lg)}
+                    >
+                      {lg}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {crossRegionChips.length > 0 && (
+                <div className={styles.refinementRow}>
+                  <span>Cross-region</span>
+                  <div>
+                    {crossRegionChips.map((lg) => (
+                      <button
+                        key={lg}
+                        type="button"
+                        className={`${styles.scopeButton} ${leagues.includes(lg) ? styles.scopeButtonActive : ""}`}
+                        aria-pressed={leagues.includes(lg)}
+                        onClick={() => toggleLeague(lg)}
+                      >
+                        {lg}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className={styles.refinementRow}>
+                <span>International events</span>
+                <div>
+                  {internationalChips.map((lg) => (
+                    <button
+                      key={lg}
+                      type="button"
+                      className={`${styles.scopeButton} ${leagues.includes(lg) ? styles.scopeButtonActive : ""}`}
+                      aria-pressed={leagues.includes(lg)}
+                      onClick={() => toggleLeague(lg)}
+                    >
+                      {lg}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <button
-                key={lg}
                 type="button"
-                className={`chip ${leagues.includes(lg) ? "is-on" : ""}`}
-                onClick={() => toggleLeague(lg)}
+                className={styles.resetButton}
+                onClick={() => {
+                  setLeagues(["TIER1"]);
+                  setExpanded(false);
+                }}
               >
-                {lg}
+                Reset to Tier 1
               </button>
-            ))}
+            </div>
+        </details>
+
+        <div className={styles.resultSummary}>
+          <p>
+            <strong>
+              {tab === "teams" ? sortedTeams.length : sortedPlayers.length}{" "}
+              {tab === "teams"
+                ? sortedTeams.length === 1
+                  ? "team"
+                  : "teams"
+                : sortedPlayers.length === 1
+                  ? "player"
+                  : "players"}
+            </strong>
+            <span>{scopeSummary}</span>
+          </p>
+          <p>
+            {tab === "teams" && !teamWinRateAvailable
+              ? "Filters change who appears. Scoped win rate is unavailable for this selection. Published ratings do not change."
+              : tab === "teams"
+                ? "Filters change who appears and scoped win rate. Published ratings do not change."
+                : "Filters change who appears. Published ratings do not change."}
+          </p>
         </div>
-        <div className="chip-group">
-          <span className="chip-group-label">Other regional</span>
-          {chips
-            .filter((lg) => (SECONDARY_REGIONAL_LEAGUES as readonly string[]).includes(lg))
-            .map((lg) => (
-              <button
-                key={lg}
-                type="button"
-                className={`chip ${leagues.includes(lg) ? "is-on" : ""}`}
-                onClick={() => toggleLeague(lg)}
-              >
-                {lg}
-              </button>
-          ))}
-        </div>
-        <div className="chip-group">
-          <span className="chip-group-label">Cross-region</span>
-          {chips
-            .filter((lg) => INTERREGIONAL_LEAGUES.includes(lg as (typeof INTERREGIONAL_LEAGUES)[number]))
-            .map((lg) => (
-              <button
-                key={lg}
-                type="button"
-                className={`chip ${leagues.includes(lg) ? "is-on" : ""}`}
-                onClick={() => toggleLeague(lg)}
-              >
-                {lg}
-              </button>
-            ))}
-        </div>
-        <div className="chip-group">
-          <span className="chip-group-label">International events</span>
-          {chips
-            .filter((lg) => intlSet.has(lg) || (INTL_LEAGUES as readonly string[]).includes(lg))
-            .map((lg) => (
-              <button
-                key={lg}
-                type="button"
-                className={`chip ${leagues.includes(lg) ? "is-on" : ""}`}
-                onClick={() => toggleLeague(lg)}
-              >
-                {lg}
-              </button>
-            ))}
-        </div>
-      </div>
+      </section>
 
       {tab === "teams" ? (
         <>
-          <div className="table-scroll elo-desktop" tabIndex={0} aria-label="Team ratings table; scroll horizontally if needed">
-            <table className="data-table">
+          <div className={styles.tableViewport} tabIndex={0} aria-label="Team ratings table; scroll horizontally if needed">
+            <table className={styles.table}>
               <caption className="sr-only">
                 Team ratings in the current pack. Default order is adjusted rating.
               </caption>
@@ -516,7 +557,7 @@ export function EloLadders({
                     onSort={onTeamSort}
                   />
                   <SortTh
-                    label="International"
+                    label="International component"
                     col="meta"
                     active={teamCol === "meta"}
                     dir={teamDir}
@@ -534,12 +575,12 @@ export function EloLadders({
                     onSort={onTeamSort}
                   />
                   <SortTh
-                    label="Win rate"
+                    label="Scoped win rate"
                     col="wr"
                     active={teamCol === "wr"}
                     dir={teamDir}
                     align="num"
-                    title="Empirical win rate in the pack for the active league filter."
+                    title="Empirical win rate in the pack for the active scope."
                     onSort={onTeamSort}
                   />
                 </tr>
@@ -552,27 +593,28 @@ export function EloLadders({
                   return (
                     <tr
                       key={t.team}
-                      className="row-click"
-                      onClick={() => router.push(`/elo/team/${teamSlug(t.team)}`)}
                     >
-                      <td className="font-mono text-[var(--ink-muted)]">{i + 1}</td>
-                      <td className="font-medium">
+                      <td className={styles.rank}>{i + 1}</td>
+                      <td className={styles.entity}>
                         <Link
                           href={`/elo/team/${teamSlug(t.team)}`}
-                          className="row-link"
+                          className={styles.entityLink}
                           onClick={(e) => e.stopPropagation()}
                         >
                           {t.team}
                         </Link>
                       </td>
                       <td>{formatAffiliation(rec?.current_tier, rec?.current_league ?? rec?.primary)}</td>
-                      <td className="num">{adjustedRating(t, TEAM_SIGMA_MIN).toFixed(1)}</td>
-                      <td className="num">{t.mu_total.toFixed(1)}</td>
-                      <td className="num">{t.mu_meta.toFixed(1)}</td>
-                      <td className="num" title={trust.layman}>
-                        {formatTrustCell(trust)}
+                      <td className={styles.numeric}>{adjustedRating(t, TEAM_SIGMA_MIN).toFixed(1)}</td>
+                      <td className={styles.numeric}>{t.mu_total.toFixed(1)}</td>
+                      <td className={styles.numeric}>{t.mu_meta.toFixed(1)}</td>
+                      <td className={`${styles.numeric} ${styles.evidence}`} title={trust.layman}>
+                        <span>{formatTrustCell(trust)}</span>
+                        {rec?.games ? <small>{rec.games} games</small> : null}
                       </td>
-                      <td className="num">{formatWr(wr)}</td>
+                      <td className={styles.numeric} title={wr == null ? "No games in this scope." : undefined}>
+                        {formatWr(wr)}
+                      </td>
                     </tr>
                   );
                 })}
@@ -580,20 +622,24 @@ export function EloLadders({
             </table>
           </div>
 
-          <ul className="elo-cards elo-mobile">
+          <ul className={styles.cards}>
             {visibleTeams.map((t, i) => {
               const rec = teamRecords[t.team];
               const trust = trustInfo(t.sigma, TEAM_SIGMA_MIN, rec?.games);
+              const wr = scopedTeamWr(rec, leagues);
               return (
                 <li key={t.team}>
-                  <Link href={`/elo/team/${teamSlug(t.team)}`} className="elo-card">
-                    <span className="elo-card-rank">#{i + 1}</span>
-                    <span className="elo-card-title">{t.team}</span>
-                    <span className="elo-card-meta">
-                      {formatAffiliation(rec?.current_tier, rec?.current_league ?? rec?.primary)} · Evidence {formatTrustCell(trust)} · Win rate{" "}
-                      {formatWr(scopedTeamWr(rec, leagues))}
+                  <Link href={`/elo/team/${teamSlug(t.team)}`} className={styles.card}>
+                    <span className={styles.cardRank}>{i + 1}</span>
+                    <span className={styles.cardTitle}>{t.team}</span>
+                    <span className={styles.cardMeta}>
+                      {formatAffiliation(rec?.current_tier, rec?.current_league ?? rec?.primary)}
+                      {" · "}
+                      {formatTrustCell(trust)} evidence
+                      {rec?.games ? `, ${rec.games} games` : ""}
+                      {wr != null ? ` · ${formatWr(wr)} scoped win rate` : ""}
                     </span>
-                    <span className="elo-card-rating">
+                    <span className={styles.cardRating}>
                       {adjustedRating(t, TEAM_SIGMA_MIN).toFixed(1)}
                     </span>
                   </Link>
@@ -603,24 +649,24 @@ export function EloLadders({
           </ul>
 
           {sortedTeams.length === 0 && (
-            <p className="empty-hint">
-              No teams match these chips
-              {q.trim() ? ` and “${q.trim()}”` : ""}. Clear a filter or try another alias.
+            <p className={styles.empty}>
+              No teams match this scope
+              {q.trim() ? ` and “${q.trim()}”` : ""}. Change the scope or search.
             </p>
           )}
           {sortedTeams.length > 20 && (
-            <p className="empty-hint flex flex-wrap items-center gap-3">
+            <p className={styles.more}>
               Showing {visibleTeams.length} of {sortedTeams.length}.
-              <button type="button" className="btn-primary" onClick={() => setExpanded((x) => !x)}>
-                {expanded ? "Collapse" : "Expand"}
+              <button type="button" onClick={() => setExpanded((x) => !x)}>
+                {expanded ? "Show 20" : "Show all"}
               </button>
             </p>
           )}
         </>
       ) : (
         <>
-          <div className="table-scroll elo-desktop" tabIndex={0} aria-label="Player ratings table; scroll horizontally if needed">
-            <table className="data-table">
+          <div className={styles.tableViewport} tabIndex={0} aria-label="Player ratings table; scroll horizontally if needed">
+            <table className={styles.table}>
               <caption className="sr-only">
                 Player ratings in the current pack. Default order is adjusted rating.
               </caption>
@@ -665,21 +711,19 @@ export function EloLadders({
                   return (
                     <tr
                       key={p.player}
-                      className="row-click"
-                      onClick={() => router.push(`/elo/player/${playerSlug(p.player)}`)}
                     >
-                      <td className="font-mono text-[var(--ink-muted)]">{i + 1}</td>
-                      <td className={`font-mono ${rankDeltaClass(rankDelta)}`} title="Change since the previous Sunday 00:00 UTC">
+                      <td className={styles.rank}>{i + 1}</td>
+                      <td className={`${styles.rankDelta} ${rankDeltaClass(rankDelta)}`} title="Change since the previous Sunday 00:00 UTC">
                         {rankDeltaLabel(rankDelta)}
                       </td>
-                      <td className="font-medium">
+                      <td className={styles.entity}>
                         <Link
                           href={`/elo/player/${playerSlug(p.player)}`}
-                          className="row-link"
+                          className={styles.entityLink}
                           onClick={(e) => e.stopPropagation()}
                         >
                           {metadata?.flag ? (
-                            <span className="player-country" title={metadata.country || undefined} aria-label={metadata.country || undefined}>
+                            <span className={styles.flag} title={metadata.country || undefined} aria-label={metadata.country || undefined}>
                               {metadata.flag}
                             </span>
                           ) : null}
@@ -690,7 +734,7 @@ export function EloLadders({
                         {currentTeam ? (
                           <Link
                             href={`/elo/team/${teamSlug(currentTeam)}`}
-                            className="row-link"
+                            className={styles.entityLink}
                             onClick={(e) => e.stopPropagation()}
                           >
                             {currentTeam}
@@ -700,14 +744,14 @@ export function EloLadders({
                         )}
                       </td>
                       <td>{formatAffiliation(rec?.current_tier ?? fromTeam?.current_tier, league)}</td>
-                      <td className="num">
+                      <td className={styles.numeric}>
                         {softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(1)}
                       </td>
-                      <td className="num">{p.mu_total.toFixed(1)}</td>
-                      <td className="num" title={trust.layman}>
+                      <td className={styles.numeric}>{p.mu_total.toFixed(1)}</td>
+                      <td className={styles.numeric} title={trust.layman}>
                         {formatTrustCell(trust)}
                       </td>
-                      <td className="num">{p.n_maps}</td>
+                      <td className={styles.numeric}>{p.n_maps}</td>
                     </tr>
                   );
                 })}
@@ -715,7 +759,7 @@ export function EloLadders({
             </table>
           </div>
 
-          <ul className="elo-cards elo-mobile">
+          <ul className={styles.cards}>
             {visiblePlayers.map((p, i) => {
               const rec = playerRecords[p.player];
               const fromTeam = p.last_team ? teamRecords[p.last_team] : undefined;
@@ -725,16 +769,16 @@ export function EloLadders({
               const metadata = playerMetadata[p.player];
               return (
                 <li key={p.player}>
-                  <Link href={`/elo/player/${playerSlug(p.player)}`} className="elo-card">
-                    <span className="elo-card-rank">#{i + 1} <span className={rankDeltaClass(rankDelta)}>{rankDeltaLabel(rankDelta)}</span></span>
-                    <span className="elo-card-title">
-                      {metadata?.flag ? <span className="player-country" title={metadata.country || undefined}>{metadata.flag}</span> : null}
+                  <Link href={`/elo/player/${playerSlug(p.player)}`} className={styles.card}>
+                    <span className={styles.cardRank}>{i + 1} <span className={rankDeltaClass(rankDelta)}>{rankDeltaLabel(rankDelta)}</span></span>
+                    <span className={styles.cardTitle}>
+                      {metadata?.flag ? <span className={styles.flag} title={metadata.country || undefined}>{metadata.flag}</span> : null}
                       {p.player}
                     </span>
-                    <span className="elo-card-meta">
-                      {currentTeam ?? "—"} · {formatAffiliation(rec?.current_tier ?? fromTeam?.current_tier, rec?.current_league ?? rec?.primary ?? fromTeam?.primary)} · Evidence {formatTrustCell(trust)} · {p.n_maps} games
+                    <span className={styles.cardMeta}>
+                      {currentTeam ?? "—"} · {formatAffiliation(rec?.current_tier ?? fromTeam?.current_tier, rec?.current_league ?? rec?.primary ?? fromTeam?.primary)} · {formatTrustCell(trust)} evidence · {p.n_maps} games
                     </span>
-                    <span className="elo-card-rating">
+                    <span className={styles.cardRating}>
                       {softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(1)}
                     </span>
                   </Link>
@@ -744,16 +788,16 @@ export function EloLadders({
           </ul>
 
           {sortedPlayers.length === 0 && (
-            <p className="empty-hint">
-              No players match these chips
-              {q.trim() ? ` and “${q.trim()}”` : ""}. Try a different scope or clear a filter.
+            <p className={styles.empty}>
+              No players match this scope
+              {q.trim() ? ` and “${q.trim()}”` : ""}. Change the scope or search.
             </p>
           )}
           {sortedPlayers.length > 20 && (
-            <p className="empty-hint flex flex-wrap items-center gap-3">
+            <p className={styles.more}>
               Showing {visiblePlayers.length} of {sortedPlayers.length}.
-              <button type="button" className="btn-primary" onClick={() => setExpanded((x) => !x)}>
-                {expanded ? "Collapse" : "Expand"}
+              <button type="button" onClick={() => setExpanded((x) => !x)}>
+                {expanded ? "Show 20" : "Show all"}
               </button>
             </p>
           )}

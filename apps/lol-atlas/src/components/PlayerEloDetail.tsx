@@ -23,6 +23,7 @@ import {
   teamSlug,
   trustInfo,
 } from "@/lib/pack";
+import profileStyles from "./ProfileHeader.module.css";
 
 type Props = {
   player: PlayerRating;
@@ -212,7 +213,7 @@ export function PlayerEloDetail({
   const teamLabel = team?.team ?? player.last_team ?? null;
 
   return (
-    <div className="space-y-6">
+    <div className="profile-page player-profile-page space-y-6">
       <p className="text-xs text-[var(--ink-muted)]">
         <Link href="/elo?tab=players" className="row-link">
           ← Players
@@ -227,29 +228,31 @@ export function PlayerEloDetail({
         )}
       </p>
 
-      <header className="page-header">
-        <p className="blog-kicker">
-          Player · {record?.primary ?? "Dual Elo"}
-          {record?.intl ? " · INTL" : ""}
-        </p>
-        <h1 className="font-display mt-2 text-3xl">{player.player}</h1>
-        <p className="text-sm muted">
-          Current team <strong className="text-[var(--ink)]">{teamLabel ?? "—"}</strong>
-          {roleLabel ? (
-            <>
-              {" · "}Role <strong className="text-[var(--ink)]">{roleLabel}</strong>
-            </>
-          ) : null}
-        </p>
-        <p className="lede text-sm" title={trust.layman}>
-          {trust.layman}
-        </p>
-        <div className="micro-log mt-4">
-          <span>
-            <strong>Raw rating</strong> {player.mu_total.toFixed(1)}
+      <header className={profileStyles.header}>
+        <div className={profileStyles.identity}>
+          <p className={profileStyles.scope}>
+            Player · {record?.primary ?? "Dual Elo"}
+            {record?.intl ? " · International" : ""}
+          </p>
+          <h1>{player.player}</h1>
+          <p className={profileStyles.affiliation}>
+            Current team <strong>{teamLabel ?? "—"}</strong>
+            {roleLabel ? (
+              <>
+                {" · "}Role <strong>{roleLabel}</strong>
+              </>
+            ) : null}
+          </p>
+          <p className={profileStyles.summary} title={trust.layman}>
+            {trust.layman}
+          </p>
+        </div>
+        <div className={profileStyles.metrics}>
+          <span className={profileStyles.primary}>
+            <strong>Adjusted rating</strong> <em>{leagueAware.toFixed(1)}</em>
           </span>
           <span>
-            <strong>Adjusted rating</strong> {leagueAware.toFixed(1)}
+            <strong>Raw rating</strong> {player.mu_total.toFixed(1)}
           </span>
           <span>
             <strong>Evidence</strong> {formatTrustCell(trust)}
@@ -273,13 +276,13 @@ export function PlayerEloDetail({
             <strong>Red WR</strong> {formatWr(sideWr.red)}
           </span>
           <span>
-            <strong>Last updated</strong> {packUpdatedLabel(manifest)}
+            <strong>Updated</strong> {packUpdatedLabel(manifest)}
           </span>
         </div>
 
-        <div className="filter-bar mt-4">
+        <div className={`${profileStyles.actions} ${profileStyles.comparison}`}>
           <label className="field">
-            <span>Compare vs</span>
+            <span>Compare with</span>
             <select
               value={compare}
               onChange={(e) => setCompare(e.target.value as "league" | "intl")}
