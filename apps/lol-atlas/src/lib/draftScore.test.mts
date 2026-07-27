@@ -640,18 +640,18 @@ test("sandbox UI defaults to the latest public patch with pooled disclosure", ()
   assert.match(source, /patch-specific|pooled/);
 });
 
-test("sandbox flex-role chooser announces, focuses, and restores focus", () => {
+test("sandbox inline role chips for multi-role picks", () => {
   const source = readFileSync(
     new URL("../components/DraftSandbox.tsx", import.meta.url),
     "utf8",
   );
-  assert.match(source, /firstRoleChoiceRef\.current\?\.focus\(\)/);
-  assert.match(source, /role="status"/);
-  assert.match(source, /aria-live="polite"/);
-  assert.match(source, /roleChoiceReturnModeRef\.current = "cancel"/);
-  assert.match(source, /roleChoiceReturnModeRef\.current = "selection"/);
-  assert.match(source, /trigger\?\.isConnected/);
-  assert.match(source, /searchInputRef\.current \?\? sandboxHeadingRef\.current/);
+  assert.match(source, /const legalRolesForChampion/);
+  assert.match(source, /const canPickDirectly/);
+  assert.match(source, /showRoleChoices/);
+  assert.match(source, /sandbox-mini-role-button/);
+  assert.match(source, /sandbox-champion-item/);
+  assert.match(source, /className=\"sandbox-role-actions\"/);
+  assert.match(source, /const explicitRole/);
 });
 
 test("sandbox copy distinguishes manual unseen-role states from supported policy search", () => {

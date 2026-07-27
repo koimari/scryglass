@@ -31,7 +31,7 @@ const ROLE_LABEL: Record<DraftRole, string> = {
 };
 
 const LIVE_RECOMMENDATION_LIMIT = 6;
-const LIVE_ANALYSIS_DEBOUNCE_MS = 220;
+const LIVE_ANALYSIS_DEBOUNCE_MS = 260;
 
 const LEAGUES = [
   "LCK",
@@ -194,8 +194,6 @@ export function DraftSandbox({
   const [league, setLeague] = useState(initialLeague);
   const [candidateRole, setCandidateRole] = useState<DraftCandidateRole>("open");
   const [search, setSearch] = useState("");
-  const [pendingChampion, setPendingChampion] = useState<DraftChampion | null>(null);
-  const [pickerAnnouncement, setPickerAnnouncement] = useState("");
   const [excludeSearch, setExcludeSearch] = useState("");
   const [analysisResponse, setAnalysisResponse] = useState<{
     key: string;
@@ -226,15 +224,9 @@ export function DraftSandbox({
     initialPublicPatch ?? latestObservedPatch ?? "",
   );
 
-  const [analysisMode, setAnalysisMode] = useState<"manual" | "live">("manual");
+  const [autoEvaluate, setAutoEvaluate] = useState(false);
 
-  const sandboxHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const firstRoleChoiceRef = useRef<HTMLButtonElement | null>(null);
-  const roleChoiceTriggerRef = useRef<HTMLElement | null>(null);
-  const roleChoiceReturnModeRef = useRef<"cancel" | "selection" | null>(
-    null,
-  );
 
   const nextSide =
     actions.length < DRAFT_PICK_ORDER.length ? DRAFT_PICK_ORDER[actions.length] : null;
@@ -250,39 +242,40 @@ export function DraftSandbox({
     return DRAFT_ROLES.filter((role) => !occupied.has(role));
   }, [actions, nextSide]);
 
-  const buildRequest = useCallback(
-    (recommendationMode: boolean) => ({
-      actions,
-      perspective,
-      next_side: nextSide ?? perspective,
-      candidate_role: candidateRole,
-      excluded,
-      league,
-      public_patch: publicPatch,
-      limit: nextSide
-        ? recommendationMode
-          ? (analysisMode === "live"
-            ? LIVE_RECOMMENDATION_LIMIT
-            : Math.max(10, LIVE_RECOMMENDATION_LIMIT))
-          : 1
-        : 1,
-      include_recommendations: recommendationMode,
-    }),
-    [
-      actions,
-      candidateRole,
-      excluded,
-      league,
-      nextSide,
-      perspective,
-      publicPatch,
-      analysisMode,
-    ],
-  );
+  const buildBoardRequest = useCallback(() => ({
+    actions,
+    perspective,
+    next_side: nextSide ?? perspective,
+    excluded,
+    league,
+    public_patch: publicPatch,
+    limit: nextSide ? 1 : 1,
+    include_recommendations: false,
+  }), [actions, excluded, league, nextSide, perspective, publicPatch]);
+
+  const buildRecommendationRequest = useCallback(() => ({
+    actions,
+    perspective,
+    next_side: nextSide ?? perspective,
+    candidate_role: candidateRole,
+    excluded,
+    league,
+    public_patch: publicPatch,
+    limit: nextSide ? LIVE_RECOMMENDATION_LIMIT : 1,
+    include_recommendations: true,
+  }), [
+    actions,
+    candidateRole,
+    excluded,
+    league,
+    nextSide,
+    perspective,
+    publicPatch,
+  ]);
 
   const analysisRequest = useMemo(
-    () => buildRequest(includeRecommendations),
-    [buildRequest, includeRecommendations],
+    () => (includeRecommendations ? buildRecommendationRequest() : buildBoardRequest()),
+    [buildBoardRequest, buildRecommendationRequest, includeRecommendations],
   );
   const requestKey = JSON.stringify(analysisRequest);
   const analysis = analysisResponse?.key === requestKey ? analysisResponse.value : null;
@@ -303,42 +296,32 @@ export function DraftSandbox({
     );
   }, [catalog, excluded, selected]);
 
+  const legalRolesForChampion = useCallback(
+    (champion: DraftChampion) => {
+      if (!nextSide) return [];
+      if (candidateRole === "open" || candidateRole === "any") {
+        return champion.roles.filter((role) => openRoles.includes(role));
+      }
+      return openRoles.includes(candidateRole) && champion.roles.includes(candidateRole)
+        ? [candidateRole]
+        : [];
+    },
+    [candidateRole, nextSide, openRoles],
+  );
+
   const pickerChampions = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     return available.filter((champion) => {
       if (query && !champion.name.toLocaleLowerCase().includes(query)) {
         return false;
       }
-      if (candidateRole === "open") {
-        return champion.roles.some((role) => openRoles.includes(role));
-      }
-      if (candidateRole === "any") {
-        return champion.roles.some((role) => openRoles.includes(role));
-      }
-      return (
-        openRoles.includes(candidateRole) && champion.roles.includes(candidateRole)
-      );
+      return legalRolesForChampion(champion).length > 0;
     });
-  }, [available, candidateRole, openRoles, search]);
-
-  const pendingRoles = pendingChampion
-    ? candidateRole !== "open" && candidateRole !== "any"
-      ? openRoles.includes(candidateRole)
-        ? [candidateRole]
-        : []
-      : candidateRole === "open"
-        ? pendingChampion.roles.filter((role) => openRoles.includes(role))
-        : pendingChampion.roles.filter((role) => openRoles.includes(role))
-    : [];
+  }, [available, legalRolesForChampion, search]);
 
   const fetchAnalysis = useCallback(
-    async (
-    recommendationMode: boolean,
-    signal?: AbortSignal,
-    force = false,
-    ): Promise<void> => {
+    async (request: Record<string, unknown>, signal?: AbortSignal, force = false): Promise<void> => {
       if (!publicPatch) return;
-      const request = buildRequest(recommendationMode);
       const payload = JSON.stringify(request);
       const cached = analysisCacheRef.current.get(payload);
       if (!force && cached) {
@@ -387,7 +370,7 @@ export function DraftSandbox({
         }
       }
     },
-    [analysisResponse?.key, buildRequest, publicPatch],
+    [analysisResponse?.key, publicPatch],
   );
 
   const runAnalysisNow = async () => {
@@ -395,46 +378,25 @@ export function DraftSandbox({
       setError("Select an observed patch context before running analysis.");
       return;
     }
-    await fetchAnalysis(includeRecommendations, undefined, true);
+    await fetchAnalysis(analysisRequest, undefined, true);
   };
 
   useEffect(() => {
-    if (analysisMode !== "live" || !publicPatch) return;
+    if (!autoEvaluate || !publicPatch) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void fetchAnalysis(includeRecommendations, controller.signal);
+      void fetchAnalysis(analysisRequest, controller.signal);
     }, LIVE_ANALYSIS_DEBOUNCE_MS);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
   }, [
-    actions,
-    candidateRole,
-    excluded,
-    league,
-    nextSide,
-    perspective,
+    analysisRequest,
+    autoEvaluate,
     publicPatch,
-    analysisMode,
-    includeRecommendations,
     fetchAnalysis,
   ]);
-
-  useEffect(() => {
-    if (pendingChampion) {
-      firstRoleChoiceRef.current?.focus();
-      return;
-    }
-    const returnMode = roleChoiceReturnModeRef.current;
-    if (!returnMode) return;
-    const trigger = roleChoiceTriggerRef.current;
-    const fallback = searchInputRef.current ?? sandboxHeadingRef.current;
-    const target = returnMode === "cancel" && trigger?.isConnected ? trigger : fallback;
-    roleChoiceReturnModeRef.current = null;
-    roleChoiceTriggerRef.current = null;
-    target?.focus();
-  }, [pendingChampion]);
 
   const addPick = (champion: string, role: DraftRole | null) => {
     setActions((currentActions) => {
@@ -450,39 +412,27 @@ export function DraftSandbox({
     });
     setCandidateRole("open");
     setSearch("");
-    setPendingChampion(null);
     setError(null);
   };
 
   const chooseChampion = (
     champion: DraftChampion,
-    trigger: HTMLElement | null = null,
+    selectedRole?: DraftRole,
   ) => {
-    const legalRoles =
-      candidateRole !== "open" && candidateRole !== "any"
-        ? openRoles.includes(candidateRole) && champion.roles.includes(candidateRole)
-          ? [candidateRole]
-          : []
-        : candidateRole === "open"
-          ? champion.roles.filter((role) => openRoles.includes(role))
-          : openRoles;
+    const legalRoles = legalRolesForChampion(champion);
+    if (selectedRole && !legalRoles.includes(selectedRole)) {
+      setError(`${champion.name} cannot be drafted as ${ROLE_LABEL[selectedRole]} in this state.`);
+      return;
+    }
+    if (selectedRole) {
+      addPick(champion.name, selectedRole);
+      return;
+    }
     if (!legalRoles.length) {
       setError(`${champion.name} has no legal role under this filter.`);
       return;
     }
-    if (legalRoles.length === 1) {
-      addPick(champion.name, legalRoles[0]);
-      return;
-    }
-    roleChoiceTriggerRef.current = trigger;
-    roleChoiceReturnModeRef.current = null;
-    setPendingChampion(champion);
-    setPickerAnnouncement(
-      candidateRole === "any"
-        ? `${champion.name} selected for a manual what-if. Choose an open role.`
-        : `${champion.name} can fit in multiple open roles. Choose one now.`,
-    );
-    setError(null);
+    addPick(champion.name, legalRoles[0]);
   };
 
   const addSearchPick = () => {
@@ -491,33 +441,14 @@ export function DraftSandbox({
         candidate.name.toLocaleLowerCase() === search.trim().toLocaleLowerCase(),
     );
     if (exact) {
-      chooseChampion(exact, searchInputRef.current);
+      chooseChampion(exact);
       return;
     }
     if (pickerChampions.length === 1) {
-      chooseChampion(pickerChampions[0], searchInputRef.current);
+      chooseChampion(pickerChampions[0]);
       return;
     }
     setError("Choose a champion from the visible grid.");
-  };
-
-  const selectPendingRole = (role: DraftRole) => {
-    if (!pendingChampion) return;
-    const champion = pendingChampion.name;
-    roleChoiceReturnModeRef.current = "selection";
-    setPickerAnnouncement(
-      `${champion} added as ${ROLE_LABEL[role]}. Focus returned to champion search.`,
-    );
-    addPick(champion, role);
-  };
-
-  const cancelPendingRole = () => {
-    if (!pendingChampion) return;
-    roleChoiceReturnModeRef.current = "cancel";
-    setPickerAnnouncement(
-      `${pendingChampion.name} role selection canceled. Focus returned to the champion choice.`,
-    );
-    setPendingChampion(null);
   };
 
   const markUnavailable = () => {
@@ -552,8 +483,7 @@ export function DraftSandbox({
     window.setTimeout(() => setShareState("Copy scenario"), 1600);
   };
 
-  const requestLabel = includeRecommendations ? "with" : "without";
-  const modeLabel = analysisMode;
+  
   const patchSupportText = latestObservedPatch
     ? `Patch ${latestObservedPatch} is current observed; values use ${latestPatchSpecific ? "patch-specific" : "pooled"} terms.`
     : "No observed patch is available for analysis.";
@@ -564,22 +494,11 @@ export function DraftSandbox({
       ? `Manual any role mode keeps recommendations in supported pro roles only (minimum ${DRAFT_POLICY_MIN_ROLE_GAMES} pro maps).`
       : `Supported pro roles require at least ${DRAFT_POLICY_MIN_ROLE_GAMES} pro maps.`;
   const boardStateLabel = nextSide ? `${sideLabel(nextSide)} pick` : "Draft complete";
-  const canEvaluateLive = analysisMode === "live";
 
   return (
     <div className="sandbox-page sandbox-draft-shell">
-      <p
-        className="sr-only"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {pickerAnnouncement}
-      </p>
-
       <header className="sandbox-hero">
         <h1
-          ref={sandboxHeadingRef}
           className="font-display"
           tabIndex={-1}
         >
@@ -589,16 +508,15 @@ export function DraftSandbox({
           <button
             type="button"
             className="sandbox-secondary-button"
-            onClick={() => {
-              setActions([]);
-              setExcluded([]);
-              setPerspective("blue");
-              setCandidateRole("open");
-              setSearch("");
-              setPendingChampion(null);
-              setAnalysisResponse(null);
-              setError(null);
-            }}
+              onClick={() => {
+                setActions([]);
+                setExcluded([]);
+                setPerspective("blue");
+                setCandidateRole("open");
+                setSearch("");
+                setAnalysisResponse(null);
+                setError(null);
+              }}
           >
             New draft
           </button>
@@ -663,19 +581,19 @@ export function DraftSandbox({
           </div>
         </fieldset>
 
-        <label className="sandbox-control-block sandbox-inline-toggle" aria-label="Auto draft evaluation">
-          <span>Auto update</span>
+          <label className="sandbox-control-block sandbox-inline-toggle" aria-label="Auto draft evaluation">
+          <span>Auto board updates</span>
           <input
             type="checkbox"
-            checked={canEvaluateLive}
+            checked={autoEvaluate}
             onChange={(event) =>
-              setAnalysisMode(event.target.checked ? "live" : "manual")
+              setAutoEvaluate(event.target.checked)
             }
           />
         </label>
 
         <label className="sandbox-control-block sandbox-inline-toggle">
-          <span>Live recommendations + evaluation</span>
+          <span>Live recommendations</span>
           <input
             type="checkbox"
             checked={includeRecommendations}
@@ -688,7 +606,7 @@ export function DraftSandbox({
           <strong>{boardStateLabel}</strong>
         </div>
 
-        {analysisMode === "manual" ? (
+        {!autoEvaluate ? (
           <button
             type="button"
             className="sandbox-primary-button"
@@ -776,7 +694,6 @@ export function DraftSandbox({
               onBranch={(index) => {
                 setActions((currentActions) => currentActions.slice(0, index));
                 setCandidateRole("open");
-                setPendingChampion(null);
               }}
             />
             <div className="sandbox-versus" aria-hidden>
@@ -789,7 +706,6 @@ export function DraftSandbox({
               onBranch={(index) => {
                 setActions((currentActions) => currentActions.slice(0, index));
                 setCandidateRole("open");
-                setPendingChampion(null);
               }}
             />
           </div>
@@ -842,7 +758,9 @@ export function DraftSandbox({
               </>
             ) : null}
             <p className="sandbox-empty sandbox-status-line">
-              {modeLabel} mode · {requestLabel} recs · {analysis?.candidate_role_policy ?? "supported pro roles"}
+              {autoEvaluate ? "Auto board updates" : "Manual board updates"}
+              · {includeRecommendations ? "with" : "without"} recommendations
+              · {analysis?.candidate_role_policy ?? "supported pro roles"}
             </p>
           </aside>
         </section>
@@ -867,7 +785,6 @@ export function DraftSandbox({
                 aria-pressed={candidateRole === "open"}
                 onClick={() => {
                   setCandidateRole("open");
-                  setPendingChampion(null);
                 }}
               >
                 Supported roles
@@ -878,7 +795,6 @@ export function DraftSandbox({
                 aria-pressed={candidateRole === "any"}
                 onClick={() => {
                   setCandidateRole("any");
-                  setPendingChampion(null);
                 }}
               >
                 Manual role
@@ -891,7 +807,6 @@ export function DraftSandbox({
                   disabled={!openRoles.includes(role)}
                   onClick={() => {
                     setCandidateRole(role);
-                    setPendingChampion(null);
                   }}
                   key={role}
                 >
@@ -927,31 +842,6 @@ export function DraftSandbox({
               ) : null}
             </div>
 
-            {pendingChampion ? (
-              <div
-                className="sandbox-role-choice"
-                role="group"
-                aria-labelledby="sandbox-role-choice-label"
-              >
-                <span id="sandbox-role-choice-label">
-                  Pick <strong>{pendingChampion.name}</strong> as
-                </span>
-                {pendingRoles.map((role, index) => (
-                  <button
-                    ref={index === 0 ? firstRoleChoiceRef : undefined}
-                    type="button"
-                    onClick={() => selectPendingRole(role)}
-                    key={role}
-                  >
-                    {ROLE_LABEL[role]}
-                  </button>
-                ))}
-                <button type="button" onClick={cancelPendingRole}>
-                  Cancel
-                </button>
-              </div>
-            ) : null}
-
             <div className="sandbox-champion-grid" aria-label="Available champions">
               {pickerChampions.map((champion) => {
                 const explicitRole =
@@ -963,29 +853,55 @@ export function DraftSandbox({
                 const observedOpenRoles = champion.roles.filter((role) =>
                   openRoles.includes(role),
                 );
+                const legalRoles = legalRolesForChampion(champion);
+                const canPickDirectly = legalRoles.length === 1;
+                const showRoleChoices =
+                  !canPickDirectly && (candidateRole === "open" || candidateRole === "any");
                 const detail = explicitRole
                   ? roleGames
                     ? `${roleGames} pro games`
                     : "Unseen in role"
                   : candidateRole === "any"
-                    ? "Manual role choice"
+                    ? "Pick from role chips below"
                     : observedOpenRoles.map((role) => ROLE_LABEL[role]).join(" · ");
+                const cardLabel = explicitRole
+                  ? `${champion.name} as ${ROLE_LABEL[explicitRole]}`
+                  : `Choose ${champion.name}`;
                 return (
-                  <button
-                    type="button"
-                    className="sandbox-champion-button"
-                    onClick={(event) => chooseChampion(champion, event.currentTarget)}
-                    aria-label={`Draft ${champion.name}${explicitRole ? ` as ${ROLE_LABEL[explicitRole]}` : ""}`}
-                    key={champion.name}
-                  >
-                    <span
-                      className="sandbox-champion-card-portrait"
-                      aria-hidden
-                      style={{ backgroundImage: `url("${champIconUrl(champion.name)}")` }}
-                    />
-                    <strong>{champion.name}</strong>
-                    <small>{detail}</small>
-                  </button>
+                  <div className="sandbox-champion-item" key={champion.name}>
+                    <button
+                      type="button"
+                      className="sandbox-champion-button"
+                      onClick={() => {
+                        if (canPickDirectly) {
+                          chooseChampion(champion, explicitRole ?? legalRoles[0]);
+                        }
+                      }}
+                      aria-label={cardLabel}
+                    >
+                      <span
+                        className="sandbox-champion-card-portrait"
+                        aria-hidden
+                        style={{ backgroundImage: `url("${champIconUrl(champion.name)}")` }}
+                      />
+                      <strong>{champion.name}</strong>
+                      <small>{detail}</small>
+                    </button>
+                    {showRoleChoices ? (
+                      <div className="sandbox-role-actions" aria-label={`Select role for ${champion.name}`}>
+                        {legalRoles.map((role) => (
+                          <button
+                            type="button"
+                            className="sandbox-mini-role-button"
+                            onClick={() => chooseChampion(champion, role)}
+                            key={`${champion.name}-${role}`}
+                          >
+                            {ROLE_LABEL[role]}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                 );
               })}
             </div>

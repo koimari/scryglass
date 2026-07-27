@@ -2898,6 +2898,11 @@ body {
   padding-top: 0.3rem;
 }
 
+.sandbox-champion-item {
+  display: grid;
+  gap: 0.24rem;
+}
+
 .sandbox-champion-button {
   display: grid;
   grid-template-columns: 1.7rem 1fr;
@@ -2943,6 +2948,31 @@ body {
   text-transform: uppercase;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sandbox-role-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.sandbox-mini-role-button {
+  min-height: 1.5rem;
+  padding: 0 0.4rem;
+  border: 1px solid color-mix(in oklch, var(--line) 72%, transparent);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 0.64rem;
+  cursor: pointer;
+}
+
+.sandbox-mini-role-button:hover,
+.sandbox-mini-role-button:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  background: color-mix(in oklch, var(--accent) 10%, var(--surface));
 }
 
 .sandbox-champion-button:hover,
