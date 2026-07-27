@@ -570,13 +570,13 @@ export function DraftSandbox({
 
       <header className="sandbox-hero">
         <div className="sandbox-hero-copy">
-          <p className="blog-kicker">Draft sandbox</p>
+          <p className="blog-kicker">Draft workspace</p>
           <h1
             ref={sandboxHeadingRef}
             className="font-display"
             tabIndex={-1}
           >
-            Draft workspace
+            Draft simulator
           </h1>
         </div>
         <div className="sandbox-header-actions">
@@ -689,7 +689,7 @@ export function DraftSandbox({
             onClick={runAnalysisNow}
             disabled={!publicPatch || loading}
           >
-            Evaluate now
+            Refresh draft
           </button>
         ) : null}
       </section>

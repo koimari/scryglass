@@ -2161,29 +2161,30 @@ body {
 /* —— Draft sandbox —— */
 .sandbox-page {
   display: grid;
-  gap: 0.55rem;
+  gap: 1rem;
 }
 
 .sandbox-draft-shell > .sandbox-hero {
-  padding-bottom: 0.15rem;
+  padding-bottom: 0.55rem;
   border-bottom: 1px solid var(--line);
 }
 
 .sandbox-hero {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 0.9rem;
+  gap: 1rem;
 }
 
 .sandbox-hero-copy {
   display: grid;
-  gap: 0.06rem;
+  gap: 0.4rem;
 }
 
 .sandbox-hero h1 {
   margin: 0;
-  font-size: clamp(1.15rem, 2vw + 0.2rem, 1.8rem);
+  font-size: clamp(1.35rem, 2vw + 0.5rem, 2rem);
+  line-height: 1.14;
 }
 
 .sandbox-hero-copy .blog-kicker {
@@ -2192,54 +2193,48 @@ body {
 
 .sandbox-mini-copy {
   color: var(--ink-faint);
-  font-size: 0.48rem;
+  font-size: 0.68rem;
+  line-height: 1.3;
   font-family: var(--font-mono), monospace;
 }
 
 .sandbox-header-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 0.5rem;
   align-items: center;
   justify-content: flex-end;
 }
 
 .sandbox-toolbar {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8.2rem, 1fr));
-  gap: 0.4rem;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.55rem;
   border: 1px solid var(--line);
-  padding: 0.4rem;
-  background: color-mix(in oklch, var(--surface) 84%, transparent);
+  padding: 0.72rem;
+  background:
+    linear-gradient(
+      to right,
+      color-mix(in oklch, var(--surface) 88%, transparent),
+      color-mix(in oklch, var(--canvas) 88%, transparent)
+    );
 }
 
 .sandbox-toolbar .sandbox-control-block,
 .sandbox-toolbar .sandbox-next {
   min-width: 0;
   margin: 0;
-  padding: 0.4rem 0.55rem 0.42rem;
-  border: 1px solid color-mix(in oklch, var(--line) 74%, transparent);
-  background: var(--surface);
 }
 
 .sandbox-toolbar select,
-.sandbox-toolbar button {
+.sandbox-toolbar button,
+.sandbox-toolbar input:not([type="checkbox"]) {
   width: 100%;
-}
-
-.sandbox-toolbar select {
-  height: 1.85rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--canvas);
-  color: var(--ink);
-  padding: 0 0.48rem;
-  font-size: 0.78rem;
 }
 
 .sandbox-control-block {
   display: grid;
-  gap: 0.2rem;
+  gap: 0.32rem;
 }
 
 .sandbox-control-block span,
@@ -2247,21 +2242,37 @@ body {
 .sandbox-next span {
   color: var(--ink-faint);
   font-family: var(--font-mono), monospace;
-  font-size: 0.56rem;
+  font-size: 0.74rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
+.sandbox-toolbar select {
+  height: 2.2rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--canvas);
+  color: var(--ink);
+  padding: 0 0.6rem;
+  font-size: 0.875rem;
+}
+
+.sandbox-toolbar .sandbox-secondary-button,
+.sandbox-toolbar .sandbox-primary-button {
+  height: 2.15rem;
+  padding-inline: 0.85rem;
+}
+
 .sandbox-inline-toggle {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.28rem;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
 }
 
 .sandbox-inline-toggle input[type="checkbox"] {
-  width: 1rem;
-  height: 1rem;
+  width: 1.1rem;
+  height: 1.1rem;
   margin: 0;
   accent-color: var(--accent);
 }
@@ -2273,15 +2284,14 @@ body {
 .sandbox-segmented {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  height: 1.7rem;
+  background: var(--surface);
 }
 
 .sandbox-segmented button {
   border: 1px solid var(--line);
-  background: var(--canvas);
+  height: 2.1rem;
   color: var(--ink-muted);
-  font: inherit;
-  font-size: 0.62rem;
+  font-size: 0.875rem;
 }
 
 .sandbox-segmented button + button {
@@ -2295,28 +2305,25 @@ body {
 }
 
 .sandbox-next strong {
-  color: var(--accent);
-  letter-spacing: 0.04em;
+  color: var(--ink);
 }
 
 .sandbox-unavailable {
   border: 1px solid var(--line);
-  padding: 0.36rem 0.45rem;
-  background: color-mix(in oklch, var(--surface) 84%, transparent);
+  padding: 0.55rem 0.65rem;
+  background: color-mix(in oklch, var(--surface) 82%, transparent);
   font: inherit;
 }
 
 .sandbox-unavailable summary {
   display: grid;
   grid-template-columns: 1fr auto;
-  align-items: baseline;
-  gap: 0.2rem;
+  align-items: center;
+  gap: 0.5rem;
   cursor: pointer;
-  font: inherit;
   list-style: none;
   color: var(--ink);
   font-weight: 600;
-  font-size: 0.7rem;
 }
 
 .sandbox-unavailable summary::marker,
@@ -2327,35 +2334,23 @@ body {
 .sandbox-unavailable summary span {
   color: var(--ink-muted);
   font-family: var(--font-mono), monospace;
-  font-size: 0.55rem;
-  letter-spacing: 0.07em;
+  font-size: 0.64rem;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
 .sandbox-unavailable summary small {
   color: var(--ink-faint);
-  font-size: 0.54rem;
+  font-size: 0.64rem;
 }
 
 .sandbox-unavailable-body {
-  margin-top: 0.4rem;
+  margin-top: 0.55rem;
   display: grid;
-  gap: 0.34rem;
+  gap: 0.45rem;
 }
 
 .sandbox-unavailable:not([open]) .sandbox-unavailable-body {
-  display: none;
-}
-
-.sandbox-unavailable-title {
-  display: none;
-}
-
-.sandbox-unavailable-title span {
-  display: none;
-}
-
-.sandbox-unavailable-title small {
   display: none;
 }
 
@@ -2366,8 +2361,8 @@ body {
 .sandbox-unavailable-control input {
   min-width: 0;
   flex: 1;
-  height: 2rem;
-  padding: 0 0.62rem;
+  height: 2.2rem;
+  padding: 0 0.65rem;
   border: 1px solid var(--line);
   border-right: 0;
   border-radius: var(--radius) 0 0 var(--radius);
@@ -2383,41 +2378,40 @@ body {
 .sandbox-excluded-list {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.32rem;
+  gap: 0.35rem;
+  align-items: center;
 }
 
 .sandbox-excluded-list > span {
   color: var(--ink-faint);
+  font-size: 0.7rem;
   font-family: var(--font-mono), monospace;
-  font-size: 0.6rem;
 }
 
 .sandbox-excluded-list button {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 0.16rem 0.42rem;
+  padding: 0.22rem 0.5rem;
   background: transparent;
   color: var(--ink-muted);
-  font-size: 0.62rem;
-  font-family: inherit;
+  font-size: 0.74rem;
 }
 
 .sandbox-layout {
   display: grid;
-  gap: 0.7rem;
-  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr);
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
 }
 
 .sandbox-workbench {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(13rem, 0.95fr);
-  gap: 0.55rem;
+  grid-template-columns: minmax(0, 1.45fr) minmax(16rem, 1fr);
+  gap: 0.8rem;
 }
 
 .sandbox-board {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 2rem minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 2.25rem minmax(0, 1fr);
   gap: 1px;
   border: 1px solid var(--line);
 }
@@ -2425,24 +2419,25 @@ body {
 .sandbox-versus {
   display: grid;
   place-items: center;
-  color: var(--ink-faint);
+  color: var(--ink-muted);
   font-family: var(--font-display), sans-serif;
-  font-size: 0.52rem;
-  letter-spacing: 0.09em;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .sandbox-side {
   min-width: 0;
-  padding: 0.3rem 0.38rem 0.35rem;
+  padding: 0.65rem 0.6rem 0.75rem;
   background: var(--surface);
 }
 
 .sandbox-side.sandbox-side-blue {
-  border-right: 1px solid color-mix(in oklch, var(--side-blue) 24%, transparent);
+  border-right: 1px solid color-mix(in oklch, var(--side-blue) 28%, transparent);
 }
 
 .sandbox-side.sandbox-side-red {
-  border-left: 1px solid color-mix(in oklch, var(--side-red) 24%, transparent);
+  border-left: 1px solid color-mix(in oklch, var(--side-red) 28%, transparent);
 }
 
 .sandbox-side-head {
@@ -2450,10 +2445,10 @@ body {
   align-items: center;
   justify-content: space-between;
   color: var(--ink-faint);
-  font-family: var(--font-mono), monospace;
-  font-size: 0.52rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  font-family: var(--font-mono), monospace;
 }
 
 .sandbox-side-head strong {
@@ -2462,37 +2457,37 @@ body {
 
 .sandbox-pick-list {
   display: grid;
-  gap: 1px;
-  margin: 0.28rem 0 0;
+  gap: 0.45rem;
+  margin: 0.45rem 0 0;
   padding: 0;
   list-style: none;
 }
 
 .sandbox-pick-list li {
   display: grid;
-  grid-template-columns: 1.3rem 1.45rem minmax(0, 1fr) auto auto;
+  grid-template-columns: 1.8rem 1.65rem minmax(0, 1fr) auto;
   align-items: center;
-  min-height: 1.8rem;
-  gap: 0.24rem;
-  padding: 0.25rem 0.34rem;
-  border: 1px solid color-mix(in oklch, var(--line) 74%, transparent);
+  min-height: 2rem;
+  gap: 0.4rem;
+  padding: 0.4rem 0.35rem;
+  border: 1px solid color-mix(in oklch, var(--line) 80%, transparent);
   background: var(--surface);
 }
 
 .sandbox-pick-list li.is-next {
-  border-color: color-mix(in oklch, var(--accent) 40%, var(--line));
-  background: color-mix(in oklch, var(--accent) 10%, var(--surface));
+  border-color: color-mix(in oklch, var(--accent) 48%, var(--line));
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface));
 }
 
 .sandbox-pick-seat {
   color: var(--ink-faint);
   font-family: var(--font-mono), monospace;
-  font-size: 0.47rem;
+  font-size: 0.62rem;
 }
 
 .sandbox-champion-portrait {
-  width: 1.45rem;
-  height: 1.45rem;
+  width: 1.65rem;
+  height: 1.65rem;
   border: 1px solid color-mix(in oklch, var(--line) 78%, transparent);
   border-radius: var(--radius);
   background-color: var(--surface-subtle);
@@ -2504,6 +2499,7 @@ body {
   min-width: 0;
   overflow: hidden;
   color: var(--ink);
+  font-size: 0.84rem;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2513,9 +2509,9 @@ body {
 .sandbox-pick-empty {
   color: var(--ink-muted);
   font-family: var(--font-mono), monospace;
-  font-size: 0.5rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
 }
 
 .sandbox-pick-empty {
@@ -2526,31 +2522,24 @@ body {
 .sandbox-primary-button,
 .sandbox-secondary-button,
 .sandbox-use-pick {
-  border: 1px solid color-mix(in oklch, var(--line) 70%, transparent);
+  border: 1px solid color-mix(in oklch, var(--line) 65%, transparent);
   border-radius: var(--radius);
   background: var(--canvas);
   color: var(--ink-muted);
   font: inherit;
-  font-size: 0.58rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 0.74rem;
   cursor: pointer;
-  transition:
-    border-color 140ms var(--ease-out),
-    color 140ms var(--ease-out),
-    background 140ms var(--ease-out);
+  transition: border-color 140ms var(--ease-out), color 140ms var(--ease-out), background 140ms var(--ease-out);
 }
 
 .sandbox-branch-button {
-  min-height: 1.3rem;
-  min-width: 1.6rem;
-  padding: 0 0.3rem;
+  min-height: 1.55rem;
+  min-width: 2.4rem;
+  padding: 0 0.38rem;
 }
 
 .sandbox-primary-button,
 .sandbox-secondary-button {
-  padding: 0 0.68rem;
   white-space: nowrap;
 }
 
@@ -2571,10 +2560,10 @@ body {
 .sandbox-read {
   display: grid;
   align-content: start;
-  gap: 0.36rem;
-  padding: 0.32rem 0.48rem 0.4rem;
+  gap: 0.5rem;
+  padding: 0.72rem;
   border: 1px solid var(--line);
-  background: var(--surface);
+  background: color-mix(in oklch, var(--surface) 80%, var(--canvas));
 }
 
 .sandbox-read .blog-kicker {
@@ -2582,39 +2571,39 @@ body {
 }
 
 .sandbox-read-head h2 {
-  margin: 0.15rem 0 0;
-  font-size: 1rem;
+  margin: 0.12rem 0 0;
+  font-size: 1.15rem;
 }
 
 .sandbox-current-number {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 0.55rem;
+  gap: 0.65rem;
+  padding-top: 0.2rem;
 }
 
 .sandbox-current-number span {
   color: var(--ink-muted);
-  font-size: 0.64rem;
+  font-size: 0.8rem;
 }
 
 .sandbox-current-number strong {
   color: var(--ink);
   font-family: var(--font-mono), monospace;
-  font-size: 1.04rem;
+  font-size: 1.25rem;
   letter-spacing: -0.02em;
 }
 
 .sandbox-read-metrics summary {
   margin-top: 0.18rem;
-  padding: 0.12rem 0;
-  border-top: 1px solid color-mix(in oklch, var(--line) 56%, transparent);
+  padding: 0.32rem 0;
+  border-top: 1px solid color-mix(in oklch, var(--line) 60%, transparent);
   color: var(--ink-muted);
   font: inherit;
-  font-size: 0.52rem;
-  font-family: var(--font-mono), monospace;
+  font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   cursor: pointer;
 }
 
@@ -2622,21 +2611,16 @@ body {
   color: var(--accent);
 }
 
-.sandbox-read-metrics[open] summary {
-  margin-bottom: 0.26rem;
-}
-
 .sandbox-read-footnote {
   margin: 0;
   color: var(--ink-faint);
-  font-size: 0.56rem;
-  font-family: var(--font-mono), monospace;
+  font-size: 0.66rem;
 }
 
 .sandbox-balance {
-  height: 0.26rem;
+  height: 0.38rem;
   overflow: hidden;
-  background: color-mix(in oklch, var(--ink) 15%, transparent);
+  background: color-mix(in oklch, var(--ink) 16%, transparent);
 }
 
 .sandbox-balance span {
@@ -2648,21 +2632,23 @@ body {
 
 .sandbox-read-ledger {
   margin: 0;
-  padding-top: 0.1rem;
+  padding-top: 0.2rem;
+  display: grid;
+  gap: 0.16rem;
 }
 
 .sandbox-read-ledger > div {
   display: flex;
   justify-content: space-between;
   gap: 0.7rem;
-  padding: 0.22rem 0;
+  padding: 0.3rem 0;
   border-bottom: 1px solid color-mix(in oklch, var(--line) 62%, transparent);
 }
 
 .sandbox-read-ledger dt,
 .sandbox-read-ledger dd {
   margin: 0;
-  font-size: 0.62rem;
+  font-size: 0.78rem;
   font-family: var(--font-mono), monospace;
 }
 
@@ -2677,29 +2663,27 @@ body {
 
 .sandbox-answer {
   margin: 0;
-  padding-top: 0.12rem;
   color: var(--ink-muted);
-  font-size: 0.67rem;
+  font-size: 0.76rem;
 }
 
 .sandbox-shortlist {
   display: grid;
-  gap: 1px;
-  margin-top: 0.1rem;
-  background: var(--line);
+  gap: 0;
+  margin-top: 0.35rem;
 }
 
 .sandbox-shortlist-head {
   display: flex;
   justify-content: space-between;
   gap: 0.65rem;
-  padding: 0.2rem 0.3rem;
-  background: var(--surface);
+  padding: 0.35rem 0.2rem;
   color: var(--ink-muted);
   font-family: var(--font-mono), monospace;
-  font-size: 0.54rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--line);
 }
 
 .sandbox-shortlist-head small {
@@ -2708,28 +2692,16 @@ body {
 
 .sandbox-shortlist button {
   display: grid;
-  grid-template-columns: 1.2rem 1.45rem minmax(0, 1fr) auto auto;
+  grid-template-columns: 1.2rem 1.65rem minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 0.28rem;
+  gap: 0.3rem;
   min-width: 0;
-  padding: 0.24rem 0.26rem;
+  padding: 0.4rem 0.2rem 0.4rem 0;
   border: 0;
-  background: var(--surface-subtle);
+  border-bottom: 1px solid color-mix(in oklch, var(--line) 74%, transparent);
+  background: transparent;
   color: var(--ink);
   text-align: left;
-}
-
-.sandbox-rec-rank {
-  width: 0.9rem;
-  text-align: center;
-  color: var(--ink-faint);
-  font-size: 0.5rem;
-}
-
-.sandbox-rec-value {
-  color: var(--ink);
-  text-align: right;
-  font-size: 0.62rem;
 }
 
 .sandbox-shortlist button > span:nth-child(2) {
@@ -2737,16 +2709,29 @@ body {
   min-width: 0;
 }
 
+.sandbox-rec-rank {
+  width: 0.95rem;
+  text-align: center;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+}
+
+.sandbox-rec-value {
+  color: var(--ink);
+  text-align: right;
+  font-size: 0.84rem;
+}
+
 .sandbox-shortlist button strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.63rem;
+  font-size: 0.86rem;
 }
 
 .sandbox-shortlist button small {
   color: var(--ink-faint);
-  font-size: 0.46rem;
+  font-size: 0.62rem;
   font-family: var(--font-mono), monospace;
   text-transform: uppercase;
 }
@@ -2755,12 +2740,12 @@ body {
   color: var(--secondary);
   font-family: var(--font-mono), monospace;
   font-style: normal;
-  font-size: 0.53rem;
+  font-size: 0.66rem;
   white-space: nowrap;
 }
 
 .sandbox-positive {
-  color: color-mix(in oklch, var(--secondary) 72%, #0f0);
+  color: color-mix(in oklch, var(--secondary) 74%, #0f0);
 }
 
 .sandbox-negative {
@@ -2768,7 +2753,7 @@ body {
 }
 
 .sandbox-skeleton {
-  height: 7.4rem;
+  height: 7.5rem;
   background: linear-gradient(
     90deg,
     color-mix(in oklch, var(--surface) 60%, transparent),
@@ -2781,37 +2766,35 @@ body {
 
 .sandbox-picker {
   display: grid;
-  gap: 0.48rem;
-  max-height: 100%;
+  gap: 0.55rem;
 }
 
 .sandbox-picker-head {
   display: grid;
-  gap: 0.08rem;
+  gap: 0.15rem;
 }
 
 .sandbox-picker-head h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 1.1rem;
 }
 
 .sandbox-role-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.22rem;
+  gap: 0.35rem;
 }
 
 .sandbox-role-filters button,
 .sandbox-role-choice button {
-  min-height: 1.4rem;
-  padding: 0 0.46rem;
+  min-height: 1.95rem;
+  padding: 0 0.58rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--ink-muted);
   font: inherit;
-  font-size: 0.55rem;
-  font-weight: 600;
+  font-size: 0.75rem;
   cursor: pointer;
 }
 
@@ -2836,7 +2819,7 @@ body {
   margin: 0;
   color: var(--ink-muted);
   font-family: var(--font-mono), monospace;
-  font-size: 0.52rem;
+  font-size: 0.66rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -2845,20 +2828,20 @@ body {
   display: flex;
   align-items: stretch;
   width: 100%;
-  gap: 0.35rem;
+  gap: 0.4rem;
 }
 
 .sandbox-picker-control input {
   min-width: 0;
   flex: 1;
-  height: 1.72rem;
-  padding: 0 0.48rem;
+  height: 2.1rem;
+  padding: 0 0.68rem;
   border: 1px solid var(--line);
   border-right: 0;
   border-radius: var(--radius) 0 0 var(--radius);
   background: var(--surface);
   color: var(--ink);
-  font: inherit;
+  font-size: 0.9rem;
 }
 
 .sandbox-picker-control .sandbox-secondary-button {
@@ -2870,16 +2853,15 @@ body {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.2rem;
-  padding: 0.32rem;
+  gap: 0.35rem;
+  padding: 0.4rem 0.5rem;
   border: 1px solid var(--accent);
   background: color-mix(in oklch, var(--accent) 10%, var(--surface));
 }
 
 .sandbox-role-choice > span {
-  margin-right: 0.3rem;
   color: var(--ink-muted);
-  font-size: 0.72rem;
+  font-size: 0.74rem;
 }
 
 .sandbox-role-choice strong {
@@ -2888,19 +2870,21 @@ body {
 
 .sandbox-champion-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(8.1rem, 1fr));
-  gap: 0.26rem;
-  max-height: 30rem;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.35rem;
+  max-height: 32rem;
   overflow-y: auto;
+  border-top: 1px solid var(--line);
+  padding-top: 0.3rem;
 }
 
 .sandbox-champion-button {
   display: grid;
-  grid-template-columns: 1.55rem 1fr;
+  grid-template-columns: 1.85rem 1fr;
   align-items: center;
-  gap: 0.28rem;
+  gap: 0.45rem;
   min-width: 0;
-  padding: 0.22rem 0.28rem;
+  padding: 0.45rem 0.5rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
@@ -2910,7 +2894,7 @@ body {
 }
 
 .sandbox-champion-card-portrait {
-  width: 1.55rem;
+  width: 1.85rem;
   aspect-ratio: 1 / 1;
   border-radius: calc(var(--radius) - 1px);
   background-color: var(--surface-subtle);
@@ -2927,7 +2911,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.64rem;
+  font-size: 0.84rem;
   line-height: 1.2;
 }
 
@@ -2935,7 +2919,7 @@ body {
   overflow: hidden;
   color: var(--ink-faint);
   font-family: var(--font-mono), monospace;
-  font-size: 0.44rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2944,7 +2928,7 @@ body {
 .sandbox-champion-button:hover,
 .sandbox-champion-button:focus-visible {
   border-color: var(--accent);
-  background: color-mix(in oklch, var(--accent) 8%, var(--surface));
+  background: color-mix(in oklch, var(--accent) 10%, var(--surface));
 }
 
 .sandbox-empty {
@@ -2952,7 +2936,7 @@ body {
   padding: 0.5rem 0;
   border-top: 1px solid var(--line);
   color: var(--ink-muted);
-  font-size: 0.68rem;
+  font-size: 0.82rem;
 }
 
 .sandbox-method {
@@ -2961,7 +2945,7 @@ body {
 }
 
 .sandbox-method summary {
-  padding: 0.75rem 0;
+  padding: 0.8rem 0;
   color: var(--ink);
   font-weight: 600;
   cursor: pointer;
@@ -2971,7 +2955,7 @@ body {
   max-width: 75ch;
   margin: 0 0 0.8rem;
   color: var(--ink-muted);
-  font-size: 0.72rem;
+  font-size: 0.84rem;
   line-height: 1.45;
 }
 
