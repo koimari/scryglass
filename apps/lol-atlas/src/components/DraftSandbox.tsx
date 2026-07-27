@@ -203,6 +203,7 @@ export function DraftSandbox({
   const [error, setError] = useState<string | null>(null);
   const [shareState, setShareState] = useState("Copy scenario");
   const [includeRecommendations, setIncludeRecommendations] = useState(false);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const analysisCacheRef = useRef<Map<string, DraftSandboxResult>>(new Map());
 
   const analysisPatchContracts = patchContractsFromSource(
@@ -762,8 +763,58 @@ export function DraftSandbox({
               · {includeRecommendations ? "with" : "without"} recommendations
               · {analysis?.candidate_role_policy ?? "supported pro roles"}
             </p>
+            <button
+              type="button"
+              className="sandbox-advanced-toggle"
+              onClick={() =>
+                setShowAdvancedSettings((current) => !current)
+              }
+            >
+              {showAdvancedSettings ? "Hide advanced controls" : "Show advanced controls"}
+            </button>
           </aside>
         </section>
+
+        {showAdvancedSettings ? (
+          <aside className="sandbox-advanced-controls" aria-label="Draft sandbox advanced controls">
+            <h2 className="font-display sandbox-advanced-title">Advanced controls</h2>
+            <p className="sandbox-mini-copy sandbox-advanced-copy">
+              Keep a strict context for repeatable experiments.
+            </p>
+            <button
+              type="button"
+              className="sandbox-secondary-button"
+              onClick={() => {
+                setCandidateRole("open");
+                setSearch("");
+                setError(null);
+              }}
+            >
+              Reset role filter
+            </button>
+            <button
+              type="button"
+              className="sandbox-secondary-button"
+              onClick={() => {
+                setLeague("LCK");
+                setPublicPatch(latestPatchSpecific || latestObservedPatch || "");
+                setAnalysisResponse(null);
+              }}
+            >
+              Reset to LCK current patch
+            </button>
+            <button
+              type="button"
+              className="sandbox-secondary-button"
+              onClick={() => {
+                setSearch("");
+                setExcludeSearch("");
+              }}
+            >
+              Clear search fields
+            </button>
+          </aside>
+        ) : null}
 
         {nextSide && (
           <section className="sandbox-picker" aria-label="Pick next champion">
@@ -850,20 +901,21 @@ export function DraftSandbox({
                     : null;
                 const roleGames =
                   explicitRole ? Number(champion.role_games?.[explicitRole] ?? 0) : null;
-                const observedOpenRoles = champion.roles.filter((role) =>
-                  openRoles.includes(role),
-                );
                 const legalRoles = legalRolesForChampion(champion);
                 const canPickDirectly = legalRoles.length === 1;
-                const showRoleChoices =
-                  !canPickDirectly && (candidateRole === "open" || candidateRole === "any");
+                const showRoleChoices = candidateRole === "open" || candidateRole === "any";
                 const detail = explicitRole
                   ? roleGames
                     ? `${roleGames} pro games`
                     : "Unseen in role"
-                  : candidateRole === "any"
-                    ? "Pick from role chips below"
-                    : observedOpenRoles.map((role) => ROLE_LABEL[role]).join(" · ");
+                  : legalRoles.length
+                    ? legalRoles
+                        .map(
+                          (role) =>
+                            `${ROLE_LABEL[role]}: ${champion.role_games?.[role] ?? 0}`,
+                        )
+                        .join(" · ")
+                    : "No legal roles available";
                 const cardLabel = explicitRole
                   ? `${champion.name} as ${ROLE_LABEL[explicitRole]}`
                   : `Choose ${champion.name}`;
@@ -873,8 +925,12 @@ export function DraftSandbox({
                       type="button"
                       className="sandbox-champion-button"
                       onClick={() => {
-                        if (canPickDirectly) {
-                          chooseChampion(champion, explicitRole ?? legalRoles[0]);
+                        if (explicitRole) {
+                          chooseChampion(champion, explicitRole);
+                          return;
+                        }
+                        if (!showRoleChoices && canPickDirectly) {
+                          chooseChampion(champion, legalRoles[0]);
                         }
                       }}
                       aria-label={cardLabel}
@@ -884,8 +940,10 @@ export function DraftSandbox({
                         aria-hidden
                         style={{ backgroundImage: `url("${champIconUrl(champion.name)}")` }}
                       />
-                      <strong>{champion.name}</strong>
-                      <small>{detail}</small>
+                      <div className="sandbox-champion-meta">
+                        <strong>{champion.name}</strong>
+                        <small>{detail}</small>
+                      </div>
                     </button>
                     {showRoleChoices ? (
                       <div className="sandbox-role-actions" aria-label={`Select role for ${champion.name}`}>
