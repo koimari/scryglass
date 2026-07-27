@@ -894,7 +894,7 @@ export function DraftSandbox({
             </div>
 
             <div className="sandbox-champion-grid" aria-label="Available champions">
-              {pickerChampions.map((champion) => {
+            {pickerChampions.map((champion) => {
                 const explicitRole =
                   candidateRole !== "open" && candidateRole !== "any"
                     ? candidateRole
@@ -921,30 +921,42 @@ export function DraftSandbox({
                   : `Choose ${champion.name}`;
                 return (
                   <div className="sandbox-champion-item" key={champion.name}>
-                    <button
-                      type="button"
-                      className="sandbox-champion-button"
-                      onClick={() => {
-                        if (explicitRole) {
-                          chooseChampion(champion, explicitRole);
-                          return;
-                        }
-                        if (!showRoleChoices && canPickDirectly) {
+                    {explicitRole || (!showRoleChoices && canPickDirectly) ? (
+                      <button
+                        type="button"
+                        className="sandbox-champion-button"
+                        onClick={() => {
+                          if (explicitRole) {
+                            chooseChampion(champion, explicitRole);
+                            return;
+                          }
                           chooseChampion(champion, legalRoles[0]);
-                        }
-                      }}
-                      aria-label={cardLabel}
-                    >
-                      <span
-                        className="sandbox-champion-card-portrait"
-                        aria-hidden
-                        style={{ backgroundImage: `url("${champIconUrl(champion.name)}")` }}
-                      />
-                      <div className="sandbox-champion-meta">
-                        <strong>{champion.name}</strong>
-                        <small>{detail}</small>
+                        }}
+                        aria-label={cardLabel}
+                      >
+                        <span
+                          className="sandbox-champion-card-portrait"
+                          aria-hidden
+                          style={{ backgroundImage: `url("${champIconUrl(champion.name)}")` }}
+                        />
+                        <div className="sandbox-champion-meta">
+                          <strong>{champion.name}</strong>
+                          <small>{detail}</small>
+                        </div>
+                      </button>
+                    ) : (
+                      <div className="sandbox-champion-display" aria-label={cardLabel}>
+                        <span
+                          className="sandbox-champion-card-portrait"
+                          aria-hidden
+                          style={{ backgroundImage: `url("${champIconUrl(champion.name)}")` }}
+                        />
+                        <div className="sandbox-champion-meta">
+                          <strong>{champion.name}</strong>
+                          <small>{detail}</small>
+                        </div>
                       </div>
-                    </button>
+                    )}
                     {showRoleChoices ? (
                       <div className="sandbox-role-actions" aria-label={`Select role for ${champion.name}`}>
                         {legalRoles.map((role) => (

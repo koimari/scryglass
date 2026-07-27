@@ -2962,6 +2962,21 @@ body {
   width: 100%;
 }
 
+.sandbox-champion-display {
+  display: grid;
+  grid-template-columns: 1.7rem 1fr;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0.42rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-subtle);
+  color: var(--ink);
+  text-align: left;
+  width: 100%;
+}
+
 .sandbox-champion-button:focus-visible,
 .sandbox-champion-button:hover {
   background: color-mix(in oklch, var(--accent) 10%, var(--surface));
