@@ -1,31 +1,20 @@
 "use client";
 
+import { ArrowUpRightIcon, ListIcon, XIcon } from "@phosphor-icons/react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ThemeToggle } from "./ThemeToggle";
 
-const GROUPS = [
-  {
-    label: "Read",
-    links: [{ href: "/articles", label: "Articles" }],
-  },
-  {
-    label: "Explore",
-    links: [
-      { href: "/elo", label: "Ratings" },
-      { href: "/browse", label: "Matches" },
-      { href: "/browse/head-to-head", label: "H2H" },
-      { href: "/sandbox", label: "Sandbox" },
-    ],
-  },
-  {
-    label: "Verify",
-    links: [
-      { href: "/methodology", label: "Method" },
-      { href: "/reproduce", label: "Reproduce" },
-    ],
-  },
+const LINKS = [
+  { href: "/articles", label: "Articles" },
+  { href: "/elo", label: "Ratings" },
+  { href: "/browse", label: "Matches" },
+  { href: "/browse/head-to-head", label: "H2H" },
+  { href: "/sandbox", label: "Sandbox" },
+  { href: "/methodology", label: "Method" },
+  { href: "/reproduce", label: "Reproduce" },
 ];
 
 function isCurrent(pathname: string, href: string): boolean {
@@ -90,6 +79,19 @@ export function SiteHeader() {
         setMenuOpen(false);
         menuToggleRef.current?.focus();
       }
+      if (event.key === "Tab" && menuRef.current) {
+        const links = [...menuRef.current.querySelectorAll<HTMLAnchorElement>("a[href]")];
+        if (!links.length) return;
+        const first = links[0];
+        const last = links[links.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -101,39 +103,41 @@ export function SiteHeader() {
     <header className="site-header">
       <div className="site-header-inner">
         <Link href="/" className="brand">
-          <span className="brand-mark" aria-hidden />
-          <span className="brand-name">Scryglass</span>
+          <span className="brand-mark" aria-hidden>
+            <Image src="/favicon.ico" width={16} height={16} alt="" />
+          </span>
+          <strong className="brand-name">Scryglass</strong>
         </Link>
-        <nav className="site-nav site-nav-desktop" aria-label="Primary">
-          {GROUPS.map((group, groupIndex) => (
-            <div className="nav-group" key={group.label}>
-              {groupIndex > 0 && <span className="nav-divider" aria-hidden />}
-              <span className="nav-group-label">{group.label}</span>
-              {group.links.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  aria-current={isCurrent(pathname, link.href) ? "page" : undefined}
-                  className="nav-link"
-                >
-                  {link.label}
-                </Link>
-              ))}
-            </div>
+        <nav className="site-nav site-nav-flat site-nav-desktop" aria-label="Primary">
+          {LINKS.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              aria-current={isCurrent(pathname, link.href) ? "page" : undefined}
+              className="nav-link"
+            >
+              {link.label}
+            </Link>
           ))}
         </nav>
-        <span className="data-freshness" aria-label={updated ? `Data updated ${updated}` : "Data freshness unavailable"}>
-          {updated ? `Data ${updated}` : "Data —"}
+        <span
+          className="data-freshness"
+          aria-label={updated ? `Data updated ${updated}` : "Data freshness unavailable"}
+        >
+          <i aria-hidden />
+          <span>{updated ? `Updated ${updated}` : "Data status"}</span>
         </span>
         <button
           type="button"
           className="menu-toggle"
           ref={menuToggleRef}
+          aria-label={menuOpen ? "Close menu" : "Open menu"}
           aria-expanded={menuOpen}
           aria-controls="mobile-primary-menu"
           onClick={() => setMenuOpen((open) => !open)}
         >
-          {menuOpen ? "Close" : "Menu"}
+          {menuOpen ? <XIcon size={17} aria-hidden /> : <ListIcon size={17} aria-hidden />}
+          <span>{menuOpen ? "Close" : "Menu"}</span>
         </button>
         <ThemeToggle />
       </div>
@@ -146,21 +150,16 @@ export function SiteHeader() {
             className="site-menu"
             aria-label="Primary mobile navigation"
           >
-            {GROUPS.map((group) => (
-              <div className="site-menu-group" key={group.label}>
-                <span className="nav-group-label">{group.label}</span>
-                {group.links.map((link) => (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    aria-current={isCurrent(pathname, link.href) ? "page" : undefined}
-                    className="site-menu-link"
-                    onClick={closeMenu}
-                  >
-                    {link.label}
-                  </Link>
-                ))}
-              </div>
+            {LINKS.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                aria-current={isCurrent(pathname, link.href) ? "page" : undefined}
+                className="site-menu-link"
+                onClick={closeMenu}
+              >
+                {link.label}
+              </Link>
             ))}
           </nav>
         </>
@@ -172,11 +171,17 @@ export function SiteHeader() {
 export function SiteFooter() {
   return (
     <footer className="site-footer">
-    Independent LoL research by koi · OE baseline + GRID recent pro rows ·{" "}
-      <Link href="/reproduce" className="row-link">
-        Data &amp; reproduction
-      </Link>{" "}
-      · Pack <span className="font-mono">2025–2026</span>
+      <div>
+        <strong>Scryglass</strong>
+        <span>Independent League of Legends research by koi.</span>
+      </div>
+      <div>
+        <span>OE baseline + GRID recent pro rows</span>
+        <Link href="/reproduce" className="row-link">
+          Data &amp; reproduction <ArrowUpRightIcon size={13} aria-hidden />
+        </Link>
+        <span className="font-mono">2025–2026</span>
+      </div>
     </footer>
   );
 }

@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { EloLadders } from "@/components/EloLadders";
 import type {
   PlayerMetadata,
@@ -10,6 +11,7 @@ import type {
 } from "@/lib/pack";
 import { packUpdatedLabel, packUrl, softMu } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
+import styles from "./EloPage.module.css";
 
 // Ratings are refreshed independently of the app deployment and are served
 // from the current Blob pack at request time.
@@ -71,29 +73,19 @@ export default async function EloPage() {
   const availableLeagues = [...leagueSet].sort();
 
   return (
-    <div className="space-y-6">
-      <header className="page-header">
-        <p className="blog-kicker">Ratings · Dual Elo</p>
-        <h1 className="font-display mt-2 text-3xl">Dual Elo ladders</h1>
-        <p className="lede">
-          Open a team for the roster, or a player for their board. Adjusted rating is the default
-          sort — it accounts for how much evidence supports the number.
-        </p>
-        <div className="micro-log mt-4">
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <div>
+          <h1>Team and player ratings</h1>
+          <p>Current Dual Elo estimates. Adjusted rating discounts uncertainty.</p>
+        </div>
+        <div className={styles.provenance} aria-label="Ratings provenance">
           <span>
-            <strong>Last updated</strong> {packUpdatedLabel(man)}
+            Updated <time dateTime={man.created_utc}>{packUpdatedLabel(man)}</time>
           </span>
-          <span>
-            <strong>Pack</strong> {man.pack_id}
-          </span>
-          <span>
-            <strong>Orgs</strong> {teams.length}
-          </span>
-          <span>
-            <a className="row-link" href={packUrl(man, "features/ratings_snapshot.json")}>
-              Snapshot JSON
-            </a>
-          </span>
+          <span>Pack {man.pack_id}</span>
+          <Link href="/methodology">Method</Link>
+          <a href={packUrl(man, "features/ratings_snapshot.json")}>JSON</a>
         </div>
       </header>
       <Suspense fallback={<div className="skeleton-block" aria-hidden />}>

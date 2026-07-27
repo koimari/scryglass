@@ -1,0 +1,48 @@
+.root {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.record {
+  margin: 0;
+  padding: 0 0 0.85rem;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  font-family: var(--font-mono), monospace;
+}
+
+.empty {
+  min-height: 8rem;
+  padding: 1.25rem 0;
+  border-block: 1px solid var(--line);
+}
+
+.empty h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  line-height: 1.2;
+}
+
+.empty p {
+  max-width: 48ch;
+  margin: 0.45rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+}
+
+.seriesButton {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.seriesButton:hover,
+.seriesButton:focus-visible {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}

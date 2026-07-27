@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr";
 import { ARTICLES, latestArticle } from "@/lib/articles";
 
 export default function HomePage() {
@@ -6,49 +7,67 @@ export default function HomePage() {
   const rest = ARTICLES.slice(1);
 
   return (
-    <div>
-      <article className="blog-hero anim-fade-up">
-        <span className="aperture tl" aria-hidden />
-        <span className="aperture tr" aria-hidden />
-        <p className="blog-kicker">
-          Latest · {lead.topic} · {lead.date}
-        </p>
-        <h1 className="blog-title">
-          {lead.title.includes("50/50") ? (
-            <>
-              Leave still wins at <span className="olive">50/50</span>
-            </>
-          ) : (
-            lead.title
-          )}
-        </h1>
-        <p className="blog-dek">{lead.dek}</p>
-        <Link href={lead.href} className="blog-cta">
-          Read the article <span aria-hidden>»</span>
-        </Link>
-        <div className="micro-log mt-8">
-          <span>
-            <strong>Contest bar</strong> 58.9%
-          </span>
-          <span>
-            <strong>At 50/50</strong> leave preferred
-          </span>
-          <span>
-            <strong>Read</strong> ~{lead.readingMinutes} min
-          </span>
+    <div className="home-page">
+      <article className="home-hero anim-fade-up">
+        <div className="home-hero-copy">
+          <p className="blog-kicker">
+            Latest article · {lead.topic} · {lead.date}
+          </p>
+          <h1 className="blog-title">
+            {lead.title.includes("50/50") ? (
+              <>
+                Leave still wins at <span className="olive">50/50</span>
+              </>
+            ) : (
+              lead.title
+            )}
+          </h1>
+          <p className="blog-dek">{lead.dek}</p>
+          <div className="home-actions">
+            <Link href={lead.href} className="blog-cta">
+              Read article <ArrowUpRightIcon size={15} aria-hidden />
+            </Link>
+            <Link href="/sandbox" className="home-secondary-cta">
+              Draft analysis
+            </Link>
+          </div>
+        </div>
+
+        <div className="home-lens" aria-label="Article evidence summary">
+          <div className="home-lens-readout">
+            <p>Decision threshold</p>
+            <strong>58.9%</strong>
+            <span>fight-win chance needed before contesting beats two waves of farm</span>
+          </div>
+          <dl>
+            <div>
+              <dt>At 50/50</dt>
+              <dd>Leave</dd>
+            </div>
+            <div>
+              <dt>Reading time</dt>
+              <dd>{lead.readingMinutes} min</dd>
+            </div>
+            <div>
+              <dt>Evidence</dt>
+              <dd>Reproducible</dd>
+            </div>
+          </dl>
         </div>
       </article>
 
       {rest.length > 0 && (
-        <section className="mt-[var(--space-5)] space-y-4 anim-fade-up-delay-1" aria-label="More articles">
-          <h2 className="font-display text-xl">More writing</h2>
-          <ul className="space-y-4 max-w-[68ch]">
+        <section className="home-more-writing anim-fade-up-delay-1" aria-label="More articles">
+          <div>
+            <h2 className="font-display">Articles</h2>
+          </div>
+          <ul>
             {rest.map((a) => (
               <li key={a.slug}>
-                <Link href={a.href} className="font-display text-lg hover:text-[var(--accent-ink)]">
+                <Link href={a.href} className="font-display">
                   {a.title}
                 </Link>
-                <p className="text-sm text-[var(--ink-muted)] mt-1">{a.dek}</p>
+                <p>{a.dek}</p>
               </li>
             ))}
           </ul>
@@ -56,41 +75,44 @@ export default function HomePage() {
       )}
 
       <section
-        className="mt-[var(--space-5)] border-t border-[var(--line)] pt-6 anim-fade-up-delay-2"
+        className="home-explore anim-fade-up-delay-2"
         aria-label="Explore the data"
       >
-        <h2 className="font-display text-xl">Explore the data</h2>
-        <p className="mt-2 text-sm text-[var(--ink-muted)] max-w-[62ch]">
-          Supporting tools for the essays — Dual Elo ratings, series boards, and head-to-head records.
-        </p>
-        <nav className="research-index mt-4" aria-label="Analysis tools">
+        <div className="home-section-intro">
+          <h2 className="font-display">Analysis tools</h2>
+          <p>
+            Ratings, completed matches, head-to-head records, and draft analysis use the same
+            current data pack.
+          </p>
+        </div>
+        <nav className="research-index" aria-label="Analysis tools">
           <Link href="/elo">
-            <span className="idx-label">01</span>
             <span>
               <span className="idx-title">Ratings</span>
-              <span className="idx-blurb block">Dual Elo ladders for teams and players.</span>
+              <span className="idx-blurb block">Compare team and player strength.</span>
             </span>
+            <ArrowUpRightIcon className="idx-arrow" size={21} aria-hidden />
           </Link>
           <Link href="/browse">
-            <span className="idx-label">02</span>
             <span>
               <span className="idx-title">Matches</span>
-              <span className="idx-blurb block">Bo-series gallery with model accuracy.</span>
+              <span className="idx-blurb block">Inspect completed series and games.</span>
             </span>
+            <ArrowUpRightIcon className="idx-arrow" size={21} aria-hidden />
           </Link>
           <Link href="/browse/head-to-head">
-            <span className="idx-label">03</span>
             <span>
               <span className="idx-title">Head-to-head</span>
-              <span className="idx-blurb block">Meetings and post-game boards.</span>
+              <span className="idx-blurb block">Compare meetings between two teams.</span>
             </span>
+            <ArrowUpRightIcon className="idx-arrow" size={21} aria-hidden />
           </Link>
-          <Link href="/articles">
-            <span className="idx-label">04</span>
+          <Link href="/sandbox">
             <span>
-              <span className="idx-title">All articles</span>
-              <span className="idx-blurb block">The full research index.</span>
+              <span className="idx-title">Draft analysis</span>
+              <span className="idx-blurb block">Compare legal next picks by projected value.</span>
             </span>
+            <ArrowUpRightIcon className="idx-arrow" size={21} aria-hidden />
           </Link>
         </nav>
       </section>
