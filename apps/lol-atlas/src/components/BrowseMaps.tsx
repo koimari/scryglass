@@ -12,6 +12,7 @@ import {
   type QueryRow,
   type SeriesCard,
 } from "@/lib/duck";
+import styles from "./BrowseMaps.module.css";
 import { expandTeamQuery, teamSlug } from "@/lib/pack";
 
 type Props = {
@@ -109,7 +110,12 @@ function SeriesTile({
   const sourceLabel = s.source === "grid" ? "GRID freshness" : s.source === "mixed" ? "OE + GRID" : null;
   return (
     <article className={`series-card ${open ? "is-open" : ""}`}>
-      <button type="button" className="series-card-head" onClick={onToggle}>
+      <button
+        type="button"
+        className="series-card-head"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
         <div className="series-card-main">
           <p className="series-kicker">
             {s.date} · {s.league}
@@ -277,10 +283,10 @@ export function BrowseMatches({ baseUrl, years }: Props) {
   const pageCount = Math.max(1, Math.ceil(series.length / pageSize));
 
   return (
-    <div className="space-y-6">
-      <div className="model-acc-strip">
+    <div className={styles.root}>
+      <div className={styles.accuracy}>
         <div>
-          <strong>Model check · Elo favorite</strong>{" "}
+          <strong>Elo favorite accuracy</strong>{" "}
           {eloAcc?.rate != null ? (
             <>
               {(100 * eloAcc.rate).toFixed(1)}% · {eloAcc.hits}/{eloAcc.n} games in {year}
@@ -289,10 +295,7 @@ export function BrowseMatches({ baseUrl, years }: Props) {
             "…"
           )}
         </div>
-        <div className="muted text-sm">
-          Elo accuracy is the pre-match favorite against the final result. Draft overlap appears on
-          individual match boards.
-        </div>
+        <p>Pre-match favorite compared with the final winner.</p>
       </div>
 
       <div className="filter-bar">

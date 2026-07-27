@@ -1,0 +1,514 @@
+.root {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
+.controls {
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(14rem, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+  padding: 0.25rem 0 0.75rem;
+}
+
+.tabs {
+  display: flex;
+  align-items: end;
+  min-height: 2.5rem;
+}
+
+.tab {
+  min-height: 2.5rem;
+  padding: 0 0.85rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.tabActive {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+}
+
+.search input,
+.minGames input {
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0 0.75rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.search input::placeholder {
+  color: var(--ink-faint);
+}
+
+.minGames {
+  display: grid;
+  gap: 0.25rem;
+  width: 7rem;
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+}
+
+.minGames input {
+  font-variant-numeric: tabular-nums;
+}
+
+.tab:focus-visible,
+.scopeButton:focus-visible,
+.resetButton:focus-visible,
+.more button:focus-visible,
+.search input:focus-visible,
+.minGames input:focus-visible,
+.refine summary:focus-visible,
+.entityLink:focus-visible,
+.card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.scopeBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  min-height: 3rem;
+  padding: 0.45rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.scopeLabel,
+.refinementRow > span {
+  color: var(--ink-muted);
+  font-size: 0.74rem;
+}
+
+.scopeLabel {
+  margin-right: 0.25rem;
+}
+
+.scopeButton {
+  min-height: 2rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.scopeButton:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.scopeButtonActive {
+  border-color: var(--ink);
+  box-shadow: inset 0 -2px var(--accent);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.refine {
+  border-top: 1px solid var(--line);
+}
+
+.refine summary {
+  width: max-content;
+  margin-left: auto;
+  padding: 0.7rem 0;
+  color: var(--ink);
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.refine[open] summary {
+  padding-bottom: 0.5rem;
+}
+
+.refinementPanel {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0 0 0.85rem;
+}
+
+.refinementPanel > p {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+}
+
+.refinementRow {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.refinementRow > span {
+  padding-top: 0.35rem;
+}
+
+.refinementRow > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.resetButton {
+  width: max-content;
+  margin-top: 0.1rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 0.72rem;
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+.resetButton:hover {
+  color: var(--ink);
+  text-decoration-color: var(--accent);
+}
+
+.resultSummary {
+  display: flex;
+  gap: 0.5rem 1.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+}
+
+.resultSummary p {
+  margin: 0;
+}
+
+.resultSummary strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.resultSummary span::before {
+  content: " · ";
+}
+
+.tableViewport {
+  max-width: 100%;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line-strong);
+  overscroll-behavior-inline: contain;
+}
+
+.table {
+  width: 100%;
+  min-width: 62rem;
+  border-collapse: collapse;
+  color: var(--ink);
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.table th {
+  padding: 0.7rem 0.75rem;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--canvas);
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+  font-weight: 550;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table td {
+  height: 3.1rem;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.table tbody tr:hover td {
+  background: var(--surface);
+}
+
+.numeric {
+  text-align: right !important;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.sortButton {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sortButton:hover {
+  color: var(--ink);
+}
+
+.sortActive {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+}
+
+.rank,
+.rankDelta {
+  color: var(--ink-muted) !important;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.rank {
+  width: 2.75rem;
+}
+
+.rankDelta {
+  width: 3rem;
+}
+
+.rankUp {
+  color: var(--accent-ink) !important;
+}
+
+.rankDown {
+  color: var(--danger) !important;
+}
+
+.rankFlat {
+  color: var(--ink-faint) !important;
+}
+
+.entity {
+  font-weight: 600;
+}
+
+.entityLink {
+  color: inherit;
+  text-decoration: none;
+}
+
+.entityLink:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 0.2em;
+}
+
+.flag {
+  display: inline-block;
+  width: 1.45rem;
+  margin-right: 0.35rem;
+  text-align: center;
+  line-height: 1;
+  vertical-align: -0.08em;
+}
+
+.evidence span,
+.evidence small {
+  display: block;
+}
+
+.evidence small {
+  margin-top: 0.1rem;
+  color: var(--ink-faint);
+  font-family: var(--font-ui), system-ui, sans-serif;
+  font-size: 0.67rem;
+}
+
+.cards {
+  display: none;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  gap: 0.2rem 0.65rem;
+  align-items: center;
+  min-height: 4.6rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.cardRank {
+  grid-row: 1 / span 2;
+  color: var(--ink-muted);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.cardTitle {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.cardMeta {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardRating {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.empty,
+.more {
+  margin: 0;
+  padding: 1rem 0;
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+}
+
+.more {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.more button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .toolbar {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .minGames {
+    grid-column: 1 / -1;
+    grid-template-columns: auto 5rem;
+    align-items: center;
+    width: max-content;
+  }
+
+  .scopeBar {
+    min-height: 0;
+    padding: 0.55rem 0;
+  }
+
+  .tab,
+  .scopeButton {
+    min-height: 2.75rem;
+    font-size: 0.875rem;
+  }
+
+  .scopeLabel {
+    width: 100%;
+    margin: 0;
+    font-size: 0.875rem;
+  }
+
+  .refine summary {
+    margin-left: 0;
+  }
+
+  .refinementRow {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+
+  .refinementRow > span {
+    padding-top: 0;
+  }
+
+  .resultSummary {
+    display: block;
+    font-size: 0.875rem;
+  }
+
+  .resultSummary p + p {
+    margin-top: 0.2rem;
+  }
+
+  .tableViewport {
+    display: none;
+  }
+
+  .cards {
+    display: grid;
+  }
+
+  .cardRank,
+  .cardMeta {
+    font-size: 0.875rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .toolbar {
+    display: block;
+  }
+
+  .tabs {
+    margin-bottom: 0.55rem;
+  }
+
+  .search input {
+    min-height: 2.75rem;
+  }
+
+  .minGames {
+    margin-top: 0.55rem;
+  }
+
+  .card {
+    grid-template-columns: 1.7rem minmax(0, 1fr) auto;
+  }
+}

@@ -1,5 +1,6 @@
 import { formatMb, packUpdatedLabel, packUrl, type PackFile, type PackManifest } from "@/lib/pack";
 import { readPackManifest } from "@/lib/serverPack";
+import { OperationalHeader } from "@/components/OperationalHeader";
 
 /** Hard allowlist: if it is not cited on-site, it does not appear here. */
 const ESSENTIALS: { group: string; paths: string[] }[] = [
@@ -59,38 +60,39 @@ export default async function ReproducePage() {
   const listedBytes = listed.reduce((s, x) => s + x.file.bytes, 0);
 
   return (
-    <div className="space-y-8">
-      <header className="page-header">
-        <p className="blog-kicker">Pack · Reproduce</p>
-        <h1 className="font-display mt-2 text-3xl">Reproduce</h1>
-        <p className="lede">
-          Cite <span className="font-mono text-sm text-[var(--ink)]">{man.pack_id}</span>. This list
-          contains the finished files cited on Scryglass. Rebuild from the GitHub repo when you need
-          the warehouse pipeline.
-        </p>
-        <p className="method-note">
-          Source order: Oracle&apos;s Elixir is the reconciled baseline; completed GRID games may
-          bridge the gap until OE publishes them. The refresh metadata records which rows came from
-          each source.
-        </p>
-        <div className="micro-log mt-4">
-          <span>
-            <strong>Last updated</strong> {packUpdatedLabel(man)}
-          </span>
-          <span>
-            <strong>Listed</strong> {formatMb(listedBytes)}
-          </span>
-          <span>
-            <strong>Schema</strong> {man.schema_version}
-          </span>
-          <span>
-            <strong>Years</strong> {man.filters.years.join("–")}
-          </span>
-        </div>
-      </header>
+    <div className="reproduce-page space-y-8">
+      <OperationalHeader
+        title="Data and reproduction"
+        description={
+          <>
+            Files used by the published ratings and articles. Pin pack{" "}
+            <span className="font-mono">{man.pack_id}</span> for a reproducible snapshot.
+          </>
+        }
+        meta={
+          <>
+            <span>
+              <strong>Updated</strong> {packUpdatedLabel(man)}
+            </span>
+            <span>
+              <strong>Listed</strong> {formatMb(listedBytes)}
+            </span>
+            <span>
+              <strong>Schema</strong> {man.schema_version}
+            </span>
+            <span>
+              <strong>Years</strong> {man.filters.years.join("–")}
+            </span>
+          </>
+        }
+      />
+      <p className="method-note">
+        Oracle&apos;s Elixir is the reconciled baseline. Completed GRID games may bridge the gap
+        until OE publishes them; refresh metadata records the source of each row.
+      </p>
 
       <section className="space-y-3 border-t border-[var(--line)] pt-5">
-        <h2 className="font-display text-lg">Checklist</h2>
+        <h2 className="font-display text-lg">Using this pack</h2>
         <ol className="list-decimal space-y-2 pl-5 text-sm text-[var(--ink-muted)]">
           <li>Pin this pack id.</li>
           <li>Use the same year / league / patch filters as the post.</li>
@@ -137,7 +139,7 @@ export default async function ReproducePage() {
       ))}
 
       <section className="space-y-2 text-sm text-[var(--ink-muted)] border-t border-[var(--line)] pt-5">
-        <h2 className="font-display text-lg text-[var(--ink)]">Power users</h2>
+        <h2 className="font-display text-lg text-[var(--ink)]">Manifest and source</h2>
         <p>
           Full manifest:{" "}
           <a className="row-link" href="/packs/manifest.json">

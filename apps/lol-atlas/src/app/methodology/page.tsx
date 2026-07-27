@@ -2,6 +2,7 @@ import Link from "next/link";
 import { promises as fs } from "fs";
 import path from "path";
 import type { ReactNode } from "react";
+import { OperationalHeader } from "@/components/OperationalHeader";
 
 async function loadChangelog(): Promise<string> {
   try {
@@ -34,35 +35,40 @@ export default async function MethodologyPage() {
   const changelog = await loadChangelog();
 
   return (
-    <article className="page-prose">
-      <header className="page-header">
-        <p className="blog-kicker">Method · Estimands</p>
-        <h1 className="font-display mt-2 text-[2.25rem] leading-tight text-[var(--ink)]">
-          Methodology
-        </h1>
-        <p className="lede">
-          Written for people who will try to break it — statisticians, coaches, analysts. Every
-          public number on Scryglass is meant to survive that kind of reading.
-        </p>
-        <div className="micro-log mt-4">
+    <article className="page-prose methodology-page">
+      <OperationalHeader
+        title="Methodology"
+        description="Definitions, model assumptions, validation, and data provenance for the public estimates."
+        meta={
+          <>
           <a className="row-link" href="/method/formulas.tex">
-            Download formulas (.tex)
+              Formulas (.tex)
           </a>
           <Link className="row-link" href="/articles/void-grubs-contest-or-leave">
             Void-grubs article
           </Link>
-        </div>
-      </header>
+          </>
+        }
+      />
 
-      <aside className="author-stub">
-        <strong>By whom</strong>
-        <p>
-          koi — independent LoL research. Author sidebar with bio lands in a later pass; the work is
-          the citation for now.
-        </p>
-      </aside>
+      <nav className="method-toc" aria-label="Methodology sections">
+        <strong>On this page</strong>
+        <a href="#hierarchical-ladder">Team ratings</a>
+        <a href="#dual-elo">Sequential benchmark</a>
+        <a href="#player-elo">Player ratings</a>
+        <a href="#draft-score">Draft model</a>
+        <a href="#kills">Expected kills</a>
+        <a href="#evidence">Evidence and uncertainty</a>
+        <a href="#blind-counter">Blind / Counter</a>
+        <a href="#pack-years">Pack years</a>
+        <a href="#freshness">Data sources</a>
+        <a href="#void-grubs">Void grubs</a>
+        <a href="#faq">FAQ</a>
+        <a href="#changelog">Changelog</a>
+      </nav>
 
-      <MethodSection id="hierarchical-ladder" title="Current public ladder" defaultOpen>
+      <div className="method-content">
+      <MethodSection id="hierarchical-ladder" title="Team ratings: what the number means" defaultOpen>
         <p>
           The published team ladder uses a regularized hierarchical Bradley–Terry fit. It estimates
           one organization effect across every event, plus a partially pooled home-league effect.
@@ -103,7 +109,7 @@ export default async function MethodologyPage() {
         </p>
       </MethodSection>
 
-      <MethodSection id="dual-elo" title="Sequential Dual Elo benchmark">
+      <MethodSection id="dual-elo" title="Sequential benchmark">
         <p>
           The sequential Dual Elo track remains available as a time-safe pre-match feature benchmark.
           Each team carries a regional component and an international (meta) component. They sum to
@@ -124,7 +130,7 @@ export default async function MethodologyPage() {
         </p>
       </MethodSection>
 
-      <MethodSection id="player-elo" title="Player Dual Elo">
+      <MethodSection id="player-elo" title="Player ratings">
         <p>
           Players are rated on their own Dual Elo track (player floor σ_min = 28). A team&apos;s
           player-aggregated strength is a role-weighted blend of the five on the rift. Prefer player
@@ -133,7 +139,7 @@ export default async function MethodologyPage() {
         </p>
       </MethodSection>
 
-      <MethodSection id="draft-score" title="Draft Score">
+      <MethodSection id="draft-score" title="Draft model">
         <p>
           Draft Score maps five-on-five picks to a blue win probability with league-calibrated
           temperature. The Elo-controlled bump (wr_bump_pp) is the residual ridge × draft edge ×
@@ -157,7 +163,7 @@ export default async function MethodologyPage() {
         </p>
       </MethodSection>
 
-      <MethodSection id="evidence" title="Evidence labels">
+      <MethodSection id="evidence" title="Evidence and uncertainty">
         <p>
           Evidence is a plain-language view of σ relative to its floor. Settled = at floor. Thin / Very thin =
           headroom above the floor. Games counts sit beside it. Method owns the formula; the ladder
@@ -185,7 +191,7 @@ export default async function MethodologyPage() {
         </p>
       </MethodSection>
 
-      <MethodSection id="freshness" title="Freshness and sources">
+      <MethodSection id="freshness" title="Data freshness and sources">
         <p>
           Scryglass publishes versioned packs, with each rating file preserved as a dated snapshot. OE is
           the canonical source when the same game appears in both feeds. GRID is a pro-only bridge
@@ -223,13 +229,14 @@ export default async function MethodologyPage() {
         </p>
         <p>
           <strong>Where is model accuracy?</strong> Matches shows Dual Elo favorite hit rate for the
-          selected year. Draft overlap with the actual winner is visible on match boards.
+          selected year. Draft overlap with the actual winner is visible on match pages.
         </p>
       </MethodSection>
 
       <MethodSection id="changelog" title="Changelog">
         <pre className="changelog-pre">{changelog}</pre>
       </MethodSection>
+      </div>
     </article>
   );
 }
