@@ -125,6 +125,29 @@ test("sandbox policy reaches the opponent after a same-side double pick", () => 
   assert.equal(result.search.future_beam_width, 8);
 });
 
+test("sandbox accepts legacy role-less partial boards with role-agnostic scoring", () => {
+  const result = analyzeDraftSandbox({
+    actions: [
+      { side: "blue", champion: "Aatrox", role: null },
+      { side: "red", champion: "Jinx", role: "bot" },
+    ],
+    perspective: "blue",
+    next_side: "red",
+    candidate_role: "open",
+    league: "LCK",
+    patch: SANDBOX_PATCH,
+    limit: 5,
+  });
+
+  assert.equal(result.model_context, null);
+  assert.equal(result.candidate_role, "open");
+  assert.ok(result.recommendations.length > 0);
+  assert.equal(
+    result.note.includes("unresolved roles"),
+    true,
+  );
+});
+
 test("mid-draft recommendations react to ally and enemy composition", () => {
   const base: DraftAction[] = [
     { side: "blue", champion: "Renekton", role: "top" },
@@ -179,6 +202,7 @@ test("sandbox propagates the selected model patch into every branch score", () =
   });
 
   assert.equal(result.current.audit.calibration, "not_applicable_to_policy_value");
+  assert.ok(result.model_context);
   assert.equal(result.model_context.normalized_patch, SANDBOX_PATCH);
   assert.equal(result.model_context.patch_status, "exact");
 });

@@ -269,6 +269,23 @@ test("sandbox rejects unknown champions, duplicate champions, and role collision
   }
 });
 
+test("sandbox accepts legacy role-missing actions for open-role adaptation", async () => {
+  const response = await sandboxPost(
+    request({
+      ...baseRequest,
+      actions: [{ side: "blue", champion: "Aatrox", role: null }],
+      next_side: "red",
+    }),
+  );
+  assert.equal(response.status, 200);
+  const payload = await json(response);
+  assert.equal(
+    (payload.model_context as Record<string, unknown>).public_patch,
+    "26.01",
+  );
+  assert.ok((payload.recommendations as unknown[]).length > 0);
+});
+
 test("internal draft API failures never serialize exception text", async () => {
   const original = console.error;
   console.error = () => {};

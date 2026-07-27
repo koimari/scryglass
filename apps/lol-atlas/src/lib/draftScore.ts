@@ -312,12 +312,13 @@ export type DraftSandboxResult = {
     minimum_role_maps: number;
   };
   note: string;
-  model_context: NonNullable<DraftScoreResult["model"]>;
+  model_context: DraftScoreResult["model"] | null;
 };
 
 export function validateDraftSandboxState(
   actions: DraftAction[],
   nextSide: DraftSide,
+  requireVerifiedRoles = true,
 ): void {
   if (actions.length > DRAFT_PICK_ORDER.length) {
     throw new Error("a draft can contain at most ten picks");
@@ -333,15 +334,18 @@ export function validateDraftSandboxState(
         `pick ${index + 1} must belong to ${DRAFT_PICK_ORDER[index]} side`,
       );
     }
-    if (!action.role || !DRAFT_ROLES.includes(action.role)) {
+    if (!action.role && requireVerifiedRoles) {
       throw new Error(`pick ${index + 1} needs one verified role`);
     }
-    if (occupied[action.side].has(action.role)) {
+    if (action.role && !DRAFT_ROLES.includes(action.role)) {
+      throw new Error(`pick ${index + 1} needs one verified role`);
+    }
+    if (action.role && occupied[action.side].has(action.role)) {
       throw new Error(
         `${action.side} side cannot assign two champions to ${action.role}`,
       );
     }
-    occupied[action.side].add(action.role);
+    if (action.role) occupied[action.side].add(action.role);
     const champion = normKey(normalizeDraftChampion(action.champion));
     if (selected.has(champion)) {
       throw new Error(`${action.champion} is already selected`);
@@ -713,6 +717,7 @@ function scoreActions(
   league: string | null | undefined,
   patch: string | null | undefined,
   eloDiff: number | null | undefined,
+  requireRoleAware: boolean,
 ): DraftScoreResult {
   const blue = actions.filter((action) => action.side === "blue");
   const red = actions.filter((action) => action.side === "red");
@@ -722,10 +727,13 @@ function scoreActions(
     league,
     patch,
     elo_diff: eloDiff,
-    blue_roles: blue.map((action) => action.role || ""),
-    red_roles: red.map((action) => action.role || ""),
   };
-  return compositionPartialDraftScore(input);
+  if (requireRoleAware) {
+    input.blue_roles = blue.map((action) => action.role || "");
+    input.red_roles = red.map((action) => action.role || "");
+    return compositionPartialDraftScore(input);
+  }
+  return draftScore(input);
 }
 
 function draftStateKey(
@@ -824,6 +832,7 @@ function policyValue(
   league: string | null | undefined,
   patch: string | null | undefined,
   eloDiff: number | null | undefined,
+  roleAwareBoard: boolean,
   memo: Map<string, PolicyValue>,
   scoreMemo: Map<string, number>,
 ): PolicyValue {
@@ -834,6 +843,7 @@ function policyValue(
       league,
       patch,
       eloDiff,
+      roleAwareBoard,
       scoreMemo,
     ),
     line: [],
@@ -865,6 +875,7 @@ function policyValue(
           league,
           patch,
           eloDiff,
+          roleAwareBoard,
           scoreMemo,
         ),
       };
@@ -902,6 +913,7 @@ function policyValue(
       league,
       patch,
       eloDiff,
+      roleAwareBoard,
       memo,
       scoreMemo,
     );
@@ -929,13 +941,19 @@ function cachedSideValue(
   league: string | null | undefined,
   patch: string | null | undefined,
   eloDiff: number | null | undefined,
+  requireRoleAware: boolean,
   cache: Map<string, number>,
 ): number {
-  const key = `${side};${draftStateKey(actions, league, patch, eloDiff)}`;
+  const key = `${side};${draftStateKey(
+    actions,
+    league,
+    patch,
+    eloDiff,
+  )};scope=${requireRoleAware ? "roles" : "roles-free"}`;
   const cachedValue = cache.get(key);
   if (cachedValue != null) return cachedValue;
   const value = sideModelValue(
-    scoreActions(actions, league, patch, eloDiff),
+    scoreActions(actions, league, patch, eloDiff, requireRoleAware),
     side,
   );
   cache.set(key, value);
@@ -957,7 +975,8 @@ export function analyzeDraftSandbox(input: {
     ...action,
     champion: normalizeDraftChampion(action.champion),
   }));
-  validateDraftSandboxState(actions, input.next_side);
+  const roleAwareBoard = actions.every((action) => isDraftRole(action.role || ""));
+  validateDraftSandboxState(actions, input.next_side, roleAwareBoard);
   const patch = requireDraftSandboxPatch(input.patch);
   const perspective = input.perspective;
   const currentScore = scoreActions(
@@ -965,6 +984,7 @@ export function analyzeDraftSandbox(input: {
     input.league,
     patch,
     input.elo_diff,
+    roleAwareBoard,
   );
   const currentValue = sideModelValue(currentScore, perspective);
   const currentRecommendationValue = sideModelValue(currentScore, input.next_side);
@@ -979,6 +999,7 @@ export function analyzeDraftSandbox(input: {
       input.league,
       patch,
       input.elo_diff,
+      roleAwareBoard,
     );
     const value = sideModelValue(score, perspective);
     timeline.push({
@@ -1041,6 +1062,7 @@ export function analyzeDraftSandbox(input: {
           input.league,
           patch,
           input.elo_diff,
+          roleAwareBoard,
           scoreMemo,
         ),
         sampleGames: Number(candidate.role_games?.[role] ?? 0),
@@ -1071,6 +1093,7 @@ export function analyzeDraftSandbox(input: {
       input.league,
       patch,
       input.elo_diff,
+      roleAwareBoard,
       scoreMemo,
     );
     const remainingPicks = DRAFT_PICK_ORDER.length - branch.length;
@@ -1087,6 +1110,7 @@ export function analyzeDraftSandbox(input: {
       input.league,
       patch,
       input.elo_diff,
+      roleAwareBoard,
       policyMemo,
       scoreMemo,
     );
@@ -1152,8 +1176,12 @@ export function analyzeDraftSandbox(input: {
       minimum_role_maps: DRAFT_POLICY_MIN_ROLE_GAMES,
     },
     note:
-      `Experimental beam-minimax composition policy value. Candidate and look-ahead policy picks require at least ${DRAFT_POLICY_MIN_ROLE_GAMES} pro maps in the champion-role pair, including when the manual board allows an unsupported role what-if. The root beam retains the strongest immediate legal actions, then re-evaluates each through up to two subsequent legal pro-role picks; the acting side maximizes its value and the opponent minimizes it. This is a bounded, non-exhaustive policy search. The composition probability pipeline failed its chronological promotion gate, so no Sandbox value is a win probability or a solved best response.`,
-    model_context: currentScore.model!,
+      `Experimental beam-minimax composition policy value. ${
+        roleAwareBoard
+          ? "Role constraints and role-aware pair effects are applied to all placed actions."
+          : "Current board includes unresolved roles; role-agnostic partial-draft fallback is used for scoring and recommendations."
+      } Candidate and look-ahead policy picks require at least ${DRAFT_POLICY_MIN_ROLE_GAMES} pro maps in the champion-role pair, including when the manual board allows an unsupported role what-if. The root beam retains the strongest immediate legal actions, then re-evaluates each through up to two subsequent legal pro-role picks; the acting side maximizes its value and the opponent minimizes it. This is a bounded, non-exhaustive policy search. The composition probability pipeline failed its chronological promotion gate, so no Sandbox value is a win probability or a solved best response.`,
+    model_context: currentScore.model,
   };
 }
 

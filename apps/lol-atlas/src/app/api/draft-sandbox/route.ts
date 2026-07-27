@@ -212,6 +212,13 @@ export async function POST(request: Request) {
 
     const actions: DraftAction[] = [];
     const seen = new Set<string>();
+    const hasVerifiedRoles = rawActions.every(
+      (action) =>
+        typeof action === "object" &&
+        action != null &&
+        typeof action.role === "string" &&
+        isRole(action.role),
+    );
     for (const [index, action] of rawActions.entries()) {
       if (!isRecord(action)) {
         return NextResponse.json(
@@ -233,7 +240,7 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
-      if (!isRole(action.role)) {
+      if (action.role != null && !isRole(action.role)) {
         return NextResponse.json({ error: `invalid role for ${action.champion}` }, { status: 400 });
       }
       if (typeof action.champion !== "string") {
@@ -251,7 +258,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `${champion} is already selected` }, { status: 400 });
       }
       seen.add(key);
-      actions.push({ side: action.side, champion, role: action.role });
+      actions.push({ side: action.side, champion, role: (action.role as DraftRole) ?? null });
     }
     const expectedNextSide = DRAFT_PICK_ORDER[actions.length] ?? null;
     if (expectedNextSide && body.next_side !== expectedNextSide) {
@@ -268,15 +275,17 @@ export async function POST(request: Request) {
     if (sideCounts.blue > 5 || sideCounts.red > 5) {
       return NextResponse.json({ error: "each side can select at most five champions" }, { status: 400 });
     }
-    for (const side of ["blue", "red"] as const) {
-      const roles = actions
-        .filter((action) => action.side === side && action.role)
-        .map((action) => action.role as DraftRole);
-      if (new Set(roles).size !== roles.length) {
-        return NextResponse.json(
-          { error: `${side} side cannot assign two champions to the same role` },
-          { status: 400 },
-        );
+    if (hasVerifiedRoles) {
+      for (const side of ["blue", "red"] as const) {
+        const roles = actions
+          .filter((action) => action.side === side && action.role)
+          .map((action) => action.role as DraftRole);
+        if (new Set(roles).size !== roles.length) {
+          return NextResponse.json(
+            { error: `${side} side cannot assign two champions to the same role` },
+            { status: 400 },
+          );
+        }
       }
     }
 
@@ -408,11 +417,13 @@ export async function POST(request: Request) {
       elo_diff: null,
       limit,
     });
-    const modelContext = Object.fromEntries(
-      Object.entries(analysis.model_context).filter(
-        ([key]) => key !== "normalized_patch",
-      ),
-    );
+    const modelContext = analysis.model_context
+      ? Object.fromEntries(
+          Object.entries(analysis.model_context).filter(
+            ([key]) => key !== "normalized_patch",
+          ),
+        )
+      : {};
     return NextResponse.json({
       ...analysis,
       current: {
