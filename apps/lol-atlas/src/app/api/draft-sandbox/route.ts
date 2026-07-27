@@ -42,6 +42,7 @@ type Body = {
   public_patch?: string | null;
   elo_diff?: number | null;
   limit?: number;
+  include_recommendations?: boolean;
 };
 
 const PUBLIC_INTERNAL_ERROR =
@@ -405,6 +406,15 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    if (
+      body.include_recommendations != null &&
+      typeof body.include_recommendations !== "boolean"
+    ) {
+      return NextResponse.json(
+        { error: "include_recommendations must be true or false" },
+        { status: 400 },
+      );
+    }
 
     const analysis = analyzeDraftSandbox({
       actions,
@@ -416,6 +426,7 @@ export async function POST(request: Request) {
       patch: patchContract.source_patch_key,
       elo_diff: null,
       limit,
+      include_recommendations: body.include_recommendations,
     });
     const modelContext = analysis.model_context
       ? Object.fromEntries(

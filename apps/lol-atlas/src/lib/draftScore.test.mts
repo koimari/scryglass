@@ -635,9 +635,9 @@ test("sandbox UI defaults to the latest public patch with pooled disclosure", ()
   assert.match(source, /if \(!publicPatch\) return;/);
   assert.match(source, /public_patch: publicPatch/);
   assert.match(source, /searchParams\.set\("public_patch", publicPatch\)/);
-  assert.match(source, /Current observed patch/);
-  assert.match(source, /uncalibrated recommendation utility/);
-  assert.match(source, /Patch-specific terms end at/);
+  assert.match(source, /patchSupportText/);
+  assert.match(source, /current observed; values use/);
+  assert.match(source, /patch-specific|pooled/);
 });
 
 test("sandbox flex-role chooser announces, focuses, and restores focus", () => {
@@ -660,8 +660,8 @@ test("sandbox copy distinguishes manual unseen-role states from supported policy
     "utf8",
   );
   assert.match(source, /Supported pro roles/);
-  assert.match(source, /Manual what-if/);
-  assert.match(source, /does not expand policy search/);
+  assert.match(source, /Manual any role/);
+  assert.match(source, /candidateRole !== "open" && candidateRole !== "any"/);
   assert.match(source, /at least[\s\S]*pro maps/);
   assert.match(source, /champion\.roles\.includes\(candidateRole\)/);
 });

@@ -970,6 +970,7 @@ export function analyzeDraftSandbox(input: {
   patch?: string | null;
   elo_diff?: number | null;
   limit?: number;
+  include_recommendations?: boolean;
 }): DraftSandboxResult {
   const actions = input.actions.map((action) => ({
     ...action,
@@ -1025,127 +1026,139 @@ export function analyzeDraftSandbox(input: {
   const recommendations: DraftRecommendation[] = [];
   const policyMemo = new Map<string, PolicyValue>();
   const scoreMemo = new Map<string, number>();
+  const includeRecommendations = input.include_recommendations ?? true;
   const requestedLimit = clip(input.limit ?? 12, 1, 200);
   const legalRootActions: Array<{
     action: DraftAction;
     immediate: number;
     sampleGames: number;
   }> = [];
-
-  for (const candidate of catalog) {
-    if (selected.has(normKey(candidate.name)) || excluded.has(normKey(candidate.name))) continue;
-    let roles: DraftRole[];
-    if (candidateRole === "any") {
-      roles = candidate.roles.filter((role) => openRoles.includes(role));
-      if (!roles.length) continue;
-    } else if (candidateRole === "open") {
-      roles = candidate.roles.filter((role) => openRoles.includes(role));
-      if (!roles.length) continue;
-    } else {
-      if (!openRoles.includes(candidateRole)) continue;
-      if (!candidate.roles.includes(candidateRole)) continue;
-      roles = [candidateRole];
-    }
-
-    for (const role of roles) {
-      const candidateAction: DraftAction = {
-        side: input.next_side,
-        champion: candidate.name,
-        role,
-      };
-      const branch = [...actions, candidateAction];
-      legalRootActions.push({
-        action: candidateAction,
-        immediate: cachedSideValue(
-          branch,
-          input.next_side,
-          input.league,
-          patch,
-          input.elo_diff,
-          roleAwareBoard,
-          scoreMemo,
-        ),
-        sampleGames: Number(candidate.role_games?.[role] ?? 0),
-      });
-    }
-  }
-
-  const rootBeamWidth = Math.min(
-    legalRootActions.length,
+  const rootBeam: typeof legalRootActions = [];
+  let rootBeamWidth = 0;
+  const recommendationBeam = Math.min(
+    Math.max(8, requestedLimit * 2),
     SANDBOX_ROOT_BEAM_MAX,
   );
-  const rootBeam = legalRootActions
-    .sort(
+
+  if (includeRecommendations) {
+    for (const candidate of catalog) {
+      if (
+        selected.has(normKey(candidate.name)) ||
+        excluded.has(normKey(candidate.name))
+      )
+        continue;
+      let roles: DraftRole[];
+      if (candidateRole === "any") {
+        roles = candidate.roles.filter((role) => openRoles.includes(role));
+        if (!roles.length) continue;
+      } else if (candidateRole === "open") {
+        roles = candidate.roles.filter((role) => openRoles.includes(role));
+        if (!roles.length) continue;
+      } else {
+        if (!openRoles.includes(candidateRole)) continue;
+        if (!candidate.roles.includes(candidateRole)) continue;
+        roles = [candidateRole];
+      }
+
+      for (const role of roles) {
+        const candidateAction: DraftAction = {
+          side: input.next_side,
+          champion: candidate.name,
+          role,
+        };
+        const branch = [...actions, candidateAction];
+        legalRootActions.push({
+          action: candidateAction,
+          immediate: cachedSideValue(
+            branch,
+            input.next_side,
+            input.league,
+            patch,
+            input.elo_diff,
+            roleAwareBoard,
+            scoreMemo,
+          ),
+          sampleGames: Number(candidate.role_games?.[role] ?? 0),
+        });
+      }
+    }
+
+    rootBeamWidth = Math.min(
+      legalRootActions.length,
+      recommendationBeam,
+    );
+    const sortedRoot = [...legalRootActions].sort(
       (a, b) =>
         b.immediate - a.immediate ||
         b.sampleGames - a.sampleGames ||
         a.action.champion.localeCompare(b.action.champion) ||
         String(a.action.role).localeCompare(String(b.action.role)),
-    )
-    .slice(0, rootBeamWidth);
-  const bestByChampion = new Map<string, DraftRecommendation>();
+    );
+    rootBeam.push(...sortedRoot.slice(0, rootBeamWidth));
+    const bestByChampion = new Map<string, DraftRecommendation>();
 
-  for (const seed of rootBeam) {
-    const branch = [...actions, seed.action];
-    const immediate = cachedSideValue(
-      branch,
-      input.next_side,
-      input.league,
-      patch,
-      input.elo_diff,
-      roleAwareBoard,
-      scoreMemo,
-    );
-    const remainingPicks = DRAFT_PICK_ORDER.length - branch.length;
-    const lookaheadPlies = Math.min(
-      SANDBOX_LOOKAHEAD_PLIES,
-      remainingPicks,
-    );
-    const policy = policyValue(
-      branch,
-      input.next_side,
-      lookaheadPlies,
-      excluded,
-      catalog,
-      input.league,
-      patch,
-      input.elo_diff,
-      roleAwareBoard,
-      policyMemo,
-      scoreMemo,
-    );
-    const row: DraftRecommendation = {
-      champion: seed.action.champion,
-      role: seed.action.role ?? null,
-      immediate_value: round(immediate, 4),
-      projected_value: round(policy.value, 4),
-      delta_points: round(
-        100 * (policy.value - currentRecommendationValue),
-        2,
-      ),
-      sample_games: seed.sampleGames,
-      evidence: evidenceLabel(seed.sampleGames),
-      lookahead_plies: lookaheadPlies,
-      principal_variation: policy.line,
-    };
-    const currentBest = bestByChampion.get(row.champion);
-    if (
-      !currentBest ||
-      row.projected_value > currentBest.projected_value ||
-      (row.projected_value === currentBest.projected_value &&
-        row.sample_games > currentBest.sample_games)
-    ) {
-      bestByChampion.set(row.champion, row);
+    for (const seed of rootBeam) {
+      const branch = [...actions, seed.action];
+      const immediate = cachedSideValue(
+        branch,
+        input.next_side,
+        input.league,
+        patch,
+        input.elo_diff,
+        roleAwareBoard,
+        scoreMemo,
+      );
+      const remainingPicks = DRAFT_PICK_ORDER.length - branch.length;
+      const lookaheadPlies = Math.min(
+        SANDBOX_LOOKAHEAD_PLIES,
+        remainingPicks,
+      );
+      const policy = policyValue(
+        branch,
+        input.next_side,
+        lookaheadPlies,
+        excluded,
+        catalog,
+        input.league,
+        patch,
+        input.elo_diff,
+        roleAwareBoard,
+        policyMemo,
+        scoreMemo,
+      );
+      const row: DraftRecommendation = {
+        champion: seed.action.champion,
+        role: seed.action.role ?? null,
+        immediate_value: round(immediate, 4),
+        projected_value: round(policy.value, 4),
+        delta_points: round(
+          100 * (policy.value - currentRecommendationValue),
+          2,
+        ),
+        sample_games: seed.sampleGames,
+        evidence: evidenceLabel(seed.sampleGames),
+        lookahead_plies: lookaheadPlies,
+        principal_variation: policy.line,
+      };
+      const currentBest = bestByChampion.get(row.champion);
+      if (
+        !currentBest ||
+        row.projected_value > currentBest.projected_value ||
+        (row.projected_value === currentBest.projected_value &&
+          row.sample_games > currentBest.sample_games)
+      ) {
+        bestByChampion.set(row.champion, row);
+      }
     }
-  }
-  recommendations.push(...bestByChampion.values());
+    recommendations.push(...bestByChampion.values());
 
-  recommendations.sort(
-    (a, b) =>
-      b.projected_value - a.projected_value ||
-      b.sample_games - a.sample_games ||
-      a.champion.localeCompare(b.champion),
-  );
+    recommendations.sort(
+      (a, b) =>
+        b.projected_value - a.projected_value ||
+        b.sample_games - a.sample_games ||
+        a.champion.localeCompare(b.champion),
+    );
+  }
 
   return {
     value_kind: "experimental_composition_policy_value",
@@ -1176,11 +1189,13 @@ export function analyzeDraftSandbox(input: {
       minimum_role_maps: DRAFT_POLICY_MIN_ROLE_GAMES,
     },
     note:
-      `Experimental beam-minimax composition policy value. ${
-        roleAwareBoard
-          ? "Role constraints and role-aware pair effects are applied to all placed actions."
-          : "Current board includes unresolved roles; role-agnostic partial-draft fallback is used for scoring and recommendations."
-      } Candidate and look-ahead policy picks require at least ${DRAFT_POLICY_MIN_ROLE_GAMES} pro maps in the champion-role pair, including when the manual board allows an unsupported role what-if. The root beam retains the strongest immediate legal actions, then re-evaluates each through up to two subsequent legal pro-role picks; the acting side maximizes its value and the opponent minimizes it. This is a bounded, non-exhaustive policy search. The composition probability pipeline failed its chronological promotion gate, so no Sandbox value is a win probability or a solved best response.`,
+      includeRecommendations
+        ? `Experimental beam-minimax composition policy value. ${
+            roleAwareBoard
+              ? "Role constraints and role-aware pair effects are applied to all placed actions."
+              : "Current board includes unresolved roles; role-agnostic partial-draft fallback is used for scoring and recommendations."
+          } Candidate and look-ahead policy picks require at least ${DRAFT_POLICY_MIN_ROLE_GAMES} pro maps in the champion-role pair, including when the manual board allows an unsupported role what-if. The root beam retains the strongest immediate legal actions, then re-evaluates each through up to two subsequent legal pro-role picks; the acting side maximizes its value and the opponent minimizes it. This is a bounded, non-exhaustive policy search. The composition probability pipeline failed its chronological promotion gate, so no Sandbox value is a win probability or a solved best response.`
+        : "Experimental composition policy value is available for the current board only. Recommendation search is intentionally disabled.",
     model_context: currentScore.model,
   };
 }

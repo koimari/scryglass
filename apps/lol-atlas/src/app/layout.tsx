@@ -1,27 +1,8 @@
 import type { Metadata } from "next";
-import { Unbounded, IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeScript } from "@/components/ThemeScript";
 import "./globals.css";
-
-const display = Unbounded({
-  variable: "--font-display",
-  subsets: ["latin"],
-  weight: ["600", "700"],
-});
-
-const ui = IBM_Plex_Sans({
-  variable: "--font-ui",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-});
-
-const mono = IBM_Plex_Mono({
-  variable: "--font-mono",
-  subsets: ["latin"],
-  weight: ["400", "500"],
-});
 
 export const metadata: Metadata = {
   title: "Scryglass — LoL research by koi",
@@ -38,7 +19,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${display.variable} ${ui.variable} ${mono.variable} h-full antialiased`}
+      className="h-full antialiased"
       suppressHydrationWarning
     >
       <head>

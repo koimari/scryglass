@@ -286,6 +286,41 @@ test("sandbox accepts legacy role-missing actions for open-role adaptation", asy
   assert.ok((payload.recommendations as unknown[]).length > 0);
 });
 
+test("sandbox supports disabling recommendations for board-only quick runs", async () => {
+  const noRecs = await sandboxPost(
+    request({
+      ...baseRequest,
+      include_recommendations: false,
+    }),
+  );
+  assert.equal(noRecs.status, 200);
+  const noPayload = await json(noRecs);
+  const recommendations = noPayload.recommendations as unknown[];
+  assert.equal(recommendations.length, 0);
+  const boardResult = await sandboxPost(
+    request({
+      ...baseRequest,
+      include_recommendations: true,
+      candidate_role: "sup",
+      limit: 1,
+    }),
+  );
+  const boardPayload = await json(boardResult);
+  assert.ok((boardPayload.recommendations as unknown[]).length > 0);
+});
+
+test("sandbox validates include_recommendations as boolean", async () => {
+  const invalid = await sandboxPost(
+    request({
+      ...baseRequest,
+      include_recommendations: "on",
+    }),
+  );
+  assert.equal(invalid.status, 400);
+  const invalidPayload = await json(invalid);
+  assert.match(String(invalidPayload.error), /include_recommendations/i);
+});
+
 test("internal draft API failures never serialize exception text", async () => {
   const original = console.error;
   console.error = () => {};
