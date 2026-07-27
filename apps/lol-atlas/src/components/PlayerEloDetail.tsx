@@ -19,6 +19,7 @@ import { champIconUrl } from "@/lib/format";
 import type {
   CurrentMembershipContext,
   PackManifest,
+  PlayerPerformanceRating,
   PlayerRating,
   PlayerRatingsMeta,
   PlayerRecord,
@@ -47,6 +48,8 @@ type Props = {
   membershipContext: CurrentMembershipContext;
   playerRatingsMeta: PlayerRatingsMeta | null;
   playerOrderingVerified: boolean;
+  playerPerformance: PlayerPerformanceRating[] | null;
+  playerPerformanceUnavailableReason: string | null;
 };
 
 type ChampCol = "n" | "wr" | "dpm" | "cs";
@@ -73,6 +76,8 @@ export function PlayerEloDetail({
   membershipContext,
   playerRatingsMeta,
   playerOrderingVerified,
+  playerPerformance,
+  playerPerformanceUnavailableReason,
 }: Props) {
   const [champs, setChamps] = useState<ChampAgg[] | null>(null);
   const [expandChamps, setExpandChamps] = useState(false);
@@ -251,7 +256,7 @@ export function PlayerEloDetail({
   return (
     <div className="space-y-6">
       <p className="text-xs text-[var(--ink-muted)]">
-        <Link href="/elo?tab=players" className="row-link">
+        <Link href="/elo?tab=performance" className="row-link">
           ← Players
         </Link>
         {currentAffiliation && (
@@ -266,7 +271,7 @@ export function PlayerEloDetail({
 
       <header className="page-header">
         <p className="blog-kicker">
-          Player · Player Dual Elo
+          Player profile · performance and outcome context
           {record?.primary ? ` · historical primary ${record.primary}` : ""}
           {record?.intl ? " · INTL" : ""}
         </p>
@@ -300,14 +305,25 @@ export function PlayerEloDetail({
         </p>
         {!playerOrderingVerified ? (
           <p className="error-banner">
-            Individual ordering and peer comparisons are withheld because team outcomes do
-            not identify individual skill in this model.
+            Team-result exposure is not used for individual ordering because shared team
+            outcomes do not identify individual skill.
           </p>
         ) : null}
-        <p className="method-note">
-          This profile reports the player&apos;s shared team-outcome signal without a peer
-          median, difference, or rank.
-        </p>
+        {playerPerformance && playerPerformance.length > 0 ? (
+          <div className="method-note">
+            <strong>Validated individual performance view.</strong>{" "}
+            Role-relative early-resource estimates are shown below. They describe
+            gold, experience, and creep-score differentials at 15 minutes after
+            observed context adjustment; they are not causal skill or win contribution.
+          </div>
+        ) : (
+          <p className="error-banner">
+            Validated individual 15-minute performance is unavailable for this player
+            {playerPerformanceUnavailableReason
+              ? ` (${playerPerformanceUnavailableReason})`
+              : " in the current fit window"}.
+          </p>
+        )}
         <div className="micro-log mt-4">
           <span>
             <strong>Raw team-outcome signal</strong> {player.mu_total.toFixed(1)}
@@ -350,6 +366,42 @@ export function PlayerEloDetail({
         </div>
 
       </header>
+
+      {playerPerformance && playerPerformance.length > 0 ? (
+        <section className="space-y-3">
+          <h2 className="font-display text-xl">15-minute resource performance</h2>
+          <div className="table-scroll" tabIndex={0}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Role</th>
+                  <th scope="col">Role rank</th>
+                  <th scope="col" className="num">Lower-bound score</th>
+                  <th scope="col" className="num">Fitted score</th>
+                  <th scope="col" className="num">Local uncertainty</th>
+                  <th scope="col" className="num">Fit maps</th>
+                </tr>
+              </thead>
+              <tbody>
+                {playerPerformance.map((row) => (
+                  <tr key={`${row.player_id}:${row.role}`}>
+                    <td>{row.role.toUpperCase()}</td>
+                    <td className="font-mono">#{row.rank}</td>
+                    <td className="num">{row.lower_bound.toFixed(3)}</td>
+                    <td className="num">{row.performance_mean.toFixed(3)}</td>
+                    <td className="num">{row.performance_sd.toFixed(3)}</td>
+                    <td className="num">{row.effective_sample_maps}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="method-note">
+            Scores are comparable only within the same canonical role. Team and league
+            context are observed covariates, and uncertainty is a local ridge approximation.
+          </p>
+        </section>
+      ) : null}
 
       <section className="space-y-3">
         <h2 className="font-display text-xl">Champions</h2>

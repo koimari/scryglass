@@ -80,6 +80,25 @@ test("a canonical series id keeps side-swapped games together", () => {
   assert.equal(grouped[0].bestOf, 3);
 });
 
+test("series outcomes accept DuckDB-WASM bigint result values", () => {
+  const grouped = groupMapsIntoSeries([
+    gridMap({
+      canonical_series_id: "bigint-series",
+      canonical_series_status: "completed",
+      game_uid: "bigint-game",
+      blue_teamname: "Alpha",
+      red_teamname: "Beta",
+      blue_result: BigInt(1),
+      red_result: BigInt(0),
+      y_blue_win: BigInt(1),
+    }),
+  ]);
+
+  assert.equal(grouped[0].knownOutcomeMaps, 1);
+  assert.equal(grouped[0].winsA, 1);
+  assert.equal(grouped[0].winsB, 0);
+});
+
 function seriesWithWinners(
   winners: Array<"Alpha" | "Beta">,
   bestOf: 3 | 5 | null = null,

@@ -5,6 +5,7 @@ import {
   aggregateChampionRows,
   favoriteHitRateFromRow,
   normalizeMapQueryRow,
+  packTimestampIso,
   patchFilterClause,
   mapFilterClauses,
   resolveMapWinnerSide,
@@ -25,6 +26,14 @@ test("map winner resolution fails closed on absent or contradictory evidence", (
   assert.equal(resolveMapWinnerSide({ blue_result: 1, y_blue_win: 0 }), null);
   assert.equal(resolveMapWinnerSide({ blue_result: 0 }), "red");
   assert.equal(resolveMapWinnerSide({ y_blue_win: 1 }), "blue");
+  assert.equal(
+    resolveMapWinnerSide({
+      blue_result: BigInt(1),
+      red_result: BigInt(0),
+      y_blue_win: BigInt(1),
+    }),
+    "blue",
+  );
 });
 
 test("player outcomes require evidence from both sides and must agree", () => {
@@ -59,6 +68,22 @@ test("unknown values never become observed zero in a derived total", () => {
   assert.equal(sumKnownNumbers([0, 0]), 0);
   assert.equal(sumKnownNumbers([4, null]), null);
   assert.equal(sumKnownNumbers(["bad", 7]), null);
+});
+
+test("pack timestamps use the explicit Arrow epoch-millisecond SQL contract", () => {
+  assert.equal(
+    packTimestampIso(new Date("2026-07-18T16:33:48Z")),
+    "2026-07-18T16:33:48.000Z",
+  );
+  assert.equal(
+    packTimestampIso("2026-07-18 16:33:48+00:00"),
+    "2026-07-18T16:33:48.000Z",
+  );
+  assert.equal(
+    packTimestampIso(1784392428000),
+    "2026-07-18T16:33:48.000Z",
+  );
+  assert.equal(packTimestampIso(null), null);
 });
 
 test("scoreboard count and KDA cells preserve missing and malformed values", () => {
@@ -250,6 +275,7 @@ test("kill benchmark query uses a strict earlier-date cutoff", async () => {
   const duck = await readFile(new URL("./duck.ts", import.meta.url), "utf8");
   assert.match(
     duck,
-    /TRY_CAST\(date AS TIMESTAMP\) < TRY_CAST\('\$\{escapedDate\}' AS TIMESTAMP\)/,
+    /TRY_CAST\(date AS TIMESTAMPTZ\) < TRY_CAST\('\$\{escapedDate\}' AS TIMESTAMPTZ\)/,
   );
+  assert.match(duck, /const targetDate = packTimestampIso\(map\.date\) \?\? ""/);
 });

@@ -1,6 +1,9 @@
 import { notFound } from "next/navigation";
 import { PlayerEloDetail } from "@/components/PlayerEloDetail";
 import type {
+  PlayerPerformanceMeta,
+  PlayerPerformanceRating,
+  PlayerPerformanceValidation,
   PlayerRating,
   PlayerRatingsMeta,
   PlayerRecord,
@@ -8,6 +11,7 @@ import type {
 } from "@/lib/pack";
 import {
   currentMembershipContext,
+  playerPerformanceContract,
   playerOutcomeOrderingVerified,
   verifiedPlayerAffiliation,
 } from "@/lib/pack";
@@ -25,6 +29,9 @@ export default async function PlayerEloPage({ params }: Props) {
   const teams = await readPackJson<TeamRating[]>(man, "features/ratings_snapshot.json");
   let playerRecords: Record<string, PlayerRecord> = {};
   let playerRatingsMeta: PlayerRatingsMeta | null = null;
+  let playerPerformanceRows: PlayerPerformanceRating[] | null = null;
+  let playerPerformanceMeta: PlayerPerformanceMeta | null = null;
+  let playerPerformanceValidation: PlayerPerformanceValidation | null = null;
   try {
     playerRecords = await readPackJson(man, "features/player_records.json");
   } catch {
@@ -38,6 +45,27 @@ export default async function PlayerEloPage({ params }: Props) {
   } catch {
     playerRatingsMeta = null;
   }
+  try {
+    [playerPerformanceRows, playerPerformanceMeta, playerPerformanceValidation] =
+      await Promise.all([
+        readPackJson<PlayerPerformanceRating[]>(
+          man,
+          "features/player_performance_snapshot.json",
+        ),
+        readPackJson<PlayerPerformanceMeta>(
+          man,
+          "features/player_performance_meta.json",
+        ),
+        readPackJson<PlayerPerformanceValidation>(
+          man,
+          "features/player_performance_validation.json",
+        ),
+      ]);
+  } catch {
+    playerPerformanceRows = null;
+    playerPerformanceMeta = null;
+    playerPerformanceValidation = null;
+  }
 
   const player = players.find((p) => p.player.toLowerCase() === name.toLowerCase());
   if (!player) notFound();
@@ -49,6 +77,16 @@ export default async function PlayerEloPage({ params }: Props) {
     players,
   );
   const currentAffiliation = verifiedPlayerAffiliation(rec, membershipContext);
+  const performanceContract = playerPerformanceContract(
+    playerPerformanceRows,
+    playerPerformanceMeta,
+    playerPerformanceValidation,
+  );
+  const playerPerformance = performanceContract.valid
+    ? (playerPerformanceRows ?? []).filter(
+        (row) => row.player_name.toLowerCase() === player.player.toLowerCase(),
+      )
+    : null;
   const team = currentAffiliation
     ? teams.find(
         (candidate) =>
@@ -70,6 +108,10 @@ export default async function PlayerEloPage({ params }: Props) {
       membershipContext={membershipContext}
       playerRatingsMeta={playerRatingsMeta}
       playerOrderingVerified={playerOrderingVerified}
+      playerPerformance={playerPerformance}
+      playerPerformanceUnavailableReason={
+        performanceContract.valid ? null : performanceContract.reason
+      }
     />
   );
 }

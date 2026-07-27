@@ -48,9 +48,39 @@ export function finiteNumberOrNull(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+export function packTimestampIso(value: unknown): string | null {
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString() : null;
+  }
+  // Apache Arrow's Timestamp.toJSON contract is Unix epoch milliseconds.
+  // This is an explicit interchange contract, not unit inference by magnitude.
+  if (typeof value === "number" && Number.isFinite(value) && Number.isInteger(value)) {
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+  }
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
 function binaryResult(value: unknown): 0 | 1 | null {
-  if (value === true || value === 1 || value === "1") return 1;
-  if (value === false || value === 0 || value === "0") return 0;
+  // Arrow/DuckDB-WASM represents parquet INT64 values as bigint in the
+  // browser. Keep the completed-outcome contract strict while accepting the
+  // runtime representation produced by our own published pack.
+  if (
+    value === true ||
+    value === 1 ||
+    value === "1" ||
+    (typeof value === "bigint" && String(value) === "1")
+  ) return 1;
+  if (
+    value === false ||
+    value === 0 ||
+    value === "0" ||
+    (typeof value === "bigint" && String(value) === "0")
+  ) return 0;
   return null;
 }
 
@@ -615,7 +645,7 @@ export async function loadMatchModelPrior(
 
   let expectedKills: number | null = null;
   let expectedKillsN = 0;
-  const targetDate = String(map.date ?? "").trim();
+  const targetDate = packTimestampIso(map.date) ?? "";
   if (targetDate) {
     try {
       const leagueClause = league ? `AND league = '${esc(league)}'` : "";
@@ -626,7 +656,7 @@ export async function loadMatchModelPrior(
            avg(total_kills) AS mu_kills,
            count(total_kills)::INT AS n_kills
          FROM read_parquet($PARQUET)
-         WHERE TRY_CAST(date AS TIMESTAMP) < TRY_CAST('${escapedDate}' AS TIMESTAMP)
+         WHERE TRY_CAST(date AS TIMESTAMPTZ) < TRY_CAST('${escapedDate}' AS TIMESTAMPTZ)
            ${leagueClause}
            AND total_kills IS NOT NULL
            AND total_kills >= 0`,
@@ -637,7 +667,13 @@ export async function loadMatchModelPrior(
         expectedKills = null;
         expectedKillsN = 0;
       }
-    } catch {
+    } catch (error) {
+      console.warn("[match-prior] earlier-date kill benchmark failed", {
+        gameId,
+        league,
+        targetDate,
+        error: error instanceof Error ? error.message : String(error),
+      });
       expectedKills = null;
       expectedKillsN = 0;
     }

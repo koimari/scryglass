@@ -673,7 +673,7 @@ export function EloLadders({
               setExpanded(false);
             }}
           >
-            Players
+            Team-result exposure
           </button>
           <button
             type="button"
@@ -683,7 +683,7 @@ export function EloLadders({
               setExpanded(false);
             }}
           >
-            15-minute resource performance
+            Player performance
           </button>
         </div>
         <label className="field grow">
