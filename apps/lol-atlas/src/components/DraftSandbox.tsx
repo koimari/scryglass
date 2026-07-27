@@ -113,7 +113,7 @@ function DraftSideColumn({
                     onClick={() => onBranch(selected.index)}
                     aria-label={`Branch before ${selected.action.champion}`}
                   >
-                    Branch
+                    ↶
                   </button>
                 </>
               ) : (
@@ -570,13 +570,13 @@ export function DraftSandbox({
 
       <header className="sandbox-hero">
         <div className="sandbox-hero-copy">
-          <p className="blog-kicker">Draft workspace</p>
+          <p className="blog-kicker">Draft board</p>
           <h1
             ref={sandboxHeadingRef}
             className="font-display"
             tabIndex={-1}
           >
-            Draft simulator
+            Live draft sandbox
           </h1>
         </div>
         <div className="sandbox-header-actions">
@@ -658,7 +658,7 @@ export function DraftSandbox({
         </fieldset>
 
         <label className="sandbox-control-block sandbox-inline-toggle" aria-label="Auto draft analysis">
-          <span>Auto update</span>
+          <span>Live update</span>
           <input
             type="checkbox"
             checked={analysisMode === "live"}
@@ -669,7 +669,7 @@ export function DraftSandbox({
         </label>
 
         <label className="sandbox-control-block sandbox-inline-toggle">
-          <span>Live recommendations</span>
+          <span>Recommendation mode</span>
           <input
             type="checkbox"
             checked={includeRecommendations}
@@ -678,7 +678,7 @@ export function DraftSandbox({
         </label>
 
         <div className="sandbox-next sandbox-control-block">
-          <span>Next seat</span>
+          <span>Next pick</span>
           <strong>{boardStateLabel}</strong>
         </div>
 
@@ -786,7 +786,7 @@ export function DraftSandbox({
             <div className="sandbox-read-head">
               <p className="blog-kicker">Board read</p>
               <h2 id="manual-pick-heading" className="font-display">
-                {sideLabel(perspective)} projection
+                {sideLabel(perspective)} draft readout
               </h2>
             </div>
             {!publicPatch ? (
@@ -812,7 +812,12 @@ export function DraftSandbox({
                   className="sandbox-balance"
                   aria-label={`${sideLabel(perspective)} model comparison value`}
                 >
-                  <span style={{ width: `${100 * current.projected_value}%` }} />
+                  <span
+                    style={{
+                      width: `${100 * current.projected_value}%`,
+                      borderRight: "2px solid color-mix(in oklch, var(--ink) 20%, transparent)",
+                    }}
+                  />
                 </div>
                 <details className="sandbox-read-metrics">
                   <summary>Projection details</summary>
@@ -848,7 +853,7 @@ export function DraftSandbox({
                 ) : null}
                 {nextSide ? null : (
                   <p className="sandbox-empty">
-                    Draft complete — branch from an earlier pick to compare alternates.
+                    Draft complete. Branch from an earlier pick to compare alternatives.
                   </p>
                 )}
               </>
@@ -860,10 +865,10 @@ export function DraftSandbox({
           <section className="sandbox-picker" aria-label="Pick next champion">
             <div className="sandbox-picker-head">
               <p className="blog-kicker">Champion board</p>
-              <h2 className="font-display text-lg">
-                Next: {sideLabel(nextSide)} pick
-              </h2>
-            </div>
+                <h2 className="font-display text-lg">
+                  Next: {sideLabel(nextSide)} pick
+                </h2>
+              </div>
 
             <div
               className="sandbox-role-filters"
@@ -943,7 +948,7 @@ export function DraftSandbox({
                 aria-labelledby="sandbox-role-choice-label"
               >
                 <span id="sandbox-role-choice-label">
-                  Draft <strong>{pendingChampion.name}</strong> as
+                  Pick <strong>{pendingChampion.name}</strong> as
                 </span>
                 {pendingRoles.map((role, index) => (
                   <button
@@ -1000,7 +1005,7 @@ export function DraftSandbox({
             </div>
             {!pickerChampions.length ? (
               <p className="sandbox-empty">
-                No available champion matches this search and role filter.
+                No available champion matches this search and filter.
               </p>
             ) : null}
           </section>
