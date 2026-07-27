@@ -2,6 +2,12 @@ import Link from "next/link";
 import { promises as fs } from "fs";
 import path from "path";
 import type { ReactNode } from "react";
+import { readValidatedGrubsArticlePublication } from "@/lib/grubsArticlePublication.server";
+import {
+  draftProbabilityGateEvidence,
+  teamRatingGateEvidence,
+} from "@/lib/modelValidation";
+import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 async function loadChangelog(): Promise<string> {
   try {
@@ -32,6 +38,34 @@ function MethodSection({
 
 export default async function MethodologyPage() {
   const changelog = await loadChangelog();
+  let draftGate: ReturnType<typeof draftProbabilityGateEvidence> = null;
+  let teamGate: ReturnType<typeof teamRatingGateEvidence> = null;
+  let grubsPublication: Awaited<
+    ReturnType<typeof readValidatedGrubsArticlePublication>
+  > = null;
+  try {
+    const manifest = await readPackManifest();
+    try {
+      const artifact = await readPackJson(
+        manifest,
+        "models/model_validation_2026-07-27.json",
+      );
+      draftGate = draftProbabilityGateEvidence(artifact);
+      teamGate = teamRatingGateEvidence(artifact);
+    } catch {
+      draftGate = null;
+      teamGate = null;
+    }
+    try {
+      grubsPublication = await readValidatedGrubsArticlePublication(manifest);
+    } catch {
+      grubsPublication = null;
+    }
+  } catch {
+    draftGate = null;
+    teamGate = null;
+    grubsPublication = null;
+  }
 
   return (
     <article className="page-prose">
@@ -62,45 +96,66 @@ export default async function MethodologyPage() {
         </p>
       </aside>
 
-      <MethodSection id="hierarchical-ladder" title="Current public ladder" defaultOpen>
+      <MethodSection id="dynamic-series-ladder" title="Current public ladder" defaultOpen>
         <p>
-          The published team ladder uses a regularized hierarchical Bradley–Terry fit. It estimates
-          one organization effect across every event, plus a partially pooled home-league effect.
-          The same Team Liquid identity is therefore used in LCS, MSI, and EWC; an event label never
-          creates a second team.
+          The published team snapshot uses a time-varying Bradley–Terry state-space filter over
+          verified completed series. One immutable organization identity persists across events;
+          event labels never create a second team. A forecast is emitted at the verified series
+          start and the result enters the state only at verified completion.
         </p>
         <p>
-          Bo3 and Bo5 maps are collapsed to one series observation so a long series cannot count as
-          five independent matches. Historical LTA source labels are retained for audit: LTA North
-          maps to LCS, LTA South maps to CBLOL, and an unqualified LTA row is treated as an Americas
-          cross-region event. International events are classified from their source competition,
-          so a title such as “LCK Road to MSI” remains LCK.
+          Historical LTA source labels are retained for audit: LTA North maps to LCS, LTA South maps
+          to CBLOL, and an unqualified LTA row is an Americas cross-region event. International
+          events are classified from their source competition, so “LCK Road to MSI” remains LCK.
+          Only series with verified Bo1, Bo3, or Bo5 format, contiguous maps, a compatible terminal
+          score, and explicit completion provenance enter the rating. Ambiguous, tied, gapped, or
+          incomplete groups remain quarantined.
         </p>
         <p>
-          The default adjusted rating is the one-sided 90% lower bound of the fitted rating. Teams
-          without an international bridge receive wider uncertainty; this is why a thin domestic
-          win streak does not automatically outrank an established LPL or LCK team. The fit is a
-          penalized MAP estimate with a local Laplace uncertainty approximation, not a claim of a
-          fully sampled Bayesian posterior.
+          When the artifact declares <span className="font-mono">z = 1.64485</span>, the adjusted
+          value is the filtered mean minus that multiple of its diagonal Gaussian approximation:
+          a normal-approximation 5th percentile used for conservative ordering. It is not presented
+          as an empirically calibrated 95% coverage bound and is withheld when the row, metadata,
+          and arithmetic do not agree. Uncertainty grows during inactivity.
         </p>
         <p>
-          Player and team affiliation filters use the latest observed non-international competition,
-          not career league history. Tier 1 is the six major regional leagues (LCK, LPL, LEC, LCS,
-          CBLOL, and LCP); Tier 2 contains established secondary and challenger circuits such as
-          TCL, LJL, CD, and NACL; Tier 3 is the remaining domestic or developmental population. A
-          Tier 2 player therefore cannot enter a Tier 1 league view merely because they played there
-          in an older season. On Ratings, tier chips set the current competitive level while league,
-          cross-region, and international-event chips narrow the evidence scope; filters across groups
-          are conjunctive.
+          Current affiliation comes only from the reviewed Riot tournament registry and matching
+          row-level participation evidence. A last observed team or league cannot create current
+          membership. The public current-membership view is Tier 1 only until an authoritative
+          registry establishes lower-tier participation under the same contract.
         </p>
         <p>
-          The validation contract is chronological, series-level holdouts: report log loss, Brier
-          score, calibration, interval coverage, and rank stability before changing the published
-          hyperparameters. Random map splits are not used because maps within a series are
-          correlated. The design follows the dynamic Bradley–Terry and state-space literature: <a className="row-link" href="https://arxiv.org/abs/2003.00083">dynamic BT</a>,
+          Model changes require chronological holdouts, immutable prediction rows, log loss, Brier
+          score, calibration, dependence-aware intervals, and rank stability. A challenger is not
+          promoted merely because its point estimate is better; the current immutable validation
+          artifact records the selection, untouched test, uncertainty interval, and promotion
+          decision. The frozen 1,771-series test also reports calibration separately for Bo1, Bo3,
+          and Bo5. Ratings are comparable only inside one connected historical comparison component.
+          The design follows the dynamic Bradley–Terry and state-space literature: <a className="row-link" href="https://doi.org/10.1111/j.1467-9876.2012.01046.x">dynamic BT</a>,
           <a className="row-link" href="https://arxiv.org/abs/2308.02414"> state-space skill models</a>, and
-          <a className="row-link" href="https://arxiv.org/abs/2106.11397"> team-skill aggregation evidence</a>.
+          <a className="row-link" href="https://www.remi-coulom.fr/WHR/WHR.pdf"> whole-history rating</a>.
         </p>
+        {teamGate ? (
+          <p>
+            On the immutable {teamGate.finalTestSeries.toLocaleString()}-series final test,
+            the dynamic model scored {teamGate.logLoss.toFixed(5)} log loss versus{" "}
+            {teamGate.rollingEloLogLoss.toFixed(5)} for the selected rolling-Elo
+            benchmark. The paired difference was {teamGate.logLossDifference.toFixed(5)},
+            with a 95% circular moving-block bootstrap interval from{" "}
+            {teamGate.confidenceInterval[0].toFixed(5)} to{" "}
+            {teamGate.confidenceInterval[1].toFixed(5)}. Its Brier score was{" "}
+            {teamGate.brier.toFixed(5)} and ten-bin ECE was{" "}
+            {teamGate.ece.toFixed(5)}. The {teamGate.bo5Series}-series Bo5 slice had ECE{" "}
+            {teamGate.bo5Ece.toFixed(3)}, so this release is not described as universally
+            calibrated or state of the art.
+          </p>
+        ) : (
+          <p>
+            Team-rating test metrics are withheld because the current immutable pack does
+            not provide a gate artifact whose model hashes, observation hash, benchmark
+            comparison, interval, and format diagnostics reconcile.
+          </p>
+        )}
       </MethodSection>
 
       <MethodSection id="dual-elo" title="Sequential Dual Elo benchmark">
@@ -126,41 +181,88 @@ export default async function MethodologyPage() {
 
       <MethodSection id="player-elo" title="Player Dual Elo">
         <p>
-          Players are rated on their own Dual Elo track (player floor σ_min = 28). A team&apos;s
-          player-aggregated strength is a role-weighted blend of the five on the rift. Prefer player
-          ladders when rosters move. Evidence on a player at 28 is usually Settled because 28 is the
-          floor.
+          The legacy player track applies the same team outcome to the five observed players. It can
+          travel across organizations and provide a shared lineup signal, but team wins generally do
+          not identify individual teammate effects. Missing identifiability metadata is therefore
+          “unverified,” never individual evidence. Exact shared-exposure cohorts remain tied, and
+          public individual rank ordering is withheld even when a player has a unique exposure
+          history.
+        </p>
+        <p>
+          A separately gated research model estimates role-relative 15-minute resource performance
+          from gold, experience, and creep-score differentials without using map wins. It appears
+          only when the current immutable pack contains a matching snapshot, metadata, and passing
+          chronological validation artifact. Even then, it is not general skill, win contribution,
+          or complete-game performance.
         </p>
       </MethodSection>
 
       <MethodSection id="draft-score" title="Draft Score">
+        {draftGate ? (
+          <p>
+            The published draft win probability is withheld by the current immutable validation
+            artifact. On its untouched {draftGate.finalTestMaps.toLocaleString()}-map chronological
+            test window, the best role/champion composition candidate scored{" "}
+            {draftGate.compositionLogLoss.toFixed(5)} log loss and{" "}
+            {draftGate.compositionBrier.toFixed(5)} Brier, compared with{" "}
+            {draftGate.overallBaseRateLogLoss.toFixed(5)} and{" "}
+            {draftGate.overallBaseRateBrier.toFixed(5)} for the overall blue-side base rate.
+            Those scores belong to the pre-final fitted pipeline evaluated on that untouched
+            window. The experimental Sandbox runtime was refit on the full population, including
+            those labels, and is exposed only as a composition utility; it is not the exact
+            coefficient artifact scored above. Calling either output a calibrated win chance would
+            overstate the evidence.
+          </p>
+        ) : (
+          <p>
+            Draft win probability is withheld. The current pack does not provide a valid immutable
+            gate artifact from which this page can quote test metrics, so no numerical fallback is
+            shown.
+          </p>
+        )}
         <p>
-          Draft Score is a time-held-out, full-composition estimate of blue-side map-win probability
-          from five role-assigned champions per side, league, and patch. It includes role-aware
-          champion effects, within-team synergy, all 25 cross-team interactions, a sparse residual,
-          and a diagonal-Laplace uncertainty range. The raw composition estimate excludes roster and
-          team identity; pre-match team and player strength is reported separately when available.
+          For a complete, uniquely role-assigned draft, the frozen probability
+          specification is{" "}
+          <span className="font-mono">
+            logit(p_blue) = a + b × (β_side + e_composition)
+          </span>
+          . The composition edge contains role-aware direct terms, within-team
+          pair terms, and all cross-team interactions. Its sign reverses when
+          the two role-labelled compositions swap. The blue-side probability
+          itself need not sum to one with that swapped counterfactual because
+          the fitted side baseline remains attached to blue. The interval uses
+          the model-intercept variance, a diagonal approximation for active
+          composition terms, and the full intercept/slope covariance from the
+          chronological calibration fit; omitted feature covariance remains a
+          stated limitation.
         </p>
         <p>
-          The Draft Sandbox uses a clearly labelled partial-draft comparison until all ten picks are
-          present; unfilled seats are neutralized and its pick-to-pick changes are not calibrated
-          match-win probabilities. A complete board uses the full-composition runtime. The sandbox
-          does not include private champion pools, scrim plans, or unannounced flex intent.
+          The Draft Sandbox therefore uses a 0–100 experimental composition policy value at every
+          draft state, including a complete board. It combines role-aware champion terms, observed
+          ally pair terms, enemy interactions, and a bounded two-ply beam-minimax response search.
+          It is useful for comparing branches inside this model, but it is not a win probability,
+          an exhaustive best response, or evidence of optimal drafting. It also does not include
+          private champion pools, scrim plans, or unannounced flex intent.
+          Public patch labels are explicit contracts: public 25.xx maps to
+          source key 15.xx and public 26.xx maps to source key 16.xx. Ambiguous
+          one-digit minor strings are rejected.
         </p>
       </MethodSection>
 
-      <MethodSection id="kills" title="Expected kills">
+      <MethodSection id="kills" title="Chronological kills benchmark">
         <p>
-          Match checklists use league-mean total kills in the pack year as a descriptive over/under
-          prior (half-kill line).
+          A match may be compared with the same-league mean from strictly earlier maps in the pack
+          year. This is a simple chronological benchmark, not a fitted kills forecast. Missing
+          history or map kills suppresses the comparison.
         </p>
       </MethodSection>
 
       <MethodSection id="evidence" title="Evidence labels">
         <p>
-          Evidence is a plain-language view of σ relative to its floor. Settled = at floor. Thin / Very thin =
-          headroom above the floor. Games counts sit beside it. Method owns the formula; the ladder
-          owns the sentence.
+          Evidence semantics are model-specific. Dynamic team rows use the model-declared local
+          spread and bound contract; Player Dual Elo uses its own sigma floor only after outcome
+          identifiability is known. A shared cohort or missing metadata cannot be labelled as
+          individual evidence merely because the numeric spread is small.
         </p>
       </MethodSection>
 
@@ -187,9 +289,12 @@ export default async function MethodologyPage() {
       <MethodSection id="freshness" title="Freshness and sources">
         <p>
           Scryglass publishes versioned packs, with each rating file preserved as a dated snapshot. OE is
-          the canonical source when the same game appears in both feeds. GRID is a pro-only bridge
-          for completed games that have already finished while the next OE export is pending.
-          Scheduled or scrim-like series stay outside the result set.
+          the canonical inclusion source when the same game appears in both feeds. Verified GRID
+          results may bridge a completed-game gap while the next OE export is pending; GRID may
+          also provide event detail for a map whose canonical result is already OE-backed. Those
+          roles are published separately as <span className="font-mono">canonical_map_source</span>{" "}
+          and <span className="font-mono">map_detail_source</span>. Scheduled or scrim-like series
+          stay outside the result set.
         </p>
         <p>
           A new pack is built by the refresh workflow, then the public pointer is updated. The
@@ -199,30 +304,41 @@ export default async function MethodologyPage() {
       </MethodSection>
 
       <MethodSection id="void-grubs" title="Void grubs">
-        <p>
-          The{" "}
-          <Link href="/articles/void-grubs-contest-or-leave" className="row-link">
-            void-grubs article
-          </Link>{" "}
-          leads with the opportunity-cost estimand. At even gold, leaving for the two-wave farm
-          reference is worth more than contesting until estimated fight-win reaches the contest bar
-          ≈ 58.9%. Gold@10 → map-win is an associational logit conversion. The OE trailing-team
-          leave-mix (~24%) answers a different question.
-        </p>
+        {grubsPublication ? (
+          <p>
+            The{" "}
+            <Link href="/articles/void-grubs-contest-or-leave" className="row-link">
+              void-grubs article
+            </Link>{" "}
+            leads with a Patch {grubsPublication.article.mechanics.patch} opportunity-cost
+            sensitivity. At even gold, leaving for the two-wave farm reference is worth more than
+            contesting until estimated fight-win reaches its{" "}
+            {grubsPublication.article.p_star_pct.toFixed(2)}% contest bar. Gold@10 → map-win is an
+            associational logit conversion; the result is not an identified action policy.
+          </p>
+        ) : (
+          <p>
+            The void-grubs numerical methodology is unavailable because the active immutable
+            article artifact did not pass its manifest hash, current-mechanics, schema, and
+            formula-parity checks.
+          </p>
+        )}
       </MethodSection>
 
       <MethodSection id="faq" title="FAQ">
         <p>
-          <strong>Why is Evidence “Settled” at 28 for players?</strong> Because 28 is the player σ
-          floor, the model&apos;s minimum spread.
+          <strong>Why can two teammates have the same score?</strong> When they have the same signed
+          map exposure, team outcomes contain no information that separates them. The interface
+          keeps that tie and states the identifiability limit.
         </p>
         <p>
           <strong>Do league chips change Elo?</strong> They filter the ladder roster while the shared
           Elo stays fixed.
         </p>
         <p>
-          <strong>Where is model accuracy?</strong> Matches shows Dual Elo favorite hit rate for the
-          selected year. Draft overlap with the actual winner is visible on match boards.
+          <strong>Where is probability quality?</strong> Favorite hit rate is only a threshold
+          diagnostic. Release evidence uses chronological log loss, Brier score, calibration, and
+          dependence-aware comparisons tied to an immutable model and pack.
         </p>
       </MethodSection>
 

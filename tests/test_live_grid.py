@@ -19,11 +19,94 @@ from lol_kills.etl.grid_series_events import (
     transaction_sequence,
     transaction_state,
 )
-from lol_kills.live_model import evaluate_live_state
+from lol_kills.etl.riot_esports_events import (
+    analyze_voidgrub_window,
+    extract_epic_kills,
+    extract_positions,
+)
+from lol_kills.live_model import _role_assigned_picks, evaluate_live_state
 from lol_kills.live_snapshots import LivePublisher, build_live_snapshot
 
 
 class GridSeriesEventsTests(unittest.TestCase):
+    def test_live_draft_uses_explicit_roles_not_pick_or_player_order(self) -> None:
+        blue_players = [
+            {"role": "support", "champion": "Nautilus"},
+            {"role": "mid", "champion": "Ahri"},
+            {"role": "top", "champion": "Gnar"},
+            {"role": "bottom", "champion": "Jinx"},
+            {"role": "jungle", "champion": "Vi"},
+        ]
+        red_players = [
+            {"role": "top", "champion": "Kennen"},
+            {"role": "jungle", "champion": "Sejuani"},
+            {"role": "mid", "champion": "Orianna"},
+            {"role": "bot", "champion": "Aphelios"},
+            {"role": "sup", "champion": "Thresh"},
+        ]
+        blue, red = _role_assigned_picks(
+            {
+                "blue": {"players": blue_players},
+                "red": {"players": red_players},
+            }
+        )
+        self.assertEqual(blue, ["Gnar", "Vi", "Ahri", "Jinx", "Nautilus"])
+        self.assertEqual(
+            red,
+            ["Kennen", "Sejuani", "Orianna", "Aphelios", "Thresh"],
+        )
+        blue_reordered, _ = _role_assigned_picks(
+            {
+                "blue": {"players": list(reversed(blue_players))},
+                "red": {"players": red_players},
+            }
+        )
+        self.assertEqual(blue_reordered, blue)
+
+    def test_live_stats_preserve_unknown_combat_values_and_real_zeroes(self) -> None:
+        rows = extract_positions(
+            [
+                {
+                    "rfc461Schema": "stats_update",
+                    "gameTime": 1_000,
+                    "participants": [
+                        {
+                            "participantID": 1,
+                            "teamID": 100,
+                            "position": {"x": 10, "z": 20},
+                            "totalGold": 0,
+                            "currentGold": None,
+                            "level": None,
+                            "health": None,
+                            "healthMax": None,
+                        }
+                    ],
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["gameTime_ms"], 1_000)
+        self.assertEqual(rows[0]["totalGold"], 0.0)
+        self.assertIsNone(rows[0]["currentGold"])
+        self.assertIsNone(rows[0]["level"])
+        self.assertIsNone(rows[0]["health"])
+        self.assertIsNone(rows[0]["healthMax"])
+        self.assertIsNone(rows[0]["alive"])
+
+    def test_missing_epic_position_never_becomes_map_origin(self) -> None:
+        kills = extract_epic_kills(
+            [
+                {
+                    "rfc461Schema": "epic_monster_kill",
+                    "gameTime": 480_000,
+                    "monsterType": "VoidGrub",
+                    "killerTeamID": 100,
+                }
+            ]
+        )
+        self.assertIsNone(kills[0]["x"])
+        result = analyze_voidgrub_window([], kills, [], [])
+        self.assertEqual(result["status"], "unavailable_missing_pit_position")
+
     def test_grid_tournament_classification_keeps_developmental_and_unknown_scopes_safe(self) -> None:
         self.assertEqual(grid_ingest._league_for("NACL Summer 2026"), "NACL")
         self.assertEqual(grid_ingest._league_for("LCK Challengers 2026"), "LCKC")
@@ -92,7 +175,12 @@ class GridSeriesEventsTests(unittest.TestCase):
                 pd.DataFrame([{"gameid": "g1", "side": "Blue", "position": "top"}]).to_parquet(
                     grid_ingest.PARQUET_DIR / "grid_player_games.parquet", index=False
                 )
-                teams, players = grid_ingest.ingest_grid(required=True)
+                teams, players = grid_ingest.ingest_grid(required=False)
+                with self.assertRaisesRegex(
+                    grid_ingest.GridIngestError,
+                    "current run produced no completed game",
+                ):
+                    grid_ingest.ingest_grid(required=True)
             finally:
                 grid_ingest.RAW_GRID_DIR = old_raw
                 grid_ingest.PARQUET_DIR = old_parquet
@@ -385,10 +473,11 @@ class GridSeriesEventsTests(unittest.TestCase):
             ]
         }
         result = evaluate_live_state(state, elo_diff=40)
-        self.assertEqual(result.status, "preliminary")
-        self.assertEqual(result.draft_status, "incomplete")
-        self.assertIsNotNone(result.p_blue)
-        self.assertIn("Draft is incomplete", " ".join(result.warnings))
+        self.assertEqual(result.status, "unavailable-unvalidated-model")
+        self.assertEqual(result.draft_status, "unavailable")
+        self.assertIsNone(result.p_blue)
+        self.assertIn("probability is withheld", " ".join(result.warnings))
+        self.assertIn("validated_live_model", result.missing)
 
     def test_live_model_fails_closed_without_a_game(self) -> None:
         result = evaluate_live_state({"games": []}, elo_diff=40)
@@ -411,9 +500,24 @@ class GridSeriesEventsTests(unittest.TestCase):
             ]
         }
         result = evaluate_live_state(state, elo_diff=40)
-        self.assertEqual(result.status, "preliminary-out-of-calibration")
+        self.assertEqual(result.status, "unavailable-unvalidated-model")
         self.assertIsNone(result.p_blue)
-        self.assertIn("calibration_window", result.missing)
+        self.assertIn("validated_live_model", result.missing)
+
+    def test_live_game_time_milliseconds_are_not_inferred_from_magnitude(self) -> None:
+        short = {
+            "games": [
+                {
+                    "gameTime": 1_000,
+                    "teams": [
+                        {"id": "blue-id", "name": "Blue", "side": "blue"},
+                        {"id": "red-id", "name": "Red", "side": "red"},
+                    ],
+                }
+            ]
+        }
+        result = evaluate_live_state(short, elo_diff=0)
+        self.assertAlmostEqual(result.minute or -1, 1 / 60)
 
     def test_live_snapshot_writes_versioned_public_pointer_without_raw_transactions(self) -> None:
         state = {
@@ -448,7 +552,11 @@ class GridSeriesEventsTests(unittest.TestCase):
         self.assertEqual(snapshot["schema_version"], "live.v1")
         self.assertNotIn("transactions", snapshot)
         self.assertEqual(snapshot["teams"]["blue"]["players"][0]["champion"], "Ahri")
-        self.assertGreater(len(snapshot["evaluation"]["contributions"]), 0)
+        self.assertEqual(
+            snapshot["evaluation"]["status"],
+            "unavailable-unvalidated-model",
+        )
+        self.assertEqual(snapshot["evaluation"]["contributions"], [])
         with TemporaryDirectory() as temp:
             publisher = LivePublisher(local_root=Path(temp))
             pointer = publisher.publish_snapshot(snapshot)
@@ -456,6 +564,53 @@ class GridSeriesEventsTests(unittest.TestCase):
             self.assertEqual(pointer["snapshot_url"], "/live/series/2970137/snapshots/12.json")
             self.assertTrue((Path(temp) / "series/2970137/snapshots/12.json").is_file())
             self.assertTrue((Path(temp) / "index.json").is_file())
+
+    def test_series_score_follows_team_identity_across_side_swaps(self) -> None:
+        state = {
+            "games": [
+                {
+                    "id": "g1",
+                    "finished": True,
+                    "teams": [
+                        {
+                            "id": "team-a",
+                            "name": "Team A",
+                            "side": "blue",
+                            "won": True,
+                        },
+                        {
+                            "id": "team-b",
+                            "name": "Team B",
+                            "side": "red",
+                            "won": False,
+                        },
+                    ],
+                },
+                {
+                    "id": "g2",
+                    "finished": True,
+                    "teams": [
+                        {
+                            "id": "team-b",
+                            "name": "Team B",
+                            "side": "blue",
+                            "won": False,
+                        },
+                        {
+                            "id": "team-a",
+                            "name": "Team A",
+                            "side": "red",
+                            "won": True,
+                        },
+                    ],
+                },
+            ]
+        }
+        snapshot = build_live_snapshot("series", state, sequence_number=2)
+        self.assertEqual(snapshot["teams"]["red"]["name"], "Team A")
+        self.assertEqual(snapshot["teams"]["red"]["score"], 2)
+        self.assertEqual(snapshot["teams"]["blue"]["name"], "Team B")
+        self.assertEqual(snapshot["teams"]["blue"]["score"], 0)
 
 
 if __name__ == "__main__":

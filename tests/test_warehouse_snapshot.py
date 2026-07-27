@@ -80,6 +80,62 @@ class WarehouseSnapshotTests(unittest.TestCase):
                 snapshot.ROOT = old_root
                 snapshot.DEFAULT_POINTER = old_default_pointer
 
+    def test_restore_verifies_snapshot_before_overwriting_warehouse(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            relative = "data/lol/warehouse/parquet/oe_team_games.parquet"
+            live_path = root / relative
+            live_path.parent.mkdir(parents=True)
+            live_path.write_bytes(b"known-good-live-warehouse")
+            replacement = b"untrusted-snapshot"
+            manifest = {
+                "schema": snapshot.SNAPSHOT_SCHEMA,
+                "files": [
+                    {
+                        "path": relative,
+                        "bytes": len(replacement),
+                        "sha256": "0" * 64,
+                    }
+                ],
+            }
+            archive_buffer = io.BytesIO()
+            with tarfile.open(fileobj=archive_buffer, mode="w:gz") as archive:
+                payload_info = tarfile.TarInfo(relative)
+                payload_info.size = len(replacement)
+                archive.addfile(payload_info, io.BytesIO(replacement))
+                raw_manifest = json.dumps(manifest).encode("utf-8")
+                manifest_info = tarfile.TarInfo("snapshot_manifest.json")
+                manifest_info.size = len(raw_manifest)
+                archive.addfile(manifest_info, io.BytesIO(raw_manifest))
+
+            pointer = root / "data/lol/warehouse_snapshot.json"
+            pointer.write_text(
+                json.dumps({"url": "https://example.invalid/snapshot.tar.gz"}),
+                encoding="utf-8",
+            )
+            old_root = snapshot.ROOT
+            try:
+                snapshot.ROOT = root
+                with patch.object(
+                    snapshot.urllib.request,
+                    "urlopen",
+                    return_value=io.BytesIO(archive_buffer.getvalue()),
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "checksum mismatch",
+                    ):
+                        snapshot.restore_snapshot(pointer)
+            finally:
+                snapshot.ROOT = old_root
+
+            self.assertEqual(live_path.read_bytes(), b"known-good-live-warehouse")
+
+    def test_fallback_pack_id_rejects_traversal_before_path_resolution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            with self.assertRaisesRegex(ValueError, "Unsafe pack_id"):
+                snapshot._latest_pack(Path(temp), "../outside")
+
 
 if __name__ == "__main__":
     unittest.main()

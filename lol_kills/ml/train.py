@@ -635,6 +635,17 @@ def race_to_k(mu_total: float, p_blue_share: float, ks: list[int] | None = None)
 
 
 def train_all(features_path: Path | None = None, do_archive: bool = True) -> dict:
+    raise RuntimeError(
+        "Legacy multi-target training is quarantined: historical feature "
+        "effects and calibration do not satisfy the current no-leakage gate."
+    )
+
+
+def _quarantined_train_all_implementation(
+    features_path: Path | None = None,
+    do_archive: bool = True,
+) -> dict:
+    """Retained temporarily for forensic comparison; never writes by default."""
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     if do_archive:
         try:

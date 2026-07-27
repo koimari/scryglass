@@ -77,3 +77,15 @@ test("fails closed when neither source has five champions per side", () => {
   ];
   assert.equal(resolveDraftLineup({}, players), null);
 });
+
+test("fails closed when a champion appears on both sides", () => {
+  const blue = ["Olaf", "Nasus", "Syndra", "Caitlyn", "Bard"];
+  const red = ["Olaf", "Trundle", "Cassiopeia", "Ashe", "Seraphine"];
+  assert.equal(
+    resolveDraftLineup(
+      {},
+      [...participants("Blue", blue), ...participants("Red", red)],
+    ),
+    null,
+  );
+});

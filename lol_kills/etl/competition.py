@@ -19,7 +19,7 @@ from typing import Any
 
 import pandas as pd
 
-from lol_kills.etl.aliases import normalize_team
+from lol_kills.etl.aliases import normalize_team, team_organization_id
 
 
 TAXONOMY_VERSION = "2026-07-26.5"
@@ -126,8 +126,13 @@ _KEY_RE = re.compile(r"[^a-z0-9]+")
 
 
 def _text(value: Any) -> str:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
+    if value is None:
         return ""
+    try:
+        if bool(pd.isna(value)):
+            return ""
+    except (TypeError, ValueError):
+        pass
     return str(value).strip()
 
 
@@ -209,6 +214,9 @@ def team_identity_key(name: Any) -> str:
     """Return a stable identity key independent of league/event context."""
 
     canonical = normalize_team(_text(name))
+    organization_id = team_organization_id(canonical)
+    if organization_id is not None:
+        return organization_id
     value = unicodedata.normalize("NFKD", canonical).encode("ascii", "ignore").decode("ascii")
     value = _KEY_RE.sub("-", value.casefold()).strip("-")
     return value or "unknown-team"
@@ -226,6 +234,11 @@ def canonicalize_competition_frame(frame: pd.DataFrame) -> pd.DataFrame:
         return frame.copy() if frame is not None else pd.DataFrame()
 
     out = frame.copy()
+    for column in ("playername", "playerid", "teamid"):
+        if column in out.columns:
+            out[column] = out[column].map(
+                lambda value: _text(value) if _text(value) else value
+            )
     if "league" in out.columns:
         if "league_source" not in out.columns:
             out["league_source"] = out["league"]
@@ -248,6 +261,9 @@ def canonicalize_competition_frame(frame: pd.DataFrame) -> pd.DataFrame:
     for column in team_columns:
         if column not in out.columns:
             continue
+        source_column = f"{column}_source"
+        if source_column not in out.columns:
+            out[source_column] = out[column]
         out[column] = out[column].map(lambda value: normalize_team(_text(value)) if _text(value) else value)
         key_column = {
             "teamname": "team_key",

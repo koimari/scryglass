@@ -305,9 +305,9 @@ def _attach_lp_to_oe(oe_maps: pd.DataFrame, lp_w: pd.DataFrame, window_hours: fl
                 m["lp_game_id"] = None
         m["lp_matched"] = m["lp_game_id"].notna()
         matched += int(m["lp_matched"].sum())
-        if "lp_first_inhib" in m.columns:
-            m["y_blue_first_inhib"] = m["lp_first_inhib"].fillna(m.get("y_blue_first_inhib"))
-            m["blue_first_inhib"] = m["y_blue_first_inhib"]
+        # Leaguepedia final inhibitor totals do not encode event order. Keep a
+        # genuine OE first-inhibitor label when present, but never fill it from
+        # the LP enrichment.
         if "lp_tournament" in m.columns:
             if "tournament" not in m.columns:
                 m["tournament"] = m["lp_tournament"]
@@ -326,9 +326,14 @@ def build_map_warehouse(
     lp_team: pd.DataFrame | None = None,
     oe_team: pd.DataFrame | None = None,
     lp_players: pd.DataFrame | None = None,
-    majors_only: bool = True,
+    majors_only: bool = False,
 ) -> pd.DataFrame:
-    """OE-primary maps.parquet (+ players). LP drafts attached when matched."""
+    """OE-primary all-league maps.parquet (+ players). LP drafts when matched.
+
+    ``majors_only`` is an explicit analysis-only opt-in.  The production
+    warehouse default must retain the same canonical league population as its
+    team and player grains.
+    """
     PARQUET_DIR.mkdir(parents=True, exist_ok=True)
     WAREHOUSE_DIR.mkdir(parents=True, exist_ok=True)
 

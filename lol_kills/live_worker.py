@@ -201,6 +201,7 @@ async def run_worker(args: argparse.Namespace) -> int:
                         stop_after_one=args.once,
                     )
                 )
+        loop_degraded = False
         for series_id, task in list(tasks.items()):
             if not task.done():
                 continue
@@ -208,6 +209,7 @@ async def run_worker(args: argparse.Namespace) -> int:
                 for entry in task.result():
                     entries[series_id] = entry
             except Exception as exc:
+                loop_degraded = True
                 publisher.publish_health(
                     status="degraded",
                     message=f"Series {series_id} stopped: {type(exc).__name__}",
@@ -216,7 +218,8 @@ async def run_worker(args: argparse.Namespace) -> int:
             del tasks[series_id]
         if entries:
             publisher.publish_index(list(entries.values()))
-        publisher.publish_health(status="ok", active_series=len(tasks))
+        if not loop_degraded:
+            publisher.publish_health(status="ok", active_series=len(tasks))
         if args.once:
             if not tasks:
                 break

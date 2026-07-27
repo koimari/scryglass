@@ -47,6 +47,24 @@ def load_cached_oe(
         print(f"[oe] cached parquet could not be read: {exc}")
         return pd.DataFrame(), pd.DataFrame()
 
+    # This compatibility path can contain a previously reconciled OE+GRID
+    # frame. A fast GRID refresh must not feed those GRID rows back into the
+    # primary side of the next merge.
+    def oe_rows_only(frame: pd.DataFrame) -> pd.DataFrame:
+        if frame.empty or "source" not in frame.columns:
+            return frame
+        source = (
+            frame["source"]
+            .astype("string")
+            .fillna("")
+            .str.strip()
+            .str.casefold()
+        )
+        return frame.loc[source.eq("oe")].copy()
+
+    team = oe_rows_only(team)
+    players = oe_rows_only(players)
+
     if years:
         wanted = {int(y) for y in years}
 
@@ -128,6 +146,11 @@ def _strip_columns(df: pd.DataFrame) -> pd.DataFrame:
 def _normalize_identity(frame: pd.DataFrame, *, players: bool) -> pd.DataFrame:
     """Team/champ aliases + dates only — do not drop or invent columns."""
     out = frame
+    for column in ("playername", "playerid", "teamid"):
+        if column in out.columns:
+            out[column] = out[column].map(
+                lambda value: str(value).strip() if pd.notna(value) else value
+            )
     if "teamname" in out.columns:
         out["teamname"] = out["teamname"].map(
             lambda x: normalize_team(str(x)) if pd.notna(x) else x

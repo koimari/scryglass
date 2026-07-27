@@ -1,32 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { articlePStarAtGoldB, contestBarPct, PSTAR_FX } from "@/lib/pstar";
+import {
+  articlePStarAtGoldB,
+  contestBarPct,
+  PSTAR_FX,
+  type ArticleCurvePoint,
+  type GoldBRow,
+  type LeaveFarmRow,
+} from "@/lib/pstar";
 
-export type ArticleCurvePoint = {
-  p_win_fight: number;
-  ev_contest_pp: number;
-  ev_leave_pp: number;
-  edge_contest_minus_leave_pp: number;
-  verdict: string;
-};
-
-export type LeaveFarmRow = {
-  label: string;
-  leave_farm_gold: number;
-  p_star_at_parity: number;
-  p_star_at_parity_pct: number;
-  p_star_at_B_plus_1183: number;
-  p_star_at_B_plus_1183_pct: number;
-};
-
-export type GoldBRow = {
-  B_gold: number;
-  leave_farm_gold: number;
-  objective_gold: number;
-  p_star: number;
-  p_star_pct: number;
-};
+export type { ArticleCurvePoint, GoldBRow, LeaveFarmRow } from "@/lib/pstar";
 
 export type FormulaHtml = {
   pStar: string;
@@ -43,6 +27,62 @@ type Props = {
 };
 
 const FARM_ALLOW = new Set(["no_farm", "one_wave", "two_waves"]);
+
+export function articleChartInputsValid(props: Props): boolean {
+  const curveValues = props.curve.flatMap((row) => [
+    row.p_win_fight,
+    row.ev_contest_pp,
+    row.ev_leave_pp,
+    row.edge_contest_minus_leave_pp,
+  ]);
+  const farmValues = props.byLeaveFarm.flatMap((row) => [
+    row.leave_farm_gold,
+    row.p_star_at_parity,
+    row.p_star_at_parity_pct,
+    row.p_star_at_B_plus_1183,
+    row.p_star_at_B_plus_1183_pct,
+  ]);
+  const goldValues = props.byGoldB.flatMap((row) => [
+    row.B_gold,
+    row.leave_farm_gold,
+    row.objective_gold,
+    row.p_star,
+    row.p_star_pct,
+  ]);
+  return (
+    Number.isFinite(props.pStar) &&
+    props.pStar >= 0 &&
+    props.pStar <= 1 &&
+    props.curve.length >= 2 &&
+    props.byGoldB.length >= 2 &&
+    props.byLeaveFarm.some((row) => row.label === "two_waves") &&
+    props.byLeaveFarm.every(
+      (row) =>
+        FARM_ALLOW.has(row.label) &&
+        row.p_star_at_parity >= 0 &&
+        row.p_star_at_parity <= 1 &&
+        Math.abs(row.p_star_at_parity * 100 - row.p_star_at_parity_pct) < 1e-6,
+    ) &&
+    props.curve.every(
+      (row) => row.p_win_fight >= 0 && row.p_win_fight <= 1,
+    ) &&
+    props.curve.some((row) => row.p_win_fight === 0.5) &&
+    new Set(props.curve.map((row) => row.p_win_fight)).size >= 2 &&
+    new Set(props.byGoldB.map((row) => row.B_gold)).size >= 2 &&
+    props.byGoldB.every(
+      (row) =>
+        row.p_star >= 0 &&
+        row.p_star <= 1 &&
+        Math.abs(row.p_star * 100 - row.p_star_pct) < 1e-6,
+    ) &&
+    [props.pStar, ...curveValues, ...farmValues, ...goldValues].every(
+      Number.isFinite,
+    ) &&
+    Object.values(props.formulaHtml).every(
+      (html) => typeof html === "string" && html.trim().length > 0,
+    )
+  );
+}
 
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t;
@@ -65,14 +105,14 @@ function interpEdge(curve: ArticleCurvePoint[], p: number) {
         ev_contest_pp: evC,
         ev_leave_pp: evL,
         edge_contest_minus_leave_pp: edge,
-        verdict: edge >= 0 ? "Contest preferred" : "Leave preferred",
+        model_preference: edge >= 0 ? "CONTEST" : "LEAVE",
       };
     }
   }
   return sorted[0];
 }
 
-export function ArticleContestCharts({
+function ValidatedArticleContestCharts({
   curve,
   pStar,
   byLeaveFarm,
@@ -152,7 +192,10 @@ export function ArticleContestCharts({
               className={`font-mono text-sm ${point.edge_contest_minus_leave_pp >= 0 ? "text-[var(--secondary)]" : "text-[var(--danger)]"}`}
             >
               {point.edge_contest_minus_leave_pp >= 0 ? "+" : ""}
-              {point.edge_contest_minus_leave_pp.toFixed(2)}pp · {point.verdict}
+              {point.edge_contest_minus_leave_pp.toFixed(2)}pp ·{" "}
+              {point.model_preference === "CONTEST"
+                ? "contest higher in model"
+                : "leave higher in model"}
             </p>
           </div>
         </div>
@@ -203,7 +246,7 @@ export function ArticleContestCharts({
             className="fill-[var(--secondary)]"
             style={{ fontSize: 11 }}
           >
-            contest better ↑
+            contest higher in model ↑
           </text>
           <text
             x={W - pad.r}
@@ -212,7 +255,7 @@ export function ArticleContestCharts({
             className="fill-[var(--danger)]"
             style={{ fontSize: 11 }}
           >
-            leave better ↓
+            leave higher in model ↓
           </text>
           <path
             d={pathD}
@@ -335,7 +378,7 @@ export function ArticleContestCharts({
           <div className="rounded-[var(--radius-sm)] border border-[var(--line)] bg-[var(--surface)] px-3 py-3 space-y-2 text-sm text-[var(--ink-muted)]">
             <p className="text-[var(--ink)]">
               The contest bar is the fight-win chance where contesting and leaving are equal.
-              Below it, leave looks better; above it, contest can be worth it.
+              It is a sensitivity boundary under these fixed inputs, not a universal action rule.
             </p>
             <p>
               This chart uses the two-wave leave package (~{PSTAR_FX.leaveFarmTwoWave.toFixed(0)}g
@@ -449,4 +492,16 @@ export function ArticleContestCharts({
       </div>
     </div>
   );
+}
+
+export function ArticleContestCharts(props: Props) {
+  if (!articleChartInputsValid(props)) {
+    return (
+      <p className="text-sm text-[var(--ink-muted)]">
+        Interactive figure unavailable: the current publication data did not pass validation.
+      </p>
+    );
+  }
+
+  return <ValidatedArticleContestCharts {...props} />;
 }

@@ -5,17 +5,21 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   groupMapsIntoSeries,
+  formatSeriesLabel,
+  formatSeriesScore,
+  isQuarantinedSeriesRow,
   listLeagues,
   loadMatchBundle,
   listTeams,
   queryMaps,
   queryMapsYears,
+  resolveMapWinnerSide,
+  sumKnownNumbers,
   type QueryRow,
   type SeriesCard,
 } from "@/lib/duck";
 import { expandTeamQuery, teamSlug } from "@/lib/pack";
 import { MatchScoreboard } from "./MatchScoreboard";
-import { useDraftWr } from "./DraftWrPanel";
 
 function H2HBoardPanel({
   map,
@@ -26,36 +30,23 @@ function H2HBoardPanel({
   players: QueryRow[];
   year: number;
 }) {
-  const { draft } = useDraftWr(map, players);
   return (
     <>
       <div className="micro-log mb-3">
-        {draft ? (
-          <span>
-            <strong>Draft</strong>{" "}
-            <span className="text-[var(--side-blue)]">
-              {(100 * (draft.contextualized?.p_blue ?? draft.p_blue_draft)).toFixed(0)}%
-            </span>
-            {" / "}
-            <span className="text-[var(--side-red)]">
-              {(100 * (1 - (draft.contextualized?.p_blue ?? draft.p_blue_draft))).toFixed(0)}%
-            </span>
-            {" · score "}
-            {(draft.contextualized?.score_blue ?? draft.draft_score_blue).toFixed(0)}–
-            {(draft.contextualized?.score_red ?? draft.draft_score_red).toFixed(0)}
-          </span>
-        ) : (
-          <span className="muted">Draft …</span>
-        )}
+        <span className="muted">
+          <strong>Draft forecast</strong> withheld · current model failed the chronological benchmark
+        </span>
       </div>
       <MatchScoreboard
         map={map}
         players={players}
-        draftPctBlue={draft?.contextualized?.p_blue ?? draft?.p_blue_draft ?? null}
+        draftPctBlue={null}
       />
       <p className="mt-3 text-xs text-[var(--ink-muted)]">
         <Link
-          href={`/browse/match/${encodeURIComponent(String(map.oe_gameid))}?year=${year}`}
+          href={`/browse/match/${encodeURIComponent(
+            String(map.oe_gameid ?? map.game_uid),
+          )}?year=${year}`}
           className="row-link"
         >
           Open match page (model checklist)
@@ -69,6 +60,22 @@ type Props = { baseUrl: string; years: number[] };
 type SortCol = "date" | "kills" | "len";
 type Dir = "asc" | "desc";
 
+function seriesTotal(series: SeriesCard, fields: string[]): number | null {
+  const perGame = series.games.map((game) =>
+    sumKnownNumbers(fields.map((field) => game[field])),
+  );
+  return perGame.every((value): value is number => value != null)
+    ? perGame.reduce((total, value) => total + value, 0)
+    : null;
+}
+
+function compareNullable(a: number | null, b: number | null, direction: Dir): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return (direction === "asc" ? 1 : -1) * (a - b);
+}
+
 export function HeadToHead({ baseUrl, years }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -80,6 +87,9 @@ export function HeadToHead({ baseUrl, years }: Props) {
   const [league, setLeague] = useState(searchParams.get("league") || "");
   const [teamA, setTeamA] = useState(searchParams.get("a") || "");
   const [teamB, setTeamB] = useState(searchParams.get("b") || "");
+  const [resolvedPair, setResolvedPair] = useState<{ a: string; b: string } | null>(
+    null,
+  );
   const [leagues, setLeagues] = useState<string[]>([]);
   const [teamDirectory, setTeamDirectory] = useState<string[]>([]);
   const [series, setSeries] = useState<SeriesCard[]>([]);
@@ -89,8 +99,8 @@ export function HeadToHead({ baseUrl, years }: Props) {
   );
   const [sortCol, setSortCol] = useState<SortCol>("date");
   const [sortDir, setSortDir] = useState<Dir>("desc");
-  const [draftLean, setDraftLean] = useState<string | null>(null);
   const [status, setStatus] = useState("Idle");
+  const [resultDisclosure, setResultDisclosure] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const autoRunKey = useRef<string | null>(null);
@@ -101,8 +111,8 @@ export function HeadToHead({ baseUrl, years }: Props) {
       try {
         const L = await listLeagues(baseUrl, year);
         if (!cancelled) setLeagues(L);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } catch {
+        if (!cancelled) setError("Could not load league filters from the public pack.");
       }
     })();
     return () => {
@@ -135,24 +145,46 @@ export function HeadToHead({ baseUrl, years }: Props) {
   }, [teamA, teamB, league, year, allTime, pathname, router]);
 
   const record = useMemo(() => {
-    let a = 0;
-    let b = 0;
-    const aN = teamA.trim().toLowerCase();
+    let mapA = 0;
+    let mapB = 0;
+    let unknownMaps = 0;
+    let seriesA = 0;
+    let seriesB = 0;
+    let unknownSeries = 0;
+    const aName = resolvedPair?.a ?? teamA.trim();
     for (const s of series) {
-      if (s.teamA.toLowerCase().includes(aN) || s.teamB.toLowerCase().includes(aN)) {
-        // map wins onto A/B labels
-        const aIsTeamA = s.teamA.toLowerCase().includes(aN);
-        if (aIsTeamA) {
-          a += s.winsA;
-          b += s.winsB;
-        } else {
-          a += s.winsB;
-          b += s.winsA;
+      for (const map of s.games) {
+        const winnerSide = resolveMapWinnerSide(map);
+        if (!winnerSide) {
+          unknownMaps += 1;
+          continue;
         }
+        const winner = String(
+          winnerSide === "blue" ? map.blue_teamname : map.red_teamname,
+        );
+        if (winner === aName) mapA += 1;
+        else mapB += 1;
       }
+      if (s.recordKind !== "canonical_series") continue;
+      if (s.winsA == null || s.winsB == null || s.winsA === s.winsB) {
+        unknownSeries += 1;
+        continue;
+      }
+      const winner = s.winsA > s.winsB ? s.teamA : s.teamB;
+      if (winner === aName) seriesA += 1;
+      else seriesB += 1;
     }
-    return { a, b };
-  }, [series, teamA]);
+    return {
+      mapA,
+      mapB,
+      knownMaps: mapA + mapB,
+      unknownMaps,
+      seriesA,
+      seriesB,
+      knownSeries: seriesA + seriesB,
+      unknownSeries,
+    };
+  }, [series, teamA, resolvedPair]);
 
   const sortedSeries = useMemo(() => {
     const list = [...series];
@@ -160,19 +192,17 @@ export function HeadToHead({ baseUrl, years }: Props) {
     list.sort((x, y) => {
       if (sortCol === "date") return sign * x.date.localeCompare(y.date);
       if (sortCol === "kills") {
-        const kx = x.games.reduce(
-          (s, g) => s + (Number(g.blue_teamkills) || 0) + (Number(g.red_teamkills) || 0),
-          0,
+        return compareNullable(
+          seriesTotal(x, ["blue_teamkills", "red_teamkills"]),
+          seriesTotal(y, ["blue_teamkills", "red_teamkills"]),
+          sortDir,
         );
-        const ky = y.games.reduce(
-          (s, g) => s + (Number(g.blue_teamkills) || 0) + (Number(g.red_teamkills) || 0),
-          0,
-        );
-        return sign * (kx - ky);
       }
-      const lx = x.games.reduce((s, g) => s + (Number(g.length_min) || 0), 0);
-      const ly = y.games.reduce((s, g) => s + (Number(g.length_min) || 0), 0);
-      return sign * (lx - ly);
+      return compareNullable(
+        seriesTotal(x, ["length_min"]),
+        seriesTotal(y, ["length_min"]),
+        sortDir,
+      );
     });
     return list;
   }, [series, sortCol, sortDir]);
@@ -195,9 +225,10 @@ export function HeadToHead({ baseUrl, years }: Props) {
       return;
     }
     setError(null);
+    setResultDisclosure(null);
     setBoard(null);
     setSelectedKey(null);
-    setDraftLean(null);
+    setResolvedPair(null);
     setLoading(true);
     setStatus("Searching series…");
     try {
@@ -205,6 +236,7 @@ export function HeadToHead({ baseUrl, years }: Props) {
       const bQ = teamB.trim();
       const variants = (q: string) => [...new Set(expandTeamQuery(q))].slice(0, 2);
       const pairs = variants(aQ).flatMap((a) => variants(bQ).map((b) => [a, b] as const));
+      const queryLimit = allTime ? 200 : 120;
       const datasets = await Promise.all(
         pairs.map(([a, b]) =>
           allTime
@@ -253,6 +285,7 @@ export function HeadToHead({ baseUrl, years }: Props) {
         setStatus("Idle");
         return;
       }
+      setResolvedPair({ a: exactA, b: exactB });
 
       const filtered = data.filter((r) => {
         const blue = String(r.blue_teamname);
@@ -261,54 +294,50 @@ export function HeadToHead({ baseUrl, years }: Props) {
           (blue === exactA && red === exactB) || (blue === exactB && red === exactA)
         );
       });
+      const unavailableOutcomes = filtered.filter(
+        (row) => resolveMapWinnerSide(row) == null,
+      ).length;
+      const quarantined = filtered.filter(isQuarantinedSeriesRow).length;
+      const displayable = filtered.filter((row) => !isQuarantinedSeriesRow(row));
+      const capped = datasets.some((dataset) => dataset.length >= queryLimit);
       const grouped = groupMapsIntoSeries(
-        filtered.map((r) => ({
+        displayable.map((r) => ({
           ...r,
           _year: r._year ?? year,
         })),
       );
+      const canonicalSeries = grouped.filter(
+        (item) => item.recordKind === "canonical_series",
+      ).length;
+      const unverifiedGroups = grouped.length - canonicalSeries;
       setSeries(grouped);
-      setStatus(`${grouped.length} series · ${filtered.length} games`);
-      if (grouped[0]) setSelectedKey(grouped[0].key);
-
-      // Draft lean: sample up to 8 games
-      let aEdge = 0;
-      let n = 0;
-      for (const g of filtered.slice(0, 8)) {
-        const blue = [1, 2, 3, 4, 5].map((i) => String(g[`blue_pick${i}`] ?? "")).filter(Boolean);
-        const red = [1, 2, 3, 4, 5].map((i) => String(g[`red_pick${i}`] ?? "")).filter(Boolean);
-        if (blue.length !== 5 || red.length !== 5) continue;
-        try {
-          const res = await fetch("/api/draft-wr", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ blue, red, league: String(g.league ?? "") }),
-          });
-          if (!res.ok) continue;
-          const ds = (await res.json()) as { draft_edge: number };
-          const aIsBlue = String(g.blue_teamname) === exactA;
-          aEdge += aIsBlue ? ds.draft_edge : -ds.draft_edge;
-          n += 1;
-        } catch {
-          /* ignore */
-        }
-      }
-      if (n) {
-        const mean = aEdge / n;
-        setDraftLean(
-          mean > 2
-            ? `${exactA} usually wins the draft axis in this H2H (${mean.toFixed(1)} mean edge).`
-            : mean < -2
-              ? `${exactB} usually wins the draft axis in this H2H (${Math.abs(mean).toFixed(1)} mean edge).`
-              : `Drafts in this H2H are roughly even (mean edge ${mean.toFixed(1)}).`,
-        );
-      }
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? `${e.message} — try again; DuckDB gets stage fright sometimes.`
-          : String(e),
+      setStatus(
+        [
+          canonicalSeries ? `${canonicalSeries} canonical series` : null,
+          unverifiedGroups
+            ? `${unverifiedGroups} unverified map group${
+                unverifiedGroups === 1 ? "" : "s"
+              }`
+            : null,
+          `${displayable.length} maps`,
+          capped ? `latest ${queryLimit} rows per alias query` : null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
       );
+      const omissions = [
+        unavailableOutcomes
+          ? `${unavailableOutcomes} map${unavailableOutcomes === 1 ? "" : "s"} retained with outcome unavailable`
+          : null,
+        quarantined
+          ? `${quarantined} map${quarantined === 1 ? "" : "s"} omitted: canonical series quarantined`
+          : null,
+        capped ? "Records and counts describe the returned sample, not a complete total" : null,
+      ].filter(Boolean);
+      setResultDisclosure(omissions.length ? omissions.join(" · ") : null);
+      if (grouped[0]) setSelectedKey(grouped[0].key);
+    } catch {
+      setError("Could not load this head-to-head sample from the public pack. Try again.");
       setStatus("Error");
     } finally {
       setLoading(false);
@@ -329,7 +358,7 @@ export function HeadToHead({ baseUrl, years }: Props) {
     if (!selectedKey) return;
     const s = series.find((x) => x.key === selectedKey);
     if (!s?.games[0]) return;
-    const id = String(s.games[0].oe_gameid);
+    const id = String(s.games[0].oe_gameid ?? s.games[0].game_uid);
     const y = s.year || year;
     let cancelled = false;
     (async () => {
@@ -338,15 +367,15 @@ export function HeadToHead({ baseUrl, years }: Props) {
         const bundle = await loadMatchBundle(baseUrl, allTime ? years : [y], id);
         if (cancelled) return;
         if (!bundle) {
-          setError("No player rows for this game — awkward.");
+          setError("This map was not found in the selected public pack years.");
           setBoard(null);
           return;
         }
         setBoard({ map: bundle.map, players: bundle.players, year: bundle.year });
         setStatus("Ready");
-      } catch (e) {
+      } catch {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : String(e));
+          setError("Could not load this match board from the public pack.");
           setStatus("Error");
         }
       }
@@ -445,23 +474,40 @@ export function HeadToHead({ baseUrl, years }: Props) {
       {loading && <div className="skeleton-block" />}
       {error && <p className="error-banner">{error}</p>}
       <p className="status-hint">{status}</p>
+      {resultDisclosure && <p className="status-hint">{resultDisclosure}</p>}
 
       {series.length > 0 && (
         <>
           <p className="h2h-record font-mono">
-            <Link href={`/elo/team/${teamSlug(teamA.trim())}`} className="row-link">
-              {teamA.trim() || "A"}
+            Map record ·{" "}
+            <Link
+              href={`/elo/team/${teamSlug(resolvedPair?.a ?? teamA.trim())}`}
+              className="row-link"
+            >
+              {(resolvedPair?.a ?? teamA.trim()) || "A"}
             </Link>{" "}
-            {record.a}–{record.b}{" "}
-            <Link href={`/elo/team/${teamSlug(teamB.trim())}`} className="row-link">
-              {teamB.trim() || "B"}
+            {record.mapA}–{record.mapB}{" "}
+            <Link
+              href={`/elo/team/${teamSlug(resolvedPair?.b ?? teamB.trim())}`}
+              className="row-link"
+            >
+              {(resolvedPair?.b ?? teamB.trim()) || "B"}
             </Link>
             <span className="muted">
-              {" "}
-              · {series.length} series · {series.reduce((n, s) => n + s.games.length, 0)} games
+              {" "}· n={record.knownMaps}
+              {record.unknownMaps ? ` · ${record.unknownMaps} unknown` : ""}
             </span>
           </p>
-          {draftLean && <p className="text-sm text-[var(--ink-muted)] max-w-[68ch]">{draftLean}</p>}
+          <p className="h2h-record font-mono">
+            Canonical series record · {record.seriesA}–{record.seriesB}
+            <span className="muted">
+              {" "}· n={record.knownSeries}
+              {record.unknownSeries
+                ? ` · ${record.unknownSeries} outcome${record.unknownSeries === 1 ? "" : "s"} unknown`
+                : ""}
+              {" "}· unverified map groups excluded
+            </span>
+          </p>
         </>
       )}
 
@@ -475,7 +521,7 @@ export function HeadToHead({ baseUrl, years }: Props) {
                     Date{sortCol === "date" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
                   </button>
                 </th>
-                <th>Series</th>
+                <th>Record</th>
                 <th className="num">
                   <button type="button" className="sort-th" onClick={() => onSort("kills")}>
                     Kills{sortCol === "kills" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
@@ -491,11 +537,8 @@ export function HeadToHead({ baseUrl, years }: Props) {
             <tbody>
               {sortedSeries.map((s) => {
                 const active = s.key === selectedKey;
-                const kills = s.games.reduce(
-                  (n, g) => n + (Number(g.blue_teamkills) || 0) + (Number(g.red_teamkills) || 0),
-                  0,
-                );
-                const len = s.games.reduce((n, g) => n + (Number(g.length_min) || 0), 0);
+                const kills = seriesTotal(s, ["blue_teamkills", "red_teamkills"]);
+                const len = seriesTotal(s, ["length_min"]);
                 return (
                   <tr
                     key={s.key}
@@ -513,12 +556,16 @@ export function HeadToHead({ baseUrl, years }: Props) {
                   >
                     <td className="font-mono text-xs">{s.date}</td>
                     <td>
-                      {s.bestOf ? `Bo${s.bestOf}` : "Incomplete series"} · {s.teamA} {s.winsA}–
-                      {s.winsB} {s.teamB}
+                      {formatSeriesLabel(s)} · {s.teamA} {formatSeriesScore(s)}{" "}
+                      {s.teamB}
                       <div className="muted text-xs">{s.league}</div>
                     </td>
-                    <td className="num font-mono">{kills}</td>
-                    <td className="num font-mono text-xs">{len.toFixed(0)}m</td>
+                    <td className="num font-mono">
+                      {kills == null ? "—" : Math.round(kills)}
+                    </td>
+                    <td className="num font-mono text-xs">
+                      {len == null ? "—" : `${len.toFixed(0)}m`}
+                    </td>
                   </tr>
                 );
               })}
@@ -535,7 +582,7 @@ export function HeadToHead({ baseUrl, years }: Props) {
             <H2HBoardPanel map={board.map} players={board.players} year={board.year} />
           ) : (
             <p className="empty-hint">
-              Click a series to open the board. The checklist lives on the match page — H2H stays
+              Click a record to open the board. The checklist lives on the match page — H2H stays
               about the rivalry.
             </p>
           )}

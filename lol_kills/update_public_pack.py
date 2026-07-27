@@ -1,9 +1,10 @@
-"""Refresh research data, rebuild ratings, export, and publish a public pack.
+"""Refresh research data, rebuild governed ratings, export, and publish a pack.
 
 This is the automation entrypoint for the public site. It intentionally stops
-short of the broader internal model-training command: current ratings and
-match rows only need a warehouse refresh, feature-store rebuild, and the
-time-safe calibration/draft-score refresh that feeds the public pack.
+short of model promotion. Data refreshes may rebuild rating snapshots whose
+contracts are enforced by the exporter, but they never refit or silently
+replace draft/calibration artifacts. Those require their separate frozen
+tournaments and explicit promotion decisions.
 
 Examples:
 
@@ -59,6 +60,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--local-only", action="store_true")
     args = parser.parse_args(argv)
 
+    from lol_kills.export.upload_pack import validate_pack_id
+
+    requested_pack_id = (
+        validate_pack_id(args.pack_id) if args.pack_id is not None else None
+    )
+
     refresh_args = ["--oe-years", *[x.strip() for x in args.years.split(",") if x.strip()]]
     if args.download_oe:
         refresh_args.append("--download-oe")
@@ -81,34 +88,45 @@ def main(argv: Sequence[str] | None = None) -> int:
         refresh_args.append("--grid-required")
     _run_module("lol_kills.refresh_warehouse", refresh_args)
 
-    from lol_kills.draft_score import fit_draft_score_scaler
-    from lol_kills.composition_model import fit_from_paths
+    import pandas as pd
+
+    from lol_kills.etl.paths import PARQUET_DIR
     from lol_kills.export.public_pack import export_public_pack
-    from lol_kills.features.build import build_feature_store
-    from lol_kills.ratings.calibrate_elo_wr import (
-        apply_calibration_to_features,
-        fit_elo_wr_calibration,
+    from lol_kills.ratings.player_elo import (
+        build_maps_frame_from_players,
+        build_player_ratings,
     )
 
-    print("[update] rebuilding feature store and player-aggregated ratings")
-    build_feature_store()
-    print("[update] recalibrating Elo win probability")
-    fit_elo_wr_calibration()
-    apply_calibration_to_features()
-    print("[update] refreshing draft-score scaler")
-    fit_draft_score_scaler()
-    print("[update] fitting full-composition draft model")
-    fit_from_paths()
+    print("[update] rebuilding the explicitly labelled Player Dual Elo benchmark")
+    player_rows = pd.read_parquet(PARQUET_DIR / "oe_player_games.parquet")
+    build_player_ratings(
+        build_maps_frame_from_players(player_rows),
+        player_rows,
+    )
+    print(
+        "[update] draft and calibration artifacts remain frozen; "
+        "this refresh cannot promote a model"
+    )
     print("[update] exporting public pack")
     manifest = export_public_pack(
         years=tuple(int(x.strip()) for x in args.years.split(",") if x.strip()),
         out_root=args.out,
-        pack_id=args.pack_id,
+        pack_id=requested_pack_id,
     )
-    pack_id = str(manifest["pack_id"])
+    pack_id = validate_pack_id(manifest["pack_id"])
     print(f"[update] exported {pack_id}")
 
     if args.publish:
+        from lol_kills.audit_public_pack import audit_pack, require_release_gate
+
+        print("[update] running full public-pack release audit")
+        report = audit_pack(args.out / pack_id)
+        require_release_gate(report)
+        counts = report["counts"]
+        print(
+            "[update] release audit passed "
+            f"(launch blocker={counts['launch blocker']}, major={counts['major']})"
+        )
         upload_args = ["--pack-root", str(args.out), "--pack-id", pack_id]
         if args.local_only:
             upload_args.append("--local-only")

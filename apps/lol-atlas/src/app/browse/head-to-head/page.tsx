@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { HeadToHead } from "@/components/HeadToHead";
-import { packUpdatedLabel } from "@/lib/pack";
+import { packDataThroughLabel, packUpdatedLabel } from "@/lib/pack";
 import { readPackManifest } from "@/lib/serverPack";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,10 @@ export default async function HeadToHeadPage() {
         </p>
         <div className="micro-log mt-4">
           <span>
-            <strong>Last updated</strong> {packUpdatedLabel(man)}
+            <strong>Pack published</strong> {packUpdatedLabel(man)}
+          </span>
+          <span>
+            <strong>Data through</strong> {packDataThroughLabel(man)}
           </span>
         </div>
       </header>

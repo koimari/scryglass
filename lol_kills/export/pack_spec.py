@@ -6,7 +6,7 @@ are out of the default pack.
 
 from __future__ import annotations
 
-SCHEMA_VERSION = "1.4.0"
+SCHEMA_VERSION = "1.6.0"
 
 # Inclusive calendar years on OE `year` / `oe_year`.
 DEFAULT_YEARS: tuple[int, ...] = (2025, 2026)
@@ -20,11 +20,35 @@ DEFAULT_LEAGUES_NOTE = (
     "International events remain separate."
 )
 
-ATTRIBUTION = (
-    "Map and player rows are derived from Oracle's Elixir public match data. "
-    "Obtain raw CSVs from Oracle's Elixir; this pack is a filtered parquet subset "
-    "for reproducing published research. Hierarchical Bradley–Terry, Dual Elo benchmark, "
-    "and calibration are our own."
+ATTRIBUTION_OE_ONLY = (
+    "Rows derive from Oracle's Elixir public match data. Obtain the raw CSVs "
+    "from Oracle's Elixir; Scryglass canonicalizes identities and competition "
+    "labels. Ratings, validation, and calibration are Scryglass calculations."
+)
+
+ATTRIBUTION_OE_GRID_GAP = (
+    "Rows combine Oracle's Elixir as the canonical baseline with verified "
+    "completed GRID games not yet present in that baseline. Overlap is "
+    "deduplicated by canonical game identity with Oracle's Elixir precedence, "
+    "and row-level source provenance is retained. Ratings, validation, and "
+    "calibration are Scryglass calculations."
+)
+
+ATTRIBUTION_OE_GRID_DETAIL = (
+    "Canonical map inclusion and results derive from Oracle's Elixir. GRID "
+    "supplies verified event detail for explicitly labelled maps; it does not "
+    "create an additional result row. Canonical origin and detail enrichment "
+    "are published as separate provenance fields. Ratings, validation, and "
+    "calibration are Scryglass calculations."
+)
+
+ATTRIBUTION_OE_GRID_GAP_AND_DETAIL = (
+    "Oracle's Elixir is the canonical baseline. Verified completed GRID maps "
+    "may fill a current canonical-result gap, and GRID may separately enrich "
+    "event detail for an Oracle's Elixir-backed map. These two uses are "
+    "published in separate provenance fields and overlap is deduplicated by "
+    "canonical game identity. Ratings, validation, and calibration are "
+    "Scryglass calculations."
 )
 
 # --- OE team / player game columns (allowlist) ---
@@ -53,6 +77,7 @@ TEAM_PLAYER_SHARED_COLS: tuple[str, ...] = (
     "playername",
     "playerid",
     "teamname",
+    "teamname_source",
     "team_key",
     "teamid",
     "firstPick",
@@ -166,6 +191,31 @@ TEAM_PLAYER_SHARED_COLS: tuple[str, ...] = (
     "opp_assistsat25",
     "opp_deathsat25",
     "source",
+    "grid_series_id",
+    "grid_game_id",
+    "grid_game_index",
+    "grid_completion_source",
+    "source_series_id",
+    "leaguepedia_match_id",
+    "leaguepedia_game_id",
+    "leaguepedia_game_index",
+    "leaguepedia_best_of",
+    "leaguepedia_overview_page",
+    "leaguepedia_scheduled_at",
+    "leaguepedia_team1",
+    "leaguepedia_team2",
+    "series_schedule_team_pair_status",
+    "series_schedule_date_status",
+    "series_format",
+    "series_format_source",
+    "series_format_stage_id",
+    "series_format_registry_snapshot_id",
+    "series_format_registry_verified",
+    "series_format_registry_conflict",
+    "best_of",
+    "series_completion_status",
+    "series_completion_source",
+    "completion_source",
     "oe_year",
 )
 
@@ -214,9 +264,13 @@ MAPS_IDENTITY: tuple[str, ...] = (
     "game",
     "patch",
     "blue_team",
+    "blue_team_source",
     "red_team",
+    "red_team_source",
     "blue_teamname",
+    "blue_teamname_source",
     "red_teamname",
+    "red_teamname_source",
     "blue_team_key",
     "red_team_key",
     "total_kills",
@@ -229,10 +283,39 @@ MAPS_IDENTITY: tuple[str, ...] = (
     "ckpm",
     "source_oe",
     "source_grid",
+    "canonical_map_source",
+    "map_detail_source",
     "grid_series_id",
     "grid_game_id",
     "grid_game_index",
     "grid_completion_source",
+    "source_series_id",
+    "leaguepedia_match_id",
+    "leaguepedia_game_id",
+    "leaguepedia_game_index",
+    "leaguepedia_best_of",
+    "leaguepedia_overview_page",
+    "leaguepedia_scheduled_at",
+    "leaguepedia_team1",
+    "leaguepedia_team2",
+    "series_schedule_team_pair_status",
+    "series_schedule_date_status",
+    "series_format",
+    "series_format_source",
+    "series_format_stage_id",
+    "series_format_registry_snapshot_id",
+    "series_format_registry_verified",
+    "series_format_registry_conflict",
+    "canonical_series_id",
+    "scheduled_best_of",
+    "canonical_game_index",
+    "raw_source_game_index",
+    "raw_source_game_uid",
+    "canonical_series_status",
+    "canonical_series_completion_source",
+    "series_rating_eligible",
+    "canonical_series_winner_team_key",
+    "series_quarantine_reasons",
     "oe_year",
     "tournament",
     "lp_matched",
@@ -292,15 +375,21 @@ RATINGS_SNAPSHOT_COLS = (
     "team",
     "team_key",
     "mu_total",
-    "mu_regional",
-    "mu_meta",
     "sigma",
-    "rating_p10",
+    "rating_p05",
     "n_series",
     "n_maps",
     "international_series",
     "home_league",
+    "last_series_at",
+    "as_of",
+    "sigma_kind",
+    "rating_p05_interpretation",
+    "comparison_component_id",
+    "comparison_component_size",
+    "cross_component_rankable",
     "model",
+    "model_version",
 )
 PLAYER_RATINGS_SNAPSHOT_COLS = (
     "player",
@@ -310,6 +399,33 @@ PLAYER_RATINGS_SNAPSHOT_COLS = (
     "sigma",
     "n_maps",
     "last_team",
+    "outcome_exposure_group_id",
+    "outcome_exposure_group_size",
+    "outcome_separately_identified",
+    "outcome_identifiability_label",
+    "outcome_identical_players",
+    "n_outcome_maps",
+    "n_distinct_lineups",
+    "n_distinct_teams",
+)
+PLAYER_PERFORMANCE_SNAPSHOT_COLS = (
+    "model_id",
+    "model_hash",
+    "player_id",
+    "player_name",
+    "role",
+    "last_team_key",
+    "last_observed_league",
+    "last_observed_date",
+    "fit_through",
+    "effective_sample_maps",
+    "performance_mean",
+    "performance_sd",
+    "lower_bound",
+    "rank",
+    "uncertainty_method",
+    "estimand",
+    "publication_status",
 )
 RATINGS_HISTORY_COLS = (
     "game_uid",
@@ -348,49 +464,59 @@ PINNED_MODEL_FILES: tuple[str, ...] = (
     "elo_year_holdup.json",
     "draft_wr_calibration.json",
     "draft_composition.json",
-    "blade_chest_role_matchups.json",
+    "model_validation_2026-07-27.json",
 )
 
-# Tierlist CSVs if present (small)
-TIERLIST_CSV_GLOB = "tierlists_csv/*.csv"
+# Champion tierlists remain quarantined until a replacement clears the governed
+# chronological/calibration contract. This path gate is intentionally broader
+# than the current filenames so a renamed legacy CSV cannot re-enter a pack.
+QUARANTINED_PUBLIC_PATH_TOKENS: tuple[str, ...] = (
+    "tierlist",
+    "champ_oe_lenses",
+    "blade_chest",
+    "draft_tierlist",
+)
 
-# Void grubs study bundle → studies/grubs/ (for video / article companions)
+
+def public_path_quarantine_reason(path: str) -> str | None:
+    """Return why a generated public-pack path is quarantined, if applicable."""
+
+    normalized = str(path).replace("\\", "/").strip().casefold()
+    if any(token in normalized for token in QUARANTINED_PUBLIC_PATH_TOKENS):
+        return "champion tierlist artifacts are quarantined"
+    if normalized.startswith("models/") and normalized.endswith(".csv"):
+        return "model CSV downloads are not an approved public-pack surface"
+    return None
+
+
+def require_publication_paths_allowed(paths: tuple[str, ...] | list[str]) -> None:
+    """Fail closed if any proposed pack path belongs to a quarantined surface."""
+
+    blocked = [
+        (path, reason)
+        for path in paths
+        if (reason := public_path_quarantine_reason(path)) is not None
+    ]
+    if blocked:
+        details = ", ".join(f"{path} ({reason})" for path, reason in blocked)
+        raise ValueError(f"public pack path quarantine rejected: {details}")
+
+# One fail-closed Void Grubs article artifact. Broader internal studies, OE
+# leave-mix outputs, figures, and superseded PDFs are not public-pack inputs.
 GRUBS_MODEL_FILES: tuple[str, ...] = (
     "grubs_article_contest_ev.json",
-    "grubs_decision_numbers.json",
-    "grubs_decision_report.md",
-    "grubs_contest_decision_paper.md",
-    "grubs_intrinsic_value.json",
-    "grubs_intrinsic_value_summary.md",
-    "grubs_intrinsic_value_paper.md",
-    "grubs_fight_probability.json",
-    "grubs_action_graph.json",
-    "grubs_isolation_study.json",
-    "grubs_isolation_brief.md",
-    "grubs_contest_study.json",
-    "grubs_contest_brief.md",
-    "grubs_ranked_contest_proof.json",
-    "grubs_ranked_contest_proof.md",
 )
 
-# PDFs / figures under output/pdf (relative to repo root)
-GRUBS_PDF_FILES: tuple[str, ...] = (
-    "void_grubs_scrap_value_and_contest_rationality.pdf",
-    "void_grubs_conceito_ptbr.pdf",
-    "grubs_intrinsic_value.pdf",
-    "void_grubs_scrap_value_and_contest_rationality_fig1_resolved_payoffs.png",
-    "void_grubs_scrap_value_and_contest_rationality_fig2_threshold_ladder.png",
-    "void_grubs_scrap_value_and_contest_rationality_fig3_probability_hurdle.png",
-    "void_grubs_scrap_value_and_contest_rationality_fig4_outcome_matrix.png",
-    "grubs_action_graph.png",
-)
+# The existing paper cannot be regenerated from the canonical current-mechanics
+# article writer and is withheld rather than shipped with unsupported claims.
+GRUBS_PDF_FILES: tuple[str, ...] = ()
 
 GRUBS_STUDY_NOTE = (
-    "Article headline: two-wave leave-farm opportunity-cost p* ≈ 58.9% at parity "
-    "(50/50 fight still prefers leave by ~2pp). "
-    "OE trailing-team leave-mix breakeven (~24%) is a different estimand; do not collapse them. "
-    "win−leave_mix ≈ +5.69pp is OE contest research, not live map-WR. "
-    "Gold@10→WR is associational, not causal."
+    "Patch 26.11+ article sensitivity: the 124.13g current-mechanics objective "
+    "equivalent gives a two-wave opportunity-cost contest bar of about 58.24% at "
+    "parity. The Touch term is an upper-bound plate-progress equivalent, not "
+    "guaranteed gold. Gold-at-10 to map-win is associational, and the contest "
+    "bar is not an identified action policy."
 )
 
 PACK_README = """# Public reproduction pack
@@ -404,16 +530,20 @@ Versioned parquet + calibration for reproducing published LoL research findings.
 - `team_games/` — OE team-row maps (one file per year, zstd parquet)
 - `player_games/` — OE player rows (one file per year, zstd parquet)
 - `maps/` — wide map table (trimmed columns, per year)
-- `features/` — Dual Elo team/player snapshots + map-level history (year-filtered)
+- `features/` — team and Player Dual Elo outputs plus the separately named,
+  role-specific 15-minute resource-performance snapshot, metadata, and compact
+  chronological validation artifact
 - `models/` — pinned calibration / study JSON
-- `studies/grubs/` — void-grubs decision numbers, briefs, PDF, key figures
+- `studies/grubs/` — one versioned, current-mechanics article JSON
 - `meta/teams.json` — team aliases for display
-- `manifest.json` — file list, row counts, sha256, schema_version
+- `meta/source_summary.json` — sanitized source counts and dedupe policy
+- `manifest.json` — governed public file list, row counts, sha256, schema_version
 
 ## Not included
 - Riot Match-V5 / Live Stats timelines (~GB)
 - Raw Oracle's Elixir CSVs (download from OE; filters documented in manifest)
-- Betting fair-odds / Slip Composer artifacts
+- Champion tierlists and model CSVs pending a validated replacement
+- Private odds / prediction tooling
 
 ## Attribution
 {attribution}
@@ -422,6 +552,6 @@ Versioned parquet + calibration for reproducing published LoL research findings.
 1. Download this pack (or fetch partitions via the atlas app).
 2. Load parquet with DuckDB / pandas / polars.
 3. Match filters in the published post to `manifest.json` → `filters`.
-4. For void grubs: start at `studies/grubs/grubs_decision_numbers.json` + the PDF;
-   do not confuse leave-mix breakeven (~24%) with article p* ladders.
+4. For void grubs: use only `studies/grubs/grubs_article_contest_ev.json`.
+   Its strict schema records current mechanics, the exact estimand, and limits.
 """

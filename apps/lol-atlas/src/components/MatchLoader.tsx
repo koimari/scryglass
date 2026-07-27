@@ -8,7 +8,6 @@ import {
   type MatchModelPrior,
   type QueryRow,
 } from "@/lib/duck";
-import { useDraftWr } from "./DraftWrPanel";
 import { MatchScoreboard } from "./MatchScoreboard";
 import { ModelChecklist } from "./ModelChecklist";
 
@@ -18,6 +17,18 @@ type Props = {
   gameId: string;
   yearHint?: number;
 };
+
+export function ratingHistorySource(
+  teamEloDiff: number | null | undefined,
+  playerEloDiff: number | null | undefined,
+): string | null {
+  if (teamEloDiff != null && playerEloDiff != null) {
+    return "pre-match team + player rating history";
+  }
+  if (teamEloDiff != null) return "pre-match team rating history";
+  if (playerEloDiff != null) return "pre-match player rating history";
+  return null;
+}
 
 export function MatchLoader({ baseUrl, years, gameId, yearHint }: Props) {
   const [map, setMap] = useState<QueryRow | null>(null);
@@ -31,12 +42,10 @@ export function MatchLoader({ baseUrl, years, gameId, yearHint }: Props) {
     () => ({
       teamEloDiff: prior?.muDiff ?? null,
       playerEloDiff: prior?.playerMuDiff ?? null,
-      source: prior?.muDiff != null ? "pre-match team + player rating history" : null,
+      source: ratingHistorySource(prior?.muDiff, prior?.playerMuDiff),
     }),
     [prior],
   );
-  const { draft } = useDraftWr(map, players, strength);
-
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -68,9 +77,9 @@ export function MatchLoader({ baseUrl, years, gameId, yearHint }: Props) {
           setPrior(p);
           setPriorLoading(false);
         }
-      } catch (e) {
+      } catch {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : String(e));
+          setError("Could not load this match from the public pack. Try again.");
           setStatus("Error");
           setPriorLoading(false);
         }
@@ -100,7 +109,7 @@ export function MatchLoader({ baseUrl, years, gameId, yearHint }: Props) {
           <MatchScoreboard
             map={map}
             players={players}
-            draftPctBlue={draft?.contextualized?.p_blue ?? draft?.p_blue_draft ?? null}
+            draftPctBlue={null}
           />
           <ModelChecklist
             map={map}

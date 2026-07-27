@@ -1,55 +1,105 @@
 import { NextResponse } from "next/server";
-import { draftScore } from "@/lib/draftScore";
+import { compositionRuntimeMetadata } from "@/lib/draftComposition";
+import {
+  draftProbabilityGateEvidence,
+  draftRuntimeBindingEvidence,
+  type DraftRuntimeBindingEvidence,
+} from "@/lib/modelValidation";
+import {
+  exposePatchContracts,
+  patchContractFromSource,
+} from "@/lib/patch";
+import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 export const runtime = "nodejs";
 
-type Body = {
-  blue?: string[];
-  red?: string[];
-  league?: string | null;
-  patch?: string | null;
-  elo_diff?: number | null;
-  team_elo_diff?: number | null;
-  player_elo_diff?: number | null;
-  blue_team?: string | null;
-  red_team?: string | null;
-  blue_players?: string[] | null;
-  red_players?: string[] | null;
-  strength_source?: string | null;
-  blue_roles?: string[] | null;
-  red_roles?: string[] | null;
-};
+export function draftWrWithheldPayload(
+  evidence: unknown = null,
+  binding: DraftRuntimeBindingEvidence | null = null,
+) {
+  const verifiedEvidence = draftProbabilityGateEvidence(evidence);
+  const metadata = compositionRuntimeMetadata();
+  const currentPatch = patchContractFromSource(
+    metadata?.latest_observed_patch,
+  );
+  return {
+    error:
+      "Draft win probability is withheld because the composition probability pipeline failed its chronological promotion gate.",
+    status: "withheld_failed_chronological_gate",
+    gate_id: "draft-probability-chronological-2026-07-27",
+    estimand:
+      "pre-map blue win probability from ten uniquely role-assigned champions",
+    evidence: verifiedEvidence && binding
+      ? {
+          artifact_schema_version: verifiedEvidence.schemaVersion,
+          artifact_created_utc: verifiedEvidence.artifactCreatedUtc,
+          artifact_sha256: verifiedEvidence.artifactSha256,
+          model_code_sha256: verifiedEvidence.modelCodeSha256,
+          training_population_sha256:
+            verifiedEvidence.trainingPopulationSha256,
+          population_maps: verifiedEvidence.populationMaps,
+          final_test_maps: verifiedEvidence.finalTestMaps,
+          final_test_start: verifiedEvidence.finalTestStart,
+          final_test_end: verifiedEvidence.finalTestEnd,
+          composition_log_loss: verifiedEvidence.compositionLogLoss,
+          overall_base_rate_log_loss: verifiedEvidence.overallBaseRateLogLoss,
+          composition_brier: verifiedEvidence.compositionBrier,
+          overall_base_rate_brier: verifiedEvidence.overallBaseRateBrier,
+          decision: "withheld",
+          active_pack_id: binding.packId,
+          runtime_binding_status: binding.status,
+        }
+      : null,
+    evidence_status: verifiedEvidence && binding
+      ? "verified_immutable_pack_artifact"
+      : "unavailable_or_invalid",
+    patch_selection: {
+      request_field: "public_patch",
+      contract: "public 25.x -> source 15.x; public 26.x -> source 16.x",
+      current_patch: currentPatch,
+    },
+    candidate_model_metadata: metadata
+      ? exposePatchContracts(metadata)
+      : null,
+    served_probability_model: null,
+    note:
+      "The interactive Sandbox exposes an experimental policy value, not a calibrated win probability.",
+  } as const;
+}
 
-export async function POST(req: Request) {
+async function currentGateEvidence(): Promise<{
+  artifact: unknown;
+  binding: DraftRuntimeBindingEvidence;
+} | null> {
   try {
-    const body = (await req.json()) as Body;
-    if (!body.blue?.length || !body.red?.length) {
-      return NextResponse.json({ error: "blue and red picks required" }, { status: 400 });
-    }
-    if (body.blue.length !== 5 || body.red.length !== 5) {
-      return NextResponse.json({ error: "need 5 picks per side" }, { status: 400 });
-    }
-    const result = draftScore({
-      blue: body.blue,
-      red: body.red,
-      league: body.league,
-      patch: body.patch,
-      elo_diff: body.elo_diff,
-      team_elo_diff: body.team_elo_diff,
-      player_elo_diff: body.player_elo_diff,
-      blue_team: body.blue_team,
-      red_team: body.red_team,
-      blue_players: body.blue_players,
-      red_players: body.red_players,
-      strength_source: body.strength_source,
-      blue_roles: body.blue_roles,
-      red_roles: body.red_roles,
-    });
-    return NextResponse.json(result);
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
+    const manifest = await readPackManifest();
+    const artifact = await readPackJson(
+      manifest,
+      "models/model_validation_2026-07-27.json",
     );
+    const binding = draftRuntimeBindingEvidence(
+      manifest,
+      artifact,
+      compositionRuntimeMetadata(),
+    );
+    return binding ? { artifact, binding } : null;
+  } catch {
+    return null;
   }
+}
+
+export async function GET() {
+  const current = await currentGateEvidence();
+  return NextResponse.json(
+    draftWrWithheldPayload(current?.artifact, current?.binding ?? null),
+    { status: 503 },
+  );
+}
+
+export async function POST() {
+  const current = await currentGateEvidence();
+  return NextResponse.json(
+    draftWrWithheldPayload(current?.artifact, current?.binding ?? null),
+    { status: 503 },
+  );
 }

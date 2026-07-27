@@ -12,7 +12,8 @@ The first production slice uses a hierarchical ridge-logistic model:
 * role-aware champion main effects, with league and patch deviations;
 * unordered within-team synergy pairs;
 * all observed blue-vs-red champion opposition pairs;
-* an optional antisymmetric low-rank residual for sparse opposition cells.
+* no low-rank residual in bounded/public scores until its uncertainty is
+  estimated and propagated.
 
 Feature-specific penalties implement partial pooling: context and interaction
 terms with little support are shrunk more strongly toward zero.  Prediction
@@ -24,8 +25,13 @@ champions.
 from __future__ import annotations
 
 import argparse
+import base64
+import gzip
+import hashlib
+import importlib.metadata
 import json
 import math
+import platform
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -45,11 +51,57 @@ from lol_kills.etl.paths import MODELS_DIR, PARQUET_DIR
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = MODELS_DIR / "draft_composition.json"
 RUNTIME_PATH = ROOT / "apps" / "lol-atlas" / "data" / "draft" / "composition_runtime.json"
+PACKED_RUNTIME_PATH = (
+    ROOT
+    / "apps"
+    / "lol-atlas"
+    / "data"
+    / "draft"
+    / "composition_runtime.json.gz.b64"
+)
 
 ROLES = ("top", "jng", "mid", "bot", "sup")
 DEFAULT_PRIOR_N = 25.0
-DEFAULT_LOW_RANK = 4
+DEFAULT_LOW_RANK = 0
+RUNTIME_VERSION = 2
+UNCERTAINTY_SCHEMA_VERSION = "1.0.0"
+STRENGTH_CALIBRATION_SCHEMA_VERSION = "1.0.0"
 PATCH_RE = re.compile(r"^(\d+)(?:\.(\d+))?")
+MODEL_CODE_PATHS = (
+    Path(__file__).resolve(),
+    (ROOT / "lol_kills" / "etl" / "aliases.py").resolve(),
+    (ROOT / "requirements-model-lock.txt").resolve(),
+)
+
+
+class CompositionArtifactError(RuntimeError):
+    """Raised when a bounded score cannot honor its artifact contract."""
+
+
+def model_code_sha256(paths: Sequence[Path] = MODEL_CODE_PATHS) -> str:
+    """Hash the exact source bundle that defines fitted draft coefficients."""
+    digest = hashlib.sha256()
+    for source_path in sorted((Path(path).resolve() for path in paths), key=str):
+        try:
+            relative = source_path.relative_to(ROOT.resolve()).as_posix()
+        except ValueError:
+            relative = source_path.as_posix()
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(source_path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def numerical_environment() -> dict[str, Any]:
+    """Record the numerical runtime needed to reproduce the fit exactly."""
+    packages = {}
+    for distribution in ("numpy", "pandas", "scipy", "scikit-learn"):
+        packages[distribution] = importlib.metadata.version(distribution)
+    return {
+        "python": platform.python_version(),
+        "packages": packages,
+    }
 
 
 @dataclass(frozen=True)
@@ -78,7 +130,11 @@ def _norm_role(value: Any) -> str:
     return s[:3]
 
 
-def normalize_patch(value: Any) -> str:
+def normalize_patch(
+    value: Any,
+    *,
+    allow_source_numeric_minor: bool = False,
+) -> str:
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return "unknown"
     s = str(value).strip()
@@ -88,9 +144,16 @@ def normalize_patch(value: Any) -> str:
     if not match:
         return s
     major, minor = match.groups()
-    # OE sometimes stores patch 16.10 as numeric 16.1. A one-digit suffix is
-    # therefore right-padded (16.1 -> 16.10), while 16.01 remains 16.01.
-    minor_text = (minor or "0").ljust(2, "0")
+    minor_text = minor or "0"
+    if len(minor_text) == 1:
+        if not allow_source_numeric_minor:
+            raise CompositionArtifactError(
+                f"ambiguous patch {s!r}; use an explicit two-digit minor"
+            )
+        # Oracle's Elixir historically serialises patch numbers through a
+        # numeric field, so 16.10 reaches this warehouse boundary as "16.1".
+        # Public/query strings never receive this source-only coercion.
+        minor_text = minor_text.ljust(2, "0")
     return f"{int(major)}.{minor_text}"
 
 
@@ -108,6 +171,11 @@ def _pair(a: str, b: str) -> tuple[str, str]:
 def _opposition_key(a: str, b: str) -> tuple[str, int]:
     """Canonical pair key plus orientation toward the first argument."""
     p = _pair(a, b)
+    if a == b:
+        # A mirrored champion matchup carries no directional opposition
+        # information.  Keeping the key is useful for deterministic feature
+        # lookup, but its signed feature value must be exactly zero.
+        return f"opposition|{p[0]}|{p[1]}", 0
     return f"opposition|{p[0]}|{p[1]}", 1 if (a, b) == p else -1
 
 
@@ -119,35 +187,341 @@ def _read_table(path: Path) -> pd.DataFrame:
     return pd.read_parquet(path)
 
 
-def _strength_calibration() -> dict[str, Any]:
-    """Return the existing time-safe team/player strength calibration."""
-    path = MODELS_DIR / "elo_wr_calibration.json"
+def _disabled_low_rank() -> dict[str, Any]:
+    return {
+        "status": "disabled",
+        "rank": 0,
+        "champions": [],
+        "left": [],
+        "right": [],
+        "reason": (
+            "bounded/public scoring disables low-rank residuals until their "
+            "fit and prediction uncertainty are estimated"
+        ),
+    }
+
+
+def _finite_number(value: Any, label: str, *, non_negative: bool = False) -> float:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        team = data.get("team") or {}
-        player = data.get("player") or {}
-        blend = data.get("strength_blend") or {}
-        return {
-            "team_intercept": float(team.get("intercept", 0.14729)),
-            "team_coef": float(team.get("coef", 2.37625)),
-            "player_intercept": float(player.get("intercept", 0.13166)),
-            "player_coef": float(player.get("coef", 3.64257)),
-            "blend_intercept": float(blend.get("intercept", -2.47489)),
-            "blend_coef_team": float(blend.get("coef_team", 2.84763)),
-            "blend_coef_player": float(blend.get("coef_player", 2.07485)),
-            "source": "time-safe team/player Dual Elo calibration",
-        }
-    except (OSError, ValueError, TypeError):
-        return {
-            "team_intercept": 0.14729,
-            "team_coef": 2.37625,
-            "player_intercept": 0.13166,
-            "player_coef": 3.64257,
-            "blend_intercept": -2.47489,
-            "blend_coef_team": 2.84763,
-            "blend_coef_player": 2.07485,
-            "source": "documented calibration defaults",
-        }
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise CompositionArtifactError(f"{label} must be numeric") from exc
+    if not math.isfinite(number):
+        raise CompositionArtifactError(f"{label} must be finite")
+    if non_negative and number < 0:
+        raise CompositionArtifactError(f"{label} must be non-negative")
+    return number
+
+
+def _nonempty_string(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise CompositionArtifactError(f"{label} must be a non-empty string")
+    return value.strip()
+
+
+def _relative_artifact_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(ROOT.resolve()))
+    except ValueError:
+        return str(path.resolve())
+
+
+def _unavailable_strength_calibration(
+    path: Path,
+    reason: str,
+    *,
+    artifact_sha256: str | None,
+    artifact_version: int | None,
+) -> dict[str, Any]:
+    return {
+        "schema_version": STRENGTH_CALIBRATION_SCHEMA_VERSION,
+        "status": "unavailable",
+        "reason": reason,
+        "source": {
+            "artifact": _relative_artifact_path(path),
+            "artifact_sha256": artifact_sha256,
+            "artifact_version": artifact_version,
+        },
+    }
+
+
+def _strength_calibration(path: Path | None = None) -> dict[str, Any]:
+    """Load complete chronological metadata or explicitly disable context.
+
+    Legacy and partial artifacts are never supplemented with application
+    constants. Raw composition scoring remains independent, while any request
+    for contextual strength fails closed.
+    """
+
+    source_path = path or (MODELS_DIR / "elo_wr_calibration.json")
+    try:
+        raw = source_path.read_bytes()
+    except OSError as exc:
+        return _unavailable_strength_calibration(
+            source_path,
+            f"strength calibration source is unreadable: {exc.__class__.__name__}",
+            artifact_sha256=None,
+            artifact_version=None,
+        )
+    digest = hashlib.sha256(raw).hexdigest()
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return _unavailable_strength_calibration(
+            source_path,
+            f"strength calibration source is invalid JSON: {exc.__class__.__name__}",
+            artifact_sha256=digest,
+            artifact_version=None,
+        )
+    version_raw = data.get("version") if isinstance(data, Mapping) else None
+    version = (
+        int(version_raw)
+        if isinstance(version_raw, int) and not isinstance(version_raw, bool)
+        else None
+    )
+    try:
+        if not isinstance(data, Mapping):
+            raise CompositionArtifactError("strength calibration must be an object")
+        if version is None or version < 2:
+            raise CompositionArtifactError(
+                "strength calibration requires version 2 or newer"
+            )
+        if data.get("status") != "validated_time_holdout":
+            raise CompositionArtifactError(
+                "strength calibration is not validated_time_holdout"
+            )
+        split = data.get("time_split")
+        if not isinstance(split, Mapping):
+            raise CompositionArtifactError("strength calibration lacks time_split")
+        fit_cutoff = _nonempty_string(
+            split.get("train_end"), "strength calibration time_split.train_end"
+        )
+        holdout_start = _nonempty_string(
+            split.get("holdout_start"),
+            "strength calibration time_split.holdout_start",
+        )
+        if split.get("strictly_future_holdout") is not True:
+            raise CompositionArtifactError(
+                "strength calibration holdout is not marked strictly future"
+            )
+        fit_ts = pd.Timestamp(fit_cutoff)
+        holdout_ts = pd.Timestamp(holdout_start)
+        if pd.isna(fit_ts) or pd.isna(holdout_ts) or fit_ts >= holdout_ts:
+            raise CompositionArtifactError(
+                "strength calibration fit cutoff must precede holdout start"
+            )
+
+        team = data.get("team")
+        player = data.get("player")
+        blend = data.get("strength_blend")
+        if not isinstance(team, Mapping):
+            raise CompositionArtifactError("strength calibration lacks team block")
+        if not isinstance(player, Mapping):
+            raise CompositionArtifactError("strength calibration lacks player block")
+        if not isinstance(blend, Mapping):
+            raise CompositionArtifactError("strength calibration lacks blend block")
+        for label, block in (("team", team), ("player", player)):
+            if block.get("fit_split") != "train":
+                raise CompositionArtifactError(
+                    f"strength calibration {label}.fit_split must equal train"
+                )
+            _finite_number(block.get("intercept"), f"{label}.intercept")
+            _finite_number(block.get("coef"), f"{label}.coef")
+            if int(block.get("n_train") or 0) <= 0:
+                raise CompositionArtifactError(f"{label}.n_train must be positive")
+            holdout = block.get("holdout")
+            if not isinstance(holdout, Mapping) or int(holdout.get("n") or 0) <= 0:
+                raise CompositionArtifactError(
+                    f"{label}.holdout.n must be positive"
+                )
+        if blend.get("fit_split") != "train":
+            raise CompositionArtifactError(
+                "strength calibration blend.fit_split must equal train"
+            )
+        for key in ("intercept", "coef_team", "coef_player"):
+            _finite_number(blend.get(key), f"blend.{key}")
+        if int(blend.get("n_train") or 0) <= 0:
+            raise CompositionArtifactError("blend.n_train must be positive")
+        if int(blend.get("n_holdout") or 0) <= 0:
+            raise CompositionArtifactError("blend.n_holdout must be positive")
+    except (
+        CompositionArtifactError,
+        TypeError,
+        ValueError,
+        OverflowError,
+    ) as exc:
+        return _unavailable_strength_calibration(
+            source_path,
+            str(exc),
+            artifact_sha256=digest,
+            artifact_version=version,
+        )
+
+    calibration_id = f"strength-calibration-v{version}-{digest[:16]}"
+    return {
+        "schema_version": STRENGTH_CALIBRATION_SCHEMA_VERSION,
+        "status": "available",
+        "calibration_id": calibration_id,
+        "fit_cutoff": fit_cutoff,
+        "holdout_start": holdout_start,
+        "source": {
+            "artifact": _relative_artifact_path(source_path),
+            "artifact_sha256": digest,
+            "artifact_version": version,
+        },
+        "team": {
+            "model_id": f"{calibration_id}-team",
+            "intercept": _finite_number(team.get("intercept"), "team.intercept"),
+            "coef": _finite_number(team.get("coef"), "team.coef"),
+        },
+        "player": {
+            "model_id": f"{calibration_id}-player",
+            "intercept": _finite_number(
+                player.get("intercept"), "player.intercept"
+            ),
+            "coef": _finite_number(player.get("coef"), "player.coef"),
+        },
+        "blend": {
+            "model_id": f"{calibration_id}-blend",
+            "intercept": _finite_number(blend.get("intercept"), "blend.intercept"),
+            "coef_team": _finite_number(blend.get("coef_team"), "blend.coef_team"),
+            "coef_player": _finite_number(
+                blend.get("coef_player"), "blend.coef_player"
+            ),
+        },
+    }
+
+
+def _require_strength_calibration(value: Any) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise CompositionArtifactError("strength_calibration is required")
+    if value.get("schema_version") != STRENGTH_CALIBRATION_SCHEMA_VERSION:
+        raise CompositionArtifactError(
+            "strength_calibration.schema_version is unsupported"
+        )
+    status = value.get("status")
+    if status != "available":
+        reason = value.get("reason")
+        detail = f": {reason}" if isinstance(reason, str) and reason else ""
+        raise CompositionArtifactError(
+            f"strength calibration is unavailable{detail}"
+        )
+    _nonempty_string(value.get("calibration_id"), "strength calibration ID")
+    fit_cutoff = _nonempty_string(
+        value.get("fit_cutoff"), "strength calibration fit_cutoff"
+    )
+    holdout_start = _nonempty_string(
+        value.get("holdout_start"), "strength calibration holdout_start"
+    )
+    try:
+        fit_ts = pd.Timestamp(fit_cutoff)
+        holdout_ts = pd.Timestamp(holdout_start)
+    except (TypeError, ValueError) as exc:
+        raise CompositionArtifactError(
+            "strength calibration timestamps are invalid"
+        ) from exc
+    if pd.isna(fit_ts) or pd.isna(holdout_ts) or fit_ts >= holdout_ts:
+        raise CompositionArtifactError(
+            "strength calibration fit_cutoff must precede holdout_start"
+        )
+    source = value.get("source")
+    if not isinstance(source, Mapping):
+        raise CompositionArtifactError("strength calibration source is required")
+    _nonempty_string(source.get("artifact"), "strength calibration source artifact")
+    digest = _nonempty_string(
+        source.get("artifact_sha256"), "strength calibration source SHA"
+    )
+    if not re.fullmatch(r"[a-f0-9]{64}", digest, flags=re.IGNORECASE):
+        raise CompositionArtifactError(
+            "strength calibration source SHA must be 64 hexadecimal characters"
+        )
+    version = source.get("artifact_version")
+    if (
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or version < 2
+    ):
+        raise CompositionArtifactError(
+            "strength calibration source version must be at least 2"
+        )
+    for label, coefficient_names in (
+        ("team", ("intercept", "coef")),
+        ("player", ("intercept", "coef")),
+        ("blend", ("intercept", "coef_team", "coef_player")),
+    ):
+        block = value.get(label)
+        if not isinstance(block, Mapping):
+            raise CompositionArtifactError(
+                f"strength calibration {label} block is required"
+            )
+        _nonempty_string(
+            block.get("model_id"), f"strength calibration {label} model_id"
+        )
+        for coefficient_name in coefficient_names:
+            _finite_number(
+                block.get(coefficient_name),
+                f"strength calibration {label}.{coefficient_name}",
+            )
+    return value
+
+
+def _validate_strength_calibration_envelope(value: Any) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise CompositionArtifactError("strength_calibration is required")
+    if value.get("schema_version") != STRENGTH_CALIBRATION_SCHEMA_VERSION:
+        raise CompositionArtifactError(
+            "strength_calibration.schema_version is unsupported"
+        )
+    if value.get("status") == "available":
+        return _require_strength_calibration(value)
+    if value.get("status") != "unavailable":
+        raise CompositionArtifactError(
+            "strength_calibration.status must be available or unavailable"
+        )
+    _nonempty_string(value.get("reason"), "strength calibration unavailable reason")
+    source = value.get("source")
+    if not isinstance(source, Mapping):
+        raise CompositionArtifactError("strength calibration source is required")
+    _nonempty_string(source.get("artifact"), "strength calibration source artifact")
+    digest = source.get("artifact_sha256")
+    if digest is not None and (
+        not isinstance(digest, str)
+        or re.fullmatch(r"[a-f0-9]{64}", digest, flags=re.IGNORECASE) is None
+    ):
+        raise CompositionArtifactError(
+            "unavailable strength calibration source SHA is invalid"
+        )
+    version = source.get("artifact_version")
+    if version is not None and (
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or version < 1
+    ):
+        raise CompositionArtifactError(
+            "unavailable strength calibration source version is invalid"
+        )
+    for key in ("team", "player", "blend"):
+        if key in value:
+            raise CompositionArtifactError(
+                f"unavailable strength calibration cannot contain {key} coefficients"
+            )
+    return value
+
+
+def _require_disabled_low_rank(value: Any) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise CompositionArtifactError("low_rank contract is required")
+    if value.get("status") != "disabled" or value.get("rank") != 0:
+        raise CompositionArtifactError(
+            "bounded/public scores require low_rank.status=disabled and rank=0"
+        )
+    for key in ("champions", "left", "right"):
+        if value.get(key) != []:
+            raise CompositionArtifactError(
+                f"disabled low_rank.{key} must be empty"
+            )
+    _nonempty_string(value.get("reason"), "low_rank.reason")
+    return value
 
 
 def default_training_paths() -> tuple[Path, Path]:
@@ -234,12 +608,48 @@ def build_games(maps: pd.DataFrame, players: pd.DataFrame) -> list[CompositionGa
                 red=tuple((role, by_side["Red"][role]) for role in ROLES),
                 y=y,
                 league=_as_text(raw.get("league")).upper().strip() or "UNKNOWN",
-                patch=normalize_patch(raw.get("patch")),
+                patch=normalize_patch(
+                    raw.get("patch"),
+                    allow_source_numeric_minor=True,
+                ),
                 date=date_value,
             )
         )
     games.sort(key=lambda g: (g.date is None, g.date or pd.Timestamp.min, g.game_id))
     return games
+
+
+def composition_games_sha256(games: Sequence[CompositionGame]) -> str:
+    """Hash the complete ordered estimand population, not source file layout."""
+    digest = hashlib.sha256()
+    ordered = sorted(
+        games,
+        key=lambda game: (
+            game.date is None,
+            game.date or pd.Timestamp.min,
+            game.game_id,
+        ),
+    )
+    for game in ordered:
+        payload = {
+            "game_id": game.game_id,
+            "blue": game.blue,
+            "red": game.red,
+            "y": game.y,
+            "league": game.league,
+            "patch": game.patch,
+            "date": game.date.isoformat() if game.date is not None else None,
+        }
+        digest.update(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        )
+        digest.update(b"\n")
+    return digest.hexdigest()
 
 
 def _main_features(game: CompositionGame) -> dict[str, float]:
@@ -355,7 +765,6 @@ def _fit_logistic(
     clf = LogisticRegression(
         C=1.0,
         fit_intercept=True,
-        penalty="l2",
         solver="saga",
         max_iter=1200,
         tol=1e-4,
@@ -387,6 +796,12 @@ def _fit_logistic(
             role_champion_counts[f"{role}|{champ}"] += 1
     return {
         "intercept": float(clf.intercept_[0]),
+        "intercept_se": float(
+            1.0
+            / math.sqrt(
+                max(float(np.sum(weights * p * (1.0 - p))), 1e-12)
+            )
+        ),
         "feature_specs": feature_specs,
         "champion_counts": dict(champion_counts),
         "role_champion_counts": dict(role_champion_counts),
@@ -411,7 +826,7 @@ def _fit_low_rank_residual(
     min_pair_support: int = 5,
 ) -> dict[str, Any]:
     if rank <= 0:
-        return {"rank": 0, "champions": [], "left": [], "right": []}
+        return _disabled_low_rank()
     champs = sorted({champ for game in games for _role, champ in game.blue + game.red})
     idx = {champ: i for i, champ in enumerate(champs)}
     mat = np.zeros((len(champs), len(champs)), dtype=float)
@@ -461,18 +876,32 @@ def _low_rank_value(low_rank: Mapping[str, Any], blue: str, red: str) -> float:
     return 0.5 * (value - reverse)
 
 
-def _calibration(model: Mapping[str, Any], games: Sequence[CompositionGame]) -> dict[str, float]:
+def _calibration(model: Mapping[str, Any], games: Sequence[CompositionGame]) -> dict[str, Any]:
     if not games:
-        return {"intercept": 0.0, "slope": 1.0}
+        raise CompositionArtifactError(
+            "composition calibration requires a non-empty chronological slice"
+        )
     x = np.asarray([_raw_edge(model, game) for game in games], dtype=float)
     y = np.asarray([game.y for game in games], dtype=int)
-    return _fit_calibration_curve(x, y)
+    calibration = _fit_calibration_curve(x, y)
+    dates = [game.date for game in games if game.date is not None]
+    calibration.update(
+        {
+            "schema_version": UNCERTAINTY_SCHEMA_VERSION,
+            "fit_n": len(games),
+            "fit_start": str(min(dates)) if dates else None,
+            "fit_cutoff": str(max(dates)) if dates else None,
+        }
+    )
+    return calibration
 
 
-def _fit_calibration_curve(x: np.ndarray, y: np.ndarray) -> dict[str, float]:
+def _fit_calibration_curve(x: np.ndarray, y: np.ndarray) -> dict[str, Any]:
     """Stable two-parameter calibration fit without high-dimensional solver state."""
     if len(np.unique(y)) < 2:
-        return {"intercept": 0.0, "slope": 1.0}
+        raise CompositionArtifactError(
+            "composition calibration requires both outcome classes"
+        )
 
     def objective(theta: np.ndarray) -> tuple[float, np.ndarray]:
         eta = np.clip(theta[0] + theta[1] * x, -35.0, 35.0)
@@ -483,8 +912,26 @@ def _fit_calibration_curve(x: np.ndarray, y: np.ndarray) -> dict[str, float]:
         return loss, grad
 
     result = minimize(lambda theta: objective(theta)[0], np.asarray([0.0, 1.0]), jac=lambda theta: objective(theta)[1], method="BFGS")
-    theta = result.x if np.all(np.isfinite(result.x)) else np.asarray([0.0, 1.0])
-    return {"intercept": float(theta[0]), "slope": float(theta[1])}
+    if not result.success or not np.all(np.isfinite(result.x)):
+        raise CompositionArtifactError(
+            f"composition calibration fit failed: {result.message}"
+        )
+    theta = result.x
+    eta = np.clip(theta[0] + theta[1] * x, -35.0, 35.0)
+    p = 1.0 / (1.0 + np.exp(-eta))
+    design = np.column_stack([np.ones(len(x), dtype=float), x])
+    hessian = design.T @ ((p * (1.0 - p))[:, None] * design)
+    hessian += 2e-6 * np.eye(2, dtype=float)
+    covariance = np.linalg.pinv(hessian)
+    if covariance.shape != (2, 2) or not np.all(np.isfinite(covariance)):
+        raise CompositionArtifactError(
+            "composition calibration covariance is unavailable"
+        )
+    return {
+        "intercept": float(theta[0]),
+        "slope": float(theta[1]),
+        "covariance": covariance.tolist(),
+    }
 
 
 def _sigmoid(x: float) -> float:
@@ -505,6 +952,37 @@ def _evidence_label(n: int) -> str:
     return "very thin"
 
 
+def _require_composition_calibration(
+    value: Any,
+) -> tuple[float, float, np.ndarray]:
+    if not isinstance(value, Mapping):
+        raise CompositionArtifactError("composition calibration is required")
+    intercept = _finite_number(
+        value.get("intercept"), "composition calibration intercept"
+    )
+    slope = _finite_number(value.get("slope"), "composition calibration slope")
+    covariance = np.asarray(value.get("covariance"), dtype=float)
+    if covariance.shape != (2, 2) or not np.all(np.isfinite(covariance)):
+        raise CompositionArtifactError(
+            "composition calibration covariance must be a finite 2x2 matrix"
+        )
+    if np.any(np.diag(covariance) < 0):
+        raise CompositionArtifactError(
+            "composition calibration covariance diagonal must be non-negative"
+        )
+    return intercept, slope, covariance
+
+
+def _feature_coefficient(spec: Any, key: str) -> tuple[float, float]:
+    if not isinstance(spec, Mapping):
+        raise CompositionArtifactError(f"feature {key} must be an object")
+    coefficient = _finite_number(spec.get("coef"), f"feature {key}.coef")
+    standard_error = _finite_number(
+        spec.get("se"), f"feature {key}.se", non_negative=True
+    )
+    return coefficient, standard_error
+
+
 def predict_composition(
     model: Mapping[str, Any],
     blue: Sequence[str],
@@ -520,6 +998,13 @@ def predict_composition(
     strength_source: str | None = None,
 ) -> dict[str, Any]:
     """Score a five-v-five draft and return an exactly reconciling ledger."""
+    _require_disabled_low_rank(model.get("low_rank"))
+    _finite_number(
+        model.get("intercept_se"), "composition intercept_se", non_negative=True
+    )
+    cal_intercept, cal_slope, cal_covariance = (
+        _require_composition_calibration(model.get("calibration"))
+    )
     if len(blue) != 5 or len(red) != 5:
         raise ValueError("need five picks per side")
     roles_b = tuple(_norm_role(r) for r in (blue_roles or ROLES))
@@ -542,8 +1027,11 @@ def predict_composition(
                 f"patch|{game.patch}|{role}|{champ}",
             ):
                 if key in specs:
-                    direct += sign * float(specs[key].get("coef", 0.0))
-                    direct_var += float(specs[key].get("se", 0.0)) ** 2
+                    coefficient, standard_error = _feature_coefficient(
+                        specs[key], key
+                    )
+                    direct += sign * coefficient
+                    direct_var += standard_error**2
             champion_parts.append(
                 {
                     "champion": champ,
@@ -573,10 +1061,12 @@ def predict_composition(
             for i in range(5):
                 for j in range(i + 1, 5):
                     a, c = _pair(picks[i][1], picks[j][1])
-                    spec = specs.get(f"synergy|{a}|{c}")
+                    key = f"synergy|{a}|{c}"
+                    spec = specs.get(key)
                     if not spec:
                         continue
-                    value = sign * float(spec.get("coef", 0.0))
+                    coefficient, standard_error = _feature_coefficient(spec, key)
+                    value = sign * coefficient
                     synergy_logit += value
                     share = value / 2.0
                     for role, champ in (picks[i], picks[j]):
@@ -584,68 +1074,105 @@ def predict_composition(
                         row["team_synergy"] += share
                         row["edge_contribution"] += share
                         row["uncertainty_logit"] = math.sqrt(
-                            float(row["uncertainty_logit"]) ** 2 + (float(spec.get("se", 0.0)) / 2.0) ** 2
+                            float(row["uncertainty_logit"]) ** 2
+                            + (standard_error / 2.0) ** 2
                         )
-                    edge_var += float(spec.get("se", 0.0)) ** 2
+                    edge_var += standard_error**2
 
-    low_rank = model.get("low_rank") or {}
     for _role_b, blue_champ in b:
         for _role_r, red_champ in r:
             if "opposition" in components:
                 key, orientation = _opposition_key(blue_champ, red_champ)
                 spec = specs.get(key)
-                if spec:
-                    value = float(orientation) * float(spec.get("coef", 0.0))
+                if spec and orientation:
+                    coefficient, standard_error = _feature_coefficient(spec, key)
+                    value = float(orientation) * coefficient
                     opposition_logit += value
-                    edge_var += float(spec.get("se", 0.0)) ** 2
+                    edge_var += standard_error**2
                     blue_row = next(row for row in champion_parts if row["side"] == "blue" and row["champion"] == blue_champ and row["role"] == next(role for role, champ in b if champ == blue_champ))
                     red_row = next(row for row in champion_parts if row["side"] == "red" and row["champion"] == red_champ and row["role"] == next(role for role, champ in r if champ == red_champ))
                     blue_row["enemy_interaction"] += value / 2.0
                     red_row["enemy_interaction"] += value / 2.0
                     blue_row["edge_contribution"] += value / 2.0
                     red_row["edge_contribution"] += value / 2.0
-                    blue_row["uncertainty_logit"] = math.sqrt(float(blue_row["uncertainty_logit"]) ** 2 + (float(spec.get("se", 0.0)) / 2.0) ** 2)
-                    red_row["uncertainty_logit"] = math.sqrt(float(red_row["uncertainty_logit"]) ** 2 + (float(spec.get("se", 0.0)) / 2.0) ** 2)
-            if int(low_rank.get("rank", 0)) > 0:
-                value = _low_rank_value(low_rank, blue_champ, red_champ)
-                low_rank_logit += value
-                blue_row = next(row for row in champion_parts if row["side"] == "blue" and row["champion"] == blue_champ and row["role"] == next(role for role, champ in b if champ == blue_champ))
-                red_row = next(row for row in champion_parts if row["side"] == "red" and row["champion"] == red_champ and row["role"] == next(role for role, champ in r if champ == red_champ))
-                blue_row["enemy_interaction"] += value / 2.0
-                red_row["enemy_interaction"] += value / 2.0
-                blue_row["edge_contribution"] += value / 2.0
-                red_row["edge_contribution"] += value / 2.0
+                    blue_row["uncertainty_logit"] = math.sqrt(
+                        float(blue_row["uncertainty_logit"]) ** 2
+                        + (standard_error / 2.0) ** 2
+                    )
+                    red_row["uncertainty_logit"] = math.sqrt(
+                        float(red_row["uncertainty_logit"]) ** 2
+                        + (standard_error / 2.0) ** 2
+                    )
 
     composition_edge = main_logit + synergy_logit + opposition_logit + low_rank_logit
-    side_advantage = float(model.get("intercept", 0.0))
+    side_advantage = _finite_number(
+        model.get("intercept"), "composition intercept"
+    )
     model_edge = side_advantage + composition_edge
-    edge_se = math.sqrt(max(edge_var, 1e-12))
-    cal = model.get("calibration") or {"intercept": 0.0, "slope": 1.0}
-    cal_intercept = float(cal.get("intercept", 0.0))
-    cal_slope = float(cal.get("slope", 1.0))
+    # The calibrated estimand is the probability of a blue-side map win.  The
+    # calibration fit was trained on the model's complete linear predictor, so
+    # both the fitted side intercept and calibration intercept belong here.
+    # Composition antisymmetry is preserved in `composition_edge`; a blue-side
+    # probability is not generally complementary under a composition-only swap
+    # because the side baseline remains attached to blue.
     calibrated_logit = cal_intercept + cal_slope * model_edge
+    intercept_se = _finite_number(
+        model.get("intercept_se"), "composition intercept_se", non_negative=True
+    )
+    model_edge_var = edge_var + intercept_se**2
+    calibration_parameter_var = (
+        float(cal_covariance[0, 0])
+        + 2.0 * model_edge * float(cal_covariance[0, 1])
+        + model_edge**2 * float(cal_covariance[1, 1])
+    )
+    calibrated_var = (
+        cal_slope**2 * model_edge_var
+        + calibration_parameter_var
+    )
+    edge_se = math.sqrt(max(calibrated_var, 1e-12))
     p_blue = _sigmoid(calibrated_logit)
-    p_lo = _sigmoid(cal_intercept + cal_slope * (model_edge - 1.96 * edge_se))
-    p_hi = _sigmoid(cal_intercept + cal_slope * (model_edge + 1.96 * edge_se))
-    strength = model.get("strength_calibration") or {}
+    p_lo = _sigmoid(calibrated_logit - 1.96 * edge_se)
+    p_hi = _sigmoid(calibrated_logit + 1.96 * edge_se)
+    neutral_blue = _sigmoid(cal_intercept + cal_slope * side_advantage)
     team_diff = team_elo_diff if team_elo_diff is not None else elo_diff
     player_diff = player_elo_diff
-    team_p = (
-        _sigmoid(float(strength.get("team_intercept", 0.14729)) + float(strength.get("team_coef", 2.37625)) * float(team_diff) / 400.0)
-        if team_diff is not None
+    strength = (
+        _require_strength_calibration(model.get("strength_calibration"))
+        if team_diff is not None or player_diff is not None
         else None
     )
-    player_p = (
-        _sigmoid(float(strength.get("player_intercept", 0.13166)) + float(strength.get("player_coef", 3.64257)) * float(player_diff) / 400.0)
-        if player_diff is not None
-        else None
-    )
+    team_block = strength.get("team") if strength is not None else None
+    player_block = strength.get("player") if strength is not None else None
+    blend_block = strength.get("blend") if strength is not None else None
+    team_p = None
+    if team_diff is not None:
+        assert isinstance(team_block, Mapping)
+        team_p = _sigmoid(
+            _finite_number(team_block.get("intercept"), "team.intercept")
+            + _finite_number(team_block.get("coef"), "team.coef")
+            * float(team_diff)
+            / 400.0
+        )
+    player_p = None
+    if player_diff is not None:
+        assert isinstance(player_block, Mapping)
+        player_p = _sigmoid(
+            _finite_number(player_block.get("intercept"), "player.intercept")
+            + _finite_number(player_block.get("coef"), "player.coef")
+            * float(player_diff)
+            / 400.0
+        )
     strength_logit = None
     if team_p is not None and player_p is not None:
+        assert isinstance(blend_block, Mapping)
         strength_logit = (
-            float(strength.get("blend_intercept", -2.47489))
-            + float(strength.get("blend_coef_team", 2.84763)) * float(team_p)
-            + float(strength.get("blend_coef_player", 2.07485)) * float(player_p)
+            _finite_number(blend_block.get("intercept"), "blend.intercept")
+            + _finite_number(blend_block.get("coef_team"), "blend.coef_team")
+            * float(team_p)
+            + _finite_number(
+                blend_block.get("coef_player"), "blend.coef_player"
+            )
+            * float(player_p)
         )
     elif team_p is not None:
         strength_logit = math.log(max(team_p, 1e-12) / max(1.0 - team_p, 1e-12))
@@ -701,19 +1228,26 @@ def predict_composition(
             "player_elo_diff": round(float(player_diff), 2) if player_diff is not None else None,
             "source": strength_source or ("explicit pre-match strength" if team_diff is not None else "unavailable"),
         },
-        "wr_bump_pp": round(100.0 * (p_blue - 0.5), 2),
+        "wr_bump_pp": round(100.0 * (p_blue - neutral_blue), 2),
         "posterior_width": round(edge_se, 4),
         "uncertainty": {
             "edge_se_logit": round(edge_se, 4),
             "p_blue_95": [round(p_lo, 4), round(p_hi, 4)],
-            "method": "diagonal Laplace approximation; coefficient correlations are not represented",
+            "method": (
+                "delta-method interval from explicit composition-term diagonal "
+                "Laplace variance, model-intercept variance, and the full "
+                "chronological calibration covariance; low-rank is disabled"
+            ),
         },
         "calibration": {
             "league": league,
             "patch": patch,
-            "source": model.get("calibration_source", "time-heldout"),
+            "source": _nonempty_string(
+                model.get("calibration_source"), "calibration_source"
+            ),
             "intercept": round(cal_intercept, 4),
             "slope": round(cal_slope, 4),
+            "neutral_blue_baseline": round(neutral_blue, 4),
             "p_blue_with_strength": round(p_strength, 4) if p_strength is not None else None,
         },
         "components": {
@@ -735,7 +1269,12 @@ def predict_composition(
         "explanation": explanation,
         "blue": [champ for _role, champ in b],
         "red": [champ for _role, champ in r],
-        "note": "Full-composition draft model: role-aware direct effects, within-team synergy, all 25 enemy interactions, and sparse low-rank residual. Strength is reported separately when supplied.",
+        "note": (
+            "Full-composition draft model: role-aware direct effects, "
+            "within-team synergy, and all 25 explicit enemy interactions. "
+            "Low-rank residuals are disabled until their uncertainty is "
+            "estimable; strength is reported separately when supplied."
+        ),
     }
 
 
@@ -779,15 +1318,20 @@ def _fit_holdout(
     train: Sequence[CompositionGame],
     test: Sequence[CompositionGame],
     components: Iterable[str],
-    low_rank_rank: int = 0,
 ) -> dict[str, float]:
-    model = _fit_logistic(train, components)
-    model["low_rank"] = _fit_low_rank_residual(model, train, low_rank_rank)
     cal_train, cal = _split_time(train, 0.8) if len(train) > 20 else (list(train), [])
     if cal:
-        cal_model = _fit_logistic(cal_train, components)
-        cal_model["low_rank"] = _fit_low_rank_residual(cal_model, cal_train, low_rank_rank)
-        model["calibration"] = _calibration(cal_model, cal)
+        # Fit, calibrate, and evaluate one frozen model.  Calibrating a model
+        # fitted on `cal_train` and then evaluating different coefficients
+        # fitted on all of `train` invalidates the calibration contract.
+        model = _fit_logistic(cal_train, components)
+        model["low_rank"] = _disabled_low_rank()
+        model["calibration"] = _calibration(model, cal)
+        model["calibration_source"] = "chronological calibration slice"
+    else:
+        raise CompositionArtifactError(
+            "holdout evaluation requires a chronological calibration slice"
+        )
     return _evaluate(model, test)
 
 
@@ -801,10 +1345,15 @@ def fit_composition_artifact(
     """Fit the checked-in artifact with time/future-patch/league diagnostics."""
     if len(games) < 50:
         raise ValueError(f"need at least 50 complete drafts, got {len(games)}")
+    if low_rank_rank != 0:
+        raise CompositionArtifactError(
+            "bounded/public composition artifacts require low_rank_rank=0 "
+            "until low-rank uncertainty is estimated"
+        )
     train, test = _split_time(games, 0.8)
     cal_train, calibration_games = _split_time(train, 0.8)
     model = _fit_logistic(cal_train, ("main", "synergy", "opposition"), min_support=min_support)
-    model["low_rank"] = _fit_low_rank_residual(model, cal_train, low_rank_rank)
+    model["low_rank"] = _disabled_low_rank()
     model["calibration"] = _calibration(model, calibration_games)
     model["calibration_source"] = "time-heldout calibration slice"
     # Preserve the separately fit strength channel; it is not part of the raw
@@ -819,65 +1368,190 @@ def fit_composition_artifact(
         patch_train = [g for g in games if g.patch not in future]
         patch_test = [g for g in games if g.patch in future]
         if patch_train and patch_test:
-            validation["future_patch_holdout"] = _fit_holdout(patch_train, patch_test, ("main", "synergy", "opposition"), low_rank_rank)
+            validation["future_patch_holdout"] = _fit_holdout(
+                patch_train,
+                patch_test,
+                ("main", "synergy", "opposition"),
+            )
             validation["future_patch"] = sorted(future)
         leagues = sorted({g.league for g in games})
         league = max(leagues, key=lambda x: sum(g.league == x for g in games))
         league_train = [g for g in games if g.league != league]
         league_test = [g for g in games if g.league == league]
         if league_train and league_test:
-            validation["league_holdout"] = _fit_holdout(league_train, league_test, ("main", "synergy", "opposition"), low_rank_rank)
+            validation["league_holdout"] = _fit_holdout(
+                league_train,
+                league_test,
+                ("main", "synergy", "opposition"),
+            )
             validation["league"] = league
         ablations = {
-            "additive_only": (("main",), 0),
-            "plus_synergy": (("main", "synergy"), 0),
-            "plus_opposition": (("main", "synergy", "opposition"), 0),
-            "plus_low_rank": (("main", "synergy", "opposition"), low_rank_rank),
+            "additive_only": ("main",),
+            "plus_synergy": ("main", "synergy"),
+            "plus_opposition": ("main", "synergy", "opposition"),
         }
         validation["ablations_time_holdout"] = {
-            name: _fit_holdout(cal_train, test, components, rank) for name, (components, rank) in ablations.items()
+            name: _fit_holdout(cal_train, test, components)
+            for name, components in ablations.items()
+        }
+        validation["low_rank"] = {
+            "status": "disabled",
+            "reason": (
+                "no bounded/public evaluation until low-rank fit and "
+                "prediction uncertainty are estimated"
+            ),
         }
     model.update(
         {
-            "version": 1,
+            "version": RUNTIME_VERSION,
+            "model_code_sha256": model_code_sha256(),
+            "training_population_sha256": composition_games_sha256(games),
+            "numerical_environment": numerical_environment(),
             "estimand": "pre-match blue-side map-win probability conditional on champion composition, role, league, and patch; no roster/player/team strength in pure draft edge",
             "n_games_total": len(games),
             "n_games_fit": len(cal_train),
             "date_min": min((g.date for g in games if g.date is not None), default=None),
             "date_max": max((g.date for g in games if g.date is not None), default=None),
             "validation": validation,
+            "uncertainty": {
+                "schema_version": UNCERTAINTY_SCHEMA_VERSION,
+                "method": (
+                    "delta method from explicit composition-term diagonal "
+                    "Laplace variance, model-intercept variance, and the full "
+                    "chronological calibration covariance"
+                ),
+                "active_terms": [
+                    "main",
+                    "league",
+                    "patch",
+                    "synergy",
+                    "opposition",
+                    "model_intercept",
+                    "calibration_intercept",
+                    "calibration_slope",
+                    "calibration_intercept_slope_covariance",
+                ],
+                "low_rank_status": "disabled",
+            },
             "limitations": [
                 "observational draft data cannot identify causal champion effects",
                 "role/league/patch deviations are ridge-pooled and should be treated as estimates, not matchup truths",
-                "uncertainty is a diagonal Laplace approximation and omits coefficient covariance",
-                "low-rank residual is a post-fit sparse correction, not a replacement for a larger embedding model",
+                "explicit feature uncertainty is a diagonal Laplace approximation and omits feature-coefficient covariance",
+                "low-rank residuals are disabled because their fit and prediction uncertainty are not estimated",
             ],
         }
     )
     return model
 
 
-def export_runtime(model: Mapping[str, Any], path: Path = RUNTIME_PATH) -> dict[str, Any]:
-    """Write the browser-sized artifact, omitting validation text."""
+def export_runtime(
+    model: Mapping[str, Any],
+    path: Path = RUNTIME_PATH,
+    *,
+    artifact_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Write the browser-sized artifact with its public evidence metadata."""
+    if model.get("version") != RUNTIME_VERSION:
+        raise CompositionArtifactError(
+            f"composition artifact version must equal {RUNTIME_VERSION}"
+        )
+    _finite_number(model.get("intercept"), "composition intercept")
+    _finite_number(
+        model.get("intercept_se"), "composition intercept_se", non_negative=True
+    )
+    _require_disabled_low_rank(model.get("low_rank"))
+    _require_composition_calibration(model.get("calibration"))
+    _validate_strength_calibration_envelope(model.get("strength_calibration"))
+    for key in ("model_code_sha256", "training_population_sha256"):
+        digest = model.get(key)
+        if not isinstance(digest, str) or re.fullmatch(
+            r"[a-f0-9]{64}", digest, flags=re.IGNORECASE
+        ) is None:
+            raise CompositionArtifactError(
+                f"{key} must be a 64-character hexadecimal digest"
+            )
+    environment = model.get("numerical_environment")
+    packages = environment.get("packages") if isinstance(environment, Mapping) else None
+    if (
+        not isinstance(environment, Mapping)
+        or not isinstance(environment.get("python"), str)
+        or not environment["python"].strip()
+        or not isinstance(packages, Mapping)
+        or any(
+            not isinstance(packages.get(name), str) or not packages[name].strip()
+            for name in ("numpy", "pandas", "scipy", "scikit-learn")
+        )
+    ):
+        raise CompositionArtifactError(
+            "numerical_environment must pin Python and numerical-library versions"
+        )
+    if not isinstance(artifact_sha256, str) or re.fullmatch(
+        r"[a-f0-9]{64}", artifact_sha256, flags=re.IGNORECASE
+    ) is None:
+        raise CompositionArtifactError(
+            "artifact_sha256 must be a 64-character hexadecimal digest"
+        )
+    validation = model.get("validation")
+    if not isinstance(validation, Mapping) or not isinstance(
+        validation.get("time_holdout"), Mapping
+    ):
+        raise CompositionArtifactError(
+            "validated runtime requires validation.time_holdout"
+        )
+    uncertainty = model.get("uncertainty")
+    if (
+        not isinstance(uncertainty, Mapping)
+        or uncertainty.get("schema_version") != UNCERTAINTY_SCHEMA_VERSION
+        or uncertainty.get("low_rank_status") != "disabled"
+    ):
+        raise CompositionArtifactError(
+            "versioned uncertainty metadata with disabled low rank is required"
+        )
     runtime = {
-        "version": model.get("version", 1),
-        "estimand": model.get("estimand"),
-        "intercept": model.get("intercept", 0.0),
-        "feature_specs": model.get("feature_specs", {}),
-        "role_champion_counts": model.get("role_champion_counts", {}),
-        "components": model.get("components", []),
-        "prior_n": model.get("prior_n", DEFAULT_PRIOR_N),
-        "low_rank": model.get("low_rank", {"rank": 0, "champions": [], "left": [], "right": []}),
-        "calibration": model.get("calibration", {"intercept": 0.0, "slope": 1.0}),
-        "calibration_source": model.get("calibration_source", "time-heldout calibration slice"),
-        "strength_calibration": model.get("strength_calibration", {}),
-        "n_games_fit": model.get("n_games_fit"),
+        "version": model["version"],
+        "model_code_sha256": model["model_code_sha256"],
+        "training_population_sha256": model["training_population_sha256"],
+        "numerical_environment": model["numerical_environment"],
+        "estimand": _nonempty_string(model.get("estimand"), "estimand"),
+        "intercept": model["intercept"],
+        "intercept_se": model["intercept_se"],
+        "feature_specs": model["feature_specs"],
+        "role_champion_counts": model["role_champion_counts"],
+        "components": model["components"],
+        "prior_n": model["prior_n"],
+        "low_rank": model["low_rank"],
+        "calibration": model["calibration"],
+        "calibration_source": _nonempty_string(
+            model.get("calibration_source"), "calibration_source"
+        ),
+        "strength_calibration": model["strength_calibration"],
+        "n_games_fit": model["n_games_fit"],
+        "n_games_total": model["n_games_total"],
         "date_min": str(model.get("date_min")) if model.get("date_min") is not None else None,
         "date_max": str(model.get("date_max")) if model.get("date_max") is not None else None,
+        "min_support": model["min_support"],
+        "recency_half_life_days": model["recency_half_life_days"],
+        "validation": validation,
+        "uncertainty": uncertainty,
+        "limitations": model["limitations"],
+        "artifact_sha256": artifact_sha256,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(runtime, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return runtime
+
+
+def export_packed_runtime(
+    runtime_path: Path,
+    packed_path: Path = PACKED_RUNTIME_PATH,
+) -> None:
+    """Write the deterministic browser bundle consumed by the Next runtime."""
+
+    encoded = base64.b64encode(
+        gzip.compress(runtime_path.read_bytes(), mtime=0)
+    ).decode("ascii")
+    packed_path.parent.mkdir(parents=True, exist_ok=True)
+    packed_path.write_text(encoded + "\n", encoding="ascii")
 
 
 def fit_from_paths(
@@ -886,6 +1560,7 @@ def fit_from_paths(
     *,
     output: Path = MODEL_PATH,
     runtime: Path = RUNTIME_PATH,
+    packed_runtime: Path | None = None,
     low_rank_rank: int = DEFAULT_LOW_RANK,
     validate: bool = True,
 ) -> dict[str, Any]:
@@ -894,7 +1569,10 @@ def fit_from_paths(
     model = fit_composition_artifact(games, low_rank_rank=low_rank_rank, validate=validate)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(model, indent=2, default=str, sort_keys=True) + "\n", encoding="utf-8")
-    export_runtime(model, runtime)
+    artifact_sha256 = hashlib.sha256(output.read_bytes()).hexdigest()
+    export_runtime(model, runtime, artifact_sha256=artifact_sha256)
+    if packed_runtime is not None:
+        export_packed_runtime(runtime, packed_runtime)
     return model
 
 
@@ -904,6 +1582,11 @@ def main() -> None:
     parser.add_argument("--players", type=Path, default=None)
     parser.add_argument("--output", type=Path, default=MODEL_PATH)
     parser.add_argument("--runtime", type=Path, default=RUNTIME_PATH)
+    parser.add_argument(
+        "--packed-runtime",
+        type=Path,
+        default=PACKED_RUNTIME_PATH,
+    )
     parser.add_argument("--low-rank", type=int, default=DEFAULT_LOW_RANK)
     parser.add_argument("--no-validate", action="store_true")
     args = parser.parse_args()
@@ -912,6 +1595,7 @@ def main() -> None:
         args.players,
         output=args.output,
         runtime=args.runtime,
+        packed_runtime=args.packed_runtime,
         low_rank_rank=args.low_rank,
         validate=not args.no_validate,
     )

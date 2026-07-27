@@ -6,11 +6,13 @@ import json
 import unicodedata
 import urllib.parse
 import urllib.request
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
+
+import pandas as pd
 
 from lol_kills.etl.paths import PARQUET_DIR
-
 
 LEAGUEPEDIA_COUNTRY_URL = "https://lol.fandom.com/wiki/Special:CargoExport"
 
@@ -65,6 +67,71 @@ def _country_code(value: Any) -> str | None:
     return COUNTRY_CODES.get(text)
 
 
+def _provider_identity_collisions(
+    player_identities: pd.DataFrame | Iterable[Any] | None,
+) -> set[str]:
+    """Return name keys that map to multiple stable provider IDs."""
+
+    if player_identities is None:
+        source = PARQUET_DIR / "players.parquet"
+        if not source.exists():
+            return set()
+        try:
+            frame = pd.read_parquet(
+                source, columns=["playername", "playerid", "position"]
+            )
+        except (OSError, ValueError, KeyError):
+            try:
+                frame = pd.read_parquet(
+                    source, columns=["playername", "playerid"]
+                )
+            except (OSError, ValueError, KeyError):
+                return set()
+    elif isinstance(player_identities, pd.DataFrame):
+        frame = player_identities.copy()
+    else:
+        records: list[dict[str, Any]] = []
+        for value in player_identities:
+            if isinstance(value, dict):
+                records.append(
+                    {
+                        "playername": value.get("playername")
+                        or value.get("player"),
+                        "playerid": value.get("playerid")
+                        or value.get("player_id"),
+                    }
+                )
+            elif isinstance(value, (tuple, list)) and len(value) >= 2:
+                records.append(
+                    {"playername": value[0], "playerid": value[1]}
+                )
+        frame = pd.DataFrame(records)
+    if not {"playername", "playerid"}.issubset(frame.columns):
+        return set()
+    if "position" in frame.columns:
+        frame = frame[
+            frame["position"].astype(str).str.casefold().ne("team")
+        ]
+    frame = frame.assign(
+        _name_key=frame["playername"].map(_key),
+        _player_id=frame["playerid"].map(
+            lambda value: (
+                ""
+                if value is None or pd.isna(value)
+                else str(value).strip()
+            )
+        ),
+    )
+    ids_by_name = (
+        frame.loc[
+            frame["_name_key"].ne("") & frame["_player_id"].ne("")
+        ]
+        .groupby("_name_key", sort=True)["_player_id"]
+        .agg(lambda values: {str(value) for value in values})
+    )
+    return set(ids_by_name[ids_by_name.map(len).gt(1)].index)
+
+
 def _fetch_rows(cache_path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for offset in range(0, 50_000, 5_000):
@@ -84,7 +151,7 @@ def _fetch_rows(cache_path: Path) -> list[dict[str, Any]]:
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
                 page = json.load(response)
-        except Exception:
+        except (OSError, TimeoutError, UnicodeError, json.JSONDecodeError):
             break
         if not isinstance(page, list):
             break
@@ -102,8 +169,9 @@ def build_player_metadata(
     *,
     cache_path: Path | None = None,
     player_context: dict[str, str | None] | None = None,
+    player_identities: pd.DataFrame | Iterable[Any] | None = None,
 ) -> dict[str, dict[str, str]]:
-    """Return country/flag metadata only where the source has a country."""
+    """Return unambiguous country/flag metadata backed by source identities."""
 
     wanted = [str(name) for name in player_names if str(name).strip()]
     if not wanted:
@@ -118,6 +186,7 @@ def build_player_metadata(
             rows = []
     if not rows:
         rows = _fetch_rows(cache)
+    colliding_name_keys = _provider_identity_collisions(player_identities)
 
     by_name: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
@@ -127,24 +196,36 @@ def build_player_metadata(
 
     metadata: dict[str, dict[str, str]] = {}
     for name in wanted:
+        if _key(name) in colliding_name_keys:
+            continue
         candidates = by_name.get(_key(name), [])
         if not candidates:
             continue
         context_team = str((player_context or {}).get(name) or "").strip()
         if context_team and len(candidates) > 1:
             context_key = _key(context_team)
-            candidates = sorted(
-                candidates,
-                key=lambda row: (
-                    0 if context_key and context_key in _key(row.get("Team")) else 1,
-                    _key(row.get("Player")),
-                ),
-            )
-        row = candidates[0]
-        country = str(row.get("NationalityPrimary") or row.get("Country") or "").strip()
-        code = _country_code(country)
-        if not code:
+            context_matches = [
+                row
+                for row in candidates
+                if context_key
+                and any(
+                    context_key in _key(row.get(field))
+                    for field in ("Team", "CurrentTeams")
+                )
+            ]
+            if context_matches:
+                candidates = context_matches
+        resolved: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in candidates:
+            country = str(
+                row.get("NationalityPrimary") or row.get("Country") or ""
+            ).strip()
+            code = _country_code(country)
+            if code:
+                resolved[(country, code)] = row
+        if len(resolved) != 1:
             continue
+        country, code = next(iter(resolved))
         item: dict[str, str] = {"country": country, "country_code": code}
         flag = _flag(code)
         if flag:

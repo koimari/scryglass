@@ -89,7 +89,10 @@ def _team_gold(team: Mapping[str, Any]) -> float | None:
 
 
 def _team_kills(team: Mapping[str, Any]) -> int | None:
-    return _int(team.get("kills") or team.get("killCount"))
+    for key in ("kills", "killCount"):
+        if key in team and team.get(key) is not None:
+            return _int(team.get(key))
+    return None
 
 
 def _objectives(team: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -103,7 +106,11 @@ def _objectives(team: Mapping[str, Any]) -> list[dict[str, Any]]:
         kind = _text(objective.get("type") or objective.get("name"))
         if not kind:
             continue
-        count = _int(objective.get("completionCount") or objective.get("count"))
+        count = None
+        for key in ("completionCount", "count"):
+            if key in objective and objective.get(key) is not None:
+                count = _int(objective.get(key))
+                break
         completed = objective.get("completed")
         item: dict[str, Any] = {"name": kind}
         if count is not None:
@@ -159,14 +166,42 @@ def _teams(game: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
     return result
 
 
-def _series_score(series_state: Mapping[str, Any], side: str) -> int | None:
+def _same_team(
+    candidate: Mapping[str, Any],
+    reference: Mapping[str, Any],
+) -> bool:
+    candidate_id = _text(candidate.get("id"))
+    reference_id = _text(reference.get("id"))
+    if candidate_id and reference_id:
+        return candidate_id == reference_id
+    candidate_name = _text(candidate.get("name"))
+    reference_name = _text(reference.get("name"))
+    return bool(
+        candidate_name
+        and reference_name
+        and normalize_team(candidate_name).casefold()
+        == normalize_team(reference_name).casefold()
+    )
+
+
+def _series_score(
+    series_state: Mapping[str, Any],
+    current_team: Mapping[str, Any],
+) -> int | None:
     score = 0
     seen = False
     for game in series_state.get("games") or []:
         if not isinstance(game, Mapping):
             continue
-        teams = _teams(game)
-        winner = _winner(game, teams.get(side, {})) if side in teams else None
+        matching_team = next(
+            (
+                team
+                for team in _teams(game).values()
+                if _same_team(team, current_team)
+            ),
+            None,
+        )
+        winner = _winner(game, matching_team) if matching_team is not None else None
         if winner is not None:
             seen = True
             score += int(winner)
@@ -179,7 +214,7 @@ def _public_teams(game: Mapping[str, Any], series_state: Mapping[str, Any]) -> d
         team = _teams(game).get(side, {})
         result[side] = {
             "name": _text(team.get("name"), side.title()),
-            "score": _series_score(series_state, side),
+            "score": _series_score(series_state, team),
             "game_winner": _winner(game, team),
             "players": _players(team),
         }
@@ -192,13 +227,23 @@ def default_ratings_path() -> Path:
         try:
             latest = json.loads(latest_path.read_text(encoding="utf-8"))
             pack_id = _text(latest.get("pack_id")) if isinstance(latest, Mapping) else None
-            if pack_id:
-                candidate = PUBLIC_ROOT / "packs" / pack_id / "features" / "ratings_snapshot.json"
-                if candidate.is_file():
-                    return candidate
+            if pack_id and Path(pack_id).name == pack_id:
+                return (
+                    PUBLIC_ROOT
+                    / "packs"
+                    / pack_id
+                    / "features"
+                    / "ratings_snapshot.json"
+                )
         except (OSError, json.JSONDecodeError):
             pass
-    return PUBLIC_ROOT / "packs" / "v2026.07.25" / "features" / "ratings_snapshot.json"
+    return (
+        PUBLIC_ROOT
+        / "packs"
+        / "__no_current_immutable_pack__"
+        / "features"
+        / "ratings_snapshot.json"
+    )
 
 
 def resolve_team_rating_gap(

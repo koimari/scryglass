@@ -211,7 +211,8 @@ def fit_all(rows: list[dict], champs: list[str], strengths: dict[str, float], la
         yw.append(1 if r["game"]["winner"] == 1 else 0)
     beta_win = logistic_ridge(Xw, yw, lam=lam)
 
-    # First inhib proxy
+    # First inhibitor requires an event-order label. Never substitute final
+    # inhibitor totals or the map-winner model.
     Xi, yi = [], []
     for r in rows:
         fi = r["game"].get("first_inhib_side")
@@ -219,7 +220,7 @@ def fit_all(rows: list[dict], champs: list[str], strengths: dict[str, float], la
             continue
         Xi.append(feat(r, True))
         yi.append(1 if fi == 1 else 0)
-    beta_inhib = logistic_ridge(Xi, yi, lam=lam) if len(yi) >= 50 else beta_win[:]
+    beta_inhib = logistic_ridge(Xi, yi, lam=lam) if len(yi) >= 50 else None
 
     # Total kills ridge on presence (both sides together)
     leagues = sorted({r["game"]["league"] for r in rows})
@@ -293,13 +294,17 @@ def fit_all(rows: list[dict], champs: list[str], strengths: dict[str, float], la
     champ_team_kills = {
         c: round(beta_team_kills[2 + i], 4) for c, i in c_idx.items()
     }
-    champ_inhib = {
-        c: {
-            "logit": round(beta_inhib[2 + i], 5),
-            "delta_pp_at_50": round(ame_pp(beta_inhib[2 + i], 0.5), 3),
+    champ_inhib = (
+        {
+            c: {
+                "logit": round(beta_inhib[2 + i], 5),
+                "delta_pp_at_50": round(ame_pp(beta_inhib[2 + i], 0.5), 3),
+            }
+            for c, i in c_idx.items()
         }
-        for c, i in c_idx.items()
-    }
+        if beta_inhib is not None
+        else {}
+    )
 
     return {
         "champs": champs,
@@ -399,8 +404,13 @@ def predict_markets(
     logit = sum(fitted["beta_win"][j] * x[j] for j in range(p))
     p_win1 = sigmoid(logit)
 
-    logit_i = sum(fitted["beta_inhib"][j] * x[j] for j in range(p))
-    p_inhib1 = sigmoid(logit_i)
+    beta_inhib = fitted.get("beta_inhib")
+    logit_i = (
+        sum(beta_inhib[j] * x[j] for j in range(p))
+        if isinstance(beta_inhib, list)
+        else None
+    )
+    p_inhib1 = sigmoid(logit_i) if logit_i is not None else None
 
     # FB proxy: team strength + early aggro draft score
     aggro1 = sum(EARLY_AGGRO.get(c, 0.0) for c in blue) + 0.35 * s1
@@ -494,9 +504,14 @@ def predict_markets(
             "method": "proxy_early_aggro_draft+team_strength (FB not in Leaguepedia Cargo)",
         },
         "first_inhibitor": {
-            "p_team1": round(p_inhib1, 4),
-            "p_team2": round(1 - p_inhib1, 4),
-            "method": "logistic on Leaguepedia inhib proxy (asymmetric inhib counts)",
+            "p_team1": round(p_inhib1, 4) if p_inhib1 is not None else None,
+            "p_team2": round(1 - p_inhib1, 4) if p_inhib1 is not None else None,
+            "status": "available" if p_inhib1 is not None else "withheld",
+            "method": (
+                "logistic on verified event-order labels"
+                if p_inhib1 is not None
+                else "unavailable: final inhibitor totals do not identify event order"
+            ),
         },
         "total_kills": {
             "mean": round(mu_total, 2),

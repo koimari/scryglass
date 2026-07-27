@@ -1,6 +1,6 @@
-import { redirect } from "next/navigation";
+import { permanentRedirect } from "next/navigation";
 
 /** Permanent home is the article; keep /grubs for old links. */
 export default function GrubsRedirectPage() {
-  redirect("/articles/void-grubs-contest-or-leave");
+  permanentRedirect("/articles/void-grubs-contest-or-leave");
 }

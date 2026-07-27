@@ -1,6 +1,7 @@
 "use client";
 
 import type { AsyncDuckDB } from "@duckdb/duckdb-wasm";
+import { normalizePatchVersion, playerCs } from "./format";
 
 let dbPromise: Promise<AsyncDuckDB> | null = null;
 
@@ -39,7 +40,90 @@ function esc(s: string): string {
 }
 
 export type QueryRow = Record<string, unknown>;
-export { formatCompletionSource, formatGameDate, groupMapsIntoSeries } from "./series";
+export type MapWinnerSide = "blue" | "red";
+
+export function finiteNumberOrNull(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function binaryResult(value: unknown): 0 | 1 | null {
+  if (value === true || value === 1 || value === "1") return 1;
+  if (value === false || value === 0 || value === "0") return 0;
+  return null;
+}
+
+/**
+ * Resolve a completed map outcome without turning absent or contradictory
+ * result fields into a winner.
+ */
+export function resolveMapWinnerSide(
+  map: QueryRow,
+  players: QueryRow[] = [],
+): MapWinnerSide | null {
+  const playerResults = {
+    blue: new Set<0 | 1>(),
+    red: new Set<0 | 1>(),
+  };
+  for (const player of players) {
+    const result = binaryResult(player.result);
+    const side = String(player.side ?? "").toLowerCase();
+    if (result != null && (side === "blue" || side === "red")) {
+      playerResults[side].add(result);
+    }
+  }
+  const playerWinner =
+    playerResults.blue.size === 1 &&
+    playerResults.red.size === 1 &&
+    [...playerResults.blue][0] !== [...playerResults.red][0]
+      ? [...playerResults.blue][0] === 1
+        ? "blue"
+        : "red"
+      : null;
+
+  const blueResult = binaryResult(map.blue_result);
+  const redResult = binaryResult(map.red_result);
+  const yBlueWin = binaryResult(map.y_blue_win);
+  const mapCandidates = new Set<MapWinnerSide>();
+  if (blueResult === 1) mapCandidates.add("blue");
+  if (blueResult === 0) mapCandidates.add("red");
+  if (redResult === 1) mapCandidates.add("red");
+  if (redResult === 0) mapCandidates.add("blue");
+  if (yBlueWin === 1) mapCandidates.add("blue");
+  if (yBlueWin === 0) mapCandidates.add("red");
+  if (mapCandidates.size > 1) return null;
+
+  const mapWinner = mapCandidates.size === 1 ? [...mapCandidates][0] : null;
+  if (playerWinner && mapWinner && playerWinner !== mapWinner) return null;
+  return mapWinner ?? playerWinner;
+}
+
+export function sumKnownNumbers(values: unknown[]): number | null {
+  const parsed = values.map(finiteNumberOrNull);
+  return parsed.every((value): value is number => value != null)
+    ? parsed.reduce((total, value) => total + value, 0)
+    : null;
+}
+
+export function normalizeMapQueryRow(row: QueryRow): QueryRow {
+  return {
+    ...row,
+    grid_game_index: row.canonical_game_index ?? row.grid_game_index,
+    grid_completion_source:
+      row.canonical_series_completion_source ?? row.grid_completion_source,
+  };
+}
+
+export {
+  canonicalSeriesStatus,
+  formatCompletionSource,
+  formatGameDate,
+  formatSeriesLabel,
+  formatSeriesScore,
+  groupMapsIntoSeries,
+  isQuarantinedSeriesRow,
+} from "./series";
 export type { SeriesCard } from "./series";
 
 export async function queryPackParquet(
@@ -159,9 +243,27 @@ async function mapSelectForPack(parquetUrl: string): Promise<string> {
     const available = new Set(columns.map((row) => String(row.column_name ?? "")));
     for (const column of [
       "source_grid",
+      "map_detail_source",
       "grid_series_id",
+      "grid_game_id",
       "grid_game_index",
       "grid_completion_source",
+      "series_format",
+      "series_format_source",
+      "series_format_stage_id",
+      "series_format_registry_snapshot_id",
+      "series_format_registry_verified",
+      "series_format_registry_conflict",
+      "canonical_series_id",
+      "scheduled_best_of",
+      "canonical_game_index",
+      "raw_source_game_index",
+      "raw_source_game_uid",
+      "canonical_series_status",
+      "canonical_series_completion_source",
+      "series_rating_eligible",
+      "canonical_series_winner_team_key",
+      "series_quarantine_reasons",
     ]) {
       if (available.has(column)) optionalColumns.push(column);
     }
@@ -172,14 +274,24 @@ async function mapSelectForPack(parquetUrl: string): Promise<string> {
   return optionalColumns.length ? `${MAP_SELECT.trimEnd()}\n  ,${optionalColumns.join(",\n  ")}` : MAP_SELECT;
 }
 
-function mapFilterClauses(opts: MapFilters): string[] {
+export function patchFilterClause(value: unknown): string {
+  const normalized = normalizePatchVersion(value);
+  if (!normalized) return "FALSE";
+  const [major, minor] = normalized.split(".").map(Number);
+  return `(
+    TRY_CAST(split_part(TRIM(CAST(patch AS VARCHAR)), '.', 1) AS INTEGER) = ${major}
+    AND TRY_CAST(split_part(TRIM(CAST(patch AS VARCHAR)), '.', 2) AS INTEGER) = ${minor}
+  )`;
+}
+
+export function mapFilterClauses(opts: MapFilters): string[] {
   const clauses: string[] = ["1=1"];
   if (opts.league) clauses.push(`league = '${esc(opts.league)}'`);
   if (opts.leagues?.length) {
     const list = opts.leagues.map((L) => `'${esc(L)}'`).join(", ");
     clauses.push(`league IN (${list})`);
   }
-  if (opts.patch) clauses.push(`CAST(patch AS VARCHAR) ILIKE '${esc(opts.patch)}%'`);
+  if (opts.patch) clauses.push(patchFilterClause(opts.patch));
   if (opts.team) {
     const t = esc(opts.team);
     clauses.push(`(blue_teamname ILIKE '%${t}%' OR red_teamname ILIKE '%${t}%')`);
@@ -199,11 +311,19 @@ function mapFilterClauses(opts: MapFilters): string[] {
       OR (blue_teamname ILIKE '%${b}%' AND red_teamname ILIKE '%${a}%')
     )`);
   }
-  if (opts.side === "blue" && opts.teams?.[0]) {
-    clauses.push(`blue_teamname ILIKE '%${esc(opts.teams[0])}%'`);
+  if (opts.side === "blue" && opts.teams?.length) {
+    clauses.push(
+      `(${opts.teams
+        .map((team) => `blue_teamname ILIKE '%${esc(team)}%'`)
+        .join(" OR ")})`,
+    );
   }
-  if (opts.side === "red" && opts.teams?.[0]) {
-    clauses.push(`red_teamname ILIKE '%${esc(opts.teams[0])}%'`);
+  if (opts.side === "red" && opts.teams?.length) {
+    clauses.push(
+      `(${opts.teams
+        .map((team) => `red_teamname ILIKE '%${esc(team)}%'`)
+        .join(" OR ")})`,
+    );
   }
   return clauses;
 }
@@ -224,7 +344,8 @@ export async function queryMaps(
     ORDER BY date DESC
     LIMIT ${lim}
   `;
-  return queryPackParquet(url, sql);
+  const rows = await queryPackParquet(url, sql);
+  return rows.map(normalizeMapQueryRow);
 }
 
 export async function queryMapsYears(
@@ -242,43 +363,140 @@ export async function queryMapsYears(
   return out.slice(0, lim);
 }
 
-export type ModelAccuracySummary = {
-  n: number;
-  eloHits: number;
-  eloRate: number | null;
-  draftOverlapHits: number;
-  draftOverlapN: number;
-  draftOverlapRate: number | null;
-};
+export type FavoriteHitRateResult =
+  | {
+      status: "ok";
+      n: number;
+      hits: number;
+      rate: number;
+    }
+  | {
+      status: "sample_empty";
+      n: 0;
+      hits: 0;
+      rate: null;
+    }
+  | {
+      status: "error";
+      n: 0;
+      hits: 0;
+      rate: null;
+      code: "query_failed" | "integrity_failed";
+    };
 
-/** Elo favorite accuracy from ratings_history for a year sample. */
-export async function queryEloAccuracy(
+export function favoriteHitRateFromRow(row: QueryRow | undefined): FavoriteHitRateResult {
+  if (!row) {
+    return { status: "sample_empty", n: 0, hits: 0, rate: null };
+  }
+  const duplicateHistory = finiteNumberOrNull(row.duplicate_history_games) ?? 0;
+  const duplicateMaps = finiteNumberOrNull(row.duplicate_map_games) ?? 0;
+  const invalidProbabilities = finiteNumberOrNull(row.invalid_probabilities) ?? 0;
+  const invalidOutcomes = finiteNumberOrNull(row.invalid_outcomes) ?? 0;
+  if (duplicateHistory || duplicateMaps || invalidProbabilities || invalidOutcomes) {
+    return {
+      status: "error",
+      n: 0,
+      hits: 0,
+      rate: null,
+      code: "integrity_failed",
+    };
+  }
+  const n = finiteNumberOrNull(row.n) ?? 0;
+  const hits = finiteNumberOrNull(row.hits) ?? 0;
+  if (n <= 0) return { status: "sample_empty", n: 0, hits: 0, rate: null };
+  if (
+    !Number.isInteger(n) ||
+    !Number.isInteger(hits) ||
+    hits < 0 ||
+    hits > n
+  ) {
+    return {
+      status: "error",
+      n: 0,
+      hits: 0,
+      rate: null,
+      code: "integrity_failed",
+    };
+  }
+  return { status: "ok", n, hits, rate: hits / n };
+}
+
+/** Threshold favorite hit rate; this is not a proper probability score. */
+export async function queryFavoriteHitRate(
   baseUrl: string,
   year: number,
-): Promise<{ n: number; hits: number; rate: number | null }> {
+): Promise<FavoriteHitRateResult> {
   const histUrl = `${baseUrl.replace(/\/$/, "")}/features/ratings_history.parquet`;
   const mapsU = mapsUrl(baseUrl, year);
   try {
     const rows = await queryPackSql(
       `
+      WITH history AS (
+        SELECT
+          game_uid,
+          COUNT(*)::INT AS row_count,
+          MIN(p_dual_elo) AS p_dual_elo
+        FROM read_parquet($HIST)
+        GROUP BY game_uid
+      ),
+      maps AS (
+        SELECT
+          game_uid,
+          COUNT(*)::INT AS row_count,
+          MIN(y_blue_win) AS y_blue_win
+        FROM read_parquet($MAPS)
+        GROUP BY game_uid
+      ),
+      joined AS (
+        SELECT
+          h.row_count AS history_rows,
+          m.row_count AS map_rows,
+          h.p_dual_elo,
+          m.y_blue_win
+        FROM history h
+        JOIN maps m USING (game_uid)
+      )
       SELECT
-        COUNT(*)::INT AS n,
         SUM(CASE
-          WHEN h.p_dual_elo >= 0.5 AND m.y_blue_win >= 0.5 THEN 1
-          WHEN h.p_dual_elo < 0.5 AND m.y_blue_win < 0.5 THEN 1
+          WHEN history_rows = 1
+            AND map_rows = 1
+            AND p_dual_elo BETWEEN 0 AND 1
+            AND y_blue_win IN (0, 1)
+          THEN 1 ELSE 0
+        END)::INT AS n,
+        SUM(CASE
+          WHEN history_rows = 1 AND map_rows = 1
+            AND p_dual_elo >= 0.5 AND y_blue_win = 1 THEN 1
+          WHEN history_rows = 1 AND map_rows = 1
+            AND p_dual_elo < 0.5 AND y_blue_win = 0 THEN 1
           ELSE 0
-        END)::INT AS hits
-      FROM read_parquet($HIST) h
-      JOIN read_parquet($MAPS) m ON h.game_uid = m.game_uid
-      WHERE h.p_dual_elo IS NOT NULL AND m.y_blue_win IS NOT NULL
+        END)::INT AS hits,
+        SUM(CASE WHEN history_rows <> 1 THEN 1 ELSE 0 END)::INT
+          AS duplicate_history_games,
+        SUM(CASE WHEN map_rows <> 1 THEN 1 ELSE 0 END)::INT
+          AS duplicate_map_games,
+        SUM(CASE
+          WHEN p_dual_elo IS NOT NULL AND NOT (p_dual_elo BETWEEN 0 AND 1)
+          THEN 1 ELSE 0 END
+        )::INT AS invalid_probabilities,
+        SUM(CASE
+          WHEN y_blue_win IS NOT NULL AND y_blue_win NOT IN (0, 1)
+          THEN 1 ELSE 0 END
+        )::INT AS invalid_outcomes
+      FROM joined
+      WHERE p_dual_elo IS NOT NULL AND y_blue_win IS NOT NULL
       `,
       { HIST: histUrl, MAPS: mapsU },
     );
-    const n = Number(rows[0]?.n ?? 0);
-    const hits = Number(rows[0]?.hits ?? 0);
-    return { n, hits, rate: n ? hits / n : null };
+    return favoriteHitRateFromRow(rows[0]);
   } catch {
-    return { n: 0, hits: 0, rate: null };
+    return {
+      status: "error",
+      n: 0,
+      hits: 0,
+      rate: null,
+      code: "query_failed",
+    };
   }
 }
 
@@ -327,7 +545,8 @@ export async function loadMatchBundle(
   for (const year of [...years].sort((a, b) => b - a)) {
     const map = await queryMapByGameId(baseUrl, year, gameId);
     if (!map) continue;
-    const players = await queryPlayersForGame(baseUrl, year, String(map.oe_gameid));
+    const playerGameId = String(map.oe_gameid ?? map.game_uid ?? gameId);
+    const players = await queryPlayersForGame(baseUrl, year, playerGameId);
     return { year, map, players };
   }
   return null;
@@ -337,13 +556,15 @@ export type MatchModelPrior = {
   pBlueWin: number | null;
   expectedFavorite: string | null;
   expectedKills: number | null;
+  expectedKillsN: number;
+  expectedKillsCutoff: string | null;
   killsLine: number | null;
   muDiff: number | null;
   playerMuDiff: number | null;
   sourceNote: string;
 };
 
-/** Dual Elo win prior from ratings_history + league mean kills as kill prior. */
+/** Dual Elo prior plus a strictly earlier-date, pack-year league kill benchmark. */
 export async function loadMatchModelPrior(
   baseUrl: string,
   year: number,
@@ -367,7 +588,13 @@ export async function loadMatchModelPrior(
        WHERE game_uid = '${esc(gameId)}'
        LIMIT 1`,
     );
-    if (rows[0]?.p_dual_elo != null) pBlueWin = Number(rows[0].p_dual_elo);
+    if (rows[0]?.p_dual_elo != null) {
+      const probability = Number(rows[0].p_dual_elo);
+      pBlueWin =
+        Number.isFinite(probability) && probability >= 0 && probability <= 1
+          ? probability
+          : null;
+    }
     if (rows[0]?.mu_diff != null) muDiff = Number(rows[0].mu_diff);
   } catch {
     pBlueWin = null;
@@ -387,17 +614,33 @@ export async function loadMatchModelPrior(
   }
 
   let expectedKills: number | null = null;
-  try {
-    const clause = league ? `WHERE league = '${esc(league)}'` : "";
-    const rows = await queryPackParquet(
-      mapsU,
-      `SELECT avg(total_kills) AS mu_kills
-       FROM read_parquet($PARQUET)
-       ${clause}`,
-    );
-    if (rows[0]?.mu_kills != null) expectedKills = Number(rows[0].mu_kills);
-  } catch {
-    expectedKills = null;
+  let expectedKillsN = 0;
+  const targetDate = String(map.date ?? "").trim();
+  if (targetDate) {
+    try {
+      const leagueClause = league ? `AND league = '${esc(league)}'` : "";
+      const escapedDate = esc(targetDate);
+      const rows = await queryPackParquet(
+        mapsU,
+        `SELECT
+           avg(total_kills) AS mu_kills,
+           count(total_kills)::INT AS n_kills
+         FROM read_parquet($PARQUET)
+         WHERE TRY_CAST(date AS TIMESTAMP) < TRY_CAST('${escapedDate}' AS TIMESTAMP)
+           ${leagueClause}
+           AND total_kills IS NOT NULL
+           AND total_kills >= 0`,
+      );
+      if (rows[0]?.mu_kills != null) expectedKills = Number(rows[0].mu_kills);
+      expectedKillsN = Number(rows[0]?.n_kills ?? 0);
+      if (!Number.isFinite(expectedKills ?? NaN) || expectedKillsN <= 0) {
+        expectedKills = null;
+        expectedKillsN = 0;
+      }
+    } catch {
+      expectedKills = null;
+      expectedKillsN = 0;
+    }
   }
 
   const killsLine =
@@ -415,34 +658,46 @@ export async function loadMatchModelPrior(
     pBlueWin,
     expectedFavorite,
     expectedKills,
+    expectedKillsN,
+    expectedKillsCutoff: targetDate || null,
     killsLine,
     muDiff,
     playerMuDiff,
     sourceNote:
       pBlueWin != null
-        ? "Winner: Dual Elo pre-match p. Kills: league mean total kills in pack year. Draft: raw composition plus separate pre-match strength when available."
-        : "Dual Elo history miss for this game_uid. Kills: league mean if available. Draft from picks when available.",
+        ? "Winner: pre-match rating-history probability. Kills: descriptive pack-year league mean using only maps on earlier dates; it is a naive benchmark, not a fitted kills forecast. Draft forecast is withheld."
+        : "Rating-history probability unavailable for this game. Kills use the same strictly earlier-date descriptive benchmark when enough rows exist. Draft forecast is withheld.",
   };
 }
 
 export type ChampAgg = {
   champion: string;
   n: number;
-  kills: number;
-  deaths: number;
-  assists: number;
-  gold: number;
+  kills: number | null;
+  killsN: number;
+  deaths: number | null;
+  deathsN: number;
+  assists: number | null;
+  assistsN: number;
+  gold: number | null;
+  goldN: number;
   dpm: number | null;
+  dpmN: number;
   cs: number | null;
+  csN: number;
   wr: number;
 };
 
 type ChampBucket = {
   n: number;
   k: number;
+  kN: number;
   d: number;
+  dN: number;
   a: number;
+  aN: number;
   gold: number;
+  goldN: number;
   dpm: number;
   dpmN: number;
   cs: number;
@@ -451,25 +706,54 @@ type ChampBucket = {
 };
 
 function emptyBucket(): ChampBucket {
-  return { n: 0, k: 0, d: 0, a: 0, gold: 0, dpm: 0, dpmN: 0, cs: 0, csN: 0, wins: 0 };
+  return {
+    n: 0,
+    k: 0,
+    kN: 0,
+    d: 0,
+    dN: 0,
+    a: 0,
+    aN: 0,
+    gold: 0,
+    goldN: 0,
+    dpm: 0,
+    dpmN: 0,
+    cs: 0,
+    csN: 0,
+    wins: 0,
+  };
 }
 
 function ingestChampRow(buckets: Map<string, ChampBucket>, r: QueryRow) {
   const champ = String(r.champion);
   const b = buckets.get(champ) ?? emptyBucket();
   b.n += 1;
-  b.k += Number(r.kills) || 0;
-  b.d += Number(r.deaths) || 0;
-  b.a += Number(r.assists) || 0;
-  b.gold += Number(r.totalgold) || 0;
-  if (r.dpm != null && Number.isFinite(Number(r.dpm))) {
-    b.dpm += Number(r.dpm);
+  const kills = finiteNumberOrNull(r.kills);
+  const deaths = finiteNumberOrNull(r.deaths);
+  const assists = finiteNumberOrNull(r.assists);
+  const gold = finiteNumberOrNull(r.totalgold);
+  const dpm = finiteNumberOrNull(r.dpm);
+  if (kills != null) {
+    b.k += kills;
+    b.kN += 1;
+  }
+  if (deaths != null) {
+    b.d += deaths;
+    b.dN += 1;
+  }
+  if (assists != null) {
+    b.a += assists;
+    b.aN += 1;
+  }
+  if (gold != null) {
+    b.gold += gold;
+    b.goldN += 1;
+  }
+  if (dpm != null) {
+    b.dpm += dpm;
     b.dpmN += 1;
   }
-  const cs =
-    r.minionkills != null || r.monsterkills != null
-      ? (Number(r.minionkills) || 0) + (Number(r.monsterkills) || 0)
-      : null;
+  const cs = playerCs(r);
   if (cs != null) {
     b.cs += cs;
     b.csN += 1;
@@ -483,16 +767,35 @@ function bucketsToAgg(buckets: Map<string, ChampBucket>, limit: number): ChampAg
     .map(([champion, b]) => ({
       champion,
       n: b.n,
-      kills: b.k / b.n,
-      deaths: b.d / b.n,
-      assists: b.a / b.n,
-      gold: b.gold / b.n,
+      kills: b.kN ? b.k / b.kN : null,
+      killsN: b.kN,
+      deaths: b.dN ? b.d / b.dN : null,
+      deathsN: b.dN,
+      assists: b.aN ? b.a / b.aN : null,
+      assistsN: b.aN,
+      gold: b.goldN ? b.gold / b.goldN : null,
+      goldN: b.goldN,
       dpm: b.dpmN ? b.dpm / b.dpmN : null,
+      dpmN: b.dpmN,
       cs: b.csN ? b.cs / b.csN : null,
+      csN: b.csN,
       wr: b.wins / b.n,
     }))
     .sort((a, b) => b.n - a.n || b.wr - a.wr)
     .slice(0, limit);
+}
+
+export function aggregateChampionRows(
+  rows: QueryRow[],
+  limit = Number.POSITIVE_INFINITY,
+): ChampAgg[] {
+  const buckets = new Map<string, ChampBucket>();
+  for (const row of rows) {
+    const champion = String(row.champion ?? "").trim();
+    if (!champion) continue;
+    ingestChampRow(buckets, { ...row, champion });
+  }
+  return bucketsToAgg(buckets, limit);
 }
 
 export async function queryPlayerChampStats(
@@ -551,7 +854,8 @@ export async function queryRosterChampStats(
     const url = playersUrl(baseUrl, year);
     const rows = await queryPackParquet(
       url,
-      `SELECT playername, champion, kills, deaths, assists, totalgold, dpm, minionkills, monsterkills, result
+      `SELECT playername, champion, kills, deaths, assists, totalgold, dpm,
+              minionkills, monsterkills, cspm, gamelength, result
        FROM read_parquet($PARQUET)
        WHERE playername IN (${inList})
          AND champion IS NOT NULL`,

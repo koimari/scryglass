@@ -1,5 +1,7 @@
 /** Pure display helpers — keep out of DuckDB-WASM import graph. */
 
+import { normalizePatchOrBuild } from "./patch";
+
 export function champIconUrl(name: string | null | undefined): string | null {
   if (!name) return null;
   const key = String(name)
@@ -28,7 +30,7 @@ export function champIconUrl(name: string | null | undefined): string | null {
     AurelionSol: "AurelionSol",
   };
   const id = aliases[key] ?? key;
-  return `https://ddragon.leagueoflegends.com/cdn/15.14.1/img/champion/${id}.png`;
+  return `https://ddragon.leagueoflegends.com/cdn/img/champion/tiles/${id}_0.jpg`;
 }
 
 export function formatGold(n: unknown): string {
@@ -41,17 +43,23 @@ export function formatGold(n: unknown): string {
 
 export function formatClock(gamelengthSec: unknown, lengthMin?: unknown): string {
   if (lengthMin != null && Number.isFinite(Number(lengthMin))) {
-    const m = Number(lengthMin);
-    const mins = Math.floor(m);
-    const secs = Math.round((m - mins) * 60);
-    return `${mins}:${String(secs).padStart(2, "0")}`;
+    const totalSeconds = Math.round(Number(lengthMin) * 60);
+    if (totalSeconds < 0) return "—";
+    return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
   }
   if (gamelengthSec == null) return "—";
   const s = Number(gamelengthSec);
-  if (!Number.isFinite(s)) return "—";
-  const mins = Math.floor(s / 60);
-  const secs = Math.round(s % 60);
-  return `${mins}:${String(secs).padStart(2, "0")}`;
+  if (!Number.isFinite(s) || s < 0) return "—";
+  const totalSeconds = Math.round(s);
+  return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
+}
+
+/**
+ * Reduce a patch or full game build to its public major.minor patch identity.
+ * No current-patch assumption is embedded here.
+ */
+export function normalizePatchVersion(value: unknown): string | null {
+  return normalizePatchOrBuild(value);
 }
 
 export type FormatRow = Record<string, unknown>;

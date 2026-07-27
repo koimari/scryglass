@@ -2,8 +2,14 @@ import { notFound } from "next/navigation";
 import { PlayerEloDetail } from "@/components/PlayerEloDetail";
 import type {
   PlayerRating,
+  PlayerRatingsMeta,
   PlayerRecord,
   TeamRating,
+} from "@/lib/pack";
+import {
+  currentMembershipContext,
+  playerOutcomeOrderingVerified,
+  verifiedPlayerAffiliation,
 } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
@@ -18,32 +24,37 @@ export default async function PlayerEloPage({ params }: Props) {
   const players = await readPackJson<PlayerRating[]>(man, "features/player_ratings_snapshot.json");
   const teams = await readPackJson<TeamRating[]>(man, "features/ratings_snapshot.json");
   let playerRecords: Record<string, PlayerRecord> = {};
+  let playerRatingsMeta: PlayerRatingsMeta | null = null;
   try {
     playerRecords = await readPackJson(man, "features/player_records.json");
   } catch {
     playerRecords = {};
+  }
+  try {
+    playerRatingsMeta = await readPackJson<PlayerRatingsMeta>(
+      man,
+      "features/player_ratings_meta.json",
+    );
+  } catch {
+    playerRatingsMeta = null;
   }
 
   const player = players.find((p) => p.player.toLowerCase() === name.toLowerCase());
   if (!player) notFound();
 
   const rec = playerRecords[player.player];
-  const team = player.last_team
-    ? teams.find((t) => t.team.toLowerCase() === player.last_team!.toLowerCase())
-    : null;
-
-  // Peers: same primary league when available, else same last_team pool / top sample
-  const primary = rec?.primary;
-  let peers = players.filter((p) => (p.n_maps ?? 0) >= 20);
-  if (primary) {
-    const narrowed = peers.filter((p) => playerRecords[p.player]?.primary === primary);
-    if (narrowed.length >= 10) peers = narrowed;
-  } else if (player.last_team) {
-    peers = peers.filter((p) => p.last_team === player.last_team);
-  }
-  const intlPeers = players.filter(
-    (p) => (p.n_maps ?? 0) >= 20 && Boolean(playerRecords[p.player]?.intl),
+  const membershipContext = currentMembershipContext(man);
+  const playerOrderingVerified = playerOutcomeOrderingVerified(
+    playerRatingsMeta,
+    players,
   );
+  const currentAffiliation = verifiedPlayerAffiliation(rec, membershipContext);
+  const team = currentAffiliation
+    ? teams.find(
+        (candidate) =>
+          candidate.team.toLowerCase() === currentAffiliation.team.toLowerCase(),
+      )
+    : null;
 
   const baseUrl = man.base_url || `/packs/${man.pack_id}`;
 
@@ -52,11 +63,13 @@ export default async function PlayerEloPage({ params }: Props) {
       player={player}
       record={rec}
       team={team}
-      peers={peers}
-      intlPeers={intlPeers}
       baseUrl={baseUrl}
       years={man.filters.years}
       manifest={man}
+      currentAffiliation={currentAffiliation}
+      membershipContext={membershipContext}
+      playerRatingsMeta={playerRatingsMeta}
+      playerOrderingVerified={playerOrderingVerified}
     />
   );
 }

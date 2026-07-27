@@ -1,6 +1,11 @@
 "use client";
 
-import { formatGameDate, type QueryRow } from "@/lib/duck";
+import {
+  finiteNumberOrNull,
+  formatGameDate,
+  resolveMapWinnerSide,
+  type QueryRow,
+} from "@/lib/duck";
 import { champIconUrl, formatClock, formatGold, playerCs, sortPlayersByRole } from "@/lib/format";
 
 type Props = {
@@ -48,11 +53,37 @@ function BanStrip({ champs, side }: { champs: string[]; side: "blue" | "red" }) 
   );
 }
 
-function fmtObj(n: unknown): string {
+export function formatObjectiveCount(n: unknown): string {
   if (n == null || n === "") return "—";
   const v = Number(n);
-  if (!Number.isFinite(v)) return String(n);
-  return String(Math.round(v));
+  if (!Number.isFinite(v) || !Number.isInteger(v) || v < 0) return "—";
+  return String(v);
+}
+
+function fmtPlayerStat(value: unknown): string {
+  const parsed = finiteNumberOrNull(value);
+  return parsed == null || !Number.isInteger(parsed) || parsed < 0
+    ? "—"
+    : String(parsed);
+}
+
+export function formatPlayerKda(row: QueryRow): string {
+  return `${fmtPlayerStat(row.kills)}/${fmtPlayerStat(row.deaths)}/${fmtPlayerStat(
+    row.assists,
+  )}`;
+}
+
+function nonNegativeOrNull(value: unknown): number | null {
+  const parsed = finiteNumberOrNull(value);
+  return parsed != null && parsed >= 0 ? parsed : null;
+}
+
+export function detailSourceLabel(source: string): string {
+  if (source === "oe_wide_feature_map") return "OE wide-map detail";
+  if (source === "grid_event_detail") return "GRID event detail";
+  if (source === "oe_team_aggregate") return "OE team-row detail";
+  if (source === "grid_team_aggregate") return "GRID team-row detail";
+  return "Detail provenance unavailable";
 }
 
 function ObjCell({
@@ -67,10 +98,13 @@ function ObjCell({
   title: string;
 }) {
   return (
-    <div className="obj-cell" aria-label={`${title}, blue ${fmtObj(blue)}, red ${fmtObj(red)}`}>
-      <span className="obj-blue font-mono">{fmtObj(blue)}</span>
+    <div
+      className="obj-cell"
+      aria-label={`${title}, blue ${formatObjectiveCount(blue)}, red ${formatObjectiveCount(red)}`}
+    >
+      <span className="obj-blue font-mono">{formatObjectiveCount(blue)}</span>
       <span className="obj-label">{label}</span>
-      <span className="obj-red font-mono">{fmtObj(red)}</span>
+      <span className="obj-red font-mono">{formatObjectiveCount(red)}</span>
     </div>
   );
 }
@@ -82,9 +116,10 @@ function PlayerHalf({
   row: QueryRow;
   mirror: boolean;
 }) {
-  const cs = playerCs(row);
-  const gold = formatGold(row.totalgold);
-  const kda = `${row.kills ?? 0}/${row.deaths ?? 0}/${row.assists ?? 0}`;
+  const rawCs = playerCs(row);
+  const cs = rawCs != null && Number.isFinite(rawCs) && rawCs >= 0 ? rawCs : null;
+  const gold = formatGold(nonNegativeOrNull(row.totalgold));
+  const kda = formatPlayerKda(row);
   const name = String(row.playername ?? "—");
   const champ = String(row.champion ?? "");
 
@@ -122,13 +157,17 @@ function PlayerHalf({
 export function MatchScoreboard({ map, players, draftPctBlue }: Props) {
   const blueName = String(map.blue_teamname ?? "Blue");
   const redName = String(map.red_teamname ?? "Red");
-  const blueWin = Number(map.blue_result) === 1;
-  const redWin = Number(map.red_result) === 1;
-  const clock = formatClock(map.gamelength, map.length_min);
-  const blueGold = formatGold(map.blue_totalgold);
-  const redGold = formatGold(map.red_totalgold);
-  const blueKills = fmtObj(map.blue_teamkills);
-  const redKills = fmtObj(map.red_teamkills);
+  const winnerSide = resolveMapWinnerSide(map, players);
+  const blueWin = winnerSide === "blue";
+  const redWin = winnerSide === "red";
+  const clock = formatClock(
+    nonNegativeOrNull(map.gamelength),
+    nonNegativeOrNull(map.length_min),
+  );
+  const blueGold = formatGold(nonNegativeOrNull(map.blue_totalgold));
+  const redGold = formatGold(nonNegativeOrNull(map.red_totalgold));
+  const blueKills = formatObjectiveCount(map.blue_teamkills);
+  const redKills = formatObjectiveCount(map.red_teamkills);
 
   const bySide = {
     Blue: sortPlayersByRole(players.filter((p) => String(p.side) === "Blue")),
@@ -144,12 +183,15 @@ export function MatchScoreboard({ map, players, draftPctBlue }: Props) {
 
   const blueBans = bans("blue", map);
   const redBans = bans("red", map);
+  const detailSource = String(map.map_detail_source ?? "");
 
   return (
     <article className="scoreboard anim-fade-up" aria-label={`${blueName} vs ${redName}`}>
       <header className="sb-header">
         <div className={`sb-team sb-team-blue ${blueWin ? "is-winner" : ""}`}>
-          <span className="sb-result">{blueWin ? "Victory" : "Defeat"}</span>
+          <span className="sb-result">
+            {winnerSide == null ? "Result —" : blueWin ? "Victory" : "Defeat"}
+          </span>
           <span className="sb-teamname">{blueName}</span>
           <div className="sb-team-stats">
             <span className="font-mono">{blueGold} gold</span>
@@ -168,7 +210,9 @@ export function MatchScoreboard({ map, players, draftPctBlue }: Props) {
           )}
         </div>
         <div className={`sb-team sb-team-red ${redWin ? "is-winner" : ""}`}>
-          <span className="sb-result">{redWin ? "Victory" : "Defeat"}</span>
+          <span className="sb-result">
+            {winnerSide == null ? "Result —" : redWin ? "Victory" : "Defeat"}
+          </span>
           <span className="sb-teamname">{redName}</span>
           <div className="sb-team-stats">
             <span className="font-mono">{redGold} gold</span>
@@ -217,6 +261,12 @@ export function MatchScoreboard({ map, players, draftPctBlue }: Props) {
         <span>{formatGameDate(map.date)}</span>
         <span>{String(map.league ?? "")}</span>
         <span>Patch {String(map.patch ?? "—")}</span>
+        <span title="Map-level detail provenance; unavailable fields remain blank.">
+          {detailSourceLabel(detailSource)}
+        </span>
+        {players.length !== 10 && (
+          <span>Player detail incomplete · {players.length}/10 rows</span>
+        )}
         <span className="muted">{String(map.oe_gameid ?? map.game_uid ?? "")}</span>
       </div>
     </article>

@@ -892,6 +892,17 @@ def ingest_grid(
             env_file=env_file,
         )
     team_df, player_df, parse_meta = _parse_local_grid()
+    fresh_completed_games = (
+        int(team_df["gameid"].nunique())
+        if not team_df.empty and "gameid" in team_df.columns
+        else 0
+    )
+    current_fetch_files = int(fetch_meta.get("files_downloaded", 0)) + int(
+        fetch_meta.get("files_existing", 0)
+    )
+    required_refresh_available = fresh_completed_games > 0 and (
+        not download or current_fetch_files > 0
+    )
     cached_team, cached_player = _load_cached_grid()
     if not cached_team.empty or not cached_player.empty:
         # Freshly parsed raw files win, while a provider throttle or a new
@@ -908,8 +919,11 @@ def ingest_grid(
     team_df.to_parquet(PARQUET_DIR / "grid_team_games.parquet", index=False)
     player_df.to_parquet(PARQUET_DIR / "grid_player_games.parquet", index=False)
     (PARQUET_DIR / "grid_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    if required and team_df.empty:
-        raise GridIngestError("GRID refresh was required but produced no completed games")
+    if required and not required_refresh_available:
+        raise GridIngestError(
+            "GRID refresh was required but the current run produced no "
+            "completed game from its requested source window"
+        )
     print(f"[grid] games={meta['games']} team_rows={meta['team_rows']} player_rows={meta['player_rows']}")
     return team_df, player_df
 

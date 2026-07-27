@@ -6,23 +6,28 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   groupMapsIntoSeries,
   formatCompletionSource,
+  formatSeriesLabel,
+  formatSeriesScore,
+  finiteNumberOrNull,
+  isQuarantinedSeriesRow,
   listLeagues,
-  queryEloAccuracy,
+  queryFavoriteHitRate,
   queryMaps,
   formatGameDate,
-  type QueryRow,
+  resolveMapWinnerSide,
+  type FavoriteHitRateResult,
   type SeriesCard,
 } from "@/lib/duck";
-import { expandTeamQuery, teamSlug } from "@/lib/pack";
+import { canonicalTeamDisplay, teamSlug } from "@/lib/pack";
 
 type Props = {
   baseUrl: string;
   years: number[];
 };
 
-function blueWon(m: QueryRow): boolean {
-  if (m.y_blue_win != null) return Number(m.y_blue_win) >= 0.5;
-  return m.blue_result === 1 || m.blue_result === true || m.blue_result === "1";
+function formatNullableCount(value: unknown): string {
+  const parsed = finiteNumberOrNull(value);
+  return parsed == null ? "—" : String(Math.round(parsed));
 }
 
 function TagInput({
@@ -43,17 +48,7 @@ function TagInput({
     if (!parts.length) return;
     const next = [...tags];
     for (const p of parts) {
-      // Use original token if not alias; else title-case from known aliases via first match in expand list
-      const pretty = (() => {
-        const needles = expandTeamQuery(p);
-        // Find a needle that looks like a full name
-        const full = needles.find((n) => n.includes(" ") || n.length > 4);
-        if (full && full !== p.toLowerCase()) {
-          // recover casing from common pattern - capitalize words
-          return full.replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\bOf\b/, "of");
-        }
-        return p;
-      })();
+      const pretty = canonicalTeamDisplay(p);
       if (!next.some((t) => t.toLowerCase() === pretty.toLowerCase())) next.push(pretty);
     }
     onChange(next);
@@ -108,7 +103,11 @@ function SeriesTile({
   onToggle: () => void;
 }) {
   const sourceLabel = s.source === "grid" ? "GRID freshness" : s.source === "mixed" ? "OE + GRID" : null;
-  const completionLabel = formatCompletionSource(s.completionSource);
+  const completionLabel =
+    formatCompletionSource(s.completionSource) ??
+    (s.completionSource === "score_to_format_validation"
+      ? "Canonical score-to-format validation"
+      : null);
   return (
     <article className={`series-card ${open ? "is-open" : ""}`}>
       <button type="button" className="series-card-head" onClick={onToggle}>
@@ -116,7 +115,7 @@ function SeriesTile({
           <p className="series-kicker">
             {s.date} · {s.league}
             {s.patch ? ` · ${s.patch}` : ""} ·{" "}
-            {s.bestOf ? `Bo${s.bestOf}` : "Incomplete series"}
+            {formatSeriesLabel(s)}
             {sourceLabel ? ` · ${sourceLabel}` : ""}
             {completionLabel ? ` · ${completionLabel}` : ""}
           </p>
@@ -129,7 +128,7 @@ function SeriesTile({
               {s.teamA}
             </Link>
             <span className="series-score">
-              {s.winsA}–{s.winsB}
+              {formatSeriesScore(s)}
             </span>
             <Link
               href={`/elo/team/${teamSlug(s.teamB)}`}
@@ -149,18 +148,33 @@ function SeriesTile({
           {s.games.map((g) => {
             const id = String(g.oe_gameid ?? g.game_uid);
             const year = s.year || Number(formatGameDate(g.date).slice(0, 4));
-            const bw = blueWon(g);
-            const winner = bw ? String(g.blue_teamname) : String(g.red_teamname);
+            const winnerSide = resolveMapWinnerSide(g);
+            const winner =
+              winnerSide === "blue"
+                ? String(g.blue_teamname)
+                : winnerSide === "red"
+                  ? String(g.red_teamname)
+                  : "Winner unavailable";
+            const length = finiteNumberOrNull(g.length_min);
             return (
               <li key={id}>
                 <Link href={`/browse/match/${encodeURIComponent(id)}?year=${year}`}>
                   <span className="font-mono">G{String(g.game ?? "?")}</span>
-                  <span className={bw ? "text-[var(--side-blue)]" : "text-[var(--side-red)]"}>
+                  <span
+                    className={
+                      winnerSide === "blue"
+                        ? "text-[var(--side-blue)]"
+                        : winnerSide === "red"
+                          ? "text-[var(--side-red)]"
+                          : "muted"
+                    }
+                  >
                     {winner}
                   </span>
                   <span className="muted">
-                    {Number(g.blue_teamkills) || 0}–{Number(g.red_teamkills) || 0} ·{" "}
-                    {Number(g.length_min)?.toFixed?.(0) ?? "—"}m
+                    {formatNullableCount(g.blue_teamkills)}–
+                    {formatNullableCount(g.red_teamkills)} ·{" "}
+                    {length == null ? "—" : length.toFixed(0)}m
                   </span>
                   <span className="row-link">Board »</span>
                 </Link>
@@ -199,9 +213,8 @@ export function BrowseMatches({ baseUrl, years }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
-  const [eloAcc, setEloAcc] = useState<{ n: number; hits: number; rate: number | null } | null>(
-    null,
-  );
+  const [favoriteRate, setFavoriteRate] = useState<FavoriteHitRateResult | null>(null);
+  const [resultDisclosure, setResultDisclosure] = useState<string | null>(null);
 
   const pageSize = 12;
 
@@ -244,20 +257,54 @@ export function BrowseMatches({ baseUrl, years }: Props) {
         side: side || undefined,
         limit: 400,
       });
-      const grouped = groupMapsIntoSeries(data.map((r) => ({ ...r, _year: year })));
+      const unavailableOutcomes = data.filter((row) => resolveMapWinnerSide(row) == null).length;
+      const quarantined = data.filter(isQuarantinedSeriesRow).length;
+      const displayable = data.filter((row) => !isQuarantinedSeriesRow(row));
+      const grouped = groupMapsIntoSeries(
+        displayable.map((r) => ({ ...r, _year: year })),
+      );
+      const canonicalSeries = grouped.filter(
+        (record) => record.recordKind === "canonical_series",
+      ).length;
+      const unverifiedGroups = grouped.length - canonicalSeries;
+      const capped = data.length >= 400;
       setSeries(grouped);
       if (grouped[0]) setOpenKey(grouped[0].key);
       setStatus(
         grouped.length
-          ? `${grouped.length} series · ${data.length} games`
+          ? [
+              canonicalSeries
+                ? `${canonicalSeries} canonical series`
+                : null,
+              unverifiedGroups
+                ? `${unverifiedGroups} unverified map group${
+                    unverifiedGroups === 1 ? "" : "s"
+                  }`
+                : null,
+              `${displayable.length} maps`,
+              capped ? "latest 400 rows returned" : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")
           : "No matches found for these filters.",
       );
-      const acc = await queryEloAccuracy(baseUrl, year);
-      setEloAcc(acc);
+      const omissions = [
+        unavailableOutcomes
+          ? `${unavailableOutcomes} map${unavailableOutcomes === 1 ? "" : "s"} retained with outcome unavailable`
+          : null,
+        quarantined
+          ? `${quarantined} map${quarantined === 1 ? "" : "s"} omitted: canonical series quarantined`
+          : null,
+        capped ? "Counts describe the latest returned sample, not a complete total" : null,
+      ].filter(Boolean);
+      setResultDisclosure(omissions.length ? omissions.join(" · ") : null);
+      const rate = await queryFavoriteHitRate(baseUrl, year);
+      setFavoriteRate(rate);
       setHasLoaded(true);
     } catch {
       setError("Could not load matches for this selection. Try again or choose another year.");
       setSeries([]);
+      setResultDisclosure(null);
       setStatus("Could not load matches.");
       setHasLoaded(true);
     } finally {
@@ -283,18 +330,26 @@ export function BrowseMatches({ baseUrl, years }: Props) {
     <div className="space-y-6">
       <div className="model-acc-strip">
         <div>
-          <strong>Model check · Elo favorite</strong>{" "}
-          {eloAcc?.rate != null ? (
+          <strong>Model check · favorite hit rate</strong>{" "}
+          {favoriteRate?.status === "ok" ? (
             <>
-              {(100 * eloAcc.rate).toFixed(1)}% · {eloAcc.hits}/{eloAcc.n} games in {year}
+              {(100 * favoriteRate.rate).toFixed(1)}% · {favoriteRate.hits}/
+              {favoriteRate.n} eligible games in {year}
             </>
+          ) : favoriteRate?.status === "sample_empty" ? (
+            "No eligible rated games in this year"
+          ) : favoriteRate?.status === "error" ? (
+            favoriteRate.code === "integrity_failed"
+              ? "Unavailable · rating/map integrity check failed"
+              : "Unavailable · pack query failed"
           ) : (
-            "…"
+            "Loading…"
           )}
         </div>
         <div className="muted text-sm">
-          Elo accuracy is the pre-match favorite against the final result. Draft overlap appears on
-          individual match boards.
+          Threshold diagnostic only: whether the pre-match rating favorite won. It is not a proper
+          probability score; this pack does not attach log loss, Brier score, or calibration results
+          here. Draft forecast remains withheld.
         </div>
       </div>
 
@@ -356,6 +411,7 @@ export function BrowseMatches({ baseUrl, years }: Props) {
         </div>
       )}
       {!loading && <p className="status-hint" aria-live="polite">{status}</p>}
+      {!loading && resultDisclosure && <p className="status-hint">{resultDisclosure}</p>}
 
       <div className="series-gallery">
         {pageRows.map((s) => (

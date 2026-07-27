@@ -36,6 +36,21 @@ def _dist(a: dict[str, float], b: dict[str, float]) -> float:
     return math.hypot(float(a["x"]) - float(b["x"]), float(a["z"]) - float(b["z"]))
 
 
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _optional_int(value: Any) -> int | None:
+    parsed = _optional_float(value)
+    return int(parsed) if parsed is not None else None
+
+
 def load_events(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with path.open() as f:
@@ -86,14 +101,14 @@ def extract_positions(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "championName": p.get("championName"),
                     "playerName": p.get("playerName"),
                     "role": p.get("role"),
-                    "alive": bool(p.get("alive", True)),
+                    "alive": p.get("alive") if isinstance(p.get("alive"), bool) else None,
                     "x": float(pos["x"]),
                     "z": float(pos["z"]),
-                    "totalGold": float(p.get("totalGold") or 0),
-                    "currentGold": float(p.get("currentGold") or 0),
-                    "level": int(p.get("level") or 0),
-                    "health": float(p.get("health") or 0),
-                    "healthMax": float(p.get("healthMax") or 0),
+                    "totalGold": _optional_float(p.get("totalGold")),
+                    "currentGold": _optional_float(p.get("currentGold")),
+                    "level": _optional_int(p.get("level")),
+                    "health": _optional_float(p.get("health")),
+                    "healthMax": _optional_float(p.get("healthMax")),
                 }
             )
     return rows
@@ -112,8 +127,8 @@ def extract_epic_kills(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "killer": o.get("killer"),
                 "killerTeamID": o.get("killerTeamID"),
                 "assistants": list(o.get("assistants") or []),
-                "x": float(pos.get("x") or 0),
-                "z": float(pos.get("z") or 0),
+                "x": _optional_float(pos.get("x")),
+                "z": _optional_float(pos.get("z")),
                 "killType": o.get("killType"),
                 "localGold": o.get("localGold"),
                 "globalGold": o.get("globalGold"),
@@ -134,8 +149,8 @@ def extract_champion_kills(events: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "killer": o.get("killer"),
                 "victim": o.get("victim"),
                 "assistants": list(o.get("assistants") or []),
-                "x": float(pos.get("x") or 0),
-                "z": float(pos.get("z") or 0),
+                "x": _optional_float(pos.get("x")),
+                "z": _optional_float(pos.get("z")),
             }
         )
     return rows
@@ -172,6 +187,12 @@ def analyze_voidgrub_window(
 
     first = min(grubs, key=lambda k: k["gameTime_ms"])
     last = max(grubs, key=lambda k: k["gameTime_ms"])
+    if first.get("x") is None or first.get("z") is None:
+        return {
+            "n_grubs": len(grubs),
+            "status": "unavailable_missing_pit_position",
+            "note": "VoidGrub events exist, but the feed omitted the pit position.",
+        }
     pit = {"x": first["x"], "z": first["z"]}
     t0, t1 = first["gameTime_ms"] - pre_ms, last["gameTime_ms"] + post_ms
 

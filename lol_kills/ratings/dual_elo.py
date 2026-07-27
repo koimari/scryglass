@@ -10,10 +10,8 @@ from __future__ import annotations
 import json
 import math
 from collections import defaultdict
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 
-import numpy as np
 import pandas as pd
 
 from lol_kills.etl.aliases import normalize_team
@@ -53,10 +51,39 @@ def total_mu(st: TeamState) -> float:
     return st.mu_regional + st.mu_meta
 
 
+def winner_relative_mov(
+    y_blue_win: float,
+    blue_gold_diff: float | None,
+    length_min: float | None,
+    mov_scale: float,
+) -> float:
+    """Return a side-symmetric post-match margin multiplier.
+
+    Oracle's Elixir gold difference is blue-relative.  Reorienting it to the
+    winner before applying the nonlinear multiplier ensures that a blue win by
+    +X gold and the side-swapped red win by -X gold receive the same weight.
+    """
+
+    outcome = float(y_blue_win)
+    if outcome not in (0.0, 1.0):
+        raise ValueError("y_blue_win must be binary for a rating update")
+    if blue_gold_diff is None or pd.isna(blue_gold_diff):
+        return 1.0
+    duration = 30.0 if length_min is None or pd.isna(length_min) else float(length_min)
+    duration = max(duration, 1.0)
+    winner_sign = 1.0 if outcome == 1.0 else -1.0
+    winner_gold_diff = winner_sign * float(blue_gold_diff)
+    return 1.0 + float(mov_scale) * math.tanh(
+        winner_gold_diff / (200.0 * duration)
+    )
+
+
 def build_dual_ratings(
     maps: pd.DataFrame,
     cfg: DualEloConfig | None = None,
     lineup_by_game: dict[str, str] | None = None,
+    *,
+    write: bool = True,
 ) -> pd.DataFrame:
     """
     Sequential dual Elo. Returns frame aligned to maps index with pre-match features.
@@ -130,10 +157,14 @@ def build_dual_ratings(
         g10 = row.get("blue_golddiffat15")
         if pd.isna(g10):
             g10 = row.get("blue_golddiffat10")
-        length = row.get("length_min") or (float(row["gamelength"]) / 60.0 if pd.notna(row.get("gamelength")) else 30.0)
-        mov = 1.0
-        if pd.notna(g10) and length:
-            mov = 1.0 + cfg.mov_scale * math.tanh(float(g10) / (200.0 * max(float(length), 1.0)))
+        length_value = row.get("length_min")
+        if pd.isna(length_value):
+            length_value = (
+                float(row["gamelength"]) / 60.0
+                if pd.notna(row.get("gamelength"))
+                else 30.0
+            )
+        mov = winner_relative_mov(y, g10, length_value, cfg.mov_scale)
 
         exp_b = expected_score(mu_b, mu_r)
         if intl:
@@ -152,6 +183,9 @@ def build_dual_ratings(
         states[bt], states[rt] = sb, sr
 
     out = pd.DataFrame(rows)
+    if not write:
+        return out
+
     FEATURES_DIR.mkdir(parents=True, exist_ok=True)
     path = FEATURES_DIR / "ratings.parquet"
     out.to_parquet(path, index=False)

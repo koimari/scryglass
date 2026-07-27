@@ -1,0 +1,250 @@
+{
+  "schema_version": "1.0.0",
+  "snapshot_id": "riot-tier1-current-2026-07-26",
+  "authority": "Riot Games LoL Esports",
+  "observed_at": "2026-07-26T18:00:00Z",
+  "review_due_at": "2026-08-02T23:59:59Z",
+  "scope": "Current participants in each Riot Tier 1 regional Split 3 tournament. Tournament participation is current league membership for public ladder/filter purposes; historical participation remains unchanged.",
+  "tournaments": [
+    {
+      "tournament_id": "115548147890329817",
+      "league": "LCK",
+      "name": "LCK - Split 3 2026",
+      "status": "current",
+      "classification": "regional_tier1",
+      "source_url": "https://lolesports.com/en-US/season/115547545029543948/handbook/115548016979679447/league/98767991310872058",
+      "participants": [
+        {"display_name": "Hanwha Life Esports", "short_code": "HLE"},
+        {"display_name": "T1", "short_code": "T1"},
+        {"display_name": "BNK FEARX", "short_code": "BFX"},
+        {"display_name": "DN SOOPers", "short_code": "DNS"},
+        {"display_name": "HANJIN BRION", "short_code": "BRO"},
+        {"display_name": "Gen.G", "short_code": "GEN"},
+        {"display_name": "Dplus Kia", "short_code": "DK"},
+        {"display_name": "KT Rolster", "short_code": "KT"},
+        {"display_name": "Nongshim RedForce", "short_code": "NS"},
+        {"display_name": "KIWOOM DRX", "short_code": "KRX"}
+      ],
+      "stages": [
+        {
+          "stage_id": "regular-season",
+          "label": "Regular Season",
+          "scheduled_best_of": null,
+          "format_status": "unverified",
+          "evidence": "Riot confirms triple round robin groups but does not state the series length on the reviewed handbook page."
+        },
+        {
+          "stage_id": "play-ins",
+          "label": "Play-ins",
+          "scheduled_best_of": null,
+          "format_status": "unverified",
+          "evidence": "Riot confirms the bracket structure but does not state the series length on the reviewed handbook page."
+        },
+        {
+          "stage_id": "playoffs",
+          "label": "Playoffs",
+          "scheduled_best_of": null,
+          "format_status": "unverified",
+          "evidence": "Riot confirms double elimination but does not state the series length on the reviewed handbook page."
+        }
+      ]
+    },
+    {
+      "tournament_id": "115616254668930796",
+      "league": "LPL",
+      "name": "LPL - Split 3 2026",
+      "status": "current",
+      "classification": "regional_tier1",
+      "source_url": "https://lolesports.com/en-US/season/115547545029543948/handbook/115548016979679447/league/98767991314006698",
+      "participants": [
+        {"display_name": "Bilibili Gaming", "short_code": "BLG"},
+        {"display_name": "Top Esports", "short_code": "TES"},
+        {"display_name": "Team WE", "short_code": "WE"},
+        {"display_name": "Anyone's Legend", "short_code": "AL"},
+        {"display_name": "JD Gaming", "short_code": "JDG"},
+        {"display_name": "LGD Gaming", "short_code": "LGD"},
+        {"display_name": "Edward Gaming", "short_code": "EDG"},
+        {"display_name": "ThunderTalk Gaming", "short_code": "TT"},
+        {"display_name": "Invictus Gaming", "short_code": "IG"},
+        {"display_name": "LNG Esports", "short_code": "LNG"},
+        {"display_name": "Ninjas in Pyjamas", "short_code": "NIP"},
+        {"display_name": "Weibo Gaming", "short_code": "WBG"}
+      ],
+      "stages": [
+        {
+          "stage_id": "group-stage",
+          "label": "Ascend and Nirvana Group Stage",
+          "tournament_label_patterns": ["group ascend", "group nirvana"],
+          "default_when_playoffs": false,
+          "scheduled_best_of": 3,
+          "format_status": "verified",
+          "evidence": "Riot states both groups use double round-robin BO3."
+        },
+        {
+          "stage_id": "knights-rival-stage",
+          "label": "Knights' Rival Stage",
+          "tournament_label_patterns": ["knight"],
+          "scheduled_best_of": 5,
+          "format_status": "verified",
+          "evidence": "Riot states the Knights' Rival Stage uses BO5."
+        },
+        {
+          "stage_id": "playoffs",
+          "label": "Playoffs",
+          "scheduled_best_of": null,
+          "format_status": "unverified",
+          "evidence": "Riot confirms double elimination but does not state the series length on the reviewed handbook page."
+        }
+      ]
+    },
+    {
+      "tournament_id": "115548681802226458",
+      "league": "LEC",
+      "name": "LEC - Split 3 2026",
+      "status": "current",
+      "classification": "regional_tier1",
+      "source_url": "https://lolesports.com/en-US/season/115547545029543948/handbook/115548016979679447/league/98767991302996019",
+      "participants": [
+        {"display_name": "Team Heretics", "short_code": "TH"},
+        {"display_name": "Natus Vincere", "short_code": "NAVI"},
+        {"display_name": "Team Vitality", "short_code": "VIT"},
+        {"display_name": "Shifters", "short_code": "SHFT"},
+        {"display_name": "GIANTX", "short_code": "GX"},
+        {"display_name": "SK Gaming", "short_code": "SK"},
+        {"display_name": "Movistar KOI", "short_code": "MKOI"},
+        {"display_name": "Fnatic", "short_code": "FNC"},
+        {"display_name": "Karmine Corp", "short_code": "KC"},
+        {"display_name": "G2 Esports", "short_code": "G2"}
+      ],
+      "stages": [
+        {
+          "stage_id": "regular-season",
+          "label": "Regular Season",
+          "scheduled_best_of": null,
+          "format_status": "unverified",
+          "evidence": "Riot confirms a single round robin but does not state the series length on the reviewed handbook page."
+        },
+        {
+          "stage_id": "playoffs",
+          "label": "Playoffs",
+          "scheduled_best_of": null,
+          "format_status": "unverified",
+          "evidence": "Riot confirms modified double elimination but does not state the series length on the reviewed handbook page."
+        }
+      ]
+    },
+    {
+      "tournament_id": "115564797158840434",
+      "league": "LCS",
+      "name": "LCS - Split 3 2026",
+      "status": "current",
+      "classification": "regional_tier1",
+      "source_url": "https://lolesports.com/en-US/season/115547545029543948/handbook/115548016979679447/league/98767991299243165",
+      "participants": [
+        {"display_name": "Sentinels", "short_code": "SEN"},
+        {"display_name": "Cloud9 Kia", "short_code": "C9"},
+        {"display_name": "Dignitas", "short_code": "DIG"},
+        {"display_name": "Disguised", "short_code": "DSG"},
+        {"display_name": "FlyQuest", "short_code": "FLY"},
+        {"display_name": "LYON", "short_code": "LYON"},
+        {"display_name": "Shopify Rebellion", "short_code": "SR"},
+        {"display_name": "Team Liquid Alienware", "short_code": "TLAW"}
+      ],
+      "stages": [
+        {
+          "stage_id": "regular-season",
+          "label": "Regular Season",
+          "default_when_playoffs": false,
+          "scheduled_best_of": 3,
+          "format_status": "verified",
+          "evidence": "Riot states the regular season is a single round robin of best-of-three matches."
+        },
+        {
+          "stage_id": "playoffs",
+          "label": "Playoffs",
+          "scheduled_best_of": null,
+          "format_status": "unverified",
+          "evidence": "Riot confirms a modified double-elimination gauntlet but does not state every round's length on the reviewed handbook page."
+        }
+      ]
+    },
+    {
+      "tournament_id": "115565671525288828",
+      "league": "CBLOL",
+      "name": "CBLOL - Split 3 2026",
+      "status": "current",
+      "classification": "regional_tier1",
+      "source_url": "https://lolesports.com/en-US/season/115547545029543948/handbook/115548016979679447/league/98767991332355509",
+      "participants": [
+        {"display_name": "FURIA", "short_code": "FUR"},
+        {"display_name": "LOS", "short_code": "LOS"},
+        {"display_name": "LOUD", "short_code": "LOUD"},
+        {"display_name": "Pain Gaming", "short_code": "PAIN"},
+        {"display_name": "Fluxo W7M", "short_code": "FX"},
+        {"display_name": "LEVIATAN", "short_code": "LEV"},
+        {"display_name": "RED Kalunga", "short_code": "RED"},
+        {"display_name": "Vivo Keyd Stars", "short_code": "VKS"}
+      ],
+      "stages": [
+        {
+          "stage_id": "regular-season",
+          "label": "Regular Season",
+          "default_when_playoffs": false,
+          "scheduled_best_of": 3,
+          "format_status": "verified",
+          "evidence": "Riot states the regular season is a single round robin of best-of-three matches."
+        },
+        {
+          "stage_id": "playoffs",
+          "label": "Playoffs",
+          "scheduled_best_of": null,
+          "format_status": "unverified",
+          "evidence": "Riot confirms double elimination but does not state the series length on the reviewed handbook page."
+        }
+      ]
+    },
+    {
+      "tournament_id": "115570728597462574",
+      "league": "LCP",
+      "name": "LCP - Split 3 2026",
+      "status": "current",
+      "classification": "regional_tier1",
+      "source_url": "https://lolesports.com/en-US/season/115547545029543948/handbook/115548016979679447/league/113476371197627891",
+      "participants": [
+        {"display_name": "CTBC Flying Oyster", "short_code": "CFO"},
+        {"display_name": "DetonatioN FocusMe", "short_code": "DFM"},
+        {"display_name": "Relove Deep Cross Gaming", "short_code": "DCG"},
+        {"display_name": "GAM Esports", "short_code": "GAM"},
+        {"display_name": "Ground Zero Gaming", "short_code": "GZ"},
+        {"display_name": "MVK Esports", "short_code": "MVK"},
+        {"display_name": "Fukuoka SoftBank HAWKS gaming", "short_code": "SHG"},
+        {"display_name": "Team Secret Whales", "short_code": "TSW"}
+      ],
+      "stages": [
+        {
+          "stage_id": "swiss-normal-round",
+          "label": "Swiss normal round",
+          "tournament_label_patterns": ["normal round"],
+          "scheduled_best_of": 3,
+          "format_status": "verified",
+          "evidence": "Riot states normal Swiss rounds use BO3."
+        },
+        {
+          "stage_id": "swiss-qualification-elimination",
+          "label": "Swiss qualification, elimination, and ranking deciders",
+          "tournament_label_patterns": ["qualification", "elimination", "ranking decider"],
+          "scheduled_best_of": 5,
+          "format_status": "verified",
+          "evidence": "Riot states qualification, elimination, and ranking-decider matches use BO5."
+        },
+        {
+          "stage_id": "playoffs",
+          "label": "Playoffs",
+          "scheduled_best_of": null,
+          "format_status": "unverified",
+          "evidence": "Riot confirms four-team double elimination but does not state the series length on the reviewed handbook page."
+        }
+      ]
+    }
+  ]
+}

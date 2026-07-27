@@ -8,6 +8,13 @@ from typing import Any
 import pandas as pd
 
 from lol_kills.etl.competition import canonicalize_competition_frame, team_identity_key
+from lol_kills.export import pack_spec
+from lol_kills.etl.tournament_registry import (
+    DEFAULT_REGISTRY_PATH,
+    current_membership_from_registry,
+    load_tournament_registry,
+    validate_tournament_registry,
+)
 
 
 def _wr(wins: int, games: int) -> float | None:
@@ -36,76 +43,98 @@ def _tournament_key(league: Any, family: Any) -> str:
 
 
 def build_current_tournament_membership(
-    maps: pd.DataFrame,
+    maps: pd.DataFrame | None = None,
     *,
     as_of: Any = None,
     window_days: int = 90,
+    registry: dict[str, Any] | None = None,
+    registry_path: Any = DEFAULT_REGISTRY_PATH,
 ) -> dict[str, Any]:
-    """Derive current domestic tournament participation from recent map rows.
+    """Build current membership from Riot's reviewed tournament registry.
 
-    This is deliberately a pack-derived membership signal, not an official
-    registry.  It selects the latest labeled tournament family per domestic
-    league within the recency window and records the canonical team keys that
-    appeared in that family.  Leagues without a usable tournament label are
-    omitted so consumers can fall back to the dated observation guard.
+    ``maps`` are used only for a reconciliation diagnostic.  An appearance can
+    never create or remove membership.  ``as_of`` is the publication/check
+    clock, deliberately separate from the latest match/model-data timestamp.
     """
 
-    result: dict[str, Any] = {
-        "as_of": None,
-        "window_days": int(window_days),
-        "leagues": {},
-        "team_leagues": {},
-    }
-    if maps is None or maps.empty or "tournament" not in maps.columns or "league" not in maps.columns:
-        return result
-
-    frame = canonicalize_competition_frame(maps).copy()
-    frame["_date"] = pd.to_datetime(frame.get("date"), errors="coerce", utc=True)
-    observed_as_of = pd.to_datetime(as_of, errors="coerce", utc=True) if as_of is not None else frame["_date"].max()
-    if pd.isna(observed_as_of):
-        return result
-    result["as_of"] = observed_as_of.isoformat()
-    start = observed_as_of - pd.Timedelta(days=max(0, int(window_days)))
-    tier = frame.get("competition_tier", pd.Series("other", index=frame.index))
-    eligible = frame[
-        tier.isin({"tier1", "tier2", "tier3"})
-        & frame["_date"].notna()
-        & frame["_date"].between(start, observed_as_of, inclusive="both")
-        & frame["league"].notna()
-        & ~frame["league"].astype(str).str.strip().str.upper().isin({"", "UNKNOWN"})
-    ].copy()
-    eligible["_tournament_family"] = eligible["tournament"].map(tournament_family)
-    eligible = eligible[eligible["_tournament_family"].notna()]
-    if eligible.empty:
-        return result
-
-    latest = (
-        eligible.sort_values(["league", "_date", "_tournament_family"], kind="mergesort")
-        .groupby("league", sort=True, as_index=False)
-        .tail(1)
+    checked_at = (
+        pd.Timestamp.now(tz="UTC")
+        if as_of is None
+        else pd.to_datetime(as_of, errors="coerce", utc=True)
     )
-    leagues = {str(row["league"]): str(row["_tournament_family"]) for _, row in latest.iterrows()}
-    result["leagues"] = dict(sorted(leagues.items()))
+    payload = (
+        validate_tournament_registry(registry)
+        if registry is not None
+        else load_tournament_registry(registry_path)
+    )
+    result = current_membership_from_registry(payload, as_of=checked_at)
+    result["window_days"] = int(window_days)
 
-    team_leagues: dict[str, dict[str, str]] = {}
-    team_columns = (("blue_team", "red_team"), ("blue_teamname", "red_teamname"))
-    for _, row in eligible.iterrows():
-        league = str(row["league"])
-        family = str(row["_tournament_family"])
-        if leagues.get(league) != family:
-            continue
-        names: list[Any] = []
-        for columns in team_columns:
-            if any(column in row.index for column in columns):
-                names = [row.get(column) for column in columns]
-                if any(value is not None and not pd.isna(value) and str(value).strip() for value in names):
-                    break
-        for name in names:
-            if name is None or pd.isna(name) or not str(name).strip():
+    observed_by_league: dict[str, set[str]] = {}
+    if (
+        maps is not None
+        and not maps.empty
+        and "tournament" in maps.columns
+        and "league" in maps.columns
+    ):
+        frame = canonicalize_competition_frame(maps).copy()
+        frame["_date"] = pd.to_datetime(
+            frame.get("date"), errors="coerce", utc=True
+        )
+        frame["_tournament_family"] = frame["tournament"].map(
+            tournament_family
+        )
+        observation_end = frame["_date"].max()
+        if pd.notna(observation_end):
+            start = observation_end - pd.Timedelta(
+                days=max(0, int(window_days))
+            )
+            frame = frame[
+                frame["_date"].between(
+                    start, observation_end, inclusive="both"
+                )
+            ]
+        for _, row in frame.iterrows():
+            league = str(row.get("league") or "")
+            if (
+                result["leagues"].get(league)
+                != row.get("_tournament_family")
+            ):
                 continue
-            key = team_identity_key(name)
-            team_leagues.setdefault(key, {})[league] = family
-    result["team_leagues"] = {key: dict(sorted(value.items())) for key, value in sorted(team_leagues.items())}
+            for column in (
+                "blue_team",
+                "red_team",
+                "blue_teamname",
+                "red_teamname",
+            ):
+                team = row.get(column)
+                if team is None or pd.isna(team) or not str(team).strip():
+                    continue
+                observed_by_league.setdefault(league, set()).add(
+                    team_identity_key(team)
+                )
+
+    registered = {
+        league: set(keys)
+        for league, keys in result["participants_by_league"].items()
+    }
+    result["observation_audit"] = {
+        league: {
+            "registered_participants": len(registered.get(league, set())),
+            "observed_participants": len(
+                observed_by_league.get(league, set())
+            ),
+            "observed_not_registered": sorted(
+                observed_by_league.get(league, set())
+                - registered.get(league, set())
+            ),
+            "registered_not_observed": sorted(
+                registered.get(league, set())
+                - observed_by_league.get(league, set())
+            ),
+        }
+        for league in sorted(result["leagues"])
+    }
     return result
 
 
@@ -132,25 +161,220 @@ def build_maps_frame_from_team_games(team_games: pd.DataFrame) -> pd.DataFrame:
     frame["_game_uid"] = frame[game_column].astype(str)
     frame["_side"] = frame["side"].astype(str).str.title()
     frame = frame[frame["_side"].isin({"Blue", "Red"})]
-    blue = frame[frame["_side"].eq("Blue")].drop_duplicates("_game_uid")
-    red = frame[frame["_side"].eq("Red")].drop_duplicates("_game_uid")
+    side_counts = frame.groupby(["_game_uid", "_side"], sort=False).size()
+    duplicate_sides = side_counts[side_counts.gt(1)]
+    if not duplicate_sides.empty:
+        examples = [
+            f"{game_id}:{side}"
+            for game_id, side in duplicate_sides.index[:10]
+        ]
+        raise ValueError(
+            "team-game population contains duplicate side rows; "
+            f"examples={examples}"
+        )
+    blue = frame[frame["_side"].eq("Blue")]
+    red = frame[frame["_side"].eq("Red")]
     if blue.empty or red.empty:
         return pd.DataFrame()
 
-    blue_columns = [c for c in ("_game_uid", "date", "league", "tournament", "result", "teamname") if c in blue.columns]
-    red_columns = [c for c in ("_game_uid", "teamname") if c in red.columns]
+    blue_columns = [
+        column
+        for column in (
+            "_game_uid",
+            "date",
+            "league",
+            "tournament",
+            "result",
+            "teamname",
+            "game",
+            "source",
+            "year",
+            "oe_year",
+            "split",
+            "playoffs",
+            "patch",
+            "gamelength",
+            "ckpm",
+            "datacompleteness",
+            "grid_series_id",
+            "grid_game_index",
+            "series_format",
+            "series_format_source",
+            "series_format_stage_id",
+            "series_format_registry_snapshot_id",
+            "series_format_registry_verified",
+            "series_format_registry_conflict",
+            "best_of",
+            "series_completion_status",
+            "series_completion_source",
+            "completion_source",
+        )
+        if column in blue.columns
+    ]
+    side_source_fields = [
+        field for field in pack_spec.MAPS_SIDE_FIELDS if field in frame.columns
+    ]
+    blue_columns.extend(
+        field for field in side_source_fields if field not in blue_columns
+    )
+    red_columns = [
+        column
+        for column in ("_game_uid", "teamname", *side_source_fields)
+        if column in red.columns
+    ]
     maps = blue[blue_columns].rename(
-        columns={"_game_uid": "game_uid", "result": "y_blue_win", "teamname": "blue_team"}
+        columns={
+            "_game_uid": "game_uid",
+            "teamname": "blue_team",
+            **{field: f"blue_{field}" for field in side_source_fields},
+        }
     )
     maps = maps.merge(
-        red[red_columns].rename(columns={"_game_uid": "game_uid", "teamname": "red_team"}),
+        red[red_columns].rename(
+            columns={
+                "_game_uid": "game_uid",
+                "teamname": "red_team",
+                **{field: f"red_{field}" for field in side_source_fields},
+            }
+        ),
         on="game_uid",
         how="inner",
     )
     maps["date"] = pd.to_datetime(maps.get("date"), errors="coerce")
-    maps["y_blue_win"] = pd.to_numeric(maps.get("y_blue_win"), errors="coerce")
+    maps["gamelength"] = pd.to_numeric(
+        maps.get("gamelength"),
+        errors="coerce",
+    )
+    maps["length_min"] = maps["gamelength"] / 60.0
+    maps["y_blue_win"] = pd.to_numeric(
+        maps.get("blue_result"),
+        errors="coerce",
+    )
     maps = maps.dropna(subset=["date", "y_blue_win", "blue_team", "red_team"])
+    maps["oe_gameid"] = maps["game_uid"]
+    maps["blue_teamname"] = maps["blue_team"]
+    maps["red_teamname"] = maps["red_team"]
+    if "red_result" not in maps.columns:
+        maps["red_result"] = 1.0 - maps["y_blue_win"]
+    blue_kills = pd.to_numeric(maps.get("blue_teamkills"), errors="coerce")
+    red_kills = pd.to_numeric(maps.get("red_teamkills"), errors="coerce")
+    maps["total_kills"] = blue_kills + red_kills
+    maps["y_total_kills"] = maps["total_kills"]
+    source = maps.get(
+        "source",
+        pd.Series("oe", index=maps.index),
+    ).fillna("").astype(str).str.casefold()
+    maps["source_grid"] = source.eq("grid")
+    maps["source_oe"] = ~maps["source_grid"]
+    maps["map_detail_source"] = source.map(
+        lambda value: (
+            "grid_team_aggregate"
+            if value == "grid"
+            else "oe_team_aggregate"
+        )
+    )
     return canonicalize_competition_frame(maps).sort_values("date").reset_index(drop=True)
+
+
+def complete_public_map_population(
+    feature_maps: pd.DataFrame,
+    team_maps: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Append full-feed maps absent from the feature-focused major slice.
+
+    The wide warehouse map is intentionally major-event focused. Public
+    records, ratings, detail pages, and downloads must nevertheless agree on
+    game identities. Missing games are therefore appended from the canonical
+    two-team aggregate feed with detail provenance made explicit; unknown
+    draft/objective fields remain null rather than being fabricated.
+    """
+
+    detailed = feature_maps.copy() if feature_maps is not None else pd.DataFrame()
+    complete = team_maps.copy() if team_maps is not None else pd.DataFrame()
+    if complete.empty:
+        return detailed, {
+            "feature_maps": int(len(detailed)),
+            "full_team_maps": 0,
+            "appended_team_aggregate_maps": 0,
+        }
+    if detailed.empty:
+        out = complete.copy()
+        out["map_detail_source"] = out.get(
+            "map_detail_source",
+            "oe_team_aggregate",
+        )
+        return out, {
+            "feature_maps": 0,
+            "full_team_maps": int(len(complete)),
+            "appended_team_aggregate_maps": int(len(complete)),
+        }
+
+    def identity(frame: pd.DataFrame) -> pd.Series:
+        if "oe_gameid" in frame.columns:
+            values = frame["oe_gameid"]
+            if "game_uid" in frame.columns:
+                values = values.where(values.notna(), frame["game_uid"])
+            return values.astype(str)
+        return frame["game_uid"].astype(str)
+
+    detailed = detailed.copy()
+    detailed["_public_map_identity"] = identity(detailed)
+    complete = complete.copy()
+    complete["_public_map_identity"] = identity(complete)
+    if detailed["_public_map_identity"].duplicated().any():
+        raise ValueError("feature map population contains duplicate identities")
+    if complete["_public_map_identity"].duplicated().any():
+        raise ValueError("team map population contains duplicate identities")
+
+    oe_backed = detailed.get(
+        "source_oe",
+        pd.Series(False, index=detailed.index),
+    ).fillna(False).astype(bool)
+    grid_backed = detailed.get(
+        "source_grid",
+        pd.Series(False, index=detailed.index),
+    ).fillna(False).astype(bool)
+    inferred_detail_source = pd.Series(
+        "oe_wide_feature_map",
+        index=detailed.index,
+    )
+    inferred_detail_source.loc[grid_backed & ~oe_backed] = "grid_event_detail"
+    detailed["map_detail_source"] = detailed.get(
+        "map_detail_source",
+        inferred_detail_source,
+    ).where(
+        detailed.get(
+            "map_detail_source",
+            inferred_detail_source,
+        ).notna(),
+        inferred_detail_source,
+    )
+    missing = complete[
+        ~complete["_public_map_identity"].isin(
+            set(detailed["_public_map_identity"])
+        )
+    ].copy()
+    missing["map_detail_source"] = missing.get(
+        "map_detail_source",
+        pd.Series("oe_team_aggregate", index=missing.index),
+    ).fillna("oe_team_aggregate")
+    columns = sorted(set(detailed.columns) | set(missing.columns))
+    out = pd.concat(
+        [
+            detailed.reindex(columns=columns),
+            missing.reindex(columns=columns),
+        ],
+        ignore_index=True,
+    )
+    out = out.drop(columns=["_public_map_identity"]).sort_values(
+        ["date", "game_uid"],
+        kind="mergesort",
+    )
+    return out.reset_index(drop=True), {
+        "feature_maps": int(len(detailed)),
+        "full_team_maps": int(len(complete)),
+        "appended_team_aggregate_maps": int(len(missing)),
+    }
 
 
 def _primary_league(group: pd.DataFrame) -> str | None:
@@ -230,6 +454,9 @@ def build_team_records(
     if tournament_maps is not None and not tournament_maps.empty:
         tournament_rows = _team_rows(canonicalize_competition_frame(tournament_maps))
     membership_teams = (current_membership or {}).get("team_leagues", {})
+    membership_display = (current_membership or {}).get(
+        "team_display_names", {}
+    )
 
     records: dict[str, dict[str, Any]] = {}
     for key, group in rows.groupby("team_key", sort=True):
@@ -260,11 +487,33 @@ def build_team_records(
             }
 
         primary = _primary_league(group)
-        current = group[group["competition_tier"].isin({"tier1", "tier2", "tier3"})]
-        current_row = current.loc[pd.to_datetime(current["date"], errors="coerce").idxmax()] if not current.empty and pd.to_datetime(current["date"], errors="coerce").notna().any() else None
-        current_league = str(current_row["league"]) if current_row is not None else primary
+        observed = group[
+            group["competition_tier"].isin({"tier1", "tier2", "tier3"})
+        ]
+        observed_row = (
+            observed.loc[
+                pd.to_datetime(
+                    observed["date"], errors="coerce"
+                ).idxmax()
+            ]
+            if not observed.empty
+            and pd.to_datetime(
+                observed["date"], errors="coerce"
+            ).notna().any()
+            else None
+        )
+        registered_leagues = membership_teams.get(key, {})
+        if len(registered_leagues) > 1:
+            raise ValueError(
+                f"team {key!r} has multiple current Tier 1 leagues"
+            )
+        current_league = (
+            next(iter(registered_leagues))
+            if registered_leagues
+            else None
+        )
         current_tournament = (
-            membership_teams.get(key, {}).get(current_league)
+            registered_leagues.get(current_league)
             if current_league is not None
             else None
         )
@@ -276,10 +525,24 @@ def build_team_records(
             "source_leagues": sorted(str(x) for x in group["league_source"].unique() if x),
             "primary": primary,
             "current_league": current_league,
-            "current_tier": str(current_row["competition_tier"]) if current_row is not None else None,
-            "current_team": display,
-            "current_date": str(current_row["date"]) if current_row is not None else None,
+            "current_tier": "tier1" if current_league is not None else None,
+            "current_team": membership_display.get(key, display)
+            if current_league is not None
+            else None,
+            "current_date": (
+                str(observed_row["date"])
+                if observed_row is not None
+                else None
+            ),
             "current_tournament": current_tournament,
+            "membership_as_of": (current_membership or {}).get("as_of")
+            if current_league is not None
+            else None,
+            "membership_source": (current_membership or {}).get(
+                "authority"
+            )
+            if current_league is not None
+            else None,
             "intl": bool(group["is_international"].any()),
             "interregional": bool(group["is_interregional"].any()),
             "wins": wins,
@@ -296,7 +559,13 @@ def build_player_records(
     players: pd.DataFrame,
     current_membership: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Aggregate player results from one pack window without team aggregate rows."""
+    """Aggregate player results without claiming an unverified current roster.
+
+    Historical rows establish only a player's last observed affiliation. A
+    current affiliation is published only when the player has an observed map
+    for a team in the active authoritative tournament registry. That proves
+    tournament participation, not a contract or starter/substitute status.
+    """
 
     if players is None or players.empty or "playername" not in players.columns:
         return {}
@@ -311,43 +580,136 @@ def build_player_records(
     if frame.empty:
         return {}
 
+    identity_source = "name_fallback_no_playerid_column"
+    identity_column = "playername"
+    if "playerid" in frame.columns:
+        identity_source = "provider_playerid"
+        frame["_player_id"] = frame["playerid"].map(
+            lambda value: (
+                str(value).strip()
+                if value is not None
+                and not pd.isna(value)
+                and str(value).strip()
+                and str(value).strip().casefold() not in {"nan", "none", "null"}
+                else None
+            )
+        )
+        frame = frame[frame["_player_id"].notna()].copy()
+        if frame.empty:
+            return {}
+        frame["_player_name_key"] = (
+            frame["playername"].astype(str).str.strip().str.casefold()
+        )
+        ids_by_name = frame.groupby("_player_name_key")["_player_id"].agg(
+            lambda values: {str(value) for value in values}
+        )
+        colliding_names = set(ids_by_name[ids_by_name.map(len).gt(1)].index)
+        if colliding_names:
+            colliding_ids = set(
+                frame.loc[
+                    frame["_player_name_key"].isin(colliding_names),
+                    "_player_id",
+                ].astype(str)
+            )
+            frame = frame[~frame["_player_id"].astype(str).isin(colliding_ids)]
+        if frame.empty:
+            return {}
+        identity_column = "_player_id"
+
     records: dict[str, dict[str, Any]] = {}
     membership_teams = (current_membership or {}).get("team_leagues", {})
-    for player, group in frame.groupby(frame["playername"].astype(str), sort=True):
+    for player_identity, group in frame.groupby(identity_column, sort=True):
         wins = int(round(float(group["result"].sum())))
         games = int(len(group))
         leagues = sorted(str(x) for x in group["league"].dropna().unique())
-        current = group[group["competition_tier"].isin({"tier1", "tier2", "tier3"})]
-        current_row = None
-        if not current.empty:
-            dates = pd.to_datetime(current["date"], errors="coerce") if "date" in current.columns else pd.Series(pd.NaT, index=current.index)
-            if dates.notna().any():
-                current_row = current.loc[dates.idxmax()]
-        primary = str(current_row["league"]) if current_row is not None else (leagues[0] if leagues else None)
-        current_team = (
-            str(current_row["teamname"])
-            if current_row is not None and pd.notna(current_row.get("teamname"))
+        dates = (
+            pd.to_datetime(group["date"], errors="coerce")
+            if "date" in group.columns
+            else pd.Series(pd.NaT, index=group.index)
+        )
+        last_row = group.loc[dates.idxmax()] if dates.notna().any() else None
+        player = (
+            str(last_row["playername"]).strip()
+            if last_row is not None and pd.notna(last_row.get("playername"))
+            else str(group["playername"].iloc[-1]).strip()
+        )
+        if not player:
+            continue
+        primary = _primary_league(group)
+        last_observed_team = (
+            str(last_row["teamname"])
+            if last_row is not None and pd.notna(last_row.get("teamname"))
             else None
         )
-        current_tournament = (
-            membership_teams.get(
-                team_identity_key(current_team),
+        last_observed_league = (
+            str(last_row["league"])
+            if last_row is not None and pd.notna(last_row.get("league"))
+            else None
+        )
+
+        current_candidates: list[tuple[pd.Timestamp, Any, str, str]] = []
+        for index, row in group.iterrows():
+            team = (
+                str(row["teamname"])
+                if pd.notna(row.get("teamname"))
+                else ""
+            )
+            league = str(row["league"]) if pd.notna(row.get("league")) else ""
+            tournament = membership_teams.get(
+                team_identity_key(team),
                 {},
-            ).get(primary)
-            if current_team is not None and primary is not None
+            ).get(league)
+            observed_at = pd.to_datetime(row.get("date"), errors="coerce")
+            if team and league and tournament and pd.notna(observed_at):
+                current_candidates.append((observed_at, index, team, tournament))
+
+        current_row = None
+        current_team = None
+        current_tournament = None
+        if current_candidates:
+            _, current_index, current_team, current_tournament = max(
+                current_candidates,
+                key=lambda value: value[0],
+            )
+            current_row = group.loc[current_index]
+        current_league = (
+            str(current_row["league"])
+            if current_row is not None and pd.notna(current_row.get("league"))
             else None
         )
         records[player] = {
+            "player_id": (
+                str(player_identity)
+                if identity_source == "provider_playerid"
+                else None
+            ),
+            "identity_source": identity_source,
             "wins": wins,
             "games": games,
             "wr": _wr(wins, games),
             "leagues": leagues,
             "primary": primary,
-            "current_league": primary,
-            "current_tier": str(current_row["competition_tier"]) if current_row is not None else None,
+            "last_observed_team": last_observed_team,
+            "last_observed_league": last_observed_league,
+            "last_observed_date": (
+                str(last_row["date"]) if last_row is not None else None
+            ),
+            "current_league": current_league,
+            "current_tier": "tier1" if current_row is not None else None,
             "current_team": current_team,
             "current_date": str(current_row["date"]) if current_row is not None else None,
             "current_tournament": current_tournament,
+            "current_affiliation_basis": (
+                "observed_current_tournament_map"
+                if current_row is not None
+                else None
+            ),
+            "membership_as_of": (current_membership or {}).get("as_of")
+            if current_row is not None
+            else None,
+            "membership_source": (current_membership or {}).get("authority")
+            if current_row is not None
+            else None,
             "intl": bool(group["is_international"].any()),
             "interregional": bool(group.get("is_interregional", pd.Series(dtype=bool)).any()),
         }

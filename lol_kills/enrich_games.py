@@ -75,17 +75,7 @@ def cargo_by_ids(game_ids: list[str], sleep_s: float = 0.35) -> dict[str, dict]:
 
 
 def first_inhib_side(inhibs1: int | None, inhibs2: int | None) -> int | None:
-    """Proxy: which side took first inhib (1/2). Asymmetric counts → that side; else None."""
-    if inhibs1 is None or inhibs2 is None:
-        return None
-    if inhibs1 > 0 and inhibs2 == 0:
-        return 1
-    if inhibs2 > 0 and inhibs1 == 0:
-        return 2
-    if inhibs1 > inhibs2:
-        return 1
-    if inhibs2 > inhibs1:
-        return 2
+    """Final inhibitor totals do not identify which team took the first one."""
     return None
 
 
@@ -100,8 +90,8 @@ def main() -> None:
     for g in games:
         m = meta.get(g["game_id"], {})
         g.update(m)
-        fi = first_inhib_side(g.get("inhibs1"), g.get("inhibs2"))
-        g["first_inhib_side"] = fi
+        g["first_inhib_side"] = None
+        g["first_inhib_provenance"] = "unavailable_final_counts_do_not_encode_order"
         # first blood not in Cargo — leave null; filled by proxy model later
         g["first_blood_side"] = None
         if g.get("winner") in (1, 2):

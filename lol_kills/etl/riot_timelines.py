@@ -30,6 +30,7 @@ TIMELINE_DIR = WAREHOUSE_DIR / "timelines"
 HORDE = "HORDE"  # void grubs in Match-V5
 CONTEST_RADIUS = 2200
 CONTEST_WINDOW_MS = 35_000
+CONTEST_FRAME_MAX_SKEW_MS = 5_000
 
 # Personal API key defaults (dev): 20 / 1s and 100 / 2min per routing value.
 RATE_PER_SEC = 20
@@ -204,9 +205,16 @@ def parse_grub_events(timeline: dict) -> list[dict[str, Any]]:
                             enemy_dead = True
                             break
                 both_near = False
+                frame_usable = False
                 # nearest frame positions
                 nearest = min(positions_by_ts, key=lambda z: abs(z[0] - ets), default=None)
-                if nearest and pit is not None:
+                if (
+                    nearest
+                    and pit is not None
+                    and abs(nearest[0] - ets) <= CONTEST_FRAME_MAX_SKEW_MS
+                    and set(nearest[1]) >= set(range(1, 11))
+                ):
+                    frame_usable = True
                     blue_near = any(
                         _dist(xy, pit) <= CONTEST_RADIUS for pid, xy in nearest[1].items() if 1 <= pid <= 5
                     )
@@ -214,7 +222,13 @@ def parse_grub_events(timeline: dict) -> list[dict[str, Any]]:
                         _dist(xy, pit) <= CONTEST_RADIUS for pid, xy in nearest[1].items() if 6 <= pid <= 10
                     )
                     both_near = blue_near and red_near
-                contested = bool(enemy_dead or both_near)
+                contested: bool | None
+                if enemy_dead or both_near:
+                    contested = True
+                elif frame_usable:
+                    contested = False
+                else:
+                    contested = None
                 events_out.append(
                     {
                         "timestamp_ms": ets,
@@ -227,7 +241,15 @@ def parse_grub_events(timeline: dict) -> list[dict[str, Any]]:
                         "contest_reason": (
                             "enemy_death_near_pit"
                             if enemy_dead
-                            else ("both_teams_near" if both_near else "uncontested_or_unknown")
+                            else (
+                                "both_teams_near"
+                                if both_near
+                                else (
+                                    "verified_no_enemy_presence"
+                                    if frame_usable
+                                    else "unknown_stale_or_incomplete_position_frame"
+                                )
+                            )
                         ),
                     }
                 )
@@ -238,14 +260,21 @@ def summarize_map_grubs(timeline: dict) -> dict[str, Any]:
     evs = parse_grub_events(timeline)
     blue = sum(1 for e in evs if e.get("killer_team") == 100)
     red = sum(1 for e in evs if e.get("killer_team") == 200)
-    contested = [e for e in evs if e.get("contested")]
+    contested = [e for e in evs if e.get("contested") is True]
+    uncontested = [e for e in evs if e.get("contested") is False]
+    unknown = [e for e in evs if e.get("contested") is None]
     return {
         "n_horde_events": len(evs),
         "blue_grubs_timeline": blue,
         "red_grubs_timeline": red,
         "n_contested": len(contested),
-        "n_uncontested": len(evs) - len(contested),
-        "any_contested": len(contested) > 0,
+        "n_uncontested": len(uncontested),
+        "n_contest_unknown": len(unknown),
+        "any_contested": (
+            True
+            if contested
+            else (False if uncontested and not unknown else None)
+        ),
         "first_grub_minute": evs[0]["minute"] if evs else None,
         "events": evs,
     }

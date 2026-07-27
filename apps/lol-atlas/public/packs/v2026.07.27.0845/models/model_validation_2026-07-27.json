@@ -1,0 +1,718 @@
+{
+  "schema_version": "1.0.0",
+  "created_utc": "2026-07-27T00:00:00Z",
+  "status": "release_contract_passed_with_draft_probability_withheld",
+  "population": {
+    "maps": 16567,
+    "team_rows": 33134,
+    "player_rows": 165670,
+    "source": "oracle_elixir_2025_frozen_plus_official_2026_annual_csv_downloaded_2026-07-26",
+    "date_min": "2025-01-11T11:11:24Z",
+    "date_max": "2026-07-26T21:25:07Z",
+    "exclusions": {
+      "grid_maps_without_preserved_completion_provenance": 62
+    }
+  },
+  "splits": {
+    "draft": [
+      {
+        "name": "train",
+        "maps": 9112,
+        "date_groups": 253,
+        "date_min": "2025-01-11 00:00:00+00:00",
+        "date_max": "2025-09-22 00:00:00+00:00"
+      },
+      {
+        "name": "validation",
+        "maps": 2476,
+        "date_groups": 118,
+        "date_min": "2025-09-23 00:00:00+00:00",
+        "date_max": "2026-02-24 00:00:00+00:00"
+      },
+      {
+        "name": "selection",
+        "maps": 2488,
+        "date_groups": 68,
+        "date_min": "2026-02-25 00:00:00+00:00",
+        "date_max": "2026-05-03 00:00:00+00:00"
+      },
+      {
+        "name": "final",
+        "maps": 2491,
+        "date_groups": 77,
+        "date_min": "2026-05-04 00:00:00+00:00",
+        "date_max": "2026-07-26 00:00:00+00:00"
+      }
+    ],
+    "team_and_player": {
+      "train_maps": 11412,
+      "validation_maps": 2445,
+      "final_test_maps": 2477,
+      "train_end": "2026-02-18T23:59:59Z",
+      "validation_end": "2026-04-29T23:59:59Z"
+    }
+  },
+  "draft_probability": {
+    "estimand": "complete_role_assigned_composition_only_blue_map_win_probability",
+    "artifact_sha256": "b56a43509354f73acb3499444ee742156a326f0f24a518bd89b4d8649a5e87b3",
+    "model_code_sha256": "69f557cf2635e535f7593039b481e2fc7b3f9e8fa6954dd23352c48d3d1f9029",
+    "training_population_sha256": "e034b057c8d56a7315ea25fac0df3478b063d18913a84bfd0b14c5c002168909",
+    "evaluation_scope": "chronological_pre_final_fit_scored_on_untouched_final",
+    "release_artifact_role": "full_population_refit_for_experimental_policy_utility_only",
+    "release_refit_includes_final_labels": true,
+    "gate_status": "failed",
+    "decision": "withhold_numeric_probability; publish pooled composition policy utility only",
+    "selection_winner": "baseline_overall_blue_rate",
+    "winner_is_composition": false,
+    "best_composition_candidate": "draft_additive__support_3__prior_40__rank_0",
+    "final_test": {
+      "baseline_overall_blue_rate": {
+        "maps": 2491,
+        "log_loss": 0.6902117586430581,
+        "brier": 0.2485335566344537,
+        "ece_10_equal_width": 0.008097361056028207
+      },
+      "draft_additive__support_3__prior_40__rank_0": {
+        "maps": 2491,
+        "log_loss": 0.6942661271695592,
+        "brier": 0.24996824789938935,
+        "ece_10_equal_width": 0.054832599085319005
+      },
+      "baseline_side_league_blue_rate": {
+        "maps": 2491,
+        "log_loss": 0.6913006116865061,
+        "brier": 0.24907340172596307,
+        "ece_10_equal_width": 0.0063792753247819516
+      }
+    },
+    "composition_lift_vs_side_league_base": {
+      "baseline_model_id": "baseline_side_league_blue_rate",
+      "brier_lift": -0.000894846173426278,
+      "composition_better": false,
+      "composition_model_id": "draft_additive__support_3__prior_40__rank_0",
+      "events": 2491,
+      "log_loss_lift": -0.002965515483053016,
+      "primary_score_lift": -0.002965515483053016,
+      "primary_score_name": "log_loss"
+    },
+    "future_unseen_patch": {
+      "composition": {
+        "brier": 0.25039999856300504,
+        "calibration_decomposition_residual": 0.0,
+        "calibration_discrimination": 0.00436214035348545,
+        "calibration_miscalibration": 0.006438801884654927,
+        "calibration_uncertainty": 0.24832333703183557,
+        "ece_10": 0.05252807564113141,
+        "event_rate": 0.5409470752089136,
+        "events": 1795,
+        "log_loss": 0.6948762831616636,
+        "mean_probability": 0.5314810457009973,
+        "model_id": "draft_additive__support_3__prior_40__rank_0",
+        "pav_recalibrated_brier": 0.24396119667835012,
+        "primary_score": 0.6948762831616636,
+        "primary_score_name": "log_loss"
+      },
+      "composition_lift": {
+        "baseline_model_id": "baseline_side_league_blue_rate",
+        "brier_lift": -0.0018928463550907104,
+        "composition_better": false,
+        "composition_model_id": "draft_additive__support_3__prior_40__rank_0",
+        "events": 1795,
+        "log_loss_lift": -0.004714039481999555,
+        "primary_score_lift": -0.004714039481999555,
+        "primary_score_name": "log_loss"
+      },
+      "events": 1795,
+      "patches": [
+        "16.10",
+        "16.11",
+        "16.12",
+        "16.13",
+        "16.14"
+      ],
+      "side_league_baseline": {
+        "brier": 0.24850715220791433,
+        "calibration_decomposition_residual": 0.0,
+        "calibration_discrimination": 0.0008998785313469038,
+        "calibration_miscalibration": 0.0010836937074256703,
+        "calibration_uncertainty": 0.24832333703183557,
+        "ece_10": 0.007919068081535752,
+        "event_rate": 0.5409470752089136,
+        "events": 1795,
+        "log_loss": 0.6901622436796641,
+        "mean_probability": 0.5330280071273779,
+        "model_id": "baseline_side_league_blue_rate",
+        "pav_recalibrated_brier": 0.24742345850048866,
+        "primary_score": 0.6901622436796641,
+        "primary_score_name": "log_loss"
+      },
+      "status": "available"
+    },
+    "invariants": {
+      "checked_games": 16,
+      "exact_side_swap_antisymmetry": true,
+      "identity_free_features": true,
+      "no_temporal_leakage": true,
+      "outcome_blind_features": true,
+      "probability_bounds": true,
+      "role_preserving_permutation": true
+    }
+  },
+  "dynamic_organization_strength": {
+    "estimand": "pre_map_organization_strength_difference",
+    "gate_status": "not_promoted",
+    "candidate": "online_diagonal_gaussian_dynamic_bradley_terry",
+    "final_test": {
+      "candidate_raw": {
+        "log_loss": 0.63223,
+        "brier": 0.220838
+      },
+      "existing_uncalibrated_dual_elo": {
+        "log_loss": 0.638057,
+        "brier": 0.223768
+      },
+      "historical_base_rate": {
+        "log_loss": 0.690534,
+        "brier": 0.248695
+      },
+      "paired_circular_moving_block_bootstrap": {
+        "series_clusters": 1024,
+        "replicates": 5000,
+        "block_length_series": 12,
+        "candidate_minus_dual_elo_log_loss": -0.005827,
+        "log_loss_interval_95": [
+          -0.012558,
+          0.000763
+        ],
+        "candidate_minus_dual_elo_brier": -0.00293,
+        "brier_interval_95": [
+          -0.005868,
+          -0.0000473
+        ]
+      }
+    },
+    "validation_selected_platt": {
+      "intercept": -0.0471949,
+      "slope": 1.229377,
+      "slope_local_hessian_interval_95": [
+        1.094336,
+        1.364418
+      ],
+      "validation_log_loss_raw": 0.608699,
+      "validation_log_loss_calibrated": 0.60629,
+      "final_log_loss_raw": 0.63223,
+      "final_log_loss_calibrated": 0.634401,
+      "final_brier_raw": 0.220838,
+      "final_brier_calibrated": 0.221299,
+      "decision": "calibration_did_not_transfer"
+    },
+    "limitation": "Log-loss superiority over the simpler existing model is inconclusive and canonical scheduled-series provenance is absent from the checked pack."
+  },
+  "robust_dynamic_organization_strength": {
+    "estimand": "pre_map_organization_strength_difference_with_outcome_supported_change_shocks",
+    "gate_status": "not_promoted",
+    "candidate": "two_branch_assumed_density_dynamic_bradley_terry",
+    "selected_on_validation": {
+      "configuration": "rare_moderate_shock",
+      "per_team_shock_hazard": 0.015,
+      "added_shock_variance": 0.5,
+      "minimum_prior_observations": 4,
+      "log_loss": 0.6081176341,
+      "brier": 0.210126548
+    },
+    "final_test": {
+      "maps": 2477,
+      "candidate": {
+        "log_loss": 0.6317888079,
+        "brier": 0.2206765904,
+        "ece_10_equal_width": 0.018568
+      },
+      "raw_dynamic_bradley_terry": {
+        "log_loss": 0.6322302749,
+        "brier": 0.2208382263,
+        "ece_10_equal_width": 0.019242
+      },
+      "old_raw_dual_elo": {
+        "log_loss": 0.6380572293,
+        "brier": 0.2237679618,
+        "ece_10_equal_width": 0.01938,
+        "caveat": "pre-map predictions but historical state updates use gold-margin information"
+      },
+      "outcome_only_dual_elo_control": {
+        "log_loss": 0.6365663705,
+        "brier": 0.2230222395,
+        "ece_10_equal_width": 0.024098
+      },
+      "paired_circular_block_bootstrap": {
+        "series_clusters": 1024,
+        "replicates": 5000,
+        "block_length_series": 12,
+        "candidate_minus_raw_dynamic_log_loss": -0.000441467,
+        "candidate_minus_raw_dynamic_log_loss_interval_95": [
+          -0.002322535,
+          0.001466461
+        ],
+        "candidate_minus_raw_dynamic_brier": -0.000161636,
+        "candidate_minus_raw_dynamic_brier_interval_95": [
+          -0.001008048,
+          0.000683022
+        ],
+        "candidate_minus_old_dual_elo_log_loss": -0.006268421,
+        "candidate_minus_old_dual_elo_log_loss_interval_95": [
+          -0.013264616,
+          0.000989716
+        ],
+        "candidate_minus_old_dual_elo_brier": -0.003091371,
+        "candidate_minus_old_dual_elo_brier_interval_95": [
+          -0.006120845,
+          0.000037714
+        ]
+      }
+    },
+    "series_provenance": {
+      "inferred_series": 7805,
+      "verified_scheduled_formats": 0,
+      "use": "dependence_clusters_only",
+      "rating_eligible_series": 0
+    },
+    "decision": "inconclusive_no_production_or_sota_claim"
+  },
+  "player_lineup_apm": {
+    "estimand": "regularized_lineup_outcome_decomposition_not_individual_skill",
+    "gate_status": "not_promoted",
+    "selected_player_l2": 0.1,
+    "selected_nuisance_l2": 10.0,
+    "final_test": {
+      "candidate": {
+        "log_loss": 0.649574,
+        "brier": 0.228477
+      },
+      "historical_base_rate": {
+        "log_loss": 0.690582,
+        "brier": 0.248719
+      },
+      "dynamic_organization_candidate": {
+        "log_loss": 0.63223,
+        "brier": 0.220838
+      }
+    },
+    "identifiability": {
+      "fit_players": 3482,
+      "identical_exposure_cohorts": 383,
+      "players_in_identical_exposure_cohorts": 1064,
+      "largest_cohort": 5,
+      "test_maps_with_unknown_players": 638,
+      "test_unknown_player_assignments": 1711
+    },
+    "decision": "do_not_publish_as_an_individual_player_ladder"
+  },
+  "player_early_resource_performance": {
+    "estimand": "descriptive_role_relative_15_minute_resource_performance",
+    "gate_status": "research_gate_passed_not_general_skill",
+    "eligible_role_matchups": 72801,
+    "complete_role_matchups": 75305,
+    "stable_identity_coverage": 0.966749,
+    "excluded_complete_rows_without_stable_player_id": 2905,
+    "selected_base_penalty": 8.0,
+    "selected_context_base_penalty": 8.0,
+    "final_test": {
+      "rows": 35062,
+      "candidate_rmse": 1.009163,
+      "zero_baseline_rmse": 1.084686,
+      "relative_zero_baseline_rmse_lift": 0.069627,
+      "context_only_rmse": 1.030704,
+      "incremental_player_identity_rmse_lift": 0.0209,
+      "incremental_player_identity_lift_interval_95": [
+        0.017363,
+        0.024438
+      ],
+      "calendar_day_blocks": 102,
+      "bootstrap_replicates": 5000
+    },
+    "future_patch": {
+      "rows": 33808,
+      "relative_zero_baseline_rmse_lift": 0.068823
+    },
+    "roster_move": {
+      "rows": 7493,
+      "relative_zero_baseline_rmse_lift": 0.062556
+    },
+    "ratings_rows": 3147,
+    "decision": "eligible_only_for_a_separately_named_early_resource_performance_surface",
+    "non_estimands": [
+      "causal_player_skill",
+      "win_contribution",
+      "complete_game_performance",
+      "pre_match_win_probability"
+    ]
+  },
+  "public_contract": {
+    "draft_probability": "withheld_failed_chronological_gate",
+    "team_rating": "passed_exact_series_dynamic_bt_gate; rank_within_connected_component_only",
+    "player_rating": "team_outcome_ladder_withheld_as_individual_skill; early_resource_performance_may_ship_only_under_its_narrow_estimand",
+    "draft_sandbox": "pooled_uncalibrated_composition_policy_utility_only"
+  },
+  "team_rating": {
+    "model_id": "series_dynamic_bt",
+    "model_version": "series_dynamic_bt:0b1dfe5c1df0:83ebfc407c17",
+    "model_code_sha256": "0b1dfe5c1df0909cf955a1d17423f76c5c4d832b28a33ac4d0ceff4227abef4d",
+    "model_config_sha256": "83ebfc407c17a4023ae3fe88fce7476d28b062df97e60635c2a7ead636c7c43c",
+    "observation_rows_sha256": "793f82846e92453a47bbdeda9d91f474df444688a452758b9bdbf08b9d388f42",
+    "estimand": "pre_series_organization_strength_probability",
+    "gate_status": "passed",
+    "temporal_audit": {
+      "ok": true,
+      "prediction_time": "verified series start",
+      "assimilation_time": "verified series completion",
+      "test_labels_used_for_selection": false
+    },
+    "final_test": {
+      "series": 1771,
+      "log_loss": 0.586208143573173,
+      "brier": 0.20006934263591877,
+      "ece_10_equal_width": 0.02778108015715976,
+      "format_stratified_calibration": {
+        "Bo1": {
+          "n": 526,
+          "log_loss": 0.6099541442737934,
+          "brier": 0.2097555475277954,
+          "ece": 0.044591320832259376,
+          "ece_bins": 10,
+          "calibration_bins": [
+            {
+              "bin": 0,
+              "lower": 0.0,
+              "upper": 0.1,
+              "n": 1,
+              "mean_probability": 0.09449510120146132,
+              "observed_rate": 0.0,
+              "absolute_gap": 0.09449510120146132
+            },
+            {
+              "bin": 1,
+              "lower": 0.1,
+              "upper": 0.2,
+              "n": 15,
+              "mean_probability": 0.16073041017527218,
+              "observed_rate": 0.26666666666666666,
+              "absolute_gap": 0.10593625649139449
+            },
+            {
+              "bin": 2,
+              "lower": 0.2,
+              "upper": 0.3,
+              "n": 50,
+              "mean_probability": 0.25187691300483267,
+              "observed_rate": 0.2,
+              "absolute_gap": 0.05187691300483266
+            },
+            {
+              "bin": 3,
+              "lower": 0.3,
+              "upper": 0.4,
+              "n": 73,
+              "mean_probability": 0.3505954229747375,
+              "observed_rate": 0.3698630136986301,
+              "absolute_gap": 0.019267590723892614
+            },
+            {
+              "bin": 4,
+              "lower": 0.4,
+              "upper": 0.5,
+              "n": 92,
+              "mean_probability": 0.45694886470528906,
+              "observed_rate": 0.45652173913043476,
+              "absolute_gap": 0.00042712557485430347
+            },
+            {
+              "bin": 5,
+              "lower": 0.5,
+              "upper": 0.6,
+              "n": 109,
+              "mean_probability": 0.5523781239639459,
+              "observed_rate": 0.6055045871559633,
+              "absolute_gap": 0.053126463192017415
+            },
+            {
+              "bin": 6,
+              "lower": 0.6,
+              "upper": 0.7,
+              "n": 89,
+              "mean_probability": 0.6453106457862806,
+              "observed_rate": 0.7078651685393258,
+              "absolute_gap": 0.06255452275304518
+            },
+            {
+              "bin": 7,
+              "lower": 0.7,
+              "upper": 0.8,
+              "n": 58,
+              "mean_probability": 0.7510673074377585,
+              "observed_rate": 0.8448275862068966,
+              "absolute_gap": 0.09376027876913806
+            },
+            {
+              "bin": 8,
+              "lower": 0.8,
+              "upper": 0.9,
+              "n": 36,
+              "mean_probability": 0.8391328003978423,
+              "observed_rate": 0.8333333333333334,
+              "absolute_gap": 0.005799467064508956
+            },
+            {
+              "bin": 9,
+              "lower": 0.9,
+              "upper": 1.0,
+              "n": 3,
+              "mean_probability": 0.9089354957801383,
+              "observed_rate": 0.6666666666666666,
+              "absolute_gap": 0.2422688291134717
+            }
+          ]
+        },
+        "Bo3": {
+          "n": 1019,
+          "log_loss": 0.5593469167003378,
+          "brier": 0.1885836787630189,
+          "ece": 0.035485996531764,
+          "ece_bins": 10,
+          "calibration_bins": [
+            {
+              "bin": 0,
+              "lower": 0.0,
+              "upper": 0.1,
+              "n": 35,
+              "mean_probability": 0.06983756226264701,
+              "observed_rate": 0.14285714285714285,
+              "absolute_gap": 0.07301958059449584
+            },
+            {
+              "bin": 1,
+              "lower": 0.1,
+              "upper": 0.2,
+              "n": 85,
+              "mean_probability": 0.15071477087949758,
+              "observed_rate": 0.08235294117647059,
+              "absolute_gap": 0.068361829703027
+            },
+            {
+              "bin": 2,
+              "lower": 0.2,
+              "upper": 0.3,
+              "n": 133,
+              "mean_probability": 0.2522993114756828,
+              "observed_rate": 0.22556390977443608,
+              "absolute_gap": 0.02673540170124672
+            },
+            {
+              "bin": 3,
+              "lower": 0.3,
+              "upper": 0.4,
+              "n": 129,
+              "mean_probability": 0.346270675421978,
+              "observed_rate": 0.2868217054263566,
+              "absolute_gap": 0.05944896999562138
+            },
+            {
+              "bin": 4,
+              "lower": 0.4,
+              "upper": 0.5,
+              "n": 134,
+              "mean_probability": 0.45060066308712476,
+              "observed_rate": 0.417910447761194,
+              "absolute_gap": 0.03269021532593075
+            },
+            {
+              "bin": 5,
+              "lower": 0.5,
+              "upper": 0.6,
+              "n": 141,
+              "mean_probability": 0.5521725070437402,
+              "observed_rate": 0.5673758865248227,
+              "absolute_gap": 0.015203379481082524
+            },
+            {
+              "bin": 6,
+              "lower": 0.6,
+              "upper": 0.7,
+              "n": 143,
+              "mean_probability": 0.6532385973863051,
+              "observed_rate": 0.7062937062937062,
+              "absolute_gap": 0.05305510890740117
+            },
+            {
+              "bin": 7,
+              "lower": 0.7,
+              "upper": 0.8,
+              "n": 98,
+              "mean_probability": 0.7482733258954681,
+              "observed_rate": 0.7346938775510204,
+              "absolute_gap": 0.013579448344447687
+            },
+            {
+              "bin": 8,
+              "lower": 0.8,
+              "upper": 0.9,
+              "n": 89,
+              "mean_probability": 0.8508140256768381,
+              "observed_rate": 0.8539325842696629,
+              "absolute_gap": 0.0031185585928248383
+            },
+            {
+              "bin": 9,
+              "lower": 0.9,
+              "upper": 1.0,
+              "n": 32,
+              "mean_probability": 0.9328025149318404,
+              "observed_rate": 0.90625,
+              "absolute_gap": 0.02655251493184041
+            }
+          ]
+        },
+        "Bo5": {
+          "n": 226,
+          "log_loss": 0.6520541339045567,
+          "brier": 0.22931247411095365,
+          "ece": 0.09993243072221224,
+          "ece_bins": 10,
+          "calibration_bins": [
+            {
+              "bin": 0,
+              "lower": 0.0,
+              "upper": 0.1,
+              "n": 1,
+              "mean_probability": 0.08723570591465421,
+              "observed_rate": 1.0,
+              "absolute_gap": 0.9127642940853458
+            },
+            {
+              "bin": 1,
+              "lower": 0.1,
+              "upper": 0.2,
+              "n": 11,
+              "mean_probability": 0.17165338144041972,
+              "observed_rate": 0.18181818181818182,
+              "absolute_gap": 0.010164800377762101
+            },
+            {
+              "bin": 2,
+              "lower": 0.2,
+              "upper": 0.3,
+              "n": 21,
+              "mean_probability": 0.25003310834813286,
+              "observed_rate": 0.19047619047619047,
+              "absolute_gap": 0.059556917871942394
+            },
+            {
+              "bin": 3,
+              "lower": 0.3,
+              "upper": 0.4,
+              "n": 30,
+              "mean_probability": 0.3437261937215092,
+              "observed_rate": 0.4,
+              "absolute_gap": 0.05627380627849082
+            },
+            {
+              "bin": 4,
+              "lower": 0.4,
+              "upper": 0.5,
+              "n": 45,
+              "mean_probability": 0.45274024441177124,
+              "observed_rate": 0.6666666666666666,
+              "absolute_gap": 0.2139264222548954
+            },
+            {
+              "bin": 5,
+              "lower": 0.5,
+              "upper": 0.6,
+              "n": 55,
+              "mean_probability": 0.5557204293964464,
+              "observed_rate": 0.5636363636363636,
+              "absolute_gap": 0.00791593423991721
+            },
+            {
+              "bin": 6,
+              "lower": 0.6,
+              "upper": 0.7,
+              "n": 32,
+              "mean_probability": 0.6453249869280255,
+              "observed_rate": 0.46875,
+              "absolute_gap": 0.17657498692802553
+            },
+            {
+              "bin": 7,
+              "lower": 0.7,
+              "upper": 0.8,
+              "n": 20,
+              "mean_probability": 0.7534017586019554,
+              "observed_rate": 0.85,
+              "absolute_gap": 0.09659824139804463
+            },
+            {
+              "bin": 8,
+              "lower": 0.8,
+              "upper": 0.9,
+              "n": 8,
+              "mean_probability": 0.8502008430929986,
+              "observed_rate": 0.875,
+              "absolute_gap": 0.024799156907001407
+            },
+            {
+              "bin": 9,
+              "lower": 0.9,
+              "upper": 1.0,
+              "n": 3,
+              "mean_probability": 0.9261399105780872,
+              "observed_rate": 0.6666666666666666,
+              "absolute_gap": 0.25947324391142057
+            }
+          ]
+        }
+      }
+    },
+    "paired_primary_comparison": {
+      "baseline_model_id": "rolling_series_elo",
+      "primary_score": "log_loss",
+      "score": "log_loss",
+      "series": 1771,
+      "candidate_score": 0.586208143573173,
+      "baseline_score": 0.6216632899478263,
+      "candidate_minus_baseline": -0.03545514637465325,
+      "confidence_level": 0.95,
+      "confidence_interval": [
+        -0.04806724122039632,
+        -0.021905156099792565
+      ],
+      "noninferiority_margin": 0.005,
+      "decision": "superior",
+      "bootstrap": {
+        "method": "paired circular moving-block bootstrap by ordered completed series",
+        "replicates": 5000,
+        "block_size_series": 8,
+        "seed": 20260726
+      }
+    },
+    "secondary_comparison": {
+      "score": "log_loss",
+      "series": 1771,
+      "candidate_score": 0.586208143573173,
+      "baseline_score": 0.6931471805599454,
+      "candidate_minus_baseline": -0.1069390369867723,
+      "confidence_level": 0.95,
+      "confidence_interval": [
+        -0.1273104469478964,
+        -0.08640603304598699
+      ],
+      "noninferiority_margin": 0.005,
+      "decision": "superior",
+      "bootstrap": {
+        "method": "paired circular moving-block bootstrap by ordered completed series",
+        "replicates": 5000,
+        "block_size_series": 8,
+        "seed": 20260726
+      }
+    },
+    "claim_boundary": "a passing gate supports this frozen tournament and snapshot only; it is not a state-of-the-art claim"
+  }
+}

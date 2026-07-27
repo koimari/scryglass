@@ -70,7 +70,9 @@ def _clock_minutes(game: Mapping[str, Any]) -> float | None:
     for key in ("currentSeconds", "elapsedSeconds", "gameTime"):
         value = _number(game.get(key))
         if value is not None and value >= 0:
-            return value / (1000.0 if key == "gameTime" and value > 10000 else 60.0)
+            # GRID gameTime is milliseconds.  Its unit is a field contract,
+            # never something inferred from the observed magnitude.
+            return value / (60_000.0 if key == "gameTime" else 60.0)
     return None
 
 
@@ -109,34 +111,86 @@ def _objective_diff(teams: Mapping[str, Mapping[str, Any]], needle: str) -> floa
     return _objective_count(teams.get("blue", {}), needle) - _objective_count(teams.get("red", {}), needle)
 
 
-def _draft_picks(game: Mapping[str, Any], teams: Mapping[str, Mapping[str, Any]]) -> tuple[list[str], list[str]]:
-    ids = {str(team.get("id")): side for side, team in teams.items() if team.get("id") is not None}
-    blue: list[str] = []
-    red: list[str] = []
-    for action in game.get("draftActions") or []:
-        if not isinstance(action, Mapping) or str(action.get("type") or "").lower() != "pick":
-            continue
-        drafter = action.get("drafter") or {}
-        team_id = str(drafter.get("id")) if isinstance(drafter, Mapping) else ""
-        draftable = action.get("draftable") or {}
-        name = str(draftable.get("name") or "").strip() if isinstance(draftable, Mapping) else ""
-        if not name:
-            continue
-        side = ids.get(team_id)
-        if side == "blue":
-            blue.append(name)
-        elif side == "red":
-            red.append(name)
-    return blue, red
+_ROLE_ORDER = ("top", "jng", "mid", "bot", "sup")
+_ROLE_ALIASES = {
+    "top": "top",
+    "jungle": "jng",
+    "jng": "jng",
+    "mid": "mid",
+    "middle": "mid",
+    "bot": "bot",
+    "bottom": "bot",
+    "adc": "bot",
+    "support": "sup",
+    "sup": "sup",
+    "utility": "sup",
+}
+
+
+def _player_champion(player: Mapping[str, Any]) -> str:
+    value = (
+        player.get("champion")
+        or player.get("character")
+        or player.get("championName")
+    )
+    if isinstance(value, Mapping):
+        value = value.get("name") or value.get("displayName")
+    return str(value or "").strip()
+
+
+def _role_assigned_picks(
+    teams: Mapping[str, Mapping[str, Any]],
+) -> tuple[list[str], list[str]]:
+    """Return Top/Jungle/Mid/Bot/Support picks only from explicit role data."""
+
+    output: dict[str, list[str]] = {"blue": [], "red": []}
+    for side in ("blue", "red"):
+        by_role: dict[str, str] = {}
+        for player in teams.get(side, {}).get("players") or []:
+            if not isinstance(player, Mapping):
+                continue
+            raw_role = str(
+                player.get("role")
+                or player.get("position")
+                or player.get("lane")
+                or ""
+            ).strip().lower()
+            role = _ROLE_ALIASES.get(raw_role)
+            champion = _player_champion(player)
+            if not role or not champion or role in by_role:
+                continue
+            by_role[role] = champion
+        picks = [by_role.get(role, "") for role in _ROLE_ORDER]
+        if all(picks) and len({pick.casefold() for pick in picks}) == 5:
+            output[side] = picks
+    return output["blue"], output["red"]
 
 
 def _load_coefficients(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"live coefficient artifact unavailable: {path}") from exc
+        raise RuntimeError("live coefficient artifact unavailable") from exc
     if not isinstance(value, dict) or not isinstance(value.get("phase_coefs"), Mapping):
-        raise RuntimeError(f"live coefficient artifact is not a supported version: {path}")
+        raise RuntimeError("live coefficient artifact is not a supported version")
+    gate = value.get("publication_gate")
+    antisymmetry = value.get("antisymmetry_validation")
+    holdout = value.get("chronological_holdout")
+    if (
+        not isinstance(gate, Mapping)
+        or gate.get("status") != "passed"
+        or not isinstance(antisymmetry, Mapping)
+        or antisymmetry.get("passed") is not True
+        or _number(antisymmetry.get("max_probability_complement_error")) is None
+        or float(antisymmetry["max_probability_complement_error"]) > 1e-10
+        or not isinstance(holdout, Mapping)
+        or holdout.get("fit_before_holdout") is not True
+        or int(_number(holdout.get("maps")) or 0) <= 0
+    ):
+        raise RuntimeError(
+            "live coefficient artifact lacks a passing chronological and "
+            "side-swap publication gate"
+        )
     return value
 
 
@@ -231,7 +285,29 @@ def evaluate_live_state(
 
     minute = _clock_minutes(game)
     phase = "early" if minute is None or minute < 12 else "mid" if minute < 20 else "late"
-    coefs = _load_coefficients(coefficients_path)
+    try:
+        coefs = _load_coefficients(coefficients_path)
+    except RuntimeError as exc:
+        return LiveEvaluation(
+            status="unavailable-unvalidated-model",
+            model="withheld",
+            phase=phase,
+            minute=minute,
+            p_blue=None,
+            p_red=None,
+            blue_team=str(blue.get("name") or "Blue"),
+            red_team=str(red.get("name") or "Red"),
+            draft_status="unavailable",
+            strength_status="unavailable",
+            features={},
+            feature_sources={},
+            missing=("validated_live_model",),
+            warnings=(
+                "Live game state is available, but probability is withheld.",
+                str(exc),
+            ),
+            contributions=[],
+        )
     phase_coef = coefs.get("phase_coefs", {}).get(phase) or {}
     blue_gold, blue_gold_source = _team_gold(blue)
     red_gold, red_gold_source = _team_gold(red)
@@ -239,7 +315,7 @@ def evaluate_live_state(
     dragon_diff = _objective_diff(teams, "dragon")
     herald_diff = _objective_diff(teams, "herald")
     tower_diff = _objective_diff(teams, "tower") + _objective_diff(teams, "structure")
-    blue_picks, red_picks = _draft_picks(game, teams)
+    blue_picks, red_picks = _role_assigned_picks(teams)
 
     draft_edge: float | None = None
     draft_status = "incomplete"

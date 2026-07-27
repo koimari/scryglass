@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   probabilityLabel,
+  parseExternalProbability,
   relativeLiveTime,
   secondsLabel,
+  validProbabilityPair,
   type LiveIndex,
   type LivePointer,
   type LiveSnapshot,
@@ -19,30 +21,10 @@ type Props = {
 function statusLabel(snapshot: LiveSnapshot): string {
   if (snapshot.status === "finished") return "Finished";
   if (snapshot.status === "unavailable") return "State unavailable";
+  if (snapshot.evaluation.status.startsWith("unavailable")) return "Estimate withheld";
   if (snapshot.evaluation.status === "preliminary") return "Preliminary estimate";
   if (snapshot.evaluation.status.includes("out-of-calibration")) return "Estimate withheld";
   return "State received";
-}
-
-function numericValue(value: unknown): number | null {
-  const number = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-function extractExternal(text: string): { pBlue: number | null; pRed: number | null; raw: Record<string, unknown> } {
-  const simple = text.trim().match(/^(\d+(?:\.\d+)?)\s*[/:]\s*(\d+(?:\.\d+)?)$/);
-  if (simple) {
-    return { pBlue: Number(simple[1]) / 100, pRed: Number(simple[2]) / 100, raw: {} };
-  }
-  const parsed = JSON.parse(text) as Record<string, unknown>;
-  const evaluation = (parsed.evaluation as Record<string, unknown> | undefined) || parsed;
-  const normalise = (value: unknown) => {
-    const number = numericValue(value);
-    return number == null ? null : number > 1 ? number / 100 : number;
-  };
-  const pBlue = normalise(evaluation.p_blue ?? evaluation.blue_probability ?? evaluation.blueWinProbability);
-  const pRed = normalise(evaluation.p_red ?? evaluation.red_probability ?? evaluation.redWinProbability);
-  return { pBlue, pRed: pRed ?? (pBlue == null ? null : 1 - pBlue), raw: parsed };
 }
 
 function CompareModel({ snapshot }: { snapshot: LiveSnapshot }) {
@@ -52,7 +34,7 @@ function CompareModel({ snapshot }: { snapshot: LiveSnapshot }) {
   const evaluation = snapshot.evaluation;
   const compare = () => {
     try {
-      setExternal(extractExternal(text));
+      setExternal(parseExternalProbability(text));
       setError(null);
     } catch {
       setExternal(null);
@@ -146,6 +128,7 @@ function TeamSide({ side, snapshot }: { side: "blue" | "red"; snapshot: LiveSnap
 function SnapshotBoard({ snapshot, now }: { snapshot: LiveSnapshot; now: number }) {
   const pBlue = snapshot.evaluation.p_blue;
   const pRed = snapshot.evaluation.p_red;
+  const probabilityAvailable = validProbabilityPair(pBlue, pRed);
   const blueGold = snapshot.game_state.gold_by_side.blue;
   const redGold = snapshot.game_state.gold_by_side.red;
   const goldDiff = blueGold != null && redGold != null ? blueGold - redGold : null;
@@ -161,8 +144,8 @@ function SnapshotBoard({ snapshot, now }: { snapshot: LiveSnapshot; now: number 
         </div>
         <div className="live-teams"><TeamSide side="blue" snapshot={snapshot} /><div className="live-center-score"><span className="live-clock">{secondsLabel(snapshot.game_state.clock_seconds)}</span><strong>{blueKills ?? "—"} <em>–</em> {redKills ?? "—"}</strong><small>{goldDiff == null ? "Gold unavailable" : `${goldDiff >= 0 ? "+" : ""}${Math.round(goldDiff).toLocaleString()} gold · blue relative`}</small></div><TeamSide side="red" snapshot={snapshot} /></div>
         <div className="live-probability-section">
-          <div className="live-probability-heading"><span>Game-state win chance</span><strong>{pBlue == null || pRed == null ? "Estimate withheld" : `${probabilityLabel(pBlue)} blue · ${probabilityLabel(pRed)} red`}</strong></div>
-          {pBlue != null && pRed != null ? <div className="live-probability-bar" aria-label={`Blue ${probabilityLabel(pBlue)}, red ${probabilityLabel(pRed)}`}><span className="is-blue" style={{ width: `${pBlue * 100}%` }}>{probabilityLabel(pBlue)}</span><span className="is-red" style={{ width: `${pRed * 100}%` }}>{probabilityLabel(pRed)}</span></div> : <div className="live-withheld"><strong>{snapshot.evaluation.status.includes("out-of-calibration") ? "31-minute and later states are withheld by the current calibration." : "The state is visible, but a probability is not emitted until required fields are present."}</strong></div>}
+          <div className="live-probability-heading"><span>Game-state win chance</span><strong>{!probabilityAvailable ? "Estimate withheld" : `${probabilityLabel(pBlue)} blue · ${probabilityLabel(pRed)} red`}</strong></div>
+          {probabilityAvailable ? <div className="live-probability-bar" aria-label={`Blue ${probabilityLabel(pBlue)}, red ${probabilityLabel(pRed)}`}><span className="is-blue" style={{ width: `${pBlue! * 100}%` }}>{probabilityLabel(pBlue)}</span><span className="is-red" style={{ width: `${pRed! * 100}%` }}>{probabilityLabel(pRed)}</span></div> : <div className="live-withheld"><strong>{snapshot.evaluation.status.includes("unvalidated-model") ? "The verified state remains visible, but the live probability model has not passed its chronological and side-swap publication gates." : snapshot.evaluation.status.includes("out-of-calibration") ? "States outside the declared calibration window are withheld." : "The state is visible, but a complementary probability pair is not emitted until required fields are present and valid."}</strong></div>}
           <p className="live-footnote">Conditional map-win estimate · preliminary model · not an Elo update or a wagering line.</p>
         </div>
       </section>

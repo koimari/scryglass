@@ -5,16 +5,25 @@
 import { readFileSync } from "fs";
 import path from "path";
 import {
+  CompositionRuntimeUnavailableError,
+  DraftIntegrityInputError,
   compositionDraftCatalog,
   compositionDraftScore,
   compositionPartialDraftScore,
+  compositionRuntimeMetadata,
+  normalizeCompositionPatch,
 } from "./draftComposition";
+import {
+  DRAFT_PICK_ORDER,
+  DRAFT_POLICY_MIN_ROLE_GAMES,
+  DRAFT_ROLES,
+} from "./draftRules";
 
 const DEFAULT_TEMP = 1.4;
 const BLUE_SIDE_BONUS = 0.03;
 const PRIOR_N = 25;
 
-export const DRAFT_ROLES = ["top", "jng", "mid", "bot", "sup"] as const;
+export { DRAFT_PICK_ORDER, DRAFT_ROLES };
 export type DraftRole = (typeof DRAFT_ROLES)[number];
 export type DraftSide = "blue" | "red";
 
@@ -112,6 +121,8 @@ export type DraftScoreInput = {
   blue_players?: string[] | null;
   red_players?: string[] | null;
   strength_source?: string | null;
+  strength_as_of?: string | null;
+  strength_model_id?: string | null;
   blue_roles?: string[] | null;
   red_roles?: string[] | null;
 };
@@ -145,11 +156,15 @@ export type DraftScoreResult = {
     source: string;
     intercept?: number;
     slope?: number;
+    neutral_blue_baseline?: number;
     temperature?: number;
     legacy_temp?: number;
     p_blue_legacy_1_4?: number;
     p_blue_with_strength: number | null;
     dp_per_logit?: number;
+    normalized_patch?: string | null;
+    patch_status?: "exact" | "pooled_missing" | "pooled_unsupported";
+    league_status?: "exact" | "pooled_global";
   };
   components: {
     win_logit_blue: number;
@@ -195,15 +210,44 @@ export type DraftScoreResult = {
       edge_contribution: number;
       uncertainty_logit: number;
       evidence: {
-        games: number;
-        shrinkage: number;
-        label: string;
+        role_champion_maps: {
+          observed_terms: number;
+          possible_terms: number;
+          minimum_maps: number;
+          median_maps: number;
+          label: string;
+        };
+        ally_synergy_pairs: {
+          observed_terms: number;
+          possible_terms: number;
+          minimum_maps: number;
+          median_maps: number;
+          label: string;
+        };
+        enemy_interaction_pairs: {
+          observed_terms: number;
+          possible_terms: number;
+          minimum_maps: number;
+          median_maps: number;
+          label: string;
+        };
         uncertainty_logit: number;
       };
     }>;
     reconciles: boolean;
     attribution: string;
   };
+  model?: {
+    runtime_version: number;
+    artifact_sha256: string;
+    model_code_sha256: string;
+    training_population_sha256: string;
+    trained_through: string;
+    normalized_patch: string | null;
+    patch_status: "exact" | "pooled_missing" | "pooled_unsupported";
+    league: string;
+    league_status: "exact" | "pooled_global";
+  } | null;
 };
 
 export type DraftChampion = {
@@ -224,130 +268,135 @@ export type DraftCandidateRole = DraftRole | "open" | "any";
 export type DraftRecommendation = {
   champion: string;
   role: DraftRole | null;
-  projected_wr: number;
-  delta_pp: number;
-  confidence: number;
+  immediate_value: number;
+  projected_value: number;
+  delta_points: number;
   sample_games: number;
   evidence: "Settled" | "Observed" | "Thin" | "Unseen role";
+  lookahead_plies: number;
+  principal_variation: DraftAction[];
 };
 
 export type DraftTimelineRow = DraftAction & {
   pick_number: number;
-  projected_wr: number;
-  delta_pp: number;
-  confidence: number;
+  projected_value: number;
+  delta_points: number;
 };
 
 export type DraftSandboxResult = {
+  value_kind: "experimental_composition_policy_value";
+  probability_status: "withheld_failed_chronological_gate";
+  candidate_role_policy: "supported_pro_roles_minimum_maps";
   perspective: DraftSide;
   recommendation_side: DraftSide;
   next_side: DraftSide;
   candidate_role: DraftCandidateRole;
   current: {
-    projected_wr: number;
-    confidence: number;
-    score: DraftScoreResult;
+    projected_value: number;
+    audit: {
+      probability_pipeline_gate: "failed";
+      release_runtime_binding: "not_checked" | "matched";
+      calibration: "not_applicable_to_policy_value";
+    };
   };
   timeline: DraftTimelineRow[];
   recommendations: DraftRecommendation[];
   open_roles: DraftRole[];
+  search: {
+    exhaustive: false;
+    root_legal_actions: number;
+    root_evaluated_actions: number;
+    root_beam_width: number;
+    future_beam_width: number;
+    max_followup_plies: number;
+    minimum_role_maps: number;
+  };
   note: string;
+  model_context: NonNullable<DraftScoreResult["model"]>;
 };
+
+export function validateDraftSandboxState(
+  actions: DraftAction[],
+  nextSide: DraftSide,
+): void {
+  if (actions.length > DRAFT_PICK_ORDER.length) {
+    throw new Error("a draft can contain at most ten picks");
+  }
+  const selected = new Set<string>();
+  const occupied = {
+    blue: new Set<DraftRole>(),
+    red: new Set<DraftRole>(),
+  };
+  actions.forEach((action, index) => {
+    if (action.side !== DRAFT_PICK_ORDER[index]) {
+      throw new Error(
+        `pick ${index + 1} must belong to ${DRAFT_PICK_ORDER[index]} side`,
+      );
+    }
+    if (!action.role || !DRAFT_ROLES.includes(action.role)) {
+      throw new Error(`pick ${index + 1} needs one verified role`);
+    }
+    if (occupied[action.side].has(action.role)) {
+      throw new Error(
+        `${action.side} side cannot assign two champions to ${action.role}`,
+      );
+    }
+    occupied[action.side].add(action.role);
+    const champion = normKey(normalizeDraftChampion(action.champion));
+    if (selected.has(champion)) {
+      throw new Error(`${action.champion} is already selected`);
+    }
+    selected.add(champion);
+  });
+  const expected = DRAFT_PICK_ORDER[actions.length];
+  if (expected && nextSide !== expected) {
+    throw new Error(
+      `next side must be ${expected} after ${actions.length} picks`,
+    );
+  }
+}
 
 let cached: DraftRuntime | null = null;
 let catalogCached: DraftChampion[] | null = null;
 
-type StrengthRow = {
-  team?: string;
-  player?: string;
-  mu_total: number;
-  sigma: number;
-  last_team?: string | null;
-};
-
-type StrengthPack = { teams: StrengthRow[]; players: StrengthRow[] };
-let strengthPack: StrengthPack | null | undefined;
-
-function loadStrengthPack(): StrengthPack | null {
-  if (strengthPack !== undefined) return strengthPack;
-  try {
-    const latest = JSON.parse(
-      readFileSync(path.join(process.cwd(), "public", "packs", "latest.json"), "utf8"),
-    ) as { pack_id?: string };
-    const packId = latest.pack_id;
-    if (!packId) throw new Error("latest pack id missing");
-    const root = path.join(process.cwd(), "public", "packs", packId, "features");
-    strengthPack = {
-      teams: JSON.parse(readFileSync(path.join(root, "ratings_snapshot.json"), "utf8")) as StrengthRow[],
-      players: JSON.parse(
-        readFileSync(path.join(root, "player_ratings_snapshot.json"), "utf8"),
-      ) as StrengthRow[],
-    };
-  } catch {
-    strengthPack = null;
+function resolveExplicitStrength(input: DraftScoreInput): DraftScoreInput {
+  const teamDiff = input.team_elo_diff ?? input.elo_diff ?? null;
+  const playerDiff = input.player_elo_diff ?? null;
+  for (const [label, value] of [
+    ["team_elo_diff", teamDiff],
+    ["player_elo_diff", playerDiff],
+  ] as const) {
+    if (value != null && !Number.isFinite(Number(value))) {
+      throw new DraftIntegrityInputError(`${label} must be finite`);
+    }
   }
-  return strengthPack;
-}
-
-function adjustedRating(row: StrengthRow, floor: number): number {
-  return Number(row.mu_total) - Math.max(0, Number(row.sigma) - floor);
-}
-
-function teamMatch(name: string, candidate: string): boolean {
-  const a = normKey(name);
-  const b = normKey(candidate);
-  return a === b || a.includes(b) || b.includes(a);
-}
-
-function resolveStrength(input: DraftScoreInput): DraftScoreInput {
-  const teamDiff = input.team_elo_diff ?? input.elo_diff;
-  const playerDiff = input.player_elo_diff;
-  if (playerDiff != null || !input.blue_team || !input.red_team) {
+  if (teamDiff == null && playerDiff == null) {
     return {
       ...input,
-      team_elo_diff: teamDiff,
-      strength_source:
-        input.strength_source ?? (teamDiff != null || playerDiff != null ? "explicit pre-match strength" : null),
+      team_elo_diff: null,
+      player_elo_diff: null,
     };
   }
-  const pack = loadStrengthPack();
-  if (!pack) return input;
-  const blueRow = pack.teams.find((row) => teamMatch(input.blue_team!, String(row.team ?? "")));
-  const redRow = pack.teams.find((row) => teamMatch(input.red_team!, String(row.team ?? "")));
-  if (!blueRow || !redRow) return input;
-  const resolved: DraftScoreInput = {
+  if (
+    !input.strength_source?.trim() ||
+    !input.strength_as_of?.trim() ||
+    !input.strength_model_id?.trim()
+  ) {
+    throw new DraftIntegrityInputError(
+      "contextual strength requires an explicit source, as-of time, and model ID",
+    );
+  }
+  const asOf = Date.parse(input.strength_as_of);
+  if (!Number.isFinite(asOf)) {
+    throw new DraftIntegrityInputError(
+      "strength_as_of must be a valid timestamp",
+    );
+  }
+  return {
     ...input,
-    team_elo_diff: teamDiff ?? adjustedRating(blueRow, 25) - adjustedRating(redRow, 25),
-    strength_source: teamDiff != null ? "pre-match team + current roster proxy" : "current pack adjusted team + roster proxy",
+    team_elo_diff: teamDiff,
+    player_elo_diff: playerDiff,
   };
-  if (input.blue_players?.length && input.red_players?.length) {
-    const bluePlayers = pack.players.filter((row) => input.blue_players!.some((p) => teamMatch(p, String(row.player ?? ""))));
-    const redPlayers = pack.players.filter((row) => input.red_players!.some((p) => teamMatch(p, String(row.player ?? ""))));
-    if (bluePlayers.length && redPlayers.length) {
-      const b = bluePlayers.reduce((sum, row) => sum + adjustedRating(row, 28), 0) / bluePlayers.length;
-      const r = redPlayers.reduce((sum, row) => sum + adjustedRating(row, 28), 0) / redPlayers.length;
-      resolved.player_elo_diff = b - r;
-      resolved.strength_source = "explicit roster/player ratings + adjusted team rating";
-    }
-  } else {
-    const roster = (team: string) => {
-      const exact = pack.players.filter((row) => normKey(String(row.last_team ?? "")) === normKey(team));
-      const candidates = exact.length
-        ? exact
-        : pack.players.filter((row) => teamMatch(team, String(row.last_team ?? "")));
-      return candidates
-        .sort((a, b) => adjustedRating(b, 28) - adjustedRating(a, 28))
-        .slice(0, 5);
-    };
-    const bluePlayers = roster(input.blue_team!);
-    const redPlayers = roster(input.red_team!);
-    if (bluePlayers.length && redPlayers.length) {
-      const b = bluePlayers.reduce((sum, row) => sum + adjustedRating(row, 28), 0) / bluePlayers.length;
-      const r = redPlayers.reduce((sum, row) => sum + adjustedRating(row, 28), 0) / redPlayers.length;
-      resolved.player_elo_diff = b - r;
-    }
-  }
-  return resolved;
 }
 
 function loadRuntime(): DraftRuntime {
@@ -528,10 +577,14 @@ function rolePairScore(
 }
 
 export function draftScore(input: DraftScoreInput): DraftScoreResult {
-  const enriched = resolveStrength(input);
+  const enriched = resolveExplicitStrength(input);
   if (enriched.blue.length === 5 && enriched.red.length === 5) {
-    const composition = compositionDraftScore(enriched);
-    if (composition) return composition;
+    return compositionDraftScore(enriched);
+  }
+  if (enriched.blue.length === 5 || enriched.red.length === 5) {
+    throw new DraftIntegrityInputError(
+      "complete scoring requires five champions on both sides",
+    );
   }
   const rt = loadRuntime();
   const scale = draftTemperature(enriched.league, rt);
@@ -578,7 +631,7 @@ export function draftScore(input: DraftScoreInput): DraftScoreResult {
       score_blue: round(scoreBlue, 2),
       score_red: round(100 - scoreBlue, 2),
       edge: round(scoreBlue - (100 - scoreBlue), 2),
-      source: "legacy partial-draft fallback",
+      source: "legacy partial-draft model (partial boards only)",
     },
     contextualized:
       pWithStrength == null
@@ -622,54 +675,43 @@ export function draftScore(input: DraftScoreInput): DraftScoreResult {
     blue: b.champs,
     red: r.champs,
     note:
-      "Legacy partial-draft fallback: league-calibrated Draft Score comparison. Complete five-versus-five boards use the full-composition runtime when available.",
+      "Legacy partial-draft comparison. Complete five-versus-five boards never use this fallback.",
+    model: null,
   };
 }
 
 export function draftCatalog(): DraftChampion[] {
   if (catalogCached) return catalogCached;
   const compositionCatalog = compositionDraftCatalog();
-  if (compositionCatalog?.length) {
-    catalogCached = compositionCatalog.map((row) => ({
-      name: row.name,
-      roles: row.roles.filter(isDraftRole),
-      games: row.games,
-      role_games: Object.fromEntries(
-        Object.entries(row.role_games)
-          .filter(([role]) => isDraftRole(role))
-          .map(([role, games]) => [role, Number(games) || 0]),
-      ) as Partial<Record<DraftRole, number>>,
-    }));
-    return catalogCached;
+  if (!compositionCatalog?.length) {
+    throw new CompositionRuntimeUnavailableError();
   }
-  const rt = loadRuntime();
-  const roleSets = new Map<string, Set<DraftRole>>();
-  for (const key of Object.keys(rt.role_pairs)) {
-    const [roleRaw, blueChampion, redChampion] = key.split("|");
-    if (!isDraftRole(roleRaw)) continue;
-    for (const champion of [blueChampion, redChampion]) {
-      const roles = roleSets.get(champion) ?? new Set<DraftRole>();
-      roles.add(roleRaw);
-      roleSets.set(champion, roles);
-    }
-  }
-  catalogCached = Object.keys(rt.champ_game_counts)
-    .sort((a, b) => a.localeCompare(b))
-    .map((name) => ({
-      name,
-      roles: DRAFT_ROLES.filter((role) => roleSets.get(name)?.has(role)),
-      games: Number(rt.champ_game_counts[name] ?? 0),
-    }));
+  catalogCached = compositionCatalog.map((row) => ({
+    name: row.name,
+    roles: row.roles.filter(
+      (role): role is DraftRole =>
+        isDraftRole(role) &&
+        Number(row.role_games[role] ?? 0) >=
+          DRAFT_POLICY_MIN_ROLE_GAMES,
+    ),
+    games: row.games,
+    role_games: Object.fromEntries(
+      Object.entries(row.role_games)
+        .filter(([role]) => isDraftRole(role))
+        .map(([role, games]) => [role, Number(games) || 0]),
+    ) as Partial<Record<DraftRole, number>>,
+  }));
   return catalogCached;
 }
 
-function sideProbability(score: DraftScoreResult, side: DraftSide): number {
+function sideModelValue(score: DraftScoreResult, side: DraftSide): number {
   return side === "blue" ? score.p_blue_draft : 1 - score.p_blue_draft;
 }
 
 function scoreActions(
   actions: DraftAction[],
   league: string | null | undefined,
+  patch: string | null | undefined,
   eloDiff: number | null | undefined,
 ): DraftScoreResult {
   const blue = actions.filter((action) => action.side === "blue");
@@ -678,11 +720,30 @@ function scoreActions(
     blue: blue.map((action) => action.champion),
     red: red.map((action) => action.champion),
     league,
+    patch,
     elo_diff: eloDiff,
     blue_roles: blue.map((action) => action.role || ""),
     red_roles: red.map((action) => action.role || ""),
   };
-  return compositionPartialDraftScore(input) ?? draftScore(input);
+  return compositionPartialDraftScore(input);
+}
+
+function draftStateKey(
+  actions: DraftAction[],
+  league: string | null | undefined,
+  patch: string | null | undefined,
+  eloDiff: number | null | undefined,
+): string {
+  const sideKey = (side: DraftSide) =>
+    actions
+      .filter((action) => action.side === side)
+      .map(
+        (action) =>
+          `${action.role ?? "?"}:${normKey(action.champion)}`,
+      )
+      .sort()
+      .join(",");
+  return `${league ?? ""};${patch ?? ""};${eloDiff ?? ""};b=${sideKey("blue")};r=${sideKey("red")}`;
 }
 
 function evidenceLabel(games: number): DraftRecommendation["evidence"] {
@@ -692,6 +753,195 @@ function evidenceLabel(games: number): DraftRecommendation["evidence"] {
   return "Thin";
 }
 
+type PolicyValue = {
+  value: number;
+  line: DraftAction[];
+};
+
+const SANDBOX_LOOKAHEAD_PLIES = 2;
+const SANDBOX_BEAM_WIDTH = 8;
+const SANDBOX_ROOT_BEAM_MAX = 32;
+
+function requireDraftSandboxPatch(
+  value: string | null | undefined,
+): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new DraftIntegrityInputError(
+      "Sandbox patch is required; select an observed patch context",
+    );
+  }
+  const patch = normalizeCompositionPatch(value);
+  if (!patch) {
+    throw new DraftIntegrityInputError(
+      "Sandbox patch must use a numeric major.minor form",
+    );
+  }
+  const metadata = compositionRuntimeMetadata();
+  if (!metadata) throw new CompositionRuntimeUnavailableError();
+  if (!metadata.analysis_patches.includes(patch)) {
+    throw new DraftIntegrityInputError(
+      `Sandbox patch ${patch} is outside the observed model artifact`,
+    );
+  }
+  return patch;
+}
+
+function legalFutureActions(
+  actions: DraftAction[],
+  excluded: Set<string>,
+  catalog: DraftChampion[],
+): DraftAction[] {
+  const side = DRAFT_PICK_ORDER[actions.length];
+  if (!side) return [];
+  const selected = new Set(actions.map((action) => normKey(action.champion)));
+  const occupied = new Set(
+    actions
+      .filter((action) => action.side === side)
+      .map((action) => action.role)
+      .filter((role): role is DraftRole => Boolean(role)),
+  );
+  const openRoles = DRAFT_ROLES.filter((role) => !occupied.has(role));
+  const legal: DraftAction[] = [];
+  for (const candidate of catalog) {
+    if (selected.has(normKey(candidate.name)) || excluded.has(normKey(candidate.name))) {
+      continue;
+    }
+    for (const role of candidate.roles) {
+      if (openRoles.includes(role)) {
+        legal.push({ side, champion: candidate.name, role });
+      }
+    }
+  }
+  return legal;
+}
+
+function policyValue(
+  actions: DraftAction[],
+  rootSide: DraftSide,
+  depth: number,
+  excluded: Set<string>,
+  catalog: DraftChampion[],
+  league: string | null | undefined,
+  patch: string | null | undefined,
+  eloDiff: number | null | undefined,
+  memo: Map<string, PolicyValue>,
+  scoreMemo: Map<string, number>,
+): PolicyValue {
+  const terminal = (): PolicyValue => ({
+    value: cachedSideValue(
+      actions,
+      rootSide,
+      league,
+      patch,
+      eloDiff,
+      scoreMemo,
+    ),
+    line: [],
+  });
+  if (depth <= 0 || actions.length >= DRAFT_PICK_ORDER.length) return terminal();
+
+  const key = [
+    rootSide,
+    depth,
+    actions
+      .map((action) => `${action.side}:${action.role}:${normKey(action.champion)}`)
+      .join("|"),
+  ].join(";");
+  const cachedValue = memo.get(key);
+  if (cachedValue) return cachedValue;
+
+  const sideToAct = DRAFT_PICK_ORDER[actions.length];
+  const legal = legalFutureActions(actions, excluded, catalog);
+  if (!sideToAct || !legal.length) return terminal();
+
+  const ranked = legal
+    .map((action) => {
+      const next = [...actions, action];
+      return {
+        action,
+        immediate: cachedSideValue(
+          next,
+          rootSide,
+          league,
+          patch,
+          eloDiff,
+          scoreMemo,
+        ),
+      };
+    })
+    .sort((a, b) => {
+      const difference =
+        sideToAct === rootSide
+          ? b.immediate - a.immediate
+          : a.immediate - b.immediate;
+      return (
+        difference ||
+        a.action.champion.localeCompare(b.action.champion) ||
+        String(a.action.role).localeCompare(String(b.action.role))
+      );
+    })
+    .slice(0, SANDBOX_BEAM_WIDTH);
+
+  if (depth === 1 && ranked.length) {
+    const resolved = {
+      value: ranked[0].immediate,
+      line: [ranked[0].action],
+    };
+    memo.set(key, resolved);
+    return resolved;
+  }
+
+  let best: PolicyValue | null = null;
+  for (const candidate of ranked) {
+    const child = policyValue(
+      [...actions, candidate.action],
+      rootSide,
+      depth - 1,
+      excluded,
+      catalog,
+      league,
+      patch,
+      eloDiff,
+      memo,
+      scoreMemo,
+    );
+    const result = {
+      value: child.value,
+      line: [candidate.action, ...child.line],
+    };
+    if (
+      !best ||
+      (sideToAct === rootSide
+        ? result.value > best.value
+        : result.value < best.value)
+    ) {
+      best = result;
+    }
+  }
+  const resolved = best ?? terminal();
+  memo.set(key, resolved);
+  return resolved;
+}
+
+function cachedSideValue(
+  actions: DraftAction[],
+  side: DraftSide,
+  league: string | null | undefined,
+  patch: string | null | undefined,
+  eloDiff: number | null | undefined,
+  cache: Map<string, number>,
+): number {
+  const key = `${side};${draftStateKey(actions, league, patch, eloDiff)}`;
+  const cachedValue = cache.get(key);
+  if (cachedValue != null) return cachedValue;
+  const value = sideModelValue(
+    scoreActions(actions, league, patch, eloDiff),
+    side,
+  );
+  cache.set(key, value);
+  return value;
+}
+
 export function analyzeDraftSandbox(input: {
   actions: DraftAction[];
   perspective: DraftSide;
@@ -699,6 +949,7 @@ export function analyzeDraftSandbox(input: {
   candidate_role?: DraftCandidateRole;
   excluded?: string[];
   league?: string | null;
+  patch?: string | null;
   elo_diff?: number | null;
   limit?: number;
 }): DraftSandboxResult {
@@ -706,26 +957,37 @@ export function analyzeDraftSandbox(input: {
     ...action,
     champion: normalizeDraftChampion(action.champion),
   }));
+  validateDraftSandboxState(actions, input.next_side);
+  const patch = requireDraftSandboxPatch(input.patch);
   const perspective = input.perspective;
-  const currentScore = scoreActions(actions, input.league, input.elo_diff);
-  const currentProbability = sideProbability(currentScore, perspective);
-  const currentRecommendationProbability = sideProbability(currentScore, input.next_side);
+  const currentScore = scoreActions(
+    actions,
+    input.league,
+    patch,
+    input.elo_diff,
+  );
+  const currentValue = sideModelValue(currentScore, perspective);
+  const currentRecommendationValue = sideModelValue(currentScore, input.next_side);
   const timeline: DraftTimelineRow[] = [];
   const prefix: DraftAction[] = [];
-  let previousProbability = 0.5;
+  let previousValue = 0.5;
 
   actions.forEach((action, index) => {
     prefix.push(action);
-    const score = scoreActions(prefix, input.league, input.elo_diff);
-    const probability = sideProbability(score, perspective);
+    const score = scoreActions(
+      prefix,
+      input.league,
+      patch,
+      input.elo_diff,
+    );
+    const value = sideModelValue(score, perspective);
     timeline.push({
       ...action,
       pick_number: index + 1,
-      projected_wr: round(probability, 4),
-      delta_pp: round(100 * (probability - previousProbability), 2),
-      confidence: score.confidence,
+      projected_value: round(value, 4),
+      delta_points: round(100 * (value - previousValue), 2),
     });
-    previousProbability = probability;
+    previousValue = value;
   });
 
   const occupied = new Set(
@@ -740,66 +1002,158 @@ export function analyzeDraftSandbox(input: {
   const candidateRole = input.candidate_role ?? "open";
   const catalog = draftCatalog();
   const recommendations: DraftRecommendation[] = [];
+  const policyMemo = new Map<string, PolicyValue>();
+  const scoreMemo = new Map<string, number>();
+  const requestedLimit = clip(input.limit ?? 12, 1, 200);
+  const legalRootActions: Array<{
+    action: DraftAction;
+    immediate: number;
+    sampleGames: number;
+  }> = [];
 
   for (const candidate of catalog) {
     if (selected.has(normKey(candidate.name)) || excluded.has(normKey(candidate.name))) continue;
-    let roles: Array<DraftRole | null>;
+    let roles: DraftRole[];
     if (candidateRole === "any") {
-      roles = openRoles;
+      roles = candidate.roles.filter((role) => openRoles.includes(role));
+      if (!roles.length) continue;
     } else if (candidateRole === "open") {
       roles = candidate.roles.filter((role) => openRoles.includes(role));
       if (!roles.length) continue;
     } else {
       if (!openRoles.includes(candidateRole)) continue;
+      if (!candidate.roles.includes(candidateRole)) continue;
       roles = [candidateRole];
     }
 
-    let best: DraftRecommendation | null = null;
     for (const role of roles) {
-      const score = scoreActions(
-        [...actions, { side: input.next_side, champion: candidate.name, role }],
-        input.league,
-        input.elo_diff,
-      );
-      const projected = sideProbability(score, input.next_side);
-      const row: DraftRecommendation = {
+      const candidateAction: DraftAction = {
+        side: input.next_side,
         champion: candidate.name,
         role,
-        projected_wr: round(projected, 4),
-        delta_pp: round(100 * (projected - currentRecommendationProbability), 2),
-        confidence: score.confidence,
-        sample_games: role ? Number(candidate.role_games?.[role] ?? 0) : candidate.games,
-        evidence: evidenceLabel(
-          role ? Number(candidate.role_games?.[role] ?? 0) : candidate.games,
-        ),
       };
-      if (!best || row.projected_wr > best.projected_wr) best = row;
+      const branch = [...actions, candidateAction];
+      legalRootActions.push({
+        action: candidateAction,
+        immediate: cachedSideValue(
+          branch,
+          input.next_side,
+          input.league,
+          patch,
+          input.elo_diff,
+          scoreMemo,
+        ),
+        sampleGames: Number(candidate.role_games?.[role] ?? 0),
+      });
     }
-    if (best) recommendations.push(best);
   }
+
+  const rootBeamWidth = Math.min(
+    legalRootActions.length,
+    SANDBOX_ROOT_BEAM_MAX,
+  );
+  const rootBeam = legalRootActions
+    .sort(
+      (a, b) =>
+        b.immediate - a.immediate ||
+        b.sampleGames - a.sampleGames ||
+        a.action.champion.localeCompare(b.action.champion) ||
+        String(a.action.role).localeCompare(String(b.action.role)),
+    )
+    .slice(0, rootBeamWidth);
+  const bestByChampion = new Map<string, DraftRecommendation>();
+
+  for (const seed of rootBeam) {
+    const branch = [...actions, seed.action];
+    const immediate = cachedSideValue(
+      branch,
+      input.next_side,
+      input.league,
+      patch,
+      input.elo_diff,
+      scoreMemo,
+    );
+    const remainingPicks = DRAFT_PICK_ORDER.length - branch.length;
+    const lookaheadPlies = Math.min(
+      SANDBOX_LOOKAHEAD_PLIES,
+      remainingPicks,
+    );
+    const policy = policyValue(
+      branch,
+      input.next_side,
+      lookaheadPlies,
+      excluded,
+      catalog,
+      input.league,
+      patch,
+      input.elo_diff,
+      policyMemo,
+      scoreMemo,
+    );
+    const row: DraftRecommendation = {
+      champion: seed.action.champion,
+      role: seed.action.role ?? null,
+      immediate_value: round(immediate, 4),
+      projected_value: round(policy.value, 4),
+      delta_points: round(
+        100 * (policy.value - currentRecommendationValue),
+        2,
+      ),
+      sample_games: seed.sampleGames,
+      evidence: evidenceLabel(seed.sampleGames),
+      lookahead_plies: lookaheadPlies,
+      principal_variation: policy.line,
+    };
+    const currentBest = bestByChampion.get(row.champion);
+    if (
+      !currentBest ||
+      row.projected_value > currentBest.projected_value ||
+      (row.projected_value === currentBest.projected_value &&
+        row.sample_games > currentBest.sample_games)
+    ) {
+      bestByChampion.set(row.champion, row);
+    }
+  }
+  recommendations.push(...bestByChampion.values());
 
   recommendations.sort(
     (a, b) =>
-      b.projected_wr - a.projected_wr ||
+      b.projected_value - a.projected_value ||
       b.sample_games - a.sample_games ||
       a.champion.localeCompare(b.champion),
   );
 
   return {
+    value_kind: "experimental_composition_policy_value",
+    probability_status: "withheld_failed_chronological_gate",
+    candidate_role_policy: "supported_pro_roles_minimum_maps",
     perspective,
     recommendation_side: input.next_side,
     next_side: input.next_side,
     candidate_role: candidateRole,
     current: {
-      projected_wr: round(currentProbability, 4),
-      confidence: currentScore.confidence,
-      score: currentScore,
+      projected_value: round(currentValue, 4),
+      audit: {
+        probability_pipeline_gate: "failed",
+        release_runtime_binding: "not_checked",
+        calibration: "not_applicable_to_policy_value",
+      },
     },
     timeline,
-    recommendations: recommendations.slice(0, clip(input.limit ?? 12, 1, 200)),
+    recommendations: recommendations.slice(0, requestedLimit),
     open_roles: openRoles,
+    search: {
+      exhaustive: false,
+      root_legal_actions: legalRootActions.length,
+      root_evaluated_actions: rootBeam.length,
+      root_beam_width: rootBeamWidth,
+      future_beam_width: SANDBOX_BEAM_WIDTH,
+      max_followup_plies: SANDBOX_LOOKAHEAD_PLIES,
+      minimum_role_maps: DRAFT_POLICY_MIN_ROLE_GAMES,
+    },
     note:
-      "Partial full-composition counterfactual. Rankings use role-aware direct effects plus learned ally synergy and enemy interactions among selected champions. Unfilled seats are neutralized, so pick-to-pick changes are not calibrated live win probabilities.",
+      `Experimental beam-minimax composition policy value. Candidate and look-ahead policy picks require at least ${DRAFT_POLICY_MIN_ROLE_GAMES} pro maps in the champion-role pair, including when the manual board allows an unsupported role what-if. The root beam retains the strongest immediate legal actions, then re-evaluates each through up to two subsequent legal pro-role picks; the acting side maximizes its value and the opponent minimizes it. This is a bounded, non-exhaustive policy search. The composition probability pipeline failed its chronological promotion gate, so no Sandbox value is a win probability or a solved best response.`,
+    model_context: currentScore.model!,
   };
 }
 

@@ -21,18 +21,21 @@ from pathlib import Path
 from typing import Any
 
 from lol_kills.etl.paths import MODELS_DIR, ROOT, WAREHOUSE_DIR
-from lol_kills.research.grubs_intrinsic_value import contest_ev_terminal_states
+from lol_kills.research.grubs_article_publication import (
+    OBJECTIVE_GOLD_EQUIVALENT,
+    TWO_WAVE_LEAVE_FARM_GOLD,
+    article_p_star_at_gold,
+    build_article_publication,
+)
 
 OUT_JSON = MODELS_DIR / "grubs_action_graph.json"
 OUT_FIG = ROOT / "output" / "pdf" / "grubs_action_graph.png"
 FUR_CASE = WAREHOUSE_DIR / "esports_events" / "426848"
 
-# Article reference knobs (Void_Grubs_koimari.pdf)
-GOLD10_INTERCEPT = 0.1611182873782888
-GOLD10_COEF = 0.000666860223609559
-BRIEF_TOUCH_O = 115.6
-TWO_WAVE_F = 241.33
-FIGHT_SWING = 600.0
+# Compatibility aliases for the internal graph and case overlay. The public
+# article constants and calculations are owned by grubs_article_publication.
+BRIEF_TOUCH_O = OBJECTIVE_GOLD_EQUIVALENT
+TWO_WAVE_F = TWO_WAVE_LEAVE_FARM_GOLD
 
 
 def _pp(x: float | None, digits: int = 2) -> float | None:
@@ -47,69 +50,26 @@ def _load_decision() -> dict[str, Any]:
 
 
 def _pstar(*, baseline_gold: float, leave_farm_gold: float, objective_gold: float = BRIEF_TOUCH_O) -> float | None:
-    _, be, _ = contest_ev_terminal_states(
-        GOLD10_INTERCEPT,
-        GOLD10_COEF,
+    return article_p_star_at_gold(
         baseline_gold=baseline_gold,
-        objective_gold=objective_gold,
         leave_farm_gold=leave_farm_gold,
-        win_kill_gold=FIGHT_SWING,
-        loss_kill_gold=-FIGHT_SWING,
-        p_secure_if_win=1.0,
-        p_secure_if_lose=0.0,
+        objective_gold=objective_gold,
     )
-    return None if be is None else float(be)
 
 
 def _article_ladder() -> dict[str, Any]:
-    behind = [0.0, -500.0, -1000.0, -2000.0]
-    ahead = [500.0, 1000.0, 1183.0, 1200.0]
-    rows = []
-    for b in behind + ahead:
-        p = _pstar(baseline_gold=b, leave_farm_gold=TWO_WAVE_F)
-        rows.append({
-            "B_gold": b,
-            "leave_farm_gold": TWO_WAVE_F,
-            "objective_gold": BRIEF_TOUCH_O,
-            "p_star": _pp(p, 4) if p is not None else None,
-            "p_star_pct": _pp(100.0 * p, 1) if p is not None else None,
-        })
-    farm_rows = []
-    for f, label in [
-        (0.0, "no_farm"),
-        (120.67, "one_wave"),
-        (241.33, "two_waves"),
-        (350.0, "fur_realistic"),
-        (432.0, "fur_optimistic"),
-    ]:
-        p0 = _pstar(baseline_gold=0.0, leave_farm_gold=f)
-        p_fur = _pstar(baseline_gold=1183.0, leave_farm_gold=f)
-        farm_rows.append({
-            "label": label,
-            "leave_farm_gold": f,
-            "p_star_at_parity": _pp(p0, 4) if p0 is not None else None,
-            "p_star_at_parity_pct": _pp(100.0 * p0, 1) if p0 is not None else None,
-            "p_star_at_B_plus_1183": _pp(p_fur, 4) if p_fur is not None else None,
-            "p_star_at_B_plus_1183_pct": _pp(100.0 * p_fur, 1) if p_fur is not None else None,
-        })
+    article = build_article_publication()
     return {
-        "units": (
-            "p* = min fight-win probability making contest EV = concede EV "
-            "under gold@10 side-neutral logit; two-wave reference unless noted"
+        "schema_version": article["schema_version"],
+        "publication_id": article["publication_id"],
+        "units": article["units"],
+        "mechanics": article["mechanics"],
+        "reference_knobs": article["reference_knobs"],
+        "by_precontest_gold_B_two_wave_leave": (
+            article["by_precontest_gold_B_two_wave_leave"]
         ),
-        "reference_knobs": {
-            "objective_gold_brief_touch": BRIEF_TOUCH_O,
-            "two_wave_leave_farm": TWO_WAVE_F,
-            "fight_swing_gold": FIGHT_SWING,
-            "secure_if_win": 1.0,
-            "secure_if_lose": 0.0,
-        },
-        "by_precontest_gold_B_two_wave_leave": rows,
-        "by_leave_farm_F": farm_rows,
-        "estimand_note": (
-            "Article opportunity-cost hurdle. Distinct from OE trailing-team "
-            "leave-mix breakeven (~24%)."
-        ),
+        "by_leave_farm_F": article["by_leave_farm_F"],
+        "estimand_note": article["interpretation"],
     }
 
 
@@ -249,7 +209,8 @@ def build_graph(decision: dict[str, Any] | None = None) -> dict[str, Any]:
         "article_pstar_ladder": _article_ladder(),
         "notes": [
             "Thin vs full commit share OE contest outcomes; not separately identified.",
-            "OE leave-mix breakeven (~24%) ≠ article two-wave p* (~58.9% at parity).",
+            "OE leave-mix estimates are not the article opportunity-cost estimand.",
+            "Article two-wave p* is ~58.24% at parity under Patch 26.11+ mechanics.",
             "Article p(map win) = side-neutral gold@10 associational logit, not causal WR.",
         ],
     }
@@ -515,7 +476,8 @@ def render_figure(graph: dict[str, Any], out_path: Path) -> Path:
     ax2.text(
         0.04,
         y,
-        "OE leave-mix breakeven ≈24%  ≠  article 2-wave p* ≈58.9%.\n"
+        "OE leave-mix estimates are not an article action threshold.\n"
+        "Patch 26.11+ article 2-wave p* ≈58.24% at parity.\n"
         "p(map win) here = gold@10 associational conversion, not draft-true WR.",
         fontsize=6.4,
         color=mute,
@@ -558,7 +520,7 @@ def main(argv: list[str] | None = None) -> None:
     # Smoke checks
     ladder = graph["article_pstar_ladder"]["by_precontest_gold_B_two_wave_leave"]
     parity = next(r for r in ladder if r["B_gold"] == 0.0)
-    assert abs(parity["p_star_pct"] - 58.9) < 0.2, parity
+    assert abs(parity["p_star_pct"] - 58.24) < 0.01, parity
     if overlay:
         assert overlay["B_gold"] == 1183
         assert overlay["opportunity_cost_delta_L"] == 1394.0

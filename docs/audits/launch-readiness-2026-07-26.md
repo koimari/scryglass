@@ -1,5 +1,14 @@
 # Scryglass launch-readiness audit — 2026-07-26
 
+> **Superseded.** A deeper series-identity, player-identifiability, model-clock,
+> and official-membership review invalidated this report's launch-ready
+> conclusion. Use
+> [`foundation-review-2026-07-26.md`](foundation-review-2026-07-26.md) as the
+> controlling audit and
+> [`../SCIENTIFIC_PRODUCT_ARCHITECTURE.md`](../SCIENTIFIC_PRODUCT_ARCHITECTURE.md)
+> as the implementation contract. This file remains only as an audit trail of
+> the earlier, narrower review.
+
 Status: **GO received; implementation and validation complete in the isolated worktree. No merge or deploy performed.** This report covers the exact Blob pack currently pointed to by `apps/lol-atlas/public/packs/latest.json`, plus the membership-aware fixes in this worktree.
 
 ## Executive summary

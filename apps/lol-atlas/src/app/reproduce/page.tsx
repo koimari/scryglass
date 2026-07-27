@@ -1,5 +1,7 @@
-import { formatMb, packUpdatedLabel, packUrl, type PackFile, type PackManifest } from "@/lib/pack";
-import { readPackManifest } from "@/lib/serverPack";
+import { formatMb, packDataThroughLabel, packUpdatedLabel, packUrl, type PackFile, type PackManifest } from "@/lib/pack";
+import { compositionRuntimeMetadata } from "@/lib/draftComposition";
+import { readValidatedGrubsArticlePublication } from "@/lib/grubsArticlePublication.server";
+import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 /** Hard allowlist: if it is not cited on-site, it does not appear here. */
 const ESSENTIALS: { group: string; paths: string[] }[] = [
@@ -25,19 +27,24 @@ const ESSENTIALS: { group: string; paths: string[] }[] = [
       "features/player_ratings_snapshot.parquet",
       "features/player_ratings_history.parquet",
       "features/player_ratings_meta.json",
+      "features/player_performance_snapshot.json",
+      "features/player_performance_snapshot.parquet",
+      "features/player_performance_meta.json",
+      "features/player_performance_validation.json",
       "features/team_records.json",
       "features/player_records.json",
       "features/major_teams.json",
       "models/elo_wr_calibration.json",
+      "models/elo_year_holdup.json",
       "models/draft_wr_calibration.json",
+      "models/model_validation_2026-07-27.json",
+      "meta/source_summary.json",
     ],
   },
   {
-    group: "Article inputs",
+    group: "Article input",
     paths: [
       "studies/grubs/grubs_article_contest_ev.json",
-      "studies/grubs/grubs_decision_numbers.json",
-      "studies/grubs/void_grubs_scrap_value_and_contest_rationality.pdf",
     ],
   },
 ];
@@ -48,15 +55,43 @@ function findFile(man: PackManifest, rel: string): PackFile | undefined {
 
 export default async function ReproducePage() {
   const man = await readPackManifest();
+  const compositionPath = "models/draft_composition.json";
+  const runtimeMetadata = compositionRuntimeMetadata();
+  let compositionVerified = false;
+  if (runtimeMetadata && findFile(man, compositionPath)) {
+    try {
+      await readPackJson(man, compositionPath, {
+        expectedSha256: runtimeMetadata.artifact_sha256,
+      });
+      compositionVerified = true;
+    } catch {
+      compositionVerified = false;
+    }
+  }
+  const grubsPublication = await readValidatedGrubsArticlePublication(man);
+  const essentials = [
+    ...ESSENTIALS.filter(
+      (group) => group.group !== "Article input" || grubsPublication,
+    ),
+    ...(compositionVerified
+      ? [{ group: "Composition model", paths: [compositionPath] }]
+      : []),
+  ];
 
   const listed: { group: string; file: PackFile; path: string }[] = [];
-  for (const g of ESSENTIALS) {
+  for (const g of essentials) {
     for (const p of g.paths) {
       const f = findFile(man, p);
       if (f) listed.push({ group: g.group, file: f, path: p });
     }
   }
   const listedBytes = listed.reduce((s, x) => s + x.file.bytes, 0);
+  const listedGroups = essentials
+    .map((group) => ({
+      group: group.group,
+      files: listed.filter((item) => item.group === group.group),
+    }))
+    .filter((group) => group.files.length > 0);
 
   return (
     <div className="space-y-8">
@@ -65,17 +100,20 @@ export default async function ReproducePage() {
         <h1 className="font-display mt-2 text-3xl">Reproduce</h1>
         <p className="lede">
           Cite <span className="font-mono text-sm text-[var(--ink)]">{man.pack_id}</span>. This list
-          contains the finished files cited on Scryglass. Rebuild from the GitHub repo when you need
-          the warehouse pipeline.
+          contains only the available, manifest-declared finished files cited on Scryglass. Rebuild
+          from the GitHub repo when you need the warehouse pipeline.
         </p>
         <p className="method-note">
-          Source order: Oracle&apos;s Elixir is the reconciled baseline; completed GRID games may
-          bridge the gap until OE publishes them. The refresh metadata records which rows came from
-          each source.
+          The pack separates canonical map inclusion from optional detail enrichment. Oracle&apos;s
+          Elixir precedence, verified GRID gap fills, and GRID event-detail contributions are
+          declared independently in the source summary.
         </p>
         <div className="micro-log mt-4">
           <span>
-            <strong>Last updated</strong> {packUpdatedLabel(man)}
+            <strong>Pack published</strong> {packUpdatedLabel(man)}
+          </span>
+          <span>
+            <strong>Data through</strong> {packDataThroughLabel(man)}
           </span>
           <span>
             <strong>Listed</strong> {formatMb(listedBytes)}
@@ -95,44 +133,42 @@ export default async function ReproducePage() {
           <li>Pin this pack id.</li>
           <li>Use the same year / league / patch filters as the post.</li>
           <li>
-            Elo→WR and Draft Score: use the pinned ratings below; Draft Score separates raw
-            composition from pre-match team/player context.
+            Ratings: keep the team model, Player Dual Elo, and the role-specific 15-minute
+            resource-performance artifacts separate. The latter includes its exact estimand,
+            non-estimands, fit-through date, model hash, and compact frozen-test evidence; it is
+            not a general player-skill rating.
           </li>
           <li>
-            Void grubs: article JSON + PDF under Article inputs — leave-mix (~24%) is a sister
-            estimand.
+            {compositionVerified
+              ? "The composition artifact is included after its manifest hash reconciled with the runtime hash. It reproduces a withheld candidate, not a passing probability model."
+              : "The composition artifact is unavailable as a verified download in this pack; do not treat this file list as sufficient to reproduce the Draft Score gate."}
+          </li>
+          <li>
+            {grubsPublication
+              ? "Void grubs: use only the validated current-mechanics article JSON."
+              : "Void grubs: article downloads are withheld because the current pack does not pass the article integrity contract."}
           </li>
         </ol>
       </section>
 
-      {ESSENTIALS.map((g) => (
-        <section key={g.group} className="space-y-3">
-          <h2 className="font-display text-lg">{g.group}</h2>
+      {listedGroups.map((group) => (
+        <section key={group.group} className="space-y-3">
+          <h2 className="font-display text-lg">{group.group}</h2>
           <ul className="text-sm">
-            {g.paths.map((p) => {
-              const f = findFile(man, p);
-              if (!f) {
-                return (
-                  <li key={p} className="py-2.5 border-b border-[var(--line)] muted text-xs">
-                    {p} <em>(missing from pack)</em>
-                  </li>
-                );
-              }
-              return (
+            {group.files.map(({ file, path: relativePath }) => (
                 <li
-                  key={p}
+                  key={relativePath}
                   className="flex flex-wrap items-baseline justify-between gap-2 py-2.5 border-b border-[var(--line)]"
                 >
-                  <a className="font-mono break-all text-xs underline sm:text-sm" href={packUrl(man, f.path)}>
-                    {p}
+                  <a className="font-mono break-all text-xs underline sm:text-sm" href={packUrl(man, file.path)}>
+                    {relativePath}
                   </a>
                   <span className="font-mono text-xs text-[var(--ink-muted)]">
-                    {(f.bytes / 1024).toFixed(0)} KB
-                    {f.rows != null ? ` · ${f.rows} rows` : ""}
+                    {(file.bytes / 1024).toFixed(0)} KB
+                    {file.rows != null ? ` · ${file.rows} rows` : ""}
                   </span>
                 </li>
-              );
-            })}
+              ))}
           </ul>
         </section>
       ))}
@@ -140,9 +176,9 @@ export default async function ReproducePage() {
       <section className="space-y-2 text-sm text-[var(--ink-muted)] border-t border-[var(--line)] pt-5">
         <h2 className="font-display text-lg text-[var(--ink)]">Power users</h2>
         <p>
-          Full manifest:{" "}
-          <a className="row-link" href="/packs/manifest.json">
-            /packs/manifest.json
+          Immutable manifest:{" "}
+          <a className="row-link" href={packUrl(man, "manifest.json")}>
+            {man.pack_id}/manifest.json
           </a>
           . Pipeline &amp; rebuild:{" "}
           <a className="row-link" href="https://github.com/koimari/scryglass">

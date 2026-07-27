@@ -470,7 +470,23 @@ def attach_series_map_index(maps: pd.DataFrame) -> pd.DataFrame:
 def build_feature_store(
     maps_path: Path | None = None,
     players_path: Path | None = None,
+    *,
+    allow_legacy_research: bool = False,
 ) -> pd.DataFrame:
+    """Build the quarantined legacy research feature matrix.
+
+    This builder contains exploratory priors, neutral missing-value fills, and
+    an unvalidated fixed team/player blend.  It must never be used to train or
+    refresh a public model.  Callers must opt in explicitly for historical
+    reproduction work.
+    """
+    if not allow_legacy_research:
+        raise RuntimeError(
+            "Legacy feature-store construction is quarantined: it contains "
+            "unvalidated priors, missing-value fills, and probability blends. "
+            "Pass allow_legacy_research=True only for isolated historical "
+            "research; it is not a production training path."
+        )
     FEATURES_DIR.mkdir(parents=True, exist_ok=True)
     maps_path = maps_path or (PARQUET_DIR / "maps.parquet")
     players_path = players_path or (PARQUET_DIR / "players.parquet")
@@ -508,8 +524,16 @@ def build_feature_store(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.parse_args()
-    build_feature_store()
+    ap.add_argument(
+        "--allow-legacy-research",
+        action="store_true",
+        help=(
+            "explicitly opt into the quarantined historical feature builder; "
+            "never use its output for public-model promotion"
+        ),
+    )
+    args = ap.parse_args()
+    build_feature_store(allow_legacy_research=args.allow_legacy_research)
 
 
 if __name__ == "__main__":

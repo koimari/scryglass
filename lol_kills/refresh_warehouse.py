@@ -16,6 +16,11 @@ from lol_kills.etl.join import build_map_warehouse
 from lol_kills.etl.leaguepedia_ingest import ingest_leaguepedia
 from lol_kills.etl.oe_ingest import ingest_oe, load_cached_oe
 from lol_kills.etl.paths import PARQUET_DIR, WAREHOUSE_DIR
+from lol_kills.etl.series_schedule import (
+    annotate_scheduled_series,
+    fetch_schedule,
+    load_schedule,
+)
 
 
 def main() -> None:
@@ -58,6 +63,11 @@ def main() -> None:
         help="Fail the refresh if GRID was requested but no completed games are available",
     )
     ap.add_argument("--skip-grid", action="store_true", help="Skip local GRID rows entirely")
+    ap.add_argument(
+        "--skip-schedule-refresh",
+        action="store_true",
+        help="Use the cached authoritative Leaguepedia match schedule",
+    )
     args = ap.parse_args()
 
     WAREHOUSE_DIR.mkdir(parents=True, exist_ok=True)
@@ -100,6 +110,31 @@ def main() -> None:
     combined_team = canonicalize_competition_frame(combined_team)
     combined_player = canonicalize_competition_frame(combined_player)
 
+    requested_years = sorted(
+        {
+            int(value)
+            for value in (args.oe_years or [datetime.now(timezone.utc).year])
+        }
+    )
+    schedule_start = f"{requested_years[0]}-01-01"
+    schedule_end = f"{requested_years[-1] + 1}-01-01"
+    if args.skip_schedule_refresh:
+        schedule = load_schedule()
+    else:
+        try:
+            schedule = fetch_schedule(
+                start=schedule_start,
+                end=schedule_end,
+            )
+        except (OSError, TimeoutError, RuntimeError, ValueError) as exc:
+            print(
+                "[schedule] refresh failed; attempting validated cache: "
+                f"{type(exc).__name__}"
+            )
+            schedule = load_schedule()
+    scheduled_team = annotate_scheduled_series(combined_team, schedule)
+    combined_team = scheduled_team.rows
+
     # Keep the join module's established input paths while making the source
     # precedence explicit in the rows themselves.
     combined_team.to_parquet(PARQUET_DIR / "oe_team_games.parquet", index=False)
@@ -119,7 +154,11 @@ def main() -> None:
         lp_team=lp_team,
         oe_team=combined_team,
         lp_players=lp_player,
+        majors_only=False,
     )
+    scheduled_maps = annotate_scheduled_series(maps, schedule)
+    maps = scheduled_maps.rows
+    maps.to_parquet(PARQUET_DIR / "maps.parquet", index=False)
 
     source_counts = {}
     if "source" in combined_team.columns:
@@ -138,6 +177,10 @@ def main() -> None:
         "source_counts": source_counts,
         "lp_side_rows": int(len(lp_team)) if lp_team is not None else 0,
         "oe_matched": int(maps["oe_matched"].sum()) if "oe_matched" in maps.columns else 0,
+        "series_schedule": {
+            "team": scheduled_team.audit,
+            "maps": scheduled_maps.audit,
+        },
     }
     (PARQUET_DIR / "refresh_meta.json").write_text(json.dumps(meta, indent=2))
     print("[refresh]", json.dumps(meta))

@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  DRAFT_PICK_ORDER,
+  DRAFT_POLICY_MIN_ROLE_GAMES,
+  DRAFT_ROLES,
+} from "@/lib/draftRules";
 import type {
   DraftAction,
   DraftCandidateRole,
@@ -11,19 +16,11 @@ import type {
   DraftSide,
 } from "@/lib/draftScore";
 import { champIconUrl } from "@/lib/format";
-
-const PICK_ORDER: DraftSide[] = [
-  "blue",
-  "red",
-  "red",
-  "blue",
-  "blue",
-  "red",
-  "blue",
-  "blue",
-  "red",
-  "red",
-];
+import type { CompositionRuntimeMetadata } from "@/lib/draftComposition";
+import {
+  patchContractFromSource,
+  patchContractsFromSource,
+} from "@/lib/patch";
 
 const ROLE_LABEL: Record<DraftRole, string> = {
   top: "Top",
@@ -32,9 +29,17 @@ const ROLE_LABEL: Record<DraftRole, string> = {
   bot: "ADC",
   sup: "Support",
 };
-const DRAFT_ROLES: DraftRole[] = ["top", "jng", "mid", "bot", "sup"];
 
-const LEAGUES = ["LCK", "LPL", "LEC", "LCS", "CBLOL", "LCP", "INTL"];
+const LEAGUES = [
+  "LCK",
+  "LPL",
+  "LEC",
+  "LCS",
+  "CBLOL",
+  "LCP",
+  "MSI",
+  "EWC",
+];
 
 type Props = {
   catalog: DraftChampion[];
@@ -42,14 +47,16 @@ type Props = {
   initialExcluded?: string[];
   initialPerspective?: DraftSide;
   initialLeague?: string;
+  initialPublicPatch?: string;
+  modelMetadata?: CompositionRuntimeMetadata | null;
 };
 
 function sideLabel(side: DraftSide): string {
   return side === "blue" ? "Blue" : "Red";
 }
 
-function signedPp(value: number): string {
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)} pp`;
+function signedChange(value: number): string {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)} points`;
 }
 
 function encodeScenario(actions: DraftAction[], excluded: string[]): string {
@@ -127,7 +134,11 @@ function RecommendationTable({
   onPick: (row: DraftRecommendation) => void;
 }) {
   if (!rows.length) {
-    return <p className="sandbox-empty">No legal candidates match this role filter.</p>;
+    return (
+      <p className="sandbox-empty">
+        No observed champion-role candidates match this role filter.
+      </p>
+    );
   }
   return (
     <div className="table-scroll sandbox-recommendation-scroll">
@@ -137,7 +148,9 @@ function RecommendationTable({
             <th>#</th>
             <th>Candidate</th>
             <th>Role</th>
-            <th>{sideLabel(perspective)} model share</th>
+            <th>
+              {sideLabel(perspective)} policy value
+            </th>
             <th>Change</th>
             <th>Pro games</th>
             <th>Evidence</th>
@@ -159,9 +172,25 @@ function RecommendationTable({
                 </span>
               </td>
               <td>{row.role ? ROLE_LABEL[row.role] : "Unassigned"}</td>
-              <td className="font-mono">{(100 * row.projected_wr).toFixed(2)}%</td>
-              <td className={`font-mono ${row.delta_pp >= 0 ? "sandbox-positive" : "sandbox-negative"}`}>
-                {signedPp(row.delta_pp)}
+              <td
+                className="font-mono"
+                title={`Immediately after this pick: ${(100 * row.immediate_value).toFixed(2)} / 100`}
+              >
+                {(100 * row.projected_value).toFixed(2)}/100
+                {row.principal_variation.length ? (
+                  <small className="block text-[var(--ink-faint)]">
+                    then{" "}
+                    {row.principal_variation
+                      .map(
+                        (action) =>
+                          `${action.side === "blue" ? "B" : "R"} ${action.champion}`,
+                      )
+                      .join(" → ")}
+                  </small>
+                ) : null}
+              </td>
+              <td className={`font-mono ${row.delta_points >= 0 ? "sandbox-positive" : "sandbox-negative"}`}>
+                {signedChange(row.delta_points)}
               </td>
               <td className="font-mono">{row.sample_games}</td>
               <td>{row.evidence}</td>
@@ -189,27 +218,92 @@ export function DraftSandbox({
   initialExcluded = [],
   initialPerspective = "blue",
   initialLeague = "LCS",
+  initialPublicPatch,
+  modelMetadata = null,
 }: Props) {
   const [actions, setActions] = useState<DraftAction[]>(initialActions);
   const [excluded, setExcluded] = useState<string[]>(initialExcluded);
   const [perspective, setPerspective] = useState<DraftSide>(initialPerspective);
   const [league, setLeague] = useState(initialLeague);
+  const analysisPatchContracts = patchContractsFromSource(
+    modelMetadata?.analysis_patches ?? [],
+  );
+  const patchSpecificContracts = patchContractsFromSource(
+    modelMetadata?.supported_patches ?? [],
+  );
+  const patchSpecificPublicPatches = new Set(
+    patchSpecificContracts.map((contract) => contract.public_patch),
+  );
+  const latestPatchSpecific =
+    patchSpecificContracts[patchSpecificContracts.length - 1]?.public_patch ??
+    null;
+  const latestObservedPatch = patchContractFromSource(
+    modelMetadata?.latest_observed_patch,
+  )?.public_patch ?? null;
+  const [publicPatch, setPublicPatch] = useState(
+    initialPublicPatch ?? latestObservedPatch ?? "",
+  );
   const [candidateRole, setCandidateRole] = useState<DraftCandidateRole>("open");
   const [search, setSearch] = useState("");
   const [pendingChampion, setPendingChampion] = useState<DraftChampion | null>(null);
+  const [pickerAnnouncement, setPickerAnnouncement] = useState("");
   const [excludeSearch, setExcludeSearch] = useState("");
-  const [analysis, setAnalysis] = useState<DraftSandboxResult | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [analysisResponse, setAnalysisResponse] = useState<{
+    key: string;
+    value: DraftSandboxResult;
+  } | null>(null);
+  const [loading, setLoading] = useState(Boolean(initialPublicPatch));
   const [error, setError] = useState<string | null>(null);
   const [shareState, setShareState] = useState("Copy scenario");
-  const nextSide = actions.length < PICK_ORDER.length ? PICK_ORDER[actions.length] : null;
+  const sandboxHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const firstRoleChoiceRef = useRef<HTMLButtonElement | null>(null);
+  const roleChoiceTriggerRef = useRef<HTMLElement | null>(null);
+  const roleChoiceReturnModeRef = useRef<"cancel" | "selection" | null>(
+    null,
+  );
+  const nextSide =
+    actions.length < DRAFT_PICK_ORDER.length
+      ? DRAFT_PICK_ORDER[actions.length]
+      : null;
+  const openRoles = useMemo(() => {
+    if (!nextSide) return [];
+    const occupied = new Set(
+      actions
+        .filter((action) => action.side === nextSide)
+        .map((action) => action.role)
+        .filter((role): role is DraftRole => Boolean(role)),
+    );
+    return DRAFT_ROLES.filter((role) => !occupied.has(role));
+  }, [actions, nextSide]);
+  const requestKey = useMemo(
+    () =>
+      JSON.stringify({
+        actions,
+        candidateRole,
+        excluded,
+        league,
+        publicPatch,
+        nextSide,
+        perspective,
+      }),
+    [
+      actions,
+      candidateRole,
+      excluded,
+      league,
+      nextSide,
+      perspective,
+      publicPatch,
+    ],
+  );
+  const analysis =
+    analysisResponse?.key === requestKey ? analysisResponse.value : null;
 
   useEffect(() => {
+    if (!publicPatch) return;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
-      if (!nextSide) {
-        setLoading(false);
-      }
       setLoading(true);
       setError(null);
       try {
@@ -224,15 +318,19 @@ export function DraftSandbox({
             candidate_role: candidateRole,
             excluded,
             league,
+            public_patch: publicPatch,
             limit: nextSide ? 15 : 1,
           }),
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || `draft sandbox ${response.status}`);
-        setAnalysis(payload as DraftSandboxResult);
+        if (controller.signal.aborted) return;
+        setAnalysisResponse({
+          key: requestKey,
+          value: payload as DraftSandboxResult,
+        });
       } catch (requestError) {
         if (requestError instanceof DOMException && requestError.name === "AbortError") return;
-        setAnalysis(null);
         setError(requestError instanceof Error ? requestError.message : String(requestError));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
@@ -242,7 +340,32 @@ export function DraftSandbox({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [actions, candidateRole, excluded, league, nextSide, perspective]);
+  }, [
+    actions,
+    candidateRole,
+    excluded,
+    league,
+    nextSide,
+    perspective,
+    publicPatch,
+    requestKey,
+  ]);
+
+  useEffect(() => {
+    if (pendingChampion) {
+      firstRoleChoiceRef.current?.focus();
+      return;
+    }
+    const returnMode = roleChoiceReturnModeRef.current;
+    if (!returnMode) return;
+    const trigger = roleChoiceTriggerRef.current;
+    const fallback = searchInputRef.current ?? sandboxHeadingRef.current;
+    const target =
+      returnMode === "cancel" && trigger?.isConnected ? trigger : fallback;
+    roleChoiceReturnModeRef.current = null;
+    roleChoiceTriggerRef.current = null;
+    target?.focus();
+  }, [pendingChampion]);
 
   const selected = useMemo(
     () => new Set(actions.map((action) => action.champion.toLocaleLowerCase())),
@@ -259,13 +382,18 @@ export function DraftSandbox({
     },
     [catalog, excluded, selected],
   );
-  const openRoles = analysis?.open_roles ?? DRAFT_ROLES.slice();
   const pickerChampions = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     return available.filter((champion) => {
       if (query && !champion.name.toLocaleLowerCase().includes(query)) return false;
       if (candidateRole === "open") {
         return champion.roles.some((role) => openRoles.includes(role));
+      }
+      if (candidateRole !== "any") {
+        return (
+          openRoles.includes(candidateRole) &&
+          champion.roles.includes(candidateRole)
+        );
       }
       return true;
     });
@@ -283,17 +411,31 @@ export function DraftSandbox({
     : [];
 
   const addPick = (champion: string, role: DraftRole | null) => {
-    if (!nextSide) return;
-    setActions((currentActions) => [...currentActions, { side: nextSide, champion, role }]);
+    setActions((currentActions) => {
+      const side = DRAFT_PICK_ORDER[currentActions.length];
+      if (!side || !role) return currentActions;
+      const occupied = new Set(
+        currentActions
+          .filter((action) => action.side === side)
+          .map((action) => action.role),
+      );
+      if (occupied.has(role)) return currentActions;
+      return [...currentActions, { side, champion, role }];
+    });
+    setCandidateRole("open");
     setSearch("");
     setPendingChampion(null);
     setError(null);
   };
 
-  const chooseChampion = (champion: DraftChampion) => {
+  const chooseChampion = (
+    champion: DraftChampion,
+    trigger: HTMLElement | null = null,
+  ) => {
     const legalRoles =
       candidateRole !== "open" && candidateRole !== "any"
-        ? openRoles.includes(candidateRole)
+        ? openRoles.includes(candidateRole) &&
+          champion.roles.includes(candidateRole)
           ? [candidateRole]
           : []
         : candidateRole === "open"
@@ -307,7 +449,14 @@ export function DraftSandbox({
       addPick(champion.name, legalRoles[0]);
       return;
     }
+    roleChoiceTriggerRef.current = trigger;
+    roleChoiceReturnModeRef.current = null;
     setPendingChampion(champion);
+    setPickerAnnouncement(
+      candidateRole === "any"
+        ? `${champion.name} selected for a manual what-if. Choose an open role. Policy rankings remain limited to supported pro roles.`
+        : `${champion.name} is a flex pick. Choose one of its supported open roles.`,
+    );
     setError(null);
   };
 
@@ -316,14 +465,33 @@ export function DraftSandbox({
       (candidate) => candidate.name.toLocaleLowerCase() === search.trim().toLocaleLowerCase(),
     );
     if (exact) {
-      chooseChampion(exact);
+      chooseChampion(exact, searchInputRef.current);
       return;
     }
     if (pickerChampions.length === 1) {
-      chooseChampion(pickerChampions[0]);
+      chooseChampion(pickerChampions[0], searchInputRef.current);
       return;
     }
     setError("Choose a champion from the visible grid.");
+  };
+
+  const selectPendingRole = (role: DraftRole) => {
+    if (!pendingChampion) return;
+    const champion = pendingChampion.name;
+    roleChoiceReturnModeRef.current = "selection";
+    setPickerAnnouncement(
+      `${champion} added as ${ROLE_LABEL[role]}. Focus returned to champion search.`,
+    );
+    addPick(champion, role);
+  };
+
+  const cancelPendingRole = () => {
+    if (!pendingChampion) return;
+    roleChoiceReturnModeRef.current = "cancel";
+    setPickerAnnouncement(
+      `${pendingChampion.name} role selection canceled. Focus returned to the champion choice.`,
+    );
+    setPendingChampion(null);
   };
 
   const markUnavailable = () => {
@@ -346,6 +514,12 @@ export function DraftSandbox({
     url.searchParams.set("draft", encodeScenario(actions, excluded));
     url.searchParams.set("side", perspective);
     url.searchParams.set("league", league);
+    url.searchParams.delete("patch");
+    if (publicPatch) {
+      url.searchParams.set("public_patch", publicPatch);
+    } else {
+      url.searchParams.delete("public_patch");
+    }
     await navigator.clipboard.writeText(url.toString());
     setShareState("Copied");
     window.setTimeout(() => setShareState("Copy scenario"), 1600);
@@ -353,18 +527,50 @@ export function DraftSandbox({
 
   return (
     <div className="sandbox-page">
+      <p
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {pickerAnnouncement}
+      </p>
       <header className="page-header">
         <p className="blog-kicker">Model lab · Draft counterfactual</p>
-        <h1 className="font-display mt-2 text-3xl">Draft sandbox</h1>
+        <h1
+          ref={sandboxHeadingRef}
+          className="font-display mt-2 text-3xl"
+          tabIndex={-1}
+        >
+          Draft sandbox
+        </h1>
         <p className="lede">
-          Replay a pick sequence, measure when the model moved, and rank the strongest legal next
-          response. The model updates after every selection.
+          Replay a pick sequence, measure when the model moved, and compare legal branches under a
+          bounded response policy. A root beam advances the strongest immediate legal actions through
+          up to two later pro-role picks.
         </p>
         <div className="micro-log mt-4">
           <span><strong>Estimand</strong> partial-draft comparison</span>
           <span><strong>Model pool</strong> {catalog.length} pro-play champions</span>
-          <span><strong>Complete board</strong> full-composition model</span>
+          <span><strong>Complete board</strong> experimental composition value</span>
+          <span>
+            <strong>Training maps</strong> {modelMetadata?.n_games_fit ?? "unverified"}
+          </span>
+          <span>
+            <strong>Through</strong> {modelMetadata?.date_max?.slice(0, 10) ?? "unverified"}
+          </span>
         </div>
+        {modelMetadata?.validation?.future_patch_holdout ? (
+          <p className="status-hint">
+            Shift warning: future-patch holdout ECE{" "}
+            {(
+              100 *
+              Number(modelMetadata.validation.future_patch_holdout.ece_10 ?? 0)
+            ).toFixed(2)}
+            %. Treat patch transfer as experimental until the replacement model passes the
+            predeclared drift gate.
+          </p>
+        ) : null}
         <div className="sandbox-header-actions">
           <button type="button" className="btn-primary" onClick={() => {
             setActions([]);
@@ -384,10 +590,53 @@ export function DraftSandbox({
 
       <section className="sandbox-context" aria-label="Analysis context">
         <label>
-          <span>Calibration</span>
+          <span>League context</span>
           <select value={league} onChange={(event) => setLeague(event.target.value)}>
             {LEAGUES.map((item) => <option value={item} key={item}>{item}</option>)}
           </select>
+        </label>
+        <label>
+          <span>Patch context</span>
+          <select
+            value={publicPatch}
+            onChange={(event) => setPublicPatch(event.target.value)}
+            aria-describedby="sandbox-patch-support"
+            required
+          >
+            <option value="" disabled>
+              Select a patch
+            </option>
+            {analysisPatchContracts.map((contract) => (
+              <option
+                value={contract.public_patch}
+                key={contract.public_patch}
+              >
+                {contract.public_patch}
+                {contract.public_patch === latestObservedPatch
+                  ? " · current observed"
+                  : patchSpecificPublicPatches.has(contract.public_patch)
+                    ? " · patch-specific"
+                    : " · pooled holdout"}
+              </option>
+            ))}
+          </select>
+          <small id="sandbox-patch-support">
+            {latestObservedPatch ? (
+              <>
+                <strong>
+                  Current observed patch {latestObservedPatch} uses pooled
+                  composition terms.
+                </strong>{" "}
+                It is an uncalibrated recommendation utility, not a
+                patch-specific win rate.
+                {latestPatchSpecific
+                  ? ` Patch-specific terms end at ${latestPatchSpecific}.`
+                  : ""}
+              </>
+            ) : (
+              "No observed patch is available for analysis."
+            )}
+          </small>
         </label>
         <fieldset>
           <legend>Evaluate for</legend>
@@ -408,17 +657,32 @@ export function DraftSandbox({
           <span>Candidate role</span>
           <select
             value={candidateRole}
+            aria-describedby="sandbox-role-policy-note"
             onChange={(event) => {
               setCandidateRole(event.target.value as DraftCandidateRole);
               setPendingChampion(null);
             }}
           >
-            <option value="open">Observed open roles</option>
-            <option value="any">Any champion / open role</option>
+            <option value="open">
+              Supported pro roles · {DRAFT_POLICY_MIN_ROLE_GAMES}+ maps
+            </option>
+            <option value="any">Manual what-if · any open role</option>
             {Object.entries(ROLE_LABEL).map(([value, label]) => (
-              <option value={value} key={value}>{label}</option>
+              <option
+                value={value}
+                disabled={!openRoles.includes(value as DraftRole)}
+                key={value}
+              >
+                {label}
+              </option>
             ))}
           </select>
+          <small id="sandbox-role-policy-note">
+            Policy rankings and look-ahead search require at least{" "}
+            {DRAFT_POLICY_MIN_ROLE_GAMES} pro maps in that champion-role pair.
+            Manual what-if mode can place an unsupported pair on the board, but
+            never adds it to policy search.
+          </small>
         </label>
         <div className="sandbox-next">
           <span>Next seat</span>
@@ -428,7 +692,7 @@ export function DraftSandbox({
 
       <section className="sandbox-unavailable" aria-label="Unavailable champions">
         <div>
-          <span>Unavailable / banned</span>
+          <span>Unavailable champions</span>
           <small>Removed from the legal next-pick ranking.</small>
         </div>
         <div className="sandbox-unavailable-control">
@@ -440,7 +704,7 @@ export function DraftSandbox({
             onKeyDown={(event) => {
               if (event.key === "Enter") markUnavailable();
             }}
-            placeholder="Add banned champion"
+            placeholder="Add unavailable champion"
             aria-label="Add unavailable champion"
           />
           <datalist id="sandbox-exclusions">
@@ -478,6 +742,7 @@ export function DraftSandbox({
             nextSide={nextSide}
             onBranch={(index) => {
               setActions((currentActions) => currentActions.slice(0, index));
+              setCandidateRole("open");
               setPendingChampion(null);
             }}
           />
@@ -488,6 +753,7 @@ export function DraftSandbox({
             nextSide={nextSide}
             onBranch={(index) => {
               setActions((currentActions) => currentActions.slice(0, index));
+              setCandidateRole("open");
               setPendingChampion(null);
             }}
           />
@@ -495,24 +761,33 @@ export function DraftSandbox({
 
         <aside className="sandbox-read" aria-live="polite">
           <p className="blog-kicker">Current model read</p>
-          {loading && !current ? (
+          {!publicPatch ? (
+            <p className="status-hint">
+              Select an observed patch context to begin analysis.
+            </p>
+          ) : loading && !current ? (
             <div className="sandbox-skeleton" aria-label="Loading analysis" />
           ) : error ? (
             <p className="error-banner">{error}</p>
           ) : current ? (
             <>
               <div className="sandbox-current-number">
-                <span>{sideLabel(perspective)} model share</span>
-                <strong>{(100 * current.projected_wr).toFixed(2)}%</strong>
+                <span>
+                  {sideLabel(perspective)}{" "}
+                  experimental policy value
+                </span>
+                <strong>
+                  {(100 * current.projected_value).toFixed(2)}/100
+                </strong>
               </div>
-              <div className="sandbox-balance" aria-label={`${sideLabel(perspective)} model comparison share`}>
-                <span style={{ width: `${100 * current.projected_wr}%` }} />
+              <div className="sandbox-balance" aria-label={`${sideLabel(perspective)} model comparison value`}>
+                <span style={{ width: `${100 * current.projected_value}%` }} />
               </div>
               {nextSide && analysis?.recommendations.length ? (
                 <div className="sandbox-shortlist">
                   <div className="sandbox-shortlist-head">
-                    <span>Best {sideLabel(analysis.recommendation_side)} responses</span>
-                    <small>Model change</small>
+                    <span>Highest response-aware branches for {sideLabel(analysis.recommendation_side)}</span>
+                    <small>Value change</small>
                   </div>
                   {analysis.recommendations.slice(0, 3).map((row) => (
                     <button
@@ -529,21 +804,26 @@ export function DraftSandbox({
                         <strong>{row.champion}</strong>
                         <small>{row.role ? ROLE_LABEL[row.role] : "Role open"}</small>
                       </span>
-                      <em>{signedPp(row.delta_pp)}</em>
+                      <em>{signedChange(row.delta_points)}</em>
                     </button>
                   ))}
                 </div>
               ) : null}
               <dl className="sandbox-read-ledger">
-                <div><dt>Model confidence</dt><dd>{(100 * current.confidence).toFixed(0)}%</dd></div>
-                <div><dt>Calibration</dt><dd>{current.score.calibration.source}</dd></div>
+                <div>
+                  <dt>Uncertainty</dt>
+                  <dd>
+                    Not a probability interval
+                  </dd>
+                </div>
+                <div><dt>Probability gate</dt><dd>Withheld · chronological benchmark failed</dd></div>
                 <div><dt>Chosen picks</dt><dd>{actions.length}/10</dd></div>
               </dl>
               {responseCheckpoint && actions.length >= 3 && (
                 <p className="sandbox-answer">
                   After the first response pair, {sideLabel(perspective)} sat at{" "}
-                  <strong>{(100 * responseCheckpoint.projected_wr).toFixed(2)}%</strong> in this
-                  partial-draft comparison ({signedPp(100 * responseCheckpoint.projected_wr - 50)}
+                  <strong>{(100 * responseCheckpoint.projected_value).toFixed(2)}/100</strong> in this
+                  partial-draft comparison ({signedChange(100 * responseCheckpoint.projected_value - 50)}
                   versus even).
                 </p>
               )}
@@ -561,10 +841,18 @@ export function DraftSandbox({
                 Add {sideLabel(nextSide)}&apos;s next pick
               </h2>
             </div>
-            <p>Choose a role, then click a champion portrait. Flex picks ask for a role before they are added.</p>
+            <p>
+              Choose a role, then click a champion portrait. Flex picks move
+              focus to their role choices before they are added.
+            </p>
           </div>
 
-          <div className="sandbox-role-filters" role="group" aria-label="Champion role filter">
+          <div
+            className="sandbox-role-filters"
+            role="group"
+            aria-label="Champion role filter"
+            aria-describedby="sandbox-role-policy-note"
+          >
             <button
               type="button"
               className={candidateRole === "open" ? "is-selected" : ""}
@@ -574,7 +862,7 @@ export function DraftSandbox({
                 setPendingChampion(null);
               }}
             >
-              Pro roles
+              Supported pro roles
             </button>
             <button
               type="button"
@@ -585,7 +873,7 @@ export function DraftSandbox({
                 setPendingChampion(null);
               }}
             >
-              All open
+              Manual any role
             </button>
             {DRAFT_ROLES.map((role) => (
               <button
@@ -606,6 +894,7 @@ export function DraftSandbox({
 
           <div className="sandbox-picker-control">
             <input
+              ref={searchInputRef}
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -627,20 +916,27 @@ export function DraftSandbox({
           </div>
 
           {pendingChampion ? (
-            <div className="sandbox-role-choice" role="group" aria-label={`Choose ${pendingChampion.name}'s role`}>
-              <span>
+            <div
+              className="sandbox-role-choice"
+              role="group"
+              aria-labelledby="sandbox-role-choice-label"
+            >
+              <span id="sandbox-role-choice-label">
                 Draft <strong>{pendingChampion.name}</strong> as
               </span>
-              {pendingRoles.map((role) => (
+              {pendingRoles.map((role, index) => (
                 <button
+                  ref={index === 0 ? firstRoleChoiceRef : undefined}
                   type="button"
-                  onClick={() => addPick(pendingChampion.name, role)}
+                  onClick={() => selectPendingRole(role)}
                   key={role}
                 >
                   {ROLE_LABEL[role]}
                 </button>
               ))}
-              <button type="button" onClick={() => setPendingChampion(null)}>Cancel</button>
+              <button type="button" onClick={cancelPendingRole}>
+                Cancel
+              </button>
             </div>
           ) : null}
 
@@ -655,13 +951,15 @@ export function DraftSandbox({
                   ? `${roleGames} pro games`
                   : "Unseen in role"
                 : candidateRole === "any"
-                  ? "Choose role"
+                  ? "Manual role choice"
                   : observedOpenRoles.map((role) => ROLE_LABEL[role]).join(" · ");
               return (
                 <button
                   type="button"
                   className="sandbox-champion-button"
-                  onClick={() => chooseChampion(champion)}
+                  onClick={(event) =>
+                    chooseChampion(champion, event.currentTarget)
+                  }
                   aria-label={`Draft ${champion.name}${explicitRole ? ` as ${ROLE_LABEL[explicitRole]}` : ""}`}
                   key={champion.name}
                 >
@@ -687,17 +985,25 @@ export function DraftSandbox({
           <div>
             <p className="blog-kicker">Counterfactual ranking</p>
             <h2 id="ranking-heading" className="font-display text-xl">
-              Best next responses for {sideLabel(analysis?.recommendation_side ?? nextSide ?? perspective)}
+              Response-aware comparisons for {sideLabel(analysis?.recommendation_side ?? nextSide ?? perspective)}
             </h2>
           </div>
           <p>
-            Sorted by model share after the pick. Change is measured against the current state; these
-            partial-draft comparisons are not calibrated live win probabilities.
+            {analysis
+              ? `The bounded search deep-evaluated ${analysis.search.root_evaluated_actions} of ${analysis.search.root_legal_actions} legal champion-role actions, then followed each through up to two later picks. `
+              : "The bounded search retains the strongest immediate legal actions, then follows each through up to two later picks. "}
+            Change is measured against the current state. The composition probability pipeline failed
+            its chronological promotion gate, so these values are not win probabilities or a solved
+            draft game.
           </p>
         </div>
         {loading && analysis ? <p className="status-hint">Updating model…</p> : null}
         {error && analysis ? <p className="error-banner">{error}</p> : null}
-        {analysis && nextSide ? (
+        {!publicPatch ? (
+          <p className="status-hint">
+            Select an observed patch context to load policy rankings.
+          </p>
+        ) : analysis && nextSide ? (
           <RecommendationTable
             rows={analysis.recommendations}
             perspective={analysis.recommendation_side}
@@ -721,7 +1027,7 @@ export function DraftSandbox({
         <div className="table-scroll">
           <table className="data-table sandbox-timeline">
             <thead>
-              <tr><th>Seat</th><th>Pick</th><th>Role</th><th>Model share</th><th>Change</th><th>Confidence</th></tr>
+              <tr><th>Seat</th><th>Pick</th><th>Role</th><th>Model value</th><th>Change</th><th>Status</th></tr>
             </thead>
             <tbody>
               {analysis?.timeline.map((row) => {
@@ -733,11 +1039,15 @@ export function DraftSandbox({
                     <td className="font-mono">{row.side === "blue" ? "B" : "R"}{sidePick}</td>
                     <td><strong>{row.champion}</strong></td>
                     <td>{row.role ? ROLE_LABEL[row.role] : "Open"}</td>
-                    <td className="font-mono">{(100 * row.projected_wr).toFixed(2)}%</td>
-                    <td className={`font-mono ${row.delta_pp >= 0 ? "sandbox-positive" : "sandbox-negative"}`}>
-                      {signedPp(row.delta_pp)}
+                    <td className="font-mono">
+                      {(100 * row.projected_value).toFixed(2)}/100
                     </td>
-                    <td className="font-mono">{(100 * row.confidence).toFixed(0)}%</td>
+                    <td className={`font-mono ${row.delta_points >= 0 ? "sandbox-positive" : "sandbox-negative"}`}>
+                      {signedChange(row.delta_points)}
+                    </td>
+                    <td>
+                      Experimental policy value
+                    </td>
                   </tr>
                 );
               })}
@@ -749,15 +1059,23 @@ export function DraftSandbox({
       <details className="sandbox-method">
         <summary>How to read this model</summary>
         <p>
-          Until all ten picks are present, unfilled seats are neutralized so changes compare one
-          draft branch with another at the same point. Those partial-draft values are not separately
-          calibrated outcome probabilities. A complete board switches to the full-composition model:
-          role-aware champion effects, within-team synergy, all 25 enemy interactions, and a sparse
-          low-rank residual. The sandbox does not know a player&apos;s champion pool, scrim plan, or
-          hidden flex intent. You can place any catalog champion in any still-open role; when that
-          champion-role pair has no pro sample, its role-specific direct effect stays neutral while
-          champion-level synergy and enemy interactions still apply, and the UI marks the role as
-          unseen.
+          Unfilled seats are neutralized so changes compare one draft branch with another at the same
+          point. The same experimental composition value is used on a complete board: role-aware
+          champion effects, within-team synergy, and all 25 explicit enemy interactions. Sparse
+          low-rank residuals are disabled because their uncertainty is not estimated. This terminal
+          model did not beat the chronological base-rate benchmark, so the
+          values are deliberately not labelled as outcome probabilities. Candidate rankings use
+          bounded beam minimax: the acting side maximizes
+          its model share and the opposing side minimizes it over up to two later picks. This is not
+          exhaustive search. The sandbox does not know a player&apos;s champion pool, scrim plan, or
+          hidden flex intent. A role is locked when a champion is placed; this
+          version does not preserve unresolved flex assignments. Manual
+          what-if mode can place any catalog champion in any still-open
+          role; when that champion-role pair has no pro sample, its role-specific direct effect stays
+          neutral while champion-level synergy and enemy interactions still apply, and the UI marks
+          the role as unseen. That manual placement does not expand policy search: recommendations
+          and look-ahead picks remain restricted to champion-role pairs with at
+          least {DRAFT_POLICY_MIN_ROLE_GAMES} pro maps.
         </p>
         <p className="font-mono">{analysis?.note}</p>
       </details>

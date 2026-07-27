@@ -34,11 +34,14 @@ function isCurrent(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function relativeFreshness(raw: string | undefined): string | null {
+function relativeFreshness(
+  raw: string | undefined,
+  now = Date.now(),
+): string | null {
   if (!raw) return null;
   const time = Date.parse(raw);
   if (!Number.isFinite(time)) return null;
-  const minutes = Math.max(0, Math.round((Date.now() - time) / 60_000));
+  const minutes = Math.max(0, Math.round((now - time) / 60_000));
   if (minutes < 2) return "just now";
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.round(minutes / 60);
@@ -46,11 +49,84 @@ function relativeFreshness(raw: string | undefined): string | null {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+export type PublicPackStatus = {
+  pack_id?: string;
+  filters?: {
+    years?: unknown[];
+  };
+  source?: "remote" | "bundled";
+  degraded?: boolean;
+  clocks?: {
+    publication?: { value?: string | null };
+    data_through?: { value?: string | null; status?: string };
+  };
+  source_provenance?: {
+    sources?: Array<{ source?: string }>;
+  };
+};
+
+export function packClockLabels(
+  manifest: PublicPackStatus | null,
+  now = Date.now(),
+): {
+  published: string | null;
+  dataThrough: string | null;
+  degraded: boolean;
+} {
+  return {
+    published: relativeFreshness(
+      manifest?.clocks?.publication?.value ?? undefined,
+      now,
+    ),
+    dataThrough: relativeFreshness(
+      manifest?.clocks?.data_through?.value ?? undefined,
+      now,
+    ),
+    degraded: Boolean(manifest?.degraded),
+  };
+}
+
+export function packSourceLabel(manifest: PublicPackStatus | null): string {
+  const declared = (manifest?.source_provenance?.sources ?? [])
+    .map(({ source }) => source?.trim().toLowerCase())
+    .filter((source): source is string => Boolean(source))
+    .map((source) => {
+      if (source === "oe") return "Oracle’s Elixir";
+      if (source === "grid") return "GRID";
+      return source.toUpperCase();
+    });
+  return declared.length > 0
+    ? declared.join(" + ")
+    : "Source provenance unavailable";
+}
+
+export function packYearsLabel(
+  manifest: PublicPackStatus | null,
+): string | null {
+  const years = [
+    ...new Set(
+      (manifest?.filters?.years ?? []).filter(
+        (year): year is number =>
+          typeof year === "number" &&
+          Number.isInteger(year) &&
+          year >= 2000 &&
+          year <= 3000,
+      ),
+    ),
+  ].sort((a, b) => a - b);
+  if (!years.length) return null;
+  return years.length === 1
+    ? String(years[0])
+    : `${years[0]}–${years[years.length - 1]}`;
+}
+
 export function SiteHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [updated, setUpdated] = useState<string | null>(null);
+  const [published, setPublished] = useState<string | null>(null);
+  const [dataThrough, setDataThrough] = useState<string | null>(null);
+  const [degraded, setDegraded] = useState(false);
   const latestPackRef = useRef<string | null>(null);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLElement>(null);
@@ -60,9 +136,12 @@ export function SiteHeader() {
     const refresh = () => {
       fetch("/api/pack-manifest", { cache: "no-store" })
         .then((response) => (response.ok ? response.json() : null))
-        .then((manifest: { pack_id?: string; created_utc?: string } | null) => {
+        .then((manifest: PublicPackStatus | null) => {
           if (cancelled) return;
-          setUpdated(relativeFreshness(manifest?.created_utc));
+          const labels = packClockLabels(manifest);
+          setPublished(labels.published);
+          setDataThrough(labels.dataThrough);
+          setDegraded(labels.degraded);
           const nextPack = manifest?.pack_id ?? null;
           if (latestPackRef.current && nextPack && latestPackRef.current !== nextPack) {
             router.refresh();
@@ -70,7 +149,11 @@ export function SiteHeader() {
           latestPackRef.current = nextPack;
         })
         .catch(() => {
-          if (!cancelled) setUpdated(null);
+          if (!cancelled) {
+            setPublished(null);
+            setDataThrough(null);
+            setDegraded(false);
+          }
         });
     };
     refresh();
@@ -122,8 +205,19 @@ export function SiteHeader() {
             </div>
           ))}
         </nav>
-        <span className="data-freshness" aria-label={updated ? `Data updated ${updated}` : "Data freshness unavailable"}>
-          {updated ? `Data ${updated}` : "Data —"}
+        <span
+          className="data-freshness"
+          aria-label={[
+            published ? `Pack published ${published}` : "Pack publication time unavailable",
+            dataThrough ? `data through ${dataThrough}` : "data-through time unavailable",
+            degraded ? "bundled fallback in use" : null,
+          ]
+            .filter(Boolean)
+            .join("; ")}
+        >
+          {published ? `Pack ${published}` : "Pack —"} ·{" "}
+          {dataThrough ? `Data through ${dataThrough}` : "Data through —"}
+          {degraded ? " · bundled fallback" : ""}
         </span>
         <button
           type="button"
@@ -170,13 +264,49 @@ export function SiteHeader() {
 }
 
 export function SiteFooter() {
+  const [sources, setSources] = useState<string[] | null>(null);
+  const [years, setYears] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/pack-manifest", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((manifest: PublicPackStatus | null) => {
+        if (cancelled) return;
+        const label = packSourceLabel(manifest);
+        setSources(
+          label === "Source provenance unavailable" ? [] : label.split(" + "),
+        );
+        setYears(packYearsLabel(manifest));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSources([]);
+          setYears(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const sourceLabel =
+    sources == null
+      ? "Source provenance loading"
+      : sources.length > 0
+        ? sources.join(" + ")
+        : "Source provenance unavailable";
+
   return (
     <footer className="site-footer">
-    Independent LoL research by koi · OE baseline + GRID recent pro rows ·{" "}
+    Independent LoL research by koi · {sourceLabel} ·{" "}
       <Link href="/reproduce" className="row-link">
         Data &amp; reproduction
       </Link>{" "}
-      · Pack <span className="font-mono">2025–2026</span>
+      · Pack years{" "}
+      <span className="font-mono">
+        {years === undefined ? "loading" : years ?? "unavailable"}
+      </span>
     </footer>
   );
 }

@@ -1,0 +1,63 @@
+{
+  "schema_version": 2,
+  "data_as_of": "2026-07-26T21:25:07+00:00",
+  "sources": {
+    "team_games": {
+      "oe": {
+        "rows": 33134,
+        "maps": 16567
+      }
+    },
+    "player_games": {
+      "oe": {
+        "rows": 165670,
+        "maps": 16567
+      }
+    },
+    "canonical_map_inclusion": {
+      "oe": {
+        "rows": 16567,
+        "maps": 16567
+      }
+    },
+    "map_detail_enrichment": {
+      "grid_event_detail": {
+        "rows": 30,
+        "maps": 30
+      },
+      "oe_team_aggregate": {
+        "rows": 10285,
+        "maps": 10285
+      },
+      "oe_wide_feature_map": {
+        "rows": 6252,
+        "maps": 6252
+      }
+    }
+  },
+  "canonicalization": {
+    "identity_grain": "canonical game identity",
+    "overlap_precedence": "oracle_elixir_then_verified_grid_gap_fill",
+    "canonical_inclusion_field": "canonical_map_source",
+    "detail_enrichment_field": "map_detail_source",
+    "completion_requirement": [
+      "events_game_end",
+      "end_state_summary"
+    ],
+    "source_fields_retained": [
+      "source",
+      "source_oe",
+      "source_grid",
+      "canonical_map_source",
+      "map_detail_source",
+      "grid_completion_source"
+    ]
+  },
+  "completion_gate": {
+    "grid_games_seen": 0,
+    "grid_games_retained": 0,
+    "grid_games_excluded_unverified": 0,
+    "excluded_examples": []
+  },
+  "attribution": "Canonical map inclusion and results derive from Oracle's Elixir. GRID supplies verified event detail for explicitly labelled maps; it does not create an additional result row. Canonical origin and detail enrichment are published as separate provenance fields. Ratings, validation, and calibration are Scryglass calculations."
+}

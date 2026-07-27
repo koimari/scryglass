@@ -55,6 +55,13 @@ function mapPicks(map: DraftRow, side: "blue" | "red"): string[] | null {
   return new Set(complete).size === 5 ? complete : null;
 }
 
+function hasTenUniqueChampions(blue: string[], red: string[]): boolean {
+  const normalized = [...blue, ...red].map((champion) =>
+    champion.normalize("NFKC").trim().toLocaleLowerCase(),
+  );
+  return new Set(normalized).size === 10;
+}
+
 /**
  * Final game participants are the authoritative champion composition and also
  * preserve role alignment. Map pick columns are draft-order, so they are only
@@ -66,7 +73,11 @@ export function resolveDraftLineup(
 ): DraftLineup | null {
   const blueParticipants = participantLineup(players, "Blue");
   const redParticipants = participantLineup(players, "Red");
-  if (blueParticipants && redParticipants) {
+  if (
+    blueParticipants &&
+    redParticipants &&
+    hasTenUniqueChampions(blueParticipants, redParticipants)
+  ) {
     const roles = [...DRAFT_ROLES];
     return {
       blue: blueParticipants,
@@ -79,7 +90,13 @@ export function resolveDraftLineup(
 
   const bluePicks = mapPicks(map, "blue");
   const redPicks = mapPicks(map, "red");
-  if (!bluePicks || !redPicks) return null;
+  if (
+    !bluePicks ||
+    !redPicks ||
+    !hasTenUniqueChampions(bluePicks, redPicks)
+  ) {
+    return null;
+  }
   return {
     blue: bluePicks,
     red: redPicks,

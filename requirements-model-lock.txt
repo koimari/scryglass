@@ -1,0 +1,7 @@
+# Exact numerical environment for checked-in model artifacts.
+# Refit with Python 3.13 and these versions; each artifact also embeds them.
+numpy==2.4.1
+pandas==3.0.0
+pyarrow==23.0.0
+scipy==1.17.0
+scikit-learn==1.8.0

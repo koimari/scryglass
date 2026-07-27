@@ -13,25 +13,17 @@ export default function HomePage() {
         <p className="blog-kicker">
           Latest · {lead.topic} · {lead.date}
         </p>
-        <h1 className="blog-title">
-          {lead.title.includes("50/50") ? (
-            <>
-              Leave still wins at <span className="olive">50/50</span>
-            </>
-          ) : (
-            lead.title
-          )}
-        </h1>
+        <h1 className="blog-title">{lead.title}</h1>
         <p className="blog-dek">{lead.dek}</p>
         <Link href={lead.href} className="blog-cta">
           Read the article <span aria-hidden>»</span>
         </Link>
         <div className="micro-log mt-8">
           <span>
-            <strong>Contest bar</strong> 58.9%
+            <strong>Scope</strong> {lead.topic}
           </span>
           <span>
-            <strong>At 50/50</strong> leave preferred
+            <strong>Published</strong> {lead.date}
           </span>
           <span>
             <strong>Read</strong> ~{lead.readingMinutes} min
@@ -61,21 +53,26 @@ export default function HomePage() {
       >
         <h2 className="font-display text-xl">Explore the data</h2>
         <p className="mt-2 text-sm text-[var(--ink-muted)] max-w-[62ch]">
-          Supporting tools for the essays — Dual Elo ratings, series boards, and head-to-head records.
+          Supporting instruments for the essays — model-specific ratings, canonical series boards,
+          and head-to-head records.
         </p>
         <nav className="research-index mt-4" aria-label="Analysis tools">
           <Link href="/elo">
             <span className="idx-label">01</span>
             <span>
               <span className="idx-title">Ratings</span>
-              <span className="idx-blurb block">Dual Elo ladders for teams and players.</span>
+              <span className="idx-blurb block">
+                Team strength, shared lineup signal, and identified performance kept separate.
+              </span>
             </span>
           </Link>
           <Link href="/browse">
             <span className="idx-label">02</span>
             <span>
               <span className="idx-title">Matches</span>
-              <span className="idx-blurb block">Bo-series gallery with model accuracy.</span>
+              <span className="idx-blurb block">
+                Complete and incomplete series with provenance and frozen diagnostics.
+              </span>
             </span>
           </Link>
           <Link href="/browse/head-to-head">

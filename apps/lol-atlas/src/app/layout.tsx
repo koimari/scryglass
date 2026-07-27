@@ -26,7 +26,7 @@ const mono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Scryglass — LoL research by koi",
   description:
-    "Independent League of Legends research publication: essays, Dual Elo ratings, and reproducible Oracle’s Elixir packs (2025–2026).",
+    "Independent League of Legends research publication: essays, ratings, and source-attributed reproducible pro-match packs (2025–2026).",
   robots: { index: true, follow: true },
 };
 

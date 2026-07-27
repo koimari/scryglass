@@ -6,10 +6,26 @@ import {
   type DraftRole,
   type DraftSide,
 } from "@/lib/draftScore";
+import {
+  compositionRuntimeMetadata,
+} from "@/lib/draftComposition";
+import {
+  patchContractFromPublic,
+  patchContractFromSource,
+} from "@/lib/patch";
 
 export const dynamic = "force-dynamic";
 
-const LEAGUES = new Set(["LCK", "LPL", "LEC", "LCS", "CBLOL", "LCP", "INTL"]);
+const LEAGUES = new Set([
+  "LCK",
+  "LPL",
+  "LEC",
+  "LCS",
+  "CBLOL",
+  "LCP",
+  "MSI",
+  "EWC",
+]);
 
 function parseScenario(
   raw: string | undefined,
@@ -67,6 +83,28 @@ export default async function SandboxPage({
     typeof params.league === "string" && LEAGUES.has(params.league)
       ? params.league
       : undefined;
+  const modelMetadata = compositionRuntimeMetadata();
+  const requestedPublicPatch =
+    typeof params.public_patch === "string"
+      ? patchContractFromPublic(params.public_patch)
+      : null;
+  const requestedPatchIsSupported = Boolean(
+    requestedPublicPatch &&
+      modelMetadata?.analysis_patches.includes(
+        requestedPublicPatch.source_patch_key,
+      ),
+  );
+  const latestPatchContract = patchContractFromSource(
+    modelMetadata?.latest_observed_patch,
+  );
+  const publicPatch =
+    typeof params.public_patch === "string"
+      ? requestedPatchIsSupported
+        ? requestedPublicPatch!.public_patch
+        : ""
+      : params.patch != null
+        ? ""
+        : latestPatchContract?.public_patch ?? "";
 
   return (
     <DraftSandbox
@@ -75,6 +113,8 @@ export default async function SandboxPage({
       initialExcluded={scenario?.excluded}
       initialPerspective={perspective}
       initialLeague={league}
+      initialPublicPatch={publicPatch}
+      modelMetadata={modelMetadata}
     />
   );
 }

@@ -52,7 +52,9 @@ def ingest_leaguepedia(
             result = None
             if winner in (1, 2):
                 result = 1 if winner == side_idx else 0
-            first_inhib = g.get("first_inhib_side")
+            # ScoreboardGames exposes final inhibitor totals, not event order.
+            # This source therefore cannot supply a first-inhibitor label.
+            first_inhib = None
             first_blood = g.get("first_blood_side")
             team_rows.append(
                 {
