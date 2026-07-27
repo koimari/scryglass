@@ -1,14 +1,14 @@
 "use client";
 
 import type { MatchModelPrior, QueryRow } from "@/lib/duck";
-import { DraftWrPanel } from "./DraftWrPanel";
+import { DraftWrPanel, type DraftStrengthInput } from "./DraftWrPanel";
 
 type Props = {
   map: QueryRow;
   players?: QueryRow[];
   prior: MatchModelPrior | null;
   loading?: boolean;
-  eloDiff?: number | null;
+  strength?: DraftStrengthInput;
 };
 
 function Mark({ ok, missing }: { ok: boolean | null; missing?: boolean }) {
@@ -44,7 +44,7 @@ function resolveWinner(map: QueryRow, players: QueryRow[]): string {
   return String(map.red_teamname ?? "Red");
 }
 
-export function ModelChecklist({ map, players = [], prior, loading, eloDiff }: Props) {
+export function ModelChecklist({ map, players = [], prior, loading, strength }: Props) {
   const actualWinner = resolveWinner(map, players);
   const actualKills =
     map.total_kills != null
@@ -74,7 +74,7 @@ export function ModelChecklist({ map, players = [], prior, loading, eloDiff }: P
   return (
     <div className="model-checklist">
       <h3>Model vs actual</h3>
-      <DraftWrPanel map={map} players={players} eloDiff={eloDiff} />
+      <DraftWrPanel map={map} players={players} strength={strength} />
       <div className="check-row">
         <span>Winner (Elo):</span>
         <span className="font-medium">{fav ?? "—"}</span>

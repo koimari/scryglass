@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   analyzeDraftSandbox,
+  draftCatalog,
   draftScore,
   type DraftAction,
 } from "./draftScore.ts";
 
-const dayosActions: DraftAction[] = [
+const partialActions: DraftAction[] = [
   { side: "blue", champion: "Jarvan IV", role: "jng" },
   { side: "red", champion: "Ezreal", role: "bot" },
   { side: "red", champion: "Naafiri", role: "jng" },
@@ -14,9 +16,9 @@ const dayosActions: DraftAction[] = [
   { side: "blue", champion: "Jayce", role: "top" },
 ];
 
-test("sandbox replays the Dayos sequence and ranks legal open-role responses", () => {
+test("sandbox replays a partial sequence and ranks legal open-role responses", () => {
   const result = analyzeDraftSandbox({
-    actions: dayosActions,
+    actions: partialActions,
     perspective: "red",
     next_side: "red",
     candidate_role: "open",
@@ -35,7 +37,7 @@ test("sandbox replays the Dayos sequence and ranks legal open-role responses", (
   );
   assert.ok(
     result.recommendations.every(
-      (row) => !dayosActions.some((action) => action.champion === row.champion),
+      (row) => !partialActions.some((action) => action.champion === row.champion),
     ),
   );
   assert.ok(
@@ -66,7 +68,7 @@ test("partial drafts apply a known same-role matchup term", () => {
 
 test("recommendations optimize the side whose turn it is", () => {
   const result = analyzeDraftSandbox({
-    actions: [...dayosActions, { side: "red", champion: "Rakan", role: "sup" }],
+    actions: [...partialActions, { side: "red", champion: "Rakan", role: "sup" }],
     perspective: "red",
     next_side: "blue",
     candidate_role: "open",
@@ -79,9 +81,56 @@ test("recommendations optimize the side whose turn it is", () => {
   assert.ok(result.recommendations[0].projected_wr > 1 - result.current.projected_wr);
 });
 
+test("mid-draft recommendations react to ally and enemy composition", () => {
+  const base: DraftAction[] = [
+    { side: "red", champion: "Renekton", role: "top" },
+    { side: "red", champion: "Sejuani", role: "jng" },
+    { side: "blue", champion: "Orianna", role: "mid" },
+  ];
+  const withJinx = analyzeDraftSandbox({
+    actions: [...base, { side: "blue", champion: "Jinx", role: "bot" }],
+    perspective: "blue",
+    next_side: "blue",
+    candidate_role: "sup",
+    league: "LCS",
+    limit: 10,
+  });
+  const withLucian = analyzeDraftSandbox({
+    actions: [...base, { side: "blue", champion: "Lucian", role: "bot" }],
+    perspective: "blue",
+    next_side: "blue",
+    candidate_role: "sup",
+    league: "LCS",
+    limit: 10,
+  });
+
+  assert.notDeepEqual(
+    withJinx.recommendations.map((row) => row.champion),
+    withLucian.recommendations.map((row) => row.champion),
+  );
+  assert.match(withJinx.current.score.note, /Partial full-composition counterfactual/);
+});
+
+test("sandbox catalog exposes the full composition pool and permits unseen legal roles", () => {
+  const catalog = draftCatalog();
+  assert.ok(catalog.length >= 160);
+  const result = analyzeDraftSandbox({
+    actions: [],
+    perspective: "blue",
+    next_side: "blue",
+    candidate_role: "sup",
+    league: "LCS",
+    limit: 200,
+  });
+  const supportCandidates = new Map(result.recommendations.map((row) => [row.champion, row]));
+  assert.equal(supportCandidates.size, catalog.length);
+  assert.ok([...supportCandidates.values()].some((row) => row.evidence === "Unseen role"));
+  assert.ok([...supportCandidates.values()].every((row) => row.role === "sup"));
+});
+
 test("excluded champions are removed from the legal recommendation set", () => {
   const baseline = analyzeDraftSandbox({
-    actions: dayosActions,
+    actions: partialActions,
     perspective: "red",
     next_side: "red",
     candidate_role: "open",
@@ -89,7 +138,7 @@ test("excluded champions are removed from the legal recommendation set", () => {
   });
   const topChampion = baseline.recommendations[0].champion;
   const excluded = analyzeDraftSandbox({
-    actions: dayosActions,
+    actions: partialActions,
     perspective: "red",
     next_side: "red",
     candidate_role: "open",
@@ -98,4 +147,45 @@ test("excluded champions are removed from the legal recommendation set", () => {
   });
 
   assert.ok(!excluded.recommendations.some((row) => row.champion === topChampion));
+});
+
+test("complete boards use the full-composition runtime and reconcile explanations", () => {
+  const blue = ["Aatrox", "Sejuani", "Ahri", "Jinx", "Leona"];
+  const red = ["Gnar", "Vi", "Orianna", "Xayah", "Nautilus"];
+  const roles = ["top", "jng", "mid", "bot", "sup"];
+  const result = draftScore({
+    blue,
+    red,
+    blue_roles: roles,
+    red_roles: roles,
+    league: "LCK",
+    patch: "16.13",
+  });
+
+  assert.match(result.note, /Full-composition draft model/);
+  assert.equal(result.raw.source, "composition only; no roster/player strength");
+  assert.equal(result.explanation?.reconciles, true);
+  assert.equal(result.explanation?.champions.length, 10);
+  const interval = result.uncertainty?.p_blue_95;
+  assert.ok(interval);
+  assert.ok(interval[0] >= 0);
+  assert.ok(interval[1] <= 1);
+
+  const swapped = draftScore({
+    blue: red,
+    red: blue,
+    blue_roles: roles,
+    red_roles: roles,
+    league: "LCK",
+    patch: "16.13",
+  });
+  assert.ok(Math.abs((result.components.composition_edge ?? 0) + (swapped.components.composition_edge ?? 0)) < 1e-5);
+});
+
+test("sandbox source contains no named public demo fixture", () => {
+  const source = readFileSync(new URL("../components/DraftSandbox.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /Example question|Load .*example/i);
+  assert.match(source, /initialActions = \[\]/);
+  assert.match(source, /sandbox-champion-grid/);
+  assert.doesNotMatch(source, /list="sandbox-champions"/);
 });

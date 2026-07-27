@@ -235,12 +235,19 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
                   blue,
                   red,
                   league: String(m.league ?? ""),
+                  patch: String(m.patch ?? ""),
+                  blue_team: String(m.blue_teamname ?? ""),
+                  red_team: String(m.red_teamname ?? ""),
                 }),
               });
               if (res.ok) {
-                const ds = (await res.json()) as { draft_edge: number };
+                const ds = (await res.json()) as {
+                  draft_edge: number;
+                  contextualized?: { edge?: number } | null;
+                };
                 const isBlue = String(m.blue_teamname) === team.team;
-                edges.push(isBlue ? ds.draft_edge : -ds.draft_edge);
+                const edge = ds.contextualized?.edge ?? ds.draft_edge;
+                edges.push(isBlue ? edge : -edge);
               }
             } catch {
               /* ignore */

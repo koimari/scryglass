@@ -4,6 +4,11 @@
  */
 import { readFileSync } from "fs";
 import path from "path";
+import {
+  compositionDraftCatalog,
+  compositionDraftScore,
+  compositionPartialDraftScore,
+} from "./draftComposition";
 
 const DEFAULT_TEMP = 1.4;
 const BLUE_SIDE_BONUS = 0.03;
@@ -18,6 +23,9 @@ const LEAGUE_TIER: Record<string, string> = {
   LPL: "tier1",
   LEC: "west",
   LCS: "west",
+  LTA: "west",
+  "LTA N": "west",
+  "LTA S": "west",
   CBLOL: "americas",
   AMERICAS: "americas",
   PCS: "asia_reg",
@@ -95,9 +103,25 @@ export type DraftScoreInput = {
   blue: string[];
   red: string[];
   league?: string | null;
+  patch?: string | null;
   elo_diff?: number | null;
+  team_elo_diff?: number | null;
+  player_elo_diff?: number | null;
+  blue_team?: string | null;
+  red_team?: string | null;
+  blue_players?: string[] | null;
+  red_players?: string[] | null;
+  strength_source?: string | null;
   blue_roles?: string[] | null;
   red_roles?: string[] | null;
+};
+
+export type DraftScoreView = {
+  p_blue: number;
+  score_blue: number;
+  score_red: number;
+  edge: number;
+  source: string;
 };
 
 export type DraftScoreResult = {
@@ -106,16 +130,26 @@ export type DraftScoreResult = {
   draft_edge: number;
   confidence: number;
   p_blue_draft: number;
+  raw: DraftScoreView;
+  contextualized: DraftScoreView | null;
+  strength: {
+    team_elo_diff: number | null;
+    player_elo_diff: number | null;
+    source: string;
+  };
   wr_bump_pp: number;
   posterior_width: number;
   calibration: {
     league: string | null | undefined;
+    patch?: string | null;
     source: string;
-    temperature: number;
-    legacy_temp: number;
-    p_blue_legacy_1_4: number;
+    intercept?: number;
+    slope?: number;
+    temperature?: number;
+    legacy_temp?: number;
+    p_blue_legacy_1_4?: number;
     p_blue_with_strength: number | null;
-    dp_per_logit: number;
+    dp_per_logit?: number;
   };
   components: {
     win_logit_blue: number;
@@ -127,16 +161,56 @@ export type DraftScoreResult = {
     pace_total_shift: number;
     known_frac_blue: number;
     known_frac_red: number;
+    main_logit?: number;
+    synergy_logit?: number;
+    opposition_logit?: number;
+    low_rank_logit?: number;
+    composition_edge?: number;
+    model_edge?: number;
+    side_advantage_logit?: number;
   };
   blue: string[];
   red: string[];
   note: string;
+  uncertainty?: {
+    edge_se_logit: number;
+    p_blue_95: [number, number];
+    method: string;
+  };
+  contextualized_uncertainty?: {
+    p_blue_95: [number, number];
+    method: string;
+  } | null;
+  explanation?: {
+    edge: number;
+    composition_edge: number;
+    side_advantage: number;
+    champions: Array<{
+      champion: string;
+      side: "blue" | "red";
+      role: string;
+      direct_effect: number;
+      team_synergy: number;
+      enemy_interaction: number;
+      edge_contribution: number;
+      uncertainty_logit: number;
+      evidence: {
+        games: number;
+        shrinkage: number;
+        label: string;
+        uncertainty_logit: number;
+      };
+    }>;
+    reconciles: boolean;
+    attribution: string;
+  };
 };
 
 export type DraftChampion = {
   name: string;
   roles: DraftRole[];
   games: number;
+  role_games?: Partial<Record<DraftRole, number>>;
 };
 
 export type DraftAction = {
@@ -154,7 +228,7 @@ export type DraftRecommendation = {
   delta_pp: number;
   confidence: number;
   sample_games: number;
-  evidence: "Settled" | "Observed" | "Thin";
+  evidence: "Settled" | "Observed" | "Thin" | "Unseen role";
 };
 
 export type DraftTimelineRow = DraftAction & {
@@ -182,6 +256,99 @@ export type DraftSandboxResult = {
 
 let cached: DraftRuntime | null = null;
 let catalogCached: DraftChampion[] | null = null;
+
+type StrengthRow = {
+  team?: string;
+  player?: string;
+  mu_total: number;
+  sigma: number;
+  last_team?: string | null;
+};
+
+type StrengthPack = { teams: StrengthRow[]; players: StrengthRow[] };
+let strengthPack: StrengthPack | null | undefined;
+
+function loadStrengthPack(): StrengthPack | null {
+  if (strengthPack !== undefined) return strengthPack;
+  try {
+    const latest = JSON.parse(
+      readFileSync(path.join(process.cwd(), "public", "packs", "latest.json"), "utf8"),
+    ) as { pack_id?: string };
+    const packId = latest.pack_id;
+    if (!packId) throw new Error("latest pack id missing");
+    const root = path.join(process.cwd(), "public", "packs", packId, "features");
+    strengthPack = {
+      teams: JSON.parse(readFileSync(path.join(root, "ratings_snapshot.json"), "utf8")) as StrengthRow[],
+      players: JSON.parse(
+        readFileSync(path.join(root, "player_ratings_snapshot.json"), "utf8"),
+      ) as StrengthRow[],
+    };
+  } catch {
+    strengthPack = null;
+  }
+  return strengthPack;
+}
+
+function adjustedRating(row: StrengthRow, floor: number): number {
+  return Number(row.mu_total) - Math.max(0, Number(row.sigma) - floor);
+}
+
+function teamMatch(name: string, candidate: string): boolean {
+  const a = normKey(name);
+  const b = normKey(candidate);
+  return a === b || a.includes(b) || b.includes(a);
+}
+
+function resolveStrength(input: DraftScoreInput): DraftScoreInput {
+  const teamDiff = input.team_elo_diff ?? input.elo_diff;
+  const playerDiff = input.player_elo_diff;
+  if (playerDiff != null || !input.blue_team || !input.red_team) {
+    return {
+      ...input,
+      team_elo_diff: teamDiff,
+      strength_source:
+        input.strength_source ?? (teamDiff != null || playerDiff != null ? "explicit pre-match strength" : null),
+    };
+  }
+  const pack = loadStrengthPack();
+  if (!pack) return input;
+  const blueRow = pack.teams.find((row) => teamMatch(input.blue_team!, String(row.team ?? "")));
+  const redRow = pack.teams.find((row) => teamMatch(input.red_team!, String(row.team ?? "")));
+  if (!blueRow || !redRow) return input;
+  const resolved: DraftScoreInput = {
+    ...input,
+    team_elo_diff: teamDiff ?? adjustedRating(blueRow, 25) - adjustedRating(redRow, 25),
+    strength_source: teamDiff != null ? "pre-match team + current roster proxy" : "current pack adjusted team + roster proxy",
+  };
+  if (input.blue_players?.length && input.red_players?.length) {
+    const bluePlayers = pack.players.filter((row) => input.blue_players!.some((p) => teamMatch(p, String(row.player ?? ""))));
+    const redPlayers = pack.players.filter((row) => input.red_players!.some((p) => teamMatch(p, String(row.player ?? ""))));
+    if (bluePlayers.length && redPlayers.length) {
+      const b = bluePlayers.reduce((sum, row) => sum + adjustedRating(row, 28), 0) / bluePlayers.length;
+      const r = redPlayers.reduce((sum, row) => sum + adjustedRating(row, 28), 0) / redPlayers.length;
+      resolved.player_elo_diff = b - r;
+      resolved.strength_source = "explicit roster/player ratings + adjusted team rating";
+    }
+  } else {
+    const roster = (team: string) => {
+      const exact = pack.players.filter((row) => normKey(String(row.last_team ?? "")) === normKey(team));
+      const candidates = exact.length
+        ? exact
+        : pack.players.filter((row) => teamMatch(team, String(row.last_team ?? "")));
+      return candidates
+        .sort((a, b) => adjustedRating(b, 28) - adjustedRating(a, 28))
+        .slice(0, 5);
+    };
+    const bluePlayers = roster(input.blue_team!);
+    const redPlayers = roster(input.red_team!);
+    if (bluePlayers.length && redPlayers.length) {
+      const b = bluePlayers.reduce((sum, row) => sum + adjustedRating(row, 28), 0) / bluePlayers.length;
+      const r = redPlayers.reduce((sum, row) => sum + adjustedRating(row, 28), 0) / redPlayers.length;
+      resolved.player_elo_diff = b - r;
+    }
+  }
+  return resolved;
+}
 
 function loadRuntime(): DraftRuntime {
   if (cached) return cached;
@@ -361,16 +528,21 @@ function rolePairScore(
 }
 
 export function draftScore(input: DraftScoreInput): DraftScoreResult {
+  const enriched = resolveStrength(input);
+  if (enriched.blue.length === 5 && enriched.red.length === 5) {
+    const composition = compositionDraftScore(enriched);
+    if (composition) return composition;
+  }
   const rt = loadRuntime();
-  const scale = draftTemperature(input.league, rt);
-  const b = scoreSide(input.blue, rt, BLUE_SIDE_BONUS);
-  const r = scoreSide(input.red, rt, 0);
+  const scale = draftTemperature(enriched.league, rt);
+  const b = scoreSide(enriched.blue, rt, BLUE_SIDE_BONUS);
+  const r = scoreSide(enriched.red, rt, 0);
 
   const pairLogit = rolePairScore(
     b.champs,
     r.champs,
-    input.blue_roles,
-    input.red_roles,
+    enriched.blue_roles,
+    enriched.red_roles,
     rt,
   );
 
@@ -386,9 +558,9 @@ export function draftScore(input: DraftScoreInput): DraftScoreResult {
   const wrBumpPp = 100 * scale.dp_per_logit * winEdge * conf;
 
   let pWithStrength: number | null = null;
-  if (input.elo_diff != null && scale.source !== "legacy_1.4") {
+  if (enriched.team_elo_diff != null && scale.source !== "legacy_1.4") {
     pWithStrength = sigmoid(
-      scale.intercept + scale.coef_elo * (Number(input.elo_diff) / 400) + temp * winEdge,
+      scale.intercept + scale.coef_elo * (Number(enriched.team_elo_diff) / 400) + temp * winEdge,
     );
   }
 
@@ -401,10 +573,33 @@ export function draftScore(input: DraftScoreInput): DraftScoreResult {
     draft_edge: round(scoreBlue - scoreRed, 2),
     confidence: round(conf, 3),
     p_blue_draft: round(pShrunk, 4),
+    raw: {
+      p_blue: round(pShrunk, 4),
+      score_blue: round(scoreBlue, 2),
+      score_red: round(100 - scoreBlue, 2),
+      edge: round(scoreBlue - (100 - scoreBlue), 2),
+      source: "legacy partial-draft fallback",
+    },
+    contextualized:
+      pWithStrength == null
+        ? null
+        : {
+            p_blue: round(pWithStrength, 4),
+            score_blue: round(100 * pWithStrength, 2),
+            score_red: round(100 * (1 - pWithStrength), 2),
+            edge: round(100 * (2 * pWithStrength - 1), 2),
+            source: enriched.strength_source ?? "pre-match team strength",
+          },
+    strength: {
+      team_elo_diff: enriched.team_elo_diff ?? enriched.elo_diff ?? null,
+      player_elo_diff: enriched.player_elo_diff ?? null,
+      source: enriched.strength_source ?? (enriched.team_elo_diff != null ? "explicit pre-match strength" : "unavailable"),
+    },
     wr_bump_pp: round(wrBumpPp, 2),
     posterior_width: round(width, 3),
     calibration: {
-      league: input.league,
+      league: enriched.league,
+      patch: enriched.patch,
       source: scale.source,
       temperature: round(temp, 4),
       legacy_temp: DEFAULT_TEMP,
@@ -412,6 +607,7 @@ export function draftScore(input: DraftScoreInput): DraftScoreResult {
       p_blue_with_strength: pWithStrength != null ? round(pWithStrength, 4) : null,
       dp_per_logit: round(scale.dp_per_logit, 4),
     },
+    contextualized_uncertainty: null,
     components: {
       win_logit_blue: round(b.win_logit, 4),
       win_logit_red: round(r.win_logit, 4),
@@ -426,12 +622,26 @@ export function draftScore(input: DraftScoreInput): DraftScoreResult {
     blue: b.champs,
     red: r.champs,
     note:
-      "Draft Score v3: league-calibrated WR temperature from OE study; one input among several on a board. wr_bump_pp ≈ Elo-controlled ΔP from residual ridge × edge × conf.",
+      "Legacy partial-draft fallback: league-calibrated Draft Score comparison. Complete five-versus-five boards use the full-composition runtime when available.",
   };
 }
 
 export function draftCatalog(): DraftChampion[] {
   if (catalogCached) return catalogCached;
+  const compositionCatalog = compositionDraftCatalog();
+  if (compositionCatalog?.length) {
+    catalogCached = compositionCatalog.map((row) => ({
+      name: row.name,
+      roles: row.roles.filter(isDraftRole),
+      games: row.games,
+      role_games: Object.fromEntries(
+        Object.entries(row.role_games)
+          .filter(([role]) => isDraftRole(role))
+          .map(([role, games]) => [role, Number(games) || 0]),
+      ) as Partial<Record<DraftRole, number>>,
+    }));
+    return catalogCached;
+  }
   const rt = loadRuntime();
   const roleSets = new Map<string, Set<DraftRole>>();
   for (const key of Object.keys(rt.role_pairs)) {
@@ -464,17 +674,19 @@ function scoreActions(
 ): DraftScoreResult {
   const blue = actions.filter((action) => action.side === "blue");
   const red = actions.filter((action) => action.side === "red");
-  return draftScore({
+  const input: DraftScoreInput = {
     blue: blue.map((action) => action.champion),
     red: red.map((action) => action.champion),
     league,
     elo_diff: eloDiff,
     blue_roles: blue.map((action) => action.role || ""),
     red_roles: red.map((action) => action.role || ""),
-  });
+  };
+  return compositionPartialDraftScore(input) ?? draftScore(input);
 }
 
 function evidenceLabel(games: number): DraftRecommendation["evidence"] {
+  if (games <= 0) return "Unseen role";
   if (games >= 200) return "Settled";
   if (games >= 75) return "Observed";
   return "Thin";
@@ -533,12 +745,12 @@ export function analyzeDraftSandbox(input: {
     if (selected.has(normKey(candidate.name)) || excluded.has(normKey(candidate.name))) continue;
     let roles: Array<DraftRole | null>;
     if (candidateRole === "any") {
-      roles = candidate.roles.length ? candidate.roles : [null];
+      roles = openRoles;
     } else if (candidateRole === "open") {
       roles = candidate.roles.filter((role) => openRoles.includes(role));
       if (!roles.length) continue;
     } else {
-      if (!candidate.roles.includes(candidateRole)) continue;
+      if (!openRoles.includes(candidateRole)) continue;
       roles = [candidateRole];
     }
 
@@ -556,8 +768,10 @@ export function analyzeDraftSandbox(input: {
         projected_wr: round(projected, 4),
         delta_pp: round(100 * (projected - currentRecommendationProbability), 2),
         confidence: score.confidence,
-        sample_games: candidate.games,
-        evidence: evidenceLabel(candidate.games),
+        sample_games: role ? Number(candidate.role_games?.[role] ?? 0) : candidate.games,
+        evidence: evidenceLabel(
+          role ? Number(candidate.role_games?.[role] ?? 0) : candidate.games,
+        ),
       };
       if (!best || row.projected_wr > best.projected_wr) best = row;
     }
@@ -582,10 +796,10 @@ export function analyzeDraftSandbox(input: {
       score: currentScore,
     },
     timeline,
-    recommendations: recommendations.slice(0, clip(input.limit ?? 12, 1, 30)),
+    recommendations: recommendations.slice(0, clip(input.limit ?? 12, 1, 200)),
     open_roles: openRoles,
     note:
-      "Partial-draft counterfactual. Unfilled seats contribute the fitted average (zero-centered); pick-to-pick changes are model comparisons, not separately calibrated live win probabilities.",
+      "Partial full-composition counterfactual. Rankings use role-aware direct effects plus learned ally synergy and enemy interactions among selected champions. Unfilled seats are neutralized, so pick-to-pick changes are not calibrated live win probabilities.",
   };
 }
 

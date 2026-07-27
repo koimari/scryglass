@@ -161,7 +161,7 @@ export function MatchScoreboard({ map, players, draftPctBlue }: Props) {
           </span>
           <span className="sb-clock font-mono">{clock}</span>
           {draftPctBlue != null && Number.isFinite(draftPctBlue) && (
-            <span className="sb-draft font-mono" title="League-calibrated Draft Score → WR">
+            <span className="sb-draft font-mono" title="Full-composition draft estimate; context shown when available">
               Draft {(100 * draftPctBlue).toFixed(0)}–
               {(100 * (1 - draftPctBlue)).toFixed(0)}%
             </span>

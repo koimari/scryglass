@@ -37,6 +37,7 @@ def cmd_refresh(args: argparse.Namespace) -> None:
 def cmd_train(args: argparse.Namespace) -> None:
     from lol_kills.features.build import build_feature_store
     from lol_kills.draft_score import fit_draft_score_scaler
+    from lol_kills.composition_model import fit_from_paths
     from lol_kills.ml.train import train_all
     from lol_kills.ratings.calibrate_elo_wr import apply_calibration_to_features, fit_elo_wr_calibration
 
@@ -47,6 +48,8 @@ def cmd_train(args: argparse.Namespace) -> None:
     apply_calibration_to_features()
     print("[pipeline] draft score fit…")
     fit_draft_score_scaler()
+    print("[pipeline] full-composition draft fit…")
+    fit_from_paths()
     print("[pipeline] train + gates…")
     report = train_all(do_archive=not args.no_archive)
     print(json.dumps({k: (v.get("status") if isinstance(v, dict) and "status" in v else "ok") for k, v in report.items()}, indent=2))

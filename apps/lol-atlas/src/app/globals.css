@@ -2648,18 +2648,68 @@ body {
 }
 
 .sandbox-picker {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
+  display: grid;
   gap: var(--space-4);
   padding: 1rem 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
 
+.sandbox-picker-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.sandbox-picker-head > p {
+  max-width: 52ch;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  text-align: right;
+}
+
+.sandbox-role-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.sandbox-role-filters button,
+.sandbox-role-choice button {
+  min-height: 2rem;
+  padding: 0 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sandbox-role-filters button:hover:not(:disabled),
+.sandbox-role-choice button:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.sandbox-role-filters button.is-selected {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+.sandbox-role-filters button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .sandbox-picker-control {
   display: flex;
-  min-width: min(100%, 24rem);
+  width: min(100%, 30rem);
 }
 
 .sandbox-picker-control input {
@@ -2675,8 +2725,96 @@ body {
   font: inherit;
 }
 
-.sandbox-picker-control .btn-primary {
+.sandbox-picker-control input:only-child {
+  border-right: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.sandbox-picker-control .sandbox-secondary-button {
+  border-left: 0;
   border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.sandbox-role-choice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.65rem;
+  border: 1px solid var(--accent);
+  background: color-mix(in oklch, var(--accent) 8%, var(--surface));
+}
+
+.sandbox-role-choice > span {
+  margin-right: 0.3rem;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+}
+
+.sandbox-role-choice strong {
+  color: var(--ink);
+}
+
+.sandbox-champion-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+  gap: 0.45rem;
+  max-height: 31rem;
+  overflow-y: auto;
+  padding: 0.15rem 0.3rem 0.15rem 0;
+}
+
+.sandbox-champion-button {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  min-width: 0;
+  gap: 0.28rem;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 140ms var(--ease-out),
+    background 140ms var(--ease-out),
+    transform 140ms var(--ease-out);
+}
+
+.sandbox-champion-button:hover,
+.sandbox-champion-button:focus-visible {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 8%, var(--surface));
+  transform: translateY(-1px);
+}
+
+.sandbox-champion-card-portrait {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: calc(var(--radius) - 1px);
+  background-color: var(--surface-subtle);
+  background-position: center;
+  background-size: cover;
+}
+
+.sandbox-champion-button strong {
+  overflow: hidden;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sandbox-champion-button small {
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.53rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .sandbox-ranking,
@@ -2802,10 +2940,13 @@ body {
   .sandbox-read {
     order: -1;
   }
-  .sandbox-picker,
+  .sandbox-picker-head,
   .sandbox-section-head {
     align-items: stretch;
     flex-direction: column;
+  }
+  .sandbox-picker-head > p {
+    text-align: left;
   }
   .sandbox-section-head > p {
     text-align: left;
@@ -2815,6 +2956,10 @@ body {
   }
   .sandbox-branch-button {
     opacity: 1;
+  }
+  .sandbox-champion-grid {
+    grid-template-columns: repeat(auto-fill, minmax(5.25rem, 1fr));
+    max-height: 26rem;
   }
 }
 

@@ -25,6 +25,7 @@ DRAFT_MODEL = ROOT / "data" / "lol" / "draft_model.json"
 OUT = MODELS_DIR / "draft_score_meta.json"
 PAIR_PATH = MODELS_DIR / "draft_role_pairs.json"
 CAL_PATH = MODELS_DIR / "draft_wr_calibration.json"
+COMPOSITION_MODEL_PATH = MODELS_DIR / "draft_composition.json"
 
 # Fallback when study artifact missing (legacy Draft Score v2)
 DEFAULT_TEMP = 1.4
@@ -239,14 +240,34 @@ def draft_score(
     blue_side_bonus: float = 0.03,
     league: str | None = None,
     elo_diff: float | None = None,
+    team_elo_diff: float | None = None,
+    player_elo_diff: float | None = None,
+    strength_source: str | None = None,
 ) -> dict:
     """
     Draft Score with league-calibrated WR mapping when
     data/lol/models/draft_wr_calibration.json exists.
 
-    elo_diff = μ_blue − μ_red (optional): used only for the reported
-    combined p_with_strength, not for the pure draft score axis.
+    Elo gaps are separate inputs to the contextualized score; they never
+    change the pure draft score axis.
     """
+    if len(blue) == 5 and len(red) == 5 and COMPOSITION_MODEL_PATH.exists():
+        from lol_kills.composition_model import predict_composition
+
+        model = json.loads(COMPOSITION_MODEL_PATH.read_text())
+        return predict_composition(
+            model,
+            blue,
+            red,
+            blue_roles=blue_roles,
+            red_roles=red_roles,
+            league=league,
+            elo_diff=elo_diff,
+            team_elo_diff=team_elo_diff,
+            player_elo_diff=player_elo_diff,
+            strength_source=strength_source,
+        )
+
     kill_beta, win_delta, _mu = _load_champ_betas()
     counts = _champ_counts()
     pairs = {}
@@ -254,6 +275,7 @@ def draft_score(
         pairs = json.loads(PAIR_PATH.read_text() or "{}")
     cal = _load_calibration()
     scale = draft_temperature(league, cal)
+    effective_team_elo_diff = team_elo_diff if team_elo_diff is not None else elo_diff
 
     b = score_side(blue, kill_beta=kill_beta, win_delta=win_delta, counts=counts, side_prior=blue_side_bonus)
     r = score_side(red, kill_beta=kill_beta, win_delta=win_delta, counts=counts, side_prior=0.0)
@@ -281,10 +303,10 @@ def draft_score(
     wr_bump_pp = 100.0 * float(scale["dp_per_logit"]) * win_edge * conf
 
     p_with_strength = None
-    if elo_diff is not None and scale["source"] != "legacy_1.4":
+    if effective_team_elo_diff is not None and scale["source"] != "legacy_1.4":
         p_with_strength = sigmoid(
             scale["intercept"]
-            + scale["coef_elo"] * (float(elo_diff) / 400.0)
+            + scale["coef_elo"] * (float(effective_team_elo_diff) / 400.0)
             + temp * win_edge
         )
         # apply same confidence shrink toward 50 on the draft component only is hard;

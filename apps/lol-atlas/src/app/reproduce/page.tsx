@@ -95,7 +95,8 @@ export default async function ReproducePage() {
           <li>Pin this pack id.</li>
           <li>Use the same year / league / patch filters as the post.</li>
           <li>
-            Elo→WR and Draft Score: use the pinned files under Ratings below.
+            Elo→WR and Draft Score: use the pinned ratings below; Draft Score separates raw
+            composition from pre-match team/player context.
           </li>
           <li>
             Void grubs: article JSON + PDF under Article inputs — leave-mix (~24%) is a sister

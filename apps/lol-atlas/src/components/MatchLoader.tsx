@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   loadMatchBundle,
@@ -27,8 +27,15 @@ export function MatchLoader({ baseUrl, years, gameId, yearHint }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("Loading…");
 
-  const eloDiff = prior?.muDiff ?? null;
-  const { draft } = useDraftWr(map, players, eloDiff);
+  const strength = useMemo(
+    () => ({
+      teamEloDiff: prior?.muDiff ?? null,
+      playerEloDiff: prior?.playerMuDiff ?? null,
+      source: prior?.muDiff != null ? "pre-match team + player rating history" : null,
+    }),
+    [prior],
+  );
+  const { draft } = useDraftWr(map, players, strength);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,14 +100,14 @@ export function MatchLoader({ baseUrl, years, gameId, yearHint }: Props) {
           <MatchScoreboard
             map={map}
             players={players}
-            draftPctBlue={draft?.p_blue_draft ?? null}
+            draftPctBlue={draft?.contextualized?.p_blue ?? draft?.p_blue_draft ?? null}
           />
           <ModelChecklist
             map={map}
             players={players}
             prior={prior}
             loading={priorLoading}
-            eloDiff={eloDiff}
+            strength={strength}
           />
         </>
       )}

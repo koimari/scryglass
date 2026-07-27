@@ -347,6 +347,7 @@ PINNED_MODEL_FILES: tuple[str, ...] = (
     "elo_wr_calibration.json",
     "elo_year_holdup.json",
     "draft_wr_calibration.json",
+    "draft_composition.json",
     "blade_chest_role_matchups.json",
 )
 

@@ -26,7 +26,7 @@ function H2HBoardPanel({
   players: QueryRow[];
   year: number;
 }) {
-  const { draft } = useDraftWr(map, players, null);
+  const { draft } = useDraftWr(map, players);
   return (
     <>
       <div className="micro-log mb-3">
@@ -34,20 +34,25 @@ function H2HBoardPanel({
           <span>
             <strong>Draft</strong>{" "}
             <span className="text-[var(--side-blue)]">
-              {(100 * draft.p_blue_draft).toFixed(0)}%
+              {(100 * (draft.contextualized?.p_blue ?? draft.p_blue_draft)).toFixed(0)}%
             </span>
             {" / "}
             <span className="text-[var(--side-red)]">
-              {(100 * (1 - draft.p_blue_draft)).toFixed(0)}%
+              {(100 * (1 - (draft.contextualized?.p_blue ?? draft.p_blue_draft))).toFixed(0)}%
             </span>
             {" · score "}
-            {draft.draft_score_blue.toFixed(0)}–{draft.draft_score_red.toFixed(0)}
+            {(draft.contextualized?.score_blue ?? draft.draft_score_blue).toFixed(0)}–
+            {(draft.contextualized?.score_red ?? draft.draft_score_red).toFixed(0)}
           </span>
         ) : (
           <span className="muted">Draft …</span>
         )}
       </div>
-      <MatchScoreboard map={map} players={players} draftPctBlue={draft?.p_blue_draft ?? null} />
+      <MatchScoreboard
+        map={map}
+        players={players}
+        draftPctBlue={draft?.contextualized?.p_blue ?? draft?.p_blue_draft ?? null}
+      />
       <p className="mt-3 text-xs text-[var(--ink-muted)]">
         <Link
           href={`/browse/match/${encodeURIComponent(String(map.oe_gameid))}?year=${year}`}

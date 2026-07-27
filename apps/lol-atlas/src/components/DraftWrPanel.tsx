@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { QueryRow } from "@/lib/duck";
 import { resolveDraftLineup } from "@/lib/draftLineup";
+import { sortPlayersByRole } from "@/lib/format";
 
 export type DraftWrResult = {
   p_blue_draft: number;
@@ -11,18 +12,76 @@ export type DraftWrResult = {
   wr_bump_pp: number;
   confidence: number;
   draft_edge: number;
+  raw?: {
+    p_blue: number;
+    score_blue: number;
+    score_red: number;
+    edge: number;
+    source: string;
+  };
+  contextualized?: {
+    p_blue: number;
+    score_blue: number;
+    score_red: number;
+    edge: number;
+    source: string;
+  } | null;
+  strength?: {
+    team_elo_diff: number | null;
+    player_elo_diff: number | null;
+    source: string;
+  };
+  uncertainty?: {
+    edge_se_logit: number;
+    p_blue_95: [number, number];
+    method: string;
+  };
+  explanation?: {
+    edge: number;
+    composition_edge: number;
+    side_advantage: number;
+    champions: Array<{
+      champion: string;
+      side: "blue" | "red";
+      role: string;
+      direct_effect: number;
+      team_synergy: number;
+      enemy_interaction: number;
+      edge_contribution: number;
+      uncertainty_logit: number;
+      evidence: { games: number; shrinkage: number; label: string; uncertainty_logit: number };
+    }>;
+    reconciles: boolean;
+    attribution: string;
+  };
+  contextualized_uncertainty?: {
+    p_blue_95: [number, number];
+    method: string;
+  } | null;
 };
 
 type Props = {
   map: QueryRow;
   players: QueryRow[];
-  eloDiff?: number | null;
+  strength?: DraftStrengthInput;
 };
+
+export type DraftStrengthInput = {
+  teamEloDiff?: number | null;
+  playerEloDiff?: number | null;
+  source?: string | null;
+};
+
+function rolesFromPlayers(players: QueryRow[], side: "Blue" | "Red"): string[] | null {
+  const ordered = sortPlayersByRole(players.filter((p) => String(p.side) === side));
+  if (ordered.length < 5) return null;
+  return ordered.map((p) => String(p.position).toLowerCase());
+}
 
 export function useDraftWr(
   map: QueryRow | null,
   players: QueryRow[],
-  eloDiff?: number | null,
+  strength?: DraftStrengthInput,
 ): { draft: DraftWrResult | null; loading: boolean; error: string | null } {
   const [draft, setDraft] = useState<DraftWrResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -54,9 +113,22 @@ export function useDraftWr(
             blue: lineup.blue,
             red: lineup.red,
             league: map.league ? String(map.league) : null,
-            elo_diff: eloDiff ?? null,
-            blue_roles: lineup.blueRoles,
-            red_roles: lineup.redRoles,
+            patch: map.patch ? String(map.patch) : null,
+            team_elo_diff: strength?.teamEloDiff ?? null,
+            player_elo_diff: strength?.playerEloDiff ?? null,
+            strength_source: strength?.source ?? null,
+            blue_team: map.blue_teamname ? String(map.blue_teamname) : null,
+            red_team: map.red_teamname ? String(map.red_teamname) : null,
+            blue_players: players
+              .filter((p) => String(p.side) === "Blue")
+              .map((p) => String(p.playername ?? ""))
+              .filter(Boolean),
+            red_players: players
+              .filter((p) => String(p.side) === "Red")
+              .map((p) => String(p.playername ?? ""))
+              .filter(Boolean),
+            blue_roles: lineup.blueRoles ?? rolesFromPlayers(players, "Blue"),
+            red_roles: lineup.redRoles ?? rolesFromPlayers(players, "Red"),
           }),
         });
         const data = await res.json();
@@ -69,6 +141,12 @@ export function useDraftWr(
             wr_bump_pp: Number(data.wr_bump_pp),
             confidence: Number(data.confidence),
             draft_edge: Number(data.draft_edge),
+            raw: data.raw,
+            contextualized: data.contextualized,
+            strength: data.strength,
+            uncertainty: data.uncertainty,
+            explanation: data.explanation,
+            contextualized_uncertainty: data.contextualized_uncertainty,
           });
         }
       } catch (e) {
@@ -83,7 +161,7 @@ export function useDraftWr(
     return () => {
       cancelled = true;
     };
-  }, [map, players, eloDiff]);
+  }, [map, players, strength]);
 
   return { draft, loading, error };
 }
@@ -125,13 +203,15 @@ function winnerFromPlayers(map: QueryRow, players: QueryRow[]): string {
 }
 
 /** Inline draft WR strip for scoreboard / checklist. */
-export function DraftWrPanel({ map, players, eloDiff }: Props) {
-  const { draft, loading, error } = useDraftWr(map, players, eloDiff);
+export function DraftWrPanel({ map, players, strength }: Props) {
+  const { draft, loading, error } = useDraftWr(map, players, strength);
   const blueName = String(map.blue_teamname ?? "Blue");
   const redName = String(map.red_teamname ?? "Red");
   const winner = winnerFromPlayers(map, players);
+  const contextual = draft?.contextualized ?? null;
+  const primaryP = contextual?.p_blue ?? draft?.p_blue_draft ?? null;
   const draftFav =
-    draft == null ? null : draft.p_blue_draft >= 0.5 ? blueName : redName;
+    primaryP == null ? null : primaryP >= 0.5 ? blueName : redName;
   const hit =
     draftFav == null ? null : draftFav.toLowerCase() === winner.toLowerCase();
 
@@ -140,23 +220,30 @@ export function DraftWrPanel({ map, players, eloDiff }: Props) {
       <span>Draft WR:</span>
       {loading && <span className="status-hint">…</span>}
       {error && !loading && (
-        <span className="status-hint">{error}</span>
+        <span className="text-[var(--danger)]">{error}</span>
       )}
       {draft && !loading && (
         <>
           <span className="font-mono">
+            {contextual && <span className="text-[var(--ink)]">context </span>}
             <span className="text-[var(--side-blue)]">
-              {(100 * draft.p_blue_draft).toFixed(1)}%
+              {(100 * primaryP!).toFixed(1)}%
             </span>
             {" / "}
             <span className="text-[var(--side-red)]">
-              {(100 * (1 - draft.p_blue_draft)).toFixed(1)}%
+              {(100 * (1 - primaryP!)).toFixed(1)}%
             </span>
           </span>
+          {contextual && draft.raw && (
+            <span className="font-mono text-[var(--ink-muted)]">
+              raw composition {(100 * draft.raw.p_blue).toFixed(1)}% / {(100 * (1 - draft.raw.p_blue)).toFixed(1)}%
+            </span>
+          )}
           <span className="font-mono text-[var(--ink-muted)]">
-            score {draft.draft_score_blue.toFixed(0)}–{draft.draft_score_red.toFixed(0)}
+            score {(contextual?.score_blue ?? draft.draft_score_blue).toFixed(0)}–
+            {(contextual?.score_red ?? draft.draft_score_red).toFixed(0)}
             {draft.wr_bump_pp != null
-              ? ` · bump ${draft.wr_bump_pp >= 0 ? "+" : ""}${draft.wr_bump_pp.toFixed(1)}pp`
+              ? ` · composition ${draft.wr_bump_pp >= 0 ? "+" : ""}${draft.wr_bump_pp.toFixed(1)}pp`
               : ""}
           </span>
           <span className="text-[var(--ink-muted)]">
@@ -170,6 +257,77 @@ export function DraftWrPanel({ map, players, eloDiff }: Props) {
             <span className="check-mark ok">✓</span>
           ) : (
             <span className="check-mark bad">✗</span>
+          )}
+          {draft.strength && (
+            <span className="w-full text-xs text-[var(--ink-muted)]">
+              strength: team {draft.strength.team_elo_diff == null ? "—" : `${draft.strength.team_elo_diff >= 0 ? "+" : ""}${draft.strength.team_elo_diff.toFixed(0)}`} Elo
+              {draft.strength.player_elo_diff != null
+                ? ` · players ${draft.strength.player_elo_diff >= 0 ? "+" : ""}${draft.strength.player_elo_diff.toFixed(0)} Elo`
+                : " · player rating unavailable"}
+              {` · ${draft.strength.source}`}
+            </span>
+          )}
+          {draft.explanation && (
+            <details className="mt-2 w-full">
+              <summary className="cursor-pointer text-[var(--ink-muted)]">
+                Full composition explanation · {draft.explanation.reconciles ? "ledger reconciles" : "ledger unavailable"}
+              </summary>
+              <div className="mt-2 text-xs text-[var(--ink-muted)]">
+                <p>
+                  Each pick has a role-aware direct estimate, its share of own-team synergy, and its
+                  share of interactions with all five enemies. Pair effects are split between both
+                  champions; no single H2H pair is treated as the whole explanation.
+                </p>
+                {draft.uncertainty && (
+                  <p className="mt-1">
+                    Raw composition range: {(100 * draft.uncertainty.p_blue_95[0]).toFixed(1)}–
+                    {(100 * draft.uncertainty.p_blue_95[1]).toFixed(1)}% blue.
+                  </p>
+                )}
+                {draft.contextualized_uncertainty && (
+                  <p className="mt-1">
+                    Context range, conditional on the supplied strength inputs: {(
+                      100 * draft.contextualized_uncertainty.p_blue_95[0]
+                    ).toFixed(1)}–{(
+                      100 * draft.contextualized_uncertainty.p_blue_95[1]
+                    ).toFixed(1)}% blue.
+                  </p>
+                )}
+                <div className="table-scroll mt-2">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Champion</th>
+                        <th>Direct</th>
+                        <th>Own team</th>
+                        <th>All enemies</th>
+                        <th>Evidence</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {draft.explanation.champions.map((row) => {
+                        const signed = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
+                        return (
+                          <tr key={`${row.side}-${row.role}-${row.champion}`}>
+                            <td>
+                              <span className={row.side === "blue" ? "text-[var(--side-blue)]" : "text-[var(--side-red)]"}>
+                                {row.champion}
+                              </span>{" "}
+                              <span className="text-[var(--ink-muted)]">({row.role})</span>
+                            </td>
+                            <td className="num font-mono">{signed(row.direct_effect)}</td>
+                            <td className="num font-mono">{signed(row.team_synergy)}</td>
+                            <td className="num font-mono">{signed(row.enemy_interaction)}</td>
+                            <td>{row.evidence.label} · {row.evidence.games} games</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-1">Side advantage is reported separately from composition contributions.</p>
+              </div>
+            </details>
           )}
         </>
       )}

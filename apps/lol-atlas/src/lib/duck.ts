@@ -339,6 +339,7 @@ export type MatchModelPrior = {
   expectedKills: number | null;
   killsLine: number | null;
   muDiff: number | null;
+  playerMuDiff: number | null;
   sourceNote: string;
 };
 
@@ -357,6 +358,7 @@ export async function loadMatchModelPrior(
 
   let pBlueWin: number | null = null;
   let muDiff: number | null = null;
+  let playerMuDiff: number | null = null;
   try {
     const rows = await queryPackParquet(
       histUrl,
@@ -369,6 +371,19 @@ export async function loadMatchModelPrior(
     if (rows[0]?.mu_diff != null) muDiff = Number(rows[0].mu_diff);
   } catch {
     pBlueWin = null;
+  }
+  try {
+    const playerHistUrl = `${baseUrl.replace(/\/$/, "")}/features/player_ratings_history.parquet`;
+    const rows = await queryPackParquet(
+      playerHistUrl,
+      `SELECT player_mu_diff
+       FROM read_parquet($PARQUET)
+       WHERE game_uid = '${esc(gameId)}'
+       LIMIT 1`,
+    );
+    if (rows[0]?.player_mu_diff != null) playerMuDiff = Number(rows[0].player_mu_diff);
+  } catch {
+    playerMuDiff = null;
   }
 
   let expectedKills: number | null = null;
@@ -402,10 +417,11 @@ export async function loadMatchModelPrior(
     expectedKills,
     killsLine,
     muDiff,
+    playerMuDiff,
     sourceNote:
       pBlueWin != null
-        ? "Winner: Dual Elo pre-match p. Kills: league mean total kills in pack year. Draft WR: league-calibrated Draft Score."
-        : "Dual Elo history miss for this game_uid. Kills: league mean if available. Draft WR from picks when available.",
+        ? "Winner: Dual Elo pre-match p. Kills: league mean total kills in pack year. Draft: raw composition plus separate pre-match strength when available."
+        : "Dual Elo history miss for this game_uid. Kills: league mean if available. Draft from picks when available.",
   };
 }
 

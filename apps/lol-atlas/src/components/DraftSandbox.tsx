@@ -25,14 +25,6 @@ const PICK_ORDER: DraftSide[] = [
   "red",
 ];
 
-const DAYOS_EXAMPLE: DraftAction[] = [
-  { side: "blue", champion: "Jarvan IV", role: "jng" },
-  { side: "red", champion: "Ezreal", role: "bot" },
-  { side: "red", champion: "Naafiri", role: "jng" },
-  { side: "blue", champion: "Orianna", role: "mid" },
-  { side: "blue", champion: "Jayce", role: "top" },
-];
-
 const ROLE_LABEL: Record<DraftRole, string> = {
   top: "Top",
   jng: "Jungle",
@@ -40,6 +32,7 @@ const ROLE_LABEL: Record<DraftRole, string> = {
   bot: "ADC",
   sup: "Support",
 };
+const DRAFT_ROLES: DraftRole[] = ["top", "jng", "mid", "bot", "sup"];
 
 const LEAGUES = ["LCK", "LPL", "LEC", "LCS", "CBLOL", "LCP", "INTL"];
 
@@ -144,7 +137,7 @@ function RecommendationTable({
             <th>#</th>
             <th>Candidate</th>
             <th>Role</th>
-            <th>{sideLabel(perspective)} projected WR</th>
+            <th>{sideLabel(perspective)} model share</th>
             <th>Change</th>
             <th>Pro games</th>
             <th>Evidence</th>
@@ -173,7 +166,12 @@ function RecommendationTable({
               <td className="font-mono">{row.sample_games}</td>
               <td>{row.evidence}</td>
               <td>
-                <button type="button" className="sandbox-use-pick" onClick={() => onPick(row)}>
+                <button
+                  type="button"
+                  className="sandbox-use-pick"
+                  onClick={() => onPick(row)}
+                  aria-label={`Draft ${row.champion}${row.role ? ` as ${ROLE_LABEL[row.role]}` : ""}`}
+                >
                   Use pick
                 </button>
               </td>
@@ -187,9 +185,9 @@ function RecommendationTable({
 
 export function DraftSandbox({
   catalog,
-  initialActions = DAYOS_EXAMPLE,
+  initialActions = [],
   initialExcluded = [],
-  initialPerspective = "red",
+  initialPerspective = "blue",
   initialLeague = "LCS",
 }: Props) {
   const [actions, setActions] = useState<DraftAction[]>(initialActions);
@@ -198,6 +196,7 @@ export function DraftSandbox({
   const [league, setLeague] = useState(initialLeague);
   const [candidateRole, setCandidateRole] = useState<DraftCandidateRole>("open");
   const [search, setSearch] = useState("");
+  const [pendingChampion, setPendingChampion] = useState<DraftChampion | null>(null);
   const [excludeSearch, setExcludeSearch] = useState("");
   const [analysis, setAnalysis] = useState<DraftSandboxResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -260,31 +259,71 @@ export function DraftSandbox({
     },
     [catalog, excluded, selected],
   );
+  const openRoles = analysis?.open_roles ?? DRAFT_ROLES.slice();
+  const pickerChampions = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    return available.filter((champion) => {
+      if (query && !champion.name.toLocaleLowerCase().includes(query)) return false;
+      if (candidateRole === "open") {
+        return champion.roles.some((role) => openRoles.includes(role));
+      }
+      return true;
+    });
+  }, [available, candidateRole, openRoles, search]);
   const responseCheckpoint = analysis?.timeline[2] ?? null;
   const current = analysis?.current;
+  const pendingRoles = pendingChampion
+    ? candidateRole !== "open" && candidateRole !== "any"
+      ? openRoles.includes(candidateRole)
+        ? [candidateRole]
+        : []
+      : candidateRole === "open"
+        ? pendingChampion.roles.filter((role) => openRoles.includes(role))
+        : openRoles
+    : [];
 
   const addPick = (champion: string, role: DraftRole | null) => {
     if (!nextSide) return;
     setActions((currentActions) => [...currentActions, { side: nextSide, champion, role }]);
     setSearch("");
+    setPendingChampion(null);
+    setError(null);
+  };
+
+  const chooseChampion = (champion: DraftChampion) => {
+    const legalRoles =
+      candidateRole !== "open" && candidateRole !== "any"
+        ? openRoles.includes(candidateRole)
+          ? [candidateRole]
+          : []
+        : candidateRole === "open"
+          ? champion.roles.filter((role) => openRoles.includes(role))
+          : openRoles;
+    if (!legalRoles.length) {
+      setError(`${champion.name} has no legal role under this filter.`);
+      return;
+    }
+    if (legalRoles.length === 1) {
+      addPick(champion.name, legalRoles[0]);
+      return;
+    }
+    setPendingChampion(champion);
+    setError(null);
   };
 
   const addSearchPick = () => {
-    const champion = available.find(
+    const exact = pickerChampions.find(
       (candidate) => candidate.name.toLocaleLowerCase() === search.trim().toLocaleLowerCase(),
     );
-    if (!champion) {
-      setError("Choose a champion from the available model pool.");
+    if (exact) {
+      chooseChampion(exact);
       return;
     }
-    const openRoles = analysis?.open_roles ?? [];
-    const role =
-      candidateRole !== "open" && candidateRole !== "any"
-        ? candidateRole
-        : champion.roles.find((candidate) => openRoles.includes(candidate)) ??
-          champion.roles[0] ??
-          null;
-    addPick(champion.name, role);
+    if (pickerChampions.length === 1) {
+      chooseChampion(pickerChampions[0]);
+      return;
+    }
+    setError("Choose a champion from the visible grid.");
   };
 
   const markUnavailable = () => {
@@ -322,22 +361,18 @@ export function DraftSandbox({
           response. The model updates after every selection.
         </p>
         <div className="micro-log mt-4">
-          <span><strong>Example question</strong> SEN Dayos</span>
+          <span><strong>Estimand</strong> partial-draft comparison</span>
           <span><strong>Model pool</strong> {catalog.length} pro-play champions</span>
-          <span><strong>Output</strong> pick-by-pick ΔWR</span>
+          <span><strong>Complete board</strong> full-composition model</span>
         </div>
         <div className="sandbox-header-actions">
           <button type="button" className="btn-primary" onClick={() => {
-            setActions(DAYOS_EXAMPLE);
-            setExcluded([]);
-            setPerspective("red");
-            setCandidateRole("open");
-          }}>
-            Load Dayos example
-          </button>
-          <button type="button" className="sandbox-secondary-button" onClick={() => {
             setActions([]);
             setExcluded([]);
+            setPerspective("blue");
+            setCandidateRole("open");
+            setSearch("");
+            setPendingChampion(null);
           }}>
             New draft
           </button>
@@ -373,10 +408,13 @@ export function DraftSandbox({
           <span>Candidate role</span>
           <select
             value={candidateRole}
-            onChange={(event) => setCandidateRole(event.target.value as DraftCandidateRole)}
+            onChange={(event) => {
+              setCandidateRole(event.target.value as DraftCandidateRole);
+              setPendingChampion(null);
+            }}
           >
-            <option value="open">Open roles</option>
-            <option value="any">Any role</option>
+            <option value="open">Observed open roles</option>
+            <option value="any">Any champion / open role</option>
             {Object.entries(ROLE_LABEL).map(([value, label]) => (
               <option value={value} key={value}>{label}</option>
             ))}
@@ -438,14 +476,20 @@ export function DraftSandbox({
             side="blue"
             actions={actions}
             nextSide={nextSide}
-            onBranch={(index) => setActions((currentActions) => currentActions.slice(0, index))}
+            onBranch={(index) => {
+              setActions((currentActions) => currentActions.slice(0, index));
+              setPendingChampion(null);
+            }}
           />
           <div className="sandbox-versus" aria-hidden>VS</div>
           <DraftSideColumn
             side="red"
             actions={actions}
             nextSide={nextSide}
-            onBranch={(index) => setActions((currentActions) => currentActions.slice(0, index))}
+            onBranch={(index) => {
+              setActions((currentActions) => currentActions.slice(0, index));
+              setPendingChampion(null);
+            }}
           />
         </div>
 
@@ -458,17 +502,17 @@ export function DraftSandbox({
           ) : current ? (
             <>
               <div className="sandbox-current-number">
-                <span>{sideLabel(perspective)} projected draft WR</span>
+                <span>{sideLabel(perspective)} model share</span>
                 <strong>{(100 * current.projected_wr).toFixed(2)}%</strong>
               </div>
-              <div className="sandbox-balance" aria-label={`${sideLabel(perspective)} projected draft win rate`}>
+              <div className="sandbox-balance" aria-label={`${sideLabel(perspective)} model comparison share`}>
                 <span style={{ width: `${100 * current.projected_wr}%` }} />
               </div>
               {nextSide && analysis?.recommendations.length ? (
                 <div className="sandbox-shortlist">
                   <div className="sandbox-shortlist-head">
                     <span>Best {sideLabel(analysis.recommendation_side)} responses</span>
-                    <small>Projected change</small>
+                    <small>Model change</small>
                   </div>
                   {analysis.recommendations.slice(0, 3).map((row) => (
                     <button
@@ -499,8 +543,8 @@ export function DraftSandbox({
                 <p className="sandbox-answer">
                   After the first response pair, {sideLabel(perspective)} sat at{" "}
                   <strong>{(100 * responseCheckpoint.projected_wr).toFixed(2)}%</strong> in this
-                  partial-draft model ({signedPp(100 * responseCheckpoint.projected_wr - 50)} versus
-                  even).
+                  partial-draft comparison ({signedPp(100 * responseCheckpoint.projected_wr - 50)}
+                  versus even).
                 </p>
               )}
             </>
@@ -510,29 +554,131 @@ export function DraftSandbox({
 
       {nextSide && (
         <section className="sandbox-picker" aria-labelledby="manual-pick-heading">
-          <div>
-            <p className="blog-kicker">Manual branch</p>
-            <h2 id="manual-pick-heading" className="font-display text-lg">
-              Add {sideLabel(nextSide)}&apos;s next pick
-            </h2>
+          <div className="sandbox-picker-head">
+            <div>
+              <p className="blog-kicker">Champion board</p>
+              <h2 id="manual-pick-heading" className="font-display text-lg">
+                Add {sideLabel(nextSide)}&apos;s next pick
+              </h2>
+            </div>
+            <p>Choose a role, then click a champion portrait. Flex picks ask for a role before they are added.</p>
           </div>
+
+          <div className="sandbox-role-filters" role="group" aria-label="Champion role filter">
+            <button
+              type="button"
+              className={candidateRole === "open" ? "is-selected" : ""}
+              aria-pressed={candidateRole === "open"}
+              onClick={() => {
+                setCandidateRole("open");
+                setPendingChampion(null);
+              }}
+            >
+              Pro roles
+            </button>
+            <button
+              type="button"
+              className={candidateRole === "any" ? "is-selected" : ""}
+              aria-pressed={candidateRole === "any"}
+              onClick={() => {
+                setCandidateRole("any");
+                setPendingChampion(null);
+              }}
+            >
+              All open
+            </button>
+            {DRAFT_ROLES.map((role) => (
+              <button
+                type="button"
+                className={candidateRole === role ? "is-selected" : ""}
+                aria-pressed={candidateRole === role}
+                disabled={!openRoles.includes(role)}
+                onClick={() => {
+                  setCandidateRole(role);
+                  setPendingChampion(null);
+                }}
+                key={role}
+              >
+                {ROLE_LABEL[role]}
+              </button>
+            ))}
+          </div>
+
           <div className="sandbox-picker-control">
             <input
               type="search"
-              list="sandbox-champions"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") addSearchPick();
               }}
-              placeholder="Champion name"
-              aria-label="Champion name"
+              placeholder={`Search ${available.length} available champions`}
+              aria-label="Search champions"
             />
-            <datalist id="sandbox-champions">
-              {available.map((champion) => <option value={champion.name} key={champion.name} />)}
-            </datalist>
-            <button type="button" className="btn-primary" onClick={addSearchPick}>Add pick</button>
+            {search ? (
+              <button
+                type="button"
+                className="sandbox-secondary-button"
+                onClick={() => setSearch("")}
+              >
+                Clear
+              </button>
+            ) : null}
           </div>
+
+          {pendingChampion ? (
+            <div className="sandbox-role-choice" role="group" aria-label={`Choose ${pendingChampion.name}'s role`}>
+              <span>
+                Draft <strong>{pendingChampion.name}</strong> as
+              </span>
+              {pendingRoles.map((role) => (
+                <button
+                  type="button"
+                  onClick={() => addPick(pendingChampion.name, role)}
+                  key={role}
+                >
+                  {ROLE_LABEL[role]}
+                </button>
+              ))}
+              <button type="button" onClick={() => setPendingChampion(null)}>Cancel</button>
+            </div>
+          ) : null}
+
+          <div className="sandbox-champion-grid" aria-label="Available champions">
+            {pickerChampions.map((champion) => {
+              const explicitRole =
+                candidateRole !== "open" && candidateRole !== "any" ? candidateRole : null;
+              const roleGames = explicitRole ? Number(champion.role_games?.[explicitRole] ?? 0) : null;
+              const observedOpenRoles = champion.roles.filter((role) => openRoles.includes(role));
+              const detail = explicitRole
+                ? roleGames
+                  ? `${roleGames} pro games`
+                  : "Unseen in role"
+                : candidateRole === "any"
+                  ? "Choose role"
+                  : observedOpenRoles.map((role) => ROLE_LABEL[role]).join(" · ");
+              return (
+                <button
+                  type="button"
+                  className="sandbox-champion-button"
+                  onClick={() => chooseChampion(champion)}
+                  aria-label={`Draft ${champion.name}${explicitRole ? ` as ${ROLE_LABEL[explicitRole]}` : ""}`}
+                  key={champion.name}
+                >
+                  <span
+                    className="sandbox-champion-card-portrait"
+                    aria-hidden
+                    style={{ backgroundImage: `url("${champIconUrl(champion.name)}")` }}
+                  />
+                  <strong>{champion.name}</strong>
+                  <small>{detail}</small>
+                </button>
+              );
+            })}
+          </div>
+          {!pickerChampions.length ? (
+            <p className="sandbox-empty">No available champion matches this search and role filter.</p>
+          ) : null}
         </section>
       )}
 
@@ -545,8 +691,8 @@ export function DraftSandbox({
             </h2>
           </div>
           <p>
-            Sorted by projected draft WR after the pick. Change is measured against the current
-            state.
+            Sorted by model share after the pick. Change is measured against the current state; these
+            partial-draft comparisons are not calibrated live win probabilities.
           </p>
         </div>
         {loading && analysis ? <p className="status-hint">Updating model…</p> : null}
@@ -557,6 +703,8 @@ export function DraftSandbox({
             perspective={analysis.recommendation_side}
             onPick={(row) => addPick(row.champion, row.role)}
           />
+        ) : nextSide ? (
+          <p className="status-hint">{error ? "Ranking unavailable." : "Loading legal responses…"}</p>
         ) : (
           <p className="sandbox-empty">Complete draft. Branch from an earlier pick to test another response.</p>
         )}
@@ -573,7 +721,7 @@ export function DraftSandbox({
         <div className="table-scroll">
           <table className="data-table sandbox-timeline">
             <thead>
-              <tr><th>Seat</th><th>Pick</th><th>Role</th><th>Projected WR</th><th>Change</th><th>Confidence</th></tr>
+              <tr><th>Seat</th><th>Pick</th><th>Role</th><th>Model share</th><th>Change</th><th>Confidence</th></tr>
             </thead>
             <tbody>
               {analysis?.timeline.map((row) => {
@@ -601,11 +749,15 @@ export function DraftSandbox({
       <details className="sandbox-method">
         <summary>How to read this model</summary>
         <p>
-          Unfilled seats are held at the fitted average, so changes compare one draft branch with
-          another at the same point. Champion effects are regularized from professional games;
-          known same-role matchups add a smaller lane-pair term. Partial pick states are not
-          separately calibrated outcome probabilities, and the ranking does not know a player&apos;s
-          champion pool, scrim plan, or hidden flex intent.
+          Until all ten picks are present, unfilled seats are neutralized so changes compare one
+          draft branch with another at the same point. Those partial-draft values are not separately
+          calibrated outcome probabilities. A complete board switches to the full-composition model:
+          role-aware champion effects, within-team synergy, all 25 enemy interactions, and a sparse
+          low-rank residual. The sandbox does not know a player&apos;s champion pool, scrim plan, or
+          hidden flex intent. You can place any catalog champion in any still-open role; when that
+          champion-role pair has no pro sample, its role-specific direct effect stays neutral while
+          champion-level synergy and enemy interactions still apply, and the UI marks the role as
+          unseen.
         </p>
         <p className="font-mono">{analysis?.note}</p>
       </details>

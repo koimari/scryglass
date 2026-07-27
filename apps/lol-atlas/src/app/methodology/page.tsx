@@ -135,18 +135,17 @@ export default async function MethodologyPage() {
 
       <MethodSection id="draft-score" title="Draft Score">
         <p>
-          Draft Score maps five-on-five picks to a blue win probability with league-calibrated
-          temperature. The Elo-controlled bump (wr_bump_pp) is the residual ridge × draft edge ×
-          confidence. Draft favorites can disagree with Dual Elo favorites; Matches reports Elo hit
-          rate, while match boards also show Draft WR.
+          Draft Score is a time-held-out, full-composition estimate of blue-side map-win probability
+          from five role-assigned champions per side, league, and patch. It includes role-aware
+          champion effects, within-team synergy, all 25 cross-team interactions, a sparse residual,
+          and a diagonal-Laplace uncertainty range. The raw composition estimate excludes roster and
+          team identity; pre-match team and player strength is reported separately when available.
         </p>
         <p>
-          The Draft Sandbox applies the same regularized champion effects to incomplete pick states.
-          Unfilled seats contribute the fitted average, and known same-role matchups add a smaller
-          pair term. The displayed pick-to-pick change is therefore a counterfactual comparison
-          between branches at the same draft seat. Partial states are not separately calibrated
-          match-win probabilities, and recommendations do not include private champion pools, scrim
-          plans, or unannounced flex intent.
+          The Draft Sandbox uses a clearly labelled partial-draft comparison until all ten picks are
+          present; unfilled seats are neutralized and its pick-to-pick changes are not calibrated
+          match-win probabilities. A complete board uses the full-composition runtime. The sandbox
+          does not include private champion pools, scrim plans, or unannounced flex intent.
         </p>
       </MethodSection>
 

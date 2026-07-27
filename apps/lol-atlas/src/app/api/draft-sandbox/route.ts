@@ -104,6 +104,17 @@ export async function POST(request: Request) {
     if (sideCounts.blue > 5 || sideCounts.red > 5) {
       return NextResponse.json({ error: "each side can select at most five champions" }, { status: 400 });
     }
+    for (const side of ["blue", "red"] as const) {
+      const roles = actions
+        .filter((action) => action.side === side && action.role)
+        .map((action) => action.role as DraftRole);
+      if (new Set(roles).size !== roles.length) {
+        return NextResponse.json(
+          { error: `${side} side cannot assign two champions to the same role` },
+          { status: 400 },
+        );
+      }
+    }
 
     const excluded = (body.excluded || [])
       .map(canonicalChampion)
