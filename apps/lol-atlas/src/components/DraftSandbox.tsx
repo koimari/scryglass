@@ -140,20 +140,15 @@ function RecommendationList({
 }) {
   if (!rows.length) {
     return (
-      <p className="sandbox-empty">
-        No observed champion-role candidates match this role filter.
-      </p>
+      <p className="sandbox-empty">No available actions for this role filter.</p>
     );
   }
+
   return (
     <div
       className="sandbox-shortlist"
       aria-label={`${sideLabel(perspective)} next best board actions`}
     >
-      <div className="sandbox-shortlist-head">
-        <span>Top next actions</span>
-        <small>Projected value</small>
-      </div>
       {rows.slice(0, 6).map((row, index) => (
         <button
           type="button"
@@ -162,13 +157,13 @@ function RecommendationList({
           key={`${row.champion}-${row.role}`}
           aria-label={`Draft ${row.champion}${row.role ? ` as ${ROLE_LABEL[row.role]}` : ""}`}
         >
-          <span className="font-mono sandbox-rec-rank">{index + 1}</span>
+          <span className="sandbox-rec-rank">{index + 1}</span>
           <span
             className="sandbox-champion-portrait"
             aria-hidden
             style={{ backgroundImage: `url("${champIconUrl(row.champion)}")` }}
           />
-          <span>
+          <span className="sandbox-rec-copy">
             <strong>{row.champion}</strong>
             <small>{row.role ? ROLE_LABEL[row.role] : "Unassigned"}</small>
           </span>
@@ -210,6 +205,7 @@ export function DraftSandbox({
   const [error, setError] = useState<string | null>(null);
   const [shareState, setShareState] = useState("Copy scenario");
   const [includeRecommendations, setIncludeRecommendations] = useState(false);
+  const analysisCacheRef = useRef<Map<string, DraftSandboxResult>>(new Map());
 
   const analysisPatchContracts = patchContractsFromSource(
     modelMetadata?.analysis_patches ?? [],
@@ -325,7 +321,6 @@ export function DraftSandbox({
     });
   }, [available, candidateRole, openRoles, search]);
 
-  const responseCheckpoint = analysis?.timeline[2] ?? null;
   const pendingRoles = pendingChampion
     ? candidateRole !== "open" && candidateRole !== "any"
       ? openRoles.includes(candidateRole)
@@ -345,6 +340,11 @@ export function DraftSandbox({
       if (!publicPatch) return;
       const request = buildRequest(recommendationMode);
       const payload = JSON.stringify(request);
+      const cached = analysisCacheRef.current.get(payload);
+      if (!force && cached) {
+        setAnalysisResponse({ key: payload, value: cached });
+        return;
+      }
       if (!force && analysisResponse?.key === payload) return;
       setLoading(true);
       setError(null);
@@ -360,7 +360,16 @@ export function DraftSandbox({
           throw new Error(raw.error || `draft sandbox ${response.status}`);
         }
         if (!signal?.aborted) {
-          setAnalysisResponse({ key: payload, value: raw as DraftSandboxResult });
+          const result = raw as DraftSandboxResult;
+          const nextCache = analysisCacheRef.current;
+          if (nextCache.size >= 80) {
+            const oldest = nextCache.keys().next().value;
+            if (oldest != null) {
+              nextCache.delete(oldest);
+            }
+          }
+          nextCache.set(payload, result);
+          setAnalysisResponse({ key: payload, value: result });
         }
       } catch (requestError) {
         if (
@@ -554,8 +563,8 @@ export function DraftSandbox({
     : candidateRole === "any"
       ? `Manual any role mode keeps recommendations in supported pro roles only (minimum ${DRAFT_POLICY_MIN_ROLE_GAMES} pro maps).`
       : `Supported pro roles require at least ${DRAFT_POLICY_MIN_ROLE_GAMES} pro maps.`;
-  const isDraftLive = analysisMode === "live";
   const boardStateLabel = nextSide ? `${sideLabel(nextSide)} pick` : "Draft complete";
+  const canEvaluateLive = analysisMode === "live";
 
   return (
     <div className="sandbox-page sandbox-draft-shell">
@@ -569,20 +578,17 @@ export function DraftSandbox({
       </p>
 
       <header className="sandbox-hero">
-        <div className="sandbox-hero-copy">
-          <p className="blog-kicker">Draft board</p>
-          <h1
-            ref={sandboxHeadingRef}
-            className="font-display"
-            tabIndex={-1}
-          >
-            Live draft sandbox
-          </h1>
-        </div>
+        <h1
+          ref={sandboxHeadingRef}
+          className="font-display"
+          tabIndex={-1}
+        >
+          Draft sandbox
+        </h1>
         <div className="sandbox-header-actions">
           <button
             type="button"
-            className="sandbox-primary-button"
+            className="sandbox-secondary-button"
             onClick={() => {
               setActions([]);
               setExcluded([]);
@@ -657,11 +663,11 @@ export function DraftSandbox({
           </div>
         </fieldset>
 
-        <label className="sandbox-control-block sandbox-inline-toggle" aria-label="Auto draft analysis">
-          <span>Live update</span>
+        <label className="sandbox-control-block sandbox-inline-toggle" aria-label="Auto draft evaluation">
+          <span>Auto update</span>
           <input
             type="checkbox"
-            checked={analysisMode === "live"}
+            checked={canEvaluateLive}
             onChange={(event) =>
               setAnalysisMode(event.target.checked ? "live" : "manual")
             }
@@ -669,7 +675,7 @@ export function DraftSandbox({
         </label>
 
         <label className="sandbox-control-block sandbox-inline-toggle">
-          <span>Recommendation mode</span>
+          <span>Live recommendations + evaluation</span>
           <input
             type="checkbox"
             checked={includeRecommendations}
@@ -678,7 +684,7 @@ export function DraftSandbox({
         </label>
 
         <div className="sandbox-next sandbox-control-block">
-          <span>Next pick</span>
+          <span>Draft stage</span>
           <strong>{boardStateLabel}</strong>
         </div>
 
@@ -689,7 +695,7 @@ export function DraftSandbox({
             onClick={runAnalysisNow}
             disabled={!publicPatch || loading}
           >
-            Refresh draft
+            Evaluate board
           </button>
         ) : null}
       </section>
@@ -756,6 +762,12 @@ export function DraftSandbox({
 
       <section className="sandbox-layout">
         <section className="sandbox-workbench">
+          <header className="sandbox-board-head">
+            <p>
+              {actions.length}/10 picks · {nextSide ? `${sideLabel(nextSide)} to act` : "Draft complete"}
+            </p>
+          </header>
+
           <div className="sandbox-board">
             <DraftSideColumn
               side="blue"
@@ -784,14 +796,13 @@ export function DraftSandbox({
 
           <aside className="sandbox-read" aria-live="polite">
             <div className="sandbox-read-head">
-              <p className="blog-kicker">Board read</p>
               <h2 id="manual-pick-heading" className="font-display">
-                {sideLabel(perspective)} draft readout
+                {sideLabel(perspective)} edge estimate
               </h2>
             </div>
             {!publicPatch ? (
               <p className="status-hint">
-                Select a patch to run analysis.
+                Select a patch to evaluate the draft.
               </p>
             ) : loading && !current ? (
               <div className="sandbox-skeleton" aria-label="Loading analysis" />
@@ -800,13 +811,13 @@ export function DraftSandbox({
             ) : current ? (
               <>
                 <div className="sandbox-current-number">
-                  <span>{sideLabel(perspective)} composition score</span>
-                  <strong>
-                    {(100 * current.projected_value).toFixed(1)}%
-                  </strong>
+                  <span>Draft utility</span>
+                  <strong>{(100 * current.projected_value).toFixed(1)}%</strong>
                 </div>
                 <p className="sandbox-read-footnote">
-                  Live mode is {isDraftLive ? "on" : "off"} · {includeRecommendations ? "recommendations" : "board only"}
+                  {includeRecommendations
+                    ? "Live recommendations and projection enabled."
+                    : "Board evaluation active."}
                 </p>
                 <div
                   className="sandbox-balance"
@@ -819,54 +830,29 @@ export function DraftSandbox({
                     }}
                   />
                 </div>
-                <details className="sandbox-read-metrics">
-                  <summary>Projection details</summary>
-                  <dl className="sandbox-read-ledger">
-                    <div>
-                      <dt>Mode</dt>
-                      <dd>{modeLabel} · {requestLabel} recs</dd>
-                    </div>
-                    <div>
-                      <dt>Scope</dt>
-                      <dd>{analysis?.candidate_role_policy ?? "supported pro roles"}</dd>
-                    </div>
-                    <div>
-                      <dt>Picks</dt>
-                      <dd>{actions.length}/10</dd>
-                    </div>
-                  </dl>
-                  {actions.length >= 3 && responseCheckpoint ? (
-                    <p className="sandbox-answer">
-                      {sideLabel(perspective)} moved{" "}
-                      {signedChange(100 * (responseCheckpoint.projected_value - 0.5))}
-                      {" "}
-                      after the first full response pair.
-                    </p>
-                  ) : null}
-                </details>
                 {nextSide && analysis?.recommendations.length ? (
                   <RecommendationList
                     rows={analysis.recommendations}
                     perspective={analysis.recommendation_side}
                     onPick={(row) => addPick(row.champion, row.role)}
                   />
+                ) : nextSide ? (
+                  <p className="sandbox-empty">No recommendations yet.</p>
                 ) : null}
-                {nextSide ? null : (
-                  <p className="sandbox-empty">
-                    Draft complete. Branch from an earlier pick to compare alternatives.
-                  </p>
-                )}
               </>
             ) : null}
+            <p className="sandbox-empty sandbox-status-line">
+              {modeLabel} mode · {requestLabel} recs · {analysis?.candidate_role_policy ?? "supported pro roles"}
+            </p>
           </aside>
         </section>
 
         {nextSide && (
           <section className="sandbox-picker" aria-label="Pick next champion">
             <div className="sandbox-picker-head">
-              <p className="blog-kicker">Champion board</p>
-                <h2 className="font-display text-lg">
-                  Next: {sideLabel(nextSide)} pick
+                <p className="blog-kicker">Champion board</p>
+                  <h2 className="font-display text-lg">
+                  Next pick · {sideLabel(nextSide)}
                 </h2>
               </div>
 
