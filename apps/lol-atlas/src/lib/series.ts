@@ -1,3 +1,5 @@
+import { parseBinaryResult } from "./binaryResult";
+
 export type SeriesRow = Record<string, unknown>;
 
 export type CanonicalSeriesStatus =
@@ -153,19 +155,7 @@ export function formatSeriesScore(series: SeriesCard): string {
 }
 
 function binaryResult(value: unknown): 0 | 1 | null {
-  if (
-    value === true ||
-    value === 1 ||
-    value === "1" ||
-    (typeof value === "bigint" && String(value) === "1")
-  ) return 1;
-  if (
-    value === false ||
-    value === 0 ||
-    value === "0" ||
-    (typeof value === "bigint" && String(value) === "0")
-  ) return 0;
-  return null;
+  return parseBinaryResult(value);
 }
 
 function mapWinnerSide(row: SeriesRow): "blue" | "red" | null {

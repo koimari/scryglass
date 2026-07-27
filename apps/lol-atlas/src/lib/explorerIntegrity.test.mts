@@ -26,6 +26,10 @@ test("map winner resolution fails closed on absent or contradictory evidence", (
   assert.equal(resolveMapWinnerSide({ blue_result: 1, y_blue_win: 0 }), null);
   assert.equal(resolveMapWinnerSide({ blue_result: 0 }), "red");
   assert.equal(resolveMapWinnerSide({ y_blue_win: 1 }), "blue");
+  assert.equal(resolveMapWinnerSide({ blue_result: true }), "blue");
+  assert.equal(resolveMapWinnerSide({ blue_result: false }), "red");
+  assert.equal(resolveMapWinnerSide({ blue_result: "true" }), "blue");
+  assert.equal(resolveMapWinnerSide({ y_blue_win: "false" }), "red");
   assert.equal(
     resolveMapWinnerSide({
       blue_result: BigInt(1),

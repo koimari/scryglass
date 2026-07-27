@@ -2,6 +2,7 @@
 
 import type { AsyncDuckDB } from "@duckdb/duckdb-wasm";
 import { normalizePatchVersion, playerCs } from "./format";
+import { parseBinaryResult } from "./binaryResult";
 
 let dbPromise: Promise<AsyncDuckDB> | null = null;
 
@@ -66,22 +67,7 @@ export function packTimestampIso(value: unknown): string | null {
 }
 
 function binaryResult(value: unknown): 0 | 1 | null {
-  // Arrow/DuckDB-WASM represents parquet INT64 values as bigint in the
-  // browser. Keep the completed-outcome contract strict while accepting the
-  // runtime representation produced by our own published pack.
-  if (
-    value === true ||
-    value === 1 ||
-    value === "1" ||
-    (typeof value === "bigint" && String(value) === "1")
-  ) return 1;
-  if (
-    value === false ||
-    value === 0 ||
-    value === "0" ||
-    (typeof value === "bigint" && String(value) === "0")
-  ) return 0;
-  return null;
+  return parseBinaryResult(value);
 }
 
 /**
