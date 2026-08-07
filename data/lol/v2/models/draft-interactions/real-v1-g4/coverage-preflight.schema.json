@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scryglass:real-v1-g4-coverage-preflight:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "reason_code",
+    "selected_model",
+    "selected_width",
+    "fallback",
+    "chronology_contract_sha256",
+    "review_core_sha256",
+    "support_first_verified",
+    "support",
+    "source",
+    "slots",
+    "failed_slot_count",
+    "first_failure",
+    "target_loader_calls",
+    "m0_loader_calls",
+    "outcome_loader_calls",
+    "fit_execution_calls",
+    "final_holdout_loaded",
+    "claim_ceiling",
+    "artifact_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": "scryglass:real-v1-g4-coverage-preflight:v1"},
+    "status": {"enum": ["NO_INCREMENTAL_DRAFT_WINNER", "READY_FOR_FRESH_PERMIT_AND_EXECUTION"]},
+    "reason_code": {"type": ["string", "null"]},
+    "selected_model": {"type": ["string", "null"]},
+    "selected_width": {"type": ["integer", "null"]},
+    "fallback": {"type": ["string", "null"]},
+    "chronology_contract_sha256": {"$ref": "#/$defs/sha256"},
+    "review_core_sha256": {"$ref": "#/$defs/sha256"},
+    "support_first_verified": {"const": true},
+    "support": {"type": "object", "additionalProperties": true},
+    "source": {"$ref": "#/$defs/source"},
+    "slots": {"type": "array", "minItems": 52, "maxItems": 52, "items": {"$ref": "#/$defs/slot"}},
+    "failed_slot_count": {"type": "integer", "minimum": 0},
+    "first_failure": {"anyOf": [{"$ref": "#/$defs/slot"}, {"type": "null"}]},
+    "target_loader_calls": {"const": 0},
+    "m0_loader_calls": {"const": 0},
+    "outcome_loader_calls": {"const": 0},
+    "fit_execution_calls": {"const": 0},
+    "final_holdout_loaded": {"const": false},
+    "claim_ceiling": {"$ref": "#/$defs/claimCeiling"},
+    "artifact_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["private_contract_locator", "private_contract_artifact_sha256", "feature_domain_sha256", "feature_source_raw_sha256", "fit_availability_domain_sha256", "fit_availability_source_raw_sha256", "feature_map_count", "fit_availability_map_count"],
+      "properties": {
+        "private_contract_locator": {"type": "string", "minLength": 1},
+        "private_contract_artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "feature_domain_sha256": {"$ref": "#/$defs/sha256"},
+        "feature_source_raw_sha256": {"$ref": "#/$defs/sha256"},
+        "fit_availability_domain_sha256": {"$ref": "#/$defs/sha256"},
+        "fit_availability_source_raw_sha256": {"$ref": "#/$defs/sha256"},
+        "feature_map_count": {"type": "integer", "minimum": 1},
+        "fit_availability_map_count": {"type": "integer", "minimum": 1}
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maps", "eligible_maps", "clusters", "eligible_clusters"],
+      "properties": {
+        "maps": {"type": "integer", "minimum": 0},
+        "eligible_maps": {"type": "integer", "minimum": 0},
+        "clusters": {"type": "integer", "minimum": 0},
+        "eligible_clusters": {"type": "integer", "minimum": 0}
+      }
+    },
+    "slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "stage", "calendar_month", "family", "penalty", "width", "split", "score_map_count", "fit_map_count", "coverage_passed", "coverage", "fit_support", "execution_status"],
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 1, "maximum": 52},
+        "stage": {"enum": ["inner", "development", "validation"]},
+        "calendar_month": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}$"},
+        "family": {"type": "string", "minLength": 1},
+        "penalty": {"type": ["number", "null"]},
+        "width": {"type": ["integer", "null"]},
+        "split": {"enum": ["train", "development", "validation"]},
+        "score_map_count": {"type": "integer", "minimum": 1},
+        "fit_map_count": {"type": "integer", "minimum": 1},
+        "coverage_passed": {"type": "boolean"},
+        "coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["overall", "month"],
+          "properties": {"overall": {"$ref": "#/$defs/counts"}, "month": {"$ref": "#/$defs/counts"}}
+        },
+        "fit_support": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["input_maps", "retained_maps", "eligible_nodes", "convergence_checks", "changing_rounds"],
+          "properties": {
+            "input_maps": {"type": "integer", "minimum": 1},
+            "retained_maps": {"type": "integer", "minimum": 0},
+            "eligible_nodes": {"type": "integer", "minimum": 0},
+            "convergence_checks": {"type": "integer", "minimum": 1},
+            "changing_rounds": {"type": "integer", "minimum": 0}
+          }
+        },
+        "execution_status": {"enum": ["coverage_pass", "coverage_gate_failed_before_target_m0_or_outcome_load"]}
+      }
+    },
+    "claimCeiling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome_free_support_preflight", "private_model_fit", "private_rank_selection", "prediction", "publication", "production", "promotion", "sota", "final_holdout"],
+      "properties": {
+        "outcome_free_support_preflight": {"const": true},
+        "private_model_fit": {"const": false},
+        "private_rank_selection": {"const": false},
+        "prediction": {"const": false},
+        "publication": {"const": false},
+        "production": {"const": false},
+        "promotion": {"const": false},
+        "sota": {"const": false},
+        "final_holdout": {"const": false}
+      }
+    }
+  }
+}

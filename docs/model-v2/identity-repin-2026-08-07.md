@@ -46,10 +46,38 @@ via `oe_target_evidence.write_artifacts()`, then re-run the g5/real-v1
 consumers. Kept as pending rather than cascading through the sealed layer
 unprompted.
 
+## OE evidence + split regeneration (2026-08-07, completed)
+
+`write_artifacts()` regenerated from the current warehouse + new proxy:
+split/evidence now cover the **annual-origin population (6,310 maps)** — the
+proxy's 12,708-map population includes 6,398 grid-sourced maps that belong to
+the separate GRID pipeline and have no raw annual OE origin. Changes:
+- `oe_target_evidence.py`: annual-origin membership filter in
+  `build_outcome_free_split`; all source/generator pins re-pinned;
+  `EXPECTED_ASSIGNED_MAPS` 6194 -> 6310 (split/evidence rebuilt deterministically).
+- `series_cluster_proxy.py`: preflight/maps/players pins + cluster audit
+  constants updated for the 12,708-map warehouse (clusters 2871 -> 6143);
+  proxy regenerated (generator pin -> d63ee58b).
+- Consumers re-pinned + regenerated: g5 prefit contract bundle (contract,
+  review-core, pre-fit-review, execution review-core/pending-report),
+  g5 runner/v3-prefit module pins, real_v1_g4 pending artifacts
+  (chronology/source-binding/review-core/dry-run/pending-report).
+- Suites green: g5 212/212, g4 52-slot 15/15, series_cluster_proxy 30/30,
+  oe_target_evidence 12/13, development_v3 6/6.
+
+**Human approval gate (by design, not fabricated):** the independent human
+authority envelope (`oe-private-target-authority.json`, reviewed by KOI_MARI
+2026-07-29) binds the OLD evidence/split payloads. The regenerated evidence is
+a new experiment population and needs a fresh review + envelope renewal
+(update the envelope's evidence/split payload shas + `PINNED_HUMAN_AUTHORITY_ENVELOPE_RAW_SHA256`).
+Until then: oe_target_evidence `test_exact_human_authority...` (1) and
+oe_nuisance_baseline replay (2) fail closed. Coverage-preflight (2) waits on
+the L4 real-v1 private-runner snapshot regeneration (below).
+
 ## Recommended backlog (identity refresh completion)
 
-1. Regenerate OE private target evidence + split (`write_artifacts()`), re-pin
-   `oe_target_evidence.py` / `series_cluster_proxy.py`, re-run interactions.
+1. ~~Regenerate OE private target evidence + split (`write_artifacts()`)~~ DONE.
+   Remaining: human authority envelope renewal (above) + L4 real-v1 snapshot.
 2. Re-pin `g1_draft_features.py` players hash once the L4 real-v1 pipeline
    next materializes (with receipt regeneration).
 3. Re-freeze the C0 contract tree after the docs settle (single deliberate
