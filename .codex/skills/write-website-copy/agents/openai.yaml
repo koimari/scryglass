@@ -1,0 +1,7 @@
+interface:
+  display_name: "Website Copy Voice"
+  short_description: "Write sharp website copy in Koi’s house voice"
+  default_prompt: "Use $write-website-copy to write concise, opinionated copy for this website."
+
+policy:
+  allow_implicit_invocation: true

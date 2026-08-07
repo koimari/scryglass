@@ -1,0 +1,96 @@
+# <recommended_plugins>
+Here is a list of plugins that are available but not installed.
+
+- Atlassian R
+
+| | |
+|---|---|
+| Session | `019fb9d5-ff59-7240-9b44-e780ad3cbd70` |
+| Started | 2026-07-31T20:20:37.337Z |
+| CWD | `/Users/river/Documents/Codex/2026-07-31/multi-agent-v2-still-filters-luna` |
+| Model provider | openai |
+| CLI | 0.146.0-alpha.9.2 |
+| Completed | True |
+| Rollout | `/Users/river/.codex/sessions/2026/07/31/rollout-2026-07-31T17-20-37-019fb9d5-ff59-7240-9b44-e780ad3cbd70.jsonl` |
+
+Tags: frontend
+
+## Codex rollout summary
+
+```text
+thread_id: 019fb9d5-ff59-7240-9b44-e780ad3cbd70
+updated_at: 2026-07-31T20:23:16+00:00
+rollout_path: /Users/river/.codex/sessions/2026/07/31/rollout-2026-07-31T17-20-37-019fb9d5-ff59-7240-9b44-e780ad3cbd70.jsonl
+cwd: /Users/river/Documents/Codex/2026-07-31/multi-agent-v2-still-filters-luna
+
+# Configure Luna as Multi-Agent V2
+
+Rollout context: The user asked to work around Codex filtering GPT-5.6-Luna as V1 by copying the model catalog, changing only Luna's `multi_agent_version`, configuring Codex to use the copy, and restarting the ChatGPT desktop app.
+
+## Task 1: Override Luna’s model catalog version
+
+Outcome: success
+
+Key steps:
+
+- Confirmed `/Users/river/.codex/models_cache.json` contained `gpt-5.6-luna` with `multi_agent_version: "v1"`.
+- Confirmed Codex supports the `model_catalog_json` config key and uses `/Users/river/.codex/config.toml`.
+- Copied the source catalog to `/Users/river/.codex/models_cache_luna_v2.json`.
+- Changed only Luna’s version field from `v1` to `v2` using `apply_patch`.
+- Added `model_catalog_json = "/Users/river/.codex/models_cache_luna_v2.json"` to `config.toml`.
+- Verified the copied JSON parses, Luna reports `v2`, and the original catalog remains untouched.
+- Restarted ChatGPT with AppleScript/open and verified the ChatGPT and bundled Codex app-server processes relaunched.
+
+Reusable knowledge:
+
+- Codex model catalog overrides are configured with the top-level `model_catalog_json` setting in `/Users/river/.codex/config.toml`.
+- A safe override workflow is to preserve the original catalog, make a separate copy, patch only the targeted model field, validate JSON with `jq empty`, then restart ChatGPT/Codex.
+
+References:
+
+- Copy: `/Users/river/.codex/models_cache_luna_v2.json`
+- Config: `/Users/river/.codex/config.toml`
+- Verification command: `jq -r '.. | objects | select(.slug? == "gpt-5.6-luna") | "\\(.slug): \\(.multi_agent_version)"' /Users/river/.codex/models_cache_luna_v2.json`
+- Restart command: `osascript -e 'tell application "ChatGPT" to quit' && /usr/bin/open -a /Applications/ChatGPT.app`
+```
+
+## User prompts
+
+### 1
+
+<recommended_plugins>
+Here is a list of plugins that are available but not installed.
+
+- Atlassian Rovo (atlassian-rovo@openai-curated-remote)
+- Box (box@openai-curated-remote)
+- Figma (figma@openai-curated-remote)
+- Gmail (gmail@openai-curated-remote)
+- Google Calendar (google-calendar@openai-curated-remote)
+- Notion (notion@openai-curated-remote)
+- Outlook Calendar (outlook-calendar@openai-curated-remote)
+- Outlook Email (outlook-email@openai-curated-remote)
+- SharePoint (sharepoint@openai-curated-remote)
+- Slack (slack@openai-curated-remote)
+- Teams (teams@openai-curated-remote)
+</recommend
+
+*(+3 further user messages; see rollout JSONL)*
+
+## Final agent message
+
+Applied and verified:
+
+- Copied catalog with Luna set to `v2`: [models_cache_luna_v2.json](/Users/river/.codex/models_cache_luna_v2.json)
+- Config now points `model_catalog_json` to that copy: [config.toml](/Users/river/.codex/config.toml)
+- ChatGPT/Codex restarted successfully.
+- Original catalog remains unchanged.
+
+<oai-mem-citation>
+<citation_entries>
+MEMORY.md:609-609|note=[historical Luna model-selection context]
+</citation_entries>
+<rollout_ids>
+</rollout_ids>
+</oai-mem-citation>
+
+## Tools and files

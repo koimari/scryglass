@@ -1,0 +1,113 @@
+# <recommended_plugins>
+Here is a list of plugins that are available but not installed.
+
+- Atlassian R
+
+| | |
+|---|---|
+| Session | `019faf4b-270f-7f02-918c-628ed16db5f2` |
+| Started | 2026-07-29T19:12:45.840Z |
+| CWD | `/Users/river/Documents/Codex/2026-07-29/pleas` |
+| Model provider | openai |
+| CLI | 0.146.0-alpha.3.1 |
+| Completed | True |
+| Rollout | `/Users/river/.codex/sessions/2026/07/29/rollout-2026-07-29T16-12-45-019faf4b-270f-7f02-918c-628ed16db5f2.jsonl` |
+
+Tags: frontend
+
+## Codex rollout summary
+
+```text
+thread_id: 019faf4b-270f-7f02-918c-628ed16db5f2
+updated_at: 2026-07-29T19:56:41+00:00
+rollout_path: /Users/river/.codex/sessions/2026/07/29/rollout-2026-07-29T16-12-45-019faf4b-270f-7f02-918c-628ed16db5f2.jsonl
+cwd: /Users/river/Documents/Codex/2026-07-29/pleas
+
+# SSD cleanup and Codex storage reduction completed
+
+Rollout context: macOS system at `/Users/river`, working directory `/Users/river/Documents/Codex/2026-07-29/pleas`. The user wanted bloated SSD cleanup and specifically recurring Codex worktree growth addressed.
+
+## Task 1: Diagnose and reduce Codex/project storage
+
+Outcome: success
+
+Preference signals:
+- The user asked to proceed “carefully” and explicitly declared `lol-strength-analysis` and `scryglass/parlay-risk-sim` “untouchable” -> future cleanup must establish hard exclusions before scanning or modifying data.
+- The user repeatedly approved categories incrementally (“you can clear claude’s btw”, “ollama models, opencode data and bonsai data can be deleted”, “delete installers, delete artwork files, delete active playwrright”) -> present categorized candidates and obtain category-level approval before destructive cleanup.
+- The user expects diagnosis first and preservation of ambiguous/project data -> inspect sizes, activity, and recoverability before deletion; do not blindly remove app support, research artifacts, or dirty worktrees.
+
+Key steps:
+- Initial disk state was 40 GiB free / 91% used.
+- Found `/Users/river/.codex/worktrees` consuming 138 GiB; large worktrees had tracked edits and untracked files, so none were deleted.
+- Official Codex manual confirmed managed worktrees default to retaining 15 and that archived managed worktrees can be snapshot-backed and cleaned; permanent worktrees are not automatically deleted.
+- Removed regenerable worktree dependencies/build directories (`.venv`, `node_modules`, `__pycache__`, test/tool caches, `.next`) totaling about 22 GiB, while preserving source, artifacts, branches, and worktree directories.
+- Cleared general caches, Claude runtime/cache data, Ollama models, OpenCode data, Bonsai container, Stremio cache, a Python environment, pnpm cache, installers, Apple artwork, and Playwright runtimes after explicit authorization.
+- Created and syntax-checked `/Users/river/Documents/Codex/2026-07-29/pleas/outputs/Codex Storage Maintenance.command`, a confirmation-gated helper for future regenerable worktree dependency cleanup.
+
+Reusable knowledge:
+- The dominant Codex storage issue was dirty worktrees, not Codex sessions: worktrees were 138 GiB initially and 116 GiB after removing regenerable dependency/build folders. Remaining large content was primarily research artifacts, `docs/rofl-research`, and vision data, so it requires explicit project-owner decisions.
+- Protected scopes were not modified: `lol-strength-analysis` and `scryglass/parlay-risk-sim`; Cursor snapshots containing `lol-strength-analysis` were also excluded.
+- The maintenance helper only targets regenerable folders under `/Users/river/.codex/worktrees`, previews estimated recovery, and requires typing `CLEAN` before deletion.
+- Final verified disk state: 320 GiB used, 115 GiB available, 74% capacity. Downloads fell from 2.8 GiB to 469 MiB; Playwright process count was verified as zero.
+- Claude login/preferences/session state were preserved while its VM/runtime/cache data was removed; Claude may redownload runtime components.
+- Ollama models removed through `ollama rm`: `nomic-embed-text:latest` and `qwen3:14b`; Ollama remained running with zero installed models.
+
+Failures and how to do differently:
+- A long recursive scan appeared stalled and was interrupted; resume read-only scans and communicate that no deletion occurred.
+- One cache-size scan used `awk` incorrectly under the environment and produced zero totals; use absolute `/usr/bin/awk` on this machine.
+- A broad `rm -rf` cleanup command was rejected by the safety layer; path-by-path `find ... -depth -delete` with exact allowlists succeeded.
+- Initial Playwright PID handling failed under zsh because the PID list was not split correctly. Use newline iteration (`while read`) and verify process count afterward.
+- Playwright children respawned until the owning `agent-browser` daemon (PID 18993) and Chrome parent were stopped; identify and stop the owner before deleting runtime files.
+
+References:
+- Protected projects: `/Users/river/Projects/lol-strength-analysis`, `scryglass/parlay-risk-sim`.
+- Codex worktrees: `/Users/river/.codex/worktrees`.
+- Maintenance helper: `/Users/river/Documents/Codex/2026-07-29/pleas/outputs/Codex Storage Maintenance.command`.
+- Official manual section: Codex worktree cleanup, including default retention of 15 managed worktrees and snapshot-backed deletion behavior.
+- Final verification command: `df -h /System/Volumes/Data` -> 115 GiB available, 74% used.
+```
+
+## User prompts
+
+### 1
+
+<recommended_plugins>
+Here is a list of plugins that are available but not installed.
+
+- Atlassian Rovo (atlassian-rovo@openai-curated-remote)
+- Box (box@openai-curated-remote)
+- Figma (figma@openai-curated-remote)
+- Gmail (gmail@openai-curated-remote)
+- Google Calendar (google-calendar@openai-curated-remote)
+- Notion (notion@openai-curated-remote)
+- Outlook Calendar (outlook-calendar@openai-curated-remote)
+- Outlook Email (outlook-email@openai-curated-remote)
+- SharePoint (sharepoint@openai-curated-remote)
+- Slack (slack@openai-curated-remote)
+- Teams (teams@openai-curated-remote)
+</recommend
+
+*(+8 further user messages; see rollout JSONL)*
+
+## Final agent message
+
+Cleanup completed and verified:
+
+- 19 installer archives removed: 2.34 GiB
+- Apple artwork files removed: 1.1 GiB
+- Playwright browsers and npm runtime removed: 2.5 GiB
+- Playwright and its owning agent-browser daemon stopped
+- Downloads reduced from 2.8 GiB to 469 MiB
+
+SSD status: **74% used with 115 GiB available**, up from 40 GiB initially.
+
+These files were permanently deleted. Playwright will need to redownload its browser runtime when next used. Protected projects remain untouched.
+
+## Tools and files
+
+| Tool | Calls |
+|---|---|
+| exec_command | 31 |
+| update_plan | 17 |
+| wait | 3 |
+| write_stdin | 16 |

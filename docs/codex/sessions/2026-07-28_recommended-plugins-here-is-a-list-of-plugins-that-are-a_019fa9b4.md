@@ -1,0 +1,118 @@
+# <recommended_plugins>
+Here is a list of plugins that are available but not installed.
+
+- Atlassian R
+
+| | |
+|---|---|
+| Session | `019fa9b4-5eeb-7d13-a816-3eb66aedb272` |
+| Started | 2026-07-28T17:09:58.177Z |
+| CWD | `/Users/river/scryglass` |
+| Model provider | openai |
+| CLI | 0.146.0-alpha.3.1 |
+| Completed | True |
+| Error | Error running remote compact task: Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying. |
+| Rollout | `/Users/river/.codex/sessions/2026/07/28/rollout-2026-07-28T14-09-58-019fa9b4-5eeb-7d13-a816-3eb66aedb272.jsonl` |
+
+Tags: draft, ratings, tier-list, champion-atoms, grubs, live, market, frontend, data-warehouse, leaguepedia, evaluation, deploy, replay
+
+## Codex rollout summary
+
+```text
+thread_id: 019fa9b4-5eeb-7d13-a816-3eb66aedb272
+updated_at: 2026-07-28T17:42:28+00:00
+rollout_path: /Users/river/.codex/sessions/2026/07/28/rollout-2026-07-28T14-09-58-019fa9b4-5eeb-7d13-a816-3eb66aedb272.jsonl
+cwd: /Users/river/scryglass
+git_branch: codex/app-visual-revamp
+
+# C1 Wave-1 foundation freeze v2 repaired and verified
+
+Rollout context: In `/Users/river/scryglass`, the user required work to remain within exactly six owned files, preserve all unrelated work, avoid Git/broad suites, and keep C1 strictly non-promotional and non-authoritative. A remand identified five defects in the prior implementation; all were repaired and independently tested.
+
+## Task 1: Repair and verify C1 foundation-freeze defects
+
+Outcome: success
+
+Preference signals:
+- The user explicitly required “exact six-file ownership,” “no Git,” and “no broad suite” -> future work should preserve strict path ownership and run only scoped validation unless explicitly expanded.
+- The user required `ACCEPT` to mean only frozen Wave-1 input bytes/identities, never promotion/PASS-B2/production/publication/sealed authority -> preserve explicit `decision_kind: foundation_freeze` and claim ceilings.
+- The user required truthful fail-closed behavior for reviewer counterexamples, including no victim overwrite and no raw OSError/FIFO blocking -> test hostile filesystem paths before any write and report unavailable tooling honestly.
+
+Key steps:
+- Added the current `lol_kills/v2/champions/schema.py` as role 26, pinned at raw SHA-256 `8e7de9d10b6e9b3ca7945ecc4031b12ffc0538b0eb290d92625822b9028c7e72`.
+- Replaced self-attested replay with four measured internal one-pass materializations: two probes and two finals, with byte/state comparisons and serialized-bundle comparison.
+- Added output preflight for root, every parent, and all three leaves; staged writes use exclusive regular files, atomic replacement, rollback, and exact temporary cleanup.
+- Replaced exposed issuance token/registry with closure-private loader issuance and immutable authority projections; expanded runtime checks over helpers, methods, code, defaults, kwdefaults, and constants.
+- Added executable AST/source-policy auditing for both owned source files and exact empty sealed-ledger semantics (`fixture_version: 1`, `kind: empty-sealed-ledger`).
+- Added hostile tests for schema mutation, replay divergence, authority forgery, helper rebinding, default/method mutation, source-policy injection, sealed mutation, root/parent/leaf symlink, hardlink, directory, and FIFO attacks.
+
+Validation evidence:
+- Focused suite: `110 passed in 24.57s`; wall time `25.89s`; no warnings.
+- Source compilation: `2/2` passed; `python3 -m pip check`: no broken requirements.
+- Fresh generation: `2/2` byte-identical; measured replay proof was probe=2, final=2, serialized=2.
+- Frozen input preservation: `26/26` byte-identical; canonical artifacts `3/3`; temporary output leaves `0`.
+- Ruff and Black were unavailable; no formatter-specific check was run. No Git or broad-suite operations were used.
+
+Reusable knowledge:
+- C1’s 26-role closure includes L1 snapshots/split/count/environment, L2 registrar/synthetic/R20/calibration/B3/legacy authorities, L3 ontology/schema/sources/review/fixtures, C4/publication negative boundaries, and the empty sealed fixture.
+- The sealed and publication boundaries remain negative: C4 authorities/approved packets empty, public/authenticated allowlists empty, private status remains `private_pending_review`, and sealed fixture remains an unopened empty ledger.
+- The mechanism is explicitly only an honest-interpreter, process-local misuse/ordinary-forgery guard. Hostile same-process closure/code mutation is disclaimed; production authority requires an independently pinned signature/native boundary/separate-process or OS trust root. Content hashes and singleton identity never authorize promotion.
+
+References:
+- Owned files and final SHA-256s: `checkpoint_c1.py` `faffef78273d695c62f862f923b6a8b85a2d4c6c78c3aec810b3143a6ff97aa1`; generator `dbac795beda3b32beaebdc2abc6e2737b8aaf981c95eca5025c3ba0aa8b2b57c`; tests `d7f7be5262e504a2b81e03b796de60e6fb63f7bfebca8a71c3f1ba6938aa6824`.
+- Final artifacts: config `fe63b846c16f4ffc52099da971e4c1c1947bb2ec48c9ba9b0f47fbea5282e2ec`; report `be3b2e53be0101d0887a98f79dc3b89295c190bdafc7465e5a6553064bf49e8a`; authority `50acdc2143303fe4e19e2cbed3a5b1df150a866f911538d965336ebe819d8bab`.
+- Focused command: `python3 -m pytest tests/model_v2/evaluation/test_checkpoint_c1.py -q`.
+```
+
+## User prompts
+
+### 1
+
+<recommended_plugins>
+Here is a list of plugins that are available but not installed.
+
+- Atlassian Rovo (atlassian-rovo@openai-curated-remote)
+- Box (box@openai-curated-remote)
+- Figma (figma@openai-curated-remote)
+- Gmail (gmail@openai-curated-remote)
+- Google Calendar (google-calendar@openai-curated-remote)
+- Google Drive (google-drive@openai-curated-remote)
+- Notion (notion@openai-curated-remote)
+- Outlook Calendar (outlook-calendar@openai-curated-remote)
+- Outlook Email (outlook-email@openai-curated-remote)
+- SharePoint (sharepoint@openai-curated-remote)
+- Slack (slack@openai-curated-remot
+
+*(+3 further user messages; see rollout JSONL)*
+
+## Final agent message
+
+PASS: all five independently reproduced C1 acceptance defects are repaired within the same six-file boundary.
+
+### Validation
+
+- Focused suite only: `110 passed in 24.57s`
+- Wall time: `25.89s`
+- Warnings: none
+- Source compilation: `2/2`
+- Dependency health: no broken requirements
+- Fresh generation: `2/2` byte-identical
+- Frozen inputs: `26/26` byte-identical
+- Canonical artifacts: `3/3`
+- Replay proof: 2 probe, 2 final-state, and 2 serialized-final comparisons
+- Residual temporary output leaves: `0`
+- Ruff and Black were unavailable, so no formatter-specific check ran.
+- No Git operations or broad suites were used.
+
+### Repairs
+
+- Public builds now perform four independent one-pass materializations internally. Serialized gate evidence comes from measured probe/final comparisons.
+- Output generation preflights root, parents, and all leaves before writing, then uses exclusive staged files, atomic replacement, and rollback.
+- L3 now pins [schema.py](/Users/river/scryglass/lol_kills/v2/champions/schema.py) as role 26 with SHA-256 `8e7de9d10b6e9b3ca7945ecc4031b12ffc0538b0eb290d92625822b9028c7e72`.
+- Authority issuance uses closure-private identity state. No `_ISSUE_TOKEN`, `_ISSUED`,
+
+## Tools and files
+
+| Tool | Calls |
+|---|---|
+| exec_command | 255 |

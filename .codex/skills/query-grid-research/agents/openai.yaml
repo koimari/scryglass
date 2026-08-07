@@ -1,0 +1,4 @@
+interface:
+  display_name: "Query GRID Research"
+  short_description: "Safe private GRID schema and metadata research"
+  default_prompt: "Use $query-grid-research to map or query GRID data safely for private research."
