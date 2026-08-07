@@ -12,7 +12,8 @@ const LINKS = [
   { href: "/elo", label: "Ratings" },
   { href: "/browse", label: "Matches" },
   { href: "/browse/head-to-head", label: "H2H" },
-  { href: "/sandbox", label: "Sandbox" },
+  { href: "/sandbox", label: "Draft analysis" },
+  { href: "/tiers", label: "Tier lists" },
   { href: "/methodology", label: "Method" },
   { href: "/reproduce", label: "Reproduce" },
 ];
