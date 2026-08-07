@@ -157,7 +157,9 @@ Interpretation (adaptive development diagnostics, no authority):
 ## Open coordination items (LCC thread)
 
 1. Regenerate the full 173-champion `*.atoms.json` set (needs `data/bin`
-   game binaries) so every champion gets atom-level detail.
-2. Pin the canonical LCC data patch marker (champions.json icons still say
-   ddragon 16.15.1 while 26.15 ingestion landed).
+   game binaries via `scripts/decompose_binaries.py` + `scripts/extract_atoms.py`)
+   so every champion gets atom-level detail. LCC thread will ping when done.
+2. **Resolved 2026-08-07**: canonical data patch is **26.15** (wiki cache is
+   the authority; ddragon 16.15.1 is a stale CDN artifact). Pinned in bridge
+   provenance as `data_patch: 26.15` from `data/.champions.json.meta`.
 3. Reciprocal mapping table in LCC for `analyze-champion`/`atomizer`.

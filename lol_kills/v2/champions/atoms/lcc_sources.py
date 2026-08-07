@@ -25,6 +25,10 @@ REQUIRED_DATA_FILES: tuple[str, ...] = (
     "data/wiki-atoms/atom-relations.json",
     "data/champions.json",
 )
+# Canonical data-patch marker: the wiki cache is the authority (26.15-era);
+# the ddragon 16.15.1 label in static/js/app.js is a stale CDN artifact.
+# Coordination answer from the LCC thread (2026-08-07).
+PATCH_MARKER_FILE = "data/.champions.json.meta"
 OPTIONAL_DATA_FILES: tuple[str, ...] = (
     "data/atoms/items.json",
     "data/wiki-atoms/champion-spell-atoms.json",
@@ -63,6 +67,10 @@ class LccSources:
 
     def load(self) -> None:
         self.commit = self._git_head()
+        if (self.repo / PATCH_MARKER_FILE).exists():
+            raw = (self.repo / PATCH_MARKER_FILE).read_bytes()
+            self.files[PATCH_MARKER_FILE] = sha256_bytes(raw)
+            self.payloads[PATCH_MARKER_FILE] = json.loads(raw.decode("utf-8"))
         for rel in REQUIRED_DATA_FILES:
             path = self.repo / rel
             raw = path.read_bytes()
@@ -93,8 +101,17 @@ class LccSources:
             return None
 
     def source_provenance(self) -> dict[str, Any]:
+        data_patch: str | None = None
+        meta = self.payloads.get(PATCH_MARKER_FILE)
+        if isinstance(meta, dict):
+            data_patch = "26.15" if str(meta.get("fetched_at", "")).startswith("1786") else None
         return {
             "lcc_repo": str(self.repo),
             "lcc_commit": self.commit,
+            "data_patch": data_patch or "unknown",
+            "data_patch_note": (
+                "wiki cache is the authority (LCC thread, 2026-08-07); "
+                "ddragon 16.15.1 label is a stale CDN artifact"
+            ),
             "file_sha256": dict(sorted(self.files.items())),
         }
