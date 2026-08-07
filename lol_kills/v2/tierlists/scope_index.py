@@ -110,12 +110,32 @@ def build_index(root: Path, *, index_path: Path = DEFAULT_INDEX_PATH, cells_dir:
     return payload
 
 
+def mirror_to_app(root: Path, cells_dir: Path = DEFAULT_CELLS_DIR) -> None:
+    """Mirror index + cells into apps/lol-atlas/public/v2/tierlists so the
+    Vercel lambda can read them (Turbopack only traces paths inside the app
+    root).  The public mirror is a serving copy; the repo data stays canonical.
+    """
+    import shutil
+
+    dst = root / "apps/lol-atlas/public/v2/tierlists"
+    dst.mkdir(parents=True, exist_ok=True)
+    (dst / "cells").mkdir(parents=True, exist_ok=True)
+    for name in ("index-v1.json",):
+        shutil.copy(root / DEFAULT_INDEX_PATH, dst / name)
+    for f in sorted((root / cells_dir).glob("*.json")):
+        shutil.copy(f, dst / "cells" / f.name)
+    print(f"mirrored tier-list data to {dst}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Build all default tier-list cells + the scope index.")
     ap.add_argument("--root", type=Path, default=Path.cwd())
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX_PATH)
+    ap.add_argument("--no-mirror", action="store_true", help="skip the apps/lol-atlas public mirror")
     args = ap.parse_args()
     index = build_index(args.root, index_path=args.index)
+    if not args.no_mirror:
+        mirror_to_app(args.root)
     print(f"wrote {args.index}")
     print(f"cells = {len(index['cells'])}, generated_at = {index['generated_at']}")
     print("artifact_sha256 =", index["artifact_sha256"])

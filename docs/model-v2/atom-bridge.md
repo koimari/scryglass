@@ -151,8 +151,32 @@ Interpretation (adaptive development diagnostics, no authority):
 - Artifact: `data/lol/v2/models/draft-terminal/development-evaluation-summary-v4-atoms.json`
   (sha256 `d4e107fc9910f67cfa237e65fa5f251fb7bf6d1461a9504e5aafce5f74016ea5`).
 - Decision rule (R-22): select only if paired deltas are nonpositive on
-  independent evaluation; currently unresolved — atoms remain descriptive
-  priors.
+  independent evaluation. **Result (2026-08-07):** deltas are tiny and not
+  consistently signed (−0.0016/−0.0006/+0.0007 log loss), and atom-only (m4)
+  loses on every fold — **not selected**. Atoms remain descriptive priors.
+
+## Ontology seeding (v1)
+
+The bridge is the sanctioned zero-play prior path. `lol_kills/v2/champions/atoms/seed_ontology_v1.py`
+emits the full 173-champion ontology seed (`data/lol/v2/champions/champion-ontology-seed.json`)
+at patch **26.15**, one role profile per legal role:
+
+- available atom dimensions → mapped label probabilities with the bridge's
+  dimension uncertainty (per label); unavailable dimensions → explicit
+  uniform prior with maximum uncertainty (1.0) — honest ignorance, never
+  fabricated zeros.
+- the four hand-authored champions (Ziggs/Xerath/Vel'Koz/Neeko) keep their
+  existing 26.14 profiles untouched; bridge profiles are additive.
+- every profile references the new `atom_bridge` source kind
+  (`source:lcc-atom-bridge-v1`, private pending review) declared in
+  `champion-ontology-sources.json`.
+- reproducible: `python3 -m lol_kills.v2.champions.atoms.seed_ontology_v1`
+  regenerates the identical seed; `tests/model_v2/champions/test_atom_seed_v1.py`
+  enforces coverage, fail-closed priors, idempotent sources, and CLI determinism.
+
+Ontology coverage is now 173/173 champions at the current patch, which
+unblocks role-legal archetype priors for tier lists and interactions across
+every league scope (previously only 4 champions had priors).
 
 ## Open coordination items (LCC thread)
 

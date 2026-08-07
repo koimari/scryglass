@@ -144,9 +144,18 @@ def test_builder_is_reproducible_from_pinned_sources():
     artifact = _artifact()
     unsigned = dict(artifact)
     unsigned.pop("artifact_sha256")
-    # generated_at differs per run; compare everything else structurally
+    # generated_at differs per run; compare everything else structurally.
+    # provenance.lcc_commit is the *live* LCC HEAD at build time (the LCC
+    # project commits independently); the reproducibility contract is the
+    # pinned file SHA-256 set, which fails closed on any data drift.
     rebuilt = dict(payload)
     rebuilt.pop("generated_at")
+    rebuilt["provenance"] = dict(rebuilt["provenance"])
+    rebuilt["provenance"].pop("lcc_commit")
     existing = dict(unsigned)
     existing.pop("generated_at")
+    existing["provenance"] = dict(existing["provenance"])
+    existing["provenance"].pop("lcc_commit")
     assert rebuilt == existing
+    # provenance sanity: the recorded commit must look like a git SHA-1
+    assert len(unsigned["provenance"]["lcc_commit"]) == 40

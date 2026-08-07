@@ -1,0 +1,65 @@
+{
+  "artifact_kind": "l2-contract-validation-trust-root",
+  "artifact_version": "1",
+  "artifacts": [
+    {
+      "artifact_id": "l1_source_snapshot",
+      "kind": "json",
+      "locator": "data/lol/v2/snapshots/b1/source-snapshot-passb1.json",
+      "object_sha256": "bd7d3d5a43c533b0293fb7c1bbf918ed690cb4d1d36f51fc9dd472ad4e7b75ba",
+      "raw_sha256": "8c08746e56c4c100c12e8f621c4e48452ec62374ac564e2a7a64dbcaa00a4680"
+    },
+    {
+      "artifact_id": "l1_training_snapshot",
+      "kind": "json",
+      "locator": "data/lol/v2/snapshots/b1/training-snapshot-passb1.json",
+      "object_sha256": "8f056c8100ccb9771779338879b05242938b91c5ad0017057a8eed8c570d25c2",
+      "raw_sha256": "037a46e5f1c2a5ca18d08dff6490242fe624ced42b46fdc8c8ae0ed38488a7f4"
+    },
+    {
+      "artifact_id": "l1_source_manifest",
+      "kind": "json",
+      "locator": "data/lol/v2/snapshots/b1/source-passb1.json",
+      "object_sha256": "9e4c6ec56423420130a3cbbe3ab5c66b619d9de8a92f0bf17532b0757150b270",
+      "raw_sha256": "9e4c6ec56423420130a3cbbe3ab5c66b619d9de8a92f0bf17532b0757150b270"
+    },
+    {
+      "artifact_id": "l1_environment_lock",
+      "kind": "raw",
+      "locator": "data/lol/v2/snapshots/b1/environment-lock-passb1.txt",
+      "object_sha256": "f2b0d9752e4fdbdde80a5b88243dd5eafd3b41e610ecb8efee99dbcd944b5c96",
+      "raw_sha256": "f2b0d9752e4fdbdde80a5b88243dd5eafd3b41e610ecb8efee99dbcd944b5c96"
+    },
+    {
+      "artifact_id": "l3_champion_ontology",
+      "kind": "json",
+      "locator": "data/lol/v2/champions/champion-ontology-seed.json",
+      "object_sha256": "8d01368a0c36a456cdb49a6b612c76c88323b746b897f247a4357ce657b3da1e",
+      "raw_sha256": "d26e40f83cf3af1129fd2f0e487229322c1eea45fd2c41240bf72779c7d440b0"
+    },
+    {
+      "artifact_id": "l3_champion_sources",
+      "kind": "json",
+      "locator": "data/lol/v2/champions/champion-ontology-sources.json",
+      "object_sha256": "96fa8feb30ffc5de26fe22381ae890262247da71b1df3dd328f7d8eedf82d77e",
+      "raw_sha256": "26e6f1682ce4178f29828aac1a724b355c3d22f4557334bc9a7cafd8bd8c5a49"
+    },
+    {
+      "artifact_id": "l3_champion_review_log",
+      "kind": "jsonl",
+      "locator": "data/lol/v2/champions/champion-review-log.jsonl",
+      "object_sha256": "0f2f518b8c3afa4304f122ada63220ee2a46f9f763bacb64da91a34b361e6964",
+      "raw_sha256": "f256e5851c69d706e0c8465ffa4ee0ed8d846c0566bd50972426d1d4ab3b859b"
+    }
+  ],
+  "contract_tree_sha256": "fb3de56ddec943bc876cb795a8ada5695233f5fe615defe93f952ce299470517",
+  "production_model_authority": {
+    "missing_layers": [
+      "L4",
+      "L5",
+      "L6",
+      "L9"
+    ],
+    "status": "fail_closed"
+  }
+}

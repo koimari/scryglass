@@ -49,7 +49,7 @@ TERMINAL_MODEL_ARTIFACT = {
 CROSSWALK_ARTIFACT = {
     "locator": "data/lol/v2/champions/champion-id-crosswalk-v1.json",
     "schema_id": "scryglass.champion-id-crosswalk.v1",
-    "artifact_sha256": "01bbcff87e63662f54b47dca0d843d08b33762c2dc0424c3fd90a8a9d03db4f5",
+    "artifact_sha256": "59fdf214b570487f64e08f060ba51c82b24e87f3bbe4d6e308fd1bdd42ef14f7",
 }
 
 APPEARANCE_SOURCE = {

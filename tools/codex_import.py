@@ -328,7 +328,7 @@ def import_skills(repo: Path) -> list[dict]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--repo", default="/Users/river/scryglass")
+    ap.add_argument("--repo", default=str(Path(__file__).resolve().parents[1]))
     ap.add_argument("--related", action="store_true", help="include related-project sessions")
     ap.add_argument("--out", default=None, help="output dir (default: <repo>/docs/codex)")
     ap.add_argument("--skills", action="store_true", help="also copy curated Codex skills into <repo>/.codex/skills")
