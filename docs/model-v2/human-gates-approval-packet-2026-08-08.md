@@ -98,3 +98,26 @@ Multileague L4 92/92 (22 files) | Player suite 224 passed |
 OE evidence 12/13 | g5 212/212 | g4 15/15 | Draft terminal full green |
 Data (g1 + receipts) green | Market phase-one green | C1 110/110 |
 b2 remand 15/15.
+
+## Final verified inventory (2026-08-08, after the last regeneration pass)
+
+Additional machine-completable work landed since the packet was first written:
+- L6 draft-interactions artifacts regenerated on the 173-champion ontology
+  (config/fixtures/report/authority/manifest; commit fc11896; L6 10/10).
+- Market chain completed: probability-pipeline readiness + Betano quote
+  adapter candidate regenerated + registries re-pinned (commit 5a75fbb);
+  market suite 143/143; private-decision-readiness tests 7/7 (now assert the
+  post-regeneration state).
+- Verified green: top-level tests 435/435, champions 114, tierlists 44,
+  team 68, player 224 (1 C0), data 244, draft-terminal 94, interactions 556
+  (+7 errors, gates only), market 143, L2 synthetic authorities (r20
+  foundation 55, r20 selection 60, outer calibration 47, b3 coverage 54),
+  app TypeScript 30/30, app production build.
+
+### Complete remaining-red inventory (all owner gates)
+
+| Gate | Tests | Owner action |
+|---|---|---|
+| 1. Authority envelope renewal | oe_target_evidence 1, oe_nuisance 2 | Approve the renewal payload (section 1) |
+| 2. L4 real-v1 private runner | private_runner 5+7, coverage_preflight 2, representation_rank_assay 2 | Run the real-v1 private pipeline (section 2) |
+| 3. C0 contract-tree re-freeze | b1_sealed 33 err, contract_validation_remand 5, contract_reconciliation 4+2, contract_prior_tree_recovery 1, player_rating 1 | L2 re-freeze decision (section 3) |
