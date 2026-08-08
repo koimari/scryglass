@@ -1,0 +1,171 @@
+{
+  "artifact_locator": "data/lol/v2/models/draft-terminal/terminal-model-neutral-development-v3.json",
+  "artifact_raw_sha256": "d6ddfbd0238ff5b9d1b259e393b1724717bcb6dd9d7e407d92fc44395da6d6c3",
+  "baseline_calibration_metrics": {
+    "brier_score": 0.22501458333292582,
+    "log_loss": 0.6415767250147512
+  },
+  "baseline_calibration_slope": 0.8,
+  "baseline_calibration_transform": "symmetric_temperature",
+  "baseline_calibration_transforms": [
+    {
+      "calibration_log_loss": 0.6443751954950351,
+      "method": "identity",
+      "parameter": 1.0,
+      "selected": false
+    },
+    {
+      "calibration_log_loss": 0.6415767250147512,
+      "method": "symmetric_temperature",
+      "parameter": 1.25,
+      "selected": true
+    },
+    {
+      "calibration_log_loss": 0.6415767250147512,
+      "method": "symmetrized_platt",
+      "parameter": 0.8,
+      "selected": false
+    }
+  ],
+  "baseline_is_not_serialized_in_neutral_artifact": true,
+  "baseline_only_coefficient": 1.2064455893412434,
+  "calibration_dependence_clusters": 287,
+  "calibration_end": "2026-07-18T16:33:48+00:00",
+  "calibration_incremental_delta": {
+    "brier_score": -0.0013211980302343662,
+    "log_loss": -0.00294891697002142,
+    "selection_or_validation_use": false
+  },
+  "calibration_rows": 810,
+  "calibration_start": "2026-05-07T08:07:34+00:00",
+  "candidate_baseline_coefficient": 1.210061265475245,
+  "candidate_calibration_metrics": {
+    "brier_score": 0.22369338530269145,
+    "log_loss": 0.6386278080447297
+  },
+  "candidate_calibration_slope": 0.8,
+  "candidate_calibration_target": "context_plus_draft_observed_outcome",
+  "candidate_calibration_transform": "symmetric_temperature",
+  "candidate_calibration_transforms": [
+    {
+      "calibration_log_loss": 0.6412921886663497,
+      "method": "identity",
+      "parameter": 1.0,
+      "selected": false
+    },
+    {
+      "calibration_log_loss": 0.6386278080447297,
+      "method": "symmetric_temperature",
+      "parameter": 1.25,
+      "selected": true
+    },
+    {
+      "calibration_log_loss": 0.6386278080447297,
+      "method": "symmetrized_platt",
+      "parameter": 0.8,
+      "selected": false
+    }
+  ],
+  "candidate_id": "m0-role-additive",
+  "claim_ceiling": {
+    "betting": false,
+    "development_diagnostic": true,
+    "equal_strength_composition_index": true,
+    "independent_validation": false,
+    "outcome_calibrated_neutral_probability": false,
+    "recommendation": false
+  },
+  "coefficient_l2": 0.38413482651584635,
+  "development_evaluation_summary_locator": "data/lol/v2/models/draft-terminal/development-evaluation-summary-v3.json",
+  "development_evaluation_summary_raw_sha256": "4c5f71cbe9f5730cdebb1d4974b185e6c10d914235c6cbf4d025e6d866056f80",
+  "feature_count": 189,
+  "model_as_of": "2026-07-18T16:33:48Z",
+  "model_version": "draft-terminal-neutral-dev-v3.0.0",
+  "neutral_equal_strength_index_directly_outcome_calibrated": false,
+  "optimizer_gradient_max_abs": 1.5788268457502788e-07,
+  "optimizer_iterations": 9,
+  "production_eligible": false,
+  "public_probability_authorized": false,
+  "ridge_strength": 0.05,
+  "schema_version": "scryglass:draft-terminal-development-artifact-report:v3",
+  "source_snapshot": {
+    "availability_status": "frozen_retrospective_development_only",
+    "development_snapshot_manifest_artifact_sha256": "da4812bd1b45e0601cc6d50fe4b53730ce2018fb2aee3c44e189fe3819be6f4b",
+    "development_snapshot_manifest_raw_sha256": "f395e0da4c138eaaaae6a749359e866a9f4fa71cfd24f334e104e2b458a74e48",
+    "development_snapshot_payload_raw_sha256": "e8105027c7b2406f735cdcca592e60071ed25fc6489f4966a663dd91bea4a7d8",
+    "development_snapshot_population": {
+      "complete_clustered_rows": 6194,
+      "dependence_clusters": 2871,
+      "end": "2026-07-18T16:33:48Z",
+      "excluded_without_cluster_assignment": 31724,
+      "leagues": [
+        "AMERICAS",
+        "CBLOL",
+        "EWC",
+        "FST",
+        "LCK",
+        "LCP",
+        "LCS",
+        "LEC",
+        "LJL",
+        "LPL",
+        "MSI",
+        "PCS",
+        "TCL",
+        "VCS"
+      ],
+      "patches": [
+        "15.01",
+        "15.02",
+        "15.03",
+        "15.04",
+        "15.05",
+        "15.06",
+        "15.07",
+        "15.08",
+        "15.09",
+        "15.10",
+        "15.11",
+        "15.12",
+        "15.13",
+        "15.14",
+        "15.15",
+        "15.16",
+        "15.17",
+        "15.18",
+        "15.19",
+        "16.01",
+        "16.02",
+        "16.03",
+        "16.04",
+        "16.05",
+        "16.06",
+        "16.07",
+        "16.08",
+        "16.09",
+        "16.10",
+        "16.11",
+        "16.13"
+      ],
+      "start": "2025-01-12T09:24:17Z"
+    },
+    "development_snapshot_source": {
+      "dependence_cluster_proxy_artifact_sha256": "632a2c1046fce7ae5ee9d41abed7ae66a46ce13a8f7c6503d2d9cce551460e8c",
+      "dependence_cluster_proxy_raw_sha256": "722ab5674e0dc02cf5075a8d61a6fd494f8dbe510b8e254626717c98dae663d3",
+      "oe_metadata_snapshot_sha256": "4a1f23299692260ea8dedaa1b37a2ff95bf13317740cb2e5763cee6c53726240",
+      "oe_players_snapshot_sha256": "12f1cca978d683a0df8ceec0772999aeb03c723b4465f98674247f327dea71fa"
+    },
+    "rights_status": "not_revalidated_for_public_serving"
+  },
+  "status": "development_only_frozen_for_prospective_incremental_evaluation",
+  "supersedes_for_future_protocol": {
+    "model_version": "draft-terminal-neutral-dev-v2.0.0",
+    "reason": "v2 selected against observed outcomes without the required contextual comparator",
+    "v2_authority_rehabilitated": false
+  },
+  "train_dependence_clusters": 2584,
+  "train_end": "2026-05-06T17:10:03+00:00",
+  "train_rows": 5384,
+  "train_start": "2025-01-12T09:24:17+00:00",
+  "uncertainty_method": "diagonal_laplace_development_diagnostic_without_covariance; not a reliability interval"
+}

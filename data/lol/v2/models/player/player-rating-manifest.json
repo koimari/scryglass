@@ -1,0 +1,50 @@
+{
+  "artifact_hashes": {
+    "config": "c5fdf3f246950bfd4a3240bd8a21f9b20040045e9776a09753732572a7717757",
+    "fixtures": "f21cce8c4aab62a656e984efb78be2cc419e68e852b96e399a2325a803d62249",
+    "report": "b0f38dd607b53543b6482fe35ec2e107d393dd8c8879b4dfbb8defb0707958de"
+  },
+  "artifact_id": "player-rating-development-manifest-l4-v2",
+  "blockers": [
+    "authoritative_observed_player_rows_unavailable",
+    "production_player_rating_authority_unavailable",
+    "independent_l6_l2_and_root_c2_review_required"
+  ],
+  "c1_scope": {
+    "artifact_id": "scryglass:c1:foundation-freeze-authority:v1",
+    "authority_scope": "wave_1_foundation_freeze_only",
+    "foundation_only": true
+  },
+  "candidate_identity_only": true,
+  "claim_ceiling": {
+    "c2": false,
+    "calibrated_public_probability_authorized": false,
+    "development_only": true,
+    "empirical_95_coverage_authorized": false,
+    "pass_b2": false,
+    "predictive_performance_authorized": false,
+    "probability_wording_authorized": false,
+    "production_eligible": false,
+    "promotion_authorized": false,
+    "publication_authorized": false,
+    "real_data_fit_authorized": false,
+    "reliability_authorized": false,
+    "sota_authorized": false,
+    "synthetic_only": true
+  },
+  "development_manifest_kind": "l4_player_synthetic_development",
+  "independent_l4_authority_present": false,
+  "model_version": "player_rating-v2.0.0-development",
+  "principal_estimand": "posterior-mean role-adjusted individual contribution at as_of",
+  "production_manifest_conformance": false,
+  "registered_formulas": {
+    "covariance": "full rank-one roster covariance propagated under decay",
+    "design_vector": "+reference role weight blue; -reference role weight red",
+    "posterior_predictive": "adaptive Gauss-Hermite; guaranteed only in frozen central domain; larger safety-domain requests may be unavailable",
+    "reference_policy_id": "equal-role-reference-policy-v1",
+    "team_outcome_likelihood": "single Bernoulli logistic rank-one Laplace update"
+  },
+  "schema_version": "2.0.0",
+  "selected_candidate_id": "random_walk_no_reset+no_resource",
+  "selection_decision_sha256": "e963c441eb7610a8a6159dc10d4702dce19b3cf78e8eaba91c4b996f17a5252a"
+}

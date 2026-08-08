@@ -58,6 +58,27 @@ export default async function SandboxPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  // Public MVP claim gate: retain the route, but do not emit predictive draft output.
+  const publicPredictiveDraftsEnabled = false;
+  if (!publicPredictiveDraftsEnabled) {
+    return (
+      <div className="space-y-3">
+        <h1 className="font-display text-3xl">Draft analysis</h1>
+        <p className="text-[var(--ink-muted)]">
+          Predictive draft recommendations are withheld in this public MVP while the supporting
+          evidence is independently reviewed.
+        </p>
+        <p className="text-sm">
+          <a className="row-link" href="/browse">Browse match records</a>
+          {" · "}
+          <a className="row-link" href="/methodology">Read the methodology</a>
+          {" · "}
+          <a className="row-link" href="/reproduce">Download reproduction files</a>
+        </p>
+      </div>
+    );
+  }
+
   const params = await searchParams;
   const catalog = draftCatalog();
   const context = await readCurrentDraftContext();

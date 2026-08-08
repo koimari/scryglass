@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scryglass:draft-terminal-l2-authority-record:v1",
+  "title": "Independent L2 Draft Score authority record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "authority_record_id",
+    "issued_at",
+    "independent_reviewer_id",
+    "model_artifact_sha256",
+    "candidate_registry_sha256",
+    "development_evaluation_sha256",
+    "l2_contract_sha256",
+    "calibration_transform_sha256",
+    "reliability_artifact_sha256",
+    "replay_parity_evidence_sha256",
+    "source_snapshot_sha256",
+    "independent_l2_authority",
+    "sealed_outer_temporal_holdout_decision",
+    "source_snapshot",
+    "holdouts",
+    "reliability",
+    "claim_ceiling"
+  ],
+  "properties": {
+    "schema_version": {"const": "scryglass:draft-terminal-l2-authority-record:v1"},
+    "status": {"const": "approved"},
+    "authority_record_id": {"type": "string", "minLength": 1},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "independent_reviewer_id": {"type": "string", "minLength": 1},
+    "model_artifact_sha256": {"$ref": "#/$defs/sha256"},
+    "candidate_registry_sha256": {"$ref": "#/$defs/sha256"},
+    "development_evaluation_sha256": {"$ref": "#/$defs/sha256"},
+    "l2_contract_sha256": {"$ref": "#/$defs/sha256"},
+    "calibration_transform_sha256": {"$ref": "#/$defs/sha256"},
+    "reliability_artifact_sha256": {"$ref": "#/$defs/sha256"},
+    "replay_parity_evidence_sha256": {"$ref": "#/$defs/sha256"},
+    "source_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+    "independent_l2_authority": {"const": true},
+    "sealed_outer_temporal_holdout_decision": {"const": "passed"},
+    "source_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["availability_status", "participant_cluster_status", "series_grouped"],
+      "properties": {
+        "availability_status": {"const": "verified_preevent"},
+        "participant_cluster_status": {"const": "team_or_series_available"},
+        "series_grouped": {"const": true}
+      }
+    },
+    "holdouts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["future_patch", "league", "international_event_or_meta", "roster_change", "sparse_or_new_champion"],
+      "properties": {
+        "future_patch": {"const": "passed"},
+        "league": {"const": "passed"},
+        "international_event_or_meta": {"const": "passed"},
+        "roster_change": {"const": "not_required_for_neutral"},
+        "sparse_or_new_champion": {"const": "passed"}
+      }
+    },
+    "reliability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["validation_gate_passed", "probability_wording_approved", "baseline_support_verified", "dependence_support_verified", "interval_coverage_verified"],
+      "properties": {
+        "validation_gate_passed": {"const": true},
+        "probability_wording_approved": {"const": true},
+        "baseline_support_verified": {"const": true},
+        "dependence_support_verified": {"const": true},
+        "interval_coverage_verified": {"const": true}
+      }
+    },
+    "claim_ceiling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["descriptive_pre_map_association", "causal_draft_effect", "recommendation", "betting"],
+      "properties": {
+        "descriptive_pre_map_association": {"const": true},
+        "causal_draft_effect": {"const": false},
+        "recommendation": {"const": false},
+        "betting": {"const": false}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

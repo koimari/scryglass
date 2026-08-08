@@ -17,11 +17,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import binascii
+import hashlib
 import json
+import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote, urlencode
 
 import websockets
@@ -40,6 +44,8 @@ from lol_kills.etl.grid_ingest import (
 SERIES_EVENTS_BASE = "wss://api.grid.gg/live-data-feed/series"
 USER_AGENT = "scryglass/grid-series-events (+pro-only; preliminary-live-evaluation)"
 MAX_MESSAGE_BYTES = 8 * 1024 * 1024
+RECEIPT_ENVELOPE_SCHEMA = "scryglass:grid-series-events-receipt-envelope:v1"
+RECEIPT_SOURCE_ID = "grid-series-events-private-v1"
 
 
 class GridSeriesEventsError(RuntimeError):
@@ -88,6 +94,8 @@ def default_config() -> dict[str, Any]:
         {"actor": "series", "action": "started", "target": "game"},
         {"actor": "series", "action": "ended", "target": "game"},
         {"actor": "game", "action": "*", "target": "*"},
+        {"actor": "team", "action": "picked", "target": "character"},
+        {"actor": "team", "action": "banned", "target": "character"},
         {"actor": "team", "action": "killed", "target": "*"},
         {"actor": "team", "action": "completed", "target": "*"},
         {"actor": "player", "action": "killed", "target": "*"},
@@ -104,19 +112,170 @@ def default_config() -> dict[str, Any]:
     }
 
 
-def _transaction_from_message(message: str | bytes) -> dict[str, Any]:
+def _message_bytes(message: str | bytes) -> bytes:
+    if isinstance(message, str):
+        return message.encode("utf-8")
     if isinstance(message, bytes):
-        try:
-            message = message.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise GridSeriesEventsError("GRID sent a non-UTF-8 WebSocket message") from exc
+        return message
+    raise GridSeriesEventsError("GRID sent an unsupported WebSocket message type")
+
+
+def _strict_object_pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in items:
+        if key in value:
+            raise GridSeriesEventsError(
+                f"GRID Series Events message contains duplicate key {key!r}"
+            )
+        value[key] = item
+    return value
+
+
+def _transaction_from_message(message: str | bytes) -> dict[str, Any]:
+    raw = _message_bytes(message)
     try:
-        value = json.loads(message)
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise GridSeriesEventsError("GRID sent a non-UTF-8 WebSocket message") from exc
+    try:
+        value = json.loads(
+            text,
+            object_pairs_hook=_strict_object_pairs,
+            parse_constant=lambda token: (_ for _ in ()).throw(
+                GridSeriesEventsError(
+                    f"GRID Series Events message contains non-finite number {token}"
+                )
+            ),
+        )
+    except GridSeriesEventsError:
+        raise
     except json.JSONDecodeError as exc:
         raise GridSeriesEventsError("GRID sent a non-JSON Series Events message") from exc
     if not isinstance(value, dict):
         raise GridSeriesEventsError("GRID Series Events messages must be JSON objects")
     return value
+
+
+def _clock_sample(clock: Callable[[], datetime]) -> datetime:
+    observed = clock()
+    if not isinstance(observed, datetime) or observed.tzinfo is None:
+        raise GridSeriesEventsError(
+            "GRID receipt clock must return a timezone-aware datetime"
+        )
+    return observed.astimezone(timezone.utc)
+
+
+def build_received_transaction_envelope(
+    message: str | bytes,
+    *,
+    series_id: str,
+    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+) -> dict[str, Any]:
+    """Bind exact WebSocket bytes to a system-clocked local receipt.
+
+    The clock is sampled inside this function before JSON parsing.  The API key
+    is deliberately absent from both the endpoint and the persisted envelope.
+    """
+
+    received_at = _clock_sample(clock)
+    sid = str(series_id).strip()
+    if not sid or not sid.isdigit():
+        raise GridSeriesEventsError("series id must be a numeric GRID series id")
+    raw = _message_bytes(message)
+    transaction = _transaction_from_message(raw)
+    if str(transaction.get("seriesId") or "") != sid:
+        raise GridSeriesEventsError("GRID transaction series identity changed")
+    if transaction_sequence(transaction) is None:
+        raise GridSeriesEventsError("GRID transaction has no valid sequence number")
+    endpoint = f"{SERIES_EVENTS_BASE}/{quote(sid, safe='')}"
+    return {
+        "schema_version": RECEIPT_ENVELOPE_SCHEMA,
+        "series_id": sid,
+        "received_at_utc": received_at.isoformat(),
+        "clock_attestation": {
+            "source": "system_utc_clock_sampled_inside_websocket_receiver",
+            "observed_wall_clock_utc": received_at.isoformat(),
+            "user_supplied_timestamp_allowed": False,
+            "receipt_time_not_after_parser_observation": True,
+        },
+        "transport": {
+            "source_id": RECEIPT_SOURCE_ID,
+            "endpoint_without_credentials": endpoint,
+            "api_key_persisted": False,
+            "message_encoding": "websocket_text_utf8_or_binary_exact_bytes",
+        },
+        "message": {
+            "raw_sha256": hashlib.sha256(raw).hexdigest(),
+            "raw_base64": base64.b64encode(raw).decode("ascii"),
+        },
+    }
+
+
+def validate_received_transaction_envelope(
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, Any], bytes, dict[str, Any]]:
+    """Validate an envelope and return it, exact message bytes, and transaction."""
+
+    expected = {
+        "schema_version",
+        "series_id",
+        "received_at_utc",
+        "clock_attestation",
+        "transport",
+        "message",
+    }
+    if not isinstance(payload, Mapping) or set(payload) != expected:
+        raise GridSeriesEventsError("GRID receipt envelope structure changed")
+    value = dict(payload)
+    if value.get("schema_version") != RECEIPT_ENVELOPE_SCHEMA:
+        raise GridSeriesEventsError("GRID receipt envelope schema changed")
+    sid = str(value.get("series_id") or "")
+    if not sid.isdigit():
+        raise GridSeriesEventsError("GRID receipt envelope series id is invalid")
+    try:
+        received_at = datetime.fromisoformat(
+            str(value.get("received_at_utc") or "").replace("Z", "+00:00")
+        )
+    except ValueError as exc:
+        raise GridSeriesEventsError(
+            "GRID receipt envelope timestamp is invalid"
+        ) from exc
+    if received_at.tzinfo is None:
+        raise GridSeriesEventsError("GRID receipt envelope timestamp lacks a timezone")
+    received_at = received_at.astimezone(timezone.utc)
+    if value.get("clock_attestation") != {
+        "source": "system_utc_clock_sampled_inside_websocket_receiver",
+        "observed_wall_clock_utc": received_at.isoformat(),
+        "user_supplied_timestamp_allowed": False,
+        "receipt_time_not_after_parser_observation": True,
+    }:
+        raise GridSeriesEventsError("GRID receipt clock attestation changed")
+    endpoint = f"{SERIES_EVENTS_BASE}/{quote(sid, safe='')}"
+    if value.get("transport") != {
+        "source_id": RECEIPT_SOURCE_ID,
+        "endpoint_without_credentials": endpoint,
+        "api_key_persisted": False,
+        "message_encoding": "websocket_text_utf8_or_binary_exact_bytes",
+    }:
+        raise GridSeriesEventsError("GRID receipt transport binding changed")
+    message = value.get("message")
+    if not isinstance(message, Mapping) or set(message) != {
+        "raw_sha256",
+        "raw_base64",
+    }:
+        raise GridSeriesEventsError("GRID receipt message binding changed")
+    try:
+        raw = base64.b64decode(str(message.get("raw_base64") or ""), validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise GridSeriesEventsError("GRID receipt message base64 is invalid") from exc
+    if hashlib.sha256(raw).hexdigest() != message.get("raw_sha256"):
+        raise GridSeriesEventsError("GRID receipt message hash changed")
+    transaction = _transaction_from_message(raw)
+    if str(transaction.get("seriesId") or "") != sid:
+        raise GridSeriesEventsError("GRID receipt transaction series identity changed")
+    if transaction_sequence(transaction) is None:
+        raise GridSeriesEventsError("GRID receipt transaction sequence is invalid")
+    return value, raw, transaction
 
 
 def transaction_sequence(transaction: Mapping[str, Any]) -> int | None:
@@ -139,6 +298,64 @@ def transaction_state(transaction: Mapping[str, Any]) -> Mapping[str, Any] | Non
             if isinstance(state, Mapping):
                 return state
     return None
+
+
+def transaction_has_terminal_draft_for_game(
+    transaction: Mapping[str, Any], game_id: str
+) -> bool:
+    """Return true only for the target game's observed draft action slot 20."""
+
+    target = str(game_id).strip()
+    if not target:
+        return False
+    for event in transaction.get("events") or []:
+        if not isinstance(event, Mapping) or event.get("type") not in {
+            "team-picked-character",
+            "team-banned-character",
+        }:
+            continue
+        delta = event.get("seriesStateDelta")
+        games = delta.get("games") if isinstance(delta, Mapping) else None
+        if not isinstance(games, list) or len(games) != 1:
+            continue
+        game = games[0]
+        if not isinstance(game, Mapping) or str(game.get("id") or "") != target:
+            continue
+        actions = game.get("draftActions")
+        if not isinstance(actions, list) or len(actions) != 1:
+            continue
+        action = actions[0]
+        if not isinstance(action, Mapping) or isinstance(
+            action.get("sequenceNumber"), bool
+        ):
+            continue
+        try:
+            if int(action.get("sequenceNumber")) == 20:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def transaction_has_map_start_for_game(
+    transaction: Mapping[str, Any], game_id: str
+) -> bool:
+    """Return true only for a target game's explicit series-started-game event."""
+
+    target = str(game_id).strip()
+    if not target:
+        return False
+    for event in transaction.get("events") or []:
+        if not isinstance(event, Mapping) or event.get("type") != "series-started-game":
+            continue
+        target_value = event.get("target")
+        if (
+            isinstance(target_value, Mapping)
+            and target_value.get("type") == "game"
+            and str(target_value.get("id") or "") == target
+        ):
+            return True
+    return False
 
 
 def _safe_status_error(exc: Exception, secret: str | None = None) -> str:
@@ -264,6 +481,8 @@ async def iter_series_events(
     reconnect: bool = False,
     max_reconnects: int = 2,
     backoff_seconds: float = 2.0,
+    receipt_envelopes: bool = False,
+    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield raw GRID transactions, resuming by sequence after a drop.
 
@@ -298,13 +517,24 @@ async def iter_series_events(
                 if config is not None:
                     await socket.send(json.dumps(config, separators=(",", ":")))
                 async for message in socket:
-                    transaction = _transaction_from_message(message)
+                    envelope: dict[str, Any] | None = None
+                    if receipt_envelopes:
+                        envelope = build_received_transaction_envelope(
+                            message,
+                            series_id=sid,
+                            clock=clock,
+                        )
+                        _, _, transaction = validate_received_transaction_envelope(
+                            envelope
+                        )
+                    else:
+                        transaction = _transaction_from_message(message)
                     sequence = transaction_sequence(transaction)
                     if sequence is not None and last_sequence is not None and sequence <= last_sequence:
                         continue
                     if sequence is not None:
                         last_sequence = sequence
-                    yield transaction
+                    yield envelope if envelope is not None else transaction
             return
         except ConnectionClosed as exc:
             if exc.code in (1000, 1001) or not reconnect or attempts >= max_reconnects:
@@ -371,6 +601,7 @@ async def _run_cli(args: argparse.Namespace) -> int:
         from_sequence_number=args.from_sequence,
         config=config,
         reconnect=args.reconnect,
+        receipt_envelopes=args.receipt_envelopes,
     )
     iterator = stream.__aiter__()
     try:
@@ -388,10 +619,33 @@ async def _run_cli(args: argparse.Namespace) -> int:
             except StopAsyncIteration:
                 break
             count += 1
-            last_sequence = transaction_sequence(transaction) or last_sequence
+            if args.receipt_envelopes:
+                _, _, received_transaction = validate_received_transaction_envelope(
+                    transaction
+                )
+            else:
+                received_transaction = transaction
+            last_sequence = transaction_sequence(received_transaction) or last_sequence
             if out:
-                with out.open("a", encoding="utf-8") as fh:
-                    fh.write(json.dumps(transaction, separators=(",", ":")) + "\n")
+                encoded = (
+                    json.dumps(transaction, separators=(",", ":")) + "\n"
+                ).encode("utf-8")
+                with out.open("ab") as fh:
+                    fh.write(encoded)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+            if (
+                args.stop_after_draft_game_id
+                and transaction_has_terminal_draft_for_game(
+                    received_transaction, args.stop_after_draft_game_id
+                )
+            ) or (
+                args.stop_after_start_game_id
+                and transaction_has_map_start_for_game(
+                    received_transaction, args.stop_after_start_game_id
+                )
+            ):
+                break
             if args.limit and count >= args.limit:
                 break
     finally:
@@ -410,11 +664,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--full-state", action="store_true")
     parser.add_argument("--reconnect", action="store_true")
+    parser.add_argument(
+        "--receipt-envelopes",
+        action="store_true",
+        help=(
+            "persist exact WebSocket bytes with a system-clocked receipt; "
+            "required for prospective evaluation evidence"
+        ),
+    )
+    stop_group = parser.add_mutually_exclusive_group()
+    stop_group.add_argument("--stop-after-draft-game-id")
+    stop_group.add_argument("--stop-after-start-game-id")
     parser.add_argument("--out", type=str, default=None)
     parser.add_argument("--env-file", type=str, default=None)
     args = parser.parse_args(argv)
     if bool(args.series_id) == args.discover_live:
         parser.error("provide exactly one of --series-id or --discover-live")
+    if args.receipt_envelopes and not args.out:
+        parser.error("--receipt-envelopes requires --out")
+    if (args.stop_after_draft_game_id or args.stop_after_start_game_id) and (
+        not args.receipt_envelopes or not args.out
+    ):
+        parser.error(
+            "one-shot game stop conditions require --receipt-envelopes and --out"
+        )
     try:
         return asyncio.run(_run_cli(args))
     except GridSeriesEventsError as exc:

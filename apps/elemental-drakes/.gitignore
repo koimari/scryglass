@@ -1,0 +1,7 @@
+.next/
+.playwright-cli/
+.pytest_cache/
+.vercel/
+node_modules/
+*.tsbuildinfo
+npm-debug.log*

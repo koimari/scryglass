@@ -83,21 +83,29 @@ export function TierListExplorer() {
     return params.toString();
   }, [region, league, international, tier, role, patch]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/v2/tierlist?${query}`);
+      const response = await fetch(`/api/v2/tierlist?${query}`, { signal });
       const payload = (await response.json()) as Response;
       setData(payload);
     } catch {
+      if (signal?.aborted) return;
       setData(EMPTY);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [query]);
 
   useEffect(() => {
-    void refresh();
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void refresh(controller.signal);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [refresh]);
 
   const options = data.options ?? {

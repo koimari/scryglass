@@ -57,7 +57,7 @@ export const ARTICLES: ArticleMeta[] = [
       {
         href: "/methodology",
         label: "Methodology",
-        blurb: "Estimands, Dual Elo, Draft Score, and pack years.",
+        blurb: "Estimands, ratings, withheld Draft Score status, and pack years.",
       },
       {
         href: "/reproduce",

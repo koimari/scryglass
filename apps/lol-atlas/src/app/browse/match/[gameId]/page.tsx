@@ -22,7 +22,7 @@ export default async function MatchPage({ params, searchParams }: Props) {
     <div className="match-page space-y-4">
       <OperationalHeader
         title="Match"
-        description="Game result, players, and model checks."
+        description="Game result, player rows, and validation status."
         meta={<span>{gameId}</span>}
       />
       <MatchLoader

@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import type { QueryRow } from "@/lib/duck";
-import { sortPlayersByRole } from "@/lib/format";
+import { DRAFT_UNAVAILABLE_MESSAGE } from "@/lib/publicDraftGate";
 
 export type DraftWrResult = {
   p_blue_draft: number;
@@ -19,87 +18,19 @@ type Props = {
   eloDiff?: number | null;
 };
 
-function picksFromMap(map: QueryRow, side: "blue" | "red"): string[] {
-  return [1, 2, 3, 4, 5]
-    .map((i) => map[`${side}_pick${i}`])
-    .filter((x) => x != null && String(x).length > 0)
-    .map(String);
-}
-
-function rolesFromPlayers(players: QueryRow[], side: "Blue" | "Red"): string[] | null {
-  const ordered = sortPlayersByRole(players.filter((p) => String(p.side) === side));
-  if (ordered.length < 5) return null;
-  return ordered.map((p) => String(p.position).toLowerCase());
-}
-
 export function useDraftWr(
   map: QueryRow | null,
   players: QueryRow[],
   eloDiff?: number | null,
 ): { draft: DraftWrResult | null; loading: boolean; error: string | null } {
-  const [draft, setDraft] = useState<DraftWrResult | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!map) return;
-    const blue = picksFromMap(map, "blue");
-    const red = picksFromMap(map, "red");
-    if (blue.length !== 5 || red.length !== 5) {
-      queueMicrotask(() => {
-        if (cancelled) return;
-        setDraft(null);
-        setError("Picks incomplete in pack row");
-        setLoading(false);
-      });
-      return () => {
-        cancelled = true;
-      };
-    }
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch("/api/draft-wr", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            blue,
-            red,
-            league: map.league ? String(map.league) : null,
-            elo_diff: eloDiff ?? null,
-            blue_roles: rolesFromPlayers(players, "Blue"),
-            red_roles: rolesFromPlayers(players, "Red"),
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || `draft-wr ${res.status}`);
-        if (!cancelled) {
-          setDraft({
-            p_blue_draft: Number(data.p_blue_draft),
-            draft_score_blue: Number(data.draft_score_blue),
-            draft_score_red: Number(data.draft_score_red),
-            wr_bump_pp: Number(data.wr_bump_pp),
-            confidence: Number(data.confidence),
-            draft_edge: Number(data.draft_edge),
-          });
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setDraft(null);
-          setError(e instanceof Error ? e.message : String(e));
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [map, players, eloDiff]);
-
-  return { draft, loading, error };
+  void map;
+  void players;
+  void eloDiff;
+  return {
+    draft: null,
+    loading: false,
+    error: DRAFT_UNAVAILABLE_MESSAGE,
+  };
 }
 
 function teamWon(map: QueryRow, side: "blue" | "red"): boolean {
@@ -138,7 +69,7 @@ function winnerFromPlayers(map: QueryRow, players: QueryRow[]): string {
   return actualWinnerName(map);
 }
 
-/** Inline draft WR strip for scoreboard / checklist. */
+/** Public claim gate for historic draft displays. */
 export function DraftWrPanel({ map, players, eloDiff }: Props) {
   const { draft, loading, error } = useDraftWr(map, players, eloDiff);
   const blueName = String(map.blue_teamname ?? "Blue");
@@ -154,7 +85,9 @@ export function DraftWrPanel({ map, players, eloDiff }: Props) {
       <span>Draft WR:</span>
       {loading && <span className="status-hint">…</span>}
       {error && !loading && (
-        <span className="text-[var(--danger)]">{error}</span>
+        <span className={error === DRAFT_UNAVAILABLE_MESSAGE ? "draft-unavailable" : "text-[var(--danger)]"}>
+          {error}
+        </span>
       )}
       {draft && !loading && (
         <>

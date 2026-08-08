@@ -102,6 +102,11 @@ TEAM_ALIASES: dict[str, str] = {
     "vit": "Team Vitality",
     "pain gaming": "Pain Gaming",
     "png": "Pain Gaming",
+    "løs": "LØS",
+    "los": "LØS",
+    "mibr.los": "LØS",
+    "mibr los": "LØS",
+    "los grandes": "LØS",
 }
 
 CHAMP_ALIASES: dict[str, str] = {

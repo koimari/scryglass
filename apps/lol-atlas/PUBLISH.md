@@ -1,5 +1,10 @@
 # Public pack publish checklist
 
+Canonical public site: https://scryglass.xyz
+
+Use the canonical domain for post-release verification. The Vercel project
+domain is not the publication URL.
+
 1. Current-data refresh: `python3 -m lol_kills.update_public_pack --years 2025,2026 --download-oe --download-grid --grid-required --publish`
    - OE is the reconciled baseline.
    - GRID is a pro-only freshness bridge for completed games not yet in OE.
@@ -14,15 +19,17 @@
 
 Do not ship betting tooling, fair-odds boards, or timelines in the default pack.
 
-## Scheduled refresh
+## Manual refresh
 
-`.github/workflows/refresh-public-pack.yml` runs every 15 minutes and can also
-be started manually. Configure these repository secrets first:
+`.github/workflows/refresh-public-pack.yml` and
+`.github/workflows/reconcile-oe-baseline.yml` are manual-only while the
+publication, storage, and cost gates are unresolved. Configure these repository
+secrets before an approved run:
 
 - `GRID_API_KEY`
 - `BLOB_READ_WRITE_TOKEN`
 
-Each successful run writes a new immutable Blob path and updates
+Each successful approved run writes a new immutable Blob path and updates
 `apps/lol-atlas/public/packs/manifest.json` and `latest.json`. Versioned paths
 avoid serving a half-written pack; the site always reads the latest complete
 pointer.

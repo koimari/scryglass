@@ -176,7 +176,6 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
   const [byPlayer, setByPlayer] = useState<Record<string, ChampAgg[]> | null>(null);
   const [champExpand, setChampExpand] = useState<Record<string, boolean>>({});
   const [series, setSeries] = useState<SeriesCard[]>([]);
-  const [draftEdge, setDraftEdge] = useState<number | null>(null);
   const [banPick, setBanPick] = useState<{ bans: string[]; picks: string[] } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [seriesLoaded, setSeriesLoaded] = useState(false);
@@ -216,8 +215,6 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
         setSeries(grouped.slice(0, 8));
         setSeriesLoaded(true);
 
-        // Draft edge over recent games with full picks
-        const edges: number[] = [];
         const banCount = new Map<string, number>();
         const pickCount = new Map<string, number>();
         const patches = [...new Set(maps.map((m) => String(m.patch ?? "")))].filter(Boolean);
@@ -225,28 +222,6 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
         const recentPatches = new Set(patches.slice(-3));
 
         for (const m of maps.slice(0, 25)) {
-          const blue = [1, 2, 3, 4, 5].map((i) => String(m[`blue_pick${i}`] ?? "")).filter(Boolean);
-          const red = [1, 2, 3, 4, 5].map((i) => String(m[`red_pick${i}`] ?? "")).filter(Boolean);
-          if (blue.length === 5 && red.length === 5 && edges.length < 12) {
-            try {
-              const res = await fetch("/api/draft-wr", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  blue,
-                  red,
-                  league: String(m.league ?? ""),
-                }),
-              });
-              if (res.ok) {
-                const ds = (await res.json()) as { draft_edge: number };
-                const isBlue = String(m.blue_teamname) === team.team;
-                edges.push(isBlue ? ds.draft_edge : -ds.draft_edge);
-              }
-            } catch {
-              /* ignore */
-            }
-          }
           if (recentPatches.has(String(m.patch ?? ""))) {
             const side = String(m.blue_teamname) === team.team ? "blue" : "red";
             for (let i = 1; i <= 5; i++) {
@@ -256,9 +231,6 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
               if (p) pickCount.set(p, (pickCount.get(p) ?? 0) + 1);
             }
           }
-        }
-        if (edges.length) {
-          setDraftEdge(edges.reduce((a, b) => a + b, 0) / edges.length);
         }
         const top = (m: Map<string, number>, n: number) =>
           [...m.entries()]
@@ -298,8 +270,8 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
           </p>
           <h1>{team.team}</h1>
           <p className={profileStyles.summary}>
-            Current-roster strength. The adjusted rating accounts for uncertainty while the roster
-            evidence settles.
+            Organization strength in the current pack. This descriptive benchmark is not an
+            exact match-time roster estimate; the adjusted rating accounts for uncertainty.
           </p>
         </div>
         <div className={profileStyles.metrics}>
@@ -322,12 +294,6 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
           <span>
             <strong>WR</strong> {formatWr(record?.wr)}
           </span>
-          {draftEdge != null && (
-            <span>
-              <strong>Draft score edge</strong> {draftEdge >= 0 ? "+" : ""}
-              {draftEdge.toFixed(1)}
-            </span>
-          )}
           <span>
             <strong>Updated</strong> {packUpdatedLabel(manifest)}
           </span>

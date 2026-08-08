@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data" / "lol"
 WAREHOUSE_DIR = DATA / "warehouse"
 RAW_OE_DIR = WAREHOUSE_DIR / "raw"
+OE_RECEIPT_DIR = WAREHOUSE_DIR / "receipts" / "oracles_elixir"
 PARQUET_DIR = WAREHOUSE_DIR / "parquet"
 FEATURES_DIR = DATA / "features"
 MODELS_DIR = DATA / "models"

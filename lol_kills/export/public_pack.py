@@ -30,7 +30,6 @@ from lol_kills.export.player_metadata import build_player_metadata
 from lol_kills.etl.competition import TAXONOMY_VERSION, canonicalize_competition_frame
 from lol_kills.ratings.hierarchical_bt import fit_hierarchical_bt
 from lol_kills.ratings.player_elo import build_maps_frame_from_players, build_player_weekly_ranks
-from lol_kills.draft_recommendation import build_draft_context
 
 ROOT = Path(__file__).resolve().parents[2]
 WAREHOUSE = ROOT / "data" / "lol" / "warehouse" / "parquet"
@@ -260,31 +259,6 @@ def export_public_pack(
             f"features/{filename}",
         )
 
-    player_rating_source = FEATURES / "player_ratings_snapshot.parquet"
-    if player_rating_source.exists():
-        draft_context = build_draft_context(
-            player_frame,
-            public_ratings.to_dict(orient="records"),
-            pd.read_parquet(player_rating_source).to_dict(orient="records"),
-            team_records_payload,
-            player_records_payload,
-        )
-        draft_context_dest = feat_dir / "draft_context.json"
-        draft_context_dest.write_text(
-            json.dumps(draft_context, separators=(",", ":"), ensure_ascii=False),
-            encoding="utf-8",
-        )
-        register(
-            {
-                "rows": len(draft_context.get("teams", [])),
-                "cols": None,
-                "bytes": draft_context_dest.stat().st_size,
-                "sha256": _sha256(draft_context_dest),
-                "columns": None,
-            },
-            "features/draft_context.json",
-        )
-
     for src_name, cols, out_name in (
         ("ratings_snapshot.parquet", spec.RATINGS_SNAPSHOT_COLS, "ratings_snapshot.parquet"),
         (
@@ -456,6 +430,27 @@ def export_public_pack(
         },
         "studies/grubs/STUDY_NOTE.txt",
     )
+
+    # Do not emit an apparently valid pack when the public Reproduce page
+    # would show a cited file as missing.  In particular, publication refreshes
+    # must carry the paper PDF and article inputs together with the ratings
+    # files; a stale/partial pack is not an acceptable fallback.
+    present_paths = {str(item["path"]) for item in files_meta}
+    missing_public_files = sorted(
+        set(spec.PUBLIC_REPRODUCTION_REQUIRED_FILES) - present_paths
+    )
+    if missing_public_files:
+        raise RuntimeError(
+            "public reproduction contract incomplete; missing: "
+            + ", ".join(missing_public_files)
+        )
+    leaked_public_files = sorted(
+        present_paths.intersection(spec.WITHHELD_PUBLIC_FILES)
+    )
+    if leaked_public_files:
+        raise RuntimeError(
+            "withheld public artifacts present: " + ", ".join(leaked_public_files)
+        )
 
     # --- meta ---
     meta_dir = pack_dir / "meta"

@@ -28,9 +28,7 @@ const ESSENTIALS: { group: string; paths: string[] }[] = [
       "features/player_ratings_meta.json",
       "features/team_records.json",
       "features/player_records.json",
-      "features/major_teams.json",
       "models/elo_wr_calibration.json",
-      "models/draft_wr_calibration.json",
     ],
   },
   {
@@ -97,7 +95,8 @@ export default async function ReproducePage() {
           <li>Pin this pack id.</li>
           <li>Use the same year / league / patch filters as the post.</li>
           <li>
-            Elo→WR and Draft Score: use the pinned files under Ratings below.
+            Published ratings are descriptive benchmark references. Draft Score outputs remain
+            withheld until the independent review gates are accepted.
           </li>
           <li>
             Void grubs: article JSON + PDF under Article inputs — leave-mix (~24%) is a sister

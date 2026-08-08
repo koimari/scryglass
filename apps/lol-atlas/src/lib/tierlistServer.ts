@@ -2,8 +2,12 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-const REPO_ROOT = path.resolve(process.cwd(), "../..");
-const INDEX_LOCATOR = "data/lol/v2/tierlists/index-v1.json";
+const TIERLIST_ROOT = path.join(process.cwd(), "public", "v2", "tierlists");
+const INDEX_LOCATOR = "index-v1.json";
+
+function cellPath(locator: string): string {
+  return path.join(TIERLIST_ROOT, "cells", path.basename(locator));
+}
 
 type CellMeta = {
   artifact_id: string;
@@ -104,7 +108,7 @@ function canonical(value: unknown): string {
 const BUCKETS = ["S", "A", "B", "C", "D"] as const;
 
 export function loadTierlistView(): TierlistView | null {
-  const absolute = path.join(REPO_ROOT, INDEX_LOCATOR);
+  const absolute = path.join(TIERLIST_ROOT, INDEX_LOCATOR);
   if (!existsSync(absolute)) return null;
   let index: { artifact_sha256: string; generated_at: string; cells: CellMeta[]; options: TierlistView["options"] };
   try {
@@ -119,9 +123,9 @@ export function loadTierlistView(): TierlistView | null {
   let cellsAvailable = 0;
   for (const cell of index.cells) {
     if (cell.status !== "development_only") continue;
-    const cellPath = path.join(REPO_ROOT, cell.locator);
-    if (!existsSync(cellPath)) return null;
-    const raw = readFileSync(cellPath, "utf-8");
+    const absoluteCellPath = cellPath(cell.locator);
+    if (!existsSync(absoluteCellPath)) return null;
+    const raw = readFileSync(absoluteCellPath, "utf-8");
     if (sha256Hex(raw) !== cell.raw_sha256) return null;
     let payload: CellPayload;
     try {

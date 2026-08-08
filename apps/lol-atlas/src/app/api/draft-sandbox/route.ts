@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import {
+  DRAFT_UNAVAILABLE_RESPONSE,
+  publicPredictiveDraftsEnabled,
+} from "@/lib/publicDraftGate";
+import {
   DRAFT_ROLES,
   analyzeDraftSandbox,
   draftCatalog,
@@ -14,6 +18,12 @@ import {
 import { readCurrentDraftContext } from "@/lib/draftServer";
 
 export const runtime = "nodejs";
+
+const unavailable = () =>
+  NextResponse.json(
+    DRAFT_UNAVAILABLE_RESPONSE,
+    { status: 503 },
+  );
 
 type Body = {
   actions?: Array<{
@@ -56,6 +66,9 @@ function canonicalChampion(value: string): string | null {
 }
 
 export async function GET() {
+  if (!publicPredictiveDraftsEnabled()) return unavailable();
+  /* Development-only implementation retained below for reproducibility work. */
+  /* istanbul ignore next */
   const context = await readCurrentDraftContext();
   return NextResponse.json({
     champions: draftCatalog(),
@@ -117,6 +130,9 @@ function lineupRating(players: Partial<Record<DraftRole, DraftContextPlayer>>): 
 }
 
 export async function POST(request: Request) {
+  if (!publicPredictiveDraftsEnabled()) return unavailable();
+  /* Development-only implementation retained below for reproducibility work. */
+  /* istanbul ignore next */
   try {
     const body = (await request.json()) as Body;
     const context = await readCurrentDraftContext();
@@ -137,7 +153,8 @@ export async function POST(request: Request) {
     const actions: DraftAction[] = [];
     const seen = new Set<string>();
     for (const action of rawActions) {
-      if (!isSide(action.side) || !action.champion) {
+      const side = isSide(action.side) ? action.side : null;
+      if (!side || typeof action.champion !== "string" || !action.champion) {
         return NextResponse.json(
           { error: "every action needs a side and champion" },
           { status: 400 },
@@ -146,7 +163,7 @@ export async function POST(request: Request) {
       if (action.role != null && !isRole(action.role)) {
         return NextResponse.json({ error: `invalid role for ${action.champion}` }, { status: 400 });
       }
-      const champion = canonicalChampion(action.champion);
+      const champion = canonicalChampion(action.champion ?? "") ?? "";
       if (!champion) {
         return NextResponse.json({ error: `unknown champion: ${action.champion}` }, { status: 400 });
       }
@@ -155,7 +172,11 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: `${champion} is already selected` }, { status: 400 });
       }
       seen.add(key);
-      actions.push({ side: action.side, champion, role: action.role ?? null });
+      actions.push({
+        side: side as DraftSide,
+        champion,
+        role: (action.role as DraftRole | null | undefined) ?? null,
+      });
     }
 
     const sideCounts = {

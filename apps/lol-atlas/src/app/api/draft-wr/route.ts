@@ -1,39 +1,57 @@
 import { NextResponse } from "next/server";
-import { draftScore } from "@/lib/draftScore";
+import {
+  DRAFT_UNAVAILABLE_RESPONSE,
+  publicPredictiveDraftsEnabled,
+} from "@/lib/publicDraftGate";
+import {
+  scoreCanonicalNeutralDraft,
+  type CanonicalNeutralDraftRequest,
+} from "@/lib/draftTerminalServer";
 
 export const runtime = "nodejs";
 
+const unavailable = () =>
+  NextResponse.json(
+    DRAFT_UNAVAILABLE_RESPONSE,
+    { status: 503 },
+  );
+
 type Body = {
-  blue?: string[];
-  red?: string[];
-  league?: string | null;
-  elo_diff?: number | null;
-  blue_roles?: string[] | null;
-  red_roles?: string[] | null;
+  side_a?: Record<string, string>;
+  side_b?: Record<string, string>;
+  event_start?: string;
+  source_available_at?: string;
+  source_record_id?: string;
+  source_payload_sha256?: string;
+  source_rights_status?: "reviewed" | "unknown";
+  actions?: unknown[];
+  final_assignments?: unknown[];
+  protocol_validation?: Record<string, unknown>;
+  contract?: Record<string, unknown>;
 };
 
 export async function POST(req: Request) {
+  if (!publicPredictiveDraftsEnabled()) return unavailable();
   try {
     const body = (await req.json()) as Body;
-    if (!body.blue?.length || !body.red?.length) {
-      return NextResponse.json({ error: "blue and red picks required" }, { status: 400 });
-    }
-    if (body.blue.length !== 5 || body.red.length !== 5) {
-      return NextResponse.json({ error: "need 5 picks per side" }, { status: 400 });
-    }
-    const result = draftScore({
-      blue: body.blue,
-      red: body.red,
-      league: body.league,
-      elo_diff: body.elo_diff,
-      blue_roles: body.blue_roles,
-      red_roles: body.red_roles,
+    const result = scoreCanonicalNeutralDraft({
+      sideA: body.side_a as CanonicalNeutralDraftRequest["sideA"],
+      sideB: body.side_b as CanonicalNeutralDraftRequest["sideB"],
+      eventStart: body.event_start as string,
+      sourceAvailableAt: body.source_available_at as string,
+      sourceRecordId: body.source_record_id as string,
+      sourcePayloadSha256: body.source_payload_sha256 as string,
+      sourceRightsStatus: body.source_rights_status as "reviewed" | "unknown",
+      actions: body.actions as CanonicalNeutralDraftRequest["actions"],
+      finalAssignments: body.final_assignments as CanonicalNeutralDraftRequest["finalAssignments"],
+      protocolValidation: body.protocol_validation as CanonicalNeutralDraftRequest["protocolValidation"],
+      contract: body.contract,
     });
-    return NextResponse.json(result);
+    return NextResponse.json(result, { status: result.status === "unavailable" ? 503 : 200 });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : String(e) },
-      { status: 500 },
+      { status: 400 },
     );
   }
 }

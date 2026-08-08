@@ -15,7 +15,6 @@ import {
 } from "@/lib/duck";
 import { expandTeamQuery, teamSlug } from "@/lib/pack";
 import { MatchScoreboard } from "./MatchScoreboard";
-import { useDraftWr } from "./DraftWrPanel";
 import styles from "./HeadToHead.module.css";
 
 function H2HBoardPanel({
@@ -27,28 +26,12 @@ function H2HBoardPanel({
   players: QueryRow[];
   year: number;
 }) {
-  const { draft } = useDraftWr(map, players, null);
   return (
     <>
       <div className="micro-log mb-3">
-        {draft ? (
-          <span>
-            <strong>Draft</strong>{" "}
-            <span className="text-[var(--side-blue)]">
-              {(100 * draft.p_blue_draft).toFixed(0)}%
-            </span>
-            {" / "}
-            <span className="text-[var(--side-red)]">
-              {(100 * (1 - draft.p_blue_draft)).toFixed(0)}%
-            </span>
-            {" · score "}
-            {draft.draft_score_blue.toFixed(0)}–{draft.draft_score_red.toFixed(0)}
-          </span>
-        ) : (
-          <span className="muted">Draft …</span>
-        )}
+        <span className="muted">Draft estimate withheld in this public MVP.</span>
       </div>
-      <MatchScoreboard map={map} players={players} draftPctBlue={draft?.p_blue_draft ?? null} />
+      <MatchScoreboard map={map} players={players} />
       <p className="mt-3 text-xs text-[var(--ink-muted)]">
         <Link
           href={`/browse/match/${encodeURIComponent(String(map.oe_gameid))}?year=${year}`}
@@ -85,7 +68,6 @@ export function HeadToHead({ baseUrl, years }: Props) {
   );
   const [sortCol, setSortCol] = useState<SortCol>("date");
   const [sortDir, setSortDir] = useState<Dir>("desc");
-  const [draftLean, setDraftLean] = useState<string | null>(null);
   const [status, setStatus] = useState("Enter two teams to compare their series.");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -193,7 +175,6 @@ export function HeadToHead({ baseUrl, years }: Props) {
     setError(null);
     setBoard(null);
     setSelectedKey(null);
-    setDraftLean(null);
     setLoading(true);
     setStatus("Searching series…");
     try {
@@ -266,39 +247,6 @@ export function HeadToHead({ baseUrl, years }: Props) {
       setSeries(grouped);
       setStatus(`${grouped.length} series · ${filtered.length} games`);
       if (grouped[0]) setSelectedKey(grouped[0].key);
-
-      // Draft lean: sample up to 8 games
-      let aEdge = 0;
-      let n = 0;
-      for (const g of filtered.slice(0, 8)) {
-        const blue = [1, 2, 3, 4, 5].map((i) => String(g[`blue_pick${i}`] ?? "")).filter(Boolean);
-        const red = [1, 2, 3, 4, 5].map((i) => String(g[`red_pick${i}`] ?? "")).filter(Boolean);
-        if (blue.length !== 5 || red.length !== 5) continue;
-        try {
-          const res = await fetch("/api/draft-wr", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ blue, red, league: String(g.league ?? "") }),
-          });
-          if (!res.ok) continue;
-          const ds = (await res.json()) as { draft_edge: number };
-          const aIsBlue = String(g.blue_teamname) === exactA;
-          aEdge += aIsBlue ? ds.draft_edge : -ds.draft_edge;
-          n += 1;
-        } catch {
-          /* ignore */
-        }
-      }
-      if (n) {
-        const mean = aEdge / n;
-        setDraftLean(
-          mean > 2
-            ? `${exactA} had the higher mean Draft Score in this sample (${mean.toFixed(1)} points).`
-            : mean < -2
-              ? `${exactB} had the higher mean Draft Score in this sample (${Math.abs(mean).toFixed(1)} points).`
-              : `Mean Draft Score difference in this sample: ${mean.toFixed(1)} points.`,
-        );
-      }
     } catch (e) {
       setError(e instanceof Error ? `${e.message} Try again.` : String(e));
       setStatus("Error");
@@ -453,7 +401,6 @@ export function HeadToHead({ baseUrl, years }: Props) {
               · {series.length} series · {series.reduce((n, s) => n + s.games.length, 0)} games
             </span>
           </p>
-          {draftLean && <p className="text-sm text-[var(--ink-muted)] max-w-[68ch]">{draftLean}</p>}
         </>
       )}
 

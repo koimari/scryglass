@@ -1,6 +1,7 @@
 name: Refresh public Scryglass pack
 
 on:
+  # Manual only until the publication, storage, and cost gates are approved.
   workflow_dispatch:
     inputs:
       grid_days:
@@ -18,10 +19,6 @@ on:
         required: false
         default: ""
         type: string
-  schedule:
-    # GRID supplies the freshness bridge. OE reconciliation runs separately
-    # so a Google Drive quota response cannot block current match rows.
-    - cron: "*/15 * * * *"
 
 concurrency:
   group: refresh-public-pack

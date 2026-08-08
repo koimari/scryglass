@@ -1,0 +1,86 @@
+{
+  "artifact_sha256": "0cdf6c2c4fd4a958c0cca851677239f06fb8711e644ca63396af353b0a9dc9c0",
+  "authority": {
+    "betting_authority": false,
+    "contextual_probability_authority": false,
+    "model_validation_authority": false,
+    "neutral_probability_authority": false,
+    "recommendation_authority": false
+  },
+  "bindings": {
+    "development_artifact_report_locator": "data/lol/v2/models/draft-terminal/terminal-model-neutral-development-v3.report.json",
+    "development_artifact_report_raw_sha256": "ac548f0849741c40a29ce4ba63ebc70c699c5d2f3b7a6414be53909a764b5bce",
+    "development_evaluation_summary_locator": "data/lol/v2/models/draft-terminal/development-evaluation-summary-v3.json",
+    "development_evaluation_summary_raw_sha256": "4c5f71cbe9f5730cdebb1d4974b185e6c10d914235c6cbf4d025e6d866056f80",
+    "development_snapshot_manifest_locator": "data/lol/v2/models/draft-terminal/development-cohort-clustered-v2.manifest.json",
+    "development_snapshot_manifest_raw_sha256": "f395e0da4c138eaaaae6a749359e866a9f4fa71cfd24f334e104e2b458a74e48",
+    "development_snapshot_payload_locator": "data/lol/v2/models/draft-terminal/development-cohort-clustered-v2.jsonl",
+    "development_snapshot_payload_raw_sha256": "e8105027c7b2406f735cdcca592e60071ed25fc6489f4966a663dd91bea4a7d8",
+    "replay_fixture_locator": "data/lol/v2/models/draft-terminal/terminal-neutral-development-v3.replay-fixture.json",
+    "replay_fixture_raw_sha256": "f7a786e629927587c99df0f6cd5bf13d5335b415c38997494ef16d498053c496"
+  },
+  "claim_ceiling": {
+    "adaptive_development_candidate": true,
+    "betting": false,
+    "equal_strength_composition_index": true,
+    "independent_validation": false,
+    "outcome_calibrated_neutral_probability": false,
+    "production_probability": false,
+    "recommendation": false
+  },
+  "clock_attestation": {
+    "future_boundary_utc": "2026-08-03T00:00:00+00:00",
+    "observed_wall_clock_utc": "2026-08-02T00:35:55.995070+00:00",
+    "source": "system_utc_clock_sampled_inside_builder",
+    "user_supplied_timestamp_allowed": false
+  },
+  "development_evidence": {
+    "development_evidence_is_independent": false,
+    "mean_validation_brier_delta": -0.0021521056946462447,
+    "mean_validation_log_loss_delta": -0.00512722110312062,
+    "outer_test_fold_count": 3,
+    "outer_test_is_candidate_selection_input": false,
+    "outer_test_pass_count": 2,
+    "validation_brier_deltas": [
+      -0.001699423928345184,
+      -0.0008372030900514749,
+      -0.003919690065542075
+    ],
+    "validation_log_loss_deltas": [
+      -0.0049557612106004845,
+      -0.0015472820042824464,
+      -0.008878620094478928
+    ]
+  },
+  "future_state": {
+    "future_holdout_status": "EMPTY_NOT_YET_ACQUIRED",
+    "future_outcomes_accessed": false,
+    "future_outcomes_present": false,
+    "independent_review_present": false,
+    "prediction_capture_present": false
+  },
+  "locked_at_utc": "2026-08-02T00:35:55.995070+00:00",
+  "result_state": "ADAPTIVE_INCREMENTAL_CANDIDATE_LOCKED_FOR_FUTURE_EVALUATION",
+  "schema_version": "scryglass:draft-terminal-candidate-registry:v3",
+  "selected_candidate": {
+    "artifact_locator": "data/lol/v2/models/draft-terminal/terminal-model-neutral-development-v3.json",
+    "artifact_raw_sha256": "d6ddfbd0238ff5b9d1b259e393b1724717bcb6dd9d7e407d92fc44395da6d6c3",
+    "candidate_id": "m0-role-additive",
+    "development_validation_all_folds_nonharmful": true,
+    "independent_validation": false,
+    "model_as_of": "2026-07-18T16:33:48Z",
+    "model_version": "draft-terminal-neutral-dev-v3.0.0",
+    "ridge_strength": 0.05,
+    "selection_target": "incremental_context_plus_draft_vs_same_input_context_only",
+    "served_neutral_semantics": "equal_strength_composition_index_not_directly_outcome_calibrated",
+    "variant_id": "m0-role-additive@ridge-0.05"
+  },
+  "supersession": {
+    "reason": "v2 ranked neutral composition logits directly against unequal-team outcomes",
+    "v2_artifact_locator": "data/lol/v2/models/draft-terminal/terminal-model-neutral-development-v2.json",
+    "v2_artifact_raw_sha256": "62ee4e5efc09d6c87db0b7564c6428447d10058cdc91f6f39d8e70b8d8721b94",
+    "v2_authority_rehabilitated": false,
+    "v2_summary_locator": "data/lol/v2/models/draft-terminal/development-evaluation-summary-v2.json",
+    "v2_summary_raw_sha256": "d3b6b7a94a8161797782d57f4b1ac54018d7afea72590b55cd261e54e20e85a2"
+  }
+}

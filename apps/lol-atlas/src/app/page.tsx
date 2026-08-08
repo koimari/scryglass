@@ -81,8 +81,9 @@ export default function HomePage() {
         <div className="home-section-intro">
           <h2 className="font-display">Analysis tools</h2>
           <p>
-            Ratings, completed matches, head-to-head records, and draft analysis use the same
-            current data pack.
+            Ratings, completed matches, head-to-head records, and reproduction files use the same
+            current data pack. Draft analysis remains visible as a withheld surface while its
+            independent review is incomplete.
           </p>
         </div>
         <nav className="research-index" aria-label="Analysis tools">
@@ -110,7 +111,7 @@ export default function HomePage() {
           <Link href="/sandbox">
             <span>
               <span className="idx-title">Draft analysis</span>
-              <span className="idx-blurb block">Compare legal next picks by projected value.</span>
+              <span className="idx-blurb block">Unavailable pending independent review.</span>
             </span>
             <ArrowUpRightIcon className="idx-arrow" size={21} aria-hidden />
           </Link>

@@ -5,7 +5,7 @@ import {
   draftCatalog,
   draftScore,
   type DraftAction,
-} from "./draftScore.ts";
+} from "./draftScore";
 
 const sampleActions: DraftAction[] = [
   { side: "blue", champion: "Jarvan IV", role: "jng" },

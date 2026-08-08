@@ -27,8 +27,9 @@ python3 -m lol_kills.export.upload_pack --local-only
 - `/elo` — Dual Elo ratings
 - `/browse` — match explorer
 - `/browse/head-to-head` — head-to-head
-- `/live` — verified live game state and conditional model estimate
+- `/live` — redirects to the completed match explorer; live model output is not a public MVP surface
 - `/reproduce` — pack download
 - `/methodology` — estimands
+- `/sandbox` — Draft Score status; predictive output is withheld pending independent review
 
 Theme: System (default) / Light / Dark via the header control.

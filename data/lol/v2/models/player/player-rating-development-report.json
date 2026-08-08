@@ -1,0 +1,667 @@
+{
+  "artifact_id": "player-rating-development-report-l4-v3",
+  "blockers": [
+    "authoritative_observed_player_rows_unavailable",
+    "production_player_rating_authority_unavailable",
+    "independent_l6_l2_and_root_c2_review_required"
+  ],
+  "claim_ceiling": {
+    "c2": false,
+    "calibrated_public_probability_authorized": false,
+    "development_only": true,
+    "empirical_95_coverage_authorized": false,
+    "pass_b2": false,
+    "predictive_performance_authorized": false,
+    "probability_wording_authorized": false,
+    "production_eligible": false,
+    "promotion_authorized": false,
+    "publication_authorized": false,
+    "real_data_fit_authorized": false,
+    "reliability_authorized": false,
+    "sota_authorized": false,
+    "synthetic_only": true
+  },
+  "common_origin_ids": [
+    "synthetic-001",
+    "synthetic-002",
+    "synthetic-003",
+    "synthetic-004"
+  ],
+  "common_origin_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+  "diagnostics": [
+    {
+      "brier": 0.20396725725962,
+      "candidate_id": "random_walk_no_reset+joint_resource_to_performance",
+      "decay_candidate_id": "random_walk_no_reset",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.600082975731726,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "joint_resource_to_performance",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.202718489546287,
+      "candidate_id": "random_walk_no_reset+no_resource",
+      "decay_candidate_id": "random_walk_no_reset",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.597549694963833,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "no_resource",
+      "resource_supported_origin_count": 3,
+      "selectable": true
+    },
+    {
+      "brier": 0.203727145346287,
+      "candidate_id": "random_walk_no_reset+lagged_pre_map_policy",
+      "decay_candidate_id": "random_walk_no_reset",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.599596109946583,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "lagged_pre_map_policy",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.206136639234502,
+      "candidate_id": "random_walk_no_reset+player_policy_double_count_sensitivity",
+      "decay_candidate_id": "random_walk_no_reset",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.604539452813062,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "player_policy_double_count_sensitivity",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.214866542704535,
+      "candidate_id": "mean_reversion+joint_resource_to_performance",
+      "decay_candidate_id": "mean_reversion",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.622492831070814,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "joint_resource_to_performance",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.213572198678947,
+      "candidate_id": "mean_reversion+no_resource",
+      "decay_candidate_id": "mean_reversion",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.619882221473637,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "no_resource",
+      "resource_supported_origin_count": 3,
+      "selectable": true
+    },
+    {
+      "brier": 0.214621990205238,
+      "candidate_id": "mean_reversion+lagged_pre_map_policy",
+      "decay_candidate_id": "mean_reversion",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.621999796423199,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "lagged_pre_map_policy",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.21685781791346,
+      "candidate_id": "mean_reversion+player_policy_double_count_sensitivity",
+      "decay_candidate_id": "mean_reversion",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.626528482555363,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "player_policy_double_count_sensitivity",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.218149708424984,
+      "candidate_id": "patch_roster_shock+joint_resource_to_performance",
+      "decay_candidate_id": "patch_roster_shock",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.629189550782897,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "joint_resource_to_performance",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.21684436838467,
+      "candidate_id": "patch_roster_shock+no_resource",
+      "decay_candidate_id": "patch_roster_shock",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.626560543312194,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "no_resource",
+      "resource_supported_origin_count": 3,
+      "selectable": true
+    },
+    {
+      "brier": 0.217904506597862,
+      "candidate_id": "patch_roster_shock+lagged_pre_map_policy",
+      "decay_candidate_id": "patch_roster_shock",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.628695891426506,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "lagged_pre_map_policy",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.220105256775833,
+      "candidate_id": "patch_roster_shock+player_policy_double_count_sensitivity",
+      "decay_candidate_id": "patch_roster_shock",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.633138804935408,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "player_policy_double_count_sensitivity",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.213759808174008,
+      "candidate_id": "season_shock+joint_resource_to_performance",
+      "decay_candidate_id": "season_shock",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.620185780420189,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "joint_resource_to_performance",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.212458241883388,
+      "candidate_id": "season_shock+no_resource",
+      "decay_candidate_id": "season_shock",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.617560169224495,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "no_resource",
+      "resource_supported_origin_count": 3,
+      "selectable": true
+    },
+    {
+      "brier": 0.21351332601372,
+      "candidate_id": "season_shock+lagged_pre_map_policy",
+      "decay_candidate_id": "season_shock",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.61968881841319,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "lagged_pre_map_policy",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.215944775414094,
+      "candidate_id": "season_shock+player_policy_double_count_sensitivity",
+      "decay_candidate_id": "season_shock",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.62462798110415,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "player_policy_double_count_sensitivity",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.207695131120943,
+      "candidate_id": "calendar_boundary_shock+joint_resource_to_performance",
+      "decay_candidate_id": "calendar_boundary_shock",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.60776656021164,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "joint_resource_to_performance",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.206425183893474,
+      "candidate_id": "calendar_boundary_shock+no_resource",
+      "decay_candidate_id": "calendar_boundary_shock",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.605196309860411,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "no_resource",
+      "resource_supported_origin_count": 3,
+      "selectable": true
+    },
+    {
+      "brier": 0.207452326054267,
+      "candidate_id": "calendar_boundary_shock+lagged_pre_map_policy",
+      "decay_candidate_id": "calendar_boundary_shock",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.607275398970559,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "lagged_pre_map_policy",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.209890615951746,
+      "candidate_id": "calendar_boundary_shock+player_policy_double_count_sensitivity",
+      "decay_candidate_id": "calendar_boundary_shock",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.612257761996146,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "player_policy_double_count_sensitivity",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.250678444588395,
+      "candidate_id": "full_reset+joint_resource_to_performance",
+      "decay_candidate_id": "full_reset",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.694504087832832,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "joint_resource_to_performance",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.249244360195736,
+      "candidate_id": "full_reset+no_resource",
+      "decay_candidate_id": "full_reset",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.69163589350316,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "no_resource",
+      "resource_supported_origin_count": 3,
+      "selectable": true
+    },
+    {
+      "brier": 0.2504239103759,
+      "candidate_id": "full_reset+lagged_pre_map_policy",
+      "decay_candidate_id": "full_reset",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.693995009382503,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "lagged_pre_map_policy",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    },
+    {
+      "brier": 0.251129440772692,
+      "candidate_id": "full_reset+player_policy_double_count_sensitivity",
+      "decay_candidate_id": "full_reset",
+      "eligible_origin_count": 4,
+      "eligible_resource_observations": 6,
+      "expected_origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "expected_origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "log_loss": 0.695406107152189,
+      "origin_identity_status": "verified",
+      "origin_ids": [
+        "synthetic-001",
+        "synthetic-002",
+        "synthetic-003",
+        "synthetic-004"
+      ],
+      "origin_set_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881",
+      "resource_candidate_id": "player_policy_double_count_sensitivity",
+      "resource_supported_origin_count": 3,
+      "selectable": false
+    }
+  ],
+  "eligible_origin_count": 4,
+  "evaluation_cutoff": "2026-03-01T14:00:00Z",
+  "interval_wording": "95% model range",
+  "production_eligible": false,
+  "resource_causal_holding_equal_claim": false,
+  "schema_version": "2.0.0",
+  "selected_candidate_id": "random_walk_no_reset+no_resource",
+  "selection_decision_sha256": "e963c441eb7610a8a6159dc10d4702dce19b3cf78e8eaba91c4b996f17a5252a",
+  "status": "synthetic_mechanics_selection",
+  "verified_selectable_origin_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881"
+}

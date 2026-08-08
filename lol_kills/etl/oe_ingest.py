@@ -5,15 +5,222 @@ Downstream models can select what they need; missing fields across years are NaN
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
+import shutil
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import pandas as pd
 
 from lol_kills.etl.aliases import normalize_champ, normalize_team
-from lol_kills.etl.paths import OE_DRIVE_IDS, OE_FOLDER, PARQUET_DIR, RAW_OE_DIR
+from lol_kills.etl.paths import (
+    OE_DRIVE_IDS,
+    OE_FOLDER,
+    OE_RECEIPT_DIR,
+    PARQUET_DIR,
+    RAW_OE_DIR,
+    ROOT,
+)
+
+
+OE_MIN_DOWNLOAD_BYTES = 10_000
+OE_REQUIRED_COLUMNS = frozenset(
+    {"gameid", "league", "date", "side", "position", "teamname", "kills"}
+)
+
+
+class OeDownloadError(RuntimeError):
+    """A requested OE source refresh could not be safely committed."""
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise OeDownloadError(f"duplicate JSON key in OE receipt: {key}")
+        value[key] = item
+    return value
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _canonical_sha256(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(ROOT.resolve()))
+    except ValueError:
+        return str(path.resolve())
+
+
+def _validate_oe_csv(path: Path, year: str) -> dict[str, Any]:
+    """Validate source identity and temporal coverage before replacement."""
+
+    if not path.is_file():
+        raise OeDownloadError(f"OE candidate is not a regular file: {path}")
+    size = path.stat().st_size
+    if size < OE_MIN_DOWNLOAD_BYTES:
+        raise OeDownloadError(
+            f"OE candidate for {year} is too small ({size} bytes)"
+        )
+    head = path.read_bytes()[:512].lower()
+    if b"<!doctype html" in head or b"<html" in head:
+        raise OeDownloadError(f"OE candidate for {year} is HTML, not CSV")
+
+    try:
+        header = [str(column).strip() for column in pd.read_csv(path, nrows=0).columns]
+    except Exception as exc:  # noqa: BLE001
+        raise OeDownloadError(f"OE candidate header could not be parsed: {exc}") from exc
+    missing = sorted(OE_REQUIRED_COLUMNS.difference(header))
+    if missing:
+        raise OeDownloadError(
+            f"OE candidate for {year} is missing required columns: {missing}"
+        )
+
+    selected = [column for column in header if column in OE_REQUIRED_COLUMNS]
+    try:
+        frame = pd.read_csv(path, usecols=selected, low_memory=False)
+    except Exception as exc:  # noqa: BLE001
+        raise OeDownloadError(f"OE candidate body could not be parsed: {exc}") from exc
+    if frame.empty:
+        raise OeDownloadError(f"OE candidate for {year} has no rows")
+
+    dates = pd.to_datetime(frame["date"], errors="coerce", utc=True)
+    if dates.isna().any():
+        raise OeDownloadError(f"OE candidate for {year} has unparseable dates")
+    observed_years = sorted({str(value) for value in dates.dt.year.unique()})
+    if observed_years != [year]:
+        raise OeDownloadError(
+            f"OE candidate year mismatch: expected {year}, observed {observed_years}"
+        )
+
+    positions = frame["position"].astype(str).str.strip().str.lower()
+    team_rows = int(positions.eq("team").sum())
+    player_rows = int((~positions.eq("team")).sum())
+    game_count = int(frame["gameid"].nunique(dropna=True))
+    if team_rows == 0 or player_rows == 0 or game_count == 0:
+        raise OeDownloadError(
+            f"OE candidate for {year} lacks team, player, or game rows"
+        )
+
+    return {
+        "raw_sha256": _sha256_file(path),
+        "bytes": int(size),
+        "row_count": int(len(frame)),
+        "game_count": game_count,
+        "team_row_count": team_rows,
+        "player_row_count": player_rows,
+        "league_count": int(frame["league"].nunique(dropna=True)),
+        "date_min_utc": dates.min().isoformat(),
+        "date_max_utc": dates.max().isoformat(),
+        "columns_sha256": _canonical_sha256(header),
+    }
+
+
+def _archive_existing(path: Path, raw_sha256: str) -> Path:
+    archive_dir = RAW_OE_DIR / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    archive = archive_dir / f"{path.stem}.{raw_sha256}{path.suffix}"
+    if archive.exists():
+        if not archive.is_file() or _sha256_file(archive) != raw_sha256:
+            raise OeDownloadError(f"OE archive path conflict: {archive}")
+        return archive
+    try:
+        os.link(path, archive)
+    except OSError:
+        shutil.copy2(path, archive)
+    if _sha256_file(archive) != raw_sha256:
+        raise OeDownloadError(f"OE archive verification failed: {archive}")
+    return archive
+
+
+def _write_refresh_receipt(receipt: dict[str, Any]) -> Path:
+    unsigned = dict(receipt)
+    unsigned["receipt_canonical_sha256"] = _canonical_sha256(unsigned)
+    payload = (json.dumps(unsigned, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(
+        "utf-8"
+    )
+    retrieved = datetime.fromisoformat(str(receipt["retrieved_at_utc"]).replace("Z", "+00:00"))
+    stamp = retrieved.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    digest = str(receipt["candidate"]["raw_sha256"])
+    destination = OE_RECEIPT_DIR / f"oe-{receipt['year']}-{stamp}-{digest[:16]}.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".partial", dir=destination.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if destination.exists():
+            if destination.read_bytes() != payload:
+                raise OeDownloadError(f"OE receipt path conflict: {destination}")
+        else:
+            os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return destination
+
+
+def load_refresh_receipt(path: Path) -> dict[str, Any]:
+    """Load and verify one hash-bound OE transport receipt."""
+
+    try:
+        payload = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise OeDownloadError(f"OE refresh receipt could not be parsed: {path}") from exc
+    if not isinstance(payload, dict):
+        raise OeDownloadError("OE refresh receipt root must be an object")
+    if payload.get("schema") != "scryglass:oe-source-refresh:v1":
+        raise OeDownloadError("OE refresh receipt schema is not supported")
+    claimed = payload.get("receipt_canonical_sha256")
+    unsigned = dict(payload)
+    unsigned.pop("receipt_canonical_sha256", None)
+    if not isinstance(claimed, str) or claimed != _canonical_sha256(unsigned):
+        raise OeDownloadError("OE refresh receipt canonical hash mismatch")
+    candidate = payload.get("candidate")
+    if (
+        not isinstance(candidate, dict)
+        or not isinstance(candidate.get("raw_sha256"), str)
+        or len(candidate["raw_sha256"]) != 64
+    ):
+        raise OeDownloadError("OE refresh receipt candidate binding is invalid")
+    authority = payload.get("authority")
+    if not isinstance(authority, dict) or any(
+        authority.get(name) is not False
+        for name in (
+            "model_validation_authority",
+            "probability_authority",
+            "recommendation_authority",
+            "betting_authority",
+        )
+    ):
+        raise OeDownloadError("OE refresh receipt exceeds its authority ceiling")
+    return payload
 
 
 def oe_csv_path(year: str | int) -> Path:
@@ -68,8 +275,13 @@ def load_cached_oe(
 
 def download_oe_years(years: Iterable[str | int], force: bool = False) -> list[Path]:
     """
-    Attempt Google Drive download via gdown.
-    Drive often rate-limits; place CSVs manually into data/lol/warehouse/raw/ if this fails.
+    Download missing annual files, or safely refresh them when ``force`` is true.
+
+    Every download is staged and structurally validated. A refresh additionally
+    refuses a temporal regression, archives the prior exact bytes, atomically
+    replaces the annual file, and emits a hash-bound source receipt. A forced
+    refresh is strict: any requested year that cannot be validated aborts before
+    downstream ingest can mistake stale bytes for a successful refresh.
     """
     RAW_OE_DIR.mkdir(parents=True, exist_ok=True)
     try:
@@ -81,38 +293,151 @@ def download_oe_years(years: Iterable[str | int], force: bool = False) -> list[P
         ) from e
 
     out_paths: list[Path] = []
+    prepared: list[dict[str, Any]] = []
     for year in years:
         y = str(year)
         dest = oe_csv_path(y)
-        if dest.exists() and dest.stat().st_size > 1_000_000 and not force:
-            print(f"[oe] skip existing {dest.name}")
-            out_paths.append(dest)
-            continue
+        previous: dict[str, Any] | None = None
+        previous_error: str | None = None
+        if dest.exists():
+            try:
+                previous = _validate_oe_csv(dest, y)
+            except OeDownloadError as exc:
+                previous_error = str(exc)
+            if previous is not None and not force:
+                print(f"[oe] skip validated existing {dest.name}")
+                out_paths.append(dest)
+                continue
         fid = OE_DRIVE_IDS.get(y)
         if not fid:
-            print(f"[oe] no known Drive id for {y}")
+            message = f"no known Drive id for {y}"
+            if force:
+                for item in prepared:
+                    Path(item["temporary"]).unlink(missing_ok=True)
+                raise OeDownloadError(message)
+            print(f"[oe] {message}")
+            if dest.exists():
+                out_paths.append(dest)
             continue
         url = f"https://drive.google.com/uc?id={fid}"
-        print(f"[oe] downloading {y} → {dest.name}")
+        action = "refreshing" if dest.exists() else "downloading"
+        print(f"[oe] {action} {y} → staged candidate for {dest.name}")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{dest.name}.", suffix=".download", dir=RAW_OE_DIR
+        )
+        os.close(descriptor)
+        temporary = Path(temporary_name)
         try:
-            gdown.download(url, str(dest), quiet=False)
+            gdown.download(url, str(temporary), quiet=False)
+            candidate = _validate_oe_csv(temporary, y)
+            if (
+                previous is not None
+                and str(candidate["date_max_utc"]) < str(previous["date_max_utc"])
+            ):
+                raise OeDownloadError(
+                    "OE candidate date_max regressed "
+                    f"from {previous['date_max_utc']} to {candidate['date_max_utc']}"
+                )
         except Exception as exc:  # noqa: BLE001
-            print(f"[oe] download failed for {y}: {exc}")
-            print(f"     Place file manually: {dest}")
-            if dest.exists() and dest.stat().st_size < 10_000:
-                dest.unlink(missing_ok=True)
+            temporary.unlink(missing_ok=True)
+            message = f"OE download validation failed for {y}: {exc}"
+            if force:
+                for item in prepared:
+                    Path(item["temporary"]).unlink(missing_ok=True)
+                raise OeDownloadError(message) from exc
+            print(f"[oe] {message}")
+            print(f"     Existing bytes were not changed; place a valid file manually: {dest}")
+            if dest.exists():
+                out_paths.append(dest)
             continue
-        if not dest.exists() or dest.stat().st_size < 10_000:
-            print(f"[oe] download looks empty/blocked for {y}")
-            dest.unlink(missing_ok=True)
-            continue
-        # reject HTML quota pages
-        head = dest.read_bytes()[:200].lower()
-        if b"<!doctype html" in head or b"<html" in head:
-            print(f"[oe] got HTML (quota?) for {y}; remove and retry later")
-            dest.unlink(missing_ok=True)
-            continue
-        out_paths.append(dest)
+
+        prepared.append(
+            {
+                "year": y,
+                "destination": dest,
+                "temporary": temporary,
+                "source_url": url,
+                "drive_file_id": fid,
+                "retrieved_at_utc": datetime.now(timezone.utc).isoformat(),
+                "candidate": candidate,
+                "previous": previous,
+                "previous_validation_error": previous_error,
+            }
+        )
+
+    try:
+        for item in prepared:
+            y = str(item["year"])
+            dest = Path(item["destination"])
+            temporary = Path(item["temporary"])
+            candidate = dict(item["candidate"])
+            previous = item["previous"]
+            archive: Path | None = None
+            status = "downloaded"
+
+            if previous is not None and previous["raw_sha256"] == candidate["raw_sha256"]:
+                status = "unchanged"
+                temporary.unlink(missing_ok=True)
+            else:
+                if dest.exists():
+                    old_sha = _sha256_file(dest)
+                    archive = _archive_existing(dest, old_sha)
+                    status = "refreshed"
+                os.replace(temporary, dest)
+                if _sha256_file(dest) != candidate["raw_sha256"]:
+                    raise OeDownloadError(f"OE committed hash verification failed for {y}")
+
+            previous_summary: dict[str, Any] | None = None
+            if dest.exists() and previous is not None:
+                previous_summary = dict(previous)
+                previous_summary["archive_locator"] = (
+                    _display_path(archive) if archive is not None else None
+                )
+            elif item["previous_validation_error"] is not None:
+                previous_summary = {
+                    "raw_sha256": _sha256_file(archive if archive is not None else dest),
+                    "validation_status": "invalid_replaced",
+                    "validation_error": item["previous_validation_error"],
+                    "archive_locator": _display_path(archive) if archive is not None else None,
+                }
+
+            receipt = {
+                "schema": "scryglass:oe-source-refresh:v1",
+                "year": y,
+                "retrieved_at_utc": item["retrieved_at_utc"],
+                "status": status,
+                "source": {
+                    "provider": "Oracle's Elixir",
+                    "transport": "public_google_drive_file",
+                    "locator": item["source_url"],
+                    "drive_file_id": item["drive_file_id"],
+                    "folder_locator": OE_FOLDER,
+                },
+                "destination_locator": _display_path(dest),
+                "candidate": candidate,
+                "previous": previous_summary,
+                "authority": {
+                    "descriptive_source_freshness_evidence": True,
+                    "model_validation_authority": False,
+                    "probability_authority": False,
+                    "recommendation_authority": False,
+                    "betting_authority": False,
+                },
+                "claim_ceiling": (
+                    "This receipt proves transport, structural validation, temporal coverage, "
+                    "and exact source bytes only. It does not validate a model, probability, "
+                    "odds, recommendation, or wager."
+                ),
+            }
+            receipt_path = _write_refresh_receipt(receipt)
+            print(
+                f"[oe] {status} {dest.name}; max={candidate['date_max_utc']} "
+                f"sha256={candidate['raw_sha256']} receipt={receipt_path.name}"
+            )
+            out_paths.append(dest)
+    finally:
+        for item in prepared:
+            Path(item["temporary"]).unlink(missing_ok=True)
     return out_paths
 
 
@@ -134,6 +459,12 @@ def _normalize_identity(frame: pd.DataFrame, *, players: bool) -> pd.DataFrame:
         )
     if "date" in out.columns:
         out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    if "playoffs" in out.columns:
+        numeric = pd.to_numeric(out["playoffs"], errors="coerce")
+        invalid = numeric.notna() & ~numeric.isin((0, 1))
+        if invalid.any():
+            raise ValueError("OE playoffs contains a value other than 0, 1, or missing")
+        out["playoffs"] = numeric.astype("Int64").astype("boolean")
     if players and "champion" in out.columns:
         out["champion"] = out["champion"].map(
             lambda x: normalize_champ(str(x)) if pd.notna(x) else x
@@ -211,7 +542,15 @@ def ingest_oe(
         return empty_t, empty_p
 
     teams, players = [], []
+    source_files: list[dict[str, Any]] = []
     for p in paths:
+        source_files.append(
+            {
+                "locator": _display_path(p),
+                "year": _year_from_name(p.name),
+                **_validate_oe_csv(p, str(_year_from_name(p.name))),
+            }
+        )
         t, pl = parse_oe_csv(p)
         teams.append(t)
         players.append(pl)
@@ -255,12 +594,15 @@ def ingest_oe(
     team_df.to_parquet(team_path, index=False)
     player_df.to_parquet(player_path, index=False)
     meta = {
+        "schema_version": "scryglass:oe-normalized-cache:v2",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "n_team_rows": int(len(team_df)),
         "n_player_rows": int(len(player_df)),
         "n_team_cols": int(len(team_df.columns)),
         "n_player_cols": int(len(player_df.columns)),
         "n_games": int(team_df["gameid"].nunique()) if len(team_df) and "gameid" in team_df else 0,
         "files": [p.name for p in paths],
+        "source_files": source_files,
         "schema": "full_oe",
         "team_columns": list(team_df.columns),
         "player_columns": list(player_df.columns),

@@ -1,0 +1,265 @@
+{
+  "claim_ceiling": {
+    "betting": false,
+    "development_diagnostic": true,
+    "prediction": false,
+    "recommendation": false
+  },
+  "draft": {
+    "actions": [
+      {
+        "action_id": "scryglass:neutral-fixture:action:1",
+        "canonical_side": "A",
+        "champion_id": "Aatrox",
+        "kind": "pick",
+        "role_set": [
+          "top"
+        ],
+        "slot": 1
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:2",
+        "canonical_side": "B",
+        "champion_id": "Gnar",
+        "kind": "pick",
+        "role_set": [
+          "top"
+        ],
+        "slot": 2
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:3",
+        "canonical_side": "A",
+        "champion_id": "Nidalee",
+        "kind": "pick",
+        "role_set": [
+          "jungle"
+        ],
+        "slot": 3
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:4",
+        "canonical_side": "B",
+        "champion_id": "Sejuani",
+        "kind": "pick",
+        "role_set": [
+          "jungle"
+        ],
+        "slot": 4
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:5",
+        "canonical_side": "A",
+        "champion_id": "Ahri",
+        "kind": "pick",
+        "role_set": [
+          "mid"
+        ],
+        "slot": 5
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:6",
+        "canonical_side": "B",
+        "champion_id": "Orianna",
+        "kind": "pick",
+        "role_set": [
+          "mid"
+        ],
+        "slot": 6
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:7",
+        "canonical_side": "A",
+        "champion_id": "Jinx",
+        "kind": "pick",
+        "role_set": [
+          "bot"
+        ],
+        "slot": 7
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:8",
+        "canonical_side": "B",
+        "champion_id": "Aphelios",
+        "kind": "pick",
+        "role_set": [
+          "bot"
+        ],
+        "slot": 8
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:9",
+        "canonical_side": "A",
+        "champion_id": "Thresh",
+        "kind": "pick",
+        "role_set": [
+          "support"
+        ],
+        "slot": 9
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:10",
+        "canonical_side": "B",
+        "champion_id": "Rakan",
+        "kind": "pick",
+        "role_set": [
+          "support"
+        ],
+        "slot": 10
+      }
+    ],
+    "event_start": "2026-07-01T12:00:00Z",
+    "final_assignments": [
+      {
+        "action_id": "scryglass:neutral-fixture:action:1",
+        "canonical_side": "A",
+        "champion_id": "Aatrox",
+        "role": "top"
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:2",
+        "canonical_side": "B",
+        "champion_id": "Gnar",
+        "role": "top"
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:3",
+        "canonical_side": "A",
+        "champion_id": "Nidalee",
+        "role": "jungle"
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:4",
+        "canonical_side": "B",
+        "champion_id": "Sejuani",
+        "role": "jungle"
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:5",
+        "canonical_side": "A",
+        "champion_id": "Ahri",
+        "role": "mid"
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:6",
+        "canonical_side": "B",
+        "champion_id": "Orianna",
+        "role": "mid"
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:7",
+        "canonical_side": "A",
+        "champion_id": "Jinx",
+        "role": "bot"
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:8",
+        "canonical_side": "B",
+        "champion_id": "Aphelios",
+        "role": "bot"
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:9",
+        "canonical_side": "A",
+        "champion_id": "Thresh",
+        "role": "support"
+      },
+      {
+        "action_id": "scryglass:neutral-fixture:action:10",
+        "canonical_side": "B",
+        "champion_id": "Rakan",
+        "role": "support"
+      }
+    ],
+    "mode": "neutral",
+    "side_a": {
+      "bot": "Jinx",
+      "jungle": "Nidalee",
+      "mid": "Ahri",
+      "support": "Thresh",
+      "top": "Aatrox"
+    },
+    "side_b": {
+      "bot": "Aphelios",
+      "jungle": "Sejuani",
+      "mid": "Orianna",
+      "support": "Rakan",
+      "top": "Gnar"
+    },
+    "source_available_at": "2026-07-01T11:00:00Z",
+    "source_payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "source_record_id": "source:terminal-neutral-development-fixture",
+    "source_rights_status": "reviewed"
+  },
+  "expected_development": {
+    "as_of": "2026-07-01T12:00:00Z",
+    "calendar_year": 2026,
+    "error": {
+      "code": "prediction_time_violation",
+      "message": "Draft Score is unavailable for this input or model state.",
+      "missing_fields": [],
+      "retryable": false,
+      "stale_fields": []
+    },
+    "identity_intentionally_omitted": true,
+    "identity_mode": "neutral",
+    "lineage": {
+      "artifact_sha256": "d6ddfbd0238ff5b9d1b259e393b1724717bcb6dd9d7e407d92fc44395da6d6c3",
+      "calibration_sha256": "67f4a4016ec4f4489a9b2ed34cf4e585ba468ac832783b9a99cbd4b1ca28ef96",
+      "code_commit": null,
+      "environment_lock_sha256": "5f9b9d5f81e2cdd1b4eea23d33c5d69c57bc875a9b23831b2c5f56f35b5715d2",
+      "evaluation_report_sha256": "26ee6eeb6739ee3070f5e093d8af5ad404fa9e47980ab07c324325122e1b6338",
+      "manifest_id": "scryglass:manifest:draft-terminal-neutral-dev-v3.0.0",
+      "source_snapshot_ids": [
+        "scryglass:source:terminal-development"
+      ],
+      "source_tree_sha256": "5be8dc08151e297b225990ba1e76561073621b3ecc364854429b3562ed2163cf",
+      "train_cutoff": "2026-07-18T16:33:48Z",
+      "training_snapshot_id": "scryglass:training:terminal-development"
+    },
+    "model_version": "draft-terminal-neutral-dev-v3.0.0",
+    "provenance": {
+      "as_of": "2026-07-01T12:00:00Z",
+      "availability_replayed": true,
+      "calibration_id": "scryglass:calibration:draft-terminal-neutral-dev-v3.0.0",
+      "created_at": "2026-07-01T12:00:00Z",
+      "estimator_id": "scryglass:estimator:draft-terminal-neutral-dev-v3.0.0",
+      "event_start": "2026-07-01T12:00:00Z",
+      "fallback_levels": [],
+      "freshness_checks": [],
+      "immutable": true,
+      "input_conflicts": [],
+      "input_snapshot_id": "scryglass:input:bbf754935201d273ce05d7c2",
+      "lineage": {
+        "artifact_sha256": "d6ddfbd0238ff5b9d1b259e393b1724717bcb6dd9d7e407d92fc44395da6d6c3",
+        "calibration_sha256": "67f4a4016ec4f4489a9b2ed34cf4e585ba468ac832783b9a99cbd4b1ca28ef96",
+        "code_commit": null,
+        "environment_lock_sha256": "5f9b9d5f81e2cdd1b4eea23d33c5d69c57bc875a9b23831b2c5f56f35b5715d2",
+        "evaluation_report_sha256": "26ee6eeb6739ee3070f5e093d8af5ad404fa9e47980ab07c324325122e1b6338",
+        "manifest_id": "scryglass:manifest:draft-terminal-neutral-dev-v3.0.0",
+        "source_snapshot_ids": [
+          "scryglass:source:terminal-development"
+        ],
+        "source_tree_sha256": "5be8dc08151e297b225990ba1e76561073621b3ecc364854429b3562ed2163cf",
+        "train_cutoff": "2026-07-18T16:33:48Z",
+        "training_snapshot_id": "scryglass:training:terminal-development"
+      },
+      "mode": "forecast",
+      "model_version": "draft-terminal-neutral-dev-v3.0.0",
+      "out_of_distribution_flags": [],
+      "output_sha256": "55a647e3c72adba3bd3cb0aa76f50e3c9e1be9bc22cc169d26708887d0ae5da7",
+      "prediction_id": "scryglass:prediction:bbf754935201d273ce05d7c2",
+      "required_input_status": "conflict",
+      "schema_version": "2.0.0",
+      "sealed_before_event_start": true
+    },
+    "schema_version": "2.0.0",
+    "season_id": "scryglass:season:development",
+    "status": "unavailable"
+  },
+  "model_artifact_locator": "data/lol/v2/models/draft-terminal/terminal-model-neutral-development-v3.json",
+  "model_artifact_sha256": "d6ddfbd0238ff5b9d1b259e393b1724717bcb6dd9d7e407d92fc44395da6d6c3",
+  "probability_semantics": "equal_strength_composition_index_not_directly_outcome_calibrated",
+  "schema_version": "scryglass:draft-terminal-development-replay:v3",
+  "status": "development_only_equal_strength_index"
+}

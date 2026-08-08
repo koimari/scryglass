@@ -1,0 +1,5026 @@
+{
+  "version": 7,
+  "title": "Void Grubs: cash reward, conditional pressure, and contest sensitivity",
+  "estimand": "Associational calibration of the 90g cash reward and conditional Touch pressure ceiling via a gold@10 logit, versus leave-window farm: N\u2208{1,2,3} laners \u00d7 grub-era average wave gold (120.67g) plus E[plate]=p\u00d7120g. Headline leave = 2 laners + 25% plate (own farm only). Item-pace layer: median/modal early component costs, relative leave\u2212take gold (own farm + opp missed waves \u2212 scrap), fight win\u2212lose item gap, and 1/2/3 min horizons while river side is delayed. Dual-tempo leave is sensitivity only.",
+  "sample": {
+    "n_raw_2026_maps": 1378,
+    "n_era_3camp": 1378,
+    "n_exactly_three_grubs": 1324,
+    "n_fewer_than_three_grubs": 54,
+    "paper_leagues": [
+      "LCS",
+      "LCK",
+      "LEC",
+      "LPL",
+      "CBLOL"
+    ],
+    "n_leagues": 5,
+    "n_fit_leagues": 4,
+    "n_gold10_missing": 453,
+    "gold10_missing_leagues": [
+      "LPL"
+    ],
+    "n_outcome_missing_after_gold": 0,
+    "n_gold10_outside_cap": 21,
+    "filter": "OE 16.xx / Patch 26.1+ reward era; LCS/LCK/LEC/LPL/CBLOL",
+    "date_min": "2026-01-14",
+    "date_max": "2026-06-14",
+    "n_fit_gold10": 904,
+    "n_fit_xp10": 884,
+    "n_fit_joint": 878,
+    "missingness_note": "Complete-case logit fits use n_gold=904, n_xp=884, n_joint=878 vs era n=1378 (caps |gold|\u22643000, |xp|\u22642000)."
+  },
+  "mechanical_package": {
+    "gold_local": 90,
+    "gold": 90,
+    "xp": 195,
+    "xp_radius": 2000,
+    "xp_to_level_7_to_8": 880,
+    "xp_local_share": {
+      "xp_per_grub": 65,
+      "package_xp": 195,
+      "radius": 2000,
+      "xp_to_level_7_to_8": 880,
+      "package_as_fraction_of_level": 0.2215909090909091,
+      "shares": [
+        {
+          "allies_in_radius": 1,
+          "xp_each": 195.0,
+          "team_xpdiff_sum": 195,
+          "levels_each_toward_7_to_8": 0.2215909090909091,
+          "note": "Solo jungler soak"
+        },
+        {
+          "allies_in_radius": 2,
+          "xp_each": 97.5,
+          "team_xpdiff_sum": 195,
+          "levels_each_toward_7_to_8": 0.11079545454545454,
+          "note": "Duo river"
+        },
+        {
+          "allies_in_radius": 3,
+          "xp_each": 65.0,
+          "team_xpdiff_sum": 195,
+          "levels_each_toward_7_to_8": 0.07386363636363637,
+          "note": "Trio contest"
+        }
+      ],
+      "notes": "Epic XP is local and shared; team xpdiff@10 still rises by the full bounty sum. Concentration (solo jg vs trio) changes who spikes a level, not the OE team-sum accounting."
+    },
+    "totv_tick_melee_3stack_pre_26_11": 12,
+    "totv_tick_melee_3stack_post_26_11": 16,
+    "totv_tick_melee_by_stack_post_26_11": [
+      0,
+      4,
+      12,
+      16
+    ],
+    "totv_tick_ranged_by_stack_post_26_11": [
+      0,
+      2,
+      6,
+      8
+    ],
+    "totv_damage_per_aa_cycle_melee": 96,
+    "totv_damage_per_aa_cycle_ranged": 48,
+    "totv_burn_duration_s": 4.0,
+    "totv_tick_interval_s": 0.5,
+    "hunger_mite_cd_s": 15.0,
+    "hunger_at_3_stacks": true,
+    "hunger_touch_stacks_required": 3,
+    "plate_gold": 120.0,
+    "outer_turret_hp": 9000.0,
+    "plate_hp_first_outer": 900.0,
+    "plate_hp_bands_outer": [
+      900.0,
+      1350.0,
+      1800.0,
+      2250.0,
+      2700.0
+    ],
+    "plate_missing_hp_fractions": [
+      0.1,
+      0.25,
+      0.45,
+      0.7,
+      1.0
+    ],
+    "plate_gold_full_outer": 600.0,
+    "wiki_economy": {
+      "reference_clock": "grub_window_pre14_at_10_00",
+      "grub_spawn_s": 480.0,
+      "grub_despawn_s": 885.0,
+      "reference_clock_s": 600.0,
+      "melee_gold": 20.0,
+      "caster_gold": 14.0,
+      "cannon_gold_base": 50.0,
+      "cannon_gold_at_reference": 56.0,
+      "cannon_gold_rule": "50 + floor(t_seconds / 90)",
+      "wave_gold_no_cannon": 102.0,
+      "wave_gold_cannon_at_reference": 158.0,
+      "wave_gold_expected_at_reference": 120.66666666666667,
+      "wave_gold_avg_wiki_0_30": 118.66666666666667,
+      "wave_gold_expected_at_08_00": 120.33333333333333,
+      "wave_gold_expected_at_14_00_table": 115.0,
+      "wave_xp_no_cannon": 279.0,
+      "wave_xp_cannon": 354.0,
+      "wave_xp_expected_pre14": 304.0,
+      "plate_gold_local": 120.0,
+      "plates_persist_past_14_00": true,
+      "outer_assumed_standing": true,
+      "sources": [
+        "https://wiki.leagueoflegends.com/en-us/Minion",
+        "https://wiki.leagueoflegends.com/en-us/Siege_minion",
+        "https://wiki.leagueoflegends.com/en-us/Turret"
+      ]
+    },
+    "worked_siege_example": {
+      "champion": "Zaahen",
+      "level": 15,
+      "items": [
+        "Doran's Blade",
+        "Trinity Force",
+        "Hexdrinker",
+        "Mercury's Treads",
+        "Sundered Sky",
+        "Caulfield's Warhammer"
+      ],
+      "item_ad": {
+        "Doran's Blade": 10.0,
+        "Trinity Force": 36.0,
+        "Hexdrinker": 25.0,
+        "Mercury's Treads": 0.0,
+        "Sundered Sky": 45.0,
+        "Caulfield's Warhammer": 20.0
+      },
+      "structure_hp": 5000.0,
+      "structure_armor": 60.0,
+      "total_ad": 252.06,
+      "base_ad": 116.06,
+      "base_attack_speed": 0.625,
+      "level_bonus_as": 0.3316,
+      "trinity_bonus_as": 0.3,
+      "attack_speed": 1.01975,
+      "attack_period_s": 0.9806325079676392,
+      "armor_multiplier": 0.625,
+      "spellblade_base_ad_ratio": 2.0,
+      "spellblade_cooldown_s": 1.5,
+      "spellblade_proc_every_attacks": 2,
+      "normal_attack_damage": 157.5375,
+      "spellblade_bonus_damage": 145.075,
+      "rows": [
+        {
+          "stacks": 0,
+          "tick_damage": 0,
+          "maintained_true_dps": 0.0,
+          "destruction_time_s": 20.593282667320423,
+          "attacks": 22,
+          "kill_event": "attack",
+          "touch_true_damage": 0.0,
+          "zaahen_physical_damage": 5000.0,
+          "zaahen_without_touch_damage": 5000.0,
+          "touch_vs_zaahen_without_touch_pct": 0.0,
+          "time_saved_s": 0.0,
+          "attacks_saved": 0,
+          "time_reduction_pct": 0.0
+        },
+        {
+          "stacks": 1,
+          "tick_damage": 4,
+          "maintained_true_dps": 8.0,
+          "destruction_time_s": 19.612650159352786,
+          "attacks": 21,
+          "kill_event": "attack",
+          "touch_true_damage": 156.0,
+          "zaahen_physical_damage": 4844.0,
+          "zaahen_without_touch_damage": 5000.0,
+          "touch_vs_zaahen_without_touch_pct": 3.12,
+          "time_saved_s": 0.9806325079676377,
+          "attacks_saved": 1,
+          "time_reduction_pct": 4.761904761904755
+        },
+        {
+          "stacks": 2,
+          "tick_damage": 12,
+          "maintained_true_dps": 24.0,
+          "destruction_time_s": 18.632017651385144,
+          "attacks": 20,
+          "kill_event": "attack",
+          "touch_true_damage": 444.0,
+          "zaahen_physical_damage": 4556.0,
+          "zaahen_without_touch_damage": 5000.0,
+          "touch_vs_zaahen_without_touch_pct": 8.88,
+          "time_saved_s": 1.961265015935279,
+          "attacks_saved": 2,
+          "time_reduction_pct": 9.523809523809527
+        },
+        {
+          "stacks": 3,
+          "tick_damage": 16,
+          "maintained_true_dps": 32.0,
+          "destruction_time_s": 17.651385143417507,
+          "attacks": 19,
+          "kill_event": "attack",
+          "touch_true_damage": 560.0,
+          "zaahen_physical_damage": 4440.0,
+          "zaahen_without_touch_damage": 5000.0,
+          "touch_vs_zaahen_without_touch_pct": 11.2,
+          "time_saved_s": 2.9418975239029166,
+          "attacks_saved": 3,
+          "time_reduction_pct": 14.285714285714283
+        }
+      ],
+      "three_stack_time_s": 17.651385143417507,
+      "three_stack_attacks": 19,
+      "zero_stack_time_s": 20.593282667320423,
+      "zero_stack_attacks": 22,
+      "three_stack_time_saved_s": 2.9418975239029166,
+      "three_stack_attacks_saved": 3,
+      "three_stack_time_reduction_pct": 14.285714285714283,
+      "structure_damage_included": [
+        "total AD autoattacks",
+        "Trinity Force Spellblade (200% level-15 base AD; structures)",
+        "Touch of the Void true burn (refresh, not stacked packets)"
+      ],
+      "structure_damage_excluded": [
+        "Sundered Sky Lightshield Strike (champions only)",
+        "Hexdrinker Lifeline (shield)",
+        "Cultivation of War / Determination (champion damage)",
+        "The Darkin Glaive double-strike and AA resets",
+        "Hunger of the Void Voidmites"
+      ],
+      "touch_rules": {
+        "source": "https://wiki.leagueoflegends.com/en-us/Touch_of_the_Void",
+        "apply": "basic attacks against structures",
+        "duration_s": 4.0,
+        "tick_interval_s": 0.5,
+        "melee_tick_by_stack_post_26_11": [
+          0,
+          4,
+          12,
+          16
+        ],
+        "ranged_tick_by_stack_post_26_11": [
+          0,
+          2,
+          6,
+          8
+        ],
+        "refresh": "subsequent structure attacks refresh duration; do not stack overlapping full burns",
+        "trigger_gate": "applies only if the triggering instance can damage the structure"
+      },
+      "hunger_rules": {
+        "source": "https://wiki.leagueoflegends.com/en-us/Hunger_of_the_Void",
+        "granted_at_touch_stacks": 3,
+        "summon_cooldown_s": 15.0,
+        "mites_apply_touch": true,
+        "omitted_from_this_clock": true
+      },
+      "scope": "Level-15 Zaahen deterministic mechanics check only; excludes Bulwark, backdoor protection, regeneration, minions, allies, Hunger mites, Determination, Q double-strikes, latency, and animation timing."
+    },
+    "wiki_sources": [
+      "https://wiki.leagueoflegends.com/en-us/Voidgrub_camp",
+      "https://wiki.leagueoflegends.com/en-us/Touch_of_the_Void",
+      "https://wiki.leagueoflegends.com/en-us/Hunger_of_the_Void",
+      "https://wiki.leagueoflegends.com/en-us/Minion",
+      "https://wiki.leagueoflegends.com/en-us/Turret",
+      "https://wiki.leagueoflegends.com/en-us/Experience_(champion)"
+    ],
+    "wave_gold_avg_early_wiki": 120.66666666666667,
+    "wave_gold_no_cannon": 102.0
+  },
+  "logits": {
+    "gold10": {
+      "intercept": 0.1611182873782888,
+      "coef": 0.000666860223609559,
+      "n": 904,
+      "cap": 3000,
+      "map_level_independence_covariance_scaled": [
+        [
+          0.005072525496069549,
+          -0.00022358328248473045
+        ],
+        [
+          -0.00022358328248473037,
+          0.004735549366155778
+        ]
+      ]
+    },
+    "xp10": {
+      "intercept": 0.14244519223325783,
+      "coef": 0.0009143439339674771,
+      "n": 884,
+      "cap": 2000
+    },
+    "joint_gold_xp": {
+      "intercept": 0.14246742061494622,
+      "coef_gold": 0.0003971464421128953,
+      "coef_xp": 0.0005499316251515212,
+      "n": 878
+    },
+    "gold15": {
+      "intercept": 0.12220783157287599,
+      "coef": 0.0005187156507786352,
+      "n": 838,
+      "cap": 4000
+    }
+  },
+  "model_diagnostics": {
+    "gold10_10fold": {
+      "folds": 10,
+      "n": 904,
+      "prevalence": 0.5530973451327433,
+      "auc": 0.6956534653465347,
+      "brier": 0.2195976347945897,
+      "null_brier": 0.24718067193985435,
+      "log_loss": 0.628970526762938,
+      "calibration_intercept": 0.004991338960239187,
+      "calibration_slope": 0.9753609281224735,
+      "kind": "10-fold stratified out-of-fold diagnostics; fixed seed 20260719"
+    }
+  },
+  "component_wr_pp": {
+    "gold_only": {
+      "at_even": 1.4903013346234228,
+      "at_behind_1k": 1.3516595542805876,
+      "at_ahead_1k": 1.326272071316692,
+      "pp_per_100g_at_even": 1.65577609436951
+    },
+    "xp_only_univariate": {
+      "at_even": 4.4233572289107626,
+      "fraction_of_level7": 0.2215909090909091
+    },
+    "joint_gold_xp": {
+      "at_even_gold_and_xp": 3.5504645788171585,
+      "at_even_gold_only_in_joint": 0.8889673453745361,
+      "at_even_xp_only_in_joint": 2.6648443935802235,
+      "at_behind_1k": 3.4637972101315473
+    },
+    "xp_local_share": {
+      "xp_per_grub": 65,
+      "package_xp": 195,
+      "radius": 2000,
+      "xp_to_level_7_to_8": 880,
+      "package_as_fraction_of_level": 0.2215909090909091,
+      "shares": [
+        {
+          "allies_in_radius": 1,
+          "xp_each": 195.0,
+          "team_xpdiff_sum": 195,
+          "levels_each_toward_7_to_8": 0.2215909090909091,
+          "note": "Solo jungler soak"
+        },
+        {
+          "allies_in_radius": 2,
+          "xp_each": 97.5,
+          "team_xpdiff_sum": 195,
+          "levels_each_toward_7_to_8": 0.11079545454545454,
+          "note": "Duo river"
+        },
+        {
+          "allies_in_radius": 3,
+          "xp_each": 65.0,
+          "team_xpdiff_sum": 195,
+          "levels_each_toward_7_to_8": 0.07386363636363637,
+          "note": "Trio contest"
+        }
+      ],
+      "notes": "Epic XP is local and shared; team xpdiff@10 still rises by the full bounty sum. Concentration (solo jg vs trio) changes who spikes a level, not the OE team-sum accounting."
+    }
+  },
+  "sampling_intervals": {
+    "cash_90g": {
+      "estimate_pp": 1.4903013346234228,
+      "se_pp": 0.15432222752168875,
+      "ci95_low_pp": 1.187829768680913,
+      "ci95_high_pp": 1.7927729005659327,
+      "n": 904,
+      "kind": "Wald sampling interval for the fitted association only"
+    },
+    "cash_plus_pre26_11_brief_pressure_ceiling": {
+      "estimate_pp": 1.9138433678164035,
+      "se_pp": 0.19810444361283883,
+      "ci95_low_pp": 1.5255586583352394,
+      "ci95_high_pp": 2.3021280772975676,
+      "n": 904,
+      "kind": "Wald sampling interval for the fitted association only"
+    },
+    "cash_plus_post26_11_brief_pressure_ceiling": {
+      "estimate_pp": 2.054966336763697,
+      "se_pp": 0.21268056428027476,
+      "ci95_low_pp": 1.6381124307743586,
+      "ci95_high_pp": 2.4718202427530356,
+      "n": 904,
+      "kind": "Wald sampling interval for the fitted association only"
+    },
+    "joint_cash_xp": {
+      "estimate_pp": 3.5504645788171585,
+      "se_pp": 0.518424016393799,
+      "ci95_low_pp": 2.5343535066853127,
+      "ci95_high_pp": 4.566575650949004,
+      "n": 878,
+      "kind": "Wald sampling interval for the fitted association only"
+    }
+  },
+  "burn": {
+    "wiki_scenarios": {
+      "pre_26_11_3stack": {
+        "tick_melee": 12,
+        "dps_true": 24.0,
+        "siege_seconds": 20.0,
+        "hunger_mite_refreshes": 0,
+        "total_true_damage": 480.0,
+        "plates_equivalent": 0.5333333333333333,
+        "undiscounted_plate_progress_g": 64.0,
+        "gold_equivalent": 64.0,
+        "plate_gold": 120.0,
+        "plate_hp": 900.0,
+        "gold_per_true_damage": 0.13333333333333333,
+        "source": "Undiscounted first-plate progress ceiling: 120g/plate; outer 9000 HP; first plate at 10% missing = 900 HP (Patch 26.1). Not paid gold unless converted.",
+        "wr_pp_via_gold10_logit": 1.0599240050070513,
+        "wr_pp_via_gold15_logit": 0.8267788992619707
+      },
+      "post_26_11_3stack": {
+        "tick_melee": 16,
+        "dps_true": 32.0,
+        "siege_seconds": 20.0,
+        "hunger_mite_refreshes": 0,
+        "total_true_damage": 640.0,
+        "plates_equivalent": 0.7111111111111111,
+        "undiscounted_plate_progress_g": 85.33333333333334,
+        "gold_equivalent": 85.33333333333334,
+        "plate_gold": 120.0,
+        "plate_hp": 900.0,
+        "gold_per_true_damage": 0.13333333333333333,
+        "source": "Undiscounted first-plate progress ceiling: 120g/plate; outer 9000 HP; first plate at 10% missing = 900 HP (Patch 26.1). Not paid gold unless converted.",
+        "wr_pp_via_gold10_logit": 1.413068450461763,
+        "wr_pp_via_gold15_logit": 1.1022940172271012
+      },
+      "pre_26_11_brief_8s": {
+        "tick_melee": 12,
+        "dps_true": 24.0,
+        "siege_seconds": 8.0,
+        "hunger_mite_refreshes": 0,
+        "total_true_damage": 192.0,
+        "plates_equivalent": 0.21333333333333335,
+        "undiscounted_plate_progress_g": 25.6,
+        "gold_equivalent": 25.6,
+        "plate_gold": 120.0,
+        "plate_hp": 900.0,
+        "gold_per_true_damage": 0.13333333333333333,
+        "source": "Undiscounted first-plate progress ceiling: 120g/plate; outer 9000 HP; first plate at 10% missing = 900 HP (Patch 26.1). Not paid gold unless converted.",
+        "wr_pp_via_gold10_logit": 0.42402260937343117,
+        "wr_pp_via_gold15_logit": 0.3307367870256428
+      },
+      "post_26_11_brief_8s": {
+        "tick_melee": 16,
+        "dps_true": 32.0,
+        "siege_seconds": 8.0,
+        "hunger_mite_refreshes": 0,
+        "total_true_damage": 256.0,
+        "plates_equivalent": 0.28444444444444444,
+        "undiscounted_plate_progress_g": 34.13333333333333,
+        "gold_equivalent": 34.13333333333333,
+        "plate_gold": 120.0,
+        "plate_hp": 900.0,
+        "gold_per_true_damage": 0.13333333333333333,
+        "source": "Undiscounted first-plate progress ceiling: 120g/plate; outer 9000 HP; first plate at 10% missing = 900 HP (Patch 26.1). Not paid gold unless converted.",
+        "wr_pp_via_gold10_logit": 0.565353007248226,
+        "wr_pp_via_gold15_logit": 0.440977399140019
+      },
+      "pre_26_11_20s_plus_hunger_mite": {
+        "tick_melee": 12,
+        "dps_true": 24.0,
+        "siege_seconds": 20.0,
+        "hunger_mite_refreshes": 1,
+        "total_true_damage": 576.0,
+        "plates_equivalent": 0.64,
+        "undiscounted_plate_progress_g": 76.8,
+        "gold_equivalent": 76.8,
+        "plate_gold": 120.0,
+        "plate_hp": 900.0,
+        "gold_per_true_damage": 0.13333333333333333,
+        "source": "Undiscounted first-plate progress ceiling: 120g/plate; outer 9000 HP; first plate at 10% missing = 900 HP (Patch 26.1). Not paid gold unless converted.",
+        "wr_pp_via_gold10_logit": 1.2718255275582568,
+        "wr_pp_via_gold15_logit": 0.9920950416788754
+      }
+    },
+    "ls_sandbox": {
+      "early_dmg_per_cycle": 90.0,
+      "early_dmg_20s_siege": 450.0,
+      "early_gold_20s": 60.0,
+      "mid_dmg_saved_full_turret": 225.0,
+      "mid_gold_saved_full_turret": 30.0,
+      "assumptions": {
+        "aa_dmg_early": 90.0,
+        "aa_dmg_mid": 150.0,
+        "aa_per_cycle": 1.0,
+        "mid_aa_saved_full_turret": 1.5,
+        "plate_gold": 120.0,
+        "plate_hp_first_outer": 900.0,
+        "outer_turret_hp": 9000.0
+      },
+      "early_20s_wr_pp": 0.9936966621872156,
+      "mid_full_turret_wr_pp": 0.4968970779700044
+    }
+  },
+  "intrinsic_bounds_pp_at_even": {
+    "lower_gold_only_pp": 1.4903013346234228,
+    "preferred_gold_plus_brief_burn_pp": 1.9138433678164035,
+    "post_26_11_cash_plus_brief_pressure_ceiling_pp": 2.054966336763697,
+    "central_gold_plus_xp_joint_pp": 3.5504645788171585,
+    "upper_joint_plus_wiki_burn_20s_pp": 4.178919110942947,
+    "upper_joint_plus_hunger_mite_pp": 4.304457859191945,
+    "upper_joint_plus_ls_burn_20s_pp": 4.544161241004375,
+    "ls_style_mid_turret_burn_alone_pp": 0.4968970779700044,
+    "notes": "Cash lower bound = 90g local. The 8s Touch quantity is an undiscounted first-plate-progress ceiling, not paid gold; 26.11 changes its tick rate. Leave farm is a scenario input, not an OE-observed counterfactual."
+  },
+  "opportunity_gold": {
+    "window_note": "HEADLINE leave hypothesis: wiki early-wave gold \u00d7 N laners + optional plate EV. Mapped through gold@10 logit. Jungle camps are NOT in the headline.",
+    "leave_farm": {
+      "wiki_sources": [
+        "https://wiki.leagueoflegends.com/en-us/Minion",
+        "https://wiki.leagueoflegends.com/en-us/Turret"
+      ],
+      "constants": {
+        "melee_minion_gold": 20.0,
+        "caster_minion_gold": 14.0,
+        "cannon_minion_gold_early": 56.0,
+        "wave_gold_no_cannon": 102.0,
+        "wave_gold_avg_early_wiki_0_30": 118.66666666666667,
+        "wave_gold_grub_era_at_10_00": 120.66666666666667,
+        "plate_gold_local": 120.0,
+        "note": "Wave = grub-era E[wave] at 10:00 = 102 + 56/3 = 120.6\u0305g (pre-14 composition; cannon gold 50+\u230at/90\u230b). Plate = 120g local outer plating (plates persist past 14:00)."
+      },
+      "wave_gold_early": 120.66666666666667,
+      "plate_gold": 120.0,
+      "scenarios": {
+        "one_laner_one_wave": {
+          "label": "1 laner \u00d7 1 grub-era average wave",
+          "n_laners": 1,
+          "waves_each": 1,
+          "wave_gold_each": 120.66666666666667,
+          "p_plate": 0.0,
+          "gold": 120.6667,
+          "components": {
+            "waves_g": 120.6667,
+            "plate_ev_g": 0.0
+          },
+          "wr_pp_at_even": 2.0,
+          "source": "wiki Minion avg early wave / Turret Plating 120g"
+        },
+        "two_laners_one_wave": {
+          "label": "2 laners \u00d7 1 grub-era average wave each",
+          "n_laners": 2,
+          "waves_each": 1,
+          "wave_gold_each": 120.66666666666667,
+          "p_plate": 0.0,
+          "gold": 241.3333,
+          "components": {
+            "waves_g": 241.3333,
+            "plate_ev_g": 0.0
+          },
+          "wr_pp_at_even": 3.99,
+          "source": "wiki Minion avg early wave / Turret Plating 120g"
+        },
+        "three_laners_one_wave": {
+          "label": "3 laners \u00d7 1 grub-era average wave each",
+          "n_laners": 3,
+          "waves_each": 1,
+          "wave_gold_each": 120.66666666666667,
+          "p_plate": 0.0,
+          "gold": 362.0,
+          "components": {
+            "waves_g": 362.0,
+            "plate_ev_g": 0.0
+          },
+          "wr_pp_at_even": 5.97,
+          "source": "wiki Minion avg early wave / Turret Plating 120g"
+        },
+        "one_laner_wave_plus_plate": {
+          "label": "1 laner \u00d7 wave + one outer plate",
+          "n_laners": 1,
+          "waves_each": 1,
+          "wave_gold_each": 120.66666666666667,
+          "p_plate": 1.0,
+          "gold": 240.6667,
+          "components": {
+            "waves_g": 120.6667,
+            "plate_ev_g": 120.0
+          },
+          "wr_pp_at_even": 3.98,
+          "source": "wiki Minion avg early wave / Turret Plating 120g"
+        },
+        "two_laners_wave_plus_plate": {
+          "label": "2 laners \u00d7 wave + one outer plate",
+          "n_laners": 2,
+          "waves_each": 1,
+          "wave_gold_each": 120.66666666666667,
+          "p_plate": 1.0,
+          "gold": 361.3333,
+          "components": {
+            "waves_g": 241.3333,
+            "plate_ev_g": 120.0
+          },
+          "wr_pp_at_even": 5.96,
+          "source": "wiki Minion avg early wave / Turret Plating 120g"
+        },
+        "three_laners_wave_plus_plate": {
+          "label": "3 laners \u00d7 wave + one outer plate",
+          "n_laners": 3,
+          "waves_each": 1,
+          "wave_gold_each": 120.66666666666667,
+          "p_plate": 1.0,
+          "gold": 482.0,
+          "components": {
+            "waves_g": 362.0,
+            "plate_ev_g": 120.0
+          },
+          "wr_pp_at_even": 7.92,
+          "source": "wiki Minion avg early wave / Turret Plating 120g"
+        },
+        "two_laners_nocannon_wave": {
+          "label": "2 laners \u00d7 non-cannon wave (102g each)",
+          "n_laners": 2,
+          "waves_each": 1,
+          "wave_gold_each": 102.0,
+          "p_plate": 0.0,
+          "gold": 204.0,
+          "components": {
+            "waves_g": 204.0,
+            "plate_ev_g": 0.0
+          },
+          "wr_pp_at_even": 3.37,
+          "source": "wiki Minion avg early wave / Turret Plating 120g"
+        }
+      },
+      "hypothesis": "If the giving team farms 1\u20133 laner-waves (wiki early wave gold) during the window and has a chance at a plate (120g), what map-WR pp does that buy vs contesting the river?",
+      "headline_key": "two_laners_one_wave"
+    },
+    "packages": {
+      "low_one_wave": {
+        "label": "1 laner \u00d7 grub-era average wave (120.67g)",
+        "gold": 120.66666666666667,
+        "components": {
+          "waves_g": 120.66666666666667,
+          "jungle_g": 0.0
+        },
+        "wr_pp_at_even": 2.0
+      },
+      "preferred_waves_plus_camp": {
+        "label": "LEGACY: 2\u00d7 wave + jungle camp (not headline)",
+        "gold": 341.33333333333337,
+        "components": {
+          "waves_g": 241.33333333333334,
+          "jungle_g": 100.0
+        },
+        "wr_pp_at_even": 5.63
+      },
+      "high_three_waves_two_camps": {
+        "label": "LEGACY: 3\u00d7 wave + 2 camps (not headline)",
+        "gold": 562.0,
+        "components": {
+          "waves_g": 362.0,
+          "jungle_g": 200.0
+        },
+        "wr_pp_at_even": 9.2
+      }
+    },
+    "kill_bounty_early": 300.0,
+    "kill_net_table": [
+      {
+        "net_kills_for_contester": -4,
+        "gold": -1200.0,
+        "wr_pp_at_even": -18.9
+      },
+      {
+        "net_kills_for_contester": -3,
+        "gold": -900.0,
+        "wr_pp_at_even": -14.48
+      },
+      {
+        "net_kills_for_contester": -2,
+        "gold": -600.0,
+        "wr_pp_at_even": -9.81
+      },
+      {
+        "net_kills_for_contester": -1,
+        "gold": -300.0,
+        "wr_pp_at_even": -4.95
+      },
+      {
+        "net_kills_for_contester": 0,
+        "gold": 0.0,
+        "wr_pp_at_even": 0.0
+      },
+      {
+        "net_kills_for_contester": 1,
+        "gold": 300.0,
+        "wr_pp_at_even": 4.95
+      },
+      {
+        "net_kills_for_contester": 2,
+        "gold": 600.0,
+        "wr_pp_at_even": 9.81
+      },
+      {
+        "net_kills_for_contester": 3,
+        "gold": 900.0,
+        "wr_pp_at_even": 14.48
+      },
+      {
+        "net_kills_for_contester": 4,
+        "gold": 1200.0,
+        "wr_pp_at_even": 18.9
+      }
+    ],
+    "median_tf_assumption": {
+      "net_kills_on_win": 2,
+      "net_kills_on_lose": -2,
+      "win_pp": 9.81,
+      "lose_pp": 9.81,
+      "note": "Structural prior (300g \u00d7 net kills), not filmed median TF."
+    }
+  },
+  "river_outcome_matrix": {
+    "units": "map WR pp versus zero team gold differential at 10 minutes",
+    "outside_option_leave": {
+      "label": "Leave river: farm, concede grubs, avoid the fight",
+      "pp": 2.08,
+      "terminal_gold": {
+        "no_plate": 125.73330000000001,
+        "with_plate": 245.7333,
+        "plate_probability": 0.0
+      }
+    },
+    "matrix": {
+      "lose_tf_no_grubs_pp": -11.64,
+      "lose_tf_but_you_get_grubs_pp": -7.96,
+      "win_tf_no_grubs_pp": 7.96,
+      "win_tf_and_grubs_pp": 11.64
+    },
+    "vs_leave": {
+      "lose_tf_no_grubs_pp": -13.72,
+      "lose_tf_but_you_get_grubs_pp": -10.04,
+      "win_tf_no_grubs_pp": 5.88,
+      "win_tf_and_grubs_pp": 9.56
+    },
+    "terminal_gold_states": {
+      "lose_tf_no_grubs": -715.6,
+      "lose_tf_but_you_get_grubs": -484.4,
+      "win_tf_no_grubs": 484.4,
+      "win_tf_and_grubs": 715.6
+    },
+    "notes": "Every cell is evaluated as a complete terminal gold state before the fitted gold logit is applied. Rows are fight outcomes; columns are whether your team secured the camp."
+  },
+  "contaminated_association_for_contrast": {
+    "label": "OE association of blue 3\u20130 | gold/kills/xp @10 \u2014 NOT intrinsic package value",
+    "unique_dpp": 0.1449899631013607,
+    "n": 925
+  },
+  "fight_swing_priors": {
+    "near_even_n": 166,
+    "bands_gold10_to_15": {
+      "mild_loss_dg": {
+        "n": 26,
+        "mean_dg": null,
+        "emp_wr": null,
+        "logit_pp_at_mean": null
+      },
+      "medium_loss_dg": {
+        "n": 14,
+        "mean_dg": null,
+        "emp_wr": null,
+        "logit_pp_at_mean": null
+      },
+      "severe_loss_dg": {
+        "n": 23,
+        "mean_dg": null,
+        "emp_wr": null,
+        "logit_pp_at_mean": null
+      },
+      "mild_gain_dg": {
+        "n": 15,
+        "mean_dg": null,
+        "emp_wr": null,
+        "logit_pp_at_mean": null
+      },
+      "medium_gain_dg": {
+        "n": 24,
+        "mean_dg": null,
+        "emp_wr": null,
+        "logit_pp_at_mean": null
+      }
+    },
+    "structural_2_deaths_neg600g_pp": -9.810239153607036,
+    "structural_3_deaths_neg900g_pp": -14.483416610142863
+  },
+  "contest_ev": {
+    "leave_one_laner_one_wave_2kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 2.0,
+      "farm_gold": 120.6667,
+      "farm_label": "1 laner \u00d7 1 grub-era average wave",
+      "leave_scenario_key": "one_laner_one_wave",
+      "terminal_states": {
+        "leave_probability": 0.5008392361391877,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 120.6667,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "breakeven_p_win_fight": 0.5036058230660659,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -8.23,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -7.07,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -5.9,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -4.74,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -3.58,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -2.41,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -1.25,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -0.08,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": 2.24,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": 4.57,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": 5.73,
+          "verdict": "CONTEST"
+        }
+      ]
+    },
+    "leave_two_laners_one_wave_2kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 3.99,
+      "farm_gold": 241.3333,
+      "farm_label": "2 laners \u00d7 1 grub-era average wave each",
+      "leave_scenario_key": "two_laners_one_wave",
+      "terminal_states": {
+        "leave_probability": 0.5208142278318245,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 241.3333,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "breakeven_p_win_fight": 0.5894294457945883,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -10.23,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -9.06,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -7.9,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -6.74,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -5.57,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -4.41,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -3.25,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -2.08,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 0.25,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 2.57,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 3.74,
+          "verdict": "CONTEST"
+        }
+      ]
+    },
+    "leave_three_laners_one_wave_2kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 5.97,
+      "farm_gold": 362.0,
+      "farm_label": "3 laners \u00d7 1 grub-era average wave each",
+      "leave_scenario_key": "three_laners_one_wave",
+      "terminal_states": {
+        "leave_probability": 0.5407233367057818,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 362.0,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "breakeven_p_win_fight": 0.6749699994604722,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -12.22,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -11.05,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -9.89,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -8.73,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -7.56,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -6.4,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -5.24,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -4.07,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -1.74,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": 0.58,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": 1.75,
+          "verdict": "CONTEST"
+        }
+      ]
+    },
+    "leave_one_laner_wave_plus_plate_2kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 3.98,
+      "farm_gold": 240.6667,
+      "farm_label": "1 laner \u00d7 wave + one outer plate",
+      "leave_scenario_key": "one_laner_wave_plus_plate",
+      "terminal_states": {
+        "leave_probability": 0.5207040027665601,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 120.6667,
+        "leave_plate_probability": 1.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "breakeven_p_win_fight": 0.5889558578921732,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": 2.07,
+          "edge_contest_minus_leave_pp": -10.22,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": 2.07,
+          "edge_contest_minus_leave_pp": -9.05,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": 2.07,
+          "edge_contest_minus_leave_pp": -7.89,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": 2.07,
+          "edge_contest_minus_leave_pp": -6.73,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": 2.07,
+          "edge_contest_minus_leave_pp": -5.56,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": 2.07,
+          "edge_contest_minus_leave_pp": -4.4,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": 2.07,
+          "edge_contest_minus_leave_pp": -3.23,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": 2.07,
+          "edge_contest_minus_leave_pp": -2.07,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": 2.07,
+          "edge_contest_minus_leave_pp": 0.26,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": 2.07,
+          "edge_contest_minus_leave_pp": 2.58,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": 2.07,
+          "edge_contest_minus_leave_pp": 3.75,
+          "verdict": "CONTEST"
+        }
+      ]
+    },
+    "leave_two_laners_wave_plus_plate_2kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 5.96,
+      "farm_gold": 361.3333,
+      "farm_label": "2 laners \u00d7 wave + one outer plate",
+      "leave_scenario_key": "two_laners_wave_plus_plate",
+      "terminal_states": {
+        "leave_probability": 0.540613631796246,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 241.3333,
+        "leave_plate_probability": 1.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "breakeven_p_win_fight": 0.6744986464350322,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": 4.06,
+          "edge_contest_minus_leave_pp": -12.21,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": 4.06,
+          "edge_contest_minus_leave_pp": -11.04,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": 4.06,
+          "edge_contest_minus_leave_pp": -9.88,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": 4.06,
+          "edge_contest_minus_leave_pp": -8.72,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": 4.06,
+          "edge_contest_minus_leave_pp": -7.55,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": 4.06,
+          "edge_contest_minus_leave_pp": -6.39,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": 4.06,
+          "edge_contest_minus_leave_pp": -5.23,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": 4.06,
+          "edge_contest_minus_leave_pp": -4.06,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": 4.06,
+          "edge_contest_minus_leave_pp": -1.73,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": 4.06,
+          "edge_contest_minus_leave_pp": 0.59,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": 4.06,
+          "edge_contest_minus_leave_pp": 1.76,
+          "verdict": "CONTEST"
+        }
+      ]
+    },
+    "leave_three_laners_wave_plus_plate_2kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 7.92,
+      "farm_gold": 482.0,
+      "farm_label": "3 laners \u00d7 wave + one outer plate",
+      "leave_scenario_key": "three_laners_wave_plus_plate",
+      "terminal_states": {
+        "leave_probability": 0.5603953048465393,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 362.0,
+        "leave_plate_probability": 1.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "breakeven_p_win_fight": 0.7594916652523152,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": 6.04,
+          "edge_contest_minus_leave_pp": -14.19,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": 6.04,
+          "edge_contest_minus_leave_pp": -13.02,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": 6.04,
+          "edge_contest_minus_leave_pp": -11.86,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": 6.04,
+          "edge_contest_minus_leave_pp": -10.69,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": 6.04,
+          "edge_contest_minus_leave_pp": -9.53,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": 6.04,
+          "edge_contest_minus_leave_pp": -8.37,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": 6.04,
+          "edge_contest_minus_leave_pp": -7.2,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": 6.04,
+          "edge_contest_minus_leave_pp": -6.04,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": 6.04,
+          "edge_contest_minus_leave_pp": -3.71,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": 6.04,
+          "edge_contest_minus_leave_pp": -1.38,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": 6.04,
+          "edge_contest_minus_leave_pp": -0.22,
+          "verdict": "AVOID"
+        }
+      ]
+    },
+    "leave_two_laners_nocannon_wave_2kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 3.37,
+      "farm_gold": 204.0,
+      "farm_label": "2 laners \u00d7 non-cannon wave (102g each)",
+      "leave_scenario_key": "two_laners_nocannon_wave",
+      "terminal_states": {
+        "leave_probability": 0.5146382226668796,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 204.0,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "breakeven_p_win_fight": 0.562893908488657,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": 1.46,
+          "edge_contest_minus_leave_pp": -9.61,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": 1.46,
+          "edge_contest_minus_leave_pp": -8.45,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": 1.46,
+          "edge_contest_minus_leave_pp": -7.28,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": 1.46,
+          "edge_contest_minus_leave_pp": -6.12,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": 1.46,
+          "edge_contest_minus_leave_pp": -4.95,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": 1.46,
+          "edge_contest_minus_leave_pp": -3.79,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": 1.46,
+          "edge_contest_minus_leave_pp": -2.63,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": 1.46,
+          "edge_contest_minus_leave_pp": -1.46,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": 1.46,
+          "edge_contest_minus_leave_pp": 0.86,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": 1.46,
+          "edge_contest_minus_leave_pp": 3.19,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": 1.46,
+          "edge_contest_minus_leave_pp": 4.35,
+          "verdict": "CONTEST"
+        }
+      ]
+    },
+    "baseline_gift_no_farm_no_kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 3.99,
+      "breakeven_p_win_fight": 0.0,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -1.34,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 0.57,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -1.15,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 0.77,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -0.96,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 0.96,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -0.77,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 1.15,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -0.57,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 1.34,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -0.38,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 1.53,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -0.19,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 1.72,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 1.91,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 0.38,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 2.3,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 0.77,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 2.68,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 0.96,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 2.87,
+          "verdict": "CONTEST"
+        }
+      ],
+      "terminal_states": {
+        "leave_probability": 0.48086156632183596,
+        "contest_win_probability": 0.519138433678164,
+        "contest_loss_probability": 0.48086156632183596,
+        "win_secure_probability": 0.519138433678164,
+        "win_no_secure_probability": 0.48086156632183596,
+        "lose_secure_probability": 0.519138433678164,
+        "lose_opponent_secure_probability": 0.48086156632183596,
+        "lose_concede_probability": 0.48086156632183596,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 0.0,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 0.0,
+        "loss_kill_gold": 0.0
+      }
+    },
+    "contrast_nofarm_2kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 3.99,
+      "breakeven_p_win_fight": 0.41777069363112346,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": -6.23,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": -5.07,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": -3.9,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": -2.74,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": -1.58,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": -0.41,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 0.75,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 1.91,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 4.24,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 6.57,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 7.73,
+          "verdict": "CONTEST"
+        }
+      ],
+      "terminal_states": {
+        "leave_probability": 0.48086156632183596,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 0.0,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      }
+    },
+    "headline_farm_3deaths_2kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 3.99,
+      "breakeven_p_win_fight": 0.6569536060015699,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -12.04,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -14.12,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -10.65,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -12.73,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -9.25,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -11.34,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -7.86,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -9.94,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -6.47,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -8.55,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -5.08,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -7.16,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -3.68,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -5.76,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": -2.29,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -4.37,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 0.49,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -1.59,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 3.28,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 1.2,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 4.67,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 2.59,
+          "verdict": "CONTEST"
+        }
+      ],
+      "terminal_states": {
+        "leave_probability": 0.5208142278318245,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3378149373792569,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.372903654341195,
+        "lose_opponent_secure_probability": 0.3378149373792569,
+        "lose_concede_probability": 0.3378149373792569,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 241.3333,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -900.0
+      }
+    },
+    "leave_dual_tempo_own_plus_opp_miss_2kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 7.93,
+      "farm_gold": 482.6666,
+      "farm_label": "dual tempo: own 241.3g + opp miss 241.3g",
+      "breakeven_p_win_fight": 0.7599591763867819,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": 6.05,
+          "edge_contest_minus_leave_pp": -14.2,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": 6.05,
+          "edge_contest_minus_leave_pp": -13.03,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": 6.05,
+          "edge_contest_minus_leave_pp": -11.87,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": 6.05,
+          "edge_contest_minus_leave_pp": -10.71,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": 6.05,
+          "edge_contest_minus_leave_pp": -9.54,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": 6.05,
+          "edge_contest_minus_leave_pp": -8.38,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": 6.05,
+          "edge_contest_minus_leave_pp": -7.21,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": 6.05,
+          "edge_contest_minus_leave_pp": -6.05,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": 6.05,
+          "edge_contest_minus_leave_pp": -3.72,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": 6.05,
+          "edge_contest_minus_leave_pp": -1.4,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": 6.05,
+          "edge_contest_minus_leave_pp": -0.23,
+          "verdict": "AVOID"
+        }
+      ],
+      "terminal_states": {
+        "leave_probability": 0.5605041155763861,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 482.6666,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "note": "Sensitivity: leave golddiff counts opponent missed waves while they take. Not headline (avoids double-counting vs contest-forgoes-F framing)."
+    },
+    "headline_leave_farm_2kills_mixture": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 3.99,
+      "breakeven_p_win_fight": 0.5894294457945883,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -10.23,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -9.06,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -7.9,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -6.74,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -5.57,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -4.41,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -3.25,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -2.08,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 0.25,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 2.57,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 3.74,
+          "verdict": "CONTEST"
+        }
+      ],
+      "mixture": {
+        "leave_probability": 0.5208142278318245,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 241.3333,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "note": "2\u00d72 mixture with headline leave-farm (wiki waves + plate EV)."
+    },
+    "preferred_farm_2kills_sym": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 3.99,
+      "farm_gold": 241.3333,
+      "farm_label": "2 laners \u00d7 1 grub-era average wave each",
+      "leave_scenario_key": "two_laners_one_wave",
+      "terminal_states": {
+        "leave_probability": 0.5208142278318245,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 241.3333,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "breakeven_p_win_fight": 0.5894294457945883,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -10.23,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -9.06,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -7.9,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -6.74,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -5.57,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -4.41,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -3.25,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -2.08,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 0.25,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 2.57,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 3.74,
+          "verdict": "CONTEST"
+        }
+      ]
+    },
+    "preferred_obj_vs_2deaths_plus_gift": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 3.99,
+      "farm_gold": 241.3333,
+      "farm_label": "2 laners \u00d7 1 grub-era average wave each",
+      "leave_scenario_key": "two_laners_one_wave",
+      "terminal_states": {
+        "leave_probability": 0.5208142278318245,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 241.3333,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "breakeven_p_win_fight": 0.5894294457945883,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -10.23,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -9.06,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -7.9,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -6.74,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -5.57,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -4.41,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -3.25,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -2.08,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 0.25,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 2.57,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 3.74,
+          "verdict": "CONTEST"
+        }
+      ]
+    },
+    "headline_nofarm_2kills_sym": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 3.99,
+      "breakeven_p_win_fight": 0.41777069363112346,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": -6.23,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": -5.07,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": -3.9,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": -2.74,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": -1.58,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": -0.41,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 0.75,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 1.91,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 4.24,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 6.57,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 7.73,
+          "verdict": "CONTEST"
+        }
+      ],
+      "terminal_states": {
+        "leave_probability": 0.48086156632183596,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 0.0,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      }
+    },
+    "preferred_3deaths_farm_2kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 3.99,
+      "breakeven_p_win_fight": 0.6569536060015699,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -12.04,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -14.12,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -10.65,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -12.73,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -9.25,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -11.34,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -7.86,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -9.94,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -6.47,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -8.55,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -5.08,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -7.16,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -3.68,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -5.76,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": -2.29,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -4.37,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 0.49,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -1.59,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 3.28,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 1.2,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 4.67,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 2.59,
+          "verdict": "CONTEST"
+        }
+      ],
+      "terminal_states": {
+        "leave_probability": 0.5208142278318245,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3378149373792569,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.372903654341195,
+        "lose_opponent_secure_probability": 0.3378149373792569,
+        "lose_concede_probability": 0.3378149373792569,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 241.3333,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -900.0
+      }
+    },
+    "baseline_2deaths_gift_no_farm": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 3.99,
+      "breakeven_p_win_fight": 0.0,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -1.34,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 0.57,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -1.15,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 0.77,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -0.96,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 0.96,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -0.77,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 1.15,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -0.57,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 1.34,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -0.38,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 1.53,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -0.19,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 1.72,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 1.91,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 0.38,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 2.3,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 0.77,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 2.68,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 0.96,
+          "ev_leave_pp": -1.91,
+          "edge_contest_minus_leave_pp": 2.87,
+          "verdict": "CONTEST"
+        }
+      ],
+      "terminal_states": {
+        "leave_probability": 0.48086156632183596,
+        "contest_win_probability": 0.519138433678164,
+        "contest_loss_probability": 0.48086156632183596,
+        "win_secure_probability": 0.519138433678164,
+        "win_no_secure_probability": 0.48086156632183596,
+        "lose_secure_probability": 0.519138433678164,
+        "lose_opponent_secure_probability": 0.48086156632183596,
+        "lose_concede_probability": 0.48086156632183596,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 0.0,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 0.0,
+        "loss_kill_gold": 0.0
+      }
+    },
+    "preferred_farm_only_no_kill_bonus": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 0.0,
+      "farm_pp": 3.99,
+      "farm_gold": 241.3333,
+      "farm_label": "2 laners \u00d7 1 grub-era average wave each",
+      "leave_scenario_key": "two_laners_one_wave",
+      "terminal_states": {
+        "leave_probability": 0.5208142278318245,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 241.3333,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "breakeven_p_win_fight": null,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -9.6,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -11.69,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -8.93,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -11.01,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -8.25,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -10.33,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -7.57,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -9.65,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -6.89,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -8.98,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -6.22,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -8.3,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -5.54,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -7.62,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": -4.86,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -6.94,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": -3.51,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -5.59,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": -2.15,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -4.23,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": -1.47,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -3.56,
+          "verdict": "AVOID"
+        }
+      ]
+    },
+    "leave_1_laner_wave_2kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 2.0,
+      "farm_gold": 120.6667,
+      "farm_label": "1 laner \u00d7 1 grub-era average wave",
+      "leave_scenario_key": "one_laner_one_wave",
+      "terminal_states": {
+        "leave_probability": 0.5008392361391877,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 120.6667,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "breakeven_p_win_fight": 0.5036058230660659,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -8.23,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -7.07,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -5.9,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -4.74,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -3.58,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -2.41,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -1.25,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": -0.08,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": 2.24,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": 4.57,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": 0.08,
+          "edge_contest_minus_leave_pp": 5.73,
+          "verdict": "CONTEST"
+        }
+      ]
+    },
+    "leave_2_laner_wave_2kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 3.99,
+      "farm_gold": 241.3333,
+      "farm_label": "2 laners \u00d7 1 grub-era average wave each",
+      "leave_scenario_key": "two_laners_one_wave",
+      "terminal_states": {
+        "leave_probability": 0.5208142278318245,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 241.3333,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "breakeven_p_win_fight": 0.5894294457945883,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -10.23,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -9.06,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -7.9,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -6.74,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -5.57,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -4.41,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -3.25,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": -2.08,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 0.25,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 2.57,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": 2.08,
+          "edge_contest_minus_leave_pp": 3.74,
+          "verdict": "CONTEST"
+        }
+      ]
+    },
+    "leave_3_laner_wave_2kills": {
+      "delta_obj_pp": 1.91,
+      "fight_loss_pp": 11.72,
+      "fight_win_extra_pp": 9.81,
+      "farm_pp": 5.97,
+      "farm_gold": 362.0,
+      "farm_label": "3 laners \u00d7 1 grub-era average wave each",
+      "leave_scenario_key": "three_laners_one_wave",
+      "terminal_states": {
+        "leave_probability": 0.5407233367057818,
+        "contest_win_probability": 0.6163723404908098,
+        "contest_loss_probability": 0.3836276595091902,
+        "win_secure_probability": 0.6163723404908098,
+        "win_no_secure_probability": 0.5795576376369818,
+        "lose_secure_probability": 0.4204423623630182,
+        "lose_opponent_secure_probability": 0.3836276595091902,
+        "lose_concede_probability": 0.3836276595091902,
+        "p_secure_if_win": 1.0,
+        "p_secure_if_lose": 0.0,
+        "baseline_gold": 0.0,
+        "objective_gold": 115.6,
+        "leave_farm_gold": 362.0,
+        "leave_plate_probability": 0.0,
+        "win_kill_gold": 600.0,
+        "loss_kill_gold": -600.0
+      },
+      "breakeven_p_win_fight": 0.6749699994604722,
+      "curve": [
+        {
+          "p_win_fight": 0.15,
+          "ev_contest_pp": -8.15,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -12.22,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.2,
+          "ev_contest_pp": -6.98,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -11.05,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.25,
+          "ev_contest_pp": -5.82,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -9.89,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.3,
+          "ev_contest_pp": -4.65,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -8.73,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.35,
+          "ev_contest_pp": -3.49,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -7.56,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.4,
+          "ev_contest_pp": -2.33,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -6.4,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.45,
+          "ev_contest_pp": -1.16,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -5.24,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.5,
+          "ev_contest_pp": 0.0,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -4.07,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.6,
+          "ev_contest_pp": 2.33,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": -1.74,
+          "verdict": "AVOID"
+        },
+        {
+          "p_win_fight": 0.7,
+          "ev_contest_pp": 4.65,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": 0.58,
+          "verdict": "CONTEST"
+        },
+        {
+          "p_win_fight": 0.75,
+          "ev_contest_pp": 5.82,
+          "ev_leave_pp": 4.07,
+          "edge_contest_minus_leave_pp": 1.75,
+          "verdict": "CONTEST"
+        }
+      ]
+    }
+  },
+  "headline_key": "leave_two_laners_one_wave_2kills",
+  "sister_study_reconciliation": {
+    "available": true,
+    "source": "grubs_decision_numbers.json",
+    "estimand": "OE take-regime contest EV among maps (who ended with all3 / leave_mix / split) \u2014 selection + tempo, NOT the mechanical scrap proxy in this note.",
+    "at_p_025_edge_vs_leave_mix_pp": 0.04,
+    "at_p_025_verdict_vs_leave": "TOSS-UP",
+    "breakeven_p_vs_leave_mix": 0.2447,
+    "breakeven_p_vs_split": 0.6809,
+    "do_not_coach_from_either_alone": true,
+    "note": "Sister study at p=0.25 is near toss-up vs leave_mix (~0pp / p*~0.26). This note's structural scrap lottery can show large negative edges under death+gift priors. Different objects \u2014 report both; do not collapse."
+  },
+  "ls_furia_scenario": {
+    "description": "Illustrative leave scenario: 2 laners \u00d7 1 grub-era average wave each (241.33g \u2192 +3.99pp wiki\u2192logit); contest forgoes farm; win = scrap + +2 kills; lose = \u22122 kills + gift. Item-pace: gift relative leave\u2212take \u2248 393g (0.45\u00d7 Pickaxe).",
+    "delta_obj_pp_preferred": 1.91,
+    "farm_pp": 3.99,
+    "farm_gold": 241.3333,
+    "farm_label": "2 laners \u00d7 1 grub-era average wave each",
+    "fight_win_extra_pp": 9.81,
+    "fight_loss_pp": 11.72,
+    "at_p_025": {
+      "p_win_fight": 0.25,
+      "ev_contest_pp": -5.82,
+      "ev_leave_pp": 2.08,
+      "edge_contest_minus_leave_pp": -7.9,
+      "verdict": "AVOID"
+    },
+    "breakeven_p": 0.5894294457945883,
+    "mixture_at_p_025": {
+      "p_win_fight": 0.25,
+      "ev_contest_pp": -5.82,
+      "ev_leave_pp": 2.08,
+      "edge_contest_minus_leave_pp": -7.9,
+      "verdict": "AVOID"
+    },
+    "mixture_breakeven_p": 0.5894294457945883,
+    "nofarm_contrast_at_p_025": {
+      "p_win_fight": 0.25,
+      "ev_contest_pp": -5.82,
+      "ev_leave_pp": -1.91,
+      "edge_contest_minus_leave_pp": -3.9,
+      "verdict": "AVOID"
+    },
+    "nofarm_contrast_breakeven_p": 0.41777069363112346,
+    "dual_tempo_at_p_025": {
+      "p_win_fight": 0.25,
+      "ev_contest_pp": -5.82,
+      "ev_leave_pp": 6.05,
+      "edge_contest_minus_leave_pp": -11.87,
+      "verdict": "AVOID"
+    },
+    "dual_tempo_breakeven_p": 0.7599591763867819,
+    "dual_tempo_farm_pp": 7.93,
+    "verdict": "Under the illustrative priors (cash plus conditional pressure, wiki leave-farm, \u00b12 kills, diagonal): LEAVE at p=0.25"
+  },
+  "answers": {
+    "what_is_the_scrap": "T_pref \u2248 +1.91pp (90g + 8s Touch\u2192plate). Full T includes 195 XP in joint/upper bounds.",
+    "leave_farm_hypothesis": "If the giving team farms 1\u20133 laner-waves (wiki early wave gold) during the window and has a chance at a plate (120g), what map-WR pp does that buy vs contesting the river? Wave = grub-era E[wave] at 10:00 = 102 + 56/3 = 120.6\u0305g (pre-14 composition; cannon gold 50+\u230at/90\u230b). Plate = 120g local outer plating (plates persist past 14:00). 1 laner(s): 120.67g \u2192 +2.00pp; edge@25%=-5.90pp; p*\u22480.50 | 2 laner(s): 241.33g \u2192 +3.99pp; edge@25%=-7.90pp; p*\u22480.59 | 3 laner(s): 362.00g \u2192 +5.97pp; edge@25%=-9.89pp; p*\u22480.67",
+    "how_large_is_intrinsic_grub_value": "T_pref +1.91pp; gold alone +1.49pp; joint +3.55pp.",
+    "leave_farm_gold": "Headline: 2 laners \u00d7 1 grub-era average wave each = 241.33g \u2192 +3.99pp (grub-era wave 120.67g \u00d7 2 + 0.25\u00d7120g plate).",
+    "tf_kill_gold": "Kill bounty 300g prior. +2/\u22122 \u2192 +9.81pp / -9.81pp.",
+    "should_you_take_25_75_to_deny": "Headline leave-farm (241g): at p=25% edge = -7.90pp \u2192 LEAVE; p*\u22480.59. Mixture: -7.90pp. If somehow zero farm: -3.90pp (p*\u22480.42). Dual-tempo (own+opp miss): -11.87pp (p*\u22480.76).",
+    "item_pace": "Gift relative gap \u2248 393g (0.45\u00d7 Pickaxe, 1.6 solo-laner minutes). Fight win\u2212lose \u2248 1380g (1.58\u00d7 Pickaxe). Take/contest side is behind on item pace even when they 'win' free scrap.",
+    "is_ls_right": "On Furia 25/75 under headline leave-farm (wiki waves \u00b1 plate): leave still preferred. T_pref \u2248 +1.91pp is not literal 0.10pp. Item-pace: gifting scrap can still leave the take side behind on next-item completion for ~1\u20133 min because they missed waves.",
+    "is_it_decimal_like_ls": "T_pref \u2248 +1.91pp \u2014 not 0.10. Take-regime +0.14pp is a different estimand.",
+    "why_not_plus_3_7pp": "OE 3\u20130 association +0.14pp is selection+tempo, not scrap.",
+    "certainty_disclaimer": "Leave farm uses wiki gold constants + gold@10 associational map; p_plate and N laners are scenario inputs; p(fight) is exogenous. Item costs and contest delay are wiki/structural priors, not OE-logged recalls."
+  },
+  "leave_farm": {
+    "wiki_sources": [
+      "https://wiki.leagueoflegends.com/en-us/Minion",
+      "https://wiki.leagueoflegends.com/en-us/Turret"
+    ],
+    "constants": {
+      "melee_minion_gold": 20.0,
+      "caster_minion_gold": 14.0,
+      "cannon_minion_gold_early": 56.0,
+      "wave_gold_no_cannon": 102.0,
+      "wave_gold_avg_early_wiki_0_30": 118.66666666666667,
+      "wave_gold_grub_era_at_10_00": 120.66666666666667,
+      "plate_gold_local": 120.0,
+      "note": "Wave = grub-era E[wave] at 10:00 = 102 + 56/3 = 120.6\u0305g (pre-14 composition; cannon gold 50+\u230at/90\u230b). Plate = 120g local outer plating (plates persist past 14:00)."
+    },
+    "wave_gold_early": 120.66666666666667,
+    "plate_gold": 120.0,
+    "scenarios": {
+      "one_laner_one_wave": {
+        "label": "1 laner \u00d7 1 grub-era average wave",
+        "n_laners": 1,
+        "waves_each": 1,
+        "wave_gold_each": 120.66666666666667,
+        "p_plate": 0.0,
+        "gold": 120.6667,
+        "components": {
+          "waves_g": 120.6667,
+          "plate_ev_g": 0.0
+        },
+        "wr_pp_at_even": 2.0,
+        "source": "wiki Minion avg early wave / Turret Plating 120g"
+      },
+      "two_laners_one_wave": {
+        "label": "2 laners \u00d7 1 grub-era average wave each",
+        "n_laners": 2,
+        "waves_each": 1,
+        "wave_gold_each": 120.66666666666667,
+        "p_plate": 0.0,
+        "gold": 241.3333,
+        "components": {
+          "waves_g": 241.3333,
+          "plate_ev_g": 0.0
+        },
+        "wr_pp_at_even": 3.99,
+        "source": "wiki Minion avg early wave / Turret Plating 120g"
+      },
+      "three_laners_one_wave": {
+        "label": "3 laners \u00d7 1 grub-era average wave each",
+        "n_laners": 3,
+        "waves_each": 1,
+        "wave_gold_each": 120.66666666666667,
+        "p_plate": 0.0,
+        "gold": 362.0,
+        "components": {
+          "waves_g": 362.0,
+          "plate_ev_g": 0.0
+        },
+        "wr_pp_at_even": 5.97,
+        "source": "wiki Minion avg early wave / Turret Plating 120g"
+      },
+      "one_laner_wave_plus_plate": {
+        "label": "1 laner \u00d7 wave + one outer plate",
+        "n_laners": 1,
+        "waves_each": 1,
+        "wave_gold_each": 120.66666666666667,
+        "p_plate": 1.0,
+        "gold": 240.6667,
+        "components": {
+          "waves_g": 120.6667,
+          "plate_ev_g": 120.0
+        },
+        "wr_pp_at_even": 3.98,
+        "source": "wiki Minion avg early wave / Turret Plating 120g"
+      },
+      "two_laners_wave_plus_plate": {
+        "label": "2 laners \u00d7 wave + one outer plate",
+        "n_laners": 2,
+        "waves_each": 1,
+        "wave_gold_each": 120.66666666666667,
+        "p_plate": 1.0,
+        "gold": 361.3333,
+        "components": {
+          "waves_g": 241.3333,
+          "plate_ev_g": 120.0
+        },
+        "wr_pp_at_even": 5.96,
+        "source": "wiki Minion avg early wave / Turret Plating 120g"
+      },
+      "three_laners_wave_plus_plate": {
+        "label": "3 laners \u00d7 wave + one outer plate",
+        "n_laners": 3,
+        "waves_each": 1,
+        "wave_gold_each": 120.66666666666667,
+        "p_plate": 1.0,
+        "gold": 482.0,
+        "components": {
+          "waves_g": 362.0,
+          "plate_ev_g": 120.0
+        },
+        "wr_pp_at_even": 7.92,
+        "source": "wiki Minion avg early wave / Turret Plating 120g"
+      },
+      "two_laners_nocannon_wave": {
+        "label": "2 laners \u00d7 non-cannon wave (102g each)",
+        "n_laners": 2,
+        "waves_each": 1,
+        "wave_gold_each": 102.0,
+        "p_plate": 0.0,
+        "gold": 204.0,
+        "components": {
+          "waves_g": 204.0,
+          "plate_ev_g": 0.0
+        },
+        "wr_pp_at_even": 3.37,
+        "source": "wiki Minion avg early wave / Turret Plating 120g"
+      }
+    },
+    "hypothesis": "If the giving team farms 1\u20133 laner-waves (wiki early wave gold) during the window and has a chance at a plate (120g), what map-WR pp does that buy vs contesting the river?",
+    "headline_key": "two_laners_one_wave"
+  },
+  "certainty_atlas": {
+    "fight_exchange": "contest win +600g / contest loss -600g (symmetric two-kill sensitivity)",
+    "packages": {
+      "cash_only": {
+        "label": "90g cash only",
+        "objective_gold": 90,
+        "cells": [
+          {
+            "key": "concede_only",
+            "label": "No farm recovered",
+            "leave_gold": 0.0,
+            "breakeven_p_win_fight": 0.43367742291914535,
+            "map_level_sampling_interval": {
+              "estimate": 0.43367742291914535,
+              "se": 0.00022892519202895355,
+              "ci95_low": 0.4332287295427686,
+              "ci95_high": 0.4341261162955221,
+              "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+            },
+            "terminal_states": {
+              "leave_probability": 0.48509698665376577,
+              "contest_win_probability": 0.6123524899225934,
+              "contest_loss_probability": 0.3876475100774067,
+              "win_secure_probability": 0.6123524899225934,
+              "win_no_secure_probability": 0.5836856647149854,
+              "lose_secure_probability": 0.4163143352850146,
+              "lose_opponent_secure_probability": 0.3876475100774067,
+              "lose_concede_probability": 0.3876475100774067,
+              "p_secure_if_win": 1.0,
+              "p_secure_if_lose": 0.0,
+              "baseline_gold": 0.0,
+              "objective_gold": 90,
+              "leave_farm_gold": 0.0,
+              "leave_plate_probability": 0.0,
+              "win_kill_gold": 600.0,
+              "loss_kill_gold": -600.0
+            }
+          },
+          {
+            "key": "one_wave",
+            "label": "One grub-era average wave",
+            "leave_gold": 120.67,
+            "breakeven_p_win_fight": 0.522604683220447,
+            "map_level_sampling_interval": {
+              "estimate": 0.522604683220447,
+              "se": 7.924664001778563e-05,
+              "ci95_low": 0.5224493598060121,
+              "ci95_high": 0.5227600066348818,
+              "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+            },
+            "terminal_states": {
+              "leave_probability": 0.5050793848874574,
+              "contest_win_probability": 0.6123524899225934,
+              "contest_loss_probability": 0.3876475100774067,
+              "win_secure_probability": 0.6123524899225934,
+              "win_no_secure_probability": 0.5836856647149854,
+              "lose_secure_probability": 0.4163143352850146,
+              "lose_opponent_secure_probability": 0.3876475100774067,
+              "lose_concede_probability": 0.3876475100774067,
+              "p_secure_if_win": 1.0,
+              "p_secure_if_lose": 0.0,
+              "baseline_gold": 0.0,
+              "objective_gold": 90,
+              "leave_farm_gold": 120.66666666666667,
+              "leave_plate_probability": 0.0,
+              "win_kill_gold": 600.0,
+              "loss_kill_gold": -600.0
+            }
+          },
+          {
+            "key": "two_waves",
+            "label": "Two grub-era average waves",
+            "leave_gold": 241.33,
+            "breakeven_p_win_fight": 0.6114602611418325,
+            "map_level_sampling_interval": {
+              "estimate": 0.6114602611418325,
+              "se": 0.0003722810477999054,
+              "ci95_low": 0.6107305902881447,
+              "ci95_high": 0.6121899319955203,
+              "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+            },
+            "terminal_states": {
+              "leave_probability": 0.5250456757334148,
+              "contest_win_probability": 0.6123524899225934,
+              "contest_loss_probability": 0.3876475100774067,
+              "win_secure_probability": 0.6123524899225934,
+              "win_no_secure_probability": 0.5836856647149854,
+              "lose_secure_probability": 0.4163143352850146,
+              "lose_opponent_secure_probability": 0.3876475100774067,
+              "lose_concede_probability": 0.3876475100774067,
+              "p_secure_if_win": 1.0,
+              "p_secure_if_lose": 0.0,
+              "baseline_gold": 0.0,
+              "objective_gold": 90,
+              "leave_farm_gold": 241.33333333333334,
+              "leave_plate_probability": 0.0,
+              "win_kill_gold": 600.0,
+              "loss_kill_gold": -600.0
+            }
+          },
+          {
+            "key": "two_waves_plate",
+            "label": "Two waves + one outer plate",
+            "leave_gold": 361.33,
+            "breakeven_p_win_fight": 0.6994757264860297,
+            "map_level_sampling_interval": {
+              "estimate": 0.6994757264860297,
+              "se": 0.0005901839966548322,
+              "ci95_low": 0.6983189658525862,
+              "ci95_high": 0.7006324871194732,
+              "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+            },
+            "terminal_states": {
+              "leave_probability": 0.5448231890996473,
+              "contest_win_probability": 0.6123524899225934,
+              "contest_loss_probability": 0.3876475100774067,
+              "win_secure_probability": 0.6123524899225934,
+              "win_no_secure_probability": 0.5836856647149854,
+              "lose_secure_probability": 0.4163143352850146,
+              "lose_opponent_secure_probability": 0.3876475100774067,
+              "lose_concede_probability": 0.3876475100774067,
+              "p_secure_if_win": 1.0,
+              "p_secure_if_lose": 0.0,
+              "baseline_gold": 0.0,
+              "objective_gold": 90,
+              "leave_farm_gold": 361.33333333333337,
+              "leave_plate_probability": 0.0,
+              "win_kill_gold": 600.0,
+              "loss_kill_gold": -600.0
+            }
+          },
+          {
+            "key": "three_waves_plate",
+            "label": "Three waves + one outer plate",
+            "leave_gold": 482.0,
+            "breakeven_p_win_fight": 0.7873537434375659,
+            "map_level_sampling_interval": {
+              "estimate": 0.7873537434375659,
+              "se": 0.0006783779238364928,
+              "ci95_low": 0.7860241227068464,
+              "ci95_high": 0.7886833641682854,
+              "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+            },
+            "terminal_states": {
+              "leave_probability": 0.5645698171275773,
+              "contest_win_probability": 0.6123524899225934,
+              "contest_loss_probability": 0.3876475100774067,
+              "win_secure_probability": 0.6123524899225934,
+              "win_no_secure_probability": 0.5836856647149854,
+              "lose_secure_probability": 0.4163143352850146,
+              "lose_opponent_secure_probability": 0.3876475100774067,
+              "lose_concede_probability": 0.3876475100774067,
+              "p_secure_if_win": 1.0,
+              "p_secure_if_lose": 0.0,
+              "baseline_gold": 0.0,
+              "objective_gold": 90,
+              "leave_farm_gold": 482.0,
+              "leave_plate_probability": 0.0,
+              "win_kill_gold": 600.0,
+              "loss_kill_gold": -600.0
+            }
+          }
+        ],
+        "capture_branches": [
+          {
+            "key": "secure_if_win",
+            "label": "Secure if fight won",
+            "p_secure_if_win": 1.0,
+            "p_secure_if_lose": 0.0,
+            "cells": [
+              {
+                "key": "concede_only",
+                "label": "No farm recovered",
+                "leave_gold": 0.0,
+                "breakeven_p_win_fight": 0.43367742291914535,
+                "map_level_sampling_interval": {
+                  "estimate": 0.43367742291914535,
+                  "se": 0.00022892519202895355,
+                  "ci95_low": 0.4332287295427686,
+                  "ci95_high": 0.4341261162955221,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.48509698665376577,
+                  "contest_win_probability": 0.6123524899225934,
+                  "contest_loss_probability": 0.3876475100774067,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 0.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "one_wave",
+                "label": "One grub-era average wave",
+                "leave_gold": 120.67,
+                "breakeven_p_win_fight": 0.522604683220447,
+                "map_level_sampling_interval": {
+                  "estimate": 0.522604683220447,
+                  "se": 7.924664001778563e-05,
+                  "ci95_low": 0.5224493598060121,
+                  "ci95_high": 0.5227600066348818,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5050793848874574,
+                  "contest_win_probability": 0.6123524899225934,
+                  "contest_loss_probability": 0.3876475100774067,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 120.66666666666667,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves",
+                "label": "Two grub-era average waves",
+                "leave_gold": 241.33,
+                "breakeven_p_win_fight": 0.6114602611418325,
+                "map_level_sampling_interval": {
+                  "estimate": 0.6114602611418325,
+                  "se": 0.0003722810477999054,
+                  "ci95_low": 0.6107305902881447,
+                  "ci95_high": 0.6121899319955203,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5250456757334148,
+                  "contest_win_probability": 0.6123524899225934,
+                  "contest_loss_probability": 0.3876475100774067,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 241.33333333333334,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves_plate",
+                "label": "Two waves + one outer plate",
+                "leave_gold": 361.33,
+                "breakeven_p_win_fight": 0.6994757264860297,
+                "map_level_sampling_interval": {
+                  "estimate": 0.6994757264860297,
+                  "se": 0.0005901839966548322,
+                  "ci95_low": 0.6983189658525862,
+                  "ci95_high": 0.7006324871194732,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5448231890996473,
+                  "contest_win_probability": 0.6123524899225934,
+                  "contest_loss_probability": 0.3876475100774067,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 361.33333333333337,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "three_waves_plate",
+                "label": "Three waves + one outer plate",
+                "leave_gold": 482.0,
+                "breakeven_p_win_fight": 0.7873537434375659,
+                "map_level_sampling_interval": {
+                  "estimate": 0.7873537434375659,
+                  "se": 0.0006783779238364928,
+                  "ci95_low": 0.7860241227068464,
+                  "ci95_high": 0.7886833641682854,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5645698171275773,
+                  "contest_win_probability": 0.6123524899225934,
+                  "contest_loss_probability": 0.3876475100774067,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 482.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              }
+            ]
+          },
+          {
+            "key": "always_secure",
+            "label": "Secure after either fight result",
+            "p_secure_if_win": 1.0,
+            "p_secure_if_lose": 1.0,
+            "cells": [
+              {
+                "key": "concede_only",
+                "label": "No farm recovered",
+                "leave_gold": 0.0,
+                "breakeven_p_win_fight": 0.35086359334442613,
+                "map_level_sampling_interval": {
+                  "estimate": 0.35086359334442613,
+                  "se": 0.00017351331086138926,
+                  "ci95_low": 0.3505235072551378,
+                  "ci95_high": 0.35120367943371444,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.48509698665376577,
+                  "contest_win_probability": 0.6123524899225934,
+                  "contest_loss_probability": 0.4163143352850146,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 0.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "one_wave",
+                "label": "One grub-era average wave",
+                "leave_gold": 120.67,
+                "breakeven_p_win_fight": 0.4527947621550776,
+                "map_level_sampling_interval": {
+                  "estimate": 0.4527947621550776,
+                  "se": 0.00045829948211423,
+                  "ci95_low": 0.4518964951701337,
+                  "ci95_high": 0.45369302914002146,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5050793848874574,
+                  "contest_win_probability": 0.6123524899225934,
+                  "contest_loss_probability": 0.4163143352850146,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 120.66666666666667,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves",
+                "label": "Two grub-era average waves",
+                "leave_gold": 241.33,
+                "breakeven_p_win_fight": 0.5546437664107522,
+                "map_level_sampling_interval": {
+                  "estimate": 0.5546437664107522,
+                  "se": 0.0007257899222624823,
+                  "ci95_low": 0.5532212181631178,
+                  "ci95_high": 0.5560663146583866,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5250456757334148,
+                  "contest_win_probability": 0.6123524899225934,
+                  "contest_loss_probability": 0.4163143352850146,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 241.33333333333334,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves_plate",
+                "label": "Two waves + one outer plate",
+                "leave_gold": 361.33,
+                "breakeven_p_win_fight": 0.6555298077163123,
+                "map_level_sampling_interval": {
+                  "estimate": 0.6555298077163123,
+                  "se": 0.0009078090423105199,
+                  "ci95_low": 0.6537505019933837,
+                  "ci95_high": 0.6573091134392409,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5448231890996473,
+                  "contest_win_probability": 0.6123524899225934,
+                  "contest_loss_probability": 0.4163143352850146,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 361.33333333333337,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "three_waves_plate",
+                "label": "Three waves + one outer plate",
+                "leave_gold": 482.0,
+                "breakeven_p_win_fight": 0.7562583014344667,
+                "map_level_sampling_interval": {
+                  "estimate": 0.7562583014344667,
+                  "se": 0.000941257478743281,
+                  "ci95_low": 0.7544134367761299,
+                  "ci95_high": 0.7581031660928035,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5645698171275773,
+                  "contest_win_probability": 0.6123524899225934,
+                  "contest_loss_probability": 0.4163143352850146,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 482.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              }
+            ]
+          },
+          {
+            "key": "never_secure",
+            "label": "Do not secure after either result",
+            "p_secure_if_win": 0.0,
+            "p_secure_if_lose": 0.0,
+            "cells": [
+              {
+                "key": "concede_only",
+                "label": "No farm recovered",
+                "leave_gold": 0.0,
+                "breakeven_p_win_fight": 0.4970944393784806,
+                "map_level_sampling_interval": {
+                  "estimate": 0.4970944393784806,
+                  "se": 0.000596214760274112,
+                  "ci95_low": 0.4959258584483433,
+                  "ci95_high": 0.49826302030861785,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.48509698665376577,
+                  "contest_win_probability": 0.5836856647149854,
+                  "contest_loss_probability": 0.3876475100774067,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 0.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "one_wave",
+                "label": "One grub-era average wave",
+                "leave_gold": 120.67,
+                "breakeven_p_win_fight": 0.5990256081891321,
+                "map_level_sampling_interval": {
+                  "estimate": 0.5990256081891321,
+                  "se": 0.00031142853493828837,
+                  "ci95_low": 0.5984152082606531,
+                  "ci95_high": 0.5996360081176111,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5050793848874574,
+                  "contest_win_probability": 0.5836856647149854,
+                  "contest_loss_probability": 0.3876475100774067,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 120.66666666666667,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves",
+                "label": "Two grub-era average waves",
+                "leave_gold": 241.33,
+                "breakeven_p_win_fight": 0.7008746124448068,
+                "map_level_sampling_interval": {
+                  "estimate": 0.7008746124448068,
+                  "se": 4.393854297589847e-05,
+                  "ci95_low": 0.700788492900574,
+                  "ci95_high": 0.7009607319890395,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5250456757334148,
+                  "contest_win_probability": 0.5836856647149854,
+                  "contest_loss_probability": 0.3876475100774067,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 241.33333333333334,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves_plate",
+                "label": "Two waves + one outer plate",
+                "leave_gold": 361.33,
+                "breakeven_p_win_fight": 0.801760653750367,
+                "map_level_sampling_interval": {
+                  "estimate": 0.801760653750367,
+                  "se": 0.00013808120868771177,
+                  "ci95_low": 0.8014900145813391,
+                  "ci95_high": 0.8020312929193949,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5448231890996473,
+                  "contest_win_probability": 0.5836856647149854,
+                  "contest_loss_probability": 0.3876475100774067,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 361.33333333333337,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "three_waves_plate",
+                "label": "Three waves + one outer plate",
+                "leave_gold": 482.0,
+                "breakeven_p_win_fight": 0.9024891474685214,
+                "map_level_sampling_interval": {
+                  "estimate": 0.9024891474685214,
+                  "se": 0.0001715295262286483,
+                  "ci95_low": 0.9021529495971132,
+                  "ci95_high": 0.9028253453399295,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5645698171275773,
+                  "contest_win_probability": 0.5836856647149854,
+                  "contest_loss_probability": 0.3876475100774067,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 482.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              }
+            ]
+          },
+          {
+            "key": "secure_if_lose",
+            "label": "Secure if fight lost",
+            "p_secure_if_win": 0.0,
+            "p_secure_if_lose": 1.0,
+            "cells": [
+              {
+                "key": "concede_only",
+                "label": "No farm recovered",
+                "leave_gold": 0.0,
+                "breakeven_p_win_fight": 0.41095838578213756,
+                "map_level_sampling_interval": {
+                  "estimate": 0.41095838578213756,
+                  "se": 0.00016727352154766954,
+                  "ci95_low": 0.4106305296799041,
+                  "ci95_high": 0.411286241884371,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.48509698665376577,
+                  "contest_win_probability": 0.5836856647149854,
+                  "contest_loss_probability": 0.4163143352850146,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 0.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "one_wave",
+                "label": "One grub-era average wave",
+                "leave_gold": 120.67,
+                "breakeven_p_win_fight": 0.5303479986970089,
+                "map_level_sampling_interval": {
+                  "estimate": 0.5303479986970089,
+                  "se": 5.865261032012699e-05,
+                  "ci95_low": 0.5302330395807814,
+                  "ci95_high": 0.5304629578132364,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5050793848874574,
+                  "contest_win_probability": 0.5836856647149854,
+                  "contest_loss_probability": 0.4163143352850146,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 120.66666666666667,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves",
+                "label": "Two grub-era average waves",
+                "leave_gold": 241.33,
+                "breakeven_p_win_fight": 0.6496413741751035,
+                "map_level_sampling_interval": {
+                  "estimate": 0.6496413741751035,
+                  "se": 0.0002644073229152936,
+                  "ci95_low": 0.6491231358221895,
+                  "ci95_high": 0.6501596125280175,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5250456757334148,
+                  "contest_win_probability": 0.5836856647149854,
+                  "contest_loss_probability": 0.4163143352850146,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 241.33333333333334,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves_plate",
+                "label": "Two waves + one outer plate",
+                "leave_gold": 361.33,
+                "breakeven_p_win_fight": 0.7678068534933974,
+                "map_level_sampling_interval": {
+                  "estimate": 0.7678068534933974,
+                  "se": 0.0003710682888828603,
+                  "ci95_low": 0.767079559647187,
+                  "ci95_high": 0.7685341473396078,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5448231890996473,
+                  "contest_win_probability": 0.5836856647149854,
+                  "contest_loss_probability": 0.4163143352850146,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 361.33333333333337,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "three_waves_plate",
+                "label": "Three waves + one outer plate",
+                "leave_gold": 482.0,
+                "breakeven_p_win_fight": 0.8857878009781458,
+                "map_level_sampling_interval": {
+                  "estimate": 0.8857878009781458,
+                  "se": 0.0003038781958285215,
+                  "ci95_low": 0.885192199714322,
+                  "ci95_high": 0.8863834022419697,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5645698171275773,
+                  "contest_win_probability": 0.5836856647149854,
+                  "contest_loss_probability": 0.4163143352850146,
+                  "win_secure_probability": 0.6123524899225934,
+                  "win_no_secure_probability": 0.5836856647149854,
+                  "lose_secure_probability": 0.4163143352850146,
+                  "lose_opponent_secure_probability": 0.3876475100774067,
+                  "lose_concede_probability": 0.3876475100774067,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 90,
+                  "leave_farm_gold": 482.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "cash_plus_touch": {
+        "label": "90g cash + brief Touch ceiling",
+        "objective_gold": 115.6,
+        "cells": [
+          {
+            "key": "concede_only",
+            "label": "No farm recovered",
+            "leave_gold": 0.0,
+            "breakeven_p_win_fight": 0.41777069363112346,
+            "map_level_sampling_interval": {
+              "estimate": 0.41777069363112346,
+              "se": 0.00030184510473976197,
+              "ci95_low": 0.41717907722583353,
+              "ci95_high": 0.4183623100364134,
+              "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+            },
+            "terminal_states": {
+              "leave_probability": 0.48086156632183596,
+              "contest_win_probability": 0.6163723404908098,
+              "contest_loss_probability": 0.3836276595091902,
+              "win_secure_probability": 0.6163723404908098,
+              "win_no_secure_probability": 0.5795576376369818,
+              "lose_secure_probability": 0.4204423623630182,
+              "lose_opponent_secure_probability": 0.3836276595091902,
+              "lose_concede_probability": 0.3836276595091902,
+              "p_secure_if_win": 1.0,
+              "p_secure_if_lose": 0.0,
+              "baseline_gold": 0.0,
+              "objective_gold": 115.6,
+              "leave_farm_gold": 0.0,
+              "leave_plate_probability": 0.0,
+              "win_kill_gold": 600.0,
+              "loss_kill_gold": -600.0
+            }
+          },
+          {
+            "key": "one_wave",
+            "label": "One grub-era average wave",
+            "leave_gold": 120.67,
+            "breakeven_p_win_fight": 0.5036057993437459,
+            "map_level_sampling_interval": {
+              "estimate": 0.5036057993437459,
+              "se": 1.3599187739613402e-05,
+              "ci95_low": 0.5035791449357763,
+              "ci95_high": 0.5036324537517156,
+              "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+            },
+            "terminal_states": {
+              "leave_probability": 0.5008392306179439,
+              "contest_win_probability": 0.6163723404908098,
+              "contest_loss_probability": 0.3836276595091902,
+              "win_secure_probability": 0.6163723404908098,
+              "win_no_secure_probability": 0.5795576376369818,
+              "lose_secure_probability": 0.4204423623630182,
+              "lose_opponent_secure_probability": 0.3836276595091902,
+              "lose_concede_probability": 0.3836276595091902,
+              "p_secure_if_win": 1.0,
+              "p_secure_if_lose": 0.0,
+              "baseline_gold": 0.0,
+              "objective_gold": 115.6,
+              "leave_farm_gold": 120.66666666666667,
+              "leave_plate_probability": 0.0,
+              "win_kill_gold": 600.0,
+              "loss_kill_gold": -600.0
+            }
+          },
+          {
+            "key": "two_waves",
+            "label": "Two grub-era average waves",
+            "leave_gold": 241.33,
+            "breakeven_p_win_fight": 0.5894294694761356,
+            "map_level_sampling_interval": {
+              "estimate": 0.5894294694761356,
+              "se": 0.00032662531509877654,
+              "ci95_low": 0.588789283858542,
+              "ci95_high": 0.5900696550937292,
+              "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+            },
+            "terminal_states": {
+              "leave_probability": 0.5208142333435787,
+              "contest_win_probability": 0.6163723404908098,
+              "contest_loss_probability": 0.3836276595091902,
+              "win_secure_probability": 0.6163723404908098,
+              "win_no_secure_probability": 0.5795576376369818,
+              "lose_secure_probability": 0.4204423623630182,
+              "lose_opponent_secure_probability": 0.3836276595091902,
+              "lose_concede_probability": 0.3836276595091902,
+              "p_secure_if_win": 1.0,
+              "p_secure_if_lose": 0.0,
+              "baseline_gold": 0.0,
+              "objective_gold": 115.6,
+              "leave_farm_gold": 241.33333333333334,
+              "leave_plate_probability": 0.0,
+              "win_kill_gold": 600.0,
+              "loss_kill_gold": -600.0
+            }
+          },
+          {
+            "key": "two_waves_plate",
+            "label": "Two waves + one outer plate",
+            "leave_gold": 361.33,
+            "breakeven_p_win_fight": 0.6744986700019255,
+            "map_level_sampling_interval": {
+              "estimate": 0.6744986700019255,
+              "se": 0.0005787805262144715,
+              "ci95_low": 0.6733642601705452,
+              "ci95_high": 0.6756330798333059,
+              "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+            },
+            "terminal_states": {
+              "leave_probability": 0.5406136372813151,
+              "contest_win_probability": 0.6163723404908098,
+              "contest_loss_probability": 0.3836276595091902,
+              "win_secure_probability": 0.6163723404908098,
+              "win_no_secure_probability": 0.5795576376369818,
+              "lose_secure_probability": 0.4204423623630182,
+              "lose_opponent_secure_probability": 0.3836276595091902,
+              "lose_concede_probability": 0.3836276595091902,
+              "p_secure_if_win": 1.0,
+              "p_secure_if_lose": 0.0,
+              "baseline_gold": 0.0,
+              "objective_gold": 115.6,
+              "leave_farm_gold": 361.33333333333337,
+              "leave_plate_probability": 0.0,
+              "win_kill_gold": 600.0,
+              "loss_kill_gold": -600.0
+            }
+          },
+          {
+            "key": "three_waves_plate",
+            "label": "Three waves + one outer plate",
+            "leave_gold": 482.0,
+            "breakeven_p_win_fight": 0.7594916652523152,
+            "map_level_sampling_interval": {
+              "estimate": 0.7594916652523152,
+              "se": 0.000717278220038322,
+              "ci95_low": 0.7580857999410401,
+              "ci95_high": 0.7608975305635902,
+              "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+            },
+            "terminal_states": {
+              "leave_probability": 0.5603953048465393,
+              "contest_win_probability": 0.6163723404908098,
+              "contest_loss_probability": 0.3836276595091902,
+              "win_secure_probability": 0.6163723404908098,
+              "win_no_secure_probability": 0.5795576376369818,
+              "lose_secure_probability": 0.4204423623630182,
+              "lose_opponent_secure_probability": 0.3836276595091902,
+              "lose_concede_probability": 0.3836276595091902,
+              "p_secure_if_win": 1.0,
+              "p_secure_if_lose": 0.0,
+              "baseline_gold": 0.0,
+              "objective_gold": 115.6,
+              "leave_farm_gold": 482.0,
+              "leave_plate_probability": 0.0,
+              "win_kill_gold": 600.0,
+              "loss_kill_gold": -600.0
+            }
+          }
+        ],
+        "capture_branches": [
+          {
+            "key": "secure_if_win",
+            "label": "Secure if fight won",
+            "p_secure_if_win": 1.0,
+            "p_secure_if_lose": 0.0,
+            "cells": [
+              {
+                "key": "concede_only",
+                "label": "No farm recovered",
+                "leave_gold": 0.0,
+                "breakeven_p_win_fight": 0.41777069363112346,
+                "map_level_sampling_interval": {
+                  "estimate": 0.41777069363112346,
+                  "se": 0.00030184510473976197,
+                  "ci95_low": 0.41717907722583353,
+                  "ci95_high": 0.4183623100364134,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.48086156632183596,
+                  "contest_win_probability": 0.6163723404908098,
+                  "contest_loss_probability": 0.3836276595091902,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 0.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "one_wave",
+                "label": "One grub-era average wave",
+                "leave_gold": 120.67,
+                "breakeven_p_win_fight": 0.5036057993437459,
+                "map_level_sampling_interval": {
+                  "estimate": 0.5036057993437459,
+                  "se": 1.3599187739613402e-05,
+                  "ci95_low": 0.5035791449357763,
+                  "ci95_high": 0.5036324537517156,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5008392306179439,
+                  "contest_win_probability": 0.6163723404908098,
+                  "contest_loss_probability": 0.3836276595091902,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 120.66666666666667,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves",
+                "label": "Two grub-era average waves",
+                "leave_gold": 241.33,
+                "breakeven_p_win_fight": 0.5894294694761356,
+                "map_level_sampling_interval": {
+                  "estimate": 0.5894294694761356,
+                  "se": 0.00032662531509877654,
+                  "ci95_low": 0.588789283858542,
+                  "ci95_high": 0.5900696550937292,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5208142333435787,
+                  "contest_win_probability": 0.6163723404908098,
+                  "contest_loss_probability": 0.3836276595091902,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 241.33333333333334,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves_plate",
+                "label": "Two waves + one outer plate",
+                "leave_gold": 361.33,
+                "breakeven_p_win_fight": 0.6744986700019255,
+                "map_level_sampling_interval": {
+                  "estimate": 0.6744986700019255,
+                  "se": 0.0005787805262144715,
+                  "ci95_low": 0.6733642601705452,
+                  "ci95_high": 0.6756330798333059,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5406136372813151,
+                  "contest_win_probability": 0.6163723404908098,
+                  "contest_loss_probability": 0.3836276595091902,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 361.33333333333337,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "three_waves_plate",
+                "label": "Three waves + one outer plate",
+                "leave_gold": 482.0,
+                "breakeven_p_win_fight": 0.7594916652523152,
+                "map_level_sampling_interval": {
+                  "estimate": 0.7594916652523152,
+                  "se": 0.000717278220038322,
+                  "ci95_low": 0.7580857999410401,
+                  "ci95_high": 0.7608975305635902,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5603953048465393,
+                  "contest_win_probability": 0.6163723404908098,
+                  "contest_loss_probability": 0.3836276595091902,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 482.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              }
+            ]
+          },
+          {
+            "key": "always_secure",
+            "label": "Secure after either fight result",
+            "p_secure_if_win": 1.0,
+            "p_secure_if_lose": 1.0,
+            "cells": [
+              {
+                "key": "concede_only",
+                "label": "No farm recovered",
+                "leave_gold": 0.0,
+                "breakeven_p_win_fight": 0.30837141174695837,
+                "map_level_sampling_interval": {
+                  "estimate": 0.30837141174695837,
+                  "se": 0.0002085973188389212,
+                  "ci95_low": 0.30796256100203406,
+                  "ci95_high": 0.3087802624918827,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.48086156632183596,
+                  "contest_win_probability": 0.6163723404908098,
+                  "contest_loss_probability": 0.4204423623630182,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 0.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "one_wave",
+                "label": "One grub-era average wave",
+                "leave_gold": 120.67,
+                "breakeven_p_win_fight": 0.41033469723805294,
+                "map_level_sampling_interval": {
+                  "estimate": 0.41033469723805294,
+                  "se": 0.0004996993860523522,
+                  "ci95_low": 0.40935528644139035,
+                  "ci95_high": 0.4113141080347155,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5008392306179439,
+                  "contest_win_probability": 0.6163723404908098,
+                  "contest_loss_probability": 0.4204423623630182,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 120.66666666666667,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves",
+                "label": "Two grub-era average waves",
+                "leave_gold": 241.33,
+                "breakeven_p_win_fight": 0.5122843984349085,
+                "map_level_sampling_interval": {
+                  "estimate": 0.5122843984349085,
+                  "se": 0.0007879401348873243,
+                  "ci95_low": 0.5107400357705293,
+                  "ci95_high": 0.5138287610992877,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5208142333435787,
+                  "contest_win_probability": 0.6163723404908098,
+                  "contest_loss_probability": 0.4204423623630182,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 241.33333333333334,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves_plate",
+                "label": "Two waves + one outer plate",
+                "leave_gold": 361.33,
+                "breakeven_p_win_fight": 0.6133378672656077,
+                "map_level_sampling_interval": {
+                  "estimate": 0.6133378672656077,
+                  "se": 0.0010046074510869228,
+                  "ci95_low": 0.6113688366614773,
+                  "ci95_high": 0.615306897869738,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5406136372813151,
+                  "contest_win_probability": 0.6163723404908098,
+                  "contest_loss_probability": 0.4204423623630182,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 361.33333333333337,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "three_waves_plate",
+                "label": "Three waves + one outer plate",
+                "leave_gold": 482.0,
+                "breakeven_p_win_fight": 0.7143008120597016,
+                "map_level_sampling_interval": {
+                  "estimate": 0.7143008120597016,
+                  "se": 0.001086335551794345,
+                  "ci95_low": 0.7121715943781847,
+                  "ci95_high": 0.7164300297412186,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5603953048465393,
+                  "contest_win_probability": 0.6163723404908098,
+                  "contest_loss_probability": 0.4204423623630182,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 1.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 482.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              }
+            ]
+          },
+          {
+            "key": "never_secure",
+            "label": "Do not secure after either result",
+            "p_secure_if_win": 0.0,
+            "p_secure_if_lose": 0.0,
+            "cells": [
+              {
+                "key": "concede_only",
+                "label": "No farm recovered",
+                "leave_gold": 0.0,
+                "breakeven_p_win_fight": 0.4962686554745942,
+                "map_level_sampling_interval": {
+                  "estimate": 0.4962686554745942,
+                  "se": 0.0007655175774219241,
+                  "ci95_low": 0.4947682410228472,
+                  "ci95_high": 0.4977690699263412,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.48086156632183596,
+                  "contest_win_probability": 0.5795576376369818,
+                  "contest_loss_probability": 0.3836276595091902,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 0.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "one_wave",
+                "label": "One grub-era average wave",
+                "leave_gold": 120.67,
+                "breakeven_p_win_fight": 0.5982319409656888,
+                "map_level_sampling_interval": {
+                  "estimate": 0.5982319409656888,
+                  "se": 0.0004744154392974224,
+                  "ci95_low": 0.5973020867046658,
+                  "ci95_high": 0.5991617952267118,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5008392306179439,
+                  "contest_win_probability": 0.5795576376369818,
+                  "contest_loss_probability": 0.3836276595091902,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 120.66666666666667,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves",
+                "label": "Two grub-era average waves",
+                "leave_gold": 241.33,
+                "breakeven_p_win_fight": 0.7001816421625443,
+                "map_level_sampling_interval": {
+                  "estimate": 0.7001816421625443,
+                  "se": 0.0001861747786696972,
+                  "ci95_low": 0.6998167395963517,
+                  "ci95_high": 0.7005465447287369,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5208142333435787,
+                  "contest_win_probability": 0.5795576376369818,
+                  "contest_loss_probability": 0.3836276595091902,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 241.33333333333334,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves_plate",
+                "label": "Two waves + one outer plate",
+                "leave_gold": 361.33,
+                "breakeven_p_win_fight": 0.8012351109932436,
+                "map_level_sampling_interval": {
+                  "estimate": 0.8012351109932436,
+                  "se": 3.0493461506487002e-05,
+                  "ci95_low": 0.8011753438086909,
+                  "ci95_high": 0.8012948781777963,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5406136372813151,
+                  "contest_win_probability": 0.5795576376369818,
+                  "contest_loss_probability": 0.3836276595091902,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 361.33333333333337,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "three_waves_plate",
+                "label": "Three waves + one outer plate",
+                "leave_gold": 482.0,
+                "breakeven_p_win_fight": 0.9021980557873376,
+                "map_level_sampling_interval": {
+                  "estimate": 0.9021980557873376,
+                  "se": 0.0001122208326698692,
+                  "ci95_low": 0.9019781029553047,
+                  "ci95_high": 0.9024180086193705,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5603953048465393,
+                  "contest_win_probability": 0.5795576376369818,
+                  "contest_loss_probability": 0.3836276595091902,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 0.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 482.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              }
+            ]
+          },
+          {
+            "key": "secure_if_lose",
+            "label": "Secure if fight lost",
+            "p_secure_if_win": 0.0,
+            "p_secure_if_lose": 1.0,
+            "cells": [
+              {
+                "key": "concede_only",
+                "label": "No farm recovered",
+                "leave_gold": 0.0,
+                "breakeven_p_win_fight": 0.37971969601779854,
+                "map_level_sampling_interval": {
+                  "estimate": 0.37971969601779854,
+                  "se": 0.00019861205122834364,
+                  "ci95_low": 0.37933041639739096,
+                  "ci95_high": 0.3801089756382061,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.48086156632183596,
+                  "contest_win_probability": 0.5795576376369818,
+                  "contest_loss_probability": 0.4204423623630182,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 0.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "one_wave",
+                "label": "One grub-era average wave",
+                "leave_gold": 120.67,
+                "breakeven_p_win_fight": 0.5052743560698301,
+                "map_level_sampling_interval": {
+                  "estimate": 0.5052743560698301,
+                  "se": 9.240392606761093e-06,
+                  "ci95_low": 0.5052562449003208,
+                  "ci95_high": 0.5052924672393393,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5008392306179439,
+                  "contest_win_probability": 0.5795576376369818,
+                  "contest_loss_probability": 0.4204423623630182,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 120.66666666666667,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves",
+                "label": "Two grub-era average waves",
+                "leave_gold": 241.33,
+                "breakeven_p_win_fight": 0.630812288812252,
+                "map_level_sampling_interval": {
+                  "estimate": 0.630812288812252,
+                  "se": 0.00021358946320721933,
+                  "ci95_low": 0.6303936534643659,
+                  "ci95_high": 0.6312309241601382,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5208142333435787,
+                  "contest_win_probability": 0.5795576376369818,
+                  "contest_loss_probability": 0.4204423623630182,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 241.33333333333334,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "two_waves_plate",
+                "label": "Two waves + one outer plate",
+                "leave_gold": 361.33,
+                "breakeven_p_win_fight": 0.7552466267703514,
+                "map_level_sampling_interval": {
+                  "estimate": 0.7552466267703514,
+                  "se": 0.00033112876943574475,
+                  "ci95_low": 0.7545976143822574,
+                  "ci95_high": 0.7558956391584454,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5406136372813151,
+                  "contest_win_probability": 0.5795576376369818,
+                  "contest_loss_probability": 0.4204423623630182,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 361.33333333333337,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              },
+              {
+                "key": "three_waves_plate",
+                "label": "Three waves + one outer plate",
+                "leave_gold": 482.0,
+                "breakeven_p_win_fight": 0.8795694960307936,
+                "map_level_sampling_interval": {
+                  "estimate": 0.8795694960307936,
+                  "se": 0.00028264146311912387,
+                  "ci95_low": 0.8790155187630802,
+                  "ci95_high": 0.880123473298507,
+                  "kind": "Delta-method interval using the map-level independence working covariance; does not include clustering or scenario-parameter uncertainty"
+                },
+                "terminal_states": {
+                  "leave_probability": 0.5603953048465393,
+                  "contest_win_probability": 0.5795576376369818,
+                  "contest_loss_probability": 0.4204423623630182,
+                  "win_secure_probability": 0.6163723404908098,
+                  "win_no_secure_probability": 0.5795576376369818,
+                  "lose_secure_probability": 0.4204423623630182,
+                  "lose_opponent_secure_probability": 0.3836276595091902,
+                  "lose_concede_probability": 0.3836276595091902,
+                  "p_secure_if_win": 0.0,
+                  "p_secure_if_lose": 1.0,
+                  "baseline_gold": 0.0,
+                  "objective_gold": 115.6,
+                  "leave_farm_gold": 482.0,
+                  "leave_plate_probability": 0.0,
+                  "win_kill_gold": 600.0,
+                  "loss_kill_gold": -600.0
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "leave_states": [
+      {
+        "key": "concede_only",
+        "label": "No farm recovered",
+        "leave_gold": 0.0
+      },
+      {
+        "key": "one_wave",
+        "label": "One grub-era average wave",
+        "leave_gold": 120.67
+      },
+      {
+        "key": "two_waves",
+        "label": "Two grub-era average waves",
+        "leave_gold": 241.33
+      },
+      {
+        "key": "two_waves_plate",
+        "label": "Two waves + one outer plate",
+        "leave_gold": 361.33
+      },
+      {
+        "key": "three_waves_plate",
+        "label": "Three waves + one outer plate",
+        "leave_gold": 482.0
+      }
+    ],
+    "notes": "For each state and capture branch, p* is the fight-win probability at which the four-cell contest mixture equals the explicit leave state. The four deterministic capture corners bound the continuous (P(secure|win), P(secure|lose)) unit square."
+  },
+  "item_pace": {
+    "wiki_sources": [
+      "https://wiki.leagueoflegends.com/en-us/Pickaxe",
+      "https://wiki.leagueoflegends.com/en-us/Recurve_Bow",
+      "https://wiki.leagueoflegends.com/en-us/Caulfield%27s_Warhammer",
+      "https://wiki.leagueoflegends.com/en-us/B._F._Sword",
+      "https://wiki.leagueoflegends.com/en-us/Minion"
+    ],
+    "hypothesis": "Contest/take burns lane tempo: missed waves slow next-item completion for 1\u20133 minutes. Leave farm gold is not only a one-shot WR bump \u2014 it is item-spike pace. Relative leave vs take = own farm + opp missed farm \u2212 scrap.",
+    "constants": {
+      "early_component_costs_g": {
+        "recurve_bow": 700.0,
+        "pickaxe": 875.0,
+        "caulfields_warhammer": 1050.0,
+        "bf_sword": 1300.0
+      },
+      "median_next_component_g": 962.5,
+      "modal_next_component_g": 875.0,
+      "modal_item": "pickaxe",
+      "wave_period_s": 30.0,
+      "laner_gpm_early": 241.3333,
+      "contest_delay_min_default": 1.25,
+      "n_laners": 2,
+      "opp_miss_fraction": 1.0,
+      "scrap_gold": 90.0,
+      "farm_gold_own": 241.3333,
+      "farm_gold_opp_missed": 241.3333
+    },
+    "gift_path_no_tf": {
+      "leave_team_gold": {
+        "gold": 241.33,
+        "frac_modal_pickaxe_875": 0.276,
+        "frac_median_component": 0.251,
+        "minutes_solo_laner_gpm": 1.0,
+        "minutes_team_gpm": 0.5,
+        "wr_pp_at_even": 3.99
+      },
+      "take_team_gold": {
+        "gold": -151.33,
+        "frac_modal_pickaxe_875": -0.173,
+        "frac_median_component": -0.157,
+        "minutes_solo_laner_gpm": -0.627,
+        "minutes_team_gpm": -0.314,
+        "wr_pp_at_even": -2.5
+      },
+      "relative_leave_minus_take": {
+        "gold": 392.67,
+        "frac_modal_pickaxe_875": 0.449,
+        "frac_median_component": 0.408,
+        "minutes_solo_laner_gpm": 1.627,
+        "minutes_team_gpm": 0.814,
+        "wr_pp_at_even": 6.47
+      },
+      "note": "Take gets scrap but misses F_opp waves. Leave gets F and does not pay river time. Relative gap \u226b own-farm-only leave EV gold."
+    },
+    "fight_path_both_contest": {
+      "win_team_net_gold": {
+        "gold": 690.0,
+        "frac_modal_pickaxe_875": 0.789,
+        "frac_median_component": 0.717,
+        "minutes_solo_laner_gpm": 2.859,
+        "minutes_team_gpm": 1.43,
+        "wr_pp_at_even": 11.24
+      },
+      "lose_team_net_gold": {
+        "gold": -690.0,
+        "frac_modal_pickaxe_875": -0.789,
+        "frac_median_component": -0.717,
+        "minutes_solo_laner_gpm": -2.859,
+        "minutes_team_gpm": -1.43,
+        "wr_pp_at_even": -11.24
+      },
+      "relative_win_minus_lose": {
+        "gold": 1380.0,
+        "frac_modal_pickaxe_875": 1.577,
+        "frac_median_component": 1.434,
+        "minutes_solo_laner_gpm": 5.718,
+        "minutes_team_gpm": 2.859,
+        "wr_pp_at_even": 21.4
+      },
+      "note": "Both miss lane farm \u2192 CS cancels. Item gap \u2248 kill gold swing + 2\u00d7 scrap. Winning the fight still buys a large item-spike lead; losing is catastrophic."
+    },
+    "horizons_after_window_min": [
+      {
+        "horizon_min": 1.0,
+        "extra_farm_while_opp_delayed_g": 482.67,
+        "relative_gold_leave_minus_take": 875.33,
+        "frac_modal_pickaxe_875": 1.0,
+        "frac_median_component": 0.909,
+        "minutes_solo_laner_gpm": 3.627,
+        "minutes_team_gpm": 1.814,
+        "wr_pp_at_even": 14.11,
+        "gold": 875.33
+      },
+      {
+        "horizon_min": 2.0,
+        "extra_farm_while_opp_delayed_g": 603.33,
+        "relative_gold_leave_minus_take": 996.0,
+        "frac_modal_pickaxe_875": 1.138,
+        "frac_median_component": 1.035,
+        "minutes_solo_laner_gpm": 4.127,
+        "minutes_team_gpm": 2.064,
+        "wr_pp_at_even": 15.93,
+        "gold": 996.0
+      },
+      {
+        "horizon_min": 3.0,
+        "extra_farm_while_opp_delayed_g": 603.33,
+        "relative_gold_leave_minus_take": 996.0,
+        "frac_modal_pickaxe_875": 1.138,
+        "frac_median_component": 1.035,
+        "minutes_solo_laner_gpm": 4.127,
+        "minutes_team_gpm": 2.064,
+        "wr_pp_at_even": 15.93,
+        "gold": 996.0
+      }
+    ],
+    "dual_tempo_leave_gold": {
+      "gold": 482.6666,
+      "wr_pp_at_even": 7.93,
+      "components": {
+        "own_farm_g": 241.3333,
+        "opp_missed_farm_g": 241.3333
+      },
+      "note": "Sensitivity for leave EV: count opp missed waves in leave golddiff. Headline leave EV still uses own farm only (contest already forgoes F)."
+    },
+    "read": "Gift relative gap \u2248 393g (0.45\u00d7 Pickaxe, 1.6 solo-laner minutes). Fight win\u2212lose \u2248 1380g (1.58\u00d7 Pickaxe). Take/contest side is behind on item pace even when they 'win' free scrap."
+  }
+}

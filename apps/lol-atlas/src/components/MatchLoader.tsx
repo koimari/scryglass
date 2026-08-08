@@ -4,11 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   loadMatchBundle,
-  loadMatchModelPrior,
-  type MatchModelPrior,
   type QueryRow,
 } from "@/lib/duck";
-import { useDraftWr } from "./DraftWrPanel";
 import { MatchScoreboard } from "./MatchScoreboard";
 import { ModelChecklist } from "./ModelChecklist";
 
@@ -22,20 +19,14 @@ type Props = {
 export function MatchLoader({ baseUrl, years, gameId, yearHint }: Props) {
   const [map, setMap] = useState<QueryRow | null>(null);
   const [players, setPlayers] = useState<QueryRow[]>([]);
-  const [prior, setPrior] = useState<MatchModelPrior | null>(null);
-  const [priorLoading, setPriorLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("Loading…");
-
-  const eloDiff = prior?.muDiff ?? null;
-  const { draft } = useDraftWr(map, players, eloDiff);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setStatus("Loading match from pack…");
       setError(null);
-      setPrior(null);
       try {
         const order =
           yearHint && years.includes(yearHint)
@@ -55,17 +46,10 @@ export function MatchLoader({ baseUrl, years, gameId, yearHint }: Props) {
             ? `Loaded · ${bundle.players.length} players`
             : "Loaded · game data only · player rows unavailable",
         );
-        setPriorLoading(true);
-        const p = await loadMatchModelPrior(baseUrl, bundle.year, bundle.map);
-        if (!cancelled) {
-          setPrior(p);
-          setPriorLoading(false);
-        }
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : String(e));
           setStatus("Error");
-          setPriorLoading(false);
         }
       }
     })();
@@ -93,14 +77,10 @@ export function MatchLoader({ baseUrl, years, gameId, yearHint }: Props) {
           <MatchScoreboard
             map={map}
             players={players}
-            draftPctBlue={draft?.p_blue_draft ?? null}
           />
           <ModelChecklist
             map={map}
             players={players}
-            prior={prior}
-            loading={priorLoading}
-            eloDiff={eloDiff}
           />
         </>
       )}

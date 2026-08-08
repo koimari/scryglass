@@ -6,7 +6,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   groupMapsIntoSeries,
   listLeagues,
-  queryEloAccuracy,
   queryMaps,
   formatGameDate,
   type QueryRow,
@@ -201,9 +200,6 @@ export function BrowseMatches({ baseUrl, years }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
-  const [eloAcc, setEloAcc] = useState<{ n: number; hits: number; rate: number | null } | null>(
-    null,
-  );
 
   const pageSize = 12;
 
@@ -254,8 +250,6 @@ export function BrowseMatches({ baseUrl, years }: Props) {
           ? `${grouped.length} series · ${data.length} games`
           : "No matches found for these filters.",
       );
-      const acc = await queryEloAccuracy(baseUrl, year);
-      setEloAcc(acc);
       setHasLoaded(true);
     } catch {
       setError("Could not load matches for this selection. Try again or choose another year.");
@@ -283,20 +277,6 @@ export function BrowseMatches({ baseUrl, years }: Props) {
 
   return (
     <div className={styles.root}>
-      <div className={styles.accuracy}>
-        <div>
-          <strong>Elo favorite accuracy</strong>{" "}
-          {eloAcc?.rate != null ? (
-            <>
-              {(100 * eloAcc.rate).toFixed(1)}% · {eloAcc.hits}/{eloAcc.n} games in {year}
-            </>
-          ) : (
-            "…"
-          )}
-        </div>
-        <p>Pre-match favorite compared with the final winner.</p>
-      </div>
-
       <div className="filter-bar">
         <label className="field">
           <span>Year</span>

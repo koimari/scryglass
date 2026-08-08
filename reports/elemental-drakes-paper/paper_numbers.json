@@ -1,0 +1,746 @@
+{
+  "allocationDiagnostics": {
+    "auc": 0.8804,
+    "brier": 0.141,
+    "designFreeze": "each evaluation design and scaler is fitted on its training partition; held-out rows are aligned to that frozen schema",
+    "ece10": 0.0114,
+    "holdoutActualEnd": "2026-04-30T22:00:00+00:00",
+    "holdoutEnd": "2026-05-01T00:00:00+00:00",
+    "holdoutGames": 1834,
+    "holdoutRows": 16018,
+    "holdoutSeries": 890,
+    "holdoutStart": "2026-03-01T06:00:00+00:00",
+    "innerValidationBrier": 0.1469,
+    "logLoss": 0.4322,
+    "nullBrier": 0.25,
+    "postHoldoutRows": 20540,
+    "selectedAlpha": 0.1,
+    "seriesSets": {
+      "holdout": {
+        "count": 890,
+        "encoding": "sorted unique UTF-8 identifiers joined by newline",
+        "sha256": "91fc3c97d779cb10edc349e65bf37c48760d7416b84862454c99cbc7e755fb8b"
+      },
+      "innerTrain": {
+        "count": 909,
+        "encoding": "sorted unique UTF-8 identifiers joined by newline",
+        "sha256": "df613afc2f248463c61e0234a3cf00aa197724e61a375519f937bbb9c9fd3eae"
+      },
+      "innerValidation": {
+        "count": 228,
+        "encoding": "sorted unique UTF-8 identifiers joined by newline",
+        "sha256": "9554ef6ee82622152dd6ff1846eddf53b2a8f2ba891fd4552e738b977fafe0cc"
+      },
+      "train": {
+        "count": 1137,
+        "encoding": "sorted unique UTF-8 identifiers joined by newline",
+        "sha256": "dd79b72375b8e980d810edefd555a3c11dc0837708b65dfa39068b9121deeccf"
+      }
+    },
+    "trainGames": 2141,
+    "trainRows": 18820,
+    "trainSeries": 1137,
+    "weighting": "equal total weight per game, normalized independently inside each fitting and evaluation partition"
+  },
+  "captures": 27689,
+  "championResidual": {
+    "julyAudit": {
+      "augmented": {
+        "brier": 0.133026,
+        "ece10": 0.021375,
+        "logLoss": 0.413153
+      },
+      "base": {
+        "brier": 0.133065,
+        "ece10": 0.024422,
+        "logLoss": 0.414593
+      },
+      "comparisons": {
+        "expandedVersusBase": {
+          "deltaBrier": -3.9e-05,
+          "deltaBrierSeriesBootstrap95": {
+            "iterations": 2000,
+            "lower": -0.001725,
+            "seed": 7626,
+            "series": 327,
+            "upper": 0.001823
+          },
+          "deltaEce10": -0.003047,
+          "deltaLogLoss": -0.001441
+        },
+        "expandedVersusEvaluationVocabulary": {
+          "deltaBrier": -0.000879,
+          "deltaBrierSeriesBootstrap95": {
+            "iterations": 2000,
+            "lower": -0.001805,
+            "seed": 7627,
+            "series": 327,
+            "upper": 2.9e-05
+          },
+          "deltaEce10": 0.002288,
+          "deltaLogLoss": -0.002572
+        }
+      },
+      "cutoff": "2026-07-01T00:00:00+00:00",
+      "deltaBrier": -3.9e-05,
+      "deltaBrierSeriesBootstrap95": {
+        "gate": "upper bound must be at most the allowed Brier regression",
+        "iterations": 2000,
+        "lower": -0.001725,
+        "seed": 7626,
+        "series": 327,
+        "upper": 0.001823
+      },
+      "deltaEce10": -0.003047,
+      "deltaLogLoss": -0.001441,
+      "designFreeze": "base feature columns and scaler fitted from pre-July rows only; July rows are reindexed to that frozen training schema",
+      "end": "2026-08-01T00:00:00+00:00",
+      "evaluationVocabulary": {
+        "byElement": {
+          "chemtech": 55,
+          "cloud": 57,
+          "hextech": 54,
+          "infernal": 55,
+          "mountain": 52,
+          "ocean": 58
+        },
+        "cells": 331,
+        "champions": 59,
+        "degreesOfFreedom": 235
+      },
+      "evaluationVocabularyRefit": {
+        "brier": 0.133905,
+        "ece10": 0.019087,
+        "logLoss": 0.415725
+      },
+      "expanded": {
+        "brier": 0.133026,
+        "ece10": 0.021375,
+        "logLoss": 0.413153
+      },
+      "expandedCellExposure": {
+        "addedCells": 216,
+        "addedCellsWithNonzeroJulyExposure": 201,
+        "affectedGames": 623,
+        "affectedRows": 5012,
+        "affectedSeries": 322,
+        "cellKeysWithNonzeroJulyExposure": [
+          "Anivia::chemtech",
+          "Anivia::cloud",
+          "Anivia::hextech",
+          "Anivia::infernal",
+          "Anivia::mountain",
+          "Anivia::ocean",
+          "Annie::chemtech",
+          "Annie::cloud",
+          "Annie::hextech",
+          "Annie::infernal",
+          "Annie::mountain",
+          "Annie::ocean",
+          "Ashe::chemtech",
+          "Ashe::cloud",
+          "Ashe::hextech",
+          "Ashe::infernal",
+          "Ashe::mountain",
+          "Ashe::ocean",
+          "Caitlyn::infernal",
+          "Camille::cloud",
+          "Camille::hextech",
+          "Camille::infernal",
+          "Camille::mountain",
+          "Camille::ocean",
+          "Cassiopeia::chemtech",
+          "Cassiopeia::cloud",
+          "Cassiopeia::hextech",
+          "Cassiopeia::infernal",
+          "Cassiopeia::mountain",
+          "Cassiopeia::ocean",
+          "Gragas::chemtech",
+          "Gragas::hextech",
+          "Gragas::infernal",
+          "Gragas::ocean",
+          "Hwei::chemtech",
+          "Hwei::cloud",
+          "Hwei::hextech",
+          "Hwei::infernal",
+          "Hwei::mountain",
+          "Hwei::ocean",
+          "Jinx::chemtech",
+          "Jinx::hextech",
+          "Jinx::infernal",
+          "Jinx::ocean",
+          "Kalista::chemtech",
+          "Kalista::cloud",
+          "Kalista::hextech",
+          "Kalista::infernal",
+          "Kalista::mountain",
+          "Kalista::ocean",
+          "Kennen::cloud",
+          "Kennen::hextech",
+          "Kennen::infernal",
+          "Kennen::ocean",
+          "LeBlanc::chemtech",
+          "LeBlanc::cloud",
+          "LeBlanc::hextech",
+          "LeBlanc::infernal",
+          "LeBlanc::mountain",
+          "LeBlanc::ocean",
+          "Lee Sin::chemtech",
+          "Lee Sin::cloud",
+          "Lee Sin::hextech",
+          "Lee Sin::infernal",
+          "Lee Sin::mountain",
+          "Lee Sin::ocean",
+          "Malphite::chemtech",
+          "Malphite::hextech",
+          "Malphite::infernal",
+          "Maokai::chemtech",
+          "Maokai::cloud",
+          "Maokai::infernal",
+          "Maokai::mountain",
+          "Maokai::ocean",
+          "Mel::chemtech",
+          "Mel::cloud",
+          "Mel::hextech",
+          "Mel::infernal",
+          "Mel::mountain",
+          "Mel::ocean",
+          "Milio::chemtech",
+          "Milio::cloud",
+          "Milio::hextech",
+          "Milio::infernal",
+          "Milio::mountain",
+          "Milio::ocean",
+          "Miss Fortune::mountain",
+          "Naafiri::chemtech",
+          "Naafiri::cloud",
+          "Naafiri::hextech",
+          "Naafiri::infernal",
+          "Naafiri::mountain",
+          "Naafiri::ocean",
+          "Nami::hextech",
+          "Nami::mountain",
+          "Olaf::chemtech",
+          "Olaf::cloud",
+          "Olaf::hextech",
+          "Olaf::infernal",
+          "Olaf::mountain",
+          "Olaf::ocean",
+          "Pyke::chemtech",
+          "Pyke::cloud",
+          "Pyke::hextech",
+          "Pyke::infernal",
+          "Pyke::mountain",
+          "Pyke::ocean",
+          "Rek'Sai::hextech",
+          "Renata Glasc::chemtech",
+          "Renata Glasc::cloud",
+          "Renata Glasc::hextech",
+          "Renata Glasc::infernal",
+          "Renata Glasc::mountain",
+          "Renata Glasc::ocean",
+          "Sejuani::chemtech",
+          "Sejuani::cloud",
+          "Sejuani::hextech",
+          "Sejuani::infernal",
+          "Sejuani::mountain",
+          "Sejuani::ocean",
+          "Senna::chemtech",
+          "Senna::cloud",
+          "Senna::hextech",
+          "Senna::infernal",
+          "Senna::mountain",
+          "Senna::ocean",
+          "Seraphine::chemtech",
+          "Seraphine::cloud",
+          "Seraphine::hextech",
+          "Seraphine::infernal",
+          "Seraphine::mountain",
+          "Seraphine::ocean",
+          "Shen::chemtech",
+          "Shen::cloud",
+          "Shen::hextech",
+          "Shen::infernal",
+          "Shen::mountain",
+          "Shen::ocean",
+          "Skarner::chemtech",
+          "Skarner::cloud",
+          "Skarner::hextech",
+          "Skarner::infernal",
+          "Skarner::mountain",
+          "Skarner::ocean",
+          "Smolder::hextech",
+          "Sylas::chemtech",
+          "Sylas::cloud",
+          "Sylas::hextech",
+          "Sylas::infernal",
+          "Sylas::mountain",
+          "Sylas::ocean",
+          "Thresh::hextech",
+          "Thresh::infernal",
+          "Thresh::mountain",
+          "Thresh::ocean",
+          "Tristana::chemtech",
+          "Tristana::cloud",
+          "Tristana::hextech",
+          "Tristana::infernal",
+          "Tristana::mountain",
+          "Tristana::ocean",
+          "Twisted Fate::chemtech",
+          "Twisted Fate::cloud",
+          "Twisted Fate::hextech",
+          "Twisted Fate::infernal",
+          "Twisted Fate::mountain",
+          "Twisted Fate::ocean",
+          "Vayne::chemtech",
+          "Vayne::cloud",
+          "Vayne::hextech",
+          "Vayne::infernal",
+          "Vayne::mountain",
+          "Vayne::ocean",
+          "Viego::chemtech",
+          "Viego::ocean",
+          "Viktor::chemtech",
+          "Viktor::mountain",
+          "Yone::chemtech",
+          "Yone::cloud",
+          "Yone::hextech",
+          "Yone::infernal",
+          "Yone::mountain",
+          "Yorick::chemtech",
+          "Yorick::cloud",
+          "Yorick::hextech",
+          "Yorick::infernal",
+          "Yorick::mountain",
+          "Yorick::ocean",
+          "Zaahen::mountain",
+          "Zeri::chemtech",
+          "Zeri::cloud",
+          "Zeri::hextech",
+          "Zeri::infernal",
+          "Zeri::mountain",
+          "Zeri::ocean",
+          "Ziggs::chemtech",
+          "Ziggs::cloud",
+          "Ziggs::hextech",
+          "Ziggs::infernal",
+          "Ziggs::mountain",
+          "Ziggs::ocean"
+        ],
+        "interpretation": "Nonzero raw July feature exposure for cells added beyond the original evaluation vocabulary; this is an audit-coverage diagnostic, not individual cell validation."
+      },
+      "holdoutEnd": "2026-07-27T23:30:00+00:00",
+      "holdoutGames": 672,
+      "holdoutRows": 5646,
+      "holdoutSeries": 327,
+      "holdoutStart": "2026-07-01T08:00:00+00:00",
+      "materialRegressionLimits": {
+        "brier": 0.0025,
+        "ece10": 0.02,
+        "logLoss": 0.01
+      },
+      "plannedEnd": "2026-08-01T00:00:00+00:00",
+      "plannedStart": "2026-07-01T00:00:00+00:00",
+      "reason": "The pre-July expanded champion vocabulary was not materially worse than either its frozen base or the original evaluation vocabulary refitted pre-July on the whole-series July audit.",
+      "seriesSets": {
+        "julyHoldout": {
+          "count": 327,
+          "encoding": "sorted unique UTF-8 identifiers joined by newline",
+          "sha256": "0abf8ba4314f79687391cd515fb6514286606f5b16a5723a26d41d53de93049d"
+        },
+        "preJulyTrain": {
+          "count": 2816,
+          "encoding": "sorted unique UTF-8 identifiers joined by newline",
+          "sha256": "d6b060fee8c097f207f5ccb6c374bbc1a45bd974ddd559d23d4bbcc51b00bd09"
+        }
+      },
+      "status": "ready",
+      "trainGames": 5710,
+      "trainRows": 49732,
+      "trainSeries": 2816,
+      "validationScope": "family-level publication-vocabulary expansion audit; no individual champion-element coefficient is separately validated",
+      "vocabulary": {
+        "byElement": {
+          "chemtech": 92,
+          "cloud": 90,
+          "hextech": 92,
+          "infernal": 91,
+          "mountain": 90,
+          "ocean": 92
+        },
+        "cells": 547,
+        "champions": 93,
+        "degreesOfFreedom": 439
+      },
+      "weighting": "equal total weight per game, normalized independently within pre-July fitting and July evaluation partitions",
+      "wholeSeries": true
+    },
+    "lockedHoldout": {
+      "augmented": {
+        "brier": 0.142619,
+        "ece10": 0.026517,
+        "logLoss": 0.437843
+      },
+      "base": {
+        "brier": 0.142299,
+        "ece10": 0.026855,
+        "logLoss": 0.436927
+      },
+      "deltaBrier": 0.00032,
+      "deltaBrierSeriesBootstrap95": {
+        "gate": "upper bound must be at most the allowed Brier regression",
+        "iterations": 2000,
+        "lower": -0.000959,
+        "seed": 461,
+        "series": 890,
+        "upper": 0.00154
+      },
+      "materialRegressionLimits": {
+        "brier": 0.0025,
+        "ece10": 0.02,
+        "logLoss": 0.01
+      }
+    },
+    "publicationCells": 549,
+    "publicationChampions": 93,
+    "selectedLambda": 0.01,
+    "selectedMinGames": 50
+  },
+  "completeGames": 6504,
+  "compositionExample": {
+    "blue": "Gen.G Esports",
+    "blueChampions": [
+      "Vayne",
+      "Trundle",
+      "Cassiopeia",
+      "Ziggs",
+      "Shen"
+    ],
+    "blueRankings": [
+      {
+        "element": "infernal",
+        "first": 13.072764863176756,
+        "map": 10.422813392822757,
+        "second": 12.23071139790897
+      },
+      {
+        "element": "mountain",
+        "first": 15.790377375357224,
+        "map": 11.694181283829094,
+        "second": 14.843051923196809
+      },
+      {
+        "element": "ocean",
+        "first": 10.304796695070928,
+        "map": 8.964975808148026,
+        "second": 9.577320362177552
+      },
+      {
+        "element": "cloud",
+        "first": 15.936929100614527,
+        "map": 11.677668086695133,
+        "second": 14.91870910519713
+      },
+      {
+        "element": "hextech",
+        "first": 13.297116270712229,
+        "map": 11.201946553821474,
+        "second": 12.384778865277536
+      },
+      {
+        "element": "chemtech",
+        "first": 11.663861652773178,
+        "map": 8.723853549897495,
+        "second": 10.999944938347376
+      }
+    ],
+    "game": "LCK - Split 2 2026 (Road to MSI: Road to MSI)",
+    "red": "T1",
+    "redChampions": [
+      "Ambessa",
+      "Lee Sin",
+      "Galio",
+      "Jhin",
+      "Camille"
+    ],
+    "redRankings": [
+      {
+        "element": "infernal",
+        "first": 11.858548912195888,
+        "map": 12.267937225827193,
+        "second": 11.40523979199449
+      },
+      {
+        "element": "mountain",
+        "first": 6.848102505320808,
+        "map": 10.05546178250488,
+        "second": 6.5842038066312965
+      },
+      {
+        "element": "ocean",
+        "first": 6.101429885852017,
+        "map": 8.623826281553548,
+        "second": 5.7560864841562545
+      },
+      {
+        "element": "cloud",
+        "first": 9.064428850270478,
+        "map": 12.93378775840016,
+        "second": 8.660720429664213
+      },
+      {
+        "element": "hextech",
+        "first": 7.339291651904167,
+        "map": 11.03392678063102,
+        "second": 6.946222060479205
+      },
+      {
+        "element": "chemtech",
+        "first": 11.864795575241082,
+        "map": 11.177925433004729,
+        "second": 11.503291325681921
+      }
+    ]
+  },
+  "dateMax": "2026-07-27T23:30:00+00:00",
+  "dateMin": "2025-09-20T17:13:55+00:00",
+  "generatedAt": "2026-07-28T18:16:24.515693+00:00",
+  "internationalGames": 752,
+  "jointDiagnostics": {
+    "auc": 0.8795,
+    "brier": 0.1423,
+    "designFreeze": "each evaluation design and scaler is fitted on its training partition; held-out rows are aligned to that frozen schema",
+    "ece10": 0.0269,
+    "holdoutActualEnd": "2026-04-30T22:00:00+00:00",
+    "holdoutEnd": "2026-05-01T00:00:00+00:00",
+    "holdoutGames": 1834,
+    "holdoutRows": 16018,
+    "holdoutSeries": 890,
+    "holdoutStart": "2026-03-01T06:00:00+00:00",
+    "innerValidationBrier": 0.1487,
+    "logLoss": 0.4369,
+    "nullBrier": 0.25,
+    "postHoldoutRows": 20540,
+    "selectedAlpha": 0.1,
+    "seriesSets": {
+      "holdout": {
+        "count": 890,
+        "encoding": "sorted unique UTF-8 identifiers joined by newline",
+        "sha256": "91fc3c97d779cb10edc349e65bf37c48760d7416b84862454c99cbc7e755fb8b"
+      },
+      "innerTrain": {
+        "count": 909,
+        "encoding": "sorted unique UTF-8 identifiers joined by newline",
+        "sha256": "df613afc2f248463c61e0234a3cf00aa197724e61a375519f937bbb9c9fd3eae"
+      },
+      "innerValidation": {
+        "count": 228,
+        "encoding": "sorted unique UTF-8 identifiers joined by newline",
+        "sha256": "9554ef6ee82622152dd6ff1846eddf53b2a8f2ba891fd4552e738b977fafe0cc"
+      },
+      "train": {
+        "count": 1137,
+        "encoding": "sorted unique UTF-8 identifiers joined by newline",
+        "sha256": "dd79b72375b8e980d810edefd555a3c11dc0837708b65dfa39068b9121deeccf"
+      }
+    },
+    "trainGames": 2141,
+    "trainRows": 18820,
+    "trainSeries": 1137,
+    "weighting": "equal total weight per game, normalized independently inside each fitting and evaluation partition"
+  },
+  "medianFirstSeconds": 428,
+  "modeledGames": 6382,
+  "otherProGames": 4047,
+  "rankingSupport": {
+    "actualDraftPerspectives": 12764,
+    "championResidualApplied": true,
+    "championResidualFeatureCount": 549,
+    "legalFirstContextsPerElement": 1,
+    "legalMapPathsPerElement": 40,
+    "legalOpeningPairsPerMapElement": 10,
+    "legalSecondContextsPerElement": 10,
+    "mapCaptureIncrementsPerElement": 120,
+    "mapPathCountsByCaptureLength": {
+      "2": 10,
+      "3": 20,
+      "4": 10
+    },
+    "modeledGames": 6382,
+    "observedFirstCapturesByElement": {
+      "chemtech": 1061,
+      "cloud": 1062,
+      "hextech": 1037,
+      "infernal": 1054,
+      "mountain": 1121,
+      "ocean": 1047
+    },
+    "observedMapPhaseCapturesByElement": {
+      "chemtech": 2644,
+      "cloud": 2450,
+      "hextech": 2545,
+      "infernal": 2497,
+      "mountain": 2412,
+      "ocean": 2399
+    },
+    "observedSecondCapturesByElement": {
+      "chemtech": 1066,
+      "cloud": 1093,
+      "hextech": 1088,
+      "infernal": 1064,
+      "mountain": 1019,
+      "ocean": 1030
+    },
+    "observedSoulCapturesByElement": {
+      "chemtech": 489,
+      "cloud": 427,
+      "hextech": 435,
+      "infernal": 435,
+      "mountain": 431,
+      "ocean": 420
+    },
+    "openingOwnerAssignmentsPerPair": 4,
+    "resolvedCaptures": 27689,
+    "soulCaptures": 2637,
+    "stageReferencePerspectiveRows": {
+      "1": 12764,
+      "2": 12720,
+      "3": 12416,
+      "4": 10524,
+      "5": 5194,
+      "6": 1492
+    }
+  },
+  "rankings": [
+    {
+      "element": "hextech",
+      "firstCapturePp": 11.979132,
+      "mapPhaseCapturePp": 12.124617,
+      "secondCapturePp": 11.396016
+    },
+    {
+      "element": "cloud",
+      "firstCapturePp": 9.738528,
+      "mapPhaseCapturePp": 11.812521,
+      "secondCapturePp": 9.250365
+    },
+    {
+      "element": "mountain",
+      "firstCapturePp": 10.005854,
+      "mapPhaseCapturePp": 11.345664,
+      "secondCapturePp": 9.5697
+    },
+    {
+      "element": "ocean",
+      "firstCapturePp": 12.015376,
+      "mapPhaseCapturePp": 10.741738,
+      "secondCapturePp": 11.449147
+    },
+    {
+      "element": "chemtech",
+      "firstCapturePp": 9.920479,
+      "mapPhaseCapturePp": 10.047437,
+      "secondCapturePp": 9.562898
+    },
+    {
+      "element": "infernal",
+      "firstCapturePp": 9.717631,
+      "mapPhaseCapturePp": 9.708975,
+      "secondCapturePp": 9.268494
+    }
+  ],
+  "rankingsByElement": {
+    "chemtech": {
+      "element": "chemtech",
+      "firstCapturePp": 9.920479,
+      "mapPhaseCapturePp": 10.047437,
+      "secondCapturePp": 9.562898
+    },
+    "cloud": {
+      "element": "cloud",
+      "firstCapturePp": 9.738528,
+      "mapPhaseCapturePp": 11.812521,
+      "secondCapturePp": 9.250365
+    },
+    "hextech": {
+      "element": "hextech",
+      "firstCapturePp": 11.979132,
+      "mapPhaseCapturePp": 12.124617,
+      "secondCapturePp": 11.396016
+    },
+    "infernal": {
+      "element": "infernal",
+      "firstCapturePp": 9.717631,
+      "mapPhaseCapturePp": 9.708975,
+      "secondCapturePp": 9.268494
+    },
+    "mountain": {
+      "element": "mountain",
+      "firstCapturePp": 10.005854,
+      "mapPhaseCapturePp": 11.345664,
+      "secondCapturePp": 9.5697
+    },
+    "ocean": {
+      "element": "ocean",
+      "firstCapturePp": 12.015376,
+      "mapPhaseCapturePp": 10.741738,
+      "secondCapturePp": 11.449147
+    }
+  },
+  "rawAudit": {
+    "coverage": {
+      "championArchetypes": 0.9667,
+      "completeComposition": 0.9823,
+      "completeRoster": 0.9732,
+      "exactPatch": 1.0,
+      "validatedPreCaptureState": 1.0
+    },
+    "errors": [],
+    "events": {
+      "duplicateKeys": 0,
+      "firstElementDistribution": {
+        "chemtech": 1083,
+        "cloud": 1082,
+        "hextech": 1059,
+        "infernal": 1079,
+        "mountain": 1134,
+        "ocean": 1067
+      },
+      "medianStateLagSeconds": 0.941,
+      "rows": 28266,
+      "validatedFirstDrakes": 6504
+    },
+    "games": {
+      "completed": 6504,
+      "duplicateKeys": 0,
+      "rows": 6517,
+      "series": 3256
+    },
+    "modelEligibility": {
+      "excludedCaptureRows": 26,
+      "illegalOrPartialCapturePathGames": 6,
+      "invalidSideAssignmentGames": 2,
+      "policy": "Exclude the complete game from joint modeling rather than repairing provider side or capture-path state."
+    },
+    "rawReconciliation": {
+      "comparedSeries": 4,
+      "elementMatches": 21,
+      "eventsCompared": 21,
+      "ownerMatches": 21,
+      "rawSeries": 4,
+      "status": "pass",
+      "timeWithinTwoSeconds": 21
+    },
+    "requiredGames": 6000,
+    "status": "pass",
+    "storageBytes": {
+      "eventsParquet": 1450994,
+      "gamesParquet": 508130
+    },
+    "warnings": [
+      "model eligibility excludes 2 games with invalid side assignments and 6 games with incomplete or illegal elemental paths"
+    ]
+  },
+  "series": 3143,
+  "tierOneGames": 1705
+}

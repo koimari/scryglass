@@ -1,0 +1,3998 @@
+{
+  "generatedAt": "2026-07-28T10:36:02.509144+00:00",
+  "games": [
+    {
+      "id": "snapshot-1",
+      "date": "2026-07-08T06:00:00Z",
+      "tournament": "MSI - 2026 (Knockouts: Knockouts)",
+      "patch": "16.13",
+      "complete": true,
+      "league": "MSI",
+      "region": "international",
+      "regionLabel": "International",
+      "competitionLevel": "international",
+      "competitionLevelLabel": "International",
+      "teams": [
+        {
+          "side": "blue",
+          "name": "G2 Esports",
+          "composition": [
+            {
+              "champion": "Vayne",
+              "role": "Top",
+              "level": 9,
+              "attackDamage": 116.0,
+              "abilityPower": 0.0,
+              "armor": 54.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.72,
+              "health": 755.0,
+              "healthMax": 1589.0,
+              "currentGold": 929,
+              "totalGold": 4364,
+              "tags": [
+                "hypercarry_adc",
+                "scaling_late",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Jarvan IV",
+              "role": "Jungle",
+              "level": 8,
+              "attackDamage": 131.0,
+              "abilityPower": 0.0,
+              "armor": 62.0,
+              "magicResist": 63.0,
+              "attackSpeed": 1.87,
+              "health": 1720.0,
+              "healthMax": 1720.0,
+              "currentGold": 178,
+              "totalGold": 4348,
+              "tags": [
+                "early_snowball",
+                "engage",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Anivia",
+              "role": "Mid",
+              "level": 8,
+              "attackDamage": 69.0,
+              "abilityPower": 18.0,
+              "armor": 42.0,
+              "magicResist": 57.0,
+              "attackSpeed": 1.19,
+              "health": 1575.0,
+              "healthMax": 1575.0,
+              "currentGold": 1175,
+              "totalGold": 4531,
+              "tags": [
+                "control_mage",
+                "poke_siege",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Ezreal",
+              "role": "Bot",
+              "level": 9,
+              "attackDamage": 132.0,
+              "abilityPower": 0.0,
+              "armor": 60.0,
+              "magicResist": 46.0,
+              "attackSpeed": 2.06,
+              "health": 1473.0,
+              "healthMax": 1835.0,
+              "currentGold": 225,
+              "totalGold": 4943,
+              "tags": [
+                "poke_siege",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Leona",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 69.0,
+              "abilityPower": 0.0,
+              "armor": 57.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.18,
+              "health": 1673.0,
+              "healthMax": 1673.0,
+              "currentGold": 378,
+              "totalGold": 2883,
+              "tags": [
+                "engage",
+                "tank_frontline"
+              ]
+            }
+          ]
+        },
+        {
+          "side": "red",
+          "name": "T1",
+          "composition": [
+            {
+              "champion": "Renekton",
+              "role": "Top",
+              "level": 9,
+              "attackDamage": 142.0,
+              "abilityPower": 0.0,
+              "armor": 95.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.18,
+              "health": 1822.0,
+              "healthMax": 1822.0,
+              "currentGold": 134,
+              "totalGold": 3859,
+              "tags": [
+                "early_snowball",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Nocturne",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 104.0,
+              "abilityPower": 0.0,
+              "armor": 58.0,
+              "magicResist": 39.0,
+              "attackSpeed": 1.75,
+              "health": 1076.0,
+              "healthMax": 1503.0,
+              "currentGold": 1229,
+              "totalGold": 3934,
+              "tags": [
+                "assassin",
+                "engage"
+              ]
+            },
+            {
+              "champion": "Cassiopeia",
+              "role": "Mid",
+              "level": 9,
+              "attackDamage": 73.0,
+              "abilityPower": 18.0,
+              "armor": 49.0,
+              "magicResist": 40.0,
+              "attackSpeed": 1.1,
+              "health": 1668.0,
+              "healthMax": 1745.0,
+              "currentGold": 1212,
+              "totalGold": 4182,
+              "tags": [
+                "control_mage",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Ziggs",
+              "role": "Bot",
+              "level": 9,
+              "attackDamage": 75.0,
+              "abilityPower": 147.0,
+              "armor": 52.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.23,
+              "health": 1207.0,
+              "healthMax": 1475.0,
+              "currentGold": 673,
+              "totalGold": 4378,
+              "tags": [
+                "poke_siege",
+                "scaling_late",
+                "siege_specialist"
+              ]
+            },
+            {
+              "champion": "Camille",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 125.0,
+              "abilityPower": 0.0,
+              "armor": 48.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.07,
+              "health": 1370.0,
+              "healthMax": 1370.0,
+              "currentGold": 20,
+              "totalGold": 2760,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "splitpush"
+              ]
+            }
+          ]
+        }
+      ],
+      "observedCaptures": [
+        {
+          "globalIndex": 1,
+          "element": "mountain",
+          "timeSeconds": 681,
+          "ownerSide": "red",
+          "ownerName": "T1",
+          "ownerStack": 1
+        },
+        {
+          "globalIndex": 2,
+          "element": "hextech",
+          "timeSeconds": 1054,
+          "ownerSide": "blue",
+          "ownerName": "G2 Esports",
+          "ownerStack": 1
+        },
+        {
+          "globalIndex": 3,
+          "element": "infernal",
+          "timeSeconds": 1479,
+          "ownerSide": "blue",
+          "ownerName": "G2 Esports",
+          "ownerStack": 2
+        },
+        {
+          "globalIndex": 4,
+          "element": "infernal",
+          "timeSeconds": 1807,
+          "ownerSide": "blue",
+          "ownerName": "G2 Esports",
+          "ownerStack": 3
+        },
+        {
+          "globalIndex": 5,
+          "element": "infernal",
+          "timeSeconds": 2194,
+          "ownerSide": "red",
+          "ownerName": "T1",
+          "ownerStack": 2
+        },
+        {
+          "globalIndex": 6,
+          "element": "infernal",
+          "timeSeconds": 2514,
+          "ownerSide": "red",
+          "ownerName": "T1",
+          "ownerStack": 3
+        }
+      ],
+      "dragonEvents": [
+        {
+          "element": "mountain",
+          "timeSeconds": 681,
+          "globalIndex": 1,
+          "ownerStack": 1,
+          "teamName": "T1",
+          "opponentName": "G2 Esports",
+          "state": {
+            "teamGold": 19113,
+            "opponentGold": 21069,
+            "goldDiff": -1956,
+            "teamKills": 4,
+            "opponentKills": 8,
+            "teamTowers": 0,
+            "opponentTowers": 0
+          },
+          "composition": [
+            {
+              "champion": "Renekton",
+              "role": "Top",
+              "level": 9,
+              "attackDamage": 142.0,
+              "abilityPower": 0.0,
+              "armor": 95.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.18,
+              "health": 1822.0,
+              "healthMax": 1822.0,
+              "currentGold": 134,
+              "totalGold": 3859,
+              "tags": [
+                "early_snowball",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Nocturne",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 104.0,
+              "abilityPower": 0.0,
+              "armor": 58.0,
+              "magicResist": 39.0,
+              "attackSpeed": 1.75,
+              "health": 1076.0,
+              "healthMax": 1503.0,
+              "currentGold": 1229,
+              "totalGold": 3934,
+              "tags": [
+                "assassin",
+                "engage"
+              ]
+            },
+            {
+              "champion": "Cassiopeia",
+              "role": "Mid",
+              "level": 9,
+              "attackDamage": 73.0,
+              "abilityPower": 18.0,
+              "armor": 49.0,
+              "magicResist": 40.0,
+              "attackSpeed": 1.1,
+              "health": 1668.0,
+              "healthMax": 1745.0,
+              "currentGold": 1212,
+              "totalGold": 4182,
+              "tags": [
+                "control_mage",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Ziggs",
+              "role": "Bot",
+              "level": 9,
+              "attackDamage": 75.0,
+              "abilityPower": 147.0,
+              "armor": 52.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.23,
+              "health": 1207.0,
+              "healthMax": 1475.0,
+              "currentGold": 673,
+              "totalGold": 4378,
+              "tags": [
+                "poke_siege",
+                "scaling_late",
+                "siege_specialist"
+              ]
+            },
+            {
+              "champion": "Camille",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 125.0,
+              "abilityPower": 0.0,
+              "armor": 48.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.07,
+              "health": 1370.0,
+              "healthMax": 1370.0,
+              "currentGold": 20,
+              "totalGold": 2760,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "splitpush"
+              ]
+            }
+          ],
+          "opponentComposition": [
+            {
+              "champion": "Vayne",
+              "role": "Top",
+              "level": 9,
+              "attackDamage": 116.0,
+              "abilityPower": 0.0,
+              "armor": 54.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.72,
+              "health": 755.0,
+              "healthMax": 1589.0,
+              "currentGold": 929,
+              "totalGold": 4364,
+              "tags": [
+                "hypercarry_adc",
+                "scaling_late",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Jarvan IV",
+              "role": "Jungle",
+              "level": 8,
+              "attackDamage": 131.0,
+              "abilityPower": 0.0,
+              "armor": 62.0,
+              "magicResist": 63.0,
+              "attackSpeed": 1.87,
+              "health": 1720.0,
+              "healthMax": 1720.0,
+              "currentGold": 178,
+              "totalGold": 4348,
+              "tags": [
+                "early_snowball",
+                "engage",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Anivia",
+              "role": "Mid",
+              "level": 8,
+              "attackDamage": 69.0,
+              "abilityPower": 18.0,
+              "armor": 42.0,
+              "magicResist": 57.0,
+              "attackSpeed": 1.19,
+              "health": 1575.0,
+              "healthMax": 1575.0,
+              "currentGold": 1175,
+              "totalGold": 4531,
+              "tags": [
+                "control_mage",
+                "poke_siege",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Ezreal",
+              "role": "Bot",
+              "level": 9,
+              "attackDamage": 132.0,
+              "abilityPower": 0.0,
+              "armor": 60.0,
+              "magicResist": 46.0,
+              "attackSpeed": 2.06,
+              "health": 1473.0,
+              "healthMax": 1835.0,
+              "currentGold": 225,
+              "totalGold": 4943,
+              "tags": [
+                "poke_siege",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Leona",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 69.0,
+              "abilityPower": 0.0,
+              "armor": 57.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.18,
+              "health": 1673.0,
+              "healthMax": 1673.0,
+              "currentGold": 378,
+              "totalGold": 2883,
+              "tags": [
+                "engage",
+                "tank_frontline"
+              ]
+            }
+          ],
+          "compositionFit": {
+            "infernal": {
+              "recipients": [
+                "Renekton",
+                "Nocturne",
+                "Cassiopeia",
+                "Ziggs",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Cassiopeia",
+                "Ziggs"
+              ],
+              "candidateCount": 2,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "mountain": {
+              "recipients": [
+                "Renekton",
+                "Nocturne",
+                "Cassiopeia",
+                "Ziggs",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Renekton",
+                "Nocturne",
+                "Camille"
+              ],
+              "candidateCount": 3,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "ocean": {
+              "recipients": [
+                "Renekton",
+                "Nocturne",
+                "Cassiopeia",
+                "Ziggs",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Renekton",
+                "Nocturne",
+                "Camille"
+              ],
+              "candidateCount": 3,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "cloud": {
+              "recipients": [
+                "Renekton",
+                "Nocturne",
+                "Cassiopeia",
+                "Ziggs",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Nocturne",
+                "Camille"
+              ],
+              "candidateCount": 2,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "hextech": {
+              "recipients": [
+                "Renekton",
+                "Nocturne",
+                "Cassiopeia",
+                "Ziggs",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Renekton",
+                "Cassiopeia",
+                "Camille"
+              ],
+              "candidateCount": 3,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "chemtech": {
+              "recipients": [
+                "Renekton",
+                "Nocturne",
+                "Cassiopeia",
+                "Ziggs",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Nocturne",
+                "Cassiopeia",
+                "Camille"
+              ],
+              "candidateCount": 3,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "snapshot-2",
+      "date": "2026-06-14T06:00:00Z",
+      "tournament": "LCK - Split 2 2026 (Road to MSI: Road to MSI)",
+      "patch": "16.11",
+      "complete": true,
+      "league": "LCK",
+      "region": "korea",
+      "regionLabel": "Korea",
+      "competitionLevel": "tier1",
+      "competitionLevelLabel": "Tier 1",
+      "teams": [
+        {
+          "side": "blue",
+          "name": "Gen.G Esports",
+          "composition": [
+            {
+              "champion": "Vayne",
+              "role": "Top",
+              "level": 7,
+              "attackDamage": 94.0,
+              "abilityPower": 0.0,
+              "armor": 45.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.76,
+              "health": 603.0,
+              "healthMax": 1294.0,
+              "currentGold": 461,
+              "totalGold": 2886,
+              "tags": [
+                "hypercarry_adc",
+                "scaling_late",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Trundle",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 155.0,
+              "abilityPower": 0.0,
+              "armor": 58.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.44,
+              "health": 1376.0,
+              "healthMax": 1452.0,
+              "currentGold": 639,
+              "totalGold": 2914,
+              "tags": [
+                "skirmisher",
+                "splitpush"
+              ]
+            },
+            {
+              "champion": "Cassiopeia",
+              "role": "Mid",
+              "level": 8,
+              "attackDamage": 70.0,
+              "abilityPower": 27.0,
+              "armor": 45.0,
+              "magicResist": 39.0,
+              "attackSpeed": 1.08,
+              "health": 1523.0,
+              "healthMax": 1685.0,
+              "currentGold": 860,
+              "totalGold": 3010,
+              "tags": [
+                "control_mage",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Ziggs",
+              "role": "Bot",
+              "level": 7,
+              "attackDamage": 70.0,
+              "abilityPower": 96.0,
+              "armor": 43.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.09,
+              "health": 1177.0,
+              "healthMax": 1274.0,
+              "currentGold": 91,
+              "totalGold": 2966,
+              "tags": [
+                "poke_siege",
+                "scaling_late",
+                "siege_specialist"
+              ]
+            },
+            {
+              "champion": "Shen",
+              "role": "Support",
+              "level": 4,
+              "attackDamage": 70.0,
+              "abilityPower": 0.0,
+              "armor": 43.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.16,
+              "health": 1229.0,
+              "healthMax": 1229.0,
+              "currentGold": 314,
+              "totalGold": 2149,
+              "tags": [
+                "peel_enchanter",
+                "splitpush",
+                "tank_frontline"
+              ]
+            }
+          ]
+        },
+        {
+          "side": "red",
+          "name": "T1",
+          "composition": [
+            {
+              "champion": "Ambessa",
+              "role": "Top",
+              "level": 8,
+              "attackDamage": 136.0,
+              "abilityPower": 0.0,
+              "armor": 63.0,
+              "magicResist": 43.0,
+              "attackSpeed": 1.64,
+              "health": 1196.0,
+              "healthMax": 1440.0,
+              "currentGold": 269,
+              "totalGold": 2844,
+              "tags": [
+                "engage",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Lee Sin",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 134.0,
+              "abilityPower": 0.0,
+              "armor": 57.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.73,
+              "health": 948.0,
+              "healthMax": 1168.0,
+              "currentGold": 739,
+              "totalGold": 2889,
+              "tags": [
+                "early_snowball",
+                "engage",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Galio",
+              "role": "Mid",
+              "level": 8,
+              "attackDamage": 79.0,
+              "abilityPower": 51.0,
+              "armor": 51.0,
+              "magicResist": 63.0,
+              "attackSpeed": 1.48,
+              "health": 1304.0,
+              "healthMax": 1532.0,
+              "currentGold": 501,
+              "totalGold": 2826,
+              "tags": [
+                "engage",
+                "peel_enchanter",
+                "tank_frontline",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Jhin",
+              "role": "Bot",
+              "level": 7,
+              "attackDamage": 124.0,
+              "abilityPower": 0.0,
+              "armor": 56.0,
+              "magicResist": 46.0,
+              "attackSpeed": 1.0,
+              "health": 1304.0,
+              "healthMax": 1378.0,
+              "currentGold": 690,
+              "totalGold": 3420,
+              "tags": [
+                "pick",
+                "poke_siege"
+              ]
+            },
+            {
+              "champion": "Camille",
+              "role": "Support",
+              "level": 4,
+              "attackDamage": 97.0,
+              "abilityPower": 0.0,
+              "armor": 45.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.15,
+              "health": 1289.0,
+              "healthMax": 1289.0,
+              "currentGold": 369,
+              "totalGold": 2704,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "splitpush"
+              ]
+            }
+          ]
+        }
+      ],
+      "observedCaptures": [
+        {
+          "globalIndex": 1,
+          "element": "infernal",
+          "timeSeconds": 502,
+          "ownerSide": "blue",
+          "ownerName": "Gen.G Esports",
+          "ownerStack": 1
+        },
+        {
+          "globalIndex": 2,
+          "element": "mountain",
+          "timeSeconds": 830,
+          "ownerSide": "blue",
+          "ownerName": "Gen.G Esports",
+          "ownerStack": 2
+        },
+        {
+          "globalIndex": 3,
+          "element": "cloud",
+          "timeSeconds": 1159,
+          "ownerSide": "blue",
+          "ownerName": "Gen.G Esports",
+          "ownerStack": 3
+        },
+        {
+          "globalIndex": 4,
+          "element": "cloud",
+          "timeSeconds": 1470,
+          "ownerSide": "red",
+          "ownerName": "T1",
+          "ownerStack": 1
+        },
+        {
+          "globalIndex": 5,
+          "element": "cloud",
+          "timeSeconds": 1784,
+          "ownerSide": "blue",
+          "ownerName": "Gen.G Esports",
+          "ownerStack": 4
+        }
+      ],
+      "dragonEvents": [
+        {
+          "element": "infernal",
+          "timeSeconds": 502,
+          "globalIndex": 1,
+          "ownerStack": 1,
+          "teamName": "Gen.G",
+          "opponentName": "T1",
+          "state": {
+            "teamGold": 14683,
+            "opponentGold": 13925,
+            "goldDiff": 758,
+            "teamKills": 3,
+            "opponentKills": 1,
+            "teamTowers": 0,
+            "opponentTowers": 0
+          },
+          "composition": [
+            {
+              "champion": "Ambessa",
+              "role": "Top",
+              "level": 8,
+              "attackDamage": 136.0,
+              "abilityPower": 0.0,
+              "armor": 63.0,
+              "magicResist": 43.0,
+              "attackSpeed": 1.64,
+              "health": 1196.0,
+              "healthMax": 1440.0,
+              "currentGold": 269,
+              "totalGold": 2844,
+              "tags": [
+                "engage",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Lee Sin",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 134.0,
+              "abilityPower": 0.0,
+              "armor": 57.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.73,
+              "health": 948.0,
+              "healthMax": 1168.0,
+              "currentGold": 739,
+              "totalGold": 2889,
+              "tags": [
+                "early_snowball",
+                "engage",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Galio",
+              "role": "Mid",
+              "level": 8,
+              "attackDamage": 79.0,
+              "abilityPower": 51.0,
+              "armor": 51.0,
+              "magicResist": 63.0,
+              "attackSpeed": 1.48,
+              "health": 1304.0,
+              "healthMax": 1532.0,
+              "currentGold": 501,
+              "totalGold": 2826,
+              "tags": [
+                "engage",
+                "peel_enchanter",
+                "tank_frontline",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Jhin",
+              "role": "Bot",
+              "level": 7,
+              "attackDamage": 124.0,
+              "abilityPower": 0.0,
+              "armor": 56.0,
+              "magicResist": 46.0,
+              "attackSpeed": 1.0,
+              "health": 1304.0,
+              "healthMax": 1378.0,
+              "currentGold": 690,
+              "totalGold": 3420,
+              "tags": [
+                "pick",
+                "poke_siege"
+              ]
+            },
+            {
+              "champion": "Camille",
+              "role": "Support",
+              "level": 4,
+              "attackDamage": 97.0,
+              "abilityPower": 0.0,
+              "armor": 45.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.15,
+              "health": 1289.0,
+              "healthMax": 1289.0,
+              "currentGold": 369,
+              "totalGold": 2704,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "splitpush"
+              ]
+            }
+          ],
+          "opponentComposition": [
+            {
+              "champion": "Vayne",
+              "role": "Top",
+              "level": 7,
+              "attackDamage": 94.0,
+              "abilityPower": 0.0,
+              "armor": 45.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.76,
+              "health": 603.0,
+              "healthMax": 1294.0,
+              "currentGold": 461,
+              "totalGold": 2886,
+              "tags": [
+                "hypercarry_adc",
+                "scaling_late",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Trundle",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 155.0,
+              "abilityPower": 0.0,
+              "armor": 58.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.44,
+              "health": 1376.0,
+              "healthMax": 1452.0,
+              "currentGold": 639,
+              "totalGold": 2914,
+              "tags": [
+                "skirmisher",
+                "splitpush"
+              ]
+            },
+            {
+              "champion": "Cassiopeia",
+              "role": "Mid",
+              "level": 8,
+              "attackDamage": 70.0,
+              "abilityPower": 27.0,
+              "armor": 45.0,
+              "magicResist": 39.0,
+              "attackSpeed": 1.08,
+              "health": 1523.0,
+              "healthMax": 1685.0,
+              "currentGold": 860,
+              "totalGold": 3010,
+              "tags": [
+                "control_mage",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Ziggs",
+              "role": "Bot",
+              "level": 7,
+              "attackDamage": 70.0,
+              "abilityPower": 96.0,
+              "armor": 43.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.09,
+              "health": 1177.0,
+              "healthMax": 1274.0,
+              "currentGold": 91,
+              "totalGold": 2966,
+              "tags": [
+                "poke_siege",
+                "scaling_late",
+                "siege_specialist"
+              ]
+            },
+            {
+              "champion": "Shen",
+              "role": "Support",
+              "level": 4,
+              "attackDamage": 70.0,
+              "abilityPower": 0.0,
+              "armor": 43.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.16,
+              "health": 1229.0,
+              "healthMax": 1229.0,
+              "currentGold": 314,
+              "totalGold": 2149,
+              "tags": [
+                "peel_enchanter",
+                "splitpush",
+                "tank_frontline"
+              ]
+            }
+          ],
+          "compositionFit": {
+            "infernal": {
+              "recipients": [
+                "Ambessa",
+                "Lee Sin",
+                "Galio",
+                "Jhin",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Jhin"
+              ],
+              "candidateCount": 1,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "mountain": {
+              "recipients": [
+                "Ambessa",
+                "Lee Sin",
+                "Galio",
+                "Jhin",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Ambessa",
+                "Lee Sin",
+                "Galio",
+                "Camille"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "ocean": {
+              "recipients": [
+                "Ambessa",
+                "Lee Sin",
+                "Galio",
+                "Jhin",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Ambessa",
+                "Lee Sin",
+                "Galio",
+                "Camille"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "cloud": {
+              "recipients": [
+                "Ambessa",
+                "Lee Sin",
+                "Galio",
+                "Jhin",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Ambessa",
+                "Lee Sin",
+                "Galio",
+                "Jhin",
+                "Camille"
+              ],
+              "candidateCount": 5,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "hextech": {
+              "recipients": [
+                "Ambessa",
+                "Lee Sin",
+                "Galio",
+                "Jhin",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Ambessa",
+                "Lee Sin",
+                "Galio",
+                "Camille"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "chemtech": {
+              "recipients": [
+                "Ambessa",
+                "Lee Sin",
+                "Galio",
+                "Jhin",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Ambessa",
+                "Lee Sin",
+                "Galio",
+                "Camille"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "snapshot-3",
+      "date": "2026-07-26T11:00:00Z",
+      "tournament": "LPL - Split 3 2026 (Group Stage: Group Ascend)",
+      "patch": "16.14",
+      "complete": true,
+      "league": "LPL",
+      "region": "china",
+      "regionLabel": "China",
+      "competitionLevel": "tier1",
+      "competitionLevelLabel": "Tier 1",
+      "teams": [
+        {
+          "side": "blue",
+          "name": "Anyone's Legend",
+          "composition": [
+            {
+              "champion": "Ambessa",
+              "role": "Top",
+              "level": 9,
+              "attackDamage": 149.0,
+              "abilityPower": 0.0,
+              "armor": 68.0,
+              "magicResist": 45.0,
+              "attackSpeed": 1.16,
+              "health": 1263.0,
+              "healthMax": 1546.0,
+              "currentGold": 422,
+              "totalGold": 3472,
+              "tags": [
+                "engage",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Naafiri",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 105.0,
+              "abilityPower": 0.0,
+              "armor": 48.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.2,
+              "health": 1188.0,
+              "healthMax": 1188.0,
+              "currentGold": 1336,
+              "totalGold": 3598,
+              "tags": [
+                "assassin",
+                "early_snowball"
+              ]
+            },
+            {
+              "champion": "Anivia",
+              "role": "Mid",
+              "level": 9,
+              "attackDamage": 72.0,
+              "abilityPower": 91.0,
+              "armor": 46.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.21,
+              "health": 1725.0,
+              "healthMax": 1725.0,
+              "currentGold": 53,
+              "totalGold": 3728,
+              "tags": [
+                "control_mage",
+                "poke_siege",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Ezreal",
+              "role": "Bot",
+              "level": 8,
+              "attackDamage": 121.0,
+              "abilityPower": 0.0,
+              "armor": 48.0,
+              "magicResist": 37.0,
+              "attackSpeed": 2.09,
+              "health": 1107.0,
+              "healthMax": 1404.0,
+              "currentGold": 800,
+              "totalGold": 4360,
+              "tags": [
+                "poke_siege",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Karma",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 58.0,
+              "abilityPower": 29.0,
+              "armor": 43.0,
+              "magicResist": 34.0,
+              "attackSpeed": 1.17,
+              "health": 1331.0,
+              "healthMax": 1331.0,
+              "currentGold": 210,
+              "totalGold": 2630,
+              "tags": [
+                "peel_enchanter",
+                "poke_siege"
+              ]
+            }
+          ]
+        },
+        {
+          "side": "red",
+          "name": "BILIBILI GAMING",
+          "composition": [
+            {
+              "champion": "Gnar",
+              "role": "Top",
+              "level": 9,
+              "attackDamage": 153.0,
+              "abilityPower": 0.0,
+              "armor": 106.0,
+              "magicResist": 65.0,
+              "attackSpeed": 1.22,
+              "health": 1723.0,
+              "healthMax": 1917.0,
+              "currentGold": 349,
+              "totalGold": 3849,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Vi",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 120.0,
+              "abilityPower": 0.0,
+              "armor": 52.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.64,
+              "health": 1316.0,
+              "healthMax": 1478.0,
+              "currentGold": 1031,
+              "totalGold": 3786,
+              "tags": [
+                "early_snowball",
+                "engage"
+              ]
+            },
+            {
+              "champion": "Ryze",
+              "role": "Mid",
+              "level": 9,
+              "attackDamage": 75.0,
+              "abilityPower": 18.0,
+              "armor": 50.0,
+              "magicResist": 40.0,
+              "attackSpeed": 1.24,
+              "health": 2024.0,
+              "healthMax": 2024.0,
+              "currentGold": 328,
+              "totalGold": 3833,
+              "tags": [
+                "control_mage",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Lucian",
+              "role": "Bot",
+              "level": 7,
+              "attackDamage": 105.0,
+              "abilityPower": 0.0,
+              "armor": 48.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.37,
+              "health": 752.0,
+              "healthMax": 1190.0,
+              "currentGold": 869,
+              "totalGold": 3694,
+              "tags": [
+                "early_snowball",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Milio",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 57.0,
+              "abilityPower": 46.0,
+              "armor": 40.0,
+              "magicResist": 34.0,
+              "attackSpeed": 1.09,
+              "health": 1036.0,
+              "healthMax": 1196.0,
+              "currentGold": 411,
+              "totalGold": 2731,
+              "tags": [
+                "peel_enchanter",
+                "scaling_late"
+              ]
+            }
+          ]
+        }
+      ],
+      "observedCaptures": [
+        {
+          "globalIndex": 1,
+          "element": "infernal",
+          "timeSeconds": 651,
+          "ownerSide": "blue",
+          "ownerName": "Anyone's Legend",
+          "ownerStack": 1
+        },
+        {
+          "globalIndex": 2,
+          "element": "hextech",
+          "timeSeconds": 1043,
+          "ownerSide": "red",
+          "ownerName": "BILIBILI GAMING",
+          "ownerStack": 1
+        },
+        {
+          "globalIndex": 3,
+          "element": "cloud",
+          "timeSeconds": 1365,
+          "ownerSide": "red",
+          "ownerName": "BILIBILI GAMING",
+          "ownerStack": 2
+        },
+        {
+          "globalIndex": 4,
+          "element": "cloud",
+          "timeSeconds": 1896,
+          "ownerSide": "red",
+          "ownerName": "BILIBILI GAMING",
+          "ownerStack": 3
+        }
+      ],
+      "dragonEvents": [
+        {
+          "element": "infernal",
+          "timeSeconds": 651,
+          "globalIndex": 1,
+          "ownerStack": 1,
+          "teamName": "Anyone's Legend",
+          "opponentName": "Bilibili Gaming",
+          "state": {
+            "teamGold": 17893,
+            "opponentGold": 17788,
+            "goldDiff": 105,
+            "teamKills": 3,
+            "opponentKills": 2,
+            "teamTowers": 0,
+            "opponentTowers": 0
+          },
+          "composition": [
+            {
+              "champion": "Gnar",
+              "role": "Top",
+              "level": 9,
+              "attackDamage": 153.0,
+              "abilityPower": 0.0,
+              "armor": 106.0,
+              "magicResist": 65.0,
+              "attackSpeed": 1.22,
+              "health": 1723.0,
+              "healthMax": 1917.0,
+              "currentGold": 349,
+              "totalGold": 3849,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Vi",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 120.0,
+              "abilityPower": 0.0,
+              "armor": 52.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.64,
+              "health": 1316.0,
+              "healthMax": 1478.0,
+              "currentGold": 1031,
+              "totalGold": 3786,
+              "tags": [
+                "early_snowball",
+                "engage"
+              ]
+            },
+            {
+              "champion": "Ryze",
+              "role": "Mid",
+              "level": 9,
+              "attackDamage": 75.0,
+              "abilityPower": 18.0,
+              "armor": 50.0,
+              "magicResist": 40.0,
+              "attackSpeed": 1.24,
+              "health": 2024.0,
+              "healthMax": 2024.0,
+              "currentGold": 328,
+              "totalGold": 3833,
+              "tags": [
+                "control_mage",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Lucian",
+              "role": "Bot",
+              "level": 7,
+              "attackDamage": 105.0,
+              "abilityPower": 0.0,
+              "armor": 48.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.37,
+              "health": 752.0,
+              "healthMax": 1190.0,
+              "currentGold": 869,
+              "totalGold": 3694,
+              "tags": [
+                "early_snowball",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Milio",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 57.0,
+              "abilityPower": 46.0,
+              "armor": 40.0,
+              "magicResist": 34.0,
+              "attackSpeed": 1.09,
+              "health": 1036.0,
+              "healthMax": 1196.0,
+              "currentGold": 411,
+              "totalGold": 2731,
+              "tags": [
+                "peel_enchanter",
+                "scaling_late"
+              ]
+            }
+          ],
+          "opponentComposition": [
+            {
+              "champion": "Ambessa",
+              "role": "Top",
+              "level": 9,
+              "attackDamage": 149.0,
+              "abilityPower": 0.0,
+              "armor": 68.0,
+              "magicResist": 45.0,
+              "attackSpeed": 1.16,
+              "health": 1263.0,
+              "healthMax": 1546.0,
+              "currentGold": 422,
+              "totalGold": 3472,
+              "tags": [
+                "engage",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Naafiri",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 105.0,
+              "abilityPower": 0.0,
+              "armor": 48.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.2,
+              "health": 1188.0,
+              "healthMax": 1188.0,
+              "currentGold": 1336,
+              "totalGold": 3598,
+              "tags": [
+                "assassin",
+                "early_snowball"
+              ]
+            },
+            {
+              "champion": "Anivia",
+              "role": "Mid",
+              "level": 9,
+              "attackDamage": 72.0,
+              "abilityPower": 91.0,
+              "armor": 46.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.21,
+              "health": 1725.0,
+              "healthMax": 1725.0,
+              "currentGold": 53,
+              "totalGold": 3728,
+              "tags": [
+                "control_mage",
+                "poke_siege",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Ezreal",
+              "role": "Bot",
+              "level": 8,
+              "attackDamage": 121.0,
+              "abilityPower": 0.0,
+              "armor": 48.0,
+              "magicResist": 37.0,
+              "attackSpeed": 2.09,
+              "health": 1107.0,
+              "healthMax": 1404.0,
+              "currentGold": 800,
+              "totalGold": 4360,
+              "tags": [
+                "poke_siege",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Karma",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 58.0,
+              "abilityPower": 29.0,
+              "armor": 43.0,
+              "magicResist": 34.0,
+              "attackSpeed": 1.17,
+              "health": 1331.0,
+              "healthMax": 1331.0,
+              "currentGold": 210,
+              "totalGold": 2630,
+              "tags": [
+                "peel_enchanter",
+                "poke_siege"
+              ]
+            }
+          ],
+          "compositionFit": {
+            "infernal": {
+              "recipients": [
+                "Gnar",
+                "Vi",
+                "Ryze",
+                "Lucian",
+                "Milio"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Ryze",
+                "Milio"
+              ],
+              "candidateCount": 2,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "mountain": {
+              "recipients": [
+                "Gnar",
+                "Vi",
+                "Ryze",
+                "Lucian",
+                "Milio"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Vi",
+                "Lucian"
+              ],
+              "candidateCount": 3,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "ocean": {
+              "recipients": [
+                "Gnar",
+                "Vi",
+                "Ryze",
+                "Lucian",
+                "Milio"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Vi",
+                "Lucian",
+                "Milio"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "cloud": {
+              "recipients": [
+                "Gnar",
+                "Vi",
+                "Ryze",
+                "Lucian",
+                "Milio"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Vi"
+              ],
+              "candidateCount": 2,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "hextech": {
+              "recipients": [
+                "Gnar",
+                "Vi",
+                "Ryze",
+                "Lucian",
+                "Milio"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Ryze",
+                "Lucian"
+              ],
+              "candidateCount": 3,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "chemtech": {
+              "recipients": [
+                "Gnar",
+                "Vi",
+                "Ryze",
+                "Lucian",
+                "Milio"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Vi",
+                "Ryze",
+                "Milio"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "snapshot-4",
+      "date": "2026-07-26T17:25:00Z",
+      "tournament": "LEC - Summer 2026 (Regular Season: Regular Season)",
+      "patch": "16.14",
+      "complete": true,
+      "league": "LEC",
+      "region": "emea",
+      "regionLabel": "EMEA",
+      "competitionLevel": "tier1",
+      "competitionLevelLabel": "Tier 1",
+      "teams": [
+        {
+          "side": "blue",
+          "name": "G2 Esports",
+          "composition": [
+            {
+              "champion": "K'Sante",
+              "role": "Top",
+              "level": 8,
+              "attackDamage": 84.0,
+              "abilityPower": 0.0,
+              "armor": 76.0,
+              "magicResist": 43.0,
+              "attackSpeed": 1.84,
+              "health": 1084.0,
+              "healthMax": 1668.0,
+              "currentGold": 759,
+              "totalGold": 3459,
+              "tags": [
+                "skirmisher",
+                "tank_frontline"
+              ]
+            },
+            {
+              "champion": "Jarvan IV",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 105.0,
+              "abilityPower": 0.0,
+              "armor": 58.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.74,
+              "health": 1373.0,
+              "healthMax": 1463.0,
+              "currentGold": 1664,
+              "totalGold": 3399,
+              "tags": [
+                "early_snowball",
+                "engage",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Ahri",
+              "role": "Mid",
+              "level": 8,
+              "attackDamage": 70.0,
+              "abilityPower": 42.0,
+              "armor": 45.0,
+              "magicResist": 37.0,
+              "attackSpeed": 1.22,
+              "health": 1127.0,
+              "healthMax": 1395.0,
+              "currentGold": 1066,
+              "totalGold": 3176,
+              "tags": [
+                "burst_mage",
+                "pick",
+                "roam"
+              ]
+            },
+            {
+              "champion": "Syndra",
+              "role": "Bot",
+              "level": 7,
+              "attackDamage": 68.0,
+              "abilityPower": 78.0,
+              "armor": 44.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.19,
+              "health": 1027.0,
+              "healthMax": 1222.0,
+              "currentGold": 705,
+              "totalGold": 3040,
+              "tags": [
+                "burst_mage",
+                "control_mage",
+                "pick",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Leona",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 69.0,
+              "abilityPower": 0.0,
+              "armor": 57.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.18,
+              "health": 1623.0,
+              "healthMax": 1623.0,
+              "currentGold": 100,
+              "totalGold": 2110,
+              "tags": [
+                "engage",
+                "tank_frontline"
+              ]
+            }
+          ]
+        },
+        {
+          "side": "red",
+          "name": "Karmine Corp",
+          "composition": [
+            {
+              "champion": "Jayce",
+              "role": "Top",
+              "level": 8,
+              "attackDamage": 124.0,
+              "abilityPower": 0.0,
+              "armor": 65.0,
+              "magicResist": 51.0,
+              "attackSpeed": 1.17,
+              "health": 0.0,
+              "healthMax": 1439.0,
+              "currentGold": 720,
+              "totalGold": 3070,
+              "tags": [
+                "early_snowball",
+                "poke_siege",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Lee Sin",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 107.0,
+              "abilityPower": 0.0,
+              "armor": 57.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.73,
+              "health": 588.0,
+              "healthMax": 1383.0,
+              "currentGold": 1395,
+              "totalGold": 3100,
+              "tags": [
+                "early_snowball",
+                "engage",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Sylas",
+              "role": "Mid",
+              "level": 8,
+              "attackDamage": 78.0,
+              "abilityPower": 51.0,
+              "armor": 59.0,
+              "magicResist": 66.0,
+              "attackSpeed": 2.45,
+              "health": 1695.0,
+              "healthMax": 1695.0,
+              "currentGold": 867,
+              "totalGold": 3117,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Viktor",
+              "role": "Bot",
+              "level": 7,
+              "attackDamage": 67.0,
+              "abilityPower": 82.0,
+              "armor": 44.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.1,
+              "health": 786.0,
+              "healthMax": 1289.0,
+              "currentGold": 919,
+              "totalGold": 2969,
+              "tags": [
+                "control_mage",
+                "poke_siege",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Rell",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 64.0,
+              "abilityPower": 0.0,
+              "armor": 42.0,
+              "magicResist": 33.0,
+              "attackSpeed": 1.06,
+              "health": 1084.0,
+              "healthMax": 1256.0,
+              "currentGold": 909,
+              "totalGold": 2039,
+              "tags": [
+                "engage",
+                "tank_frontline",
+                "teamfight_aoe"
+              ]
+            }
+          ]
+        }
+      ],
+      "observedCaptures": [
+        {
+          "globalIndex": 1,
+          "element": "chemtech",
+          "timeSeconds": 538,
+          "ownerSide": "red",
+          "ownerName": "Karmine Corp",
+          "ownerStack": 1
+        },
+        {
+          "globalIndex": 2,
+          "element": "cloud",
+          "timeSeconds": 871,
+          "ownerSide": "blue",
+          "ownerName": "G2 Esports",
+          "ownerStack": 1
+        },
+        {
+          "globalIndex": 3,
+          "element": "infernal",
+          "timeSeconds": 1185,
+          "ownerSide": "red",
+          "ownerName": "Karmine Corp",
+          "ownerStack": 2
+        },
+        {
+          "globalIndex": 4,
+          "element": "infernal",
+          "timeSeconds": 1577,
+          "ownerSide": "red",
+          "ownerName": "Karmine Corp",
+          "ownerStack": 3
+        }
+      ],
+      "dragonEvents": [
+        {
+          "element": "chemtech",
+          "timeSeconds": 538,
+          "globalIndex": 1,
+          "ownerStack": 1,
+          "teamName": "Karmine Corp",
+          "opponentName": "G2 Esports",
+          "state": {
+            "teamGold": 14295,
+            "opponentGold": 15184,
+            "goldDiff": -889,
+            "teamKills": 0,
+            "opponentKills": 1,
+            "teamTowers": 0,
+            "opponentTowers": 0
+          },
+          "composition": [
+            {
+              "champion": "Jayce",
+              "role": "Top",
+              "level": 8,
+              "attackDamage": 124.0,
+              "abilityPower": 0.0,
+              "armor": 65.0,
+              "magicResist": 51.0,
+              "attackSpeed": 1.17,
+              "health": 0.0,
+              "healthMax": 1439.0,
+              "currentGold": 720,
+              "totalGold": 3070,
+              "tags": [
+                "early_snowball",
+                "poke_siege",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Lee Sin",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 107.0,
+              "abilityPower": 0.0,
+              "armor": 57.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.73,
+              "health": 588.0,
+              "healthMax": 1383.0,
+              "currentGold": 1395,
+              "totalGold": 3100,
+              "tags": [
+                "early_snowball",
+                "engage",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Sylas",
+              "role": "Mid",
+              "level": 8,
+              "attackDamage": 78.0,
+              "abilityPower": 51.0,
+              "armor": 59.0,
+              "magicResist": 66.0,
+              "attackSpeed": 2.45,
+              "health": 1695.0,
+              "healthMax": 1695.0,
+              "currentGold": 867,
+              "totalGold": 3117,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Viktor",
+              "role": "Bot",
+              "level": 7,
+              "attackDamage": 67.0,
+              "abilityPower": 82.0,
+              "armor": 44.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.1,
+              "health": 786.0,
+              "healthMax": 1289.0,
+              "currentGold": 919,
+              "totalGold": 2969,
+              "tags": [
+                "control_mage",
+                "poke_siege",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Rell",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 64.0,
+              "abilityPower": 0.0,
+              "armor": 42.0,
+              "magicResist": 33.0,
+              "attackSpeed": 1.06,
+              "health": 1084.0,
+              "healthMax": 1256.0,
+              "currentGold": 909,
+              "totalGold": 2039,
+              "tags": [
+                "engage",
+                "tank_frontline",
+                "teamfight_aoe"
+              ]
+            }
+          ],
+          "opponentComposition": [
+            {
+              "champion": "K'Sante",
+              "role": "Top",
+              "level": 8,
+              "attackDamage": 84.0,
+              "abilityPower": 0.0,
+              "armor": 76.0,
+              "magicResist": 43.0,
+              "attackSpeed": 1.84,
+              "health": 1084.0,
+              "healthMax": 1668.0,
+              "currentGold": 759,
+              "totalGold": 3459,
+              "tags": [
+                "skirmisher",
+                "tank_frontline"
+              ]
+            },
+            {
+              "champion": "Jarvan IV",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 105.0,
+              "abilityPower": 0.0,
+              "armor": 58.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.74,
+              "health": 1373.0,
+              "healthMax": 1463.0,
+              "currentGold": 1664,
+              "totalGold": 3399,
+              "tags": [
+                "early_snowball",
+                "engage",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Ahri",
+              "role": "Mid",
+              "level": 8,
+              "attackDamage": 70.0,
+              "abilityPower": 42.0,
+              "armor": 45.0,
+              "magicResist": 37.0,
+              "attackSpeed": 1.22,
+              "health": 1127.0,
+              "healthMax": 1395.0,
+              "currentGold": 1066,
+              "totalGold": 3176,
+              "tags": [
+                "burst_mage",
+                "pick",
+                "roam"
+              ]
+            },
+            {
+              "champion": "Syndra",
+              "role": "Bot",
+              "level": 7,
+              "attackDamage": 68.0,
+              "abilityPower": 78.0,
+              "armor": 44.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.19,
+              "health": 1027.0,
+              "healthMax": 1222.0,
+              "currentGold": 705,
+              "totalGold": 3040,
+              "tags": [
+                "burst_mage",
+                "control_mage",
+                "pick",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Leona",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 69.0,
+              "abilityPower": 0.0,
+              "armor": 57.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.18,
+              "health": 1623.0,
+              "healthMax": 1623.0,
+              "currentGold": 100,
+              "totalGold": 2110,
+              "tags": [
+                "engage",
+                "tank_frontline"
+              ]
+            }
+          ],
+          "compositionFit": {
+            "infernal": {
+              "recipients": [
+                "Jayce",
+                "Lee Sin",
+                "Sylas",
+                "Viktor",
+                "Rell"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Jayce",
+                "Viktor"
+              ],
+              "candidateCount": 2,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "mountain": {
+              "recipients": [
+                "Jayce",
+                "Lee Sin",
+                "Sylas",
+                "Viktor",
+                "Rell"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Jayce",
+                "Lee Sin",
+                "Sylas",
+                "Rell"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "ocean": {
+              "recipients": [
+                "Jayce",
+                "Lee Sin",
+                "Sylas",
+                "Viktor",
+                "Rell"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Jayce",
+                "Lee Sin",
+                "Sylas",
+                "Rell"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "cloud": {
+              "recipients": [
+                "Jayce",
+                "Lee Sin",
+                "Sylas",
+                "Viktor",
+                "Rell"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Lee Sin",
+                "Sylas",
+                "Rell"
+              ],
+              "candidateCount": 3,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "hextech": {
+              "recipients": [
+                "Jayce",
+                "Lee Sin",
+                "Sylas",
+                "Viktor",
+                "Rell"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Jayce",
+                "Lee Sin",
+                "Sylas",
+                "Viktor",
+                "Rell"
+              ],
+              "candidateCount": 5,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "chemtech": {
+              "recipients": [
+                "Jayce",
+                "Lee Sin",
+                "Sylas",
+                "Viktor",
+                "Rell"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Lee Sin",
+                "Sylas",
+                "Viktor",
+                "Rell"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "snapshot-5",
+      "date": "2026-07-26T20:00:00Z",
+      "tournament": "LCS - Split 3 2026 (Regular Season: Regular Season)",
+      "patch": "16.14",
+      "complete": true,
+      "league": "LCS",
+      "region": "north-america",
+      "regionLabel": "North America",
+      "competitionLevel": "tier1",
+      "competitionLevelLabel": "Tier 1",
+      "teams": [
+        {
+          "side": "blue",
+          "name": "Team Liquid Alienware",
+          "composition": [
+            {
+              "champion": "Renekton",
+              "role": "Top",
+              "level": 6,
+              "attackDamage": 106.0,
+              "abilityPower": 0.0,
+              "armor": 55.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.1,
+              "health": 1179.0,
+              "healthMax": 1423.0,
+              "currentGold": 468,
+              "totalGold": 1848,
+              "tags": [
+                "early_snowball",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Wukong",
+              "role": "Jungle",
+              "level": 5,
+              "attackDamage": 92.0,
+              "abilityPower": 0.0,
+              "armor": 87.0,
+              "magicResist": 34.0,
+              "attackSpeed": 1.65,
+              "health": 835.0,
+              "healthMax": 1115.0,
+              "currentGold": 758,
+              "totalGold": 2008,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Locke",
+              "role": "Mid",
+              "level": 6,
+              "attackDamage": 69.0,
+              "abilityPower": 51.0,
+              "armor": 48.0,
+              "magicResist": 40.0,
+              "attackSpeed": 1.13,
+              "health": 1048.0,
+              "healthMax": 1290.0,
+              "currentGold": 847,
+              "totalGold": 2127,
+              "tags": [
+                "assassin",
+                "burst_mage",
+                "early_snowball",
+                "pick"
+              ]
+            },
+            {
+              "champion": "Kai'Sa",
+              "role": "Bot",
+              "level": 5,
+              "attackDamage": 102.0,
+              "abilityPower": 0.0,
+              "armor": 37.0,
+              "magicResist": 34.0,
+              "attackSpeed": 1.35,
+              "health": 1020.0,
+              "healthMax": 1020.0,
+              "currentGold": 42,
+              "totalGold": 2067,
+              "tags": [
+                "hypercarry_adc",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Nautilus",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 71.0,
+              "abilityPower": 0.0,
+              "armor": 54.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.13,
+              "health": 1032.0,
+              "healthMax": 1050.0,
+              "currentGold": 846,
+              "totalGold": 1346,
+              "tags": [
+                "engage",
+                "pick",
+                "tank_frontline"
+              ]
+            }
+          ]
+        },
+        {
+          "side": "red",
+          "name": "Cloud9 Kia",
+          "composition": [
+            {
+              "champion": "Rumble",
+              "role": "Top",
+              "level": 6,
+              "attackDamage": 76.0,
+              "abilityPower": 37.0,
+              "armor": 79.0,
+              "magicResist": 34.0,
+              "attackSpeed": 1.07,
+              "health": 1182.0,
+              "healthMax": 1230.0,
+              "currentGold": 252,
+              "totalGold": 2002,
+              "tags": [
+                "poke_siege",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Skarner",
+              "role": "Jungle",
+              "level": 5,
+              "attackDamage": 78.0,
+              "abilityPower": 0.0,
+              "armor": 46.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.16,
+              "health": 835.0,
+              "healthMax": 1446.0,
+              "currentGold": 308,
+              "totalGold": 1988,
+              "tags": [
+                "engage",
+                "pick",
+                "tank_frontline"
+              ]
+            },
+            {
+              "champion": "Akali",
+              "role": "Mid",
+              "level": 6,
+              "attackDamage": 75.0,
+              "abilityPower": 56.0,
+              "armor": 41.0,
+              "magicResist": 45.0,
+              "attackSpeed": 1.12,
+              "health": 1095.0,
+              "healthMax": 1246.0,
+              "currentGold": 979,
+              "totalGold": 2084,
+              "tags": [
+                "assassin",
+                "scaling_late",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Ezreal",
+              "role": "Bot",
+              "level": 5,
+              "attackDamage": 90.0,
+              "abilityPower": 0.0,
+              "armor": 36.0,
+              "magicResist": 34.0,
+              "attackSpeed": 1.32,
+              "health": 980.0,
+              "healthMax": 980.0,
+              "currentGold": 198,
+              "totalGold": 1998,
+              "tags": [
+                "poke_siege",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Leona",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 69.0,
+              "abilityPower": 0.0,
+              "armor": 57.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.18,
+              "health": 946.0,
+              "healthMax": 1053.0,
+              "currentGold": 897,
+              "totalGold": 1397,
+              "tags": [
+                "engage",
+                "tank_frontline"
+              ]
+            }
+          ]
+        }
+      ],
+      "observedCaptures": [
+        {
+          "globalIndex": 1,
+          "element": "hextech",
+          "timeSeconds": 339,
+          "ownerSide": "red",
+          "ownerName": "Cloud9 Kia",
+          "ownerStack": 1
+        },
+        {
+          "globalIndex": 2,
+          "element": "mountain",
+          "timeSeconds": 664,
+          "ownerSide": "red",
+          "ownerName": "Cloud9 Kia",
+          "ownerStack": 2
+        },
+        {
+          "globalIndex": 3,
+          "element": "ocean",
+          "timeSeconds": 1006,
+          "ownerSide": "blue",
+          "ownerName": "Team Liquid Alienware",
+          "ownerStack": 1
+        },
+        {
+          "globalIndex": 4,
+          "element": "ocean",
+          "timeSeconds": 1399,
+          "ownerSide": "red",
+          "ownerName": "Cloud9 Kia",
+          "ownerStack": 3
+        },
+        {
+          "globalIndex": 5,
+          "element": "ocean",
+          "timeSeconds": 1717,
+          "ownerSide": "blue",
+          "ownerName": "Team Liquid Alienware",
+          "ownerStack": 2
+        },
+        {
+          "globalIndex": 6,
+          "element": "ocean",
+          "timeSeconds": 2048,
+          "ownerSide": "blue",
+          "ownerName": "Team Liquid Alienware",
+          "ownerStack": 3
+        }
+      ],
+      "dragonEvents": [
+        {
+          "element": "hextech",
+          "timeSeconds": 339,
+          "globalIndex": 1,
+          "ownerStack": 1,
+          "teamName": "Cloud9 Kia",
+          "opponentName": "Team Liquid Alienware",
+          "state": {
+            "teamGold": 9469,
+            "opponentGold": 9396,
+            "goldDiff": 73,
+            "teamKills": 0,
+            "opponentKills": 0,
+            "teamTowers": 0,
+            "opponentTowers": 0
+          },
+          "composition": [
+            {
+              "champion": "Rumble",
+              "role": "Top",
+              "level": 6,
+              "attackDamage": 76.0,
+              "abilityPower": 37.0,
+              "armor": 79.0,
+              "magicResist": 34.0,
+              "attackSpeed": 1.07,
+              "health": 1182.0,
+              "healthMax": 1230.0,
+              "currentGold": 252,
+              "totalGold": 2002,
+              "tags": [
+                "poke_siege",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Skarner",
+              "role": "Jungle",
+              "level": 5,
+              "attackDamage": 78.0,
+              "abilityPower": 0.0,
+              "armor": 46.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.16,
+              "health": 835.0,
+              "healthMax": 1446.0,
+              "currentGold": 308,
+              "totalGold": 1988,
+              "tags": [
+                "engage",
+                "pick",
+                "tank_frontline"
+              ]
+            },
+            {
+              "champion": "Akali",
+              "role": "Mid",
+              "level": 6,
+              "attackDamage": 75.0,
+              "abilityPower": 56.0,
+              "armor": 41.0,
+              "magicResist": 45.0,
+              "attackSpeed": 1.12,
+              "health": 1095.0,
+              "healthMax": 1246.0,
+              "currentGold": 979,
+              "totalGold": 2084,
+              "tags": [
+                "assassin",
+                "scaling_late",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Ezreal",
+              "role": "Bot",
+              "level": 5,
+              "attackDamage": 90.0,
+              "abilityPower": 0.0,
+              "armor": 36.0,
+              "magicResist": 34.0,
+              "attackSpeed": 1.32,
+              "health": 980.0,
+              "healthMax": 980.0,
+              "currentGold": 198,
+              "totalGold": 1998,
+              "tags": [
+                "poke_siege",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Leona",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 69.0,
+              "abilityPower": 0.0,
+              "armor": 57.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.18,
+              "health": 946.0,
+              "healthMax": 1053.0,
+              "currentGold": 897,
+              "totalGold": 1397,
+              "tags": [
+                "engage",
+                "tank_frontline"
+              ]
+            }
+          ],
+          "opponentComposition": [
+            {
+              "champion": "Renekton",
+              "role": "Top",
+              "level": 6,
+              "attackDamage": 106.0,
+              "abilityPower": 0.0,
+              "armor": 55.0,
+              "magicResist": 36.0,
+              "attackSpeed": 1.1,
+              "health": 1179.0,
+              "healthMax": 1423.0,
+              "currentGold": 468,
+              "totalGold": 1848,
+              "tags": [
+                "early_snowball",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Wukong",
+              "role": "Jungle",
+              "level": 5,
+              "attackDamage": 92.0,
+              "abilityPower": 0.0,
+              "armor": 87.0,
+              "magicResist": 34.0,
+              "attackSpeed": 1.65,
+              "health": 835.0,
+              "healthMax": 1115.0,
+              "currentGold": 758,
+              "totalGold": 2008,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Locke",
+              "role": "Mid",
+              "level": 6,
+              "attackDamage": 69.0,
+              "abilityPower": 51.0,
+              "armor": 48.0,
+              "magicResist": 40.0,
+              "attackSpeed": 1.13,
+              "health": 1048.0,
+              "healthMax": 1290.0,
+              "currentGold": 847,
+              "totalGold": 2127,
+              "tags": [
+                "assassin",
+                "burst_mage",
+                "early_snowball",
+                "pick"
+              ]
+            },
+            {
+              "champion": "Kai'Sa",
+              "role": "Bot",
+              "level": 5,
+              "attackDamage": 102.0,
+              "abilityPower": 0.0,
+              "armor": 37.0,
+              "magicResist": 34.0,
+              "attackSpeed": 1.35,
+              "health": 1020.0,
+              "healthMax": 1020.0,
+              "currentGold": 42,
+              "totalGold": 2067,
+              "tags": [
+                "hypercarry_adc",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Nautilus",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 71.0,
+              "abilityPower": 0.0,
+              "armor": 54.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.13,
+              "health": 1032.0,
+              "healthMax": 1050.0,
+              "currentGold": 846,
+              "totalGold": 1346,
+              "tags": [
+                "engage",
+                "pick",
+                "tank_frontline"
+              ]
+            }
+          ],
+          "compositionFit": {
+            "infernal": {
+              "recipients": [
+                "Rumble",
+                "Skarner",
+                "Akali",
+                "Ezreal",
+                "Leona"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Rumble",
+                "Akali",
+                "Ezreal"
+              ],
+              "candidateCount": 3,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "mountain": {
+              "recipients": [
+                "Rumble",
+                "Skarner",
+                "Akali",
+                "Ezreal",
+                "Leona"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Skarner",
+                "Akali",
+                "Ezreal",
+                "Leona"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "ocean": {
+              "recipients": [
+                "Rumble",
+                "Skarner",
+                "Akali",
+                "Ezreal",
+                "Leona"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Skarner",
+                "Akali",
+                "Ezreal",
+                "Leona"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "cloud": {
+              "recipients": [
+                "Rumble",
+                "Skarner",
+                "Akali",
+                "Ezreal",
+                "Leona"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Skarner",
+                "Leona"
+              ],
+              "candidateCount": 2,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "hextech": {
+              "recipients": [
+                "Rumble",
+                "Skarner",
+                "Akali",
+                "Ezreal",
+                "Leona"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Rumble",
+                "Akali",
+                "Ezreal"
+              ],
+              "candidateCount": 3,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "chemtech": {
+              "recipients": [
+                "Rumble",
+                "Skarner",
+                "Akali",
+                "Ezreal",
+                "Leona"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Rumble",
+                "Skarner",
+                "Leona"
+              ],
+              "candidateCount": 3,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "snapshot-6",
+      "date": "2026-07-25T19:00:00Z",
+      "tournament": "CBLOL - Split 2 2026 (Regular Season: Regular Season)",
+      "patch": "16.14",
+      "complete": true,
+      "league": "CBLOL",
+      "region": "south-america",
+      "regionLabel": "South America",
+      "competitionLevel": "tier1",
+      "competitionLevelLabel": "Tier 1",
+      "teams": [
+        {
+          "side": "blue",
+          "name": "LOUD",
+          "composition": [
+            {
+              "champion": "Gnar",
+              "role": "Top",
+              "level": 6,
+              "attackDamage": 78.0,
+              "abilityPower": 0.0,
+              "armor": 69.0,
+              "magicResist": 43.0,
+              "attackSpeed": 1.48,
+              "health": 1172.0,
+              "healthMax": 1238.0,
+              "currentGold": 513,
+              "totalGold": 1938,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Vi",
+              "role": "Jungle",
+              "level": 6,
+              "attackDamage": 97.0,
+              "abilityPower": 0.0,
+              "armor": 48.0,
+              "magicResist": 40.0,
+              "attackSpeed": 1.58,
+              "health": 1051.0,
+              "healthMax": 1384.0,
+              "currentGold": 1187,
+              "totalGold": 2917,
+              "tags": [
+                "early_snowball",
+                "engage"
+              ]
+            },
+            {
+              "champion": "Viktor",
+              "role": "Mid",
+              "level": 6,
+              "attackDamage": 64.0,
+              "abilityPower": 41.0,
+              "armor": 40.0,
+              "magicResist": 55.0,
+              "attackSpeed": 1.18,
+              "health": 1209.0,
+              "healthMax": 1224.0,
+              "currentGold": 85,
+              "totalGold": 2385,
+              "tags": [
+                "control_mage",
+                "poke_siege",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Ezreal",
+              "role": "Bot",
+              "level": 6,
+              "attackDamage": 104.0,
+              "abilityPower": 0.0,
+              "armor": 40.0,
+              "magicResist": 35.0,
+              "attackSpeed": 1.34,
+              "health": 922.0,
+              "healthMax": 1067.0,
+              "currentGold": 568,
+              "totalGold": 2418,
+              "tags": [
+                "poke_siege",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Rell",
+              "role": "Support",
+              "level": 3,
+              "attackDamage": 59.0,
+              "abilityPower": 0.0,
+              "armor": 35.0,
+              "magicResist": 30.0,
+              "attackSpeed": 1.02,
+              "health": 1018.0,
+              "healthMax": 1018.0,
+              "currentGold": 600,
+              "totalGold": 1660,
+              "tags": [
+                "engage",
+                "tank_frontline",
+                "teamfight_aoe"
+              ]
+            }
+          ]
+        },
+        {
+          "side": "red",
+          "name": "Pain Gaming",
+          "composition": [
+            {
+              "champion": "Tristana",
+              "role": "Top",
+              "level": 7,
+              "attackDamage": 99.0,
+              "abilityPower": 0.0,
+              "armor": 74.0,
+              "magicResist": 34.0,
+              "attackSpeed": 1.49,
+              "health": 1183.0,
+              "healthMax": 1199.0,
+              "currentGold": 301,
+              "totalGold": 2606,
+              "tags": [
+                "early_snowball",
+                "hypercarry_adc"
+              ]
+            },
+            {
+              "champion": "Lee Sin",
+              "role": "Jungle",
+              "level": 5,
+              "attackDamage": 117.0,
+              "abilityPower": 0.0,
+              "armor": 49.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.56,
+              "health": 996.0,
+              "healthMax": 1178.0,
+              "currentGold": 68,
+              "totalGold": 2443,
+              "tags": [
+                "early_snowball",
+                "engage",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Syndra",
+              "role": "Mid",
+              "level": 6,
+              "attackDamage": 65.0,
+              "abilityPower": 67.0,
+              "armor": 40.0,
+              "magicResist": 35.0,
+              "attackSpeed": 1.17,
+              "health": 1157.0,
+              "healthMax": 1157.0,
+              "currentGold": 109,
+              "totalGold": 2109,
+              "tags": [
+                "burst_mage",
+                "control_mage",
+                "pick",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Kai'Sa",
+              "role": "Bot",
+              "level": 4,
+              "attackDamage": 98.0,
+              "abilityPower": 0.0,
+              "armor": 34.0,
+              "magicResist": 32.0,
+              "attackSpeed": 1.49,
+              "health": 936.0,
+              "healthMax": 936.0,
+              "currentGold": 195,
+              "totalGold": 1900,
+              "tags": [
+                "hypercarry_adc",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Shen",
+              "role": "Support",
+              "level": 3,
+              "attackDamage": 68.0,
+              "abilityPower": 0.0,
+              "armor": 40.0,
+              "magicResist": 35.0,
+              "attackSpeed": 1.14,
+              "health": 926.0,
+              "healthMax": 1001.0,
+              "currentGold": 661,
+              "totalGold": 1561,
+              "tags": [
+                "peel_enchanter",
+                "splitpush",
+                "tank_frontline"
+              ]
+            }
+          ]
+        }
+      ],
+      "observedCaptures": [
+        {
+          "globalIndex": 1,
+          "element": "mountain",
+          "timeSeconds": 401,
+          "ownerSide": "red",
+          "ownerName": "Pain Gaming",
+          "ownerStack": 1
+        },
+        {
+          "globalIndex": 2,
+          "element": "chemtech",
+          "timeSeconds": 735,
+          "ownerSide": "red",
+          "ownerName": "Pain Gaming",
+          "ownerStack": 2
+        },
+        {
+          "globalIndex": 3,
+          "element": "infernal",
+          "timeSeconds": 1058,
+          "ownerSide": "red",
+          "ownerName": "Pain Gaming",
+          "ownerStack": 3
+        },
+        {
+          "globalIndex": 4,
+          "element": "infernal",
+          "timeSeconds": 1388,
+          "ownerSide": "red",
+          "ownerName": "Pain Gaming",
+          "ownerStack": 4
+        }
+      ],
+      "dragonEvents": [
+        {
+          "element": "mountain",
+          "timeSeconds": 401,
+          "globalIndex": 1,
+          "ownerStack": 1,
+          "teamName": "Pain Gaming",
+          "opponentName": "LOUD",
+          "state": {
+            "teamGold": 11318,
+            "opponentGold": 10619,
+            "goldDiff": 699,
+            "teamKills": 2,
+            "opponentKills": 1,
+            "teamTowers": 0,
+            "opponentTowers": 0
+          },
+          "composition": [
+            {
+              "champion": "Gnar",
+              "role": "Top",
+              "level": 6,
+              "attackDamage": 78.0,
+              "abilityPower": 0.0,
+              "armor": 69.0,
+              "magicResist": 43.0,
+              "attackSpeed": 1.48,
+              "health": 1172.0,
+              "healthMax": 1238.0,
+              "currentGold": 513,
+              "totalGold": 1938,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Vi",
+              "role": "Jungle",
+              "level": 6,
+              "attackDamage": 97.0,
+              "abilityPower": 0.0,
+              "armor": 48.0,
+              "magicResist": 40.0,
+              "attackSpeed": 1.58,
+              "health": 1051.0,
+              "healthMax": 1384.0,
+              "currentGold": 1187,
+              "totalGold": 2917,
+              "tags": [
+                "early_snowball",
+                "engage"
+              ]
+            },
+            {
+              "champion": "Viktor",
+              "role": "Mid",
+              "level": 6,
+              "attackDamage": 64.0,
+              "abilityPower": 41.0,
+              "armor": 40.0,
+              "magicResist": 55.0,
+              "attackSpeed": 1.18,
+              "health": 1209.0,
+              "healthMax": 1224.0,
+              "currentGold": 85,
+              "totalGold": 2385,
+              "tags": [
+                "control_mage",
+                "poke_siege",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Ezreal",
+              "role": "Bot",
+              "level": 6,
+              "attackDamage": 104.0,
+              "abilityPower": 0.0,
+              "armor": 40.0,
+              "magicResist": 35.0,
+              "attackSpeed": 1.34,
+              "health": 922.0,
+              "healthMax": 1067.0,
+              "currentGold": 568,
+              "totalGold": 2418,
+              "tags": [
+                "poke_siege",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Rell",
+              "role": "Support",
+              "level": 3,
+              "attackDamage": 59.0,
+              "abilityPower": 0.0,
+              "armor": 35.0,
+              "magicResist": 30.0,
+              "attackSpeed": 1.02,
+              "health": 1018.0,
+              "healthMax": 1018.0,
+              "currentGold": 600,
+              "totalGold": 1660,
+              "tags": [
+                "engage",
+                "tank_frontline",
+                "teamfight_aoe"
+              ]
+            }
+          ],
+          "opponentComposition": [
+            {
+              "champion": "Tristana",
+              "role": "Top",
+              "level": 7,
+              "attackDamage": 99.0,
+              "abilityPower": 0.0,
+              "armor": 74.0,
+              "magicResist": 34.0,
+              "attackSpeed": 1.49,
+              "health": 1183.0,
+              "healthMax": 1199.0,
+              "currentGold": 301,
+              "totalGold": 2606,
+              "tags": [
+                "early_snowball",
+                "hypercarry_adc"
+              ]
+            },
+            {
+              "champion": "Lee Sin",
+              "role": "Jungle",
+              "level": 5,
+              "attackDamage": 117.0,
+              "abilityPower": 0.0,
+              "armor": 49.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.56,
+              "health": 996.0,
+              "healthMax": 1178.0,
+              "currentGold": 68,
+              "totalGold": 2443,
+              "tags": [
+                "early_snowball",
+                "engage",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Syndra",
+              "role": "Mid",
+              "level": 6,
+              "attackDamage": 65.0,
+              "abilityPower": 67.0,
+              "armor": 40.0,
+              "magicResist": 35.0,
+              "attackSpeed": 1.17,
+              "health": 1157.0,
+              "healthMax": 1157.0,
+              "currentGold": 109,
+              "totalGold": 2109,
+              "tags": [
+                "burst_mage",
+                "control_mage",
+                "pick",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Kai'Sa",
+              "role": "Bot",
+              "level": 4,
+              "attackDamage": 98.0,
+              "abilityPower": 0.0,
+              "armor": 34.0,
+              "magicResist": 32.0,
+              "attackSpeed": 1.49,
+              "health": 936.0,
+              "healthMax": 936.0,
+              "currentGold": 195,
+              "totalGold": 1900,
+              "tags": [
+                "hypercarry_adc",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Shen",
+              "role": "Support",
+              "level": 3,
+              "attackDamage": 68.0,
+              "abilityPower": 0.0,
+              "armor": 40.0,
+              "magicResist": 35.0,
+              "attackSpeed": 1.14,
+              "health": 926.0,
+              "healthMax": 1001.0,
+              "currentGold": 661,
+              "totalGold": 1561,
+              "tags": [
+                "peel_enchanter",
+                "splitpush",
+                "tank_frontline"
+              ]
+            }
+          ],
+          "compositionFit": {
+            "infernal": {
+              "recipients": [
+                "Gnar",
+                "Vi",
+                "Viktor",
+                "Ezreal",
+                "Rell"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Viktor",
+                "Ezreal"
+              ],
+              "candidateCount": 2,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "mountain": {
+              "recipients": [
+                "Gnar",
+                "Vi",
+                "Viktor",
+                "Ezreal",
+                "Rell"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Vi",
+                "Ezreal",
+                "Rell"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "ocean": {
+              "recipients": [
+                "Gnar",
+                "Vi",
+                "Viktor",
+                "Ezreal",
+                "Rell"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Vi",
+                "Ezreal",
+                "Rell"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "cloud": {
+              "recipients": [
+                "Gnar",
+                "Vi",
+                "Viktor",
+                "Ezreal",
+                "Rell"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Vi",
+                "Rell"
+              ],
+              "candidateCount": 3,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "hextech": {
+              "recipients": [
+                "Gnar",
+                "Vi",
+                "Viktor",
+                "Ezreal",
+                "Rell"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Viktor",
+                "Ezreal",
+                "Rell"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "chemtech": {
+              "recipients": [
+                "Gnar",
+                "Vi",
+                "Viktor",
+                "Ezreal",
+                "Rell"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Vi",
+                "Viktor",
+                "Rell"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "snapshot-7",
+      "date": "2026-07-26T09:00:00Z",
+      "tournament": "LCP - Split 3 2026 (Swiss: Swiss)",
+      "patch": "16.14",
+      "complete": true,
+      "league": "LCP",
+      "region": "pacific",
+      "regionLabel": "Pacific",
+      "competitionLevel": "tier1",
+      "competitionLevelLabel": "Tier 1",
+      "teams": [
+        {
+          "side": "blue",
+          "name": "GAM Esports",
+          "composition": [
+            {
+              "champion": "Ambessa",
+              "role": "Top",
+              "level": 9,
+              "attackDamage": 149.0,
+              "abilityPower": 0.0,
+              "armor": 78.0,
+              "magicResist": 55.0,
+              "attackSpeed": 1.66,
+              "health": 121.0,
+              "healthMax": 1656.0,
+              "currentGold": 397,
+              "totalGold": 3327,
+              "tags": [
+                "engage",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Qiyana",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 129.0,
+              "abilityPower": 0.0,
+              "armor": 52.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.25,
+              "health": 1007.0,
+              "healthMax": 1212.0,
+              "currentGold": 679,
+              "totalGold": 3679,
+              "tags": [
+                "assassin",
+                "early_snowball",
+                "roam"
+              ]
+            },
+            {
+              "champion": "Locke",
+              "role": "Mid",
+              "level": 8,
+              "attackDamage": 75.0,
+              "abilityPower": 96.0,
+              "armor": 56.0,
+              "magicResist": 43.0,
+              "attackSpeed": 1.19,
+              "health": 1789.0,
+              "healthMax": 1789.0,
+              "currentGold": 238,
+              "totalGold": 4138,
+              "tags": [
+                "assassin",
+                "burst_mage",
+                "early_snowball",
+                "pick"
+              ]
+            },
+            {
+              "champion": "Cassiopeia",
+              "role": "Bot",
+              "level": 8,
+              "attackDamage": 70.0,
+              "abilityPower": 27.0,
+              "armor": 45.0,
+              "magicResist": 39.0,
+              "attackSpeed": 1.08,
+              "health": 1332.0,
+              "healthMax": 1650.0,
+              "currentGold": 1082,
+              "totalGold": 3432,
+              "tags": [
+                "control_mage",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Shen",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 73.0,
+              "abilityPower": 0.0,
+              "armor": 61.0,
+              "magicResist": 58.0,
+              "attackSpeed": 1.09,
+              "health": 1280.0,
+              "healthMax": 1280.0,
+              "currentGold": 210,
+              "totalGold": 2535,
+              "tags": [
+                "peel_enchanter",
+                "splitpush",
+                "tank_frontline"
+              ]
+            }
+          ]
+        },
+        {
+          "side": "red",
+          "name": "DetonatioN FocusMe",
+          "composition": [
+            {
+              "champion": "Gnar",
+              "role": "Top",
+              "level": 9,
+              "attackDamage": 143.0,
+              "abilityPower": 0.0,
+              "armor": 106.0,
+              "magicResist": 65.0,
+              "attackSpeed": 1.46,
+              "health": 1322.0,
+              "healthMax": 1917.0,
+              "currentGold": 422,
+              "totalGold": 3872,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Lee Sin",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 138.0,
+              "abilityPower": 0.0,
+              "armor": 57.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.69,
+              "health": 1108.0,
+              "healthMax": 1633.0,
+              "currentGold": 361,
+              "totalGold": 4196,
+              "tags": [
+                "early_snowball",
+                "engage",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Ryze",
+              "role": "Mid",
+              "level": 9,
+              "attackDamage": 75.0,
+              "abilityPower": 63.0,
+              "armor": 50.0,
+              "magicResist": 40.0,
+              "attackSpeed": 1.24,
+              "health": 1895.0,
+              "healthMax": 1952.0,
+              "currentGold": 495,
+              "totalGold": 4065,
+              "tags": [
+                "control_mage",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Syndra",
+              "role": "Bot",
+              "level": 8,
+              "attackDamage": 70.0,
+              "abilityPower": 88.0,
+              "armor": 48.0,
+              "magicResist": 37.0,
+              "attackSpeed": 1.21,
+              "health": 1204.0,
+              "healthMax": 1330.0,
+              "currentGold": 616,
+              "totalGold": 3666,
+              "tags": [
+                "burst_mage",
+                "control_mage",
+                "pick",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Camille",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 110.0,
+              "abilityPower": 0.0,
+              "armor": 48.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.47,
+              "health": 1420.0,
+              "healthMax": 1420.0,
+              "currentGold": 180,
+              "totalGold": 2715,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "splitpush"
+              ]
+            }
+          ]
+        }
+      ],
+      "observedCaptures": [
+        {
+          "globalIndex": 1,
+          "element": "hextech",
+          "timeSeconds": 620,
+          "ownerSide": "blue",
+          "ownerName": "GAM Esports",
+          "ownerStack": 1
+        },
+        {
+          "globalIndex": 2,
+          "element": "ocean",
+          "timeSeconds": 964,
+          "ownerSide": "red",
+          "ownerName": "DetonatioN FocusMe",
+          "ownerStack": 1
+        },
+        {
+          "globalIndex": 3,
+          "element": "cloud",
+          "timeSeconds": 1358,
+          "ownerSide": "blue",
+          "ownerName": "GAM Esports",
+          "ownerStack": 2
+        },
+        {
+          "globalIndex": 4,
+          "element": "cloud",
+          "timeSeconds": 1724,
+          "ownerSide": "blue",
+          "ownerName": "GAM Esports",
+          "ownerStack": 3
+        }
+      ],
+      "dragonEvents": [
+        {
+          "element": "hextech",
+          "timeSeconds": 619,
+          "globalIndex": 1,
+          "ownerStack": 1,
+          "teamName": "GAM Esports",
+          "opponentName": "DetonatioN FocusMe",
+          "state": {
+            "teamGold": 18514,
+            "opponentGold": 17111,
+            "goldDiff": 1403,
+            "teamKills": 2,
+            "opponentKills": 2,
+            "teamTowers": 0,
+            "opponentTowers": 0
+          },
+          "composition": [
+            {
+              "champion": "Gnar",
+              "role": "Top",
+              "level": 9,
+              "attackDamage": 143.0,
+              "abilityPower": 0.0,
+              "armor": 106.0,
+              "magicResist": 65.0,
+              "attackSpeed": 1.46,
+              "health": 1322.0,
+              "healthMax": 1917.0,
+              "currentGold": 422,
+              "totalGold": 3872,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Lee Sin",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 138.0,
+              "abilityPower": 0.0,
+              "armor": 57.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.69,
+              "health": 1108.0,
+              "healthMax": 1633.0,
+              "currentGold": 361,
+              "totalGold": 4196,
+              "tags": [
+                "early_snowball",
+                "engage",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Ryze",
+              "role": "Mid",
+              "level": 9,
+              "attackDamage": 75.0,
+              "abilityPower": 63.0,
+              "armor": 50.0,
+              "magicResist": 40.0,
+              "attackSpeed": 1.24,
+              "health": 1895.0,
+              "healthMax": 1952.0,
+              "currentGold": 495,
+              "totalGold": 4065,
+              "tags": [
+                "control_mage",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Syndra",
+              "role": "Bot",
+              "level": 8,
+              "attackDamage": 70.0,
+              "abilityPower": 88.0,
+              "armor": 48.0,
+              "magicResist": 37.0,
+              "attackSpeed": 1.21,
+              "health": 1204.0,
+              "healthMax": 1330.0,
+              "currentGold": 616,
+              "totalGold": 3666,
+              "tags": [
+                "burst_mage",
+                "control_mage",
+                "pick",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Camille",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 110.0,
+              "abilityPower": 0.0,
+              "armor": 48.0,
+              "magicResist": 38.0,
+              "attackSpeed": 1.47,
+              "health": 1420.0,
+              "healthMax": 1420.0,
+              "currentGold": 180,
+              "totalGold": 2715,
+              "tags": [
+                "engage",
+                "skirmisher",
+                "splitpush"
+              ]
+            }
+          ],
+          "opponentComposition": [
+            {
+              "champion": "Ambessa",
+              "role": "Top",
+              "level": 9,
+              "attackDamage": 149.0,
+              "abilityPower": 0.0,
+              "armor": 78.0,
+              "magicResist": 55.0,
+              "attackSpeed": 1.66,
+              "health": 121.0,
+              "healthMax": 1656.0,
+              "currentGold": 397,
+              "totalGold": 3327,
+              "tags": [
+                "engage",
+                "skirmisher"
+              ]
+            },
+            {
+              "champion": "Qiyana",
+              "role": "Jungle",
+              "level": 7,
+              "attackDamage": 129.0,
+              "abilityPower": 0.0,
+              "armor": 52.0,
+              "magicResist": 41.0,
+              "attackSpeed": 1.25,
+              "health": 1007.0,
+              "healthMax": 1212.0,
+              "currentGold": 679,
+              "totalGold": 3679,
+              "tags": [
+                "assassin",
+                "early_snowball",
+                "roam"
+              ]
+            },
+            {
+              "champion": "Locke",
+              "role": "Mid",
+              "level": 8,
+              "attackDamage": 75.0,
+              "abilityPower": 96.0,
+              "armor": 56.0,
+              "magicResist": 43.0,
+              "attackSpeed": 1.19,
+              "health": 1789.0,
+              "healthMax": 1789.0,
+              "currentGold": 238,
+              "totalGold": 4138,
+              "tags": [
+                "assassin",
+                "burst_mage",
+                "early_snowball",
+                "pick"
+              ]
+            },
+            {
+              "champion": "Cassiopeia",
+              "role": "Bot",
+              "level": 8,
+              "attackDamage": 70.0,
+              "abilityPower": 27.0,
+              "armor": 45.0,
+              "magicResist": 39.0,
+              "attackSpeed": 1.08,
+              "health": 1332.0,
+              "healthMax": 1650.0,
+              "currentGold": 1082,
+              "totalGold": 3432,
+              "tags": [
+                "control_mage",
+                "scaling_late",
+                "teamfight_aoe"
+              ]
+            },
+            {
+              "champion": "Shen",
+              "role": "Support",
+              "level": 5,
+              "attackDamage": 73.0,
+              "abilityPower": 0.0,
+              "armor": 61.0,
+              "magicResist": 58.0,
+              "attackSpeed": 1.09,
+              "health": 1280.0,
+              "healthMax": 1280.0,
+              "currentGold": 210,
+              "totalGold": 2535,
+              "tags": [
+                "peel_enchanter",
+                "splitpush",
+                "tank_frontline"
+              ]
+            }
+          ],
+          "compositionFit": {
+            "infernal": {
+              "recipients": [
+                "Gnar",
+                "Lee Sin",
+                "Ryze",
+                "Syndra",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Ryze",
+                "Syndra"
+              ],
+              "candidateCount": 2,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "mountain": {
+              "recipients": [
+                "Gnar",
+                "Lee Sin",
+                "Ryze",
+                "Syndra",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Lee Sin",
+                "Camille"
+              ],
+              "candidateCount": 3,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "ocean": {
+              "recipients": [
+                "Gnar",
+                "Lee Sin",
+                "Ryze",
+                "Syndra",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Lee Sin",
+                "Camille"
+              ],
+              "candidateCount": 3,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "cloud": {
+              "recipients": [
+                "Gnar",
+                "Lee Sin",
+                "Ryze",
+                "Syndra",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Lee Sin",
+                "Syndra",
+                "Camille"
+              ],
+              "candidateCount": 4,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "hextech": {
+              "recipients": [
+                "Gnar",
+                "Lee Sin",
+                "Ryze",
+                "Syndra",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Lee Sin",
+                "Ryze",
+                "Syndra",
+                "Camille"
+              ],
+              "candidateCount": 5,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            },
+            "chemtech": {
+              "recipients": [
+                "Gnar",
+                "Lee Sin",
+                "Ryze",
+                "Syndra",
+                "Camille"
+              ],
+              "recipientCount": 5,
+              "higherConversionCandidates": [
+                "Gnar",
+                "Lee Sin",
+                "Ryze",
+                "Syndra",
+                "Camille"
+              ],
+              "candidateCount": 5,
+              "basis": "all five champions receive the buff; the candidate list is a transparent archetype prior for differential conversion, not an estimated champion effect"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "checks": [],
+  "rawFilesRetained": false
+}

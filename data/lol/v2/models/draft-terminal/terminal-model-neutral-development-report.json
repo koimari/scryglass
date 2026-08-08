@@ -1,0 +1,50 @@
+{
+  "artifact_sha256": "bef2f994291df322f0eb5cd1e5d9e5131c989eebd2a38d0874f7801a7073b23f",
+  "baseline_adjustment": {
+    "baseline_is_not_serialized_in_served_artifact": true,
+    "config_sha256": "49de7c85653707b3fdda6ef6cd7a2c6db296bdb58836f1ac7149d6a58d0350d2",
+    "current_cluster_outcomes_update_after_cluster": true,
+    "development_only": true,
+    "expected_score": "elo_base10_scale_400",
+    "initial_rating": 1500.0,
+    "k_factor": 20.0,
+    "kind": "pre_event_team_elo_logit",
+    "served_baseline_logit": 0.0,
+    "team_identifier": "teamid",
+    "update_unit": "dependence_cluster"
+  },
+  "baseline_coefficient": 1.1855224295618876,
+  "baseline_feature": "pre_event_team_elo_logit",
+  "baseline_feature_count": 1,
+  "calibration_log_loss": 0.689426890841246,
+  "calibration_method": "symmetrized_platt",
+  "calibration_parameter": 0.35,
+  "calibration_rows": 2070,
+  "calibration_start": "2026-05-01T00:00:00Z",
+  "calibration_target": "equalized_draft_logit",
+  "candidate_id": "m0-role-additive",
+  "candidate_order": [
+    "m0-role-additive",
+    "m1-role-additive-allied-synergy",
+    "m2-role-additive-allied-and-counter"
+  ],
+  "feature_count": 255,
+  "model_as_of": "2026-06-30T23:59:59Z",
+  "model_version": "draft-terminal-neutral-dev-v1.1.0",
+  "production_eligible": false,
+  "public_probability_authorized": false,
+  "source_date_range": {
+    "calibration_end": "2026-06-30T19:24:39+00:00",
+    "calibration_start": "2026-05-01T05:08:53+00:00",
+    "train_end": "2026-04-30T23:55:44+00:00",
+    "train_start": "2025-01-11T11:11:24+00:00"
+  },
+  "source_snapshot": {
+    "dependence_cluster_proxy_artifact_sha256": "632a2c1046fce7ae5ee9d41abed7ae66a46ce13a8f7c6503d2d9cce551460e8c",
+    "dependence_cluster_proxy_raw_sha256": "722ab5674e0dc02cf5075a8d61a6fd494f8dbe510b8e254626717c98dae663d3",
+    "oe_metadata_snapshot_sha256": "707e2b10d680506c8fb0d84ecf5f54b66c8191c604919a6dba53527588e7977c",
+    "oe_players_snapshot_sha256": "97cd79708021c3adaa1fd7fc16e413662981bc8593b28fc80d7953aa01331ab3"
+  },
+  "train_rows": 13921,
+  "uncertainty_method": "diagonal_laplace_development_diagnostic"
+}

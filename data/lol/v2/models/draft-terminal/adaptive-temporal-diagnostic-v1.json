@@ -1,0 +1,84 @@
+{
+  "artifact_sha256": "cff3e0d647745e176f8bb001c1607e53aa49f8ffb4dadf1aeb53dee91a2aff27",
+  "claim_ceiling": {
+    "adaptive_development_diagnostic": true,
+    "betting": false,
+    "independent_validation": false,
+    "probability": false,
+    "recommendation": false,
+    "terminal_model_reliability": false
+  },
+  "decision": {
+    "independent_validation": false,
+    "known_app_draft_family_nonharmful": false,
+    "production_eligible": false,
+    "terminal_candidate_selected": false
+  },
+  "inputs": {
+    "evaluation": "data/lol/v2/experiments/leaguepedia/manual-run-2026-07-31/temporal-runtime-hybrid-strict-roster-receipts-v2-incremental/temporal-hybrid-evaluation.json",
+    "evaluation_raw_sha256": "b0b51097172ebda2bbabe0d265366ec8bbef4009b010504b116f24cf09d87fbd",
+    "outcome_free_scored_ledger": "data/lol/v2/experiments/leaguepedia/manual-run-2026-07-31/temporal-runtime-hybrid-strict-roster-receipts-v2-incremental/temporal-hybrid-scored-ledger.jsonl",
+    "outcome_free_scored_ledger_raw_sha256": "99075820094288217882663f8d255bc95099bc4c19d03d2f1b40c38cfd1d1339",
+    "replay_manifest": "data/lol/v2/experiments/leaguepedia/manual-run-2026-07-31/temporal-runtime-hybrid-strict-roster-receipts-v2-incremental/temporal-hybrid-manifest.json",
+    "replay_manifest_canonical_sha256": "ea470cd054ee93d261dbf64e8d6dfcdc1d9dcc056a2632631e50a6370fa799fe",
+    "replay_manifest_raw_sha256": "8cc819d55d9d23d27c852f5e9ff79166f7b94768ad42409cf7bb648e7fc57d9f",
+    "runtime": "data/lol/v2/experiments/leaguepedia/manual-run-2026-07-31/temporal-runtime-hybrid-strict-roster-receipts-v2-incremental/temporal-hybrid-runtime.json",
+    "runtime_raw_sha256": "4cb75a0091aa02f8ac9b39ce791242232308b58fa289e85149d7ace748e4535c",
+    "source_hashes": {
+      "frozen_ledger": "6577378c8222b965911c9ea0e4d8722c2840d399df66129562253ecfb918d7b3",
+      "prior_drafts": "ad654547d1739627652942c7b1e792d21d85c7014e58c1bcc495d8b2895c93b4",
+      "prior_outcomes": "47066abaca161826fd64b19916bfbae94b6787feae93f4507980f8b341fd46be",
+      "roster_receipt_file": "25c6c91fb97c86f5e0f69423d459a60038016a6ddea9b565ba003d02d9b26992",
+      "roster_receipt_manifest": "b27611f2381b1f8612568263bb1d6031c20cecac349c5c3db597c71ad0d04d24",
+      "runner": "abc024dfd0b3a33ed578f6397cb07a970712e507478b57aa75de7f8d885b6375",
+      "target_outcomes": "9aa3af24db2209544be6cbd0bf427a0ed9127f1c2fbaedc56dd0e4ad7248ab5b"
+    }
+  },
+  "metrics": {
+    "context_with_draft": {
+      "accuracy_pct": 63.6704,
+      "brier": 0.238402,
+      "correct": 170,
+      "logloss": 0.67827,
+      "n": 267
+    },
+    "context_without_draft": {
+      "accuracy_pct": 65.1685,
+      "brier": 0.217023,
+      "correct": 174,
+      "logloss": 0.626531,
+      "n": 267
+    },
+    "incremental_draft_against_same_context": {
+      "brier_delta": 0.021379,
+      "logloss_delta": 0.051739,
+      "n": 267,
+      "pass_rule": "both deltas must be nonpositive",
+      "passed": false
+    },
+    "pure_draft": {
+      "accuracy_pct": 53.5607,
+      "brier": 0.261223,
+      "correct": 534,
+      "logloss": 0.720285,
+      "n": 997
+    }
+  },
+  "model_scope": {
+    "applicability": "known_app_draft_feature_family_diagnostic",
+    "model_version": "temporal-hybrid-v1.3.0",
+    "same_as_terminal_m0_candidate": false
+  },
+  "population": {
+    "exact_roster_context_maps": 267,
+    "lineup_status_counts": {
+      "mismatch": 343,
+      "unavailable": 387,
+      "verified_preevent": 267
+    },
+    "maps": 997
+  },
+  "purpose": "bind a known adaptive temporal diagnostic for the current app draft feature family; never substitute it for terminal-model L2 evaluation",
+  "result_state": "ADAPTIVE_DRAFT_TERMS_HARM",
+  "schema_version": "scryglass:draft-terminal-adaptive-temporal-diagnostic:v1"
+}

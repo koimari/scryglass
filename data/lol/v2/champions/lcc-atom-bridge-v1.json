@@ -1,5 +1,5 @@
 {
- "artifact_sha256": "5ce1449f690535e94aef42a17baa47353c7009d20c747011204a614c0ce1d037",
+ "artifact_sha256": "1b781f70e0899157bcd3c6e197785a47a33467a2490b5e776c955b4a7aff92d9",
  "atom_relations": {
   "crowd-control-mobility.brittle": [
    "crowd-control-mobility.tenacity",
@@ -21212,7 +21212,7 @@
    "weight": 0.15
   }
  ],
- "generated_at": "2026-08-07T20:21:14.952437Z",
+ "generated_at": "2026-08-07T20:55:44.102200Z",
  "mapping": [
   {
    "atom_id": "damage.ability",
@@ -21621,7 +21621,7 @@
    "data/wiki-atoms/champion-passive-atoms.json": "44db7ac5ffd8f639ce08ea913c040eb0a044c882bcef616b9b891e0d6c828a3f",
    "data/wiki-atoms/champion-spell-atoms.json": "423de0dc210741804731db128860b810ca9bb5ba55983a726ec992937e401416"
   },
-  "lcc_commit": "3ba8c235c56be0fcb668f7c22a68e429463c80ea",
+  "lcc_commit": "f8e40deb8782b8adb1c345facf9d17389cedd18c",
   "lcc_repo": "/Users/river/Projects/league-combat-calculator"
  },
  "schema_id": "scryglass.lcc-atom-bridge.v1",

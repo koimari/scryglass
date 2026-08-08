@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { groupMapsIntoSeries, type SeriesRow } from "./series.ts";
+import { groupMapsIntoSeries, type SeriesRow } from "./series";
 
 function gridMap(overrides: Partial<SeriesRow>): SeriesRow {
   return {

@@ -2,6 +2,11 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["@duckdb/duckdb-wasm"],
+  // API routes read versioned v2 artifacts from the repo at request time;
+  // trace them into the lambda so the routes work in production.
+  outputFileTracingIncludes: {
+    "/api/v2/tierlist": ["public/v2/tierlists/**/*.json"],
+  },
   turbopack: {
     root: __dirname,
   },

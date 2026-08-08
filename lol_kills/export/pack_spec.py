@@ -340,13 +340,25 @@ PLAYER_RATINGS_HISTORY_COLS = (
     "p_player_elo",
 )
 
-# Model / calibration JSON copied into pack/models/
+# Model / calibration JSON copied into pack/models/.  Draft Score artifacts are
+# intentionally absent while the independent serving gate is closed; keeping
+# them in a public pack would expose an unreviewed predictive implementation
+# even when the UI and API fail closed.
 PINNED_MODEL_FILES: tuple[str, ...] = (
     "elo_wr_calibration.json",
     "elo_year_holdup.json",
+    "blade_chest_role_matchups.json",
+)
+
+WITHHELD_MODEL_FILES: tuple[str, ...] = (
     "draft_wr_calibration.json",
     "draft_recommendation.json",
-    "blade_chest_role_matchups.json",
+)
+
+WITHHELD_PUBLIC_FILES: tuple[str, ...] = (
+    "features/draft_context.json",
+    "models/draft_wr_calibration.json",
+    "models/draft_recommendation.json",
 )
 
 # Tierlist CSVs if present (small)
@@ -391,6 +403,26 @@ GRUBS_STUDY_NOTE = (
     "Gold@10→WR is associational, not causal."
 )
 
+# Files cited by the public atlas reproduction page.  The exporter must fail
+# closed if any of these are absent; silently omitting one creates a pack that
+# looks publishable while the public reproduction surface is incomplete.
+PUBLIC_REPRODUCTION_REQUIRED_FILES: tuple[str, ...] = (
+    "features/ratings_snapshot.json",
+    "features/ratings_snapshot.parquet",
+    "features/ratings_history.parquet",
+    "features/ratings_meta.json",
+    "features/player_ratings_snapshot.json",
+    "features/player_ratings_snapshot.parquet",
+    "features/player_ratings_history.parquet",
+    "features/player_ratings_meta.json",
+    "features/team_records.json",
+    "features/player_records.json",
+    "models/elo_wr_calibration.json",
+    "studies/grubs/grubs_article_contest_ev.json",
+    "studies/grubs/grubs_decision_numbers.json",
+    "studies/grubs/void_grubs_scrap_value_and_contest_rationality.pdf",
+)
+
 PACK_README = """# Public reproduction pack
 
 Versioned parquet + calibration for reproducing published LoL research findings.
@@ -402,16 +434,21 @@ Versioned parquet + calibration for reproducing published LoL research findings.
 - `team_games/` — OE team-row maps (one file per year, zstd parquet)
 - `player_games/` — OE player rows (one file per year, zstd parquet)
 - `maps/` — wide map table (trimmed columns, per year)
-- `features/` — Dual Elo snapshots, draft team/player context, and map-level history
-- `models/` — pinned calibration, interaction, and study JSON
+- `features/` — Dual Elo snapshots and map-level history
+- `models/` — pinned public calibration and tier-list JSON
 - `studies/grubs/` — void-grubs decision numbers, briefs, PDF, key figures
 - `meta/teams.json` — team aliases for display
 - `manifest.json` — file list, row counts, sha256, schema_version
+
+The exporter refuses to write a publishable manifest when a cited reproduction
+file is missing.
 
 ## Not included
 - Riot Match-V5 / Live Stats timelines (~GB)
 - Raw Oracle's Elixir CSVs (download from OE; filters documented in manifest)
 - Betting fair-odds / Slip Composer artifacts
+- Draft Score calibration and recommendation artifacts while the independent
+  serving review is incomplete
 
 ## Attribution
 {attribution}

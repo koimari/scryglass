@@ -1,0 +1,38 @@
+{
+  "schema_version": "scryglass:draft-terminal-g1-grid-procurement-attempt:v1",
+  "status": "externally_blocked",
+  "provider": "GRID",
+  "attempt_scope": "one_known_local_professional_series",
+  "observed_at": "2026-07-31T02:06:01Z",
+  "series_id": "2974293",
+  "competition": "Circuito Desafiante - Split 2 2026 (Regular Season: Regular Season)",
+  "scheduled_date": "2026-07-27T20:00:00Z",
+  "source_metadata_sha256": "6652157b5861f23dcf36d6eb15841eb871f9cd21ffce968d775a65eab941586d",
+  "source_event_payload_sha256": "6fd44641cf87fc3546a0836f447d9bb21f1e904bb2d2573d572ee5cef861da91",
+  "source_event_payload_bytes": 624470,
+  "observed_evidence": {
+    "event_row_count": 924,
+    "pick_ban_event_count": 20,
+    "final_draft_action_count": 20,
+    "draft_action_sequence_contiguous": true,
+    "final_result_present": true,
+    "first_pick_event_time": "2026-07-27T19:57:37.641Z",
+    "last_pick_event_time": "2026-07-27T20:03:21.641Z"
+  },
+  "blockers": [
+    "pre_draft_roles_missing_from_GRID_state",
+    "pre_draft_patch_missing_from_GRID_state",
+    "source_availability_and_retrieval_receipt_missing",
+    "independent_identity_sequence_and_leakage_checks_not_supplied",
+    "held_out_OE_comparison_not_supplied",
+    "second_replay_hashes_not_supplied"
+  ],
+  "action": {
+    "g1_status": "externally_blocked",
+    "contextual_production": "unavailable",
+    "neutral_production": "not_blocked_by_G1",
+    "speculative_source_reconstruction": "stopped"
+  },
+  "raw_GRID_payload_retained_privately": true,
+  "public_probability_authorized": false
+}

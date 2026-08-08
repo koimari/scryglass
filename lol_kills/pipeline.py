@@ -22,6 +22,8 @@ def cmd_refresh(args: argparse.Namespace) -> None:
         forwarded += ["--oe-years", *args.oe_years]
     if args.download_oe:
         forwarded.append("--download-oe")
+    if args.refresh_oe:
+        forwarded.append("--refresh-oe")
     if args.skip_oe:
         forwarded.append("--skip-oe")
     if args.download_grid:
@@ -72,7 +74,9 @@ def main() -> None:
 
     p_r = sub.add_parser("refresh", help="Refresh OE+GRID+LP warehouse")
     p_r.add_argument("--oe-years", nargs="*", default=None)
-    p_r.add_argument("--download-oe", action="store_true")
+    oe_download = p_r.add_mutually_exclusive_group()
+    oe_download.add_argument("--download-oe", action="store_true")
+    oe_download.add_argument("--refresh-oe", action="store_true")
     p_r.add_argument("--skip-oe", action="store_true")
     p_r.add_argument("--download-grid", action="store_true")
     p_r.add_argument("--grid-required", action="store_true")

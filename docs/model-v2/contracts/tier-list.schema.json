@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scryglass.xyz/schemas/model-v2/tier-list.schema.json",
+  "title": "Scryglass role-specific league-patch tier list",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_version",
+    "as_of",
+    "season_id",
+    "calendar_year",
+    "competition_scope_kind",
+    "status",
+    "lineage",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/semver"},
+    "model_version": {"$ref": "common.schema.json#/$defs/model_version"},
+    "as_of": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "season_id": {"$ref": "common.schema.json#/$defs/season_id"},
+    "calendar_year": {"$ref": "common.schema.json#/$defs/calendar_year"},
+    "status": {"$ref": "common.schema.json#/$defs/status"},
+    "competition_scope_id": {
+      "$ref": "common.schema.json#/$defs/stable_id",
+      "description": "Canonical regional league scope used for this role-by-league current-patch list."
+    },
+    "competition_scope_kind": {"const": "regional_league"},
+    "patch_id": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$"},
+    "role": {"$ref": "common.schema.json#/$defs/role"},
+    "current_patch_verified": {"type": "boolean"},
+    "refresh_trigger_map_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "reference_mixture_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "counterability_policy_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "counterability_weight": {
+      "type": "number",
+      "minimum": 0,
+      "description": "The single manifested artifact-level lambda_C applied to every entry."
+    },
+    "ranking_tie_break_policy_id": {
+      "$ref": "common.schema.json#/$defs/stable_id"
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rank",
+          "champion_id",
+          "display_name",
+          "verified_appearance_count",
+          "incremental_value_pp",
+          "counterability_pp",
+          "tier_value_pp",
+          "interval_95",
+          "evidence"
+        ],
+        "properties": {
+          "rank": {"type": "integer", "minimum": 1},
+          "champion_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+          "display_name": {"type": "string", "minLength": 1},
+          "verified_appearance_count": {"type": "integer", "minimum": 1},
+          "incremental_value_pp": {"type": "number"},
+          "counterability_pp": {"type": "number", "minimum": 0},
+          "tier_value_pp": {"type": "number"},
+          "interval_95": {"$ref": "common.schema.json#/$defs/interval_real_95"},
+          "evidence": {"$ref": "common.schema.json#/$defs/evidence"},
+          "provisional": {"type": "boolean"}
+        }
+      }
+    },
+    "reliability": {"$ref": "common.schema.json#/$defs/reliability"},
+    "literal_interpretation": {
+      "const": "Model-estimated incremental draft value for champions actually played in this role, league, and current patch, adjusted by the validated counterability rule."
+    },
+    "error": {"$ref": "common.schema.json#/$defs/error"},
+    "lineage": {"$ref": "common.schema.json#/$defs/lineage"},
+    "provenance": {"$ref": "prediction-provenance.schema.json"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"status": {"const": "ok"}},
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {"current_patch_verified": {"const": true}},
+        "required": [
+          "competition_scope_id",
+          "patch_id",
+          "role",
+          "current_patch_verified",
+          "refresh_trigger_map_id",
+          "reference_mixture_id",
+          "counterability_policy_id",
+          "counterability_weight",
+          "ranking_tie_break_policy_id",
+          "entries",
+          "reliability",
+          "literal_interpretation"
+        ],
+        "not": {"required": ["error"]}
+      },
+      "else": {
+        "required": ["error"],
+        "not": {"required": ["entries"]}
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"const": "ok"}},
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "properties": {
+              "required_input_status": {"const": "complete"},
+              "freshness_checks": {
+                "minItems": 1,
+                "items": {
+                  "properties": {"fresh": {"const": true}},
+                  "required": ["fresh"]
+                }
+              },
+              "input_conflicts": {"maxItems": 0}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "x-semantic-invariants": [
+    {
+      "id": "tier_list_regional_league_scope_only",
+      "applies_when": "status == 'ok'",
+      "expression": "competition_scope_kind == 'regional_league' and competition_scope_id resolves to one canonical regional league taxonomy node, never an international event or meta scope",
+      "severity": "error"
+    },
+    {
+      "id": "tier_value_identity",
+      "applies_when": "status == 'ok'",
+      "for_each": "entries",
+      "expression": "tier_value_pp == incremental_value_pp - parent.counterability_weight * counterability_pp",
+      "severity": "error"
+    },
+    {
+      "id": "tier_single_manifested_counterability_weight",
+      "applies_when": "status == 'ok'",
+      "expression": "one artifact-level counterability_weight=lambda_C from counterability_policy_id applies unchanged to every entry",
+      "severity": "error"
+    },
+    {
+      "id": "tier_rank_and_champion_unique",
+      "applies_when": "status == 'ok'",
+      "expression": "count(distinct entries.rank) == count(entries) && count(distinct entries.champion_id) == count(entries)",
+      "severity": "error"
+    },
+    {
+      "id": "tier_rank_matches_value_and_tie_break",
+      "applies_when": "status == 'ok'",
+      "expression": "entries are ranked by descending tier_value_pp; exact ties follow ranking_tie_break_policy_id",
+      "severity": "error"
+    },
+    {
+      "id": "tier_interval_contains_value",
+      "applies_when": "status == 'ok'",
+      "for_each": "entries",
+      "expression": "interval_95.lower <= tier_value_pp && tier_value_pp <= interval_95.upper",
+      "severity": "error"
+    }
+  ],
+  "x-negative-mutation-fixtures": [
+    {
+      "id": "tier_list_international_scope_forbidden",
+      "mutation": {
+        "op": "replace",
+        "path": "/competition_scope_kind",
+        "value": "international_event"
+      },
+      "expected_schema_failure": true
+    },
+    {
+      "id": "tier_value_arithmetic_break",
+      "mutation": {
+        "op": "replace",
+        "path": "/entries/0/tier_value_pp",
+        "value": 2.3
+      },
+      "expected_violation": "tier_value_identity"
+    },
+    {
+      "id": "tier_duplicate_rank_forbidden",
+      "mutation": {
+        "op": "copy",
+        "from": "/entries/0/rank",
+        "path": "/entries/1/rank"
+      },
+      "expected_violation": "tier_rank_and_champion_unique"
+    },
+    {
+      "id": "tier_duplicate_champion_forbidden",
+      "mutation": {
+        "op": "copy",
+        "from": "/entries/0/champion_id",
+        "path": "/entries/1/champion_id"
+      },
+      "expected_violation": "tier_rank_and_champion_unique"
+    },
+    {
+      "id": "tier_rank_order_break",
+      "mutation": {
+        "op": "replace",
+        "path": "/entries/0/rank",
+        "value": 2
+      },
+      "expected_violation": "tier_rank_matches_value_and_tie_break"
+    }
+  ]
+}

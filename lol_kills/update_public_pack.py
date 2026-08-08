@@ -7,7 +7,7 @@ time-safe calibration/draft-score refresh that feeds the public pack.
 
 Examples:
 
-  python3 -m lol_kills.update_public_pack --download-oe --download-grid
+  python3 -m lol_kills.update_public_pack --refresh-oe --download-grid
   python3 -m lol_kills.update_public_pack --skip-oe --download-grid --publish
   python3 -m lol_kills.update_public_pack --skip-oe --allow-missing-lp --download-grid --publish
 """
@@ -34,7 +34,9 @@ def _run_module(module: str, args: list[str]) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--years", default="2025,2026")
-    parser.add_argument("--download-oe", action="store_true")
+    oe_download = parser.add_mutually_exclusive_group()
+    oe_download.add_argument("--download-oe", action="store_true")
+    oe_download.add_argument("--refresh-oe", action="store_true")
     parser.add_argument("--skip-oe", action="store_true")
     parser.add_argument("--download-grid", action="store_true")
     parser.add_argument("--skip-grid", action="store_true")
@@ -62,6 +64,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     refresh_args = ["--oe-years", *[x.strip() for x in args.years.split(",") if x.strip()]]
     if args.download_oe:
         refresh_args.append("--download-oe")
+    if args.refresh_oe:
+        refresh_args.append("--refresh-oe")
     if args.skip_oe:
         refresh_args.append("--skip-oe")
     if args.skip_lp:

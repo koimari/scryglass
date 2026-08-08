@@ -1,0 +1,33 @@
+{
+  "benchmark": "lol-oracle-semantic-v1",
+  "client_patch": "16.15",
+  "completion_exact_coverage": 1.0,
+  "completion_exact_matches": 3,
+  "completion_latency": {
+    "max_ms": 4.516,
+    "min_ms": 2.1535,
+    "p50_ms": 2.939,
+    "p95_ms": 4.516
+  },
+  "completion_mismatches": [],
+  "completion_questions": 3,
+  "impossible_latency": {
+    "max_ms": 10.2207,
+    "min_ms": 1.22,
+    "p50_ms": 2.0639,
+    "p95_ms": 2.8648
+  },
+  "impossible_questions": 100,
+  "impossible_status_counts": {
+    "invalid_scenario": 25,
+    "needs_input": 75
+  },
+  "index_sha256": "1ab34d0b4bb313b8199355c84d92fef41125bc254a4a69586303750a02a56e88",
+  "patch": "26.15",
+  "questions_sha256": "5c0ebb53752f2544d47f8af2e7f3e3b36f40ea3b24158a9924acfd0bb61adfa6",
+  "semantic_cases_sha256": "01cbbd34a3c11c63773b1937549747a920382437cbb0510b11b9ad11cf9137aa",
+  "semantic_contract_accuracy": 1.0,
+  "semantic_contract_complete": 100,
+  "startup_ms": 1173.9197,
+  "triage_mismatches": []
+}

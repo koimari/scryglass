@@ -77,7 +77,10 @@ export default async function EloPage() {
       <header className={styles.header}>
         <div>
           <h1>Team and player ratings</h1>
-          <p>Current Dual Elo estimates. Adjusted rating discounts uncertainty.</p>
+          <p>
+            Current Dual Elo benchmark. Adjusted rating discounts uncertainty; these are
+            descriptive pack estimates, not a validated predictive release.
+          </p>
         </div>
         <div className={styles.provenance} aria-label="Ratings provenance">
           <span>

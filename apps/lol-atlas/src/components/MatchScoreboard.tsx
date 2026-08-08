@@ -6,7 +6,6 @@ import { champIconUrl, formatClock, formatGold, playerCs, sortPlayersByRole } fr
 type Props = {
   map: QueryRow;
   players: QueryRow[];
-  draftPctBlue?: number | null;
 };
 
 function bans(prefix: "blue" | "red", map: QueryRow): string[] {
@@ -78,19 +77,26 @@ function ObjCell({
 function PlayerHalf({
   row,
   mirror,
+  combatUnavailable,
 }: {
   row: QueryRow;
   mirror: boolean;
+  combatUnavailable: boolean;
 }) {
   const cs = playerCs(row);
   const gold = formatGold(row.totalgold);
-  const kda = `${row.kills ?? 0}/${row.deaths ?? 0}/${row.assists ?? 0}`;
+  const kda = combatUnavailable
+    ? "—"
+    : `${row.kills ?? "—"}/${row.deaths ?? "—"}/${row.assists ?? "—"}`;
   const name = String(row.playername ?? "—");
   const champ = String(row.champion ?? "");
 
   if (mirror) {
     return (
-      <div className="sb-player sb-player-red">
+      <div
+        className={`sb-player sb-player-red ${combatUnavailable ? "is-incomplete" : ""}`}
+        title={combatUnavailable ? "Player combat stats unavailable in this pack row" : undefined}
+      >
         <div className="sb-metrics">
           <span className="font-mono">{gold}</span>
           <span className="font-mono muted">{cs != null ? cs : "—"}</span>
@@ -105,7 +111,10 @@ function PlayerHalf({
   }
 
   return (
-    <div className="sb-player sb-player-blue">
+    <div
+      className={`sb-player sb-player-blue ${combatUnavailable ? "is-incomplete" : ""}`}
+      title={combatUnavailable ? "Player combat stats unavailable in this pack row" : undefined}
+    >
       <div className="sb-identity">
         <ChampThumb name={champ} size={44} />
         <span className="sb-ign">{name}</span>
@@ -119,7 +128,7 @@ function PlayerHalf({
   );
 }
 
-export function MatchScoreboard({ map, players, draftPctBlue }: Props) {
+export function MatchScoreboard({ map, players }: Props) {
   const blueName = String(map.blue_teamname ?? "Blue");
   const redName = String(map.red_teamname ?? "Red");
   const blueWin = Number(map.blue_result) === 1;
@@ -129,6 +138,16 @@ export function MatchScoreboard({ map, players, draftPctBlue }: Props) {
   const redGold = formatGold(map.red_totalgold);
   const blueKills = fmtObj(map.blue_teamkills);
   const redKills = fmtObj(map.red_teamkills);
+  const teamKills = (Number(map.blue_teamkills) || 0) + (Number(map.red_teamkills) || 0);
+  const combatStatsUnavailable =
+    teamKills > 0 &&
+    players.length > 0 &&
+    players.every(
+      (player) =>
+        Number(player.kills ?? 0) === 0 &&
+        Number(player.deaths ?? 0) === 0 &&
+        Number(player.assists ?? 0) === 0,
+    );
 
   const bySide = {
     Blue: sortPlayersByRole(players.filter((p) => String(p.side) === "Blue")),
@@ -160,12 +179,6 @@ export function MatchScoreboard({ map, players, draftPctBlue }: Props) {
             {blueKills} – {redKills}
           </span>
           <span className="sb-clock font-mono">{clock}</span>
-          {draftPctBlue != null && Number.isFinite(draftPctBlue) && (
-            <span className="sb-draft font-mono" title="League-calibrated Draft Score → WR">
-              Draft {(100 * draftPctBlue).toFixed(0)}–
-              {(100 * (1 - draftPctBlue)).toFixed(0)}%
-            </span>
-          )}
         </div>
         <div className={`sb-team sb-team-red ${redWin ? "is-winner" : ""}`}>
           <span className="sb-result">{redWin ? "Victory" : "Defeat"}</span>
@@ -175,6 +188,13 @@ export function MatchScoreboard({ map, players, draftPctBlue }: Props) {
           </div>
         </div>
       </header>
+
+      {combatStatsUnavailable && (
+        <p className="sb-data-note">
+          <strong>Partial pack row.</strong> Player combat totals are unavailable, so KDA is withheld.
+          Team result, roster, champion, and duration fields remain visible where supplied.
+        </p>
+      )}
 
       <div className="sb-col-legend" aria-hidden>
         <div className="sb-legend-half">
@@ -193,9 +213,17 @@ export function MatchScoreboard({ map, players, draftPctBlue }: Props) {
       <div className="sb-grid">
         {pairs.map(({ role, blue, red }) => (
           <div className="sb-row" key={role}>
-            {blue ? <PlayerHalf row={blue} mirror={false} /> : <div className="sb-player empty" />}
+            {blue ? (
+              <PlayerHalf row={blue} mirror={false} combatUnavailable={combatStatsUnavailable} />
+            ) : (
+              <div className="sb-player empty" />
+            )}
             <div className="sb-role-gap">{role}</div>
-            {red ? <PlayerHalf row={red} mirror /> : <div className="sb-player empty" />}
+            {red ? (
+              <PlayerHalf row={red} mirror combatUnavailable={combatStatsUnavailable} />
+            ) : (
+              <div className="sb-player empty" />
+            )}
           </div>
         ))}
       </div>

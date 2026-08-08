@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scryglass:g1-roster-payload:v1",
+  "title": "Scryglass pre-event exact roster payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_record_id",
+    "event_start",
+    "available_at",
+    "retrieved_at",
+    "rights_status",
+    "rosters"
+  ],
+  "properties": {
+    "schema_version": {"const": "scryglass:g1-roster-payload:v1"},
+    "source_record_id": {"type": "string", "minLength": 1},
+    "event_start": {"type": "string", "format": "date-time"},
+    "available_at": {"type": "string", "format": "date-time"},
+    "retrieved_at": {"type": "string", "format": "date-time"},
+    "rights_status": {"const": "reviewed"},
+    "rosters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["A", "B"],
+      "properties": {
+        "A": {"$ref": "#/$defs/roster"},
+        "B": {"$ref": "#/$defs/roster"}
+      }
+    }
+  },
+  "$defs": {
+    "roster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roster_id", "starters"],
+      "properties": {
+        "roster_id": {"type": "string", "minLength": 1},
+        "starters": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "player_id"],
+            "properties": {
+              "role": {"enum": ["top", "jungle", "mid", "bot", "support"]},
+              "player_id": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    }
+  }
+}

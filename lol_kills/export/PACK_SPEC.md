@@ -23,7 +23,7 @@ Canonical machine-readable allowlists and defaults live in
 | `features/player_metadata.json` | Player display metadata | Leaguepedia nationality/country code/flag when available |
 | `features/team_records.json` | Current team affiliation and ladder scope aggregates | Includes `current_tier`, `by_league`, and `by_tier` for hierarchical filters and win rates |
 | `features/*_history.parquet` | Elo history | Rows whose `game_uid` is in year-filtered maps |
-| `models/` | Pinned calibration / tierlist CSV | See `PINNED_MODEL_FILES` |
+| `models/` | Pinned public calibration / tierlist CSV | See `PINNED_MODEL_FILES` |
 | `studies/grubs/` | Void-grubs decision + PDF + figures | See `GRUBS_MODEL_FILES` / `GRUBS_PDF_FILES` |
 
 ## Excluded
@@ -31,11 +31,13 @@ Canonical machine-readable allowlists and defaults live in
 - `warehouse/timelines/` (~1.2GB)
 - Raw OE CSVs (`warehouse/raw/`)
 - Private betting tooling / joblibs
+- Draft Score calibration and recommendation artifacts while the independent
+  serving review is incomplete
 
 ## Build
 
 ```bash
-python3 -m lol_kills.update_public_pack --years 2025,2026 --download-oe --download-grid --grid-required --publish
+python3 -m lol_kills.update_public_pack --years 2025,2026 --refresh-oe --download-grid --grid-required --publish
 # Or, when the warehouse is already current:
 python3 -m lol_kills.export.public_pack --years 2025,2026
 python3 -m lol_kills.export.upload_pack --local-only   # or Blob with token
