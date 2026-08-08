@@ -18,10 +18,10 @@ ROOT = Path(__file__).parents[4]
 ARTIFACT_DIR = ROOT / "data/lol/v2/models/draft-interactions/real-v1-g4"
 RAW_SHA256 = {
     "chronology-contract.json": "11b9280375f6f9e404d1aee647ea53aa978498dc3ad4bbd8d6217425782f116a",
-    "source-binding-manifest.json": "2542217fbe3e57a2b1f3202cb52f99823111fcf6287899188911cd19a5823d1b",
-    "review-core.json": "0594ad8ea014990cba5e6d87f4292109cb22ba5ef59aae8a54e353ead1ffac10",
-    "dry-run-preflight.json": "799fb45da3f223f61b5fd6ac1698ae3321c37d65159307c861cf35da0a2e9e51",
-    "pending-report.json": "7996352458dc9aec154794159b39db9b11f3a61c0fdc7a16245ce69d97f96b89",
+    "source-binding-manifest.json": "c46de0c827a5e85dfd2dc4d8cdede478d2591111ef73e48d98b1360f73381732",
+    "review-core.json": "bc6fec7c81fc9afaacfb31a761b41eccd4ca3a425b5e0e49df22a35d6894984c",
+    "dry-run-preflight.json": "64e05d087b57d81c904783a6845cb3b32c23dab4e6ae066e1236ff1a99a5bb9d",
+    "pending-report.json": "7d84dd887e8f2604fef66eb60948c08c3e28e21d1579c74bbd7a2f576682be01",
 }
 
 

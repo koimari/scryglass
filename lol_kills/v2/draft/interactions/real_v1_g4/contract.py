@@ -24,12 +24,12 @@ from lol_kills.v2.draft.interactions import representation_rank_2026_support_gat
 ROOT = Path(__file__).resolve().parents[5]
 NAMESPACE = ROOT / "data/lol/v2/models/draft-interactions/real-v1-g4"
 G4_RESULT_PATH = ROOT / "data/lol/warehouse/private_v2/draft-interactions/representation-rank-private-result.json"
-G4_RESULT_RAW_SHA256 = "1219c5c94e805f56418cb16c980b25c039c8d182b2b8b650508317a844c16881"
-G4_RESULT_ARTIFACT_SHA256 = "6936525d564b819082b5a8bfc8a11599d535d155192797ec890b624b2e23df35"
+G4_RESULT_RAW_SHA256 = "be59be06c9cdbbeb2d1065f6ddd6c2a6fd84da716e7be73ab12ef025f60a847a"
+G4_RESULT_ARTIFACT_SHA256 = "3f909cb0f283b1804d424155545684a74c207c13b4d74359126c7338d69c6c78"
 SUPPORT_GATE_PATH = ROOT / "data/lol/v2/models/draft-interactions/representation-rank-2026-support-gate.json"
-SUPPORT_GATE_RAW_SHA256 = "a48a89ac663d4461eeaba6503c561cc34e4c364e1f2f7a562c3f8446fcc1b8c1"
-SUPPORT_GATE_ARTIFACT_SHA256 = "89787963d0cbe9aa915db0a9ad1d4ef95d2d700acba1073635dc72b2c5ca2d61"
-SUPPORT_PROJECTION_SHA256 = "132ed5b87169b4b937897be0f095af3d70a8001cfb0474dd5b6677ae8f51783f"
+SUPPORT_GATE_RAW_SHA256 = "cd0c5cfa04ea1ae28de4612dadefdd636d81a3e9f99410f97574482c8af4db59"
+SUPPORT_GATE_ARTIFACT_SHA256 = "9ac0ca8fa8929a42ba88cb9ecdfc2809ddf5ba7232fe68e5cb6b8fb34c47c5d0"
+SUPPORT_PROJECTION_SHA256 = "b11c689a743c3d617ecb2773e96ae59bd53444e9cfdec973a7072c302c6a5fc0"
 G1_PINS = {
     "manifest_sha256": "3af87fffb2b32fd95aeb920409abe0254fa158b3dc7f079650b3472731d4ff72",
     "rows_sha256": "4ed79abb0b2471a666ab5643b91edf33c2fdde19e361c456aa589d2e9a4df846",
@@ -45,7 +45,7 @@ SEEDS = {"inner": 2026072900, "development": 2026072901, "validation": 202607290
 PERMIT_SCHEMA = "scryglass.representation-rank-runner-review-permit.v1"
 OUTPUT_SCHEMA = "scryglass:real-v1-g4-repair-execution-output:v1"
 TARGET_AUTHORITY_PINS = {
-    "authority": {"locator": "data/lol/v2/models/draft-interactions/oe-private-target-authority.json", "raw_sha256": "b1d0a6e37abb9a74dee8689dc19ab54d30fd15516bd4ee454906a075d8f20788"},
+    "authority": {"locator": "data/lol/v2/models/draft-interactions/oe-private-target-authority.json", "raw_sha256": "b0aac33a7d23f05daa14cf8a769fa4cafc44bb15d6a165ec64d5542a49e937d5"},
     "split": {"locator": "data/lol/v2/models/draft-interactions/oe-private-split-assignment.json", "raw_sha256": "76717d32a1686348d6a4408d00427af7bf0eb45c86afbfb99521b94ac0f7bc4d", "artifact_sha256": G1_PINS["split_payload_sha256"]},
     "evidence": {"locator": "data/lol/v2/models/draft-interactions/oe-private-target-evidence.json", "raw_sha256": "164e90134f4fe464eed7784314307b48bb44e86de80158b36a6250b6cd2f21aa", "artifact_sha256": "8d96e0fef0883595595b8e962bf14a920b3488bb2189ce3f7ab8fe23221f5304"},
 }
@@ -250,8 +250,8 @@ def _review_core(chronology: Mapping[str, Any], source_binding: Mapping[str, Any
         },
         "executables": {
             "fit_primitives": {
-                "assay": _verified_raw_file("lol_kills/v2/draft/interactions/representation_rank_assay.py", "2fdd312ecf468d9f6b42dfe47fca3b81d9a1460ad24283b247c03561fba4cc2c", code="FIT_PRIMITIVE_ASSAY_SHA256_MISMATCH"),
-                "private_runner": _verified_raw_file("lol_kills/v2/draft/interactions/representation_rank_private_runner.py", "81e232ba4d34af6c4039f4e987466ab1030f990381ba70dffc08c132c83f9ab4", code="FIT_PRIMITIVE_RUNNER_SHA256_MISMATCH"),
+                "assay": _verified_raw_file("lol_kills/v2/draft/interactions/representation_rank_assay.py", "a39acf3b359322d011435f15bd74821963de6292cba6f0bf2ba64f0880d78ac8", code="FIT_PRIMITIVE_ASSAY_SHA256_MISMATCH"),
+                "private_runner": _verified_raw_file("lol_kills/v2/draft/interactions/representation_rank_private_runner.py", "ab57635341028e4c10d0a053a77886957ffb524297e87f637e367a56b8b6b360", code="FIT_PRIMITIVE_RUNNER_SHA256_MISMATCH"),
             },
         },
         "target_authority_split_evidence_pins": {
