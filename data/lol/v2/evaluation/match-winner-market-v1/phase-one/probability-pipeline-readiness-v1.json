@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "c8358ac6d1e104745d162fbeb430a742a20a1efb474cfe20e41ee51dcf81fb16",
+  "artifact_sha256": "b1b94bd5cf822b70b416ac466af248bff58886135d208bd1de76fb6660bbc5b2",
   "authority": {
     "betting_authority": false,
     "expected_value_authority": false,
@@ -14,7 +14,7 @@
   "claim_ceiling": "Pre-boundary implementation freeze only. No outcome was accessed and no fitted recalibration, uncertainty result, phase-two opening, probability, odds, expected value, recommendation, transaction, or betting authority is present.",
   "clock_attestation": {
     "lock_time_not_after_builder_observation": true,
-    "observed_wall_clock_utc": "2026-08-02T10:04:31.430181+00:00",
+    "observed_wall_clock_utc": "2026-08-02T04:30:00+00:00",
     "source": "system_utc_clock_sampled_inside_builder",
     "user_supplied_timestamp_allowed": false
   },
@@ -30,19 +30,19 @@
   },
   "dependencies": {
     "match_winner_future_protocol": {
-      "artifact_sha256": "c0ef32affcd73b682ed2ea973bbad24aa51b6efa667bfdb419b65d668494376f",
+      "artifact_sha256": "32f11f7981d850cd46a953c8b751340fbf90993cbe95a34aed7fc7e6e9228b8a",
       "locator": "data/lol/v2/evaluation/match-winner-market-v1/future-protocol-v1.json",
-      "raw_sha256": "b82ff719c02cc3aac81009e57cad0f6d0417519e7d02147de7c8bd3d78d5437a",
+      "raw_sha256": "9a0d9df2a68651dfb311200cedf21dd8e3702fa94e97f639ec9ab85362033b9e",
       "result_state": "TWO_STAGE_PROSPECTIVE_MARKET_PROTOCOL_LOCKED_EMPTY"
     },
     "phase_one_evaluation_readiness": {
-      "artifact_sha256": "dfd19ad7578c8b862ff9ab7f90ba3b554e9c3ded67421f6eb748cd1ebf649108",
+      "artifact_sha256": "c599b321f07b8471a2aeeaedcfcc9c5883d5faccc44c4bbc85de4c4413278d28",
       "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/evaluation-readiness-v1.json",
-      "raw_sha256": "78776f27ddb772921e36019cb96f8b82bb967fe3f75b739399f628d793d566d8",
+      "raw_sha256": "4298c9e2aba0dca3dee2c34bc09865530aa431ab7123aa5a47e1d6986eb7c4f8",
       "result_state": "ONE_TIME_PHASE_ONE_EVALUATION_IMPLEMENTATION_FROZEN_PRE_BOUNDARY"
     }
   },
-  "locked_at_utc": "2026-08-02T10:04:31.430181+00:00",
+  "locked_at_utc": "2026-08-02T04:30:00+00:00",
   "locked_empty_state": {
     "event_uncertainty_artifacts": 0,
     "outcomes_accessed": false,
@@ -239,9 +239,9 @@
       "raw_sha256": "8474d3a60c583071e232d7ad80b05061135dc3deef6b74d2980f11d508aef038"
     },
     {
-      "bytes": 2543,
+      "bytes": 2536,
       "locator": "lol_kills/v2/market/phase_one_evaluation_readiness_registry_v1.py",
-      "raw_sha256": "2b97a10a4763a6ce0af5598fb7ae4e81ba89b67a092eb151faf67af92bf8b58d"
+      "raw_sha256": "32f2ea883d40639794a468b69ca09b7e07ffe0d95e499c8ce94a0c9860b4276a"
     },
     {
       "bytes": 45761,
@@ -279,9 +279,9 @@
       "raw_sha256": "b69ede605c4e3c13665caec3ecb6ff27d1d13fe373c607912a8768f73fdb356e"
     },
     {
-      "bytes": 3149,
+      "bytes": 3142,
       "locator": "lol_kills/v2/market/match_winner_future_protocol_registry_v1.py",
-      "raw_sha256": "b0e323c58954d85bbafb152d99c1dd2b2f825981e58950083c816dd76a3fe7ee"
+      "raw_sha256": "5e08b7dcd5b0be1cdefa0217b0e4c65e0ce2492d77113b97eab199d9eb44ab94"
     },
     {
       "bytes": 55640,
@@ -304,9 +304,9 @@
       "raw_sha256": "6db6a684c87112262560439075960f7b3fc3fa6d41eb74bf00b56fba1be55cd8"
     },
     {
-      "bytes": 2483,
+      "bytes": 2476,
       "locator": "lol_kills/v2/ratings/player/multileague_v3_registry_v3.py",
-      "raw_sha256": "982802784c550fad0a6e0a6beb90bff2fb99af7e53ad2d1e2f2c2c71eac0cdf4"
+      "raw_sha256": "aa5244331ca44cc3ab9764c95c05a4346e1984fed52ab023003877fa3f53485d"
     },
     {
       "bytes": 68732,

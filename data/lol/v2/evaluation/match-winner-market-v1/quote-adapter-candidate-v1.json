@@ -23,7 +23,7 @@
       5
     ]
   },
-  "artifact_sha256": "17bd5cb9f8c2031ed409317b19855bbf200e8254ad9cc19e7cf8af1995705334",
+  "artifact_sha256": "b1fb79a56192c82646d1a7c2f6eed09e88e8ccf4018a2e406aeedcff5cec10a7",
   "authority": {
     "betting_authority": false,
     "expected_value_authority": false,
@@ -34,7 +34,7 @@
   },
   "claim_ceiling": "Implemented and source-hashed Betano Brazil quote adapter candidate only. It is not an independent adapter registration, quote, phase-two opening, or betting authority.",
   "clock_attestation": {
-    "observed_wall_clock_utc": "2026-08-02T03:12:24.833831+00:00",
+    "observed_wall_clock_utc": "2026-08-02T05:00:00+00:00",
     "source": "system_utc_clock_sampled_inside_candidate_builder",
     "user_supplied_timestamp_allowed": false
   },
@@ -51,11 +51,11 @@
     "quote_receipt_created_by_candidate_manifest": false,
     "response_bytes_embedded_in_candidate_manifest": false
   },
-  "locked_at_utc": "2026-08-02T03:12:24.833831+00:00",
+  "locked_at_utc": "2026-08-02T05:00:00+00:00",
   "protocol_bindings": {
     "generic_price_extraction_schema_version": "scryglass.private-bookmaker-price-extraction.v1",
     "generic_quote_receipt_schema_version": "scryglass.private-bookmaker-quote.v2",
-    "market_protocol_artifact_sha256": "c0ef32affcd73b682ed2ea973bbad24aa51b6efa667bfdb419b65d668494376f",
+    "market_protocol_artifact_sha256": "32f11f7981d850cd46a953c8b751340fbf90993cbe95a34aed7fc7e6e9228b8a",
     "quote_capture_contract_sha256": "06dc090de7c93d2625bc78c3ba7163eafda598e3d14deaea3f325c829cb55c68",
     "settlement_contract_sha256": "6f1e885f7d49ee27555bdad7babb9579c8ee9b5057951e728957d44dbe253405"
   },
