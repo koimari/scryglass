@@ -178,6 +178,27 @@ Ontology coverage is now 173/173 champions at the current patch, which
 unblocks role-legal archetype priors for tier lists and interactions across
 every league scope (previously only 4 champions had priors).
 
+## L5 policy / lineup-synergy estimand opener (v1)
+
+`lol_kills/v2/ratings/team/estimands_v1.py` is the first downstream consumer
+that treats the bridge as a champion-composition channel (not just a prior):
+
+- **policy weights**: role-normalized time-safe resource deviations, shrunk by
+  kappa toward the reference policy (mathematical-contract §Team Rating);
+- **lineup synergy** `gamma^q`: composition residual `psi = phi - proj_span(phi)`
+  (atom composition projected off the policy-weighted player span through the
+  roster composition matrix), with a normal-normal strong-shrinkage update;
+- **identification audit**: within-roster policy variation, orthogonalization
+  residual ratio, posterior dependence, source removal jackknife, design rank
+  — verdict strong only when every gate passes;
+- fail closed: when the audit is weak (or inputs are inadmissible) the caller
+  keeps the null-with-blocker fallback; no separate policy/synergy facts are
+  ever fabricated. `aggregate_team_rating(..., estimand_inputs=...)` exposes
+  components only in the strong case; claim ceilings and rank eligibility stay
+  false.
+- tests: `tests/model_v2/ratings/team/test_estimands_v1.py` (strong opens,
+  weak fails closed, unknown champion fails closed, end-to-end wiring).
+
 ## Open coordination items (LCC thread)
 
 1. Regenerate the full 173-champion `*.atoms.json` set (needs `data/bin`

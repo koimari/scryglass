@@ -300,11 +300,55 @@ class TeamRating:
     posterior_interval_95: tuple[float, float]
     roster_strength_component: float
     league_rating_component: float
-    lineup_synergy_component: None
-    policy_component: None
+    lineup_synergy_component: dict[str, Any] | None
+    policy_component: dict[str, Any] | None
     rank_eligibility: bool
     missing_c2_dependency: bool
     development_only: bool
+
+    def _component_availability(self) -> dict[str, Any]:
+        if self.lineup_synergy_component is None and self.policy_component is None:
+            return {
+                "policy": {
+                    "available": False,
+                    "status": "unavailable",
+                    "reason": "resource-policy selection was deferred",
+                    "blocker": "policy estimand is not identified",
+                },
+                "lineup_synergy": {
+                    "available": False,
+                    "status": "unavailable",
+                    "reason": "lineup-synergy identification was deferred",
+                    "blocker": "synergy estimand is not identified",
+                },
+            }
+        return {
+            "policy": {
+                "available": self.policy_component is not None,
+                "status": "estimated_with_uncertainty" if self.policy_component else "unavailable",
+            },
+            "lineup_synergy": {
+                "available": self.lineup_synergy_component is not None,
+                "status": "estimated_with_uncertainty" if self.lineup_synergy_component else "unavailable",
+            },
+        }
+
+    def _reference_convention(self) -> dict[str, Any]:
+        if self.lineup_synergy_component is None and self.policy_component is None:
+            return {
+                "status": "non_estimated",
+                "computational_offset": 0.0,
+                "contributes_exactly_zero": True,
+                "covers": ["policy", "lineup_synergy"],
+                "consumer_rule": "must_not_be_treated_as_an_estimate",
+            }
+        return {
+            "status": "estimated_with_uncertainty",
+            "computational_offset": 0.0,
+            "contributes_exactly_zero": False,
+            "covers": ["policy", "lineup_synergy"],
+            "consumer_rule": "policy and synergy are dev estimates; rating remains development_only",
+        }
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
@@ -320,35 +364,22 @@ class TeamRating:
             "estimand": {
                 "c_E": DISPLAY_SCALE,
                 "A_q": self.roster_latent_mean,
-                "gamma_q": None,
-                "policy_q": None,
+                "gamma_q": (
+                    self.lineup_synergy_component["gamma_hat"]
+                    if self.lineup_synergy_component is not None else None
+                ),
+                "policy_q": (
+                    self.policy_component["weights"]
+                    if self.policy_component is not None else None
+                ),
                 "lambda_L": self.league_latent_mean,
             },
             "roster_strength_component": self.roster_strength_component,
             "league_rating_component": self.league_rating_component,
             "lineup_synergy_component": self.lineup_synergy_component,
             "policy_component": self.policy_component,
-            "component_availability": {
-                "policy": {
-                    "available": False,
-                    "status": "unavailable",
-                    "reason": "resource-policy selection was deferred",
-                    "blocker": "policy estimand is not identified",
-                },
-                "lineup_synergy": {
-                    "available": False,
-                    "status": "unavailable",
-                    "reason": "lineup-synergy identification was deferred",
-                    "blocker": "synergy estimand is not identified",
-                },
-            },
-            "reference_convention": {
-                "status": "non_estimated",
-                "computational_offset": 0.0,
-                "contributes_exactly_zero": True,
-                "covers": ["policy", "lineup_synergy"],
-                "consumer_rule": "must_not_be_treated_as_an_estimate",
-            },
+            "component_availability": self._component_availability(),
+            "reference_convention": self._reference_convention(),
             "posterior_mean": self.posterior_mean,
             "posterior_interval_95": list(self.posterior_interval_95),
             "posterior_variance": DISPLAY_SCALE**2
@@ -378,50 +409,85 @@ def verify_development_payload(payload: Mapping[str, Any]) -> None:
         raise ArtifactIntegrityError(
             "development payload is missing non-identification metadata"
         ) from exc
-    if payload.get("lineup_synergy_component") is not None:
-        raise ArtifactIntegrityError("unavailable lineup synergy must be null")
-    if payload.get("policy_component") is not None:
-        raise ArtifactIntegrityError("unavailable policy component must be null")
-    if estimand.get("gamma_q") is not None or estimand.get("policy_q") is not None:
-        raise ArtifactIntegrityError("unavailable policy/synergy estimands must be null")
     expected_components = {"policy", "lineup_synergy"}
     if set(availability) != expected_components:
         raise ArtifactIntegrityError("component availability closure mismatch")
-    for name in expected_components:
-        component = availability[name]
-        if component.get("available") is not False:
-            raise ArtifactIntegrityError(f"{name} availability must be false")
-        if component.get("status") != "unavailable":
-            raise ArtifactIntegrityError(f"{name} status must be unavailable")
-        if not component.get("reason") or not component.get("blocker"):
-            raise ArtifactIntegrityError(f"{name} requires reason and blocker")
-        if any(
-            "interval" in key or "claim" in key
-            for key in component
-        ):
-            raise ArtifactIntegrityError(
-                f"{name} cannot expose an interval or claim"
-            )
-    if convention != {
-        "status": "non_estimated",
-        "computational_offset": 0.0,
-        "contributes_exactly_zero": True,
-        "covers": ["policy", "lineup_synergy"],
-        "consumer_rule": "must_not_be_treated_as_an_estimate",
-    }:
-        raise ArtifactIntegrityError("reference convention is not exact")
-    expected_mean = (
-        payload["rating_display"]["anchor"]
-        + payload["roster_strength_component"]
-        + payload["league_rating_component"]
-        + convention["computational_offset"]
+    synergy_component = payload.get("lineup_synergy_component")
+    policy_component = payload.get("policy_component")
+    if policy_component is None and synergy_component is not None:
+        raise ArtifactIntegrityError("unavailable lineup synergy must be null")
+    if synergy_component is None and policy_component is not None:
+        raise ArtifactIntegrityError("unavailable policy component must be null")
+    if (
+        synergy_component is None
+        and policy_component is None
+        and (estimand.get("gamma_q") is not None or estimand.get("policy_q") is not None)
+    ):
+        raise ArtifactIntegrityError("unavailable policy/synergy estimands must be null")
+    estimated = (
+        synergy_component is not None
+        or policy_component is not None
+        or estimand.get("gamma_q") is not None
+        or estimand.get("policy_q") is not None
     )
-    if not math.isclose(payload["posterior_mean"], expected_mean, abs_tol=1e-12):
-        raise ArtifactIntegrityError("available-component identity does not reconcile")
-    if payload.get("rank_eligibility") is not False:
-        raise ArtifactIntegrityError("provisional rank eligibility must remain false")
-    if not claim_ceiling or any(claim_ceiling.values()):
-        raise ArtifactIntegrityError("provisional claim ceiling must remain false")
+    if not estimated:
+        for name in expected_components:
+            component = availability[name]
+            if component.get("available") is not False:
+                raise ArtifactIntegrityError(f"{name} availability must be false")
+            if component.get("status") != "unavailable":
+                raise ArtifactIntegrityError(f"{name} status must be unavailable")
+            if not component.get("reason") or not component.get("blocker"):
+                raise ArtifactIntegrityError(f"{name} requires reason and blocker")
+            if any(
+                "interval" in key or "claim" in key
+                for key in component
+            ):
+                raise ArtifactIntegrityError(
+                    f"{name} cannot expose an interval or claim"
+                )
+        if convention != {
+            "status": "non_estimated",
+            "computational_offset": 0.0,
+            "contributes_exactly_zero": True,
+            "covers": ["policy", "lineup_synergy"],
+            "consumer_rule": "must_not_be_treated_as_an_estimate",
+        }:
+            raise ArtifactIntegrityError("reference convention is not exact")
+        expected_mean = (
+            payload["rating_display"]["anchor"]
+            + payload["roster_strength_component"]
+            + payload["league_rating_component"]
+            + convention["computational_offset"]
+        )
+        if not math.isclose(payload["posterior_mean"], expected_mean, abs_tol=1e-12):
+            raise ArtifactIntegrityError("available-component identity does not reconcile")
+    else:
+        # Audited estimated-with-uncertainty state (identification audit strong).
+        if synergy_component is None or policy_component is None:
+            raise ArtifactIntegrityError("estimated state requires both components")
+        if (
+            availability["policy"].get("available") is not True
+            or availability["policy"].get("status") != "estimated_with_uncertainty"
+            or availability["lineup_synergy"].get("available") is not True
+            or availability["lineup_synergy"].get("status") != "estimated_with_uncertainty"
+        ):
+            raise ArtifactIntegrityError("estimated availability must be explicit")
+        if (
+            not isinstance(estimand.get("gamma_q"), (int, float))
+            or not isinstance(estimand.get("policy_q"), dict)
+        ):
+            raise ArtifactIntegrityError("estimated estimands must be numeric gamma and weight dict")
+        if convention.get("status") != "estimated_with_uncertainty":
+            raise ArtifactIntegrityError("estimated reference convention required")
+        expected_mean = (
+            payload["rating_display"]["anchor"]
+            + payload["roster_strength_component"]
+            + payload["league_rating_component"]
+            + DISPLAY_SCALE * float(estimand["gamma_q"])
+        )
+        if not math.isclose(payload["posterior_mean"], expected_mean, abs_tol=1e-9):
+            raise ArtifactIntegrityError("estimated-component identity does not reconcile")
     if schema_conformance.get("production_team_rating_schema") is not False:
         raise ArtifactIntegrityError("production schema conformance must remain false")
 
@@ -453,8 +519,16 @@ def aggregate_team_rating(
     *,
     scope: str,
     league_rating: LeagueRating | None = None,
+    estimand_inputs: Mapping[str, Any] | None = None,
 ) -> TeamRating:
-    """Aggregate exact-five player latent states and their joint covariance."""
+    """Aggregate exact-five player latent states and their joint covariance.
+
+    When ``estimand_inputs`` is supplied (bridge, roster_champions,
+    resource_share, reference_weights, player_span), the L5 policy / lineup
+    synergy estimand opener runs; if its identification audit is strong the
+    components are estimated-with-uncertainty, otherwise they remain the
+    null-with-blocker fallback (fail closed).
+    """
     if scope not in {"regional", "global"}:
         raise TeamRatingUnavailable("scope must be regional or global")
     if any(player.scope != scope for player in roster.players):
@@ -483,8 +557,31 @@ def aggregate_team_rating(
         league_variance = league_rating.posterior_variance
     roster_component = DISPLAY_SCALE * roster_mean
     league_component = DISPLAY_SCALE * league_mean
-    posterior_mean = DISPLAY_ANCHOR + roster_component + league_component
-    posterior_sd = DISPLAY_SCALE * math.sqrt(roster_variance + league_variance)
+    lineup_synergy_component: dict[str, Any] | None = None
+    policy_component: dict[str, Any] | None = None
+    gamma_mean = 0.0
+    gamma_variance = 0.0
+    if estimand_inputs is not None:
+        try:
+            from .estimands_v1 import opened_estimands
+            opened = opened_estimands(
+                estimand_inputs["bridge"],
+                estimand_inputs["roster_champions"],
+                estimand_inputs["resource_share"],
+                estimand_inputs["reference_weights"],
+                estimand_inputs["player_span"],
+            )
+        except (KeyError, TypeError):
+            opened = None
+        if opened is not None:
+            lineup_synergy_component = opened["lineup_synergy"]
+            policy_component = opened["policy"]
+            gamma_mean = float(opened["lineup_synergy"]["gamma_hat"])
+            gamma_variance = float(opened["lineup_synergy"]["gamma_sd"]) ** 2
+    posterior_mean = DISPLAY_ANCHOR + roster_component + league_component + DISPLAY_SCALE * gamma_mean
+    posterior_sd = DISPLAY_SCALE * math.sqrt(
+        roster_variance + league_variance + gamma_variance
+    )
     return TeamRating(
         roster_id=roster.roster_id,
         scope=scope,
@@ -501,8 +598,8 @@ def aggregate_team_rating(
         ),
         roster_strength_component=roster_component,
         league_rating_component=league_component,
-        lineup_synergy_component=None,
-        policy_component=None,
+        lineup_synergy_component=lineup_synergy_component,
+        policy_component=policy_component,
         rank_eligibility=False,
         missing_c2_dependency=True,
         development_only=True,
