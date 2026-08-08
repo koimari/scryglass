@@ -1,0 +1,103 @@
+{
+  "artifact_sha256": "593f8abb0e4dae2774462ebe4195485990fe07db72ffc31e9622592c57113114",
+  "authority": {
+    "betting_authority": false,
+    "expected_value_authority": false,
+    "model_validation_authority": false,
+    "odds_authority": false,
+    "player_rating_authority": false,
+    "probability_authority": false,
+    "recommendation_authority": false,
+    "team_rating_authority": false
+  },
+  "capture_contract": {
+    "candidate_and_both_comparators_captured": true,
+    "deterministic_replay_available": true,
+    "event_outcome_fields_rejected": true,
+    "exact_pre_event_roster_receipt_required": true,
+    "fixture_side_and_player_identity_bound": true,
+    "ledger_locator": "data/lol/v2/evaluation/multileague-v3/prediction-ledger.json",
+    "model_ids": [
+      "hierarchical-orgw100-orgv025-retain100",
+      "predecessor-player-random-walk",
+      "predecessor-organization-random-walk"
+    ],
+    "no_clobber_writes": true,
+    "outcome_free_ledger_schema": "scryglass:multileague-rating-v3-prediction-ledger:v2",
+    "pre_event_patch_revision_receipt_required": true,
+    "prediction_receipt_schema": "scryglass:multileague-rating-v3-pre-event-prediction:v2",
+    "retrospective_backfill_qualifies": false,
+    "source_candidate_patch_roster_and_fixture_hash_bound": true
+  },
+  "claim_ceiling": "This receipt proves that an outcome-free pre-event capture path exists. The ledger is empty, so it supplies no future predictive evidence and no rating, probability, recommendation, or betting authority.",
+  "decision_outputs": {
+    "bet_recommendation": null,
+    "expected_value": null,
+    "fair_odds": null,
+    "match_probability": null,
+    "player_rating_authority": null,
+    "team_rating_authority": null
+  },
+  "implementation": {
+    "actual_future_prediction_evidence_present": false,
+    "independent_opening_approval_present": false,
+    "independent_protocol_review_present": false,
+    "ready_for_pre_event_capture": true
+  },
+  "ledger_state": {
+    "entries": 0,
+    "independently_pinned": false,
+    "metadata_support_met": false,
+    "opening_authority": false,
+    "outcomes_accessed": false,
+    "outcomes_present": false,
+    "status": "EMPTY_NOT_YET_CREATED"
+  },
+  "locked_at_utc": "2026-08-02T12:00:00+00:00",
+  "protocol_artifact_sha256": "49c91c8d1af525514b6125a453185bc41f16717ff60b011712fd7d8ce40425e2",
+  "result_state": "PRE_EVENT_CAPTURE_IMPLEMENTATION_READY_EMPTY_LEDGER",
+  "schema_version": "scryglass:multileague-rating-v3-capture-readiness:v1",
+  "source_locks": [
+    {
+      "bytes": 12308,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_capture_readiness.py",
+      "raw_sha256": "46ab7593c420e5f7d32826a90d458d832484e1be7e36f15686d9c2f096bfb6c9"
+    },
+    {
+      "bytes": 55640,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_prediction_ledger.py",
+      "raw_sha256": "c3d5843570aea6cbac0d0991c7244698de86fd43e2217eab3fdfb41d461ad707"
+    },
+    {
+      "bytes": 23614,
+      "locator": "lol_kills/pregame_roster_capture.py",
+      "raw_sha256": "052e07aae82edcc5c17c27b9299020f4dbefd50ff0cc806cb44deb98677e5b9b"
+    },
+    {
+      "bytes": 27457,
+      "locator": "lol_kills/etl/leaguepedia_patch_revisions.py",
+      "raw_sha256": "b9079a64c8dcba4d17c7762edda4c914a7a42b8b7680044910298b69014ebb58"
+    },
+    {
+      "bytes": 2018,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_preflight_v2_registry.py",
+      "raw_sha256": "a759d4738f0df2bf36759efd2ef490bdc52664e66250f3a229c7406d3f2956f0"
+    },
+    {
+      "bytes": 1973,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_registry_v2.py",
+      "raw_sha256": "2c725f877f5f4994ab16c0dc4d8c529a9bccd2f952d1fc3fada0b6155a0f6618"
+    },
+    {
+      "bytes": 11678,
+      "locator": "data/lol/v2/models/player/multileague-v3/source-preflight-v2.json",
+      "raw_sha256": "e86f9c660278bef68d6abe873756050180603da7dfaed07edb5b605ce67f493b"
+    },
+    {
+      "bytes": 11376,
+      "locator": "data/lol/v2/models/player/multileague-v3/future-protocol-lock-v2.json",
+      "raw_sha256": "106a36b0eafa069bee3d48c8e44c70a2e17efa087f4ea41653b812c707510127"
+    }
+  ],
+  "source_preflight_artifact_sha256": "bb2abaa30f657d15345796a076dfb19a7e116ed235030d29b82b625896b9c6ec"
+}
