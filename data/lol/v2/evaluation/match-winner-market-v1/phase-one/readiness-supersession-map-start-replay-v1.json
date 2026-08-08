@@ -1,0 +1,60 @@
+{
+  "artifact_sha256": "d3f401def440e2645f94089f483a0a8877caf7ee48732f7b164bfb7572f01b3f",
+  "authority": {
+    "betting_authority": false,
+    "expected_value_authority": false,
+    "model_validation_authority": false,
+    "odds_authority": false,
+    "probability_authority": false,
+    "recommendation_authority": false
+  },
+  "claim_ceiling": "Pre-boundary implementation correction and audit trail only; no future evidence, model pass, probability, odds, expected value, recommendation, or betting authority.",
+  "created_at_utc": "2026-08-02T08:28:00+00:00",
+  "future_boundary_utc": "2026-08-03T00:00:00+00:00",
+  "preconditions": {
+    "old_readiness_bytes_preserved": true,
+    "performed_before_future_boundary": true,
+    "phase_one_outcome_cohorts_present": 0,
+    "phase_one_outcomes_accessed": false,
+    "phase_one_parity_registries_present": 0,
+    "phase_one_prediction_events_present": 0
+  },
+  "reason": "The outcome-free TypeScript replay used the ratings series start instead of the ledger-bound actual map start, causing valid later-map draft captures to fail timing validation before scoring.",
+  "replacement": {
+    "phase_one_evaluation_readiness": {
+      "artifact_sha256": "340ed6f1a35420ad75a9e695aed1db28f6cd4849e206157d0da0341c5d5a8d48",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/superseded/evaluation-readiness-v1-after-map-start-before-entity-hac.json",
+      "locked_at_utc": "2026-08-02T08:27:11.142561+00:00",
+      "raw_sha256": "aa15a391a1a6bf2a5e10c9d5c93bdf320b52ab1b742ff2ef510299b25aeb4b29"
+    },
+    "probability_pipeline_readiness": {
+      "artifact_sha256": "b5eeaa24a74b4434e83de6587471d09ca8e656691d078c4968dfd57f5e39b4a8",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/superseded/probability-pipeline-readiness-v1-after-map-start-before-entity-hac.json",
+      "locked_at_utc": "2026-08-02T08:27:35.950873+00:00",
+      "raw_sha256": "bc7d2ae06e76360805a987994f8f63a6049ffb5c03c2faf88b494cba2fa3439a"
+    }
+  },
+  "replay_source": {
+    "locator": "apps/lol-atlas/scripts/phaseOneDraftParity.mts",
+    "replacement_event_start": "draft_ledger_candidate.entries[].actual_map_start_utc",
+    "replacement_raw_sha256": "df103825e71e28944d35063f2160a8fc804fbdf33b75cbc5fd7337de24848d02",
+    "superseded_raw_sha256": "a03a600129dd0690e6647ce2c35c20c9ba3790ba0775c0b4ee91e89f24f09b7d"
+  },
+  "schema_version": "scryglass:pre-boundary-readiness-supersession:v1",
+  "superseded": {
+    "phase_one_evaluation_readiness": {
+      "artifact_sha256": "e13e687599359a39aebc91e7031c977253e0e97de7d5f7d56dc0433a54c59108",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/superseded/evaluation-readiness-v1-before-map-start-replay-fix.json",
+      "locked_at_utc": "2026-08-02T03:37:01.477528+00:00",
+      "raw_sha256": "f2ae313223995a740c27bceaf4bf046e14a5eb489a1a17f199c2b59926c42dbd"
+    },
+    "probability_pipeline_readiness": {
+      "artifact_sha256": "4d81e7f5c6f9fcc11c42d2e413c15a0785e52cbcfc04bbffad39e757c44e99c7",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/superseded/probability-pipeline-readiness-v1-before-map-start-replay-fix.json",
+      "locked_at_utc": "2026-08-02T04:00:07.921114+00:00",
+      "raw_sha256": "4e49c29a737b9920aedd7b1ed94ef2b976c133e274f9f0aa3711e67128ec0e82"
+    }
+  },
+  "supersession_id": "phase-one-map-specific-draft-replay-timing-fix-20260802"
+}
+

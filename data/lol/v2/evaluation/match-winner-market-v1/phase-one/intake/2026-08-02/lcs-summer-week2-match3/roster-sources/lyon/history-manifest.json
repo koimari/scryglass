@@ -1,0 +1,104 @@
+{
+  "captured_at": "2026-08-02T06:58:42Z",
+  "manifest_sha256": "861fbca3eae5a4ae1e09c341d5f161b3c96099620e134327512c9ef725f4e2af",
+  "newest": "2026-08-02T06:58:24Z",
+  "oldest": "2025-08-02T06:58:24Z",
+  "pages": [
+    {
+      "payload_sha256": "df398d954daac8f3aaaaf2f863ac7c5d639b5ad7b2aec02aa0f12b63f0df008c",
+      "raw_file": "history-000.json",
+      "revision_count": 21,
+      "source_url": "https://lol.fandom.com/api.php?action=query&prop=revisions&titles=LYON+%282024+American+Team%29&rvprop=ids%7Ctimestamp&rvlimit=max&rvstart=2026-08-02T06%3A58%3A24Z&rvend=2025-08-02T06%3A58%3A24Z&rvdir=older&format=json&formatversion=2"
+    }
+  ],
+  "resolved_title": "LYON (2024 American Team)",
+  "revisions": [
+    {
+      "revision_id": 4270208,
+      "revision_timestamp": "2025-08-18T21:23:41Z"
+    },
+    {
+      "revision_id": 4270780,
+      "revision_timestamp": "2025-08-19T19:48:59Z"
+    },
+    {
+      "revision_id": 4318381,
+      "revision_timestamp": "2025-10-24T23:01:39Z"
+    },
+    {
+      "revision_id": 4334134,
+      "revision_timestamp": "2025-11-20T15:16:00Z"
+    },
+    {
+      "revision_id": 4341537,
+      "revision_timestamp": "2025-12-11T06:38:04Z"
+    },
+    {
+      "revision_id": 4341538,
+      "revision_timestamp": "2025-12-11T06:38:30Z"
+    },
+    {
+      "revision_id": 4341539,
+      "revision_timestamp": "2025-12-11T06:40:13Z"
+    },
+    {
+      "revision_id": 4342056,
+      "revision_timestamp": "2025-12-12T19:16:41Z"
+    },
+    {
+      "revision_id": 4342225,
+      "revision_timestamp": "2025-12-13T08:18:06Z"
+    },
+    {
+      "revision_id": 4386489,
+      "revision_timestamp": "2026-02-19T16:15:49Z"
+    },
+    {
+      "revision_id": 4394153,
+      "revision_timestamp": "2026-03-01T00:59:25Z"
+    },
+    {
+      "revision_id": 4394166,
+      "revision_timestamp": "2026-03-01T01:14:06Z"
+    },
+    {
+      "revision_id": 4394920,
+      "revision_timestamp": "2026-03-02T00:49:01Z"
+    },
+    {
+      "revision_id": 4394923,
+      "revision_timestamp": "2026-03-02T00:53:43Z"
+    },
+    {
+      "revision_id": 4394937,
+      "revision_timestamp": "2026-03-02T01:05:28Z"
+    },
+    {
+      "revision_id": 4394938,
+      "revision_timestamp": "2026-03-02T01:05:50Z"
+    },
+    {
+      "revision_id": 4394940,
+      "revision_timestamp": "2026-03-02T01:13:21Z"
+    },
+    {
+      "revision_id": 4395020,
+      "revision_timestamp": "2026-03-02T03:20:50Z"
+    },
+    {
+      "revision_id": 4404740,
+      "revision_timestamp": "2026-03-17T18:46:23Z"
+    },
+    {
+      "revision_id": 4470986,
+      "revision_timestamp": "2026-06-15T02:41:54Z"
+    },
+    {
+      "revision_id": 4471044,
+      "revision_timestamp": "2026-06-15T07:29:34Z"
+    }
+  ],
+  "schema_version": "scryglass:roster-receipts:v1",
+  "status": "ok",
+  "team_page": "LYON (2024 American Team)"
+}

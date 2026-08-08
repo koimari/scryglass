@@ -1,0 +1,169 @@
+{
+  "artifact_sha256": "854a12258ca1389b8dae3789bd654dd6ddad76c16bfcbf573c43854c79bb4fe7",
+  "authority": {
+    "betting_authority": false,
+    "calibration_authority": false,
+    "draft_validation_authority": false,
+    "expected_value_authority": false,
+    "incremental_draft_authority": false,
+    "odds_authority": false,
+    "outcome_opening_authority": false,
+    "player_rating_authority": false,
+    "probability_authority": false,
+    "ratings_validation_authority": false,
+    "recommendation_authority": false,
+    "team_rating_authority": false
+  },
+  "claim_ceiling": "This receipt proves only that the system-clocked outcome-free phase-one collection implementation was frozen with zero plans, event bundles, and joint snapshots. It grants no validation, opening, rating, probability, odds, expected-value, recommendation, or betting authority.",
+  "clock_attestation": {
+    "lock_time_not_after_builder_observation": true,
+    "observed_wall_clock_utc": "2026-08-02T03:30:00+00:00",
+    "source": "system_utc_clock_sampled_inside_builder",
+    "user_supplied_timestamp_allowed": false
+  },
+  "collection_contract": {
+    "all_builder_clocks_sampled_inside_implementation": true,
+    "artifact_files_must_be_unaliased_regular_files": true,
+    "artifact_symlinks_rejected": true,
+    "atomic_fsynced_no_clobber_writes": true,
+    "builder_parameters": {
+      "event_bundle": [
+        "plan_locator",
+        "root",
+        "clock"
+      ],
+      "joint_snapshot": [
+        "bundle_locators",
+        "snapshot_locator",
+        "root",
+        "clock"
+      ],
+      "plan": [
+        "ratings_prediction_locator",
+        "root",
+        "clock"
+      ]
+    },
+    "cli_user_capture_or_creation_timestamp_present": false,
+    "draft_prediction_must_strictly_precede_actual_map_start": true,
+    "event_bundle_prefix": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/bundles",
+    "event_bundle_schema_version": "scryglass:match-winner-phase-one-event-bundle:v1",
+    "event_outcome_fields_rejected_recursively": true,
+    "exact_event_series_game_league_patch_side_and_team_join_required": true,
+    "exact_ratings_bytes_must_match_terminal_draft_embedding": true,
+    "joint_ledger_schema_version": "scryglass:match-winner-phase-one-joint-ledger:v1",
+    "joint_snapshot_prefix": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/snapshots",
+    "joint_snapshot_rebuilds_registered_draft_ledger": true,
+    "joint_snapshot_rebuilds_registered_ratings_ledger": true,
+    "map_start_capture_must_be_at_or_after_actual_start": true,
+    "metadata_support_itself_authorizes_opening": false,
+    "plan_prefix": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/plans",
+    "plan_schema_version": "scryglass:match-winner-phase-one-event-plan:v1",
+    "ratings_receipt_must_preexist_plan": true,
+    "retrospective_backfill_qualifies": false
+  },
+  "decision_outputs": {
+    "bet_recommendation": null,
+    "draft_validation_authority": null,
+    "expected_value": null,
+    "fair_odds": null,
+    "match_probability": null,
+    "outcome_opening_authority": null,
+    "ratings_validation_authority": null
+  },
+  "dependencies": {
+    "match_winner_protocol": {
+      "artifact_sha256": "32f11f7981d850cd46a953c8b751340fbf90993cbe95a34aed7fc7e6e9228b8a",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/future-protocol-v1.json",
+      "locked_at_utc": "2026-08-02T02:00:00+00:00",
+      "raw_sha256": "9a0d9df2a68651dfb311200cedf21dd8e3702fa94e97f639ec9ab85362033b9e",
+      "result_state": "TWO_STAGE_PROSPECTIVE_MARKET_PROTOCOL_LOCKED_EMPTY"
+    },
+    "ratings_capture": {
+      "artifact_sha256": "7b744150924ea7a217c524bb71928eb41644f59c1332bbc3de169ba90c18a611",
+      "locator": "data/lol/v2/models/player/multileague-v3/capture-readiness-v3.json",
+      "locked_at_utc": "2026-08-01T23:58:00+00:00",
+      "raw_sha256": "7426cb9603b07b8f45dfb78537e4315271436ea20362fcff5b2af2b7b55c0d6e",
+      "result_state": "SYSTEM_CLOCKED_PRE_EVENT_CAPTURE_IMPLEMENTATION_READY_EMPTY_LEDGER"
+    },
+    "terminal_draft_capture": {
+      "artifact_sha256": "d60f1d5db16aa06d8e5686c754c74c67905f4c9cc5f528e928328b7b3bc23514",
+      "locator": "data/lol/v2/models/draft-terminal/future-capture-readiness-v1.json",
+      "locked_at_utc": "2026-08-02T01:30:00+00:00",
+      "raw_sha256": "84f66287df739ddc57a643ce5612a7933c4ae9caa87835c360ac4c838ed8c11f",
+      "result_state": "SYSTEM_CLOCKED_TERMINAL_DRAFT_CAPTURE_IMPLEMENTATION_READY_EMPTY_LEDGER"
+    }
+  },
+  "implementation": {
+    "actual_future_evidence_present": false,
+    "independent_collection_review_present": false,
+    "independent_ledger_pin_present": false,
+    "independent_opening_approval_present": false,
+    "ready_for_outcome_free_phase_one_collection": true
+  },
+  "locked_at_utc": "2026-08-02T03:30:00+00:00",
+  "locked_empty_collection_state": {
+    "event_bundles": 0,
+    "independently_pinned": false,
+    "joint_snapshots": 0,
+    "metadata_support_met": false,
+    "opening_authority": false,
+    "outcomes_accessed": false,
+    "outcomes_present": false,
+    "plans": 0
+  },
+  "result_state": "OUTCOME_FREE_PHASE_ONE_COLLECTION_IMPLEMENTATION_READY_EMPTY",
+  "schema_version": "scryglass:match-winner-phase-one-collection-readiness:v1",
+  "source_locks": [
+    {
+      "bytes": 18499,
+      "locator": "lol_kills/v2/market/phase_one_collection_readiness_v1.py",
+      "raw_sha256": "67db4bd083e4e49a362176b10b66dfda6ad5ba3543dceb19febdae47bac69411"
+    },
+    {
+      "bytes": 52548,
+      "locator": "lol_kills/v2/market/phase_one_collection_v1.py",
+      "raw_sha256": "44f1882f48dab9d24052e5fb292d375225f2274423e2b2a6e17951b73347d1bf"
+    },
+    {
+      "bytes": 55640,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_prediction_ledger.py",
+      "raw_sha256": "c3d5843570aea6cbac0d0991c7244698de86fd43e2217eab3fdfb41d461ad707"
+    },
+    {
+      "bytes": 68732,
+      "locator": "lol_kills/v2/draft/terminal/future_prediction_ledger.py",
+      "raw_sha256": "ef881dca83cbf3138b4362a2e5c6d40f15f82adab6d7a165b0a86d1288127f64"
+    },
+    {
+      "bytes": 2493,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_capture_registry_v3.py",
+      "raw_sha256": "50517c5f171162b83f8d5e5ed6c37f208415f6d50065a870139877d47599b45b"
+    },
+    {
+      "bytes": 2526,
+      "locator": "lol_kills/v2/draft/terminal/capture_readiness_registry_v1.py",
+      "raw_sha256": "1e9bf72a017187fbe3bf8459ff4c239b7eb6e83b2a9c064ad738c4bcf7c33c00"
+    },
+    {
+      "bytes": 3142,
+      "locator": "lol_kills/v2/market/match_winner_future_protocol_registry_v1.py",
+      "raw_sha256": "5e08b7dcd5b0be1cdefa0217b0e4c65e0ce2492d77113b97eab199d9eb44ab94"
+    },
+    {
+      "bytes": 7165,
+      "locator": "data/lol/v2/models/player/multileague-v3/capture-readiness-v3.json",
+      "raw_sha256": "7426cb9603b07b8f45dfb78537e4315271436ea20362fcff5b2af2b7b55c0d6e"
+    },
+    {
+      "bytes": 6213,
+      "locator": "data/lol/v2/models/draft-terminal/future-capture-readiness-v1.json",
+      "raw_sha256": "84f66287df739ddc57a643ce5612a7933c4ae9caa87835c360ac4c838ed8c11f"
+    },
+    {
+      "bytes": 16503,
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/future-protocol-v1.json",
+      "raw_sha256": "9a0d9df2a68651dfb311200cedf21dd8e3702fa94e97f639ec9ab85362033b9e"
+    }
+  ]
+}

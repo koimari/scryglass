@@ -1,0 +1,223 @@
+{
+  "artifact_sha256": "7e1ce1bfd5a2ab80c51c0f354d695c6aab0d6e47fdabc49086535e34982bf4f5",
+  "authority": {
+    "betting_authority": false,
+    "draft_validation_authority": false,
+    "expected_value_authority": false,
+    "odds_authority": false,
+    "phase_one_opening_authority": false,
+    "player_rating_authority": false,
+    "probability_authority": false,
+    "ratings_validation_authority": false,
+    "recommendation_authority": false,
+    "team_rating_authority": false
+  },
+  "claim_ceiling": "Pre-boundary implementation freeze only. No future outcomes, model pass, rating, probability, odds, expected value, recommendation, transaction, or betting authority is present.",
+  "clock_attestation": {
+    "lock_time_not_after_builder_observation": true,
+    "observed_wall_clock_utc": "2026-08-02T08:48:00+00:00",
+    "source": "system_utc_clock_sampled_inside_builder",
+    "user_supplied_timestamp_allowed": false
+  },
+  "decision_outputs": {
+    "bet_recommendation": null,
+    "draft_validation_authority": null,
+    "expected_value": null,
+    "fair_odds": null,
+    "match_probability": null,
+    "phase_one_opening_authority": null,
+    "phase_two_opening_authority": null,
+    "ratings_validation_authority": null
+  },
+  "dependencies": {
+    "match_winner_future_protocol": {
+      "artifact_sha256": "c0ef32affcd73b682ed2ea973bbad24aa51b6efa667bfdb419b65d668494376f",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/future-protocol-v1.json",
+      "raw_sha256": "b82ff719c02cc3aac81009e57cad0f6d0417519e7d02147de7c8bd3d78d5437a",
+      "result_state": "TWO_STAGE_PROSPECTIVE_MARKET_PROTOCOL_LOCKED_EMPTY"
+    },
+    "phase_one_collection_readiness": {
+      "artifact_sha256": "4c1abb28525130b17852071b9d64737bc78806c6a9a43419bd49670fd16f6629",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/capture-readiness-v1.json",
+      "raw_sha256": "7ca30d0b87ffea8b2e5e329e99a86942a8f6f1ff70c055fa39fce3c5acfa9b50",
+      "result_state": "OUTCOME_FREE_PHASE_ONE_COLLECTION_IMPLEMENTATION_READY_EMPTY"
+    }
+  },
+  "evaluation_contract": {
+    "bootstrap": {
+      "confidence_interval": [
+        0.025,
+        0.975
+      ],
+      "draft_replicates": 10000,
+      "draft_seed": 20260804,
+      "map_weighted_point_metrics": true,
+      "ratings_replicates": 10000,
+      "ratings_seed": 20260803,
+      "whole_series_resampling": true
+    },
+    "builder_parameters": {
+      "build_parity": [
+        "snapshot_locator",
+        "typescript_replay_raw",
+        "parity_locator",
+        "root",
+        "clock"
+      ],
+      "evaluate": [
+        "snapshot_locator",
+        "parity_locator",
+        "outcome_cohort_raw",
+        "outcome_cohort_locator",
+        "opening_authority_binding",
+        "run_id",
+        "root",
+        "clock"
+      ],
+      "expected_bindings": [
+        "snapshot_locator",
+        "parity_locator",
+        "root"
+      ],
+      "run_authorized": [
+        "snapshot_locator",
+        "parity_locator",
+        "root",
+        "environment",
+        "clock"
+      ],
+      "validate_outcomes": [
+        "payload",
+        "snapshot",
+        "root"
+      ]
+    },
+    "draft_gates": {
+      "at_least_one_overall_upper_95_strictly_negative": true,
+      "calibration_intercept_interval_includes_zero": true,
+      "calibration_slope_interval_includes_one": true,
+      "each_domestic_league_each_patch_and_international_point_nonharm": true,
+      "ece_delta_upper_95_maximum": 0.01,
+      "entity_network_dependence_sensitivity_must_pass": true,
+      "exact_python_typescript_parity_tolerance": 1e-12,
+      "overall_both_metric_points_nonpositive": true,
+      "overall_both_upper_95_bounds_nonpositive": true
+    },
+    "entity_network_dependence_sensitivity": {
+      "both_metric_upper_95_bounds_must_be_nonpositive": true,
+      "critical_value": 2.1,
+      "dependency_rule": "maps_may_covary_when_they_share_series_id_any_exact_player_id_or_any_exact_organization_id",
+      "draft_required_strata": [
+        "overall"
+      ],
+      "exact_ten_player_and_two_organization_ids_required": true,
+      "locked_before_future_outcomes": true,
+      "method": "shared_series_participant_or_organization_network_hac_sandwich_for_mean_paired_loss_delta",
+      "minimum_participants": 50,
+      "minimum_series": 20,
+      "ratings_required_strata": [
+        "overall",
+        "league:LCS",
+        "league:LEC",
+        "league:LCK",
+        "league:LPL",
+        "roster_change"
+      ],
+      "supplements_not_replaces_whole_series_bootstrap": true
+    },
+    "opening_contract": {
+      "atomic_no_clobber_output": true,
+      "authority_raw_sha256_must_be_pinned_out_of_band": true,
+      "crash_after_marker_does_not_authorize_reopening": true,
+      "marker_or_output_presence_blocks_second_opening": true,
+      "opening_marker_written_before_first_outcome_read": true,
+      "two_distinct_scope_complete_independent_reviews_required": true
+    },
+    "outcome_contract": {
+      "exact_snapshot_event_coverage_required": true,
+      "manual_post_outcome_exclusion_permitted": false,
+      "outcome_evidence_bytes_hash_checked": true,
+      "source_observation_strictly_after_actual_map_start": true,
+      "winning_side_explicit_blue_or_red": true
+    },
+    "phase_one_pass_itself_authorizes_phase_two": false,
+    "phase_one_pass_itself_is_probability_or_betting_authority": false,
+    "ratings_reliability_gate_repair": {
+      "calibration_intercept_percentile_interval_must_include_zero": true,
+      "calibration_slope_percentile_interval_must_include_one": true,
+      "candidate_minus_each_comparator_ece_upper_95_maximum": 0.01,
+      "ece_equal_frequency_bins": 10,
+      "locked_before_outcomes": true,
+      "reason": "v3_protocol_required_a_locked_gate_but_omitted_its_exact_definition"
+    },
+    "schemas": {
+      "evaluation_result": "scryglass:phase-one-model-evaluation:v1",
+      "independent_evaluation_registry": "scryglass:phase-one-evaluation-independent-registry:v1",
+      "opening_authority": "scryglass:phase-one-independent-opening-authority:v1",
+      "parity_registry": "scryglass:phase-one-draft-replay-parity-registry:v1",
+      "sealed_outcome_cohort": "scryglass:phase-one-sealed-outcome-cohort:v1",
+      "typescript_parity_replay": "scryglass:phase-one-draft-typescript-replay:v1"
+    },
+    "selection_or_tuning_after_opening_permitted": false
+  },
+  "locked_at_utc": "2026-08-02T08:48:00+00:00",
+  "locked_empty_state": {
+    "evaluation_outputs": 0,
+    "opening_authority_present": false,
+    "opening_markers": 0,
+    "outcome_cohorts": 0,
+    "outcome_evidence": 0,
+    "outcomes_accessed": false,
+    "parity_registries": 0
+  },
+  "result_state": "ONE_TIME_PHASE_ONE_EVALUATION_IMPLEMENTATION_FROZEN_PRE_BOUNDARY",
+  "schema_version": "scryglass:phase-one-evaluation-readiness:v1",
+  "source_locks": [
+    {
+      "bytes": 18259,
+      "locator": "lol_kills/v2/market/phase_one_evaluation_readiness_v1.py",
+      "raw_sha256": "0119dac0b57ea113bebf8ac7fe988df5003be21b0b34157191d50d26811e616c"
+    },
+    {
+      "bytes": 68330,
+      "locator": "lol_kills/v2/market/phase_one_evaluation_v1.py",
+      "raw_sha256": "48dbdb4642d5f17f34879277b9dc7b04ab877c4f7c99292f16e827174ae65b5f"
+    },
+    {
+      "bytes": 15596,
+      "locator": "lol_kills/v2/market/phase_one_opening_v1.py",
+      "raw_sha256": "d4c734b4e2ee139052de4796f5716dbb62438f1753b1cd2fe7de918a64ed6ee6"
+    },
+    {
+      "bytes": 9215,
+      "locator": "lol_kills/v2/market/phase_one_evaluation_registry_v1.py",
+      "raw_sha256": "b69ede605c4e3c13665caec3ecb6ff27d1d13fe373c607912a8768f73fdb356e"
+    },
+    {
+      "bytes": 6292,
+      "locator": "apps/lol-atlas/scripts/phaseOneDraftParity.mts",
+      "raw_sha256": "df103825e71e28944d35063f2160a8fc804fbdf33b75cbc5fd7337de24848d02"
+    },
+    {
+      "bytes": 53201,
+      "locator": "apps/lol-atlas/src/lib/draftTerminalScore.ts",
+      "raw_sha256": "9b03719b709c4b253099241a0b8e409d15dfb1d93fcddeff13f28ffbadba27f4"
+    },
+    {
+      "bytes": 52548,
+      "locator": "lol_kills/v2/market/phase_one_collection_v1.py",
+      "raw_sha256": "44f1882f48dab9d24052e5fb292d375225f2274423e2b2a6e17951b73347d1bf"
+    },
+    {
+      "bytes": 55640,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_prediction_ledger.py",
+      "raw_sha256": "c3d5843570aea6cbac0d0991c7244698de86fd43e2217eab3fdfb41d461ad707"
+    },
+    {
+      "bytes": 68732,
+      "locator": "lol_kills/v2/draft/terminal/future_prediction_ledger.py",
+      "raw_sha256": "ef881dca83cbf3138b4362a2e5c6d40f15f82adab6d7a165b0a86d1288127f64"
+    }
+  ]
+}
+

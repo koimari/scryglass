@@ -1,0 +1,46 @@
+{
+  "artifact_sha256": "99ed25778e95e0e79824d1ca8732b29596c066e950716d1bcdf10ebad2f52e43",
+  "authority": {
+    "betting_authority": false,
+    "expected_value_authority": false,
+    "model_validation_authority": false,
+    "odds_authority": false,
+    "probability_authority": false,
+    "recommendation_authority": false
+  },
+  "claim_ceiling": "Pre-boundary post-pass provenance hardening only; no future evidence, model pass, rating authority, probability, odds, expected value, recommendation, or betting authority.",
+  "created_at_utc": "2026-08-02T09:42:00+00:00",
+  "future_boundary_utc": "2026-08-03T00:00:00+00:00",
+  "preconditions": {
+    "candidate_or_threshold_selected_from_future_outcomes": false,
+    "old_readiness_bytes_preserved": true,
+    "performed_before_future_boundary": true,
+    "phase_one_outcome_cohorts_present": 0,
+    "phase_one_outcomes_accessed": false,
+    "phase_one_prediction_events_present": 0
+  },
+  "prior_supersession": {
+    "artifact_sha256": "93f13bc0a02ae0788804d66afca4436ebb9d8ccce1c91d97a68f84400a29f532",
+    "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/readiness-supersession-fresh-rating-refit-v1.json",
+    "raw_sha256": "fd34cd92aade3459838cd138a69ddaf8a7ccdf4e0de87f187916318746708bc7"
+  },
+  "reason": "The fresh post-validation refit already required an independently registered phase-one pass, but its candidate payload bound only the evaluation result bytes. Before future outcomes, it was strengthened to bind the exact externally pinned independent registry locator, raw digest, registry ID, and registration time and to reject a refit timestamp that predates that registration.",
+  "replacement": {
+    "probability_pipeline_readiness": {
+      "artifact_sha256": "16b5710153438ee35add127de0b4f34cdb487af80f3b60465676331b6ec09fd7",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/probability-pipeline-readiness-v1.json",
+      "locked_at_utc": "2026-08-02T09:41:18.260944+00:00",
+      "raw_sha256": "7d2d339af21549e9a4a50425fb927bc4d709d3e9d8434711f70cddeffb6f3d58"
+    }
+  },
+  "schema_version": "scryglass:pre-boundary-readiness-supersession:v1",
+  "superseded": {
+    "probability_pipeline_readiness": {
+      "artifact_sha256": "43e87a8fa7297e484abc9b57d27f92c000e0f3dca7213274b731ecde5b5a7e45",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/superseded/probability-pipeline-readiness-v1-fresh-refit-before-exact-registry-binding.json",
+      "locked_at_utc": "2026-08-02T09:27:31.114006+00:00",
+      "raw_sha256": "267fd467e5d171f6a060c9cad1b44422abbb1f2693aa5b2f5930c25372b7d794"
+    }
+  },
+  "supersession_id": "fresh-rating-refit-exact-phase-one-registry-binding-20260802"
+}

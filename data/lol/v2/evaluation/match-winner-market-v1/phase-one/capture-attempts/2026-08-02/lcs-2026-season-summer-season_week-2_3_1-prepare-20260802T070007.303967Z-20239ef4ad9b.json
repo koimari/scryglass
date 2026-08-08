@@ -1,0 +1,53 @@
+{
+  "artifact_sha256": "20239ef4ad9b42e4330cae7162fa95cfc40960910187db723c40fcd612a0f399",
+  "authority": {
+    "betting_authority": false,
+    "calibration_authority": false,
+    "draft_validation_authority": false,
+    "expected_value_authority": false,
+    "incremental_draft_authority": false,
+    "odds_authority": false,
+    "outcome_opening_authority": false,
+    "player_rating_authority": false,
+    "probability_authority": false,
+    "ratings_validation_authority": false,
+    "recommendation_authority": false,
+    "stake_authority": false,
+    "team_rating_authority": false,
+    "transaction_authority": false
+  },
+  "blockers": [
+    "PregameRosterError:teams must be ordered blue then red"
+  ],
+  "claim_ceiling": "Operational outcome-free capture audit only. Success creates evaluation candidates and failure creates no eligible evidence. Neither state grants rating, probability, odds, EV, recommendation, stake, transaction, or betting authority.",
+  "clock_attestation": {
+    "observed_wall_clock_utc": "2026-08-02T07:00:07.303967+00:00",
+    "source": "system_utc_clock_sampled_inside_builder",
+    "user_supplied_timestamp_allowed": false
+  },
+  "eligible_evaluation_evidence": false,
+  "event": {
+    "event_id": "LCS/2026 Season/Summer Season_Week 2_3_1",
+    "event_start_utc": "2026-08-02T20:00:00Z",
+    "game_number": 1,
+    "league": "LCS",
+    "series_id": "LCS/2026 Season/Summer Season_Week 2_3"
+  },
+  "implementation": {
+    "bytes": 40590,
+    "locator": "lol_kills/v2/market/prospective_capture_v1.py",
+    "raw_sha256": "d9847b54a0e096c7f4197f570c12336dcb504d3d9f1eac4d25c7c605b214fd32"
+  },
+  "input_digests": {
+    "patch_receipt_raw_sha256": "1f7e6ee16d478b4ef22a15cb8fb064666d5c340ff328f23c6280a1638190c99a",
+    "prepare_input_raw_sha256": "425ad7c39c9aa9a772f70b695cf79367adc2c10183ac34cc6dfa88111b11d547",
+    "roster_source_payload_raw_sha256": "36ad3afd39f4740c7950a0cfe98d991c22ded86ddfa62d7d53962a7fafd684d8"
+  },
+  "outcomes_accessed": false,
+  "outcomes_present": false,
+  "published_artifacts": [],
+  "recorded_at_utc": "2026-08-02T07:00:07.303967+00:00",
+  "schema_version": "scryglass:prospective-match-winner-capture-attempt:v1",
+  "stage": "prepare",
+  "status": "FAILED_CLOSED"
+}

@@ -1,0 +1,46 @@
+{
+  "schema_version": "scryglass:prospective-match-winner-capture-input:v1",
+  "event": {
+    "event_id": "LCS/2026 Season/Summer Season_Week 2_3_1",
+    "series_id": "LCS/2026 Season/Summer Season_Week 2_3",
+    "game_number": 1,
+    "event_start_utc": "2026-08-02T20:00:00Z",
+    "league": "LCS"
+  },
+  "roster_source": {
+    "source": "Leaguepedia revisions plus dated ProDiff interview",
+    "source_url": "https://prodiff.gg/p/armao-interview-august-2026",
+    "source_record_id": "lcs-2026-summer-week2-match3-roster-package-20260802T065850Z",
+    "source_updated_at_utc": "2026-08-01T00:00:00Z",
+    "available_at_utc": "2026-08-02T06:58:50Z",
+    "rights_status": "reviewed"
+  },
+  "teams": [
+    {
+      "side": "team1",
+      "organization_id": "oe:team:da1143bf9a245b78a8dc86417de85b3",
+      "organization_name": "LYON",
+      "roster_id": "lcs-2026-summer-lyon-armao-v1",
+      "players": [
+        {"role": "top", "player_id": "oe:player:5385f74da3e5deb5b66d9a1ee56cf97", "display_name": "Dhokla"},
+        {"role": "jungle", "player_id": "oe:player:a04a853a0f540f156d08711204fe252", "display_name": "Armao"},
+        {"role": "mid", "player_id": "oe:player:f45792335d83b10581da2f0cbdd6e8e", "display_name": "Saint"},
+        {"role": "bot", "player_id": "oe:player:460ae5a7af8d68f7831b70307210ab3", "display_name": "Berserker"},
+        {"role": "support", "player_id": "oe:player:40704dfd2d966862568d29770de57bd", "display_name": "Isles"}
+      ]
+    },
+    {
+      "side": "team2",
+      "organization_id": "oe:team:b360f1d729b0a8e0f29a5243c4200fa",
+      "organization_name": "Shopify Rebellion",
+      "roster_id": "lcs-2026-summer-shopify-zeyzal-v1",
+      "players": [
+        {"role": "top", "player_id": "oe:player:f02f1c8275084050765b4b6414bdfda", "display_name": "Fudge"},
+        {"role": "jungle", "player_id": "oe:player:8a5dbe19794784cfd0553556844f045", "display_name": "Contractz"},
+        {"role": "mid", "player_id": "oe:player:3648451fd5b8a8ab01e4bedf780c1d6", "display_name": "Zinie"},
+        {"role": "bot", "player_id": "oe:player:494fc60dffbb5da1caa2226baef0ec7", "display_name": "Bvoy"},
+        {"role": "support", "player_id": "oe:player:6841f2d68619d53bdd1cdbf30b5be2c", "display_name": "Zeyzal"}
+      ]
+    }
+  ]
+}

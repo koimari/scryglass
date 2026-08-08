@@ -1,0 +1,140 @@
+{
+  "captured_at": "2026-08-02T06:58:33Z",
+  "manifest_sha256": "9bc50439b6b3dcac8ff75cc7e3afd70816019442a28dc475a4266a3c114923f1",
+  "newest": "2026-08-03T20:00:00Z",
+  "oldest": "2025-07-28T20:00:00Z",
+  "page": "Data:LCS/2026 Season/Summer Season",
+  "pages": [
+    {
+      "payload_sha256": "7be31a9f4b4930f9fa6635995071efdcb4be2160832f000f1fff7125126cc80c",
+      "raw_file": "history/Data-LCS-2026-Season-Summer-Season/history-000.json",
+      "revision_count": 30,
+      "source_url": "https://lol.fandom.com/api.php?action=query&prop=revisions&titles=Data%3ALCS%2F2026+Season%2FSummer+Season&rvprop=ids%7Ctimestamp&rvlimit=max&rvstart=2026-08-03T20%3A00%3A00Z&rvend=2025-07-28T20%3A00%3A00Z&rvdir=older&format=json&formatversion=2"
+    }
+  ],
+  "resolved_title": "Data:LCS/2026 Season/Summer Season",
+  "revisions": [
+    {
+      "revision_id": 4474016,
+      "revision_timestamp": "2026-06-20T02:11:17Z"
+    },
+    {
+      "revision_id": 4474018,
+      "revision_timestamp": "2026-06-20T02:12:40Z"
+    },
+    {
+      "revision_id": 4474022,
+      "revision_timestamp": "2026-06-20T02:30:06Z"
+    },
+    {
+      "revision_id": 4474032,
+      "revision_timestamp": "2026-06-20T03:00:39Z"
+    },
+    {
+      "revision_id": 4494103,
+      "revision_timestamp": "2026-07-26T00:16:34Z"
+    },
+    {
+      "revision_id": 4494105,
+      "revision_timestamp": "2026-07-26T00:23:40Z"
+    },
+    {
+      "revision_id": 4494115,
+      "revision_timestamp": "2026-07-26T00:24:49Z"
+    },
+    {
+      "revision_id": 4494116,
+      "revision_timestamp": "2026-07-26T00:25:26Z"
+    },
+    {
+      "revision_id": 4494133,
+      "revision_timestamp": "2026-07-26T01:11:25Z"
+    },
+    {
+      "revision_id": 4494139,
+      "revision_timestamp": "2026-07-26T02:23:42Z"
+    },
+    {
+      "revision_id": 4494141,
+      "revision_timestamp": "2026-07-26T02:24:47Z"
+    },
+    {
+      "revision_id": 4494142,
+      "revision_timestamp": "2026-07-26T02:26:07Z"
+    },
+    {
+      "revision_id": 4494143,
+      "revision_timestamp": "2026-07-26T02:28:40Z"
+    },
+    {
+      "revision_id": 4494274,
+      "revision_timestamp": "2026-07-26T09:19:42Z"
+    },
+    {
+      "revision_id": 4494280,
+      "revision_timestamp": "2026-07-26T09:20:49Z"
+    },
+    {
+      "revision_id": 4494846,
+      "revision_timestamp": "2026-07-26T22:41:40Z"
+    },
+    {
+      "revision_id": 4494857,
+      "revision_timestamp": "2026-07-26T22:44:35Z"
+    },
+    {
+      "revision_id": 4494865,
+      "revision_timestamp": "2026-07-27T00:17:18Z"
+    },
+    {
+      "revision_id": 4494866,
+      "revision_timestamp": "2026-07-27T00:17:59Z"
+    },
+    {
+      "revision_id": 4494867,
+      "revision_timestamp": "2026-07-27T00:18:22Z"
+    },
+    {
+      "revision_id": 4494868,
+      "revision_timestamp": "2026-07-27T00:19:34Z"
+    },
+    {
+      "revision_id": 4494870,
+      "revision_timestamp": "2026-07-27T00:20:32Z"
+    },
+    {
+      "revision_id": 4494871,
+      "revision_timestamp": "2026-07-27T00:21:24Z"
+    },
+    {
+      "revision_id": 4494881,
+      "revision_timestamp": "2026-07-27T00:49:35Z"
+    },
+    {
+      "revision_id": 4499972,
+      "revision_timestamp": "2026-08-02T00:42:30Z"
+    },
+    {
+      "revision_id": 4499975,
+      "revision_timestamp": "2026-08-02T00:49:02Z"
+    },
+    {
+      "revision_id": 4499976,
+      "revision_timestamp": "2026-08-02T00:53:06Z"
+    },
+    {
+      "revision_id": 4500017,
+      "revision_timestamp": "2026-08-02T01:53:00Z"
+    },
+    {
+      "revision_id": 4500054,
+      "revision_timestamp": "2026-08-02T03:19:22Z"
+    },
+    {
+      "revision_id": 4500061,
+      "revision_timestamp": "2026-08-02T03:22:33Z"
+    }
+  ],
+  "schema_version": "scryglass:leaguepedia-patch-revisions:v1",
+  "status": "ok"
+}

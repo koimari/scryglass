@@ -1,0 +1,101 @@
+{
+  "adapter_contract": {
+    "adapter_id": "betano-br-pre-event-html-map-winner-v1",
+    "bookmaker_id": "betano-brazil",
+    "deterministic_exact_byte_replay_required": true,
+    "embedded_state_assignment": "window[\"initial_state\"]=",
+    "event_market_and_selection_suspension_must_be_absent_or_false": true,
+    "exact_two_participant_and_two_selection_bindings_required": true,
+    "map_winner_type": "TMPW",
+    "map_winner_type_id": 3185,
+    "market_close_at_least_five_seconds_after_response_required": true,
+    "market_type": "match_winner",
+    "settlement_rule_id": "betano-br-map-winner-shadow-v1",
+    "source_document": "public_pre_event_html_response_body",
+    "source_host": "www.betano.bet.br",
+    "source_locator": "lol_kills/v2/market/betano_br_quote_adapter_v1.py",
+    "source_sha256": "ef7d011b358c1604c3dde2a570ade988e3dadaaa60a8753f5e3fa90d4d60f2ef",
+    "supported_map_numbers": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ]
+  },
+  "artifact_sha256": "17bd5cb9f8c2031ed409317b19855bbf200e8254ad9cc19e7cf8af1995705334",
+  "authority": {
+    "betting_authority": false,
+    "expected_value_authority": false,
+    "probability_authority": false,
+    "quote_identity_authority": false,
+    "recommendation_authority": false,
+    "source_adapter_authority": false
+  },
+  "claim_ceiling": "Implemented and source-hashed Betano Brazil quote adapter candidate only. It is not an independent adapter registration, quote, phase-two opening, or betting authority.",
+  "clock_attestation": {
+    "observed_wall_clock_utc": "2026-08-02T03:12:24.833831+00:00",
+    "source": "system_utc_clock_sampled_inside_candidate_builder",
+    "user_supplied_timestamp_allowed": false
+  },
+  "decision_outputs": {
+    "edge": null,
+    "expected_value": null,
+    "fair_odds": null,
+    "probability": null,
+    "recommendation": null,
+    "stake": null
+  },
+  "live_capture": {
+    "first_phase_two_quote_created": false,
+    "quote_receipt_created_by_candidate_manifest": false,
+    "response_bytes_embedded_in_candidate_manifest": false
+  },
+  "locked_at_utc": "2026-08-02T03:12:24.833831+00:00",
+  "protocol_bindings": {
+    "generic_price_extraction_schema_version": "scryglass.private-bookmaker-price-extraction.v1",
+    "generic_quote_receipt_schema_version": "scryglass.private-bookmaker-quote.v2",
+    "market_protocol_artifact_sha256": "c0ef32affcd73b682ed2ea973bbad24aa51b6efa667bfdb419b65d668494376f",
+    "quote_capture_contract_sha256": "06dc090de7c93d2625bc78c3ba7163eafda598e3d14deaea3f325c829cb55c68",
+    "settlement_contract_sha256": "6f1e885f7d49ee27555bdad7babb9579c8ee9b5057951e728957d44dbe253405"
+  },
+  "registration": {
+    "independent_registry_locator": null,
+    "independent_registry_sha256": null,
+    "independent_reviewer": null,
+    "independently_registered": false
+  },
+  "result_state": "SOURCE_ADAPTER_IMPLEMENTED_NOT_INDEPENDENTLY_REGISTERED",
+  "schema_version": "scryglass:betano-br-quote-adapter-candidate:v1",
+  "source_lock": {
+    "bytes": 78838,
+    "locator": "lol_kills/v2/market/betano_br_quote_adapter_v1.py",
+    "raw_sha256": "ef7d011b358c1604c3dde2a570ade988e3dadaaa60a8753f5e3fa90d4d60f2ef"
+  },
+  "transport_contract": {
+    "authentication_permitted": false,
+    "bet_slip_or_price_click_permitted": false,
+    "browser_product": "Brave",
+    "credential_submission_permitted": false,
+    "exact_http_200_utf8_html_body_required": true,
+    "fresh_ephemeral_profile_required": true,
+    "generic_quote_builder_time_counts_as_transport_time": false,
+    "monotonic_duration_required": true,
+    "persisted_response_material": [
+      "final_url",
+      "http_status",
+      "content_type",
+      "response_body_bytes",
+      "response_body_sha256",
+      "response_body_base64"
+    ],
+    "playwright_cli_package": "@playwright/cli",
+    "playwright_cli_version": "0.1.17",
+    "prediction_must_precede_request": true,
+    "prediction_to_response_seconds_maximum": 30.0,
+    "redirect_permitted": false,
+    "request_headers_cookies_credentials_persisted": false,
+    "system_utc_before_and_after_fetch_required": true,
+    "transport_id": "betano-br-public-brave-playwright-v1"
+  }
+}

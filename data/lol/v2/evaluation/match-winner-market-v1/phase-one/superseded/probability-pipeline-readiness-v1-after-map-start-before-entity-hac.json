@@ -1,0 +1,254 @@
+{
+  "artifact_sha256": "b5eeaa24a74b4434e83de6587471d09ca8e656691d078c4968dfd57f5e39b4a8",
+  "authority": {
+    "betting_authority": false,
+    "expected_value_authority": false,
+    "odds_authority": false,
+    "phase_one_outcome_opening_authority": false,
+    "phase_two_opening_authority": false,
+    "probability_authority": false,
+    "recalibration_identity_authority": false,
+    "recommendation_authority": false,
+    "uncertainty_identity_authority": false
+  },
+  "claim_ceiling": "Pre-boundary implementation freeze only. No outcome was accessed and no fitted recalibration, uncertainty result, phase-two opening, probability, odds, expected value, recommendation, transaction, or betting authority is present.",
+  "clock_attestation": {
+    "lock_time_not_after_builder_observation": true,
+    "observed_wall_clock_utc": "2026-08-02T08:27:35.950873+00:00",
+    "source": "system_utc_clock_sampled_inside_builder",
+    "user_supplied_timestamp_allowed": false
+  },
+  "decision_outputs": {
+    "bet_recommendation": null,
+    "expected_value": null,
+    "fair_odds": null,
+    "match_probability": null,
+    "phase_one_model_pass": null,
+    "phase_two_opening_authority": null,
+    "recalibration_parameters": null,
+    "uncertainty_interval": null
+  },
+  "dependencies": {
+    "match_winner_future_protocol": {
+      "artifact_sha256": "c0ef32affcd73b682ed2ea973bbad24aa51b6efa667bfdb419b65d668494376f",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/future-protocol-v1.json",
+      "raw_sha256": "b82ff719c02cc3aac81009e57cad0f6d0417519e7d02147de7c8bd3d78d5437a",
+      "result_state": "TWO_STAGE_PROSPECTIVE_MARKET_PROTOCOL_LOCKED_EMPTY"
+    },
+    "phase_one_evaluation_readiness": {
+      "artifact_sha256": "340ed6f1a35420ad75a9e695aed1db28f6cd4849e206157d0da0341c5d5a8d48",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/evaluation-readiness-v1.json",
+      "raw_sha256": "aa15a391a1a6bf2a5e10c9d5c93bdf320b52ab1b742ff2ef510299b25aeb4b29",
+      "result_state": "ONE_TIME_PHASE_ONE_EVALUATION_IMPLEMENTATION_FROZEN_PRE_BOUNDARY"
+    }
+  },
+  "locked_at_utc": "2026-08-02T08:27:35.950873+00:00",
+  "locked_empty_state": {
+    "event_uncertainty_artifacts": 0,
+    "outcomes_accessed": false,
+    "phase_one_evaluation_outputs": 0,
+    "phase_one_evaluation_registry_present": false,
+    "phase_one_outcome_cohorts": 0,
+    "phase_two_opening_present": false,
+    "phase_two_started": false,
+    "recalibration_artifacts": 0,
+    "recalibration_uncertainty_registry_present": false
+  },
+  "probability_pipeline_contract": {
+    "builder_parameters": {
+      "build_event_uncertainty": [
+        "phase_one_result_locator",
+        "recalibration_artifact_locator",
+        "target_prediction_locator",
+        "workers",
+        "root",
+        "environment"
+      ],
+      "build_phase_one_recalibration": [
+        "phase_one_result_locator",
+        "root",
+        "environment",
+        "clock"
+      ],
+      "fit_bounded_recalibration": [
+        "probabilities",
+        "outcomes"
+      ],
+      "validate_event_uncertainty": [
+        "payload",
+        "root"
+      ],
+      "validate_phase_one_recalibration": [
+        "payload"
+      ]
+    },
+    "implementation_freeze_itself_authorizes_probability_or_betting": false,
+    "phase_one_pass_itself_authorizes_phase_two": false,
+    "post_pass_sequence": [
+      "independently_registered_phase_one_model_pass",
+      "fit_exact_bounded_recalibration_once",
+      "independently_register_recalibration_and_uncertainty_identity",
+      "independently_open_disjoint_phase_two",
+      "capture_event_specific_prediction_and_uncertainty_before_quote"
+    ],
+    "recalibration": {
+      "formula": "sigmoid(intercept+slope*logit(clipped_raw_probability))",
+      "initial_parameters": {
+        "intercept": 0.0,
+        "slope": 1.0
+      },
+      "intercept_bounds": [
+        -2.0,
+        2.0
+      ],
+      "maximum_iterations": 10000,
+      "method": "bounded_logistic_recalibration",
+      "objective": "unweighted_map_log_loss",
+      "optimizer": "scipy.optimize.minimize:L-BFGS-B",
+      "optimizer_ftol": 1e-12,
+      "optimizer_gtol": 1e-08,
+      "phase_two_refit_or_online_update_permitted": false,
+      "rating_only_comparator_recalibrated_by_identical_procedure": true,
+      "raw_probability_clip": [
+        1e-06,
+        0.999999
+      ],
+      "slope_bounds": [
+        0.25,
+        4.0
+      ]
+    },
+    "schemas": {
+      "event_full_pipeline_uncertainty": "scryglass:event-full-pipeline-uncertainty:v1",
+      "phase_one_recalibration": "scryglass:phase-one-bounded-recalibration:v1"
+    },
+    "uncertainty": {
+      "candidate_and_hyperparameters_fixed": true,
+      "confidence_level": 0.95,
+      "draft_development_resampling": "train_and_calibration_series_resampled_separately_with_replacement",
+      "draft_terms_refit_in_each_resample": true,
+      "failure_or_nonconvergence_action": "event_probability_unavailable",
+      "interval_is_epistemic_not_binary_outcome_guarantee": true,
+      "master_seed": 20260805,
+      "method": "series_cluster_bootstrap_full_prediction_pipeline",
+      "percentile_interval": [
+        0.025,
+        0.975
+      ],
+      "phase_one_recalibration_refit_in_each_resample": true,
+      "phase_one_recalibration_resampling": "series_with_replacement",
+      "phase_one_stored_predictions_used_for_recalibration_refit": true,
+      "ratings_development_resampling": "series_with_replacement_preserve_chronological_order",
+      "ratings_state_refit_in_each_resample": true,
+      "resamples": 2000,
+      "target_event_outcome_or_market_price_used": false,
+      "target_event_rating_and_draft_predictions_refit_in_each_resample": true
+    }
+  },
+  "result_state": "POST_PASS_RECALIBRATION_AND_FULL_PIPELINE_UNCERTAINTY_IMPLEMENTATION_FROZEN_PRE_BOUNDARY",
+  "runtime_identity": {
+    "numpy_version": "2.0.2",
+    "python_implementation": "CPython",
+    "python_version": "3.9.6",
+    "scipy_version": "1.13.1"
+  },
+  "schema_version": "scryglass:probability-pipeline-readiness:v1",
+  "source_locks": [
+    {
+      "bytes": 18791,
+      "locator": "lol_kills/v2/market/probability_pipeline_readiness_v1.py",
+      "raw_sha256": "462828901a9b1508c21ae164ebb4ce1d8f2c5b4d2bce0f7b975d351effd389a1"
+    },
+    {
+      "bytes": 2543,
+      "locator": "lol_kills/v2/market/phase_one_evaluation_readiness_registry_v1.py",
+      "raw_sha256": "2b694be77b1eea13806d55d8c32c066275ec5ba725f5d62a08008209ab0f1b87"
+    },
+    {
+      "bytes": 42520,
+      "locator": "lol_kills/v2/market/full_pipeline_uncertainty_v1.py",
+      "raw_sha256": "ab3fbd61c690b207d4bb6106138fc1224f546d12028ecb219afe676645a52fbb"
+    },
+    {
+      "bytes": 21076,
+      "locator": "lol_kills/v2/market/phase_one_recalibration_v1.py",
+      "raw_sha256": "ebbee0900968fde2e4b4b49f9e9351f6353d31ea5cc15979037e402ab43d89e5"
+    },
+    {
+      "bytes": 52585,
+      "locator": "lol_kills/v2/market/phase_one_evaluation_v1.py",
+      "raw_sha256": "94286341c1141343560ea1c57c81d781b9f07f01a67800d7242d570f9dc73c89"
+    },
+    {
+      "bytes": 9215,
+      "locator": "lol_kills/v2/market/phase_one_evaluation_registry_v1.py",
+      "raw_sha256": "b69ede605c4e3c13665caec3ecb6ff27d1d13fe373c607912a8768f73fdb356e"
+    },
+    {
+      "bytes": 3149,
+      "locator": "lol_kills/v2/market/match_winner_future_protocol_registry_v1.py",
+      "raw_sha256": "b0e323c58954d85bbafb152d99c1dd2b2f825981e58950083c816dd76a3fe7ee"
+    },
+    {
+      "bytes": 55640,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_prediction_ledger.py",
+      "raw_sha256": "c3d5843570aea6cbac0d0991c7244698de86fd43e2217eab3fdfb41d461ad707"
+    },
+    {
+      "bytes": 43974,
+      "locator": "lol_kills/v2/ratings/player/multileague_v2_runner.py",
+      "raw_sha256": "6d791bca445841c4f84bb0851ea5034f238b0cd2fbd4f5a056f134810cd14ac5"
+    },
+    {
+      "bytes": 35782,
+      "locator": "lol_kills/v2/ratings/player/multileague_development.py",
+      "raw_sha256": "6db6a684c87112262560439075960f7b3fc3fa6d41eb74bf00b56fba1be55cd8"
+    },
+    {
+      "bytes": 19382,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_preflight_v2.py",
+      "raw_sha256": "8e076db9c79b8cbf6a103bca42eda4ad2e0577733f15c9cf9d3f722204ef9dd6"
+    },
+    {
+      "bytes": 2483,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_registry_v3.py",
+      "raw_sha256": "982802784c550fad0a6e0a6beb90bff2fb99af7e53ad2d1e2f2c2c71eac0cdf4"
+    },
+    {
+      "bytes": 1910,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_source_registry_v2.py",
+      "raw_sha256": "2f98f4b6e4ab297cf4d08d979d95640e5b6523aa5eebc62b4fcc86b1fcd09251"
+    },
+    {
+      "bytes": 68732,
+      "locator": "lol_kills/v2/draft/terminal/future_prediction_ledger.py",
+      "raw_sha256": "ef881dca83cbf3138b4362a2e5c6d40f15f82adab6d7a165b0a86d1288127f64"
+    },
+    {
+      "bytes": 18162,
+      "locator": "lol_kills/v2/draft/terminal/development_artifact_v3.py",
+      "raw_sha256": "501d0e0857590821a3b79a08adbde39798af12b8bbefaa2f236355a62d550dd9"
+    },
+    {
+      "bytes": 36706,
+      "locator": "lol_kills/v2/draft/terminal/development_evaluation.py",
+      "raw_sha256": "586f215003ea1955d76d90c48bfff1cbc635352568e7f8bf2d1e83966c65cae8"
+    },
+    {
+      "bytes": 27788,
+      "locator": "lol_kills/v2/draft/terminal/development_evaluation_v2.py",
+      "raw_sha256": "15dc9fa46a055bd8c022d80c638908aa9755d542269b156643cecc97ce49c2a1"
+    },
+    {
+      "bytes": 14934,
+      "locator": "lol_kills/v2/draft/terminal/development_snapshot.py",
+      "raw_sha256": "2a3d12990591b77eb42fa65f99a419167199a42950e61d157a0cc40da5b48218"
+    },
+    {
+      "bytes": 39589,
+      "locator": "lol_kills/v2/draft/terminal/model.py",
+      "raw_sha256": "f2442bd0ed70f7454aecd174345f7c3547882e2b323f66c4f6b6f8518cfcb014"
+    }
+  ]
+}
+
