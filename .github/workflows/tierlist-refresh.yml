@@ -1,39 +1,63 @@
-name: Refresh development tier lists
+name: Refresh production Scryglass data
 
 on:
   workflow_dispatch:
-  # Optional weekly automation. Enable by uncommenting; the commit step below
-  # then runs on schedule with contents: write.
-  # schedule:
-  #   - cron: "0 6 * * 1"   # Mondays 06:00 UTC
+    inputs:
+      as_of:
+        description: "UTC source cutoff. Leave empty for now."
+        required: false
+        default: ""
+        type: string
+      window_start:
+        description: "Historical source start. The worker records 2025-01-01."
+        required: false
+        default: "2025-01-01T00:00:00Z"
+        type: string
+      live_window_start:
+        description: "Live catch-up start. The worker records 2026-07-18."
+        required: false
+        default: "2026-07-18T00:00:00Z"
+        type: string
+      source_mode:
+        description: "OE source mode for the descriptive bundle"
+        required: false
+        default: "oe_only"
+        type: choice
+        options:
+          - oe_only
+          - oe_plus_grid
 
 concurrency:
-  group: tierlist-refresh
+  group: tierlist-production-refresh
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+    env:
+      ORACLES_ELIXIR_API_KEY: ${{ secrets.ORACLES_ELIXIR_API_KEY }}
+      BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+      LIVE_BLOB_BASE_URL: ${{ secrets.LIVE_BLOB_BASE_URL }}
+      GRID_API_KEY: ${{ secrets.GRID_API_KEY }}
+      SCRYGLASS_LCC_REPO: ${{ github.workspace }}/league-combat-calculator
+
     steps:
-      - name: Check out the repository
+      - name: Check out Scryglass
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Restore the warehouse cache
-        uses: actions/cache/restore@v4
+      - name: Check out the pinned champion atom source
+        uses: actions/checkout@v4
         with:
-          path: |
-            data/lol/warehouse
-            data/lol/features
-            data/lol/models
-          key: scryglass-warehouse-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: |
-            scryglass-warehouse-${{ runner.os }}-
+          repository: koimari/league-combat-calculator
+          path: league-combat-calculator
+          token: ${{ secrets.LCC_REPO_TOKEN }}
+          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -44,23 +68,43 @@ jobs:
       - name: Install data dependencies
         run: python -m pip install -r requirements.txt gdown
 
-      - name: Restore the durable derived warehouse snapshot
+      - name: Refresh OE, atom bridge, ratings, and the tier bundle
+        env:
+          REFRESH_AS_OF: ${{ inputs.as_of }}
+          REFRESH_SOURCE_MODE: ${{ inputs.source_mode || 'oe_only' }}
         run: |
-          python3 -m lol_kills.export.warehouse_snapshot restore \
-            --pointer data/lol/warehouse_snapshot.json
-
-      - name: Regenerate the development tier-list cells and scope index
-        run: |
-          python3 -m lol_kills.v2.tierlists.scope_index --root .
-
-      - name: Commit the refreshed tier lists when they changed
-        run: |
-          if ! git diff --quiet -- data/lol/v2/tierlists apps/lol-atlas/public/v2/tierlists; then
-            git config user.name "scryglass-data-bot"
-            git config user.email "actions@users.noreply.github.com"
-            git add data/lol/v2/tierlists apps/lol-atlas/public/v2/tierlists
-            git commit -m "chore(data): refresh development tier lists [skip ci]"
-            git push
-          else
-            echo "tier-list artifacts unchanged; nothing to commit"
+          set -euo pipefail
+          as_of="$REFRESH_AS_OF"
+          if [ -z "$as_of" ]; then
+            as_of="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           fi
+          test -n "$ORACLES_ELIXIR_API_KEY" || (echo "ORACLES_ELIXIR_API_KEY is required" && exit 1)
+          test -n "$BLOB_READ_WRITE_TOKEN" || (echo "BLOB_READ_WRITE_TOKEN is required" && exit 1)
+          test -n "$LIVE_BLOB_BASE_URL" || (echo "LIVE_BLOB_BASE_URL is required" && exit 1)
+          python3 -m lol_kills.v2.tierlists.live_refresh \
+            --root . \
+            --expected-live-as-of "$as_of" \
+            --promote \
+            --source-mode "$REFRESH_SOURCE_MODE"
+
+      - name: Export and publish the current ratings pack
+        run: |
+          set -euo pipefail
+          pack_id="v$(date -u +%Y.%m.%d.%H%M)"
+          python3 -m lol_kills.export.public_pack \
+            --years 2025,2026 \
+            --pack-id "$pack_id"
+          python3 -m lol_kills.export.upload_pack \
+            --pack-root output/public_pack \
+            --pack-id "$pack_id"
+
+      - name: Upload refresh receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scryglass-refresh-receipts-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            data/lol/v2/tierlists/refresh-receipts/
+            data/lol/v2/tierlists/rating-refresh/rating-refresh-v1.json
+            data/lol/v2/tierlists/production-manifest-v1.json

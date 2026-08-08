@@ -19,7 +19,7 @@ Return the map winner first. Use one local scoring command and do not browse unl
 5. Run:
 
 ```bash
-/Users/river/scryglass/apps/lol-atlas/node_modules/.bin/tsx \
+/Users/river/scryglass/apps/scryglass/node_modules/.bin/tsx \
   /Users/river/.codex/skills/who-wins-this-game/scripts/who_wins_game.ts \
   --blue "CHAMP1,CHAMP2,CHAMP3,CHAMP4,CHAMP5" \
   --red "CHAMP1,CHAMP2,CHAMP3,CHAMP4,CHAMP5" \

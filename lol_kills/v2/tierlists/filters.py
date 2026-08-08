@@ -19,7 +19,7 @@ from .schema import (
 )
 
 DEFAULT_INDEX_PATH = Path("data/lol/v2/tierlists/index-v1.json")
-TIER_BUCKETS = ("S", "A", "B", "C", "D")
+TIER_BUCKETS = ("Z Blind", "Z Counter", "S Blind", "S Counter", "A", "B", "C", "D")
 
 
 def _raw_sha256(raw: bytes) -> str:
@@ -93,7 +93,11 @@ class TierListIndex:
             total = len(cell_rows)
             for rank, row in enumerate(cell_rows, start=1):
                 quantile = (rank - 1) / max(1, total)
-                bucket = TIER_BUCKETS[min(len(TIER_BUCKETS) - 1, int(quantile * len(TIER_BUCKETS)))]
+                fallback_buckets = ("A", "B", "C", "D")
+                bucket = row.get(
+                    "tier_bucket",
+                    fallback_buckets[min(len(fallback_buckets) - 1, int(quantile * len(fallback_buckets)))],
+                )
                 rows.append(
                     {
                         "scope_id": meta["artifact_id"],

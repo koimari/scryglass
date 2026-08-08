@@ -30,10 +30,15 @@ def build_maps_frame_from_team_games(team_games: pd.DataFrame) -> pd.DataFrame:
         frame = frame[frame["position"].astype(str).str.lower().eq("team")]
     if frame.empty or "teamname" not in frame.columns or "side" not in frame.columns:
         return pd.DataFrame()
-    game_column = "game_uid" if "game_uid" in frame.columns else "gameid"
-    if game_column not in frame.columns:
+    if "game_uid" not in frame.columns and "gameid" not in frame.columns:
         return pd.DataFrame()
-    frame["_game_uid"] = frame[game_column].astype(str)
+    if "game_uid" in frame.columns:
+        game_uid = frame["game_uid"].astype("string")
+        fallback = frame["gameid"].astype("string") if "gameid" in frame.columns else pd.Series("", index=frame.index, dtype="string")
+        frame["_game_uid"] = game_uid.where(game_uid.notna() & game_uid.str.strip().ne(""), fallback)
+    else:
+        frame["_game_uid"] = frame["gameid"].astype("string")
+    frame = frame[frame["_game_uid"].notna() & frame["_game_uid"].str.strip().ne("")]
     frame["_side"] = frame["side"].astype(str).str.title()
     frame = frame[frame["_side"].isin({"Blue", "Red"})]
     blue = frame[frame["_side"].eq("Blue")].drop_duplicates("_game_uid")

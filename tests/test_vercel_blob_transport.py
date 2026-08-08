@@ -119,6 +119,11 @@ def test_constructor_requires_explicit_credentials_and_redacts_token():
     assert "<redacted>" in repr(value)
 
 
+def test_constructor_accepts_mixed_case_store_id_in_token():
+    value = VercelBlobTransport("vercel_blob_rw_Store-AbC_secret", "store-abc")
+    assert value.store_id == "store-abc"
+
+
 @pytest.mark.parametrize(
     "store_id",
     [

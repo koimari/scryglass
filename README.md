@@ -8,7 +8,7 @@ match explorer, and head-to-head boards support the claims with reproducible Ora
 ## Public site
 
 ```bash
-cd apps/lol-atlas
+cd apps/scryglass
 npm install
 npm run dev
 ```

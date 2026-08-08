@@ -28,11 +28,11 @@ V2 is isolated until promotion:
 lol_kills/v2/
 data/lol/v2/
 tests/model_v2/
-apps/lol-atlas/src/model-v2/
-apps/lol-atlas/src/app/api/v2/
-apps/lol-atlas/src/app/(model-v2)/
-apps/lol-atlas/src/components/model-v2/
-apps/lol-atlas/data/model-v2/
+apps/scryglass/src/model-v2/
+apps/scryglass/src/app/api/v2/
+apps/scryglass/src/app/(model-v2)/
+apps/scryglass/src/components/model-v2/
+apps/scryglass/data/model-v2/
 ```
 
 Existing v1 files are read-only baselines until the migration checkpoint.
@@ -334,9 +334,9 @@ is zero while counterability remains descriptive.
 **Owns:**
 
 - `lol_kills/v2/registry/**`
-- `apps/lol-atlas/src/model-v2/**`
-- `apps/lol-atlas/src/app/api/v2/**`
-- `apps/lol-atlas/data/model-v2/**`
+- `apps/scryglass/src/model-v2/**`
+- `apps/scryglass/src/app/api/v2/**`
+- `apps/scryglass/data/model-v2/**`
 - `tests/model_v2/serving/**`
 
 **Inputs:** C3 interface freeze; L8/L9 final artifacts for integration.
@@ -381,8 +381,8 @@ promoted model.
 
 **Owns:**
 
-- `apps/lol-atlas/src/app/(model-v2)/**` excluding article/auth routes
-- `apps/lol-atlas/src/components/model-v2/**` excluding article/auth components
+- `apps/scryglass/src/app/(model-v2)/**` excluding article/auth routes
+- `apps/scryglass/src/components/model-v2/**` excluding article/auth components
 - `tests/model_v2/ui/**`
 
 **Inputs:** version-pinned L10 candidate APIs with a passing sealed decision.

@@ -14,7 +14,6 @@ import json
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from collections import defaultdict
 
 import pandas as pd
 
@@ -104,8 +103,15 @@ def _lineups_by_game(players: pd.DataFrame) -> dict[str, dict[str, list[tuple[st
     if players is None or players.empty or "playername" not in players.columns:
         return {}
     p = players.copy()
-    gcol = "game_uid" if "game_uid" in p.columns else "gameid"
-    p["_gid"] = p[gcol].astype(str)
+    if "game_uid" in p.columns:
+        game_uid = p["game_uid"].astype("string")
+        fallback = p["gameid"].astype("string") if "gameid" in p.columns else pd.Series("", index=p.index, dtype="string")
+        p["_gid"] = game_uid.where(game_uid.notna() & game_uid.str.strip().ne(""), fallback)
+    elif "gameid" in p.columns:
+        p["_gid"] = p["gameid"].astype("string")
+    else:
+        return {}
+    p = p[p["_gid"].notna() & p["_gid"].str.strip().ne("")]
     p["side"] = p["side"].astype(str).str.title()
     p["position"] = p.get("position", pd.Series("unk", index=p.index)).astype(str)
     pos = p["position"].str.lower()
@@ -198,7 +204,9 @@ def _run_player_elo(
 
     # Apply the same source-preserving competition taxonomy as team ratings so
     # player regional/meta updates cannot drift from the public team contract.
-    df = canonicalize_competition_frame(maps).sort_values("date").copy().reset_index(drop=True)
+    df = canonicalize_competition_frame(maps).copy()
+    df["date"] = pd.to_datetime(df.get("date"), errors="coerce", utc=True).dt.tz_localize(None)
+    df = df.sort_values("date").reset_index(drop=True)
     df["game_uid"] = df["game_uid"].astype(str)
     lineups = _lineups_by_game(players)
     states: dict[str, PlayerState] = {}
@@ -372,11 +380,11 @@ def build_player_weekly_ranks(
     week_start = _sunday_utc(as_of)
     previous_start = week_start - pd.Timedelta(days=7)
     frame = maps.copy()
-    frame["date"] = pd.to_datetime(frame.get("date"), errors="coerce")
+    frame["date"] = pd.to_datetime(frame.get("date"), errors="coerce", utc=True).dt.tz_localize(None)
+    cutoff = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp.now(tz="UTC")
+    if cutoff.tzinfo is not None:
+        cutoff = cutoff.tz_convert("UTC").tz_localize(None)
     if as_of is not None:
-        cutoff = pd.Timestamp(as_of)
-        if cutoff.tzinfo is not None:
-            cutoff = cutoff.tz_convert("UTC").tz_localize(None)
         frame = frame[frame["date"].le(cutoff)]
 
     _, states, checkpoints = _run_player_elo(
@@ -436,6 +444,7 @@ def build_player_weekly_ranks(
     return {
         "as_of": f"{week_start.isoformat()}Z",
         "previous_as_of": f"{previous_start.isoformat()}Z",
+        "current_through": f"{cutoff.isoformat()}Z",
         "min_games": int(min_games),
         "by_player": by_player,
         "note": "Rank movement compares adjusted player Elo at Sunday 00:00 UTC snapshots; positive delta means a climb.",
@@ -445,8 +454,15 @@ def build_player_weekly_ranks(
 def build_maps_frame_from_players(players: pd.DataFrame) -> pd.DataFrame:
     """One map row per OE game_uid from player rows (full history, not warehouse-filtered)."""
     pl = players.copy()
-    gcol = "game_uid" if "game_uid" in pl.columns else "gameid"
-    pl["_gid"] = pl[gcol].astype(str)
+    if "game_uid" in pl.columns:
+        game_uid = pl["game_uid"].astype("string")
+        fallback = pl["gameid"].astype("string") if "gameid" in pl.columns else pd.Series("", index=pl.index, dtype="string")
+        pl["_gid"] = game_uid.where(game_uid.notna() & game_uid.str.strip().ne(""), fallback)
+    elif "gameid" in pl.columns:
+        pl["_gid"] = pl["gameid"].astype("string")
+    else:
+        return pd.DataFrame()
+    pl = pl[pl["_gid"].notna() & pl["_gid"].str.strip().ne("")]
     pl["side"] = pl["side"].astype(str).str.title()
     pl["position"] = pl.get("position", pd.Series("", index=pl.index)).astype(str).str.lower()
     pl = pl[pl["position"] != "team"]
@@ -461,7 +477,7 @@ def build_maps_frame_from_players(players: pd.DataFrame) -> pd.DataFrame:
         how="inner",
     )
     m["y_blue_win"] = pd.to_numeric(m["y_blue_win"], errors="coerce")
-    m["date"] = pd.to_datetime(m["date"], errors="coerce")
+    m["date"] = pd.to_datetime(m["date"], errors="coerce", utc=True).dt.tz_localize(None)
     return m.dropna(subset=["date", "y_blue_win"]).sort_values("date").reset_index(drop=True)
 
 

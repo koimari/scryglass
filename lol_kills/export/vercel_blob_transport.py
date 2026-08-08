@@ -297,7 +297,10 @@ class VercelBlobTransport:
         if not separator or not secret:
             raise ValueError("token must be an exact Vercel Blob read-write token")
         try:
-            return cls._normalize_store_id(token_store)
+            # Vercel tokens can preserve mixed-case store IDs. Public Blob
+            # hostnames use the lowercase form, so normalize only the token
+            # identity before the existing hostname-safe validation.
+            return cls._normalize_store_id(token_store.casefold())
         except ValueError as error:
             raise ValueError("token contains a malformed store identity") from error
 

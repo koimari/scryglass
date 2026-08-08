@@ -28,11 +28,17 @@ from lol_kills.export.pack_records import (
 )
 from lol_kills.export.player_metadata import build_player_metadata
 from lol_kills.etl.competition import TAXONOMY_VERSION, canonicalize_competition_frame
-from lol_kills.ratings.hierarchical_bt import fit_hierarchical_bt
-from lol_kills.ratings.player_elo import build_maps_frame_from_players, build_player_weekly_ranks
+from lol_kills.ratings.dual_elo import build_dual_ratings, lineup_hashes_from_players
+from lol_kills.ratings.hierarchical_bt import build_team_weekly_ranks, fit_hierarchical_bt
+from lol_kills.ratings.player_elo import (
+    build_maps_frame_from_players,
+    build_player_ratings,
+    build_player_weekly_ranks,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 WAREHOUSE = ROOT / "data" / "lol" / "warehouse" / "parquet"
+LIVE_WAREHOUSE = WAREHOUSE / "oe_live"
 FEATURES = ROOT / "data" / "lol" / "features"
 MODELS = ROOT / "data" / "lol" / "models"
 TEAMS_JSON = ROOT / "web" / "composer" / "teams.json"
@@ -54,21 +60,60 @@ def _present(cols: Sequence[str], available: Iterable[str]) -> list[str]:
 
 def _filter_years(table: pa.Table, years: Sequence[int], year_cols: Sequence[str]) -> pa.Table:
     years_list = list(years)
-    mask = None
-    for col in year_cols:
-        if col not in table.column_names:
-            continue
-        arr = table[col]
-        # year may be int or string
-        try:
-            as_int = pc.cast(arr, pa.int64(), safe=False)
-        except Exception:
-            as_int = pc.cast(pc.utf8_to_int(pc.cast(arr, pa.string())), pa.int64(), safe=False)
-        m = pc.is_in(as_int, value_set=pa.array(years_list, type=pa.int64()))
-        mask = m if mask is None else pc.or_(mask, m)
-    if mask is None:
+    # The live OE overlay can carry both the original ``year`` and the
+    # normalized ``oe_year``.  They differ for a small API overlay.  Prefer
+    # the normalized source year instead of widening the map set with OR.
+    available = set(table.column_names)
+    col = "oe_year" if "oe_year" in available else next(
+        (value for value in year_cols if value in available),
+        None,
+    )
+    if col is None:
         return table
+    arr = table[col]
+    try:
+        as_int = pc.cast(arr, pa.int64(), safe=False)
+    except Exception:
+        as_int = pc.cast(pc.utf8_to_int(pc.cast(arr, pa.string())), pa.int64(), safe=False)
+    mask = pc.is_in(as_int, value_set=pa.array(years_list, type=pa.int64()))
     return table.filter(mask)
+
+
+def _ensure_year_column(table: pa.Table) -> pa.Table:
+    """Add a UTC-derived year when a live map overlay has no source year."""
+    if "year" in table.column_names or "oe_year" in table.column_names:
+        return table
+    if "date" not in table.column_names:
+        return table
+    frame = table.to_pandas()
+    dates = pd.to_datetime(frame["date"], utc=True, errors="coerce")
+    frame["year"] = dates.dt.year.astype("Int64")
+    return pa.Table.from_pandas(frame, preserve_index=False)
+
+
+def _normalized_game_uid(frame: pd.DataFrame) -> pd.Series:
+    """Use the source game UID and fall back to the OE game ID per row."""
+    if "game_uid" not in frame.columns and "gameid" not in frame.columns:
+        raise ValueError("rating source has no game identity column")
+    if "game_uid" in frame.columns:
+        game_uid = frame["game_uid"].astype("string")
+        fallback = (
+            frame["gameid"].astype("string")
+            if "gameid" in frame.columns
+            else pd.Series("", index=frame.index, dtype="string")
+        )
+        value = game_uid.where(game_uid.notna() & game_uid.str.strip().ne(""), fallback)
+    else:
+        value = frame["gameid"].astype("string")
+    return value.where(value.notna() & value.str.strip().ne(""), pd.NA)
+
+
+def _source_file_meta(path: Path) -> dict[str, Any]:
+    return {
+        "locator": path.name,
+        "bytes": int(path.stat().st_size),
+        "sha256": _sha256(path),
+    }
 
 
 def _write_parquet(table: pa.Table, path: Path) -> dict[str, Any]:
@@ -108,8 +153,16 @@ def export_public_pack(
     years: Sequence[int] | None = None,
     out_root: Path | None = None,
     pack_id: str | None = None,
+    warehouse_root: Path | None = None,
 ) -> dict[str, Any]:
     years = tuple(years or spec.DEFAULT_YEARS)
+    warehouse = Path(
+        warehouse_root
+        if warehouse_root is not None
+        else LIVE_WAREHOUSE
+        if (LIVE_WAREHOUSE / "meta.json").exists()
+        else WAREHOUSE
+    )
     # Include UTC time so the 15-minute freshness workflow can publish more
     # than one immutable pack per day without colliding in Blob storage.
     stamp = datetime.now(timezone.utc).strftime("%Y.%m.%d.%H%M")
@@ -129,12 +182,13 @@ def export_public_pack(
         files_meta.append(meta)
 
     # --- team games (partition by year) ---
-    team_path = WAREHOUSE / "oe_team_games.parquet"
-    team = pq.read_table(team_path)
-    team = pa.Table.from_pandas(canonicalize_competition_frame(team.to_pandas()), preserve_index=False)
-    team_cols = _present(spec.TEAM_COLS, team.column_names)
-    team = team.select(team_cols)
-    team = _filter_years(team, years, ("year", "oe_year"))
+    team_path = warehouse / "oe_team_games.parquet"
+    team_source = canonicalize_competition_frame(pq.read_table(team_path).to_pandas())
+    team_table = pa.Table.from_pandas(team_source, preserve_index=False)
+    team_table = _filter_years(team_table, years, ("year", "oe_year"))
+    team_rating_frame = team_table.to_pandas()
+    team_cols = _present(spec.TEAM_COLS, team_table.column_names)
+    team = team_table.select(team_cols)
     for y in years:
         part = team
         if "year" in team.column_names:
@@ -145,16 +199,17 @@ def export_public_pack(
         if part.num_rows == 0:
             continue
         register(_write_parquet(part, dest), f"team_games/year={y}/part.parquet")
-    team_for_records = team.to_pandas()
+    team_for_records = team_rating_frame
     team_maps_for_ratings = build_maps_frame_from_team_games(team_for_records)
 
     # --- player games ---
-    player_path = WAREHOUSE / "oe_player_games.parquet"
-    player = pq.read_table(player_path)
-    player = pa.Table.from_pandas(canonicalize_competition_frame(player.to_pandas()), preserve_index=False)
-    player_cols = _present(spec.PLAYER_COLS, player.column_names)
-    player = player.select(player_cols)
-    player = _filter_years(player, years, ("year", "oe_year"))
+    player_path = warehouse / "oe_player_games.parquet"
+    player_source = canonicalize_competition_frame(pq.read_table(player_path).to_pandas())
+    player_table = pa.Table.from_pandas(player_source, preserve_index=False)
+    player_table = _filter_years(player_table, years, ("year", "oe_year"))
+    player_rating_frame = player_table.to_pandas()
+    player_cols = _present(spec.PLAYER_COLS, player_table.column_names)
+    player = player_table.select(player_cols)
     for y in years:
         if "year" in player.column_names:
             part = player.filter(pc.equal(pc.cast(player["year"], pa.int64(), safe=False), y))
@@ -166,22 +221,62 @@ def export_public_pack(
         register(_write_parquet(part, dest), f"player_games/year={y}/part.parquet")
 
     # --- maps ---
-    maps_path = WAREHOUSE / "maps.parquet"
+    maps_path = warehouse / "maps.parquet"
     maps = pq.read_table(maps_path)
     # Re-apply the canonical map contract at export time as a safety net for
     # packs built from an older local warehouse refresh.
     maps = pa.Table.from_pandas(canonicalize_competition_frame(maps.to_pandas()), preserve_index=False)
+    maps = _ensure_year_column(maps)
     map_cols = spec.maps_columns(maps.column_names)
     maps = maps.select(map_cols)
     maps = _filter_years(maps, years, ("year", "oe_year"))
     maps_for_records = maps.to_pandas()
+    source_as_of = pd.to_datetime(maps_for_records["date"], utc=True, errors="coerce").max()
+    if pd.isna(source_as_of):
+        raise RuntimeError("public pack source has no usable map dates")
     # The feature-oriented maps table intentionally covers the major/public
     # event slice.  Team ladders need the full OE team-game population so
     # Tier 2 and Tier 3 organizations receive both records and estimates.
-    rating_input = team_maps_for_ratings if not team_maps_for_ratings.empty else maps_for_records
-    public_ratings, public_ratings_meta = fit_hierarchical_bt(rating_input, write=False)
+    live_source = (warehouse / "meta.json").exists()
+    rating_input = (
+        maps_for_records
+        if live_source
+        else team_maps_for_ratings if not team_maps_for_ratings.empty else maps_for_records
+    )
+    player_maps_for_ratings = build_maps_frame_from_players(player_rating_frame)
+    if player_maps_for_ratings.empty:
+        raise RuntimeError("public pack rating source has no complete player maps")
+    if (warehouse / "meta.json").exists():
+        map_ids = set(maps_for_records["game_uid"].dropna().astype(str))
+        team_ids = set(team_maps_for_ratings["game_uid"].dropna().astype(str))
+        player_ids = set(player_maps_for_ratings["game_uid"].dropna().astype(str))
+        if team_ids != map_ids or player_ids != map_ids:
+            raise RuntimeError(
+                "OE live public pack inputs do not share the deduplicated map set; "
+                f"maps={len(map_ids)} team={len(team_ids)} player={len(player_ids)}"
+            )
+    lineup_frame = player_rating_frame.copy()
+    lineup_frame["game_uid"] = _normalized_game_uid(lineup_frame)
+    if lineup_frame["game_uid"].isna().any():
+        raise RuntimeError("public pack rating source has rows without a game identity")
+    build_dual_ratings(
+        rating_input,
+        lineup_by_game=lineup_hashes_from_players(lineup_frame),
+    )
+    build_player_ratings(player_maps_for_ratings, player_rating_frame)
+    public_ratings, public_ratings_meta = fit_hierarchical_bt(rating_input, write=True)
     public_ratings_meta["pack_years"] = list(years)
     public_ratings_meta["rating_window"] = "full canonical OE team-game window as this pack"
+    public_ratings_meta["source_as_of"] = source_as_of.isoformat().replace("+00:00", "Z")
+    public_ratings_meta["source_mode"] = "oe_live" if live_source else "warehouse"
+    (FEATURES / "ratings_meta.json").write_text(
+        json.dumps(public_ratings_meta, indent=2),
+        encoding="utf-8",
+    )
+    (FEATURES / "ratings_hierarchical_meta.json").write_text(
+        json.dumps(public_ratings_meta, indent=2),
+        encoding="utf-8",
+    )
     for y in years:
         if "year" in maps.column_names:
             part = maps.filter(pc.equal(pc.cast(maps["year"], pa.int64(), safe=False), y))
@@ -200,12 +295,37 @@ def export_public_pack(
     player_records_payload = build_player_records(player_frame)
     team_records_payload = build_team_records(rating_input)
 
+    team_weekly_ranks = build_team_weekly_ranks(
+        rating_input,
+        as_of=source_as_of,
+        min_series=5,
+    )
+    team_weekly_dest = feat_dir / "team_weekly_ranks.json"
+    team_weekly_dest.write_text(json.dumps(team_weekly_ranks, indent=2), encoding="utf-8")
+    register(
+        {
+            "rows": len(team_weekly_ranks.get("by_team", {})),
+            "cols": None,
+            "bytes": team_weekly_dest.stat().st_size,
+            "sha256": _sha256(team_weekly_dest),
+            "columns": None,
+        },
+        "features/team_weekly_ranks.json",
+    )
+
     weekly_ranks = build_player_weekly_ranks(
-        build_maps_frame_from_players(player_frame),
-        player_frame,
-        as_of=pd.Timestamp.now(tz="UTC"),
+        player_maps_for_ratings,
+        player_rating_frame,
+        as_of=pd.to_datetime(maps_for_records["date"], utc=True, errors="coerce").max(),
         min_games=20,
     )
+    player_meta_path = FEATURES / "player_ratings_meta.json"
+    if player_meta_path.exists():
+        player_meta = json.loads(player_meta_path.read_text(encoding="utf-8"))
+        player_meta["source_as_of"] = source_as_of.isoformat().replace("+00:00", "Z")
+        player_meta["source_mode"] = "oe_live" if live_source else "warehouse"
+        player_meta["window_years"] = list(years)
+        player_meta_path.write_text(json.dumps(player_meta, indent=2), encoding="utf-8")
     weekly_dest = feat_dir / "player_weekly_ranks.json"
     weekly_dest.write_text(json.dumps(weekly_ranks, indent=2), encoding="utf-8")
     register(
@@ -295,6 +415,7 @@ def export_public_pack(
 
     # --- features history year-filtered via maps game_uid ---
     maps_all = pq.read_table(maps_path)
+    maps_all = _ensure_year_column(maps_all)
     maps_all = maps_all.select(spec.maps_columns(maps_all.column_names))
     maps_all = _filter_years(maps_all, years, ("year", "oe_year"))
 
@@ -478,16 +599,42 @@ def export_public_pack(
         encoding="utf-8",
     )
 
-    oe_meta = WAREHOUSE / "oe_meta.json"
-    refresh_meta = WAREHOUSE / "refresh_meta.json"
+    oe_meta = warehouse / "oe_meta.json"
+    refresh_meta = warehouse / "refresh_meta.json"
     ingest = {}
-    grid_meta = WAREHOUSE / "grid_meta.json"
-    for p in (oe_meta, refresh_meta, grid_meta):
+    grid_meta = warehouse / "grid_meta.json"
+    live_meta = warehouse / "meta.json"
+    for p in (live_meta, oe_meta, refresh_meta, grid_meta):
         if p.exists():
             try:
-                ingest[p.stem] = json.loads(p.read_text())
+                key = "oe_live_meta" if p == live_meta else p.stem
+                ingest[key] = json.loads(p.read_text())
             except json.JSONDecodeError:
-                ingest[p.stem] = {"raw": p.read_text()[:500]}
+                key = "oe_live_meta" if p == live_meta else p.stem
+                ingest[key] = {"raw": p.read_text()[:500]}
+
+    rating_source_files = {
+        name: _source_file_meta(warehouse / name)
+        for name in ("maps.parquet", "oe_team_games.parquet", "oe_player_games.parquet")
+        if (warehouse / name).exists()
+    }
+    rating_artifact_paths = {
+        item["path"]: {
+            key: item[key]
+            for key in ("sha256", "bytes", "rows")
+            if key in item
+        }
+        for item in files_meta
+        if item["path"]
+        in {
+            "features/ratings_snapshot.parquet",
+            "features/ratings_snapshot.json",
+            "features/player_ratings_snapshot.parquet",
+            "features/player_ratings_snapshot.json",
+            "features/team_weekly_ranks.json",
+            "features/player_weekly_ranks.json",
+        }
+    }
 
     total_bytes = sum(f["bytes"] for f in files_meta)
     manifest: dict[str, Any] = {
@@ -531,6 +678,17 @@ def export_public_pack(
             }
         },
         "ingest": ingest,
+        "ratings": {
+            "source_mode": "oe_live" if live_meta.exists() else "warehouse",
+            "source_as_of": source_as_of.isoformat().replace("+00:00", "Z"),
+            "window_years": list(years),
+            "map_rows": int(len(maps_for_records)),
+            "team_rating_rows": int(len(rating_input)),
+            "player_rating_rows": int(len(player_rating_frame)),
+            "source_files": rating_source_files,
+            "artifacts": rating_artifact_paths,
+            "claim_ceiling": "Source-bound descriptive ratings and weekly rank movement only.",
+        },
         "base_url": None,  # filled by upload / atlas config
         "total_bytes": total_bytes,
         "total_files": len(files_meta),
@@ -555,9 +713,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--years", default="2025,2026", help="Comma-separated years (default 2025,2026)")
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT, help="Output root directory")
     ap.add_argument("--pack-id", default=None, help="Override pack id (default vYYYY.MM.DD)")
+    ap.add_argument("--warehouse-root", type=Path, default=None, help="Use a source-root overlay for live refreshes")
     args = ap.parse_args(argv)
     years = tuple(int(x.strip()) for x in args.years.split(",") if x.strip())
-    man = export_public_pack(years=years, out_root=args.out, pack_id=args.pack_id)
+    man = export_public_pack(
+        years=years,
+        out_root=args.out,
+        pack_id=args.pack_id,
+        warehouse_root=args.warehouse_root,
+    )
     mb = man["total_bytes"] / (1024 * 1024)
     print(f"Wrote pack {man['pack_id']} → {args.out / man['pack_id']}")
     print(f"Files: {man['total_files']}  Size: {mb:.1f} MB  schema={man['schema_version']}")

@@ -377,7 +377,7 @@ diff. “Looks right” is not evidence.
 - [ ] Commit, push, PR, migration, and deployment each have explicit user
       authorization.
 - [ ] Production root/settings remain compatible with the existing
-      `apps/lol-atlas` Vercel project.
+      `apps/scryglass` Vercel project.
 - [ ] Rollback manifest and previous registry pointer are recorded before
       deploy.
 

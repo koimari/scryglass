@@ -19,7 +19,7 @@ from lol_kills.export.upload_pack import _blob_put
 from lol_kills.live_model import LiveEvaluation, evaluate_live_state
 
 ROOT = Path(__file__).resolve().parents[1]
-PUBLIC_ROOT = ROOT / "apps" / "lol-atlas" / "public"
+PUBLIC_ROOT = ROOT / "apps" / "scryglass" / "public"
 DEFAULT_LOCAL_LIVE_ROOT = PUBLIC_ROOT / "live"
 SCHEMA_VERSION = "live.v1"
 

@@ -330,7 +330,7 @@ function compactActual(score: any): any {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const repo = path.resolve(args.repo ?? "/Users/river/scryglass");
-  const app = path.join(repo, "apps", "lol-atlas");
+  const app = path.join(repo, "apps", "scryglass");
   const scoreModule = path.join(app, "src", "lib", "draftScore.ts");
   const runtimePath = path.join(app, "data", "draft", "runtime.json");
   const blue = picks(args.blue, "blue");

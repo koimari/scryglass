@@ -1,0 +1,3 @@
+public/packs/*
+!public/packs/manifest.json
+!public/packs/latest.json

@@ -1,0 +1,1385 @@
+"""Build the descriptive champion-role Elo candidate for the tier API.
+
+The ladder starts with the complete 2025 source window and replays maps in
+time order. Each champion is rated against the opposing champion in the same
+role. The pre-map team Elo probability controls for team strength. A map
+updates the ladder only after its result is known.
+
+This module writes a development candidate. It does not create a production
+manifest or grant model authority. A separate worker can replay the same
+source, compare against the previous published artifact, and publish an
+immutable production pointer after the required reviews pass.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Mapping
+
+import pandas as pd
+import numpy as np
+from scipy.optimize import minimize
+from scipy.special import expit, ndtr
+
+from lol_kills.v2.champions.atoms.consume import AtomBridge
+
+SCHEMA_VERSION = "scryglass:champion-role-elo-candidate:v1"
+ARTIFACT_KIND = "tier_list_candidate"
+SOURCE_MODES = ("oe_only", "oe_plus_grid")
+DEFAULT_SOURCE_MODE = "oe_only"
+HISTORY_START = pd.Timestamp("2025-01-01T00:00:00Z")
+LIVE_WINDOW_START = pd.Timestamp("2026-07-18T00:00:00Z")
+ROLES = ("top", "jungle", "mid", "bot", "support")
+INTERNATIONAL_EVENTS = {"msi", "ewc", "worlds", "fst", "first stand"}
+TIER_BUCKETS = ("Z Blind", "Z Counter", "S Blind", "S Counter", "A", "B", "C", "D")
+SOURCE_LOCATOR = "data/lol/warehouse/parquet/oe_player_games.parquet"
+SUPPLEMENTAL_SOURCE_LOCATOR = "data/lol/warehouse/parquet/oe_api_player_games.parquet"
+SUPPLEMENTAL_META_LOCATOR = "data/lol/warehouse/parquet/oe_api_meta.json"
+IDENTITY_CROSSWALK_LOCATOR = "data/lol/v2/champions/champion-id-crosswalk-v1.json"
+IDENTITY_METADATA_LOCATOR = "data/lol/v2/champions/sources/riot-champion-metadata-16.14.1.json"
+ATOM_BRIDGE_LOCATOR = "data/lol/v2/champions/lcc-atom-bridge-v1.json"
+DEFAULT_OUTPUT = Path("data/lol/v2/tierlists/champion-elo-candidate-v1.json")
+DEFAULT_MIN_APPEARANCES = 1
+INITIAL_RATING = 1500.0
+CHAMPION_K = 12.0
+TEAM_K = 20.0
+RATING_TO_PP = 25.0 * math.log(10.0) / 400.0
+STRENGTH_PRIOR_SD = 0.75
+MATCHUP_PRIOR_SD = 0.35
+RECENCY_HALF_LIFE_DAYS = 120.0
+MATCHUP_MIN_EFFECTIVE_MAPS = 3.0
+MATCHUP_MIN_OPPONENTS = 5
+MATCHUP_MIN_SERIES = 3
+COUNTER_POSTERIOR_THRESHOLD = 0.80
+COUNTER_EFFECT_THRESHOLD_LOGIT = 0.05
+MATCHUP_MAX_POSTERIOR_SD = 0.90
+STRENGTH_MAX_CONTRAST_SD = 0.50
+LEGAL_OPPONENT_COUNT = 5
+BLIND_TAIL_SHARE = 0.20
+BLIND_CREDIBLE_Z = 1.2815515655446004
+POSTERIOR_DRAWS = 384
+TIER_MEMBERSHIP_PROBABILITY = 0.65
+
+
+class ChampionEloError(ValueError):
+    """Raised when the source cannot support a deterministic candidate."""
+
+
+@dataclass
+class ChampState:
+    rating: float = INITIAL_RATING
+    appearances: int = 0
+
+
+def _canonical_json(value: object) -> bytes:
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
+
+
+def _sha256_bytes(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _utc_stamp(value: pd.Timestamp) -> str:
+    stamp = pd.Timestamp(value)
+    if stamp.tzinfo is None:
+        stamp = stamp.tz_localize("UTC")
+    else:
+        stamp = stamp.tz_convert("UTC")
+    return stamp.isoformat().replace("+00:00", "Z")
+
+
+def _normalize_name(value: object) -> str:
+    return "".join(ch for ch in str(value).strip().casefold() if ch.isalnum())
+
+
+def _canonical_role(value: object) -> str | None:
+    token = str(value).strip().casefold()
+    return {
+        "top": "top",
+        "jng": "jungle",
+        "jungle": "jungle",
+        "mid": "mid",
+        "middle": "mid",
+        "bot": "bot",
+        "bottom": "bot",
+        "adc": "bot",
+        "sup": "support",
+        "support": "support",
+        "utility": "support",
+    }.get(token)
+
+
+def _side(value: object) -> str | None:
+    token = str(value).strip().casefold()
+    if token in {"blue", "1"}:
+        return "blue"
+    if token in {"red", "2"}:
+        return "red"
+    return None
+
+
+def _sigmoid(value: float) -> float:
+    return 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, value))))
+
+
+def _logit(value: float) -> float:
+    clipped = max(1e-6, min(1.0 - 1e-6, value))
+    return math.log(clipped / (1.0 - clipped))
+
+
+def _scope_for(league: str, competition_tier: str | None, event_kind: str | None) -> tuple[str, str, str | None]:
+    event = (event_kind or "").strip().casefold()
+    league_token = league.strip().upper()
+    if event in INTERNATIONAL_EVENTS or competition_tier == "international":
+        event_name = event.replace(" ", "_").upper() or league_token
+        return f"event:{event_name.lower()}", event_name, "international"
+    tier = competition_tier or "unknown"
+    return f"league:{league_token.lower()}:{tier}", league_token, tier
+
+
+def _load_crosswalk(root: Path) -> tuple[dict[str, str], dict[str, Any]]:
+    path = root / IDENTITY_CROSSWALK_LOCATOR
+    try:
+        crosswalk = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ChampionEloError(f"champion crosswalk cannot be read: {path}") from exc
+    out: dict[str, str] = {}
+    for entry in crosswalk.get("entries", []):
+        if not isinstance(entry, Mapping):
+            continue
+        stable = entry.get("stable_champion_id")
+        if not isinstance(stable, str):
+            continue
+        for name in (entry.get("oe_name"), entry.get("riot_display_name"), entry.get("normalized_oe_name")):
+            if isinstance(name, str) and name.strip():
+                out[_normalize_name(name)] = stable
+    identity_sources: dict[str, Any] = {
+        "crosswalk": {
+            "locator": IDENTITY_CROSSWALK_LOCATOR,
+            "raw_sha256": _sha256_path(path),
+            "coverage": crosswalk.get("coverage"),
+        }
+    }
+
+    # The frozen crosswalk covers the names in its original preflight. The
+    # refreshed warehouse can contain later observed names. Resolve those
+    # exact display names from the pinned Riot metadata vocabulary. This keeps
+    # the identity repair explicit and hash-bound without changing the older
+    # crosswalk artifact in place.
+    metadata_path = root / IDENTITY_METADATA_LOCATOR
+    supplemental: list[str] = []
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        metadata = None
+        identity_sources["metadata_error"] = f"{type(exc).__name__}: {exc}"
+    if isinstance(metadata, Mapping) and isinstance(metadata.get("data"), Mapping):
+        for entry in metadata["data"].values():
+            if not isinstance(entry, Mapping):
+                continue
+            name = entry.get("name")
+            numeric_id = entry.get("key")
+            if not isinstance(name, str) or not isinstance(numeric_id, str) or not numeric_id.isdecimal():
+                continue
+            key = _normalize_name(name)
+            stable = f"riot:champion:{int(numeric_id)}"
+            if key not in out:
+                out[key] = stable
+                supplemental.append(name)
+        identity_sources["metadata"] = {
+            "locator": IDENTITY_METADATA_LOCATOR,
+            "raw_sha256": _sha256_path(metadata_path),
+            "version": metadata.get("version"),
+            "supplemental_names": sorted(supplemental, key=_normalize_name),
+        }
+    else:
+        identity_sources["metadata"] = {
+            "locator": IDENTITY_METADATA_LOCATOR,
+            "present": False,
+            "supplemental_names": [],
+        }
+    return out, identity_sources
+
+
+def _load_source(root: Path, *, as_of: pd.Timestamp | None = None) -> tuple[pd.DataFrame, str]:
+    primary_path = root / SOURCE_LOCATOR
+    if not primary_path.is_file() or primary_path.is_symlink():
+        raise ChampionEloError(f"source is missing or not a regular file: {primary_path}")
+    needed = [
+        "gameid",
+        "date",
+        "league",
+        "competition_tier",
+        "event_kind",
+        "patch",
+        "position",
+        "champion",
+        "side",
+        "teamname",
+        "result",
+    ]
+    source_paths = [primary_path]
+    supplemental_path = root / SUPPLEMENTAL_SOURCE_LOCATOR
+    if supplemental_path.is_file() and not supplemental_path.is_symlink():
+        meta_path = root / SUPPLEMENTAL_META_LOCATOR
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            claimed_sha = meta["player_output"]["raw_sha256"]
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise ChampionEloError(
+                f"OE API supplement receipt cannot be read: {meta_path}"
+            ) from exc
+        if claimed_sha != _sha256_path(supplemental_path):
+            raise ChampionEloError("OE API supplement digest does not match its receipt")
+        source_paths.append(supplemental_path)
+    frames: list[pd.DataFrame] = []
+    source_bindings: list[dict[str, str]] = []
+    for path in source_paths:
+        try:
+            frames.append(pd.read_parquet(path, columns=needed))
+        except (OSError, KeyError, ValueError) as exc:
+            raise ChampionEloError(f"source columns cannot be read: {exc}") from exc
+        source_bindings.append(
+            {
+                "locator": str(path.relative_to(root)),
+                "raw_sha256": _sha256_path(path),
+            }
+        )
+    frame = pd.concat(frames, ignore_index=True, sort=False)
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce", utc=True)
+    frame["role"] = frame["position"].map(_canonical_role)
+    frame["side_norm"] = frame["side"].map(_side)
+    frame["result_num"] = pd.to_numeric(frame["result"], errors="coerce")
+    frame["league_norm"] = frame["league"].astype(str).str.strip().str.upper()
+    frame["competition_tier_norm"] = frame["competition_tier"].where(frame["competition_tier"].notna(), None)
+    frame["event_kind_norm"] = frame["event_kind"].astype(str).str.strip().str.casefold()
+    frame = frame[
+        frame["date"].notna()
+        & frame["date"].ge(HISTORY_START)
+        & frame["role"].isin(ROLES)
+        & frame["side_norm"].isin(("blue", "red"))
+        & frame["result_num"].isin((0, 1))
+        & frame["league_norm"].ne("")
+    ].copy()
+    if as_of is not None:
+        cutoff = pd.Timestamp(as_of)
+        if cutoff.tzinfo is None:
+            cutoff = cutoff.tz_localize("UTC")
+        else:
+            cutoff = cutoff.tz_convert("UTC")
+        frame = frame[frame["date"].le(cutoff)].copy()
+    if frame.empty:
+        raise ChampionEloError("source has no completed maps in the requested window")
+    frame["game_id"] = frame["gameid"].astype(str)
+    return frame, _sha256_bytes(_canonical_json(source_bindings))
+
+
+def _build_maps(frame: pd.DataFrame) -> tuple[list[dict[str, Any]], int]:
+    maps: list[dict[str, Any]] = []
+    rejected = 0
+    seen_signatures: set[tuple[Any, ...]] = set()
+    for game_id, group in frame.groupby("game_id", sort=False):
+        if group["date"].nunique() != 1:
+            rejected += 1
+            continue
+        blue = group[group["side_norm"] == "blue"]
+        red = group[group["side_norm"] == "red"]
+        roles: dict[str, dict[str, Any]] = {}
+        valid = True
+        for role in ROLES:
+            b = blue[blue["role"] == role]
+            r = red[red["role"] == role]
+            if len(b) != 1 or len(r) != 1:
+                valid = False
+                break
+            roles[role] = {
+                "blue_champion": str(b.iloc[0]["champion"]).strip(),
+                "red_champion": str(r.iloc[0]["champion"]).strip(),
+            }
+        if not valid:
+            rejected += 1
+            continue
+        first = group.iloc[0]
+        blue_result = blue[blue["role"] == "top"].iloc[0]["result_num"]
+        scope_id, scope_label, scope_tier = _scope_for(
+            str(first["league_norm"]),
+            None if pd.isna(first["competition_tier_norm"]) else str(first["competition_tier_norm"]),
+            None if pd.isna(first["event_kind_norm"]) else str(first["event_kind_norm"]),
+        )
+        map_record = {
+            "game_id": str(game_id),
+            "date": pd.Timestamp(first["date"]),
+            "league": str(first["league_norm"]),
+            "competition_tier": scope_tier,
+            "event_kind": None if scope_id.startswith("league:") else scope_label.casefold(),
+            "patch": str(first["patch"]).strip(),
+            "scope_id": scope_id,
+            "scope_label": scope_label,
+            "blue_team": str(blue.iloc[0]["teamname"]),
+            "red_team": str(red.iloc[0]["teamname"]),
+            "series_id": "|".join(
+                (
+                    str(first["league_norm"]),
+                    pd.Timestamp(first["date"]).strftime("%Y-%m-%d"),
+                    *sorted(
+                        (
+                            _normalize_name(str(blue.iloc[0]["teamname"])),
+                            _normalize_name(str(red.iloc[0]["teamname"])),
+                        )
+                    ),
+                )
+            ),
+            "y_blue_win": int(float(blue_result)),
+            "roles": roles,
+        }
+        signature = (
+            _utc_stamp(map_record["date"]),
+            map_record["league"],
+            _normalize_name(map_record["blue_team"]),
+            _normalize_name(map_record["red_team"]),
+            map_record["y_blue_win"],
+            tuple(
+                _normalize_name(map_record["roles"][role][side])
+                for role in ROLES
+                for side in ("blue_champion", "red_champion")
+            ),
+        )
+        if signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+        maps.append(map_record)
+    maps.sort(key=lambda row: (row["date"], row["game_id"]))
+    return maps, rejected
+
+
+def _lower_tail_mean(values: list[float], share: float) -> float:
+    ordered = sorted(values)
+    if not ordered:
+        return 0.5
+    count = max(1, math.ceil(len(ordered) * share))
+    return sum(ordered[:count]) / count
+
+
+def _fit_hierarchical_cell(
+    states: Mapping[str, ChampState],
+    observations: list[dict[str, Any]],
+    *,
+    min_appearances: int,
+    reference_date: pd.Timestamp,
+) -> list[dict[str, Any]]:
+    raise ChampionEloError(
+        "retired single-role tier fit cannot be used; call _fit_joint_scope"
+    )
+    champions = sorted(
+        (champion for champion, state in states.items() if state.appearances >= min_appearances),
+        key=_normalize_name,
+    )
+    if not champions:
+        return []
+    champion_index = {champion: index for index, champion in enumerate(champions)}
+    usable = [row for row in observations if row["blue"] in champion_index and row["red"] in champion_index]
+    pairs = sorted(
+        {tuple(sorted((row["blue"], row["red"]), key=_normalize_name)) for row in usable},
+        key=lambda pair: (_normalize_name(pair[0]), _normalize_name(pair[1])),
+    )
+    pair_index = {pair: index for index, pair in enumerate(pairs)}
+    n_champions = len(champions)
+    n_pairs = len(pairs)
+    blue = np.asarray([champion_index[row["blue"]] for row in usable], dtype=np.int64)
+    red = np.asarray([champion_index[row["red"]] for row in usable], dtype=np.int64)
+    pair_ids = np.asarray([
+        pair_index[tuple(sorted((row["blue"], row["red"]), key=_normalize_name))]
+        for row in usable
+    ], dtype=np.int64)
+    pair_sign = np.asarray([
+        1.0 if row["blue"] == pairs[pair_ids[index]][0] else -1.0
+        for index, row in enumerate(usable)
+    ])
+    outcome = np.asarray([float(row["outcome"]) for row in usable])
+    offset = np.asarray([float(row["team_logit"]) for row in usable])
+    age_days = np.asarray([
+        max(0.0, (reference_date - pd.Timestamp(row["date"])).total_seconds() / 86400.0)
+        for row in usable
+    ])
+    weight = np.power(0.5, age_days / RECENCY_HALF_LIFE_DAYS)
+    strength_precision = 1.0 / (STRENGTH_PRIOR_SD ** 2)
+    matchup_precision = 1.0 / (MATCHUP_PRIOR_SD ** 2)
+
+    def objective(parameters: np.ndarray) -> tuple[float, np.ndarray]:
+        strength = parameters[:n_champions]
+        matchup = parameters[n_champions:]
+        eta = offset + strength[blue] - strength[red] + pair_sign * matchup[pair_ids]
+        probability = expit(eta)
+        loss = float(np.sum(weight * (np.logaddexp(0.0, eta) - outcome * eta)))
+        loss += 0.5 * strength_precision * float(np.dot(strength, strength))
+        loss += 0.5 * matchup_precision * float(np.dot(matchup, matchup))
+        residual = weight * (probability - outcome)
+        gradient = np.zeros_like(parameters)
+        np.add.at(gradient, blue, residual)
+        np.add.at(gradient, red, -residual)
+        np.add.at(gradient, n_champions + pair_ids, pair_sign * residual)
+        gradient[:n_champions] += strength_precision * strength
+        gradient[n_champions:] += matchup_precision * matchup
+        return loss, gradient
+
+    fit = minimize(
+        objective,
+        np.zeros(n_champions + n_pairs, dtype=float),
+        method="L-BFGS-B",
+        jac=True,
+        options={"maxiter": 400, "ftol": 1e-11, "gtol": 1e-7},
+    )
+    if not fit.success:
+        raise ChampionEloError(f"hierarchical matchup fit failed: {fit.message}")
+    strength = fit.x[:n_champions]
+    matchup = fit.x[n_champions:]
+    eta = offset + strength[blue] - strength[red] + pair_sign * matchup[pair_ids]
+    information = weight * expit(eta) * (1.0 - expit(eta))
+    strength_info = np.full(n_champions, strength_precision)
+    matchup_info = np.full(n_pairs, matchup_precision)
+    np.add.at(strength_info, blue, information)
+    np.add.at(strength_info, red, information)
+    np.add.at(matchup_info, pair_ids, information)
+    strength_sd = 1.0 / np.sqrt(strength_info)
+    matchup_sd = 1.0 / np.sqrt(matchup_info)
+    effective_maps = np.zeros(n_pairs)
+    np.add.at(effective_maps, pair_ids, weight)
+
+    rows: list[dict[str, Any]] = []
+    for champion, champion_i in champion_index.items():
+        matchup_probabilities: list[float] = []
+        lower_bounds: list[float] = []
+        observed_opponents = 0
+        observed_maps = 0.0
+        countered = 0
+        for opponent, opponent_i in champion_index.items():
+            if opponent == champion:
+                continue
+            pair = tuple(sorted((champion, opponent), key=_normalize_name))
+            interaction_i = pair_index.get(pair)
+            if interaction_i is None:
+                interaction = 0.0
+                interaction_sd = MATCHUP_PRIOR_SD
+            else:
+                sign = 1.0 if champion == pair[0] else -1.0
+                interaction = sign * matchup[interaction_i]
+                interaction_sd = matchup_sd[interaction_i]
+                observed_opponents += 1
+                observed_maps += effective_maps[interaction_i]
+            theta = strength[champion_i] - strength[opponent_i] + interaction
+            theta_sd = math.sqrt(
+                strength_sd[champion_i] ** 2 + strength_sd[opponent_i] ** 2 + interaction_sd ** 2
+            )
+            matchup_probabilities.append(float(expit(theta)))
+            lower_bounds.append(float(expit(theta - BLIND_CREDIBLE_Z * theta_sd)))
+            if interaction_i is not None and float(ndtr(theta / theta_sd)) >= COUNTER_POSTERIOR_THRESHOLD:
+                countered += 1
+        strength_score = (
+            sum(matchup_probabilities) / len(matchup_probabilities)
+            if matchup_probabilities
+            else 0.5
+        )
+        blind_score = _lower_tail_mean(lower_bounds, BLIND_TAIL_SHARE)
+        available = observed_maps >= MATCHUP_MIN_EFFECTIVE_MAPS and observed_opponents >= MATCHUP_MIN_OPPONENTS
+        share = countered / observed_opponents if observed_opponents else 0.0
+        rows.append(
+            {
+                "champion": champion,
+                "rating": round(INITIAL_RATING + strength[champion_i] * 400.0 / math.log(10.0), 4),
+                "tier_value_pp": round(100.0 * (strength_score - 0.5), 4),
+                "strength_score": round(strength_score, 6),
+                "strength_sd_logit": round(float(strength_sd[champion_i]), 6),
+                "played_maps": states[champion].appearances,
+                "counterability_status": "available" if available else "unavailable",
+                "counterability": round(100.0 * (1.0 - blind_score), 4) if available else None,
+                "matchup_maps": round(observed_maps, 4),
+                "matchup_opponents": observed_opponents,
+                "blind_score_pp": round(100.0 * (blind_score - 0.5), 4) if available else None,
+                "counter_score": round(countered + share, 4) if available else None,
+                "countered_opponent_count": countered if available else None,
+                "countered_opponent_share": round(share, 4) if available else None,
+            }
+        )
+    rows.sort(key=lambda row: (-row["strength_score"], _normalize_name(row["champion"])))
+    for rank, row in enumerate(rows, start=1):
+        row["rank"] = rank
+    _assign_tier_buckets(rows)
+    return rows
+
+
+def _assign_tier_buckets(rows: list[dict[str, Any]]) -> None:
+    available = [row for row in rows if row["counterability_status"] == "available"]
+    assigned: dict[str, str] = {}
+
+    def take(label: str, ordered: list[dict[str, Any]], quota: int) -> None:
+        for row in ordered:
+            key = _normalize_name(row["champion"])
+            if key in assigned:
+                continue
+            assigned[key] = label
+            if sum(candidate == label for candidate in assigned.values()) >= quota:
+                return
+
+    if len(available) >= 4:
+        z_quota = 1
+        s_quota = max(1, min(math.ceil(len(available) * 0.20), (len(available) - 2) // 2))
+        blind_order = sorted(
+            available,
+            key=lambda row: (-float(row["blind_score_pp"]), -row["rating"], _normalize_name(row["champion"])),
+        )
+        counter_order = sorted(
+            [row for row in available if float(row["counter_score"]) > 0.0],
+            key=lambda row: (
+                -float(row["counter_score"]),
+                -int(row["countered_opponent_count"]),
+                -float(row["countered_opponent_share"]),
+                -row["rating"],
+                _normalize_name(row["champion"]),
+            ),
+        )
+        take("Z Counter", counter_order, z_quota)
+        take("Z Blind", blind_order, z_quota)
+        take("S Counter", counter_order, s_quota)
+        take("S Blind", blind_order, s_quota)
+
+    draw_count = min(
+        (
+            len(row.get("_blind_draws", ()))
+            for row in available
+            if row.get("_blind_draws") is not None
+        ),
+        default=0,
+    )
+    membership_counts = {key: 0 for key in assigned}
+    if assigned and draw_count:
+        for draw_index in range(draw_count):
+            draw_assignment: dict[str, str] = {}
+
+            def draw_take(label: str, ordered: list[dict[str, Any]], quota: int) -> None:
+                for row in ordered:
+                    key = _normalize_name(row["champion"])
+                    if key in draw_assignment:
+                        continue
+                    draw_assignment[key] = label
+                    if sum(candidate == label for candidate in draw_assignment.values()) >= quota:
+                        return
+
+            draw_blind = sorted(
+                available,
+                key=lambda row: (
+                    -float(row["_blind_draws"][draw_index]),
+                    -row["rating"],
+                    _normalize_name(row["champion"]),
+                ),
+            )
+            draw_counter = sorted(
+                available,
+                key=lambda row: (
+                    -float(row["_counter_draws"][draw_index]),
+                    -row["rating"],
+                    _normalize_name(row["champion"]),
+                ),
+            )
+            draw_take("Z Counter", draw_counter, z_quota)
+            draw_take("Z Blind", draw_blind, z_quota)
+            draw_take("S Counter", draw_counter, s_quota)
+            draw_take("S Blind", draw_blind, s_quota)
+            for key, label in assigned.items():
+                if draw_assignment.get(key) == label:
+                    membership_counts[key] += 1
+
+    stable_assigned: set[str] = set()
+    for row in rows:
+        key = _normalize_name(row["champion"])
+        label = assigned.get(key)
+        probability = membership_counts.get(key, draw_count) / draw_count if label and draw_count else (1.0 if label else None)
+        row["tier_membership_probability"] = None if probability is None else round(probability, 4)
+        if label and probability is not None and probability >= TIER_MEMBERSHIP_PROBABILITY:
+            row["tier_bucket"] = label
+            stable_assigned.add(key)
+        row.pop("_blind_draws", None)
+        row.pop("_counter_draws", None)
+
+    remaining = [row for row in rows if _normalize_name(row["champion"]) not in stable_assigned]
+    base_buckets = ("A", "B", "C", "D")
+    for index, row in enumerate(remaining):
+        row["tier_bucket"] = base_buckets[
+            min(len(base_buckets) - 1, index * len(base_buckets) // max(1, len(remaining)))
+        ]
+
+
+def _weighted_lower_tail(values: np.ndarray, weights: np.ndarray, share: float) -> float:
+    order = np.argsort(values)
+    remaining = share
+    total = 0.0
+    for index in order:
+        portion = min(remaining, float(weights[index]))
+        total += portion * float(values[index])
+        remaining -= portion
+        if remaining <= 1e-12:
+            break
+    return total / share
+
+
+def _weighted_lower_tail_rows(values: np.ndarray, weights: np.ndarray, share: float) -> np.ndarray:
+    order = np.argsort(values, axis=1)
+    sorted_values = np.take_along_axis(values, order, axis=1)
+    sorted_weights = weights[order]
+    prior_weight = np.cumsum(sorted_weights, axis=1) - sorted_weights
+    portions = np.minimum(sorted_weights, np.clip(share - prior_weight, 0.0, None))
+    return np.sum(portions * sorted_values, axis=1) / share
+
+
+def _fit_joint_scope(
+    states_by_role: Mapping[str, Mapping[str, ChampState]],
+    observations: list[dict[str, Any]],
+    *,
+    min_appearances: int,
+    reference_date: pd.Timestamp,
+    scope_id: str,
+) -> dict[str, dict[str, Any]]:
+    champions_by_role = {
+        role: sorted(
+            (champion for champion, state in states_by_role.get(role, {}).items() if state.appearances >= min_appearances),
+            key=_normalize_name,
+        )
+        for role in ROLES
+    }
+    parameter_keys = [
+        (role, champion)
+        for role in ROLES
+        for champion in champions_by_role[role]
+    ]
+    parameter_index = {key: index for index, key in enumerate(parameter_keys)}
+    usable = [
+        row for row in observations
+        if all(
+            (role, row["roles"][role][side]) in parameter_index
+            for role in ROLES
+            for side in ("blue_champion", "red_champion")
+        )
+    ]
+    if not usable:
+        return {role: {"rows": [], "legal_opponents": [], "design": {}} for role in ROLES}
+    n_maps = len(usable)
+    n_strength = len(parameter_keys)
+    side_index = n_strength
+    design = np.zeros((n_maps, n_strength + 1), dtype=float)
+    for map_index, row in enumerate(usable):
+        for role in ROLES:
+            design[map_index, parameter_index[(role, row["roles"][role]["blue_champion"])]] += 1.0
+            design[map_index, parameter_index[(role, row["roles"][role]["red_champion"])]] -= 1.0
+        design[map_index, side_index] = 1.0
+    outcome = np.asarray([float(row["outcome"]) for row in usable])
+    offset = np.asarray([float(row["team_logit"]) for row in usable])
+    age_days = np.asarray([
+        max(0.0, (reference_date - pd.Timestamp(row["date"])).total_seconds() / 86400.0)
+        for row in usable
+    ])
+    weight = np.power(0.5, age_days / RECENCY_HALF_LIFE_DAYS)
+    precision = np.full(n_strength + 1, 1.0 / (STRENGTH_PRIOR_SD ** 2))
+    precision[side_index] = 1.0 / (0.30 ** 2)
+
+    component_by_role_champion: dict[tuple[str, str], int] = {}
+    component_counts: dict[str, int] = {}
+    contrast_columns: list[np.ndarray] = []
+    for role in ROLES:
+        champions = champions_by_role[role]
+        adjacency = {champion: set() for champion in champions}
+        for row in usable:
+            blue_champion = row["roles"][role]["blue_champion"]
+            red_champion = row["roles"][role]["red_champion"]
+            adjacency[blue_champion].add(red_champion)
+            adjacency[red_champion].add(blue_champion)
+        components: list[list[str]] = []
+        remaining = set(champions)
+        while remaining:
+            seed = min(remaining, key=_normalize_name)
+            stack = [seed]
+            component: list[str] = []
+            remaining.remove(seed)
+            while stack:
+                champion = stack.pop()
+                component.append(champion)
+                for neighbor in sorted(adjacency[champion], key=_normalize_name, reverse=True):
+                    if neighbor in remaining:
+                        remaining.remove(neighbor)
+                        stack.append(neighbor)
+            components.append(sorted(component, key=_normalize_name))
+        component_counts[role] = len(components)
+        for component_id, component in enumerate(components):
+            indices = [parameter_index[(role, champion)] for champion in component]
+            for champion in component:
+                component_by_role_champion[(role, champion)] = component_id
+            if len(indices) < 2:
+                continue
+            raw_basis = np.zeros((len(indices), len(indices) - 1), dtype=float)
+            raw_basis[:-1, :] = np.eye(len(indices) - 1)
+            raw_basis[-1, :] = -1.0
+            orthonormal_basis, _ = np.linalg.qr(raw_basis, mode="reduced")
+            for local_column in range(orthonormal_basis.shape[1]):
+                column = np.zeros(n_strength + 1, dtype=float)
+                column[indices] = orthonormal_basis[:, local_column]
+                contrast_columns.append(column)
+    side_column = np.zeros(n_strength + 1, dtype=float)
+    side_column[side_index] = 1.0
+    contrast_columns.append(side_column)
+    contrast = np.column_stack(contrast_columns)
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        reduced_design = design @ contrast
+        reduced_precision = contrast.T @ (precision[:, None] * contrast)
+    if not np.all(np.isfinite(reduced_design)) or not np.all(np.isfinite(reduced_precision)):
+        raise ChampionEloError(f"identified contrast system is non-finite for {scope_id}")
+    reduced_parameter_count = contrast.shape[1]
+
+    def objective(parameters: np.ndarray) -> tuple[float, np.ndarray]:
+        with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+            eta = offset + reduced_design @ parameters
+            probability = expit(eta)
+            loss = float(np.sum(weight * (np.logaddexp(0.0, eta) - outcome * eta)))
+            loss += 0.5 * float(parameters @ reduced_precision @ parameters)
+            gradient = reduced_design.T @ (weight * (probability - outcome)) + reduced_precision @ parameters
+        if not math.isfinite(loss) or not np.all(np.isfinite(gradient)):
+            return float("inf"), np.zeros_like(parameters)
+        return loss, gradient
+
+    fit = minimize(
+        objective,
+        np.zeros(reduced_parameter_count, dtype=float),
+        method="L-BFGS-B",
+        jac=True,
+        bounds=[(-5.0, 5.0)] * (reduced_parameter_count - 1) + [(-2.0, 2.0)],
+        options={"maxiter": 500, "ftol": 1e-11, "gtol": 1e-7},
+    )
+    if not fit.success or not np.all(np.isfinite(fit.x)):
+        raise ChampionEloError(f"joint hierarchical strength fit failed for {scope_id}: {fit.message}")
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        eta = offset + reduced_design @ fit.x
+        information = weight * expit(eta) * (1.0 - expit(eta))
+        hessian = reduced_design.T @ (information[:, None] * reduced_design) + reduced_precision
+    if not np.all(np.isfinite(hessian)):
+        raise ChampionEloError(f"joint hierarchical Hessian is non-finite for {scope_id}")
+    reduced_covariance = np.linalg.inv(hessian)
+    reduced_covariance = 0.5 * (reduced_covariance + reduced_covariance.T)
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        full_mean = contrast @ fit.x
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        covariance = contrast @ reduced_covariance @ contrast.T
+    covariance = 0.5 * (covariance + covariance.T)
+    if not np.all(np.isfinite(full_mean)) or not np.all(np.isfinite(covariance)):
+        raise ChampionEloError(f"identified joint fit is non-finite for {scope_id}")
+    weighted_design = reduced_design * np.sqrt(weight)[:, None]
+    design_rank = int(np.linalg.matrix_rank(weighted_design))
+    design_columns = reduced_parameter_count
+    design_rank_full = design_rank == design_columns
+    design_condition = float(np.linalg.cond(weighted_design)) if design_rank_full else float("inf")
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        eta = offset + reduced_design @ fit.x
+    if not np.all(np.isfinite(eta)):
+        raise ChampionEloError(f"identified joint linear predictor is non-finite for {scope_id}")
+
+    pair_observations: dict[
+        tuple[str, str, str],
+        list[tuple[float, float, float, float, int, str]],
+    ] = {}
+    for map_index, row in enumerate(usable):
+        for role in ROLES:
+            blue_champion = row["roles"][role]["blue_champion"]
+            red_champion = row["roles"][role]["red_champion"]
+            pair = tuple(sorted((blue_champion, red_champion), key=_normalize_name))
+            sign = 1.0 if blue_champion == pair[0] else -1.0
+            pair_observations.setdefault((role, pair[0], pair[1]), []).append(
+                (
+                    outcome[map_index],
+                    eta[map_index],
+                    weight[map_index],
+                    sign,
+                    map_index,
+                    str(row["series_id"]),
+                )
+            )
+
+    pair_posteriors: dict[tuple[str, str, str], dict[str, Any]] = {}
+    matchup_precision = 1.0 / (MATCHUP_PRIOR_SD ** 2)
+    for key, pair_rows in pair_observations.items():
+        gamma = 0.0
+        for _ in range(50):
+            gradient = matchup_precision * gamma
+            info = matchup_precision
+            for y, base_eta, row_weight, sign, _, _ in pair_rows:
+                probability = float(expit(base_eta + sign * gamma))
+                gradient += row_weight * sign * (probability - y)
+                info += row_weight * probability * (1.0 - probability)
+            step = gradient / info
+            gamma -= step
+            if abs(step) < 1e-9:
+                break
+        cross_information = np.zeros(reduced_parameter_count, dtype=float)
+        for y, base_eta, row_weight, sign, map_index, _ in pair_rows:
+            probability = float(expit(base_eta + sign * gamma))
+            cross_information += (
+                row_weight * probability * (1.0 - probability) * sign * reduced_design[map_index]
+            )
+        weights = np.asarray([row[2] for row in pair_rows])
+        effective_n = float(weights.sum() ** 2 / np.square(weights).sum())
+        series_weights: dict[str, float] = {}
+        canonical_outcomes: set[int] = set()
+        for y, _, row_weight, sign, _, series_id in pair_rows:
+            series_weights[series_id] = max(series_weights.get(series_id, 0.0), float(row_weight))
+            canonical_outcomes.add(int(y if sign > 0 else 1.0 - y))
+        series_weight_values = np.asarray(list(series_weights.values()), dtype=float)
+        effective_series = float(
+            series_weight_values.sum() ** 2 / np.square(series_weight_values).sum()
+        )
+        conditional_sd = 1.0 / math.sqrt(info)
+        sensitivity = cross_information / info
+        with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+            marginal_variance = conditional_sd ** 2 + float(
+                sensitivity @ reduced_covariance @ sensitivity
+            )
+        if not math.isfinite(marginal_variance):
+            raise ChampionEloError(f"matchup marginal variance is non-finite for {scope_id} {key}")
+        pair_posteriors[key] = {
+            "mean": gamma,
+            "conditional_sd": conditional_sd,
+            "sd": math.sqrt(max(0.0, marginal_variance)),
+            "effective_n": effective_n,
+            "effective_series": effective_series,
+            "outcome_variation": len(canonical_outcomes) == 2,
+            "sensitivity": sensitivity,
+        }
+
+    output: dict[str, dict[str, Any]] = {}
+    for role in ROLES:
+        champions = champions_by_role[role]
+        role_parameter_indices = np.asarray([parameter_index[(role, champion)] for champion in champions])
+        role_mean = full_mean[role_parameter_indices]
+        role_covariance = covariance[np.ix_(role_parameter_indices, role_parameter_indices)]
+        pick_counts = np.asarray([states_by_role[role][champion].appearances for champion in champions], dtype=float)
+        legal_pool_indices = sorted(
+            range(len(champions)),
+            key=lambda index: (-pick_counts[index], _normalize_name(champions[index])),
+        )[:LEGAL_OPPONENT_COUNT + 1]
+        legal_pool_weights = pick_counts[legal_pool_indices]
+        legal_pool_weights = legal_pool_weights / legal_pool_weights.sum()
+        legal_opponents = [
+            {"champion": champions[index], "weight": round(float(weight), 8)}
+            for index, weight in zip(legal_pool_indices, legal_pool_weights)
+        ]
+        legal_hash = _sha256_bytes(_canonical_json({
+            "pool": legal_opponents,
+            "rule": "take the five highest-pick legal opponents after excluding the focal champion",
+        }))
+        seed = int(hashlib.sha256(f"{scope_id}|{role}".encode("utf-8")).hexdigest()[:16], 16)
+        rng = np.random.default_rng(seed)
+        role_covariance = 0.5 * (role_covariance + role_covariance.T)
+        with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+            reduced_parameter_draws = rng.multivariate_normal(
+                fit.x,
+                reduced_covariance,
+                size=POSTERIOR_DRAWS,
+                check_valid="raise",
+            )
+        with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+            parameter_draws = reduced_parameter_draws @ contrast.T
+        if not np.all(np.isfinite(parameter_draws)):
+            raise ChampionEloError(f"identified posterior draws are non-finite for {scope_id} {role}")
+        strength_draws = parameter_draws[:, role_parameter_indices]
+        if not np.all(np.isfinite(strength_draws)):
+            raise ChampionEloError(f"joint hierarchical posterior draws are non-finite for {scope_id} {role}")
+        rows: list[dict[str, Any]] = []
+        for champion_i, champion in enumerate(champions):
+            opponent_indices = [
+                index for index in legal_pool_indices if index != champion_i
+            ][:LEGAL_OPPONENT_COUNT]
+            opponent_weights = pick_counts[opponent_indices]
+            if opponent_weights.size:
+                opponent_weights = opponent_weights / opponent_weights.sum()
+            row_legal_opponents = [
+                {"champion": champions[index], "weight": round(float(weight), 8)}
+                for index, weight in zip(opponent_indices, opponent_weights)
+            ]
+            row_legal_hash = _sha256_bytes(_canonical_json(row_legal_opponents))
+            if not opponent_indices:
+                standardized_strength = 0.5
+                blind_draws = np.full(POSTERIOR_DRAWS, 0.5)
+                supported = []
+                countered = 0
+                expected_counter_breadth = 0.0
+                countered_weight = 0.0
+                counter_breadth_draws = np.zeros(POSTERIOR_DRAWS)
+                effective_maps = 0.0
+            else:
+                map_probabilities = []
+                matchup_draw_columns = []
+                supported = []
+                countered = 0
+                expected_counter_breadth = 0.0
+                countered_weight = 0.0
+                counter_breadth_draws = np.zeros(POSTERIOR_DRAWS)
+                effective_maps = 0.0
+                for opponent_i, opponent_weight in zip(opponent_indices, opponent_weights):
+                    opponent = champions[opponent_i]
+                    pair = tuple(sorted((champion, opponent), key=_normalize_name))
+                    posterior = pair_posteriors.get((role, pair[0], pair[1]))
+                    if posterior is None:
+                        interaction_draw = rng.normal(0.0, MATCHUP_PRIOR_SD, size=POSTERIOR_DRAWS)
+                        interaction_mean = 0.0
+                    else:
+                        sign = 1.0 if champion == pair[0] else -1.0
+                        interaction_mean = sign * posterior["mean"]
+                        with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+                            canonical_draw = (
+                                posterior["mean"]
+                                - (reduced_parameter_draws - fit.x) @ posterior["sensitivity"]
+                                + rng.normal(0.0, posterior["conditional_sd"], size=POSTERIOR_DRAWS)
+                            )
+                        if not np.all(np.isfinite(canonical_draw)):
+                            raise ChampionEloError(
+                                f"matchup posterior draws are non-finite for {scope_id} {role} {pair}"
+                            )
+                        interaction_draw = sign * canonical_draw
+                        if (
+                            posterior["effective_n"] >= MATCHUP_MIN_EFFECTIVE_MAPS
+                            and posterior["effective_series"] >= MATCHUP_MIN_SERIES
+                            and posterior["outcome_variation"]
+                            and posterior["sd"] <= MATCHUP_MAX_POSTERIOR_SD
+                        ):
+                            supported.append(opponent)
+                            effective_maps += posterior["effective_n"]
+                            probability_positive = float(
+                                np.mean(interaction_draw > COUNTER_EFFECT_THRESHOLD_LOGIT)
+                            )
+                            expected_counter_breadth += float(opponent_weight) * probability_positive
+                            counter_breadth_draws += float(opponent_weight) * (
+                                interaction_draw > COUNTER_EFFECT_THRESHOLD_LOGIT
+                            )
+                            if probability_positive >= COUNTER_POSTERIOR_THRESHOLD:
+                                countered += 1
+                                countered_weight += float(opponent_weight)
+                    matchup_draw_columns.append(
+                        expit(
+                            strength_draws[:, champion_i]
+                            - strength_draws[:, opponent_i]
+                            + interaction_draw
+                        )
+                    )
+                    map_probabilities.append(float(expit(role_mean[champion_i] - role_mean[opponent_i])))
+                matchup_draw_matrix = np.column_stack(matchup_draw_columns)
+                blind_draws = _weighted_lower_tail_rows(
+                    matchup_draw_matrix,
+                    opponent_weights,
+                    BLIND_TAIL_SHARE,
+                )
+                standardized_strength = float(np.dot(opponent_weights, np.asarray(map_probabilities)))
+            required_supported = len(opponent_indices)
+            legal_components = {
+                component_by_role_champion[(role, champions[index])]
+                for index in opponent_indices
+            }
+            champion_component = component_by_role_champion[(role, champion)]
+            component_identified = legal_components == {champion_component}
+            contrast_sds = [
+                math.sqrt(max(
+                    0.0,
+                    float(
+                        role_covariance[champion_i, champion_i]
+                        + role_covariance[opponent_i, opponent_i]
+                        - 2.0 * role_covariance[champion_i, opponent_i]
+                    ),
+                ))
+                for opponent_i in opponent_indices
+            ]
+            maximum_strength_contrast_sd = max(contrast_sds, default=float("inf"))
+            available = (
+                len(opponent_indices) == LEGAL_OPPONENT_COUNT
+                and len(supported) == required_supported
+                and component_identified
+                and maximum_strength_contrast_sd <= STRENGTH_MAX_CONTRAST_SD
+            )
+            blind_score = float(np.quantile(blind_draws, 0.10))
+            share = countered_weight if supported else 0.0
+            alpha_sd = math.sqrt(float(role_covariance[champion_i, champion_i]))
+            rows.append(
+                {
+                    "champion": champion,
+                    "rating": round(INITIAL_RATING + role_mean[champion_i] * 400.0 / math.log(10.0), 4),
+                    "tier_value_pp": round(100.0 * (standardized_strength - 0.5), 4),
+                    "strength_score": round(standardized_strength, 6),
+                    "strength_sd_logit": round(alpha_sd, 6),
+                    "played_maps": states_by_role[role][champion].appearances,
+                    "counterability_status": "available" if available else "unavailable",
+                    "counterability": round(100.0 * (1.0 - blind_score), 4) if available else None,
+                    "matchup_maps": round(effective_maps, 4),
+                    "matchup_opponents": len(supported),
+                    "blind_score_pp": round(100.0 * (blind_score - 0.5), 4) if available else None,
+                    "counter_score": round(LEGAL_OPPONENT_COUNT * expected_counter_breadth, 4) if available else None,
+                    "expected_counter_breadth": round(LEGAL_OPPONENT_COUNT * expected_counter_breadth, 4) if available else None,
+                    "countered_opponent_count": countered if available else None,
+                    "countered_opponent_share": round(share, 4) if available else None,
+                    "legal_opponent_distribution_sha256": row_legal_hash,
+                    "legal_opponents": row_legal_opponents,
+                    "legal_opponent_coverage": 1.0 if available else round(len(supported) / max(1, required_supported), 4),
+                    "strength_design_rank_full": design_rank_full,
+                    "strength_design_condition_number": None if not math.isfinite(design_condition) else round(design_condition, 4),
+                    "strength_component_identified": component_identified,
+                    "maximum_strength_contrast_sd": (
+                        round(maximum_strength_contrast_sd, 6)
+                        if math.isfinite(maximum_strength_contrast_sd)
+                        else None
+                    ),
+                    "_blind_draws": blind_draws,
+                    "_counter_draws": LEGAL_OPPONENT_COUNT * counter_breadth_draws,
+                }
+            )
+        rows.sort(key=lambda row: (-row["strength_score"], _normalize_name(row["champion"])))
+        for rank, row in enumerate(rows, start=1):
+            row["rank"] = rank
+        _assign_tier_buckets(rows)
+        output[role] = {
+            "rows": rows,
+            "legal_opponents": legal_opponents,
+            "legal_opponent_distribution_sha256": legal_hash,
+            "design": {
+                "rank": design_rank,
+                "columns": design_columns,
+                "rank_full": design_rank_full,
+                "condition_number": None if not math.isfinite(design_condition) else round(design_condition, 4),
+                "role_location_gauge": "sum_to_zero_per_connected_component",
+                "connected_components_by_role": component_counts,
+                "fit_coordinates": "orthonormal reduced contrasts",
+            },
+        }
+    return output
+
+
+def build_candidate(
+    root: Path,
+    *,
+    as_of: pd.Timestamp | None = None,
+    expected_live_as_of: pd.Timestamp | None = None,
+    previous: Mapping[str, Any] | None = None,
+    min_appearances: int = DEFAULT_MIN_APPEARANCES,
+    source_mode: str = DEFAULT_SOURCE_MODE,
+) -> dict[str, Any]:
+    if min_appearances < 1:
+        raise ChampionEloError("min_appearances must be at least 1")
+    if source_mode not in SOURCE_MODES:
+        raise ChampionEloError(
+            f"source_mode must be one of {', '.join(SOURCE_MODES)}"
+        )
+    from .pooled_candidate import build_pooled_candidate
+
+    return build_pooled_candidate(
+        root,
+        as_of=as_of,
+        expected_live_as_of=expected_live_as_of,
+        previous=previous,
+        min_appearances=min_appearances,
+        source_mode=source_mode,
+    )
+    frame, source_sha256 = _load_source(root, as_of=as_of)
+    maps, rejected_maps = _build_maps(frame)
+    if not maps:
+        raise ChampionEloError("no complete five-role maps remain after identity checks")
+    crosswalk, identity_sources = _load_crosswalk(root)
+    atom_bridge_path = root / ATOM_BRIDGE_LOCATOR
+    atom_bridge = AtomBridge.load(atom_bridge_path)
+    atom_provenance = atom_bridge.provenance
+    atom_patch = atom_provenance.get("data_patch")
+    if not isinstance(atom_patch, str) or not atom_patch:
+        raise ChampionEloError("champion atom bridge has no canonical data patch")
+    team_ratings: dict[str, float] = {}
+    ladders: dict[tuple[str, str], dict[str, ChampState]] = {}
+    scope_observations: dict[str, list[dict[str, Any]]] = {}
+    previous_rows: dict[tuple[str, str, str], Mapping[str, Any]] = {}
+    for cell in (previous or {}).get("cells", []):
+        if not isinstance(cell, Mapping):
+            continue
+        scope_id = str(cell.get("scope_id") or "")
+        role = str(cell.get("role") or "")
+        for row in cell.get("rows", []):
+            if isinstance(row, Mapping):
+                champion_key = _normalize_name(row.get("champion") or row.get("champion_name") or "")
+                previous_rows[(scope_id, role, champion_key)] = row
+
+    for game in maps:
+        blue_team = _normalize_name(game["blue_team"])
+        red_team = _normalize_name(game["red_team"])
+        blue_rating = team_ratings.get(blue_team, INITIAL_RATING)
+        red_rating = team_ratings.get(red_team, INITIAL_RATING)
+        p_team = 1.0 / (1.0 + 10.0 ** ((red_rating - blue_rating) / 400.0))
+        scope_observations.setdefault(game["scope_id"], []).append(
+            {
+                "outcome": int(game["y_blue_win"]),
+                "team_logit": _logit(p_team),
+                "date": game["date"],
+                "series_id": game["series_id"],
+                "roles": game["roles"],
+            }
+        )
+        for role in ROLES:
+            blue_champion = game["roles"][role]["blue_champion"]
+            red_champion = game["roles"][role]["red_champion"]
+            key = (game["scope_id"], role)
+            states = ladders.setdefault(key, {})
+            blue_state = states.setdefault(blue_champion, ChampState())
+            red_state = states.setdefault(red_champion, ChampState())
+            blue_state.appearances += 1
+            red_state.appearances += 1
+        team_residual = float(game["y_blue_win"]) - p_team
+        team_ratings[blue_team] = blue_rating + TEAM_K * team_residual
+        team_ratings[red_team] = red_rating - TEAM_K * team_residual
+
+    reference_date = max(game["date"] for game in maps)
+    fitted_scopes: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for scope_id in sorted(scope_observations):
+        fitted_scopes[scope_id] = _fit_joint_scope(
+            {role: ladders.get((scope_id, role), {}) for role in ROLES},
+            scope_observations[scope_id],
+            min_appearances=min_appearances,
+            reference_date=reference_date,
+            scope_id=scope_id,
+        )
+
+    cells: list[dict[str, Any]] = []
+    unresolved: set[str] = set()
+    for (scope_id, role), states in sorted(ladders.items()):
+        fit_cell = fitted_scopes[scope_id][role]
+        rows = fit_cell["rows"]
+        scope_label = next(game["scope_label"] for game in maps if game["scope_id"] == scope_id)
+        scope_kind = "international" if scope_id.startswith("event:") else "league"
+        if scope_kind == "international":
+            event_kind = scope_label.casefold()
+            league = None
+            competition_tier = "international"
+            region = "international"
+        else:
+            _, league, tier = scope_id.split(":", 2)
+            league = league.upper()
+            event_kind = None
+            competition_tier = tier
+            region = None
+        resolved_rows: list[dict[str, Any]] = []
+        unresolved_in_cell: list[str] = []
+        for row in rows:
+            stable_id = crosswalk.get(_normalize_name(row["champion"]))
+            if stable_id is None:
+                unresolved_name = row["champion"]
+                unresolved.add(unresolved_name)
+                unresolved_in_cell.append(unresolved_name)
+                continue
+            prior = previous_rows.get((scope_id, role, _normalize_name(row["champion"])))
+            previous_rank = int(prior["rank"]) if prior and isinstance(prior.get("rank"), int) else None
+            previous_rating = float(prior["rating"]) if prior and isinstance(prior.get("rating"), (int, float)) else None
+            rank_delta = previous_rank - row["rank"] if previous_rank is not None else None
+            rating_delta = row["rating"] - previous_rating if previous_rating is not None else None
+            row.update(
+                {
+                    "champion_id": stable_id,
+                    "previous_rank": previous_rank,
+                    "rank_delta": rank_delta,
+                    "rating_delta": None if rating_delta is None else round(rating_delta, 4),
+                    "movement": (
+                        "new" if rank_delta is None else "up" if rank_delta > 0 else "down" if rank_delta < 0 else "flat"
+                    ),
+                    "atom_profile_status": (atom_bridge.profile(stable_id) or {}).get("profile_status", "unavailable"),
+                    "atom_patch_last_changed": (atom_bridge.profile(stable_id) or {}).get("lcc_patch_last_changed"),
+                }
+            )
+            resolved_rows.append(row)
+        cells.append(
+            {
+                "scope_id": scope_id,
+                "scope_kind": scope_kind,
+                "scope_label": scope_label,
+                "region": region,
+                "league": league,
+                "event_kind": event_kind,
+                "competition_tier": competition_tier,
+                "role": role,
+                "patches": sorted({game["patch"] for game in maps if game["scope_id"] == scope_id}),
+                "as_of": _utc_stamp(max(game["date"] for game in maps if game["scope_id"] == scope_id)),
+                "status": "development_only",
+                "identity_status": "complete" if not unresolved_in_cell else "unavailable",
+                "unresolved_champion_identities": sorted(unresolved_in_cell),
+                "row_count": len(resolved_rows),
+                "legal_opponents": fit_cell["legal_opponents"],
+                "legal_opponent_distribution_sha256": fit_cell["legal_opponent_distribution_sha256"],
+                "strength_design": fit_cell["design"],
+                "rows": resolved_rows,
+            }
+        )
+
+    source_latest = max(game["date"] for game in maps)
+    live_rows = [game for game in maps if game["date"] >= LIVE_WINDOW_START]
+    expected = expected_live_as_of
+    if expected is not None:
+        expected = pd.Timestamp(expected)
+        if expected.tzinfo is None:
+            expected = expected.tz_localize("UTC")
+        else:
+            expected = expected.tz_convert("UTC")
+    source_complete = expected is None or source_latest >= expected
+    payload: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_kind": ARTIFACT_KIND,
+        "artifact_sha256": "",
+        "status": "development_only",
+        "development_only": True,
+        "publication_eligible": False,
+        "production_eligible": False,
+        "source_mode": source_mode,
+        "history_start": _utc_stamp(HISTORY_START),
+        "live_window_start": _utc_stamp(LIVE_WINDOW_START),
+        "as_of": _utc_stamp(source_latest),
+        "expected_live_as_of": _utc_stamp(expected) if expected is not None else None,
+        "source_complete_through_expected_live_as_of": source_complete,
+        "source": {
+            "locator": SOURCE_LOCATOR,
+            "raw_sha256": source_sha256,
+            "source_files": [SOURCE_LOCATOR]
+            + ([SUPPLEMENTAL_SOURCE_LOCATOR] if (root / SUPPLEMENTAL_SOURCE_LOCATOR).is_file() else []),
+            "maps_replayed": len(maps),
+            "maps_rejected_incomplete_roles": rejected_maps,
+            "maps_in_live_window": len(live_rows),
+            "source_earliest_replayed": _utc_stamp(min(game["date"] for game in maps)),
+            "source_latest_replayed": _utc_stamp(source_latest),
+        },
+        "identity_sources": identity_sources,
+        "patch_ingestion": {
+            "mode": "champion_atomization",
+            "canonical_data_patch": atom_patch,
+            "atom_bridge_locator": ATOM_BRIDGE_LOCATOR,
+            "atom_bridge_artifact_sha256": atom_bridge.artifact_sha256,
+            "atom_bridge_raw_sha256": _sha256_path(atom_bridge_path),
+            "atom_bridge_generated_at": atom_bridge.generated_at,
+            "lcc_commit": atom_provenance.get("lcc_commit"),
+            "oe_patch_namespace": "Oracle's Elixir source patch token",
+            "official_to_oe_patch_mapping": "not_inferred",
+            "use": "patch update agenda, champion-state provenance, and structured prior source",
+        },
+        "options": {
+            "leagues": sorted({cell["league"] for cell in cells if cell["league"]}),
+            "event_kinds": sorted({cell["event_kind"] for cell in cells if cell["event_kind"]}),
+            "competition_tiers": sorted({cell["competition_tier"] for cell in cells if cell["competition_tier"]}),
+            "roles": list(ROLES),
+            "patches": sorted({patch for cell in cells for patch in cell["patches"]}),
+        },
+        "rating_method": {
+            "name": "joint five-role recency-weighted hierarchical Bradley-Terry with pre-map team Elo control",
+            "initial_rating": INITIAL_RATING,
+            "team_k": TEAM_K,
+            "strength_prior_sd_logit": STRENGTH_PRIOR_SD,
+            "maximum_supported_strength_contrast_sd": STRENGTH_MAX_CONTRAST_SD,
+            "recency_half_life_days": RECENCY_HALF_LIFE_DAYS,
+            "fit": "penalized maximum a posteriori with full observed-Hessian Laplace covariance",
+            "fit_coordinates": "orthonormal reduced contrasts",
+            "update_order": "team control is chronological; champion posterior refits after completed maps",
+            "rating_claim": "standardized descriptive paired-comparison strength; not an outcome-calibrated probability",
+        },
+        "matchup_shape_method": {
+            "name": "separate antisymmetric same-role residual model after joint five-role strength fit",
+            "matchup_prior_sd_logit": MATCHUP_PRIOR_SD,
+            "blind_definition": "posterior 10th percentile of weighted lower-tail matchup probability across the registered focal-legal opponent distribution",
+            "blind_tail_share": BLIND_TAIL_SHARE,
+            "blind_lower_credible_probability": 0.90,
+            "counter_definition": "posterior expected weighted residual breadth over five registered legal opponents; strict count and share use the probability threshold",
+            "counter_posterior_probability_threshold": COUNTER_POSTERIOR_THRESHOLD,
+            "counter_effect_threshold_logit": COUNTER_EFFECT_THRESHOLD_LOGIT,
+            "minimum_effective_maps": MATCHUP_MIN_EFFECTIVE_MAPS,
+            "minimum_effective_series": MATCHUP_MIN_SERIES,
+            "outcome_variation_required": True,
+            "minimum_opponents": LEGAL_OPPONENT_COUNT,
+            "legal_opponent_count": LEGAL_OPPONENT_COUNT,
+            "legal_opponent_selection": "top six role picks in the exact scope; exclude the focal champion, take five, and renormalize",
+            "maximum_pair_posterior_sd": MATCHUP_MAX_POSTERIOR_SD,
+            "posterior_draws": POSTERIOR_DRAWS,
+            "minimum_special_tier_membership_probability": TIER_MEMBERSHIP_PROBABILITY,
+            "effective_sample_size": "Kish effective sample size from temporal weights",
+            "series_support": "team-pair calendar-day clusters",
+            "pick_order_claim": False,
+            "rating_claim": "descriptive matchup-shape proxy; not a causal counter-pick estimate",
+        },
+        "claim_ceiling": {
+            "production": False,
+            "publication": False,
+            "outcome_calibrated_probability": False,
+            "recommendation": False,
+            "betting": False,
+            "causal_draft_effect": False,
+        },
+        "unresolved_champion_identities": sorted(unresolved),
+        "cells": cells,
+    }
+    unsigned = dict(payload)
+    unsigned.pop("artifact_sha256")
+    payload["artifact_sha256"] = _sha256_bytes(_canonical_json(unsigned))
+    return payload
+
+
+def write_candidate(path: Path, payload: Mapping[str, Any]) -> str:
+    raw = _canonical_json(dict(payload)) + b"\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(raw)
+    return _sha256_bytes(raw)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=Path.cwd())
+    parser.add_argument("--as-of", default=None)
+    parser.add_argument("--expected-live-as-of", default=None)
+    parser.add_argument("--previous", type=Path, default=None)
+    parser.add_argument("--min-appearances", type=int, default=DEFAULT_MIN_APPEARANCES)
+    parser.add_argument(
+        "--source-mode",
+        choices=SOURCE_MODES,
+        default=DEFAULT_SOURCE_MODE,
+        help="source provenance mode for this replay",
+    )
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUTPUT)
+    args = parser.parse_args()
+    as_of = pd.Timestamp(args.as_of) if args.as_of else None
+    expected = pd.Timestamp(args.expected_live_as_of) if args.expected_live_as_of else None
+    previous = json.loads(args.previous.read_text()) if args.previous else None
+    payload = build_candidate(
+        args.root,
+        as_of=as_of,
+        expected_live_as_of=expected,
+        previous=previous,
+        min_appearances=args.min_appearances,
+        source_mode=args.source_mode,
+    )
+    raw_sha = write_candidate(args.out, payload)
+    print(json.dumps({
+        "out": str(args.out),
+        "raw_sha256": raw_sha,
+        "artifact_sha256": payload["artifact_sha256"],
+        "as_of": payload["as_of"],
+        "maps_replayed": payload["source"]["maps_replayed"],
+        "maps_in_live_window": payload["source"]["maps_in_live_window"],
+        "source_mode": payload["source_mode"],
+        "cells": len(payload["cells"]),
+        "source_complete_through_expected_live_as_of": payload["source_complete_through_expected_live_as_of"],
+        "unresolved_champion_identities": payload["unresolved_champion_identities"],
+    }, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

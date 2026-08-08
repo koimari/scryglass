@@ -1,0 +1,100 @@
+{
+  "authority": {
+    "betting": false,
+    "model_validation": false,
+    "publication": false,
+    "recommendation": false,
+    "source_freshness": true
+  },
+  "candidate": {
+    "artifact_sha256": "4f8f50bf316cb35a4d7a10dd9334fff6f282388116fed2e0cfe315db3b4eea40",
+    "as_of": "2026-08-08T12:13:56Z",
+    "locator": "data/lol/v2/tierlists/champion-elo-candidate-v1.json",
+    "maps_in_live_window": 888,
+    "maps_replayed": 17209,
+    "rating_refresh_completed": true,
+    "raw_sha256": "891aa8d57f5d4496547c1e3c396c86aa2e01df10e73c273b1a1f0791f266d303",
+    "source_complete_through_expected_live_as_of": true,
+    "source_mode": "oe_only"
+  },
+  "candidate_expected_live_as_of": "2026-08-08T12:13:56Z",
+  "claim_ceiling": "This receipt records source refresh and a development replay only.",
+  "expected_live_as_of": "2026-08-08T12:57:21Z",
+  "live_window_start": "2026-07-18T00:00:00Z",
+  "movement_baseline": {
+    "artifact_sha256": "965012cf218603f66cd8383c702a531ef875571bd1a946123b605123258044b6",
+    "as_of": "2026-07-26T00:00:00Z",
+    "kind": "previous_sunday_utc"
+  },
+  "receipt_canonical_sha256": "6e2369ac30705ac562d772389a02df579e8b7098464758a501c4e9e8fdbb47c2",
+  "retrieved_at": "2026-08-08T16:07:54.128505Z",
+  "schema_version": "scryglass:tierlist-live-refresh:v1",
+  "source_mode": "oe_only",
+  "source_observed_through": "2026-08-08T12:13:56Z",
+  "source_steps": [
+    {
+      "command": [
+        "lol_kills.refresh_warehouse",
+        "--oe-years",
+        "2025",
+        "2026",
+        "--refresh-oe",
+        "--skip-lp",
+        "--skip-grid"
+      ],
+      "completed": false,
+      "returncode": 1,
+      "source": "oe_annual",
+      "stderr_bytes": 3692,
+      "stdout_bytes": 97
+    },
+    {
+      "command": [
+        "lol_kills.etl.oe_api_ingest",
+        "--start",
+        "2026-07-18T00:00:00Z",
+        "--end",
+        "2026-08-08T12:57:21Z",
+        "--lookback-days",
+        "120"
+      ],
+      "completed": true,
+      "returncode": 0,
+      "source": "oe_api",
+      "stderr_bytes": 0,
+      "stdout_bytes": 1271
+    },
+    {
+      "command": [
+        "lol_kills.etl.oe_live_source"
+      ],
+      "completed": true,
+      "returncode": 0,
+      "source": "oe_live_source",
+      "stderr_bytes": 974,
+      "stdout_bytes": 1326
+    },
+    {
+      "command": [
+        "lol_kills.v2.tierlists.rating_refresh",
+        "--as-of",
+        "2026-08-08T12:13:56Z"
+      ],
+      "completed": true,
+      "returncode": 0,
+      "source": "ratings",
+      "stderr_bytes": 0,
+      "stdout_bytes": 475
+    },
+    {
+      "command": [],
+      "completed": false,
+      "reason": "source_mode_oe_only",
+      "returncode": null,
+      "skipped": true,
+      "source": "grid"
+    }
+  ],
+  "status": "ready_for_authority_review",
+  "window_start": "2025-01-01T00:00:00Z"
+}

@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _pack_id() -> str | None:
-    latest_path = ROOT / "apps" / "lol-atlas" / "public" / "packs" / "latest.json"
+    latest_path = ROOT / "apps" / "scryglass" / "public" / "packs" / "latest.json"
     try:
         value = json.loads(latest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

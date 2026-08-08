@@ -51,7 +51,7 @@ def test_merged_rows_are_played_only_and_ranked(index):
     for row in rows:
         assert row["played_maps"] >= 1
         assert row["rank"] >= 1
-        assert row["tier_bucket"] in ("S", "A", "B", "C", "D")
+        assert row["tier_bucket"] in ("Z Blind", "Z Counter", "S Blind", "S Counter", "A", "B", "C", "D")
         assert row["champion_id"].startswith("riot:champion:")
 
 

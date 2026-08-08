@@ -324,7 +324,7 @@ A forecast record is immutable. Hindsight links to but cannot replace it.
 ## 8. TypeScript/runtime boundary
 
 L10 generates TypeScript types and validators from the schemas into
-`apps/lol-atlas/src/model-v2/generated/`. UI code consumes discriminated unions
+`apps/scryglass/src/model-v2/generated/`. UI code consumes discriminated unions
 on `analysis_kind` and `status`; accessing a score without both the canonical
 branch and `status === "ok"` is a type and lint failure.
 

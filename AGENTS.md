@@ -8,7 +8,7 @@
 
 ## Learned Workspace Facts
 
-- Public Scryglass app at `apps/lol-atlas` (canonical host: https://scryglass.xyz; project Root Directory must be `apps/lol-atlas` — do not add a root `vercel.json` `outputDirectory` under that setting): Dual Elo ladders, OE parquet pack browse/H2H (pack years 2025–2026 under `public/packs/`), research articles under `/articles`; DuckDB-WASM needs absolute origin URLs for parquet (relative `/packs/...` fails)
+- Public Scryglass app at `apps/scryglass` (canonical host: https://scryglass.xyz; project Root Directory must be `apps/scryglass` — do not add a root `vercel.json` `outputDirectory` under that setting): Dual Elo ladders, OE parquet pack browse/H2H (pack years 2025–2026 under `public/packs/`), research articles under `/articles`; DuckDB-WASM needs absolute origin URLs for parquet (relative `/packs/...` fails)
 - Research / pack pipeline lives in `lol_kills` (ETL, Dual Elo, draft score, grubs studies, `lol_kills.export.public_pack`); agent-only warehouse refresh via `lol_kills.refresh_warehouse` / `lol_kills.pipeline`
 - Team aliases include KC → Karmine Corp, DK → Dplus Kia, and MKOI/KOI → Movistar KOI (`lol_kills/etl/aliases.py`); Locke stays in champ coverage with neutral OE prior until warehouse coverage exists
 - Primary warehouse is Oracle’s Elixir CSVs; Riot Match-V5 timeline cache at `data/lol/warehouse/timelines/` (rate limits ~20/1s, 100/2min per routing value)
