@@ -68,6 +68,9 @@ jobs:
       - name: Install data dependencies
         run: python -m pip install -r requirements.txt gdown
 
+      - name: Restore the committed OE baseline
+        run: python3 -m lol_kills.etl.restore_oe_pack_baseline --root .
+
       - name: Refresh OE, atom bridge, ratings, and the tier bundle
         env:
           REFRESH_AS_OF: ${{ inputs.as_of }}
@@ -85,6 +88,7 @@ jobs:
             --root . \
             --expected-live-as-of "$as_of" \
             --promote \
+            --skip-annual-oe \
             --source-mode "$REFRESH_SOURCE_MODE"
 
       - name: Export and publish the current ratings pack
@@ -108,3 +112,5 @@ jobs:
             data/lol/v2/tierlists/refresh-receipts/
             data/lol/v2/tierlists/rating-refresh/rating-refresh-v1.json
             data/lol/v2/tierlists/production-manifest-v1.json
+            data/lol/warehouse/parquet/oe_baseline_meta.json
+            data/lol/warehouse/parquet/oe_api_meta.json

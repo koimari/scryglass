@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "66d261f1a9786581274c08adddb948d7e59310eb1627b459c7111d9c98041864",
+  "artifact_sha256": "89c8009b0441c640d791c382db7f078d329a1448ef049f68f82ff27a06fb0942",
   "atom_snapshots": [
     {
       "bridge_artifact_sha256": "1b781f70e0899157bcd3c6e197785a47a33467a2490b5e776c955b4a7aff92d9",
@@ -1374,12 +1374,14 @@
     {
       "kind": "oe_live_player_games",
       "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+      "mutable_live_source": true,
       "role": "OE token and source interval evidence",
       "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
     },
     {
       "kind": "oe_live_meta",
       "locator": "data/lol/warehouse/parquet/oe_live/meta.json",
+      "mutable_live_source": true,
       "role": "current source watermark and OE-only composition",
       "sha256": "74268c54bbd86423b58cf52e63303d013228feefc07f854b3e9663eb575a35a6"
     },
@@ -1387,7 +1389,9 @@
       "bridge_artifact_sha256": "1b781f70e0899157bcd3c6e197785a47a33467a2490b5e776c955b4a7aff92d9",
       "kind": "lcc_atom_bridge",
       "locator": "data/lol/v2/champions/lcc-atom-bridge-v1.json",
+      "mutable_source": true,
       "role": "atom snapshot provenance",
+      "semantic_sha256": "6c99cb25d981954e5e08231a89c3cab23b2062988cd7ccfc3eb7c79d38092bbd",
       "sha256": "35aaa81d0fd8b1a6a633c5e8c34ab956af7a4dc1344cf3c3129d988dff13555f"
     }
   ]

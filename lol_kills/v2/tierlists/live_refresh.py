@@ -351,24 +351,29 @@ def refresh_candidate(
     grid_limit: int = 200,
     source_mode: str = DEFAULT_SOURCE_MODE,
     promote: bool = False,
+    skip_annual_oe: bool = False,
 ) -> dict[str, Any]:
     if grid_days < 1 or grid_limit < 1:
         raise ValueError("grid_days and grid_limit must be positive")
     if source_mode not in SOURCE_MODES:
         raise ValueError(f"source_mode must be one of {', '.join(SOURCE_MODES)}")
 
-    oe_step = _run_step(
-        root,
-        [
-            "lol_kills.refresh_warehouse",
-            "--oe-years",
-            "2025",
-            "2026",
-            "--refresh-oe",
-            "--skip-lp",
-            "--skip-grid",
-        ],
-        source="oe_annual",
+    oe_step = (
+        _skipped_step("oe_annual", "committed_public_pack_baseline")
+        if skip_annual_oe
+        else _run_step(
+            root,
+            [
+                "lol_kills.refresh_warehouse",
+                "--oe-years",
+                "2025",
+                "2026",
+                "--refresh-oe",
+                "--skip-lp",
+                "--skip-grid",
+            ],
+            source="oe_annual",
+        )
     )
     oe_api_step = _run_step(
         root,
@@ -629,6 +634,11 @@ def main() -> int:
         default=DEFAULT_SOURCE_MODE,
         help="oe_only uses the daily OE export; oe_plus_grid adds the same-day bridge",
     )
+    parser.add_argument(
+        "--skip-annual-oe",
+        action="store_true",
+        help="use the restored committed OE pack as the historical baseline and only fetch the API freshness bridge",
+    )
     args = parser.parse_args()
     receipt = refresh_candidate(
         args.root,
@@ -640,6 +650,7 @@ def main() -> int:
         grid_limit=args.grid_limit,
         source_mode=args.source_mode,
         promote=args.promote,
+        skip_annual_oe=args.skip_annual_oe,
     )
     print(json.dumps(receipt, ensure_ascii=True, indent=2, sort_keys=True))
     return 0 if receipt["status"] in {"ready_for_authority_review", "production_promoted"} else 2

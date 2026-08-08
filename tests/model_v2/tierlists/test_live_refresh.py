@@ -165,6 +165,38 @@ def test_oe_plus_grid_keeps_the_grid_step_available(tmp_path: Path) -> None:
     assert receipt["source_steps"][5]["completed"] is True
 
 
+def test_skip_annual_oe_uses_the_committed_pack_baseline(tmp_path: Path) -> None:
+    steps = [
+        {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0}
+        for _ in range(4)
+    ]
+    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_api_meta.json"
+    meta_path.parent.mkdir(parents=True)
+    meta_path.write_text(
+        json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_detail_complete": True}),
+        encoding="utf-8",
+    )
+    with patch.object(live_refresh, "_run_step", side_effect=steps) as run_step, patch.object(
+        live_refresh,
+        "build_candidate",
+        return_value=_candidate(source_mode="oe_only"),
+    ), patch.object(live_refresh, "write_candidate", return_value="b" * 64):
+        receipt = live_refresh.refresh_candidate(
+            tmp_path,
+            expected_live_as_of="2026-08-08T12:00:00Z",
+            output_path=tmp_path / "candidate.json",
+            receipt_path=tmp_path / "receipt.json",
+            source_mode="oe_only",
+            skip_annual_oe=True,
+        )
+
+    assert run_step.call_count == 4
+    assert receipt["source_steps"][0]["source"] == "oe_annual"
+    assert receipt["source_steps"][0]["skipped"] is True
+    assert receipt["source_steps"][0]["reason"] == "committed_public_pack_baseline"
+    assert run_step.call_args_list[0].kwargs["source"] == "oe_api"
+
+
 def test_promote_runs_evaluation_authority_and_bundle_after_source_refresh(tmp_path: Path) -> None:
     steps = [
         {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0}

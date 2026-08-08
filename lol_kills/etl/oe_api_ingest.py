@@ -28,6 +28,7 @@ API_BASE = "https://oe.datalisk.io"
 SCHEMA_VERSION = "scryglass:oe-api-live-bridge:v1"
 DEFAULT_LOOKBACK_DAYS = 120
 DEFAULT_MAX_WORKERS = 8
+ROLES = ("top", "jng", "mid", "bot", "sup")
 PLAYER_OUTPUT = PARQUET_DIR / "oe_api_player_games.parquet"
 TEAM_OUTPUT = PARQUET_DIR / "oe_api_team_games.parquet"
 META_OUTPUT = PARQUET_DIR / "oe_api_meta.json"
@@ -328,6 +329,47 @@ def _fetch_full_games(
     return details, missing
 
 
+def _cached_full_games(path: Path) -> dict[str, dict[str, Any]]:
+    """Reuse player names from the previous completed API bridge receipt."""
+
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, Mapping) or payload.get("schema_version") != SCHEMA_VERSION:
+        return {}
+    cached: dict[str, dict[str, Any]] = {}
+    for game in payload.get("games", []):
+        if not isinstance(game, Mapping):
+            continue
+        game_id = str(game.get("oe_game_id") or "").strip()
+        players = game.get("players")
+        if not game_id or not isinstance(players, Mapping):
+            continue
+        detail: dict[str, Any] = {}
+        complete = True
+        for side, team_key in (("blue", "blueTeam"), ("red", "redTeam")):
+            side_players = players.get(side)
+            if not isinstance(side_players, Mapping):
+                complete = False
+                break
+            detail_players: dict[str, dict[str, str]] = {}
+            for role in ROLES:
+                name = str(side_players.get(role) or "").strip()
+                if not name:
+                    complete = False
+                    break
+                detail_players[role] = {"name": name}
+            if not complete:
+                break
+            detail[team_key] = {"players": detail_players}
+        if complete:
+            cached[game_id] = detail
+    return cached
+
+
 def _metadata_for_game(
     game: Mapping[str, Any],
     tournaments: list[dict[str, Any]],
@@ -469,7 +511,7 @@ def ingest_oe_api(
 ) -> dict[str, Any]:
     if lookback_days < 0 or max_workers < 1:
         raise ValueError("lookback_days must be non-negative and max_workers must be positive")
-    repo_root = Path(root)
+    repo_root = Path(root).resolve()
     api_key = _api_key()
     start = _parse_timestamp(start)
     end = _parse_timestamp(end)
@@ -505,11 +547,25 @@ def ingest_oe_api(
             and _parse_timestamp(game.get("gameCreation")) > primary_latest
         )
     ]
-    full_games, full_games_missing = _fetch_full_games(
-        detail_games,
+    cached_full_games = _cached_full_games(repo_root / RAW_OUTPUT)
+    detail_game_ids = {
+        str(game.get("oeGameId") or game.get("gameId") or "")
+        for game in detail_games
+    }
+    cached_detail_ids = detail_game_ids.intersection(cached_full_games)
+    detail_games_to_fetch = [
+        game
+        for game in detail_games
+        if str(game.get("oeGameId") or game.get("gameId") or "") not in cached_full_games
+    ]
+    fetched_full_games, fetched_missing = _fetch_full_games(
+        detail_games_to_fetch,
         api_key=api_key,
         max_workers=max_workers,
     )
+    full_games = {**cached_full_games, **fetched_full_games}
+    full_detail_ids = detail_game_ids.intersection(full_games)
+    full_games_missing = len(detail_game_ids - full_detail_ids)
     team_frame, player_frame, accepted_games = _rows_from_games(
         games,
         tournaments=tournaments,
@@ -532,7 +588,9 @@ def ingest_oe_api(
         "games_discovered": len(games),
         "games_accepted": len(accepted_games),
         "full_detail_games_requested": len(detail_games),
-        "games_with_full_details": len(full_games),
+        "full_detail_games_fetched": len(detail_games_to_fetch),
+        "full_detail_games_cached": len(cached_detail_ids),
+        "games_with_full_details": len(full_detail_ids),
         "games_missing_full_details": full_games_missing,
         "games": accepted_games,
         "authority": {
@@ -562,7 +620,9 @@ def ingest_oe_api(
         "games": len(accepted_games),
         "source_latest": max(game["date"] for game in accepted_games),
         "full_detail_games_requested": len(detail_games),
-        "games_with_full_details": len(full_games),
+        "full_detail_games_fetched": len(detail_games_to_fetch),
+        "full_detail_games_cached": len(cached_detail_ids),
+        "games_with_full_details": len(full_detail_ids),
         "games_missing_full_details": full_games_missing,
         "player_detail_complete": full_games_missing == 0,
         "player_detail_floor": primary_latest.isoformat().replace("+00:00", "Z") if primary_latest is not None else None,

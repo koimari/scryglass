@@ -139,7 +139,7 @@ def _merge(primary: pd.DataFrame, supplement: pd.DataFrame, *, with_players: boo
 
 
 def build_live_source(root: Path | str = Path(".")) -> dict[str, Any]:
-    repo_root = Path(root)
+    repo_root = Path(root).resolve()
     primary_player_path = repo_root / PARQUET_DIR / "oe_player_games.parquet"
     primary_team_path = repo_root / PARQUET_DIR / "oe_team_games.parquet"
     api_player_path = repo_root / PARQUET_DIR / "oe_api_player_games.parquet"

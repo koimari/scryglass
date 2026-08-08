@@ -1,0 +1,168 @@
+{
+  "authority": {
+    "betting": false,
+    "model_validation": false,
+    "publication": true,
+    "rank_eligibility": true,
+    "recommendation": false,
+    "source_freshness": true
+  },
+  "candidate": {
+    "artifact_sha256": "eafff802aed53ed2bb09c6f93b064ba5fa30cb92a78456779343229f3a6af7bd",
+    "as_of": "2026-08-08T21:50:46Z",
+    "locator": "data/lol/v2/tierlists/champion-elo-candidate-v1.json",
+    "maps_in_live_window": 906,
+    "maps_replayed": 17227,
+    "rating_refresh_completed": true,
+    "raw_sha256": "36e4c74aba5c7b418f5c2ee197782d882e55818f8cc124a8c25d8e0d6547998d",
+    "source_complete_through_expected_live_as_of": true,
+    "source_mode": "oe_only"
+  },
+  "candidate_expected_live_as_of": "2026-08-08T21:50:46Z",
+  "claim_ceiling": "This receipt records a source-bound descriptive production bundle. It does not authorize outcome-calibrated probability, causal, recommendation, or betting claims.",
+  "expected_live_as_of": "2026-08-08T23:38:51Z",
+  "live_window_start": "2026-07-18T00:00:00Z",
+  "movement_baseline": {
+    "artifact_sha256": "c521f70be6e7c0bfe07a129980ef9eb25574d20d5c2abceef5a86dd93d197a4b",
+    "as_of": "2026-07-26T00:00:00Z",
+    "kind": "previous_sunday_utc"
+  },
+  "promotion_status": "promoted",
+  "promotion_steps": [
+    {
+      "command": [
+        "lol_kills.v2.tierlists.forward_evaluation",
+        "--output",
+        "data/lol/v2/tierlists/prospective-evaluation-v1.json"
+      ],
+      "completed": true,
+      "returncode": 0,
+      "source": "forward_evaluation",
+      "stderr_bytes": 0,
+      "stdout_bytes": 305
+    },
+    {
+      "command": [
+        "lol_kills.v2.tierlists.independent_authority",
+        "--output",
+        "data/lol/v2/tierlists/independent-l2-authority-v1.json"
+      ],
+      "completed": true,
+      "returncode": 0,
+      "source": "independent_authority",
+      "stderr_bytes": 0,
+      "stdout_bytes": 312
+    },
+    {
+      "command": [
+        "lol_kills.v2.tierlists.production_bundle"
+      ],
+      "completed": true,
+      "returncode": 0,
+      "source": "production_bundle",
+      "stderr_bytes": 0,
+      "stdout_bytes": 3094
+    },
+    {
+      "command": [],
+      "completed": true,
+      "publication": {
+        "blob_store_id": "97gks2fobqkgppwx",
+        "cell_count": 285,
+        "index_url": "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/tierlists/index-v1.json",
+        "pointer_artifact_sha256": "9214f4aa8fb93e92bf14b521797b5b6edc8e24a7f34fcff36a3f1af883940edf",
+        "pointer_mode": "OVERWRITE",
+        "pointer_path": "tierlists/index-v1.json",
+        "pointer_readback_verified": true,
+        "release_id": "c63a22287444cee3dbbdb46451b9ed8e53f2a91c0ce97515eb108740ce44ca44",
+        "release_index_artifact_sha256": "979e08b875b935ab9048b9b6c948d07823e371c15c872a9632d85a5390352f01",
+        "release_index_path": "tierlists/releases/c63a22287444cee3dbbdb46451b9ed8e53f2a91c0ce97515eb108740ce44ca44/index-v1.json",
+        "retention": {
+          "actual_final_bytes": 334832218,
+          "current_retained_bytes": 319407701,
+          "peak_retained_bytes": 334832441,
+          "policy_sha256": "a962339eca9b73256ff481c08f816cc1228c48dca560d26324ff36029e482873",
+          "projected_final_bytes": 334832218,
+          "state": "normal"
+        },
+        "source_index_artifact_sha256": "c63a22287444cee3dbbdb46451b9ed8e53f2a91c0ce97515eb108740ce44ca44",
+        "status": "published"
+      },
+      "returncode": 0,
+      "source": "blob_publication"
+    }
+  ],
+  "receipt_canonical_sha256": "cf53aa7a84cc58e91b0f7fe3e07f0253154cac7d58f7a9e0a1f4631ebcbba213",
+  "retrieved_at": "2026-08-08T23:50:04.244564Z",
+  "schema_version": "scryglass:tierlist-live-refresh:v1",
+  "source_mode": "oe_only",
+  "source_observed_through": "2026-08-08T21:50:46Z",
+  "source_steps": [
+    {
+      "command": [],
+      "completed": false,
+      "reason": "committed_public_pack_baseline",
+      "returncode": null,
+      "skipped": true,
+      "source": "oe_annual"
+    },
+    {
+      "command": [
+        "lol_kills.etl.oe_api_ingest",
+        "--start",
+        "2026-07-18T00:00:00Z",
+        "--end",
+        "2026-08-08T23:38:51Z",
+        "--lookback-days",
+        "120"
+      ],
+      "completed": true,
+      "returncode": 0,
+      "source": "oe_api",
+      "stderr_bytes": 0,
+      "stdout_bytes": 1341
+    },
+    {
+      "command": [
+        "lol_kills.v2.champions.atoms.bridge_v1"
+      ],
+      "completed": true,
+      "returncode": 0,
+      "source": "champion_atomization",
+      "stderr_bytes": 0,
+      "stdout_bytes": 218
+    },
+    {
+      "command": [
+        "lol_kills.etl.oe_live_source"
+      ],
+      "completed": true,
+      "returncode": 0,
+      "source": "oe_live_source",
+      "stderr_bytes": 974,
+      "stdout_bytes": 1326
+    },
+    {
+      "command": [
+        "lol_kills.v2.tierlists.rating_refresh",
+        "--as-of",
+        "2026-08-08T21:50:46Z"
+      ],
+      "completed": true,
+      "returncode": 0,
+      "source": "ratings",
+      "stderr_bytes": 0,
+      "stdout_bytes": 468
+    },
+    {
+      "command": [],
+      "completed": false,
+      "reason": "source_mode_oe_only",
+      "returncode": null,
+      "skipped": true,
+      "source": "grid"
+    }
+  ],
+  "status": "production_promoted",
+  "window_start": "2025-01-01T00:00:00Z"
+}

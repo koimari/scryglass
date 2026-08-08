@@ -29,3 +29,6 @@ def test_cron_route_requires_worker_auth_and_preserves_source_windows() -> None:
     assert 'source_mode: "oe_only"' in route
     assert 'trigger: "vercel_cron"' in route
     assert "controller.abort()" in route
+    assert "dispatchGitHubWorkflow" not in route
+    assert "api.github.com" not in route
+    assert "refresh_worker_not_configured" in route

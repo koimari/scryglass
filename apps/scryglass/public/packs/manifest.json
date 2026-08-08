@@ -1,7 +1,7 @@
 {
-  "pack_id": "v2026.08.08.1750",
+  "pack_id": "v2026.08.08.2350",
   "schema_version": "1.3.0",
-  "created_utc": "2026-08-08T17:57:30.424445+00:00",
+  "created_utc": "2026-08-08T23:51:42.856280+00:00",
   "filters": {
     "years": [
       2025,
@@ -43,105 +43,105 @@
   },
   "ingest": {
     "oe_live_meta": {
-      "maps": 38510,
+      "maps": 17227,
       "outputs": {
         "maps": "data/lol/warehouse/parquet/oe_live/maps.parquet",
         "player": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
         "team": "data/lol/warehouse/parquet/oe_live/oe_team_games.parquet"
       },
-      "player_rows": 385100,
-      "player_rows_with_names": 384570,
+      "player_rows": 172270,
+      "player_rows_with_names": 171740,
       "schema_version": "scryglass:oe-live-source:v1",
-      "source_latest": "2026-08-08T12:13:56Z",
+      "source_latest": "2026-08-08T21:50:46Z",
       "source_mode": "oe_only",
       "sources": [
         {
           "locator": "data/lol/warehouse/parquet/oe_player_games.parquet",
-          "raw_sha256": "fe7f0a8519e5ac24c3597bbbc47c83d6fd8751282f9108c2136c6ccb8683bed0"
+          "raw_sha256": "a35d95a0474bb2c50c77604a072379fdae86d9ae39c1a99af81b9ce6faf022ef"
         },
         {
           "locator": "data/lol/warehouse/parquet/oe_team_games.parquet",
-          "raw_sha256": "456a3e550952915ee134d8cc04163389de1bf22480f8a9bca234b8b985d1dac2"
+          "raw_sha256": "e8e6c26caa510e57e302ed083c813fbb819f431a13e73471946a5e77d02c5662"
         },
         {
           "locator": "data/lol/warehouse/parquet/oe_api_player_games.parquet",
-          "raw_sha256": "2e27b87bb7c008a314ddfd28691a491cfca57f5864d352d09cac057c7bd52ef5"
+          "raw_sha256": "ad6fef51a11e1a214f76bd610c5553a34c8ddf48d27fede68f18308a7213059a"
         },
         {
           "locator": "data/lol/warehouse/parquet/oe_api_team_games.parquet",
-          "raw_sha256": "44f333cc3f925f564be9f9ffe37821fbf9e1274225a423c90a1558adf3bc7dba"
+          "raw_sha256": "3bb4481fa0d1b7b63b197080273be04cd3f4b17b2887cdd0b0989b4425e11de1"
         },
         {
           "locator": "data/lol/warehouse/parquet/oe_api_meta.json",
-          "raw_sha256": "7b9deba59b966c78b46a3a8ef7666cb35072aecd695865c8180a653e805ee516"
+          "raw_sha256": "6b8bfa5c70e435ffd34092b80f56ef6d3b6abe7884633d25d21fa816ec095336"
         }
       ],
-      "team_rows": 77020
+      "team_rows": 34454
     }
   },
   "ratings": {
     "source_mode": "oe_live",
-    "source_as_of": "2026-08-08T12:13:56Z",
+    "source_as_of": "2026-08-08T21:50:46Z",
     "window_years": [
       2025,
       2026
     ],
-    "map_rows": 17209,
-    "team_rating_rows": 17209,
-    "player_rating_rows": 172090,
+    "map_rows": 17227,
+    "team_rating_rows": 17227,
+    "player_rating_rows": 172270,
     "source_files": {
       "maps.parquet": {
         "locator": "maps.parquet",
-        "bytes": 1088334,
-        "sha256": "879b935de89c93f2737fcf1c054a1bcdd18efbefc6ea510093be32b38253110d"
+        "bytes": 489669,
+        "sha256": "8424a38fa11728d25507f8dbdef777bf7ce3ca66b319e934b8c8848816a0be53"
       },
       "oe_team_games.parquet": {
         "locator": "oe_team_games.parquet",
-        "bytes": 17516950,
-        "sha256": "57bf6cf6da47eeb44469a757374c1dec6205b12a5cfb91bb858d4095542f6b3f"
+        "bytes": 8589437,
+        "sha256": "484e1b609977b3b490ee0ff662f71831854cae2bbcedd6e8e087f1994aa9df79"
       },
       "oe_player_games.parquet": {
         "locator": "oe_player_games.parquet",
-        "bytes": 61843743,
-        "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        "bytes": 29330275,
+        "sha256": "ff4a0ce513eb05b2a1a0ef703f2ded4ccb9d81f5a85cabcec2e94c7fedea1368"
       }
     },
     "artifacts": {
       "features/team_weekly_ranks.json": {
-        "sha256": "6d644a38df4c2647aed1866c332ead327b33289c87f2fc4c25b0239d93c91b44",
-        "bytes": 32614,
+        "sha256": "7ae79ee6f9adcbefce62f92e58201a617a32f2c0288cf1df65f57eedb4cc22c2",
+        "bytes": 32615,
         "rows": 481
       },
       "features/player_weekly_ranks.json": {
-        "sha256": "6b245d1154c14af59046429dc8116ea994f7674092aa3eb969df8bef94aadc60",
-        "bytes": 298326,
+        "sha256": "81fea55de89a69922dee6dfdfd8d3f34505b2f8e0f92c8175bba6332720c127e",
+        "bytes": 298290,
         "rows": 1931
       },
       "features/ratings_snapshot.parquet": {
-        "sha256": "2f1ea5be0cd8ce9f8a940c4929f3e6462b645999b8af81ae83452271890e5b3f",
-        "bytes": 42243,
+        "sha256": "3bf83dc77971f8fbf2f46411839783a32cbe286d8a83bcb85820dd07d4f73424",
+        "bytes": 42247,
         "rows": 615
       },
       "features/ratings_snapshot.json": {
-        "sha256": "83cbab22dcf8b6358f9030cad3868d472d312479d3698fdaffd605ebc1f5a49b",
-        "bytes": 193598,
+        "sha256": "0b6216b22f125cd84ee89b6bbb42134baf457443c8f46bbf92f265dca33cca9f",
+        "bytes": 193593,
         "rows": 615
       },
       "features/player_ratings_snapshot.parquet": {
-        "sha256": "8de5cd06a302c6adb1075b1bd98f7e96b6c8b908b707b97a7c5159b3023e4722",
-        "bytes": 132830,
-        "rows": 3846
+        "sha256": "d7ba4945eb98712e3679cb0760698e6eb8c98ec7b3bf9976341b07ba9ff7bc76",
+        "bytes": 132713,
+        "rows": 3847
       },
       "features/player_ratings_snapshot.json": {
-        "sha256": "7a24cd24772b998db37e1f7da74fddac30ef9139cf38ca902d55c4f612212bab",
-        "bytes": 687450,
-        "rows": 3846
+        "sha256": "aafb81b85a34c560c6cb47611ac49c01b05cea8556bf1e5329fd5bc655201b37",
+        "bytes": 687524,
+        "rows": 3847
       }
     },
     "claim_ceiling": "Source-bound descriptive ratings and weekly rank movement only."
   },
-  "base_url": "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/packs/v2026.08.08.1750",
-  "total_bytes": 34411582,
+  "base_url": "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/packs/v2026.08.08.2350",
+  "total_bytes": 34332095,
   "total_files": 51,
   "files": [
     {
@@ -149,8 +149,8 @@
       "relative": "team_games/year=2025/part.parquet",
       "rows": 19586,
       "cols": 141,
-      "bytes": 3290116,
-      "sha256": "80eca101aa0ed9a1b470367cc61cfa4470ad6889121570a8b8bd591f9bf78414",
+      "bytes": 3265675,
+      "sha256": "b5aacc378887178745814325dea71a178f1687c603d9b80ed97503e979c9242d",
       "columns": [
         "gameid",
         "datacompleteness",
@@ -298,10 +298,10 @@
     {
       "path": "team_games/year=2026/part.parquet",
       "relative": "team_games/year=2026/part.parquet",
-      "rows": 14832,
+      "rows": 14868,
       "cols": 141,
-      "bytes": 2485081,
-      "sha256": "79ef25eac6dea5d8f8cfc91dd6f36e27b1924ff2fffb59f2df8b6ecc3046c930",
+      "bytes": 2471578,
+      "sha256": "147c35a0c8d202403605aead32d44c1140fb33a31284759e1d47b1a8528fdc02",
       "columns": [
         "gameid",
         "datacompleteness",
@@ -451,8 +451,8 @@
       "relative": "player_games/year=2025/part.parquet",
       "rows": 97930,
       "cols": 147,
-      "bytes": 11534433,
-      "sha256": "61aea5aa3462b9040b4b0675cbbc8b7f38611be3f8e689f9fee12c44968ffbdf",
+      "bytes": 11507602,
+      "sha256": "3bb4923f1a03777f36e277065fe0c1c98da861f6f04261df7ad9dcf0abaef40c",
       "columns": [
         "gameid",
         "datacompleteness",
@@ -606,10 +606,10 @@
     {
       "path": "player_games/year=2026/part.parquet",
       "relative": "player_games/year=2026/part.parquet",
-      "rows": 74160,
+      "rows": 74340,
       "cols": 147,
-      "bytes": 8461020,
-      "sha256": "f0dba8ebec78708b157b4a8f85fc210e652a6ea0c8a3a381d1c1a2e8be1d56bb",
+      "bytes": 8439471,
+      "sha256": "201bb30dc18b1a83fc9dc83f253a025bacbd9eb559b497872950d68c20f00962",
       "columns": [
         "gameid",
         "datacompleteness",
@@ -765,8 +765,8 @@
       "relative": "maps/year=2025/part.parquet",
       "rows": 10041,
       "cols": 16,
-      "bytes": 216744,
-      "sha256": "8922a16cdbdb2cd08a41e92777e0913e046c6e20115b63e3da9687deab0a659b",
+      "bytes": 216745,
+      "sha256": "b1ebe9dfa13499cb45536b789d86dde669bec58b4bd4e93538cbf7892298ca8f",
       "columns": [
         "game_uid",
         "league",
@@ -789,10 +789,10 @@
     {
       "path": "maps/year=2026/part.parquet",
       "relative": "maps/year=2026/part.parquet",
-      "rows": 7168,
+      "rows": 7186,
       "cols": 16,
-      "bytes": 166197,
-      "sha256": "28a9ddf82b768bc3bb3bbf942dcd20c04a8d2c9017977314d68676626e3886ca",
+      "bytes": 166866,
+      "sha256": "6fa900e9b14a61f970de97f58bda5beeb42c37a164b33377408573da6e292cff",
       "columns": [
         "game_uid",
         "league",
@@ -815,8 +815,8 @@
     {
       "rows": 481,
       "cols": null,
-      "bytes": 32614,
-      "sha256": "6d644a38df4c2647aed1866c332ead327b33289c87f2fc4c25b0239d93c91b44",
+      "bytes": 32615,
+      "sha256": "7ae79ee6f9adcbefce62f92e58201a617a32f2c0288cf1df65f57eedb4cc22c2",
       "columns": null,
       "relative": "features/team_weekly_ranks.json",
       "path": "features/team_weekly_ranks.json"
@@ -824,17 +824,17 @@
     {
       "rows": 1931,
       "cols": null,
-      "bytes": 298326,
-      "sha256": "6b245d1154c14af59046429dc8116ea994f7674092aa3eb969df8bef94aadc60",
+      "bytes": 298290,
+      "sha256": "81fea55de89a69922dee6dfdfd8d3f34505b2f8e0f92c8175bba6332720c127e",
       "columns": null,
       "relative": "features/player_weekly_ranks.json",
       "path": "features/player_weekly_ranks.json"
     },
     {
-      "rows": 3233,
+      "rows": 3234,
       "cols": null,
-      "bytes": 305535,
-      "sha256": "9c6d98a2fd47c1bdef130bfab7412ab62cc52cb9ef5933c551a466a9610acf0a",
+      "bytes": 305626,
+      "sha256": "5ed81f5c29dfb223bb0f11422a9b565fa791373c0303a3f81b04a088458e2d58",
       "columns": null,
       "relative": "features/player_metadata.json",
       "path": "features/player_metadata.json"
@@ -842,17 +842,17 @@
     {
       "rows": 615,
       "cols": null,
-      "bytes": 432220,
-      "sha256": "dad385d70358d23eae6533a17b3bea0c2b78111c03bac978e68568ff8f9adf31",
+      "bytes": 432185,
+      "sha256": "923277308c7136faaab8320c314d6a19e6ab40900b09d15a8d1967e032cd46b2",
       "columns": null,
       "relative": "features/team_records.json",
       "path": "features/team_records.json"
     },
     {
-      "rows": 3846,
+      "rows": 3847,
       "cols": null,
-      "bytes": 1320507,
-      "sha256": "260d31eb91f9ce59959e260f29f82e21aeb8f4d1b60bf86a85a78e81f312669a",
+      "bytes": 1320947,
+      "sha256": "4d22516ec7a780d0b4f4b65efeccd010760cedf960909da8bf38f6e7a4498cbd",
       "columns": null,
       "relative": "features/player_records.json",
       "path": "features/player_records.json"
@@ -862,8 +862,8 @@
       "relative": "features/ratings_snapshot.parquet",
       "rows": 615,
       "cols": 12,
-      "bytes": 42243,
-      "sha256": "2f1ea5be0cd8ce9f8a940c4929f3e6462b645999b8af81ae83452271890e5b3f",
+      "bytes": 42247,
+      "sha256": "3bf83dc77971f8fbf2f46411839783a32cbe286d8a83bcb85820dd07d4f73424",
       "columns": [
         "team",
         "team_key",
@@ -882,8 +882,8 @@
     {
       "rows": 615,
       "cols": 12,
-      "bytes": 193598,
-      "sha256": "83cbab22dcf8b6358f9030cad3868d472d312479d3698fdaffd605ebc1f5a49b",
+      "bytes": 193593,
+      "sha256": "0b6216b22f125cd84ee89b6bbb42134baf457443c8f46bbf92f265dca33cca9f",
       "columns": [
         "team",
         "team_key",
@@ -904,10 +904,10 @@
     {
       "path": "features/player_ratings_snapshot.parquet",
       "relative": "features/player_ratings_snapshot.parquet",
-      "rows": 3846,
+      "rows": 3847,
       "cols": 7,
-      "bytes": 132830,
-      "sha256": "8de5cd06a302c6adb1075b1bd98f7e96b6c8b908b707b97a7c5159b3023e4722",
+      "bytes": 132713,
+      "sha256": "d7ba4945eb98712e3679cb0760698e6eb8c98ec7b3bf9976341b07ba9ff7bc76",
       "columns": [
         "player",
         "mu_total",
@@ -919,10 +919,10 @@
       ]
     },
     {
-      "rows": 3846,
+      "rows": 3847,
       "cols": 7,
-      "bytes": 687450,
-      "sha256": "7a24cd24772b998db37e1f7da74fddac30ef9139cf38ca902d55c4f612212bab",
+      "bytes": 687524,
+      "sha256": "aafb81b85a34c560c6cb47611ac49c01b05cea8556bf1e5329fd5bc655201b37",
       "columns": [
         "player",
         "mu_total",
@@ -938,10 +938,10 @@
     {
       "path": "features/ratings_history.parquet",
       "relative": "features/ratings_history.parquet",
-      "rows": 17209,
+      "rows": 17227,
       "cols": 15,
-      "bytes": 1670891,
-      "sha256": "c7c88d82b8ce780efafb8af198bdd539a213cc00028a831e6f93376accff1033",
+      "bytes": 1674967,
+      "sha256": "312e42a17cfce204f36f49fbaed2b47268f37d7067f629b3b9be719089e210cb",
       "columns": [
         "game_uid",
         "date",
@@ -963,10 +963,10 @@
     {
       "path": "features/player_ratings_history.parquet",
       "relative": "features/player_ratings_history.parquet",
-      "rows": 17209,
+      "rows": 17227,
       "cols": 11,
-      "bytes": 1374970,
-      "sha256": "2e07c2bd40812d4fd072e314b1f975f134c8f56a02f7e043edeb7d5c933fcf66",
+      "bytes": 1376644,
+      "sha256": "e2954e71e3aff78891c06c0cf4c5a1d30af61997020efc9b8ed036071aa3ee38",
       "columns": [
         "game_uid",
         "date",
@@ -985,7 +985,7 @@
       "rows": null,
       "cols": null,
       "bytes": 3398,
-      "sha256": "107beb1edb458376bfde8c4977bfd0360d957783b59d4cc9710ef8cc71de67a1",
+      "sha256": "42a4ae5c5f0512faf2bdcd33f986250a2117e19473ee1d0dfa2867a33d07b074",
       "columns": null,
       "relative": "features/ratings_meta.json",
       "path": "features/ratings_meta.json"
@@ -994,7 +994,7 @@
       "rows": null,
       "cols": null,
       "bytes": 504,
-      "sha256": "fc0b8cbc9849b3266673b6d885e6f7148d03ec0c434dcfccac28f22a7b2f2251",
+      "sha256": "dd89081d1b40e1760260179bf026efb89bd1fd03bc8df31bb51b95a2e5082467",
       "columns": null,
       "relative": "features/player_ratings_meta.json",
       "path": "features/player_ratings_meta.json"

@@ -43,6 +43,19 @@ def test_current_token_resolves_to_the_exact_atom_snapshot() -> None:
     assert resolve_atom_snapshot_patch("16.15", "2026-08-08T12:13:56Z") == "26.15"
 
 
+def test_live_binding_extends_the_audited_interval_without_changing_the_mapping() -> None:
+    artifact = load_mapping()
+
+    assert artifact.live_source is not None
+    assert artifact.live_source["source_mode"] == "oe_only"
+    assert artifact.live_source["source_latest"] >= artifact.payload["source_window"]["end"]
+    assert artifact.rows["16.15"]["oe_observed_interval"]["end"] >= "2026-08-08T12:13:56Z"
+    current = resolve_oe_patch("16.15", artifact.live_source["source_latest"])
+
+    assert current.exact_official_patch is True
+    assert current.exact_atom_snapshot is True
+
+
 def test_historical_token_keeps_official_resolution_and_withholds_atom_snapshot() -> None:
     result = resolve_oe_patch("16.14", "2026-07-24T08:30:21Z")
 

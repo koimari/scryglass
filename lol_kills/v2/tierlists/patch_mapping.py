@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+import pandas as pd
+
 
 SCHEMA_VERSION = "scryglass:oe-atom-patch-map:v1"
 DEFAULT_MAPPING_PATH = Path(
@@ -120,6 +122,7 @@ class MappingArtifact:
     rows: dict[str, dict[str, Any]]
     path: Path
     repo_root: Path | None
+    live_source: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +172,46 @@ def _validate_source_ref(source: Mapping[str, Any], *, field: str) -> None:
     _require_sha(source.get("sha256"), field=f"{field}.sha256")
 
 
+def _source_by_kind(payload: Mapping[str, Any], kind: str) -> Mapping[str, Any] | None:
+    for source in payload.get("sources", []):
+        if isinstance(source, Mapping) and source.get("kind") == kind:
+            return source
+    return None
+
+
+def _verify_mutable_atom_source(path: Path, source: Mapping[str, Any]) -> None:
+    try:
+        bridge = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PatchMappingError("LCC atom bridge is not valid JSON") from exc
+    if not isinstance(bridge, Mapping):
+        raise PatchMappingError("LCC atom bridge must be an object")
+    if bridge.get("schema_id") != "scryglass.lcc-atom-bridge.v1":
+        raise PatchMappingError("LCC atom bridge schema is not supported")
+    if bridge.get("version") != "lcc-atom-bridge-v1":
+        raise PatchMappingError("LCC atom bridge version is not supported")
+    artifact_hash = _require_sha(bridge.get("artifact_sha256"), field="LCC atom bridge artifact_sha256")
+    unsigned = dict(bridge)
+    unsigned.pop("artifact_sha256", None)
+    if _sha256_bytes(_canonical_json(unsigned)) != artifact_hash:
+        raise PatchMappingError("LCC atom bridge canonical hash is invalid")
+    semantic_hash = _require_sha(
+        source.get("semantic_sha256"),
+        field="mutable LCC atom bridge semantic_sha256",
+    )
+    semantic = dict(bridge)
+    semantic.pop("artifact_sha256", None)
+    semantic.pop("generated_at", None)
+    provenance = semantic.get("provenance")
+    if isinstance(provenance, Mapping):
+        stable_provenance = dict(provenance)
+        stable_provenance.pop("lcc_commit", None)
+        stable_provenance.pop("lcc_repo", None)
+        semantic["provenance"] = stable_provenance
+    if _sha256_bytes(_canonical_json(semantic)) != semantic_hash:
+        raise PatchMappingError("LCC atom bridge semantic hash does not match the audited source")
+
+
 def _verify_local_sources(
     payload: Mapping[str, Any],
     *,
@@ -185,12 +228,155 @@ def _verify_local_sources(
         path = repo_root / locator
         if not path.is_file():
             raise PatchMappingError(f"mapping source is missing: {locator}")
+        if source.get("mutable_live_source") is True or source.get("mutable_source") is True:
+            if source.get("kind") in {"oe_live_player_games", "oe_live_meta"}:
+                continue
+            if source.get("kind") == "lcc_atom_bridge":
+                _verify_mutable_atom_source(path, source)
+                continue
+            if source.get("kind") not in {"oe_live_player_games", "oe_live_meta", "lcc_atom_bridge"}:
+                raise PatchMappingError(
+                    f"mutable mapping source kind is not allowed: {source.get('kind')}"
+                )
         expected = str(source.get("sha256") or "")
         actual = _sha256_path(path)
         if actual != expected:
             raise PatchMappingError(
                 f"mapping source hash mismatch for {locator}: {actual} != {expected}"
             )
+
+
+def _live_source_binding(
+    payload: Mapping[str, Any],
+    *,
+    repo_root: Path | None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]] | None:
+    """Bind current OE intervals while retaining the static audit sidecar.
+
+    The OE live parquet and its receipt are expected to change after a refresh.
+    Their current hashes belong in the refresh receipt. The sidecar keeps the
+    audited token-to-official and token-to-atom evidence. This function binds
+    the current source watermark and intervals to those audited rows.
+    """
+
+    if repo_root is None:
+        return None
+    player_source = _source_by_kind(payload, "oe_live_player_games")
+    meta_source = _source_by_kind(payload, "oe_live_meta")
+    if player_source is None and meta_source is None:
+        return None
+    if player_source is None or meta_source is None:
+        raise PatchMappingError("OE live mapping sources must include parquet and metadata")
+    if player_source.get("mutable_live_source") is not True or meta_source.get("mutable_live_source") is not True:
+        raise PatchMappingError("OE live mapping sources must declare mutable_live_source")
+
+    player_locator = str(player_source.get("locator") or "")
+    meta_locator = str(meta_source.get("locator") or "")
+    player_path = repo_root / player_locator
+    meta_path = repo_root / meta_locator
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PatchMappingError("OE live metadata is not valid JSON") from exc
+    if not isinstance(meta, Mapping):
+        raise PatchMappingError("OE live metadata must be an object")
+    if meta.get("schema_version") != "scryglass:oe-live-source:v1":
+        raise PatchMappingError("OE live metadata schema is not supported")
+    if meta.get("source_mode") != "oe_only":
+        raise PatchMappingError("OE live mapping requires the OE-only source mode")
+    source_window = payload.get("source_window")
+    if not isinstance(source_window, Mapping):
+        raise PatchMappingError("source_window is required before binding the OE live source")
+    source_start = _parse_utc(source_window.get("start"), field="source_window.start")
+    try:
+        source_latest = _parse_utc(meta.get("source_latest"), field="oe_live.source_latest")
+    except PatchMappingError:
+        raise
+
+    try:
+        frame = pd.read_parquet(player_path, columns=["gameid", "date", "patch"])
+    except (OSError, ValueError, ImportError) as exc:
+        raise PatchMappingError("OE live player parquet cannot be read") from exc
+    required = {"gameid", "date", "patch"}
+    if not required.issubset(frame.columns):
+        raise PatchMappingError("OE live player parquet lacks patch interval columns")
+    frame = frame.copy()
+    frame["gameid"] = frame["gameid"].astype("string").str.strip()
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce", utc=True)
+    frame = frame[frame["gameid"].notna() & frame["gameid"].ne("")]
+    frame = frame[frame["date"].notna()]
+    frame = frame[frame["date"] >= pd.Timestamp(source_start)]
+    if frame.empty:
+        raise PatchMappingError("OE live player parquet has no rows in the audited source window")
+
+    unique_games = frame[["gameid", "date", "patch"]].drop_duplicates()
+    conflicts = unique_games.groupby("gameid", sort=False).agg(
+        date_count=("date", "nunique"),
+        patch_count=("patch", "nunique"),
+    )
+    if (conflicts["date_count"] > 1).any() or (conflicts["patch_count"] > 1).any():
+        raise PatchMappingError("OE live source has a game with conflicting date or patch tokens")
+    games = unique_games.drop_duplicates("gameid").copy()
+    normalized_tokens: list[str] = []
+    for value in games["patch"].tolist():
+        try:
+            normalized_tokens.append(normalize_oe_token(value))
+        except PatchMappingError as exc:
+            raise PatchMappingError(f"OE live source has a malformed patch token: {value!r}") from exc
+    games["oe_token"] = normalized_tokens
+    known_tokens = {str(row.get("oe_token")) for row in payload.get("mappings", []) if isinstance(row, Mapping)}
+    unknown_tokens = sorted(set(games["oe_token"]) - known_tokens)
+    if unknown_tokens:
+        raise PatchMappingError(
+            "OE live source has patch tokens without audited mapping rows: "
+            + ", ".join(unknown_tokens)
+        )
+
+    intervals: dict[str, dict[str, Any]] = {}
+    for token, group in games.groupby("oe_token", sort=True):
+        intervals[token] = {
+            "observed_game_count": int(group["gameid"].nunique()),
+            "oe_observed_interval": {
+                "start": _rfc3339(pd.Timestamp(group["date"].min()).to_pydatetime()),
+                "end": _rfc3339(pd.Timestamp(group["date"].max()).to_pydatetime()),
+            },
+        }
+    observed_latest = pd.Timestamp(games["date"].max()).to_pydatetime().replace(tzinfo=timezone.utc)
+    observed_latest_utc = observed_latest.astimezone(timezone.utc)
+    if observed_latest_utc != source_latest:
+        raise PatchMappingError("OE live metadata watermark does not match the player parquet")
+    expected_maps = meta.get("maps")
+    if isinstance(expected_maps, int) and expected_maps != int(games["gameid"].nunique()):
+        raise PatchMappingError("OE live metadata map count does not match the player parquet")
+    return intervals, {
+        "status": "bound",
+        "source_mode": "oe_only",
+        "source_latest": _rfc3339(source_latest),
+        "source_game_count": int(games["gameid"].nunique()),
+        "source_token_count": len(intervals),
+        "player_locator": player_locator,
+        "player_raw_sha256": _sha256_path(player_path),
+        "meta_locator": meta_locator,
+        "meta_raw_sha256": _sha256_path(meta_path),
+        "patch_intervals": intervals,
+    }
+
+
+def _bind_live_rows(
+    rows: Mapping[str, dict[str, Any]],
+    live_intervals: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    bound: dict[str, dict[str, Any]] = {}
+    for token, row in rows.items():
+        current = live_intervals.get(token)
+        if current is None:
+            bound[token] = dict(row)
+            continue
+        refreshed = dict(row)
+        refreshed["observed_game_count"] = current["observed_game_count"]
+        refreshed["oe_observed_interval"] = dict(current["oe_observed_interval"])
+        bound[token] = refreshed
+    return bound
 
 
 def _validate_row(
@@ -339,14 +525,20 @@ def load_mapping(
         validated[token] = validated_row
 
     resolved_root = Path(repo_root) if repo_root is not None else _repo_root_for(mapping_path)
+    live_source: dict[str, Any] | None = None
     if verify_source_hashes:
         _verify_local_sources(payload, repo_root=resolved_root)
+    live_binding = _live_source_binding(payload, repo_root=resolved_root)
+    if live_binding is not None:
+        live_intervals, live_source = live_binding
+        validated = _bind_live_rows(validated, live_intervals)
 
     return MappingArtifact(
         payload=dict(payload),
         rows=validated,
         path=mapping_path,
         repo_root=resolved_root,
+        live_source=live_source,
     )
 
 

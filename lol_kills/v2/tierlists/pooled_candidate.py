@@ -149,6 +149,7 @@ def _mapping_for_root(root: Path) -> tuple[MappingArtifact | None, dict[str, Any
         "schema_version": artifact.payload["schema_version"],
         "source_window": artifact.payload.get("source_window"),
         "mapping_rows": len(artifact.rows),
+        "live_source": artifact.live_source,
     }
 
 
@@ -692,22 +693,35 @@ def _loo_stability(
             entry = cell_designs.get((scope_id, role))
             if not entry:
                 continue
+            pair_rows: list[sparse.spmatrix] = []
+            pair_keys: list[tuple[str, str]] = []
             scores: list[dict[str, Any]] = []
             for champion_id, pair_map in entry["by_champion"].items():
-                opponent_rows = [pair_map[key] for key in pair_map]
-                probabilities = np.asarray(
-                    [float((row @ beta_loo).item()) for row in opponent_rows],
-                    dtype=float,
-                )
+                for opponent, row in pair_map.items():
+                    pair_rows.append(row)
+                    pair_keys.append((champion_id, opponent))
+            if not pair_rows:
+                continue
+            pair_scores = np.asarray(
+                sparse.vstack(pair_rows, format="csr") @ beta_loo,
+                dtype=float,
+            ).reshape(-1)
+            status_by_champion = {
+                str(row["champion_id"]): row["counterability_status"]
+                for row in cell["rows"]
+            }
+            for champion_id in entry["by_champion"]:
+                indices = [
+                    index
+                    for index, (focal, _opponent) in enumerate(pair_keys)
+                    if focal == champion_id
+                ]
+                probabilities = pair_scores[indices]
                 scores.append(
                     {
                         "champion": champion_id,
                         "strength_score": float(np.mean(expit(probabilities))) if probabilities.size else 0.5,
-                        "counterability_status": next(
-                            row["counterability_status"]
-                            for row in cell["rows"]
-                            if row["champion_id"] == champion_id
-                        ),
+                        "counterability_status": status_by_champion[champion_id],
                         "blind_score_pp": 0.0,
                         "counter_score": float(np.sum(probabilities > COUNTER_EFFECT_THRESHOLD_LOGIT)),
                         "countered_opponent_count": int(np.sum(probabilities > COUNTER_EFFECT_THRESHOLD_LOGIT)),
