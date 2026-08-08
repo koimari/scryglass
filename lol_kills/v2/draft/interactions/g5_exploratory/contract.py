@@ -90,12 +90,12 @@ G1 = {
 
 G1_FEATURES = {
     "loader_verifier_locator": "lol_kills/v2/data/g1_draft_features.py",
-    "loader_verifier_raw_sha256": "95a7bd8cf903b6f44c6a6c553250989d261dd4f82809432dd03fbe3aa6a5b4a3",
+    "loader_verifier_raw_sha256": "b5c366ede303bd4011d2d03ebbb638236b7e7caa43b3eaa1d1b1cd59cd913def",
     "focused_test_locator": "tests/model_v2/data/test_g1_draft_features.py",
     "focused_test_raw_sha256": "ae8c9aaed41e33c901278b13cb24055d96f6cdd9b30292ec60860248240516de",
     "manifest_locator": "data/lol/v2/snapshots/real-v1/lpl-private-draft-features-manifest.json",
-    "manifest_raw_sha256": "4ba9653e634c703ca6ef4379461833276811b4571e4f998f2bd6683d5e060efb",
-    "manifest_canonical_sha256": "7e559054ac3f1bd79f1821121c17b778927736f6a3a52c85b48b5d3d0460189c",
+    "manifest_raw_sha256": "c806505ac5dfb9eabf00921ed5176f6d295af84bf577179fab3ccf68c216690f",
+    "manifest_canonical_sha256": "35947a49c9840d2944f90e932b3e6fffcb3f05ccc382a5d3fa79f30f7b9961ea",
     "rows_locator": "data/lol/v2/snapshots/real-v1/lpl-private-draft-features-rows.jsonl",
     "rows_raw_sha256": "e742631e1c12fb1af7148468a0d595ff6cf23e816af4edb20af162a04a6a9680",
     "rows_canonical_sha256": "52d59dd0c41a212f7eb07b6f6132841f3c152f28324308b376042f8e262c141d",

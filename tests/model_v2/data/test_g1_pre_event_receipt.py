@@ -22,7 +22,7 @@ def test_committed_receipt_exactly_replays_pinned_non_authorizing_input() -> Non
 
     assert receipt.validate_receipt(payload) == expected
     assert receipt.canonical_receipt_bytes(payload) == receipt.RECEIPT_PATH.read_bytes()
-    assert payload["receipt_sha256"] == "37907f55f586d54380788737494dfff97257103d61f74a177f87e242898ed937"
+    assert payload["receipt_sha256"] == "94882c6a6bde5ddf181e964f39342043f75fd2a35a196ae2b301893f2612bc04"
     assert payload["final_holdout"] == {"accessed": False, "included": False, "status": "SEALED_UNREAD"}
     assert payload["claim_ceiling"]["prediction"] is False
     assert payload["claim_ceiling"]["private_model_fit_feature_input"] is True

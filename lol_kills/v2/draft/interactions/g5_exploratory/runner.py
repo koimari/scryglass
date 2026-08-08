@@ -32,9 +32,9 @@ from . import contract, result
 
 ROOT = Path(__file__).resolve().parents[5]
 NAMESPACE = ROOT / "data/lol/v2/models/draft-interactions/g5-exploratory"
-CONTRACT_SHA = "28eaac0c407b2fd422ac6fa1936f5f7f63946142cc0a8be3542bc4d1cf71ac53"
-PREFIT_CORE_SHA = "af14e15fed83ae859f57b201396d256d7ef2cbeb1dc836dd18055eabbd6357bf"
-PREFIT_REVIEW_SHA = "f2ee55946410e564a1453833f113195f7ef323d3dec4f1a1dd5e1579bef46a28"
+CONTRACT_SHA = "5dc6a1e77cabad6b7e73c0e490c0dacccfc7fae6b2117f13c4a4f070f4da27ed"
+PREFIT_CORE_SHA = "0d6052de3d2885311e51320324b5f9e0b758a3279e9a628792605da6ac1d474b"
+PREFIT_REVIEW_SHA = "6b84758b7a2e23f7032e57dba43ae085b4b1dede5a491e26a4fd8aa030dc374f"
 FEATURE_MANIFEST_SHA = "7e559054ac3f1bd79f1821121c17b778927736f6a3a52c85b48b5d3d0460189c"
 ROLES = ("top", "jungle", "mid", "bot", "support")
 EXPECTED_MAPS = 1226
