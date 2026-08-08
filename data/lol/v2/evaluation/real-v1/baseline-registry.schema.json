@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scryglass:baseline-registry-schema:v1.4",
+  "title": "Scryglass real-v1 baseline registry v1.4 closed schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registry_id",
+    "schema_version",
+    "artifact_kind",
+    "acceptance",
+    "final_labels_read",
+    "binding_contract",
+    "baselines",
+    "component_ablation_registry"
+  ],
+  "properties": {
+    "registry_id": {
+      "const": "scryglass:real-baselines:v1"
+    },
+    "schema_version": {
+      "const": "1.4"
+    },
+    "artifact_kind": {
+      "const": "PRE_BINDING_BASELINE_TEMPLATE"
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "source_independent_inventory_status",
+        "source_dependent_execution_bindings_status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_independent_inventory_status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_dependent_execution_bindings_status": {
+          "const": "UNBOUND"
+        }
+      }
+    },
+    "final_labels_read": {
+      "type": "boolean"
+    },
+    "binding_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_bound_transition",
+        "typed_unavailable_required_fields",
+        "null_placeholders_prohibited",
+        "required_comparator_effect"
+      ],
+      "properties": {
+        "source_bound_transition": {
+          "const": "PROHIBITED_IN_V1_4_REQUIRES_G1_UNIFIED_AUTHORITY_BUNDLE"
+        },
+        "typed_unavailable_required_fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "null_placeholders_prohibited": {
+          "type": "boolean"
+        },
+        "required_comparator_effect": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "baselines": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["id", "family", "comparison_output", "simplicity_rank", "applies_to_draft_depths", "status", "label_access", "unavailable"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1}, "family": {"type": "string", "minLength": 1}, "comparison_output": {"type": "string", "minLength": 1}, "simplicity_rank": {"type": "integer"},
+              "applies_to_draft_depths": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer"}},
+              "status": {"const": "TYPED_UNAVAILABLE"}, "label_access": {"const": "NO_FINAL_LABEL_ACCESS"},
+              "unavailable": {"type": "object", "additionalProperties": false, "required": ["reason_code", "evidence_locator", "resolution_task", "claim_effect"], "properties": {"reason_code": {"type": "string", "minLength": 1}, "evidence_locator": {"type": "string", "minLength": 1}, "resolution_task": {"const": "G1-018"}, "claim_effect": {"const": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}}}
+            }
+          },
+          {
+            "not": {},
+            "type": "object", "additionalProperties": false,
+            "required": ["id", "family", "comparison_output", "simplicity_rank", "applies_to_draft_depths", "status", "label_access", "execution"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1}, "family": {"type": "string", "minLength": 1}, "comparison_output": {"type": "string", "minLength": 1}, "simplicity_rank": {"type": "integer"},
+              "applies_to_draft_depths": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer"}},
+              "status": {"const": "EXECUTABLE_PREBOUND"}, "label_access": {"const": "NO_FINAL_LABEL_ACCESS"},
+              "execution": {"type": "object", "additionalProperties": false, "required": ["entry_point", "execution_authority", "code_locator", "code_raw_sha256", "config_schema", "config_schema_sha256", "default_config", "default_config_sha256", "environment_lock_locator", "environment_lock_raw_sha256", "fixture_input", "fixture_output", "fixture_sha256"], "properties": {"entry_point": {"type": "string", "minLength": 3}, "execution_authority": {"type": "object", "additionalProperties": false, "required": ["kind", "authority_id", "receipt_sha256"], "properties": {"kind": {"const": "AUTHORITY_SIDE_REEXECUTION"}, "authority_id": {"const": "scryglass:authority-derived-preflight:v1.4"}, "receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}, "code_locator": {"type": "string", "minLength": 1}, "code_raw_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "config_schema": {"type": "object"}, "config_schema_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "default_config": {"type": "object"}, "default_config_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "environment_lock_locator": {"type": "string", "minLength": 1}, "environment_lock_raw_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "fixture_input": {"type": "object"}, "fixture_output": {"type": "object"}, "fixture_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
+            }
+          }
+        ]
+      }
+    },
+    "component_ablation_registry": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "component_id",
+          "ablation_baseline_id",
+          "output",
+          "required_decision"
+        ],
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ablation_baseline_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "output": {
+            "type": "string",
+            "minLength": 1
+          },
+          "required_decision": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

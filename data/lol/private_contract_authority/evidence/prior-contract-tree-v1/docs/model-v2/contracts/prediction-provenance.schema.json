@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scryglass.xyz/schemas/model-v2/prediction-provenance.schema.json",
+  "title": "Scryglass prediction provenance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_version",
+    "as_of",
+    "prediction_id",
+    "mode",
+    "created_at",
+    "input_snapshot_id",
+    "estimator_id",
+    "required_input_status",
+    "freshness_checks",
+    "input_conflicts",
+    "fallback_levels",
+    "out_of_distribution_flags",
+    "output_sha256",
+    "immutable",
+    "lineage"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/semver"},
+    "model_version": {"$ref": "common.schema.json#/$defs/model_version"},
+    "as_of": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "prediction_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "mode": {"$ref": "common.schema.json#/$defs/mode"},
+    "created_at": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "event_start": {
+      "oneOf": [
+        {"$ref": "common.schema.json#/$defs/timestamp"},
+        {"type": "null"}
+      ]
+    },
+    "related_forecast_id": {
+      "oneOf": [
+        {"$ref": "common.schema.json#/$defs/stable_id"},
+        {"type": "null"}
+      ]
+    },
+    "simulation_run_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "availability_replayed": {"type": "boolean"},
+    "sealed_before_event_start": {"type": "boolean"},
+    "input_snapshot_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "estimator_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "calibration_id": {
+      "oneOf": [
+        {"$ref": "common.schema.json#/$defs/stable_id"},
+        {"type": "null"}
+      ]
+    },
+    "probability_transform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transform_sha256",
+        "probability_domain",
+        "monotonicity",
+        "complement_symmetry_verified",
+        "open_support_verified",
+        "transform_proof_sha256"
+      ],
+      "properties": {
+        "transform_sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "probability_domain": {"const": "open_0_1"},
+        "monotonicity": {"const": "nondecreasing"},
+        "complement_symmetry_verified": {"const": true},
+        "open_support_verified": {"const": true},
+        "transform_proof_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        }
+      }
+    },
+    "partial_probability_calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "search_policy_id",
+        "search_method",
+        "search_temperature",
+        "search_artifact_sha256",
+        "transform_sha256",
+        "prefix_calibration_report_sha256",
+        "prefix_stratum_id",
+        "probability_domain",
+        "probability_wording_approved"
+      ],
+      "properties": {
+        "search_policy_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "search_method": {
+          "type": "string",
+          "enum": [
+            "hard_minimax",
+            "soft_minimax",
+            "empirical_policy",
+            "risk_aware"
+          ]
+        },
+        "search_temperature": {
+          "oneOf": [
+            {"type": "number", "exclusiveMinimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "search_artifact_sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "transform_sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "prefix_calibration_report_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "prefix_stratum_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "probability_domain": {"const": "open_0_1"},
+        "probability_wording_approved": {"type": "boolean"}
+      }
+    },
+    "required_input_status": {
+      "type": "string",
+      "enum": ["complete", "missing", "stale", "conflict"]
+    },
+    "freshness_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["input_id", "source_updated_at", "limit_seconds", "fresh"],
+        "properties": {
+          "input_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+          "source_updated_at": {"$ref": "common.schema.json#/$defs/timestamp"},
+          "limit_seconds": {"type": "integer", "minimum": 0},
+          "fresh": {"type": "boolean"}
+        }
+      }
+    },
+    "input_conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "input_id",
+          "conflict_type",
+          "source_ids",
+          "detected_at"
+        ],
+        "properties": {
+          "input_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+          "conflict_type": {
+            "type": "string",
+            "enum": [
+              "identity",
+              "patch",
+              "roster",
+              "protocol",
+              "availability",
+              "source_revision"
+            ]
+          },
+          "source_ids": {
+            "type": "array",
+            "minItems": 2,
+            "uniqueItems": true,
+            "items": {"$ref": "common.schema.json#/$defs/stable_id"}
+          },
+          "detected_at": {"$ref": "common.schema.json#/$defs/timestamp"}
+        }
+      }
+    },
+    "fallback_levels": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["F0", "F1", "F2", "F3", "F4", "F5"]
+      }
+    },
+    "out_of_distribution_flags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "output_sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+    "immutable": {"const": true},
+    "lineage": {"$ref": "common.schema.json#/$defs/lineage"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mode": {"enum": ["state_snapshot", "current_analysis"]}
+        },
+        "required": ["mode"]
+      },
+      "then": {
+        "properties": {
+          "event_start": {"type": "null"},
+          "related_forecast_id": {"type": "null"}
+        },
+        "not": {
+          "anyOf": [
+            {"required": ["simulation_run_id"]},
+            {"required": ["availability_replayed"]},
+            {"required": ["sealed_before_event_start"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"mode": {"const": "forecast"}},
+        "required": ["mode"]
+      },
+      "then": {
+        "required": ["event_start", "sealed_before_event_start"],
+        "properties": {
+          "event_start": {"$ref": "common.schema.json#/$defs/timestamp"},
+          "sealed_before_event_start": {"const": true}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"mode": {"const": "forecast_simulation"}},
+        "required": ["mode"]
+      },
+      "then": {
+        "required": [
+          "event_start",
+          "simulation_run_id",
+          "availability_replayed"
+        ],
+        "properties": {
+          "event_start": {"$ref": "common.schema.json#/$defs/timestamp"},
+          "availability_replayed": {"const": true}
+        },
+        "not": {"required": ["sealed_before_event_start"]}
+      }
+    },
+    {
+      "if": {
+        "properties": {"mode": {"const": "hindsight"}},
+        "required": ["mode"]
+      },
+      "then": {
+        "required": ["event_start", "related_forecast_id"],
+        "properties": {
+          "event_start": {"$ref": "common.schema.json#/$defs/timestamp"}
+        }
+      }
+    }
+  ],
+  "x-semantic-invariants": [
+    {
+      "id": "forecast_created_before_event",
+      "applies_when": "mode == 'forecast'",
+      "expression": "created_at < event_start && as_of < event_start",
+      "severity": "error"
+    },
+    {
+      "id": "forecast_simulation_replays_historical_availability",
+      "applies_when": "mode == 'forecast_simulation'",
+      "expression": "as_of < event_start && availability_replayed == true",
+      "severity": "error"
+    },
+    {
+      "id": "hindsight_created_after_event",
+      "applies_when": "mode == 'hindsight'",
+      "expression": "created_at >= event_start",
+      "severity": "error"
+    },
+    {
+      "id": "partial_transform_identity_matches_proof",
+      "applies_when": "partial_probability_calibration is present && probability_transform is present",
+      "expression": "partial_probability_calibration.transform_sha256 == probability_transform.transform_sha256",
+      "severity": "error"
+    }
+  ],
+  "x-negative-mutation-fixtures": [
+    {
+      "id": "forecast_simulation_without_replay",
+      "mutation": {
+        "op": "replace",
+        "path": "/provenance/availability_replayed",
+        "value": false
+      },
+      "expected_schema_failure": true
+    }
+  ]
+}

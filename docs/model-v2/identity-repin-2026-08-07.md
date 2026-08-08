@@ -83,3 +83,37 @@ the L4 real-v1 private-runner snapshot regeneration (below).
 3. Re-freeze the C0 contract tree after the docs settle (single deliberate
    freeze, updating `types.py` + trust root + reconciliation reference).
 4. Re-pin L4 review snapshot after the next real-v1 L4 run.
+
+## L4/L5 + g1 + draft/market regeneration completion (2026-08-08)
+
+- L4 multileague v1/v2/v3 fully regenerated on the refreshed warehouse and
+  re-pinned (commits 8e5ffc3, e829687): v1 runner/benchmark (new-data gate
+  failures are the honest signal), v2 protocol locks + adaptive/equal-series
+  runner (selected hierarchical-orgw100-orgv025-retain100), v3 future
+  protocols/preflights/capture readiness (re-issued on current sources),
+  corrected adaptive diagnostic (incumbent retained), temporal-failure receipt
+  (time-capsule preserved with backdated file creation), side-neutral
+  supersessions, prediction ledger.  multileague 92 passed / 22 files green.
+- g1 completed-draft feature layer rebuilt on the current players parquet
+  (commit d01b...): v1/v3 manifests+rows, receipt, source authority, g5
+  re-pins.  g1 data + g5 suites green.
+- Draft-terminal future-protocol + capture readiness + market phase-one chain
+  re-pinned on the regenerated ratings (l2_readiness 3/3, ledger 30/30).
+
+### Remaining documented boundaries (all human or L2-owned)
+
+1. Human authority envelope (oe-private-target-authority.json): binds the
+   pre-regeneration evidence/split; the regenerated evidence needs KOI_MARI's
+   fresh review + envelope renewal -> oe_target_evidence (1), oe_nuisance (2).
+2. L4 real-v1 private runner: contract/assay config pins the pre-re-pin
+   crosswalk/split/evidence; the full real-v1 private pipeline regeneration
+   (representation rank assay shell + review) is required ->
+   test_representation_rank_private_runner (5 failed + 7 errors) and
+   g4 coverage-preflight (2).
+3. C0 contract-tree freeze: fb3de56d predates the current docs
+   (current tree 8748bbe4...); re-freezing is an L2 decision ->
+   contract_validation_remand (5), contract_reconciliation (3),
+   test_player_rating (1).
+4. g1 source-authority/real-v1 independent review artifact
+   (lpl-private-draft-features-review.json) is a human review with no
+   generator; its subject pins update with the next L4 real-v1 pipeline run.

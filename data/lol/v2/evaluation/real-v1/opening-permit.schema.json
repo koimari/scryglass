@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scryglass.local/schema/opening-permit-v1.4.json",
+  "title": "Scryglass final-opening reviewer permit v1.4",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "status",
+        "decision_scope",
+        "authorizing"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1.4"
+        },
+        "status": {
+          "const": "NOT_REQUESTED"
+        },
+        "decision_scope": {
+          "const": "G9_FINAL_OPENING_ONLY"
+        },
+        "authorizing": {
+          "const": false
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "status",
+        "decision_scope",
+        "authorizing",
+        "permit_id",
+        "reviewer_identity",
+        "reviewer_role",
+        "approved_at_utc"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "g0-opening-permit-v1"
+        },
+        "status": {
+          "const": "APPROVED"
+        },
+        "decision_scope": {
+          "const": "G9_FINAL_OPENING_ONLY"
+        },
+        "authorizing": {
+          "const": true
+        },
+        "permit_id": {
+          "type": "string",
+          "pattern": "^permit:g9:[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$"
+        },
+        "reviewer_identity": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$"
+        },
+        "reviewer_role": {
+          "const": "INDEPENDENT_FINAL_OPENING_REVIEWER"
+        },
+        "approved_at_utc": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        }
+      }
+    }
+  ]
+}

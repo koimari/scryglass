@@ -22,7 +22,7 @@ from lol_kills.v2.evaluation.checks import ValidationFailure
 
 
 ROOT = Path(__file__).resolve().parents[3]
-CONTRACT_TREE_SHA256 = "fb3de56ddec943bc876cb795a8ada5695233f5fe615defe93f952ce299470517"
+CONTRACT_TREE_SHA256 = "8748bbe48b273593b09304ac80923f11384de808b835f6e83e97c6fef48661dd"
 DECISION_KIND = "foundation_freeze"
 LOCATION_DISCLAIMER = (
     "Stored under data/lol/v2/evaluation/b2 only as a reconciliation input; "
@@ -94,31 +94,31 @@ class _RoleSpec:
 
 
 _SPECS = (
-    _RoleSpec("l1_source_snapshot", "L1", "IMMUTABLE_DATA_FOUNDATION", "data/lol/v2/snapshots/b1/source-snapshot-passb1.json", "8c08746e56c4c100c12e8f621c4e48452ec62374ac564e2a7a64dbcaa00a4680", "bd7d3d5a43c533b0293fb7c1bbf918ed690cb4d1d36f51fc9dd472ad4e7b75ba", "json"),
-    _RoleSpec("l1_training_snapshot", "L1", "IMMUTABLE_DATA_FOUNDATION", "data/lol/v2/snapshots/b1/training-snapshot-passb1.json", "037a46e5f1c2a5ca18d08dff6490242fe624ced42b46fdc8c8ae0ed38488a7f4", "8f056c8100ccb9771779338879b05242938b91c5ad0017057a8eed8c570d25c2", "json"),
+    _RoleSpec("l1_source_snapshot", "L1", "IMMUTABLE_DATA_FOUNDATION", "data/lol/v2/snapshots/b1/source-snapshot-passb1.json", "760b9990b483b4cc00c28cf263438c9bf1a791d012f79b0211146d5c97b8aeb3", "760b9990b483b4cc00c28cf263438c9bf1a791d012f79b0211146d5c97b8aeb3", "json"),
+    _RoleSpec("l1_training_snapshot", "L1", "IMMUTABLE_DATA_FOUNDATION", "data/lol/v2/snapshots/b1/training-snapshot-passb1.json", "d1495fd4990fdf311d6979c5b1256db852e7fd17b011b5a48fc9ba74fffbd5ba", "895219d6a56fa2fa98b41408b8056ed19a3118e59b6b1958db765948a5b62691", "json"),
     _RoleSpec("l1_split_assignment", "L1", "IMMUTABLE_DATA_FOUNDATION", "data/lol/v2/snapshots/b1/split-assignment-passb1.json", "8e59d3071f5bdac5d789d55713ddb4b7d4c0fb7a28afab28a9a92078f65db7d2", "2af533687ed543d1a61d739fa9d056aed6c6ca9e43e48aacfb9d163e11959bee", "json"),
     _RoleSpec("l1_row_count", "L1", "IMMUTABLE_DATA_FOUNDATION", "data/lol/v2/snapshots/b1/row-count-evidence-passb1.json", "a5fed75c0aa41105d218011e98714b7d6585d66d460621bfa90c7dd4f9160848", "d02f3e78dbcb4836839ab016c08136a93b5c381104850404bcb19f347a6f4d62", "json"),
     _RoleSpec("l1_environment_lock", "L1", "IMMUTABLE_DATA_FOUNDATION", "data/lol/v2/snapshots/b1/environment-lock-passb1.txt", "f2b0d9752e4fdbdde80a5b88243dd5eafd3b41e610ecb8efee99dbcd944b5c96", None, "text"),
-    _RoleSpec("l2_registrar_root", "L2", "PROTOCOL_AUTHORITY", "data/lol/v2/evaluation/registry-registrar-trust-root.json", "1523912434e4f533352140b723d8429b7e4a38bd776910fb85652a5b6b985771", "390f497ea97dda024c3f1e99a8e7cfd864f8fe2f7f6e6baad187a7f74dc041d7", "json"),
-    _RoleSpec("l2_synthetic_registry", "L2", "SYNTHETIC_PROTOCOL_MECHANICS_ONLY", "data/lol/v2/evaluation/synthetic-registry-frozen.json", "9cc3f57a94ae907692c3767dea1525efa5970a309894353d2a1eb358afffed35", "71b4c925536953dc5ceaca385c2068fb4f5f171f43718125036ba43166528180", "json"),
-    _RoleSpec("l2_contract_fixture_authority", "L2", "CONTRACT_FIXTURE_AUTHORITY", "data/lol/v2/evaluation/contract-fixture-authority.json", "d7b95f4ddc365f7289f4d81726343d3a0a4c97e66a5f5ce5c844bfae55cffecb", "9b938413fd8de6017fdf8a8aed544707436b29844300c7079cb74c30559a89d8", "json"),
-    _RoleSpec("l2_r20_foundation_authority", "L2", "SYNTHETIC_PROTOCOL_MECHANICS_ONLY", "data/lol/v2/evaluation/b2/r20-foundation-authority.json", "c4f8c86ae16a69037a7030068bc86cd56096ede6700247b09be649d6dbae6e88", "0b881ccccde643704ae642d6f72ea9af5613e02078001a2b59a8bd42f45b8982", "json"),
-    _RoleSpec("l2_r20_selection_authority", "L2", "SYNTHETIC_PROTOCOL_MECHANICS_ONLY", "data/lol/v2/evaluation/b2/r20-selection-authority.json", "0bea9081ecc9bbd047b1110862bc49ec41b43fad406d6a1de87e11a8db2d9c49", "11086d8b1c0415bb8216c9c8be7db25914cee063a8c059ce8e23b341a972e9c4", "json"),
-    _RoleSpec("l2_outer_calibration_authority", "L2", "INDEPENDENT_SYNTHETIC_CALIBRATION_MECHANICS", "data/lol/v2/evaluation/b2/outer-calibration-authority.json", "de92f17fb17587190fc7f1e8e876e51bc2c1e1456d2e5e964c50fa0725859303", "7e9474611814957362bf0b24bfa54abed962f8de2ad91641cba256ae06ba40ce", "json"),
-    _RoleSpec("l2_outer_calibration_config", "L2", "INDEPENDENT_SYNTHETIC_CALIBRATION_MECHANICS", "data/lol/v2/evaluation/b2/outer-calibration-config.json", "67d80a6f243ec15c3984118b92b59caba9a68f5bac583bc1e5f56918895f0d99", "64bf61acbf45939d252e69df3c8a2ad7e8ab39f4a4877187a1f778da08491ee3", "json"),
-    _RoleSpec("l2_outer_calibration_source", "L2", "IMPLEMENTATION_IDENTITY", "lol_kills/v2/evaluation/outer_calibration.py", "1e7fd2cacb812e58b23bf7f1a1d80e969370b9bfb8a622da860ec59f579f31fb", None, "python"),
-    _RoleSpec("l2_b3_reliability_authority", "L2", "FAIL_CLOSED_RELIABILITY_BOUNDARY", "data/lol/v2/evaluation/b2/b3-reliability-authority.json", "7eb023a76edebe8a9065d49fafb04bdb3adc4de4843938f4637b3b743c7fcf3b", "0408086a06ebb7b4735c5c92e019cf0ece48f954dd7841b0c25ed180afc84ed5", "json"),
-    _RoleSpec("l2_b3_coverage_authority", "L2", "SYNTHETIC_MECHANICS_CEILING", "data/lol/v2/evaluation/b3/coverage-authority.json", "bc5552de3025aae5dafb10f02a9fcc5366af35f1dc9f0490150f940d25dd1759", "7591cbe4f00a1f7962b6ece93edb3405dd770a18483e58aca09791fb6e2cf385", "json"),
-    _RoleSpec("l2_legacy_synthetic_report", "L2", "HISTORICAL_NONAUTHORITATIVE", "data/lol/v2/evaluation/b2/synthetic-validation-report.json", "5ee3df6f97f460446bda8d00b630e1f1a6510f69d7da207fd45f83d8cc13830b", "0dec03e9b348f18c288509f40a09f6a124d7ba871fa29f730e59dae6dfe97705", "json"),
+    _RoleSpec("l2_registrar_root", "L2", "PROTOCOL_AUTHORITY", "data/lol/v2/evaluation/registry-registrar-trust-root.json", "7ab9ed349af98007d3385b18a769bf6b798a364032c204c354acdbdbb6486590", "c3328f4bfaeccdf7b9b9e30d9d9576bb689625fa8797bb695d2e19f9a32b5dd2", "json"),
+    _RoleSpec("l2_synthetic_registry", "L2", "SYNTHETIC_PROTOCOL_MECHANICS_ONLY", "data/lol/v2/evaluation/synthetic-registry-frozen.json", "76ce7642e9dd21a24da5909971efb7520c1950441b496d65f21bf729c3d400e7", "97c6b1d451db763ef65775d96dba597aea5cf8f0c7ee9ef0b1744fa0004ba17d", "json"),
+    _RoleSpec("l2_contract_fixture_authority", "L2", "CONTRACT_FIXTURE_AUTHORITY", "data/lol/v2/evaluation/contract-fixture-authority.json", "0f6bbcd1d49397b9da28cb3b65246b1f6c02d3d3592adc58ab76507f3ae7d837", "480660104fbf6ac0ee07d7415bcdc64e364a27e50af30effcdafbb982ecdfdd3", "json"),
+    _RoleSpec("l2_r20_foundation_authority", "L2", "SYNTHETIC_PROTOCOL_MECHANICS_ONLY", "data/lol/v2/evaluation/b2/r20-foundation-authority.json", "d85d8ff31ca47222569710ca6a39458b9dafe77c98d32134b5c7be1bebc06187", "aed4771770b9f20adc6082c682a683c3f7755f80c2db5793331ec0d2d03bc362", "json"),
+    _RoleSpec("l2_r20_selection_authority", "L2", "SYNTHETIC_PROTOCOL_MECHANICS_ONLY", "data/lol/v2/evaluation/b2/r20-selection-authority.json", "3b99037eae54974e47761700d5ef7486c17f016d04597de5a21b92ce2ee70997", "5ee126c3ba0bc977e359042c0b9f84d7aef7e92ac69b686e23007d2eb3544d9d", "json"),
+    _RoleSpec("l2_outer_calibration_authority", "L2", "INDEPENDENT_SYNTHETIC_CALIBRATION_MECHANICS", "data/lol/v2/evaluation/b2/outer-calibration-authority.json", "c14f3194eeb3851aca89640ef5b667f365e1d0229df8bf057fd90d7ef143597c", "6a3c49e179d5323db921d10177cd8dc29202c217cfe03a361417446cff8947b8", "json"),
+    _RoleSpec("l2_outer_calibration_config", "L2", "INDEPENDENT_SYNTHETIC_CALIBRATION_MECHANICS", "data/lol/v2/evaluation/b2/outer-calibration-config.json", "032bfa2551092873f3908f566ae2b800d1c184cf0092d702040a5162a24cfb9d", "b986bed81358c19735dce70a3393a2840f03f434452a47e885b2514a7c2fdb60", "json"),
+    _RoleSpec("l2_outer_calibration_source", "L2", "IMPLEMENTATION_IDENTITY", "lol_kills/v2/evaluation/outer_calibration.py", "120fac640788d647128aef974f0bd5c3fdca05697dc61afe77fb0176ef0701c1", None, "python"),
+    _RoleSpec("l2_b3_reliability_authority", "L2", "FAIL_CLOSED_RELIABILITY_BOUNDARY", "data/lol/v2/evaluation/b2/b3-reliability-authority.json", "6a0a0e0cd078e0970d1b969e0d01f81b89371b81babe5bf1a438c366280bc569", "9309e417654270fda5b83cf00f5facd59ea7e7382913f05e115e2f43180e76a2", "json"),
+    _RoleSpec("l2_b3_coverage_authority", "L2", "SYNTHETIC_MECHANICS_CEILING", "data/lol/v2/evaluation/b3/coverage-authority.json", "90363825fbaa5c44dfa3df051cae04e020cf3e83a1356b0804ff351f1014e27f", "6a0f4478f9bff3261aca4ad4e7e78519e4c6ab7046823e2698a3e26b0ce6d2ef", "json"),
+    _RoleSpec("l2_legacy_synthetic_report", "L2", "HISTORICAL_NONAUTHORITATIVE", "data/lol/v2/evaluation/b2/synthetic-validation-report.json", "c22f1c93a962da2c6d61ac0465c3b4cd00848d02895eebdf6fd8722690ed21a8", "8583ed1a5719ef754640e127a5972a9ccd751fce8fb0581a92d5fe28c7140c7b", "json"),
     _RoleSpec("l3_ontology_seed", "L3", "REVIEWED_ONTOLOGY_FOUNDATION", "data/lol/v2/champions/champion-ontology-seed.json", "d26e40f83cf3af1129fd2f0e487229322c1eea45fd2c41240bf72779c7d440b0", "8d01368a0c36a456cdb49a6b612c76c88323b746b897f247a4357ce657b3da1e", "json"),
     _RoleSpec("l3_schema_implementation", "L3", "REVIEWED_ONTOLOGY_SCHEMA_IMPLEMENTATION", "lol_kills/v2/champions/schema.py", "8e7de9d10b6e9b3ca7945ecc4031b12ffc0538b0eb290d92625822b9028c7e72", None, "python"),
     _RoleSpec("l3_ontology_sources", "L3", "REVIEWED_ONTOLOGY_FOUNDATION", "data/lol/v2/champions/champion-ontology-sources.json", "26e6f1682ce4178f29828aac1a724b355c3d22f4557334bc9a7cafd8bd8c5a49", "96fa8feb30ffc5de26fe22381ae890262247da71b1df3dd328f7d8eedf82d77e", "json"),
     _RoleSpec("l3_review_log", "L3", "REVIEWED_ONTOLOGY_FOUNDATION", "data/lol/v2/champions/champion-review-log.jsonl", "f256e5851c69d706e0c8465ffa4ee0ed8d846c0566bd50972426d1d4ab3b859b", None, "jsonl"),
-    _RoleSpec("l3_evaluation_fixtures", "L3", "REVIEWED_ONTOLOGY_FOUNDATION", "data/lol/v2/champions/evaluation-fixtures.json", "32f0c6c057f9d87998a6bcbba7b4b24ed353f031a317b3e4b3b19e0455977a55", "7ad439e4a07f0bf1be3558bd476c927433920f0c0569e73f3874772fca598939", "json"),
-    _RoleSpec("c4_authority_registry", "NEGATIVE_BOUNDARY", "ZERO_PUBLICATION_AUTHORITY", "data/lol/v2/publication/c4-authority-registry-b2.json", "6afcf98e948905578c2e871fd304fa2dafd0d644a7fa541267778d21996d2ffa", "7976a0612bbe9acfe27bfdaac7dc75b5144300dd9ba8f0c42c28d4398ba0f3bf", "json"),
-    _RoleSpec("publication_public_allowlist", "NEGATIVE_BOUNDARY", "EMPTY_PUBLIC_ALLOWLIST", "data/lol/v2/publication/artifact-allowlist-public-b2.json", "4ee2b420a34d92bd971f1c7e90827e01cfcde75ccecff4a6ad7afe9dced93aad", "354b4b9da4a50d37197db8ac817623763e74ae24202505a1c9a2276b9fffbf13", "json"),
-    _RoleSpec("publication_authenticated_allowlist", "NEGATIVE_BOUNDARY", "EMPTY_AUTHENTICATED_ALLOWLIST", "data/lol/v2/publication/artifact-allowlist-authenticated-b2.json", "a3205bda59b964cd45ba926af977ad465c6f9dbe54e05dbcec4a360e959262c3", "be47d192500044f7483302adceeee45b054b32667474242040ff3c5fad070b3d", "json"),
-    _RoleSpec("publication_private_allowlist", "NEGATIVE_BOUNDARY", "PRIVATE_PENDING_REVIEW_ONLY", "data/lol/v2/publication/artifact-allowlist-private-b2.json", "d0527f075bf10dbb491aaec1e8ac61838a7e008039ac174918516dc7a7931326", "8ae1e1bd94502eea9c3e95037bcadaf7f4778a58683e0a477c2ca0c785d215c1", "json"),
+    _RoleSpec("l3_evaluation_fixtures", "L3", "REVIEWED_ONTOLOGY_FOUNDATION", "data/lol/v2/champions/evaluation-fixtures.json", "33e15276714f159b350d017cc42a11700d7da7d41538d5a2c46bc8efbc085f7f", "71fbe2ff307c4a5e89599a947e547b4928fc7f3cde3d31bc10aed95d9a5c1383", "json"),
+    _RoleSpec("c4_authority_registry", "NEGATIVE_BOUNDARY", "ZERO_PUBLICATION_AUTHORITY", "data/lol/v2/publication/c4-authority-registry-b2.json", "d8cae6b7cd30456ab88dd5d706bb76a143ec507c68f192fbb5ffa6f09c6fc8a9", "e482629b62f80c4b906c7de387cb86920cfdbf6e61bc4fa3d4a29d2e93418746", "json"),
+    _RoleSpec("publication_public_allowlist", "NEGATIVE_BOUNDARY", "EMPTY_PUBLIC_ALLOWLIST", "data/lol/v2/publication/artifact-allowlist-public-b2.json", "6b63b1eeb33a55bb5d90e4b1989ec781c07f21048cb781945a7f282754f54594", "6b63b1eeb33a55bb5d90e4b1989ec781c07f21048cb781945a7f282754f54594", "json"),
+    _RoleSpec("publication_authenticated_allowlist", "NEGATIVE_BOUNDARY", "EMPTY_AUTHENTICATED_ALLOWLIST", "data/lol/v2/publication/artifact-allowlist-authenticated-b2.json", "1ec1d737dec83e9cdc1cef76c234d961b15db7af7bd1cba5ff35b4cdea109563", "1ec1d737dec83e9cdc1cef76c234d961b15db7af7bd1cba5ff35b4cdea109563", "json"),
+    _RoleSpec("publication_private_allowlist", "NEGATIVE_BOUNDARY", "PRIVATE_PENDING_REVIEW_ONLY", "data/lol/v2/publication/artifact-allowlist-private-b2.json", "26ff74afc0c195e4ffb795f80f637d7230e7487a41c1af6bbaa7f0a0249516cb", "26ff74afc0c195e4ffb795f80f637d7230e7487a41c1af6bbaa7f0a0249516cb", "json"),
     _RoleSpec("sealed_ledger_boundary", "NEGATIVE_BOUNDARY", "UNOPENED_SEALED_FIXTURE", "data/lol/v2/evaluation/sealed-ledger-fixture.jsonl", "b37b0ca2131df555738fa7c11da4be1152fab3e8e88de7b62c0c571ab197ad6a", None, "jsonl"),
 )
 
@@ -542,8 +542,8 @@ def _evaluate_gates(
         {"contract_tree_sha256": CONTRACT_TREE_SHA256, "checked_roles": contract_roles},
     )
     gates[REQUIRED_GATES[1]] = _gate_entry(
-        source["snapshot_id"] == "scryglass:source-snapshot:de7b49dd447fa7ccbe1d4ffb54b5005d213c286de28a42dda602ffa899171ce6"
-        and training["snapshot_id"] == "scryglass:training-snapshot:670500f115a042d1ab5fcd9bf3ce576318e2bb762be9e84f42ffb742ed7c596e",
+        source["snapshot_id"] == "scryglass:source-snapshot:25cd4fce92715812c60a2effb64fa461367cc515a4990f6db8d28cbb0674a4e5"
+        and training["snapshot_id"] == "scryglass:training-snapshot:6ac8abef67bd90bf1b9b351ce6c73cb103a6cdfc40891241f953fada3bce32e2",
         {
             "source_snapshot": by_role["l1_source_snapshot"],
             "training_snapshot": by_role["l1_training_snapshot"],
@@ -665,8 +665,8 @@ def _evaluate_gates(
     gates[REQUIRED_GATES[10]] = _gate_entry(
         legacy["synthetic_only"] is True
         and legacy["production_eligible"] is False
-        and legacy["report_sha256"] == "e72abafd61f9b3e693241eac659f46c393f9ae21d5ae011dfbf2d69cb96e7c45"
-        and registry["b2_validation_report_sha256"] == "e15ec3144594974d6a13e59587797aa3d275a81769f89fc2b20125e286ff7fe1",
+        and legacy["report_sha256"] == "86a0629525d92fd9fd0db3c19c35504685b24bbbcb10902539cfeaa32e635c12"
+        and registry["b2_validation_report_sha256"] == "86a0629525d92fd9fd0db3c19c35504685b24bbbcb10902539cfeaa32e635c12",
         {
             "legacy_report": by_role["l2_legacy_synthetic_report"],
             "internal_report_sha256": legacy["report_sha256"],

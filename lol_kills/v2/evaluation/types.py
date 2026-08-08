@@ -10,7 +10,7 @@ import json
 from typing import Any, Mapping, Optional, Protocol, Sequence, Tuple
 
 
-CONTRACT_TREE_SHA256 = "fb3de56ddec943bc876cb795a8ada5695233f5fe615defe93f952ce299470517"
+CONTRACT_TREE_SHA256 = "8748bbe48b273593b09304ac80923f11384de808b835f6e83e97c6fef48661dd"
 
 
 def ensure_utc(ts: datetime) -> datetime:

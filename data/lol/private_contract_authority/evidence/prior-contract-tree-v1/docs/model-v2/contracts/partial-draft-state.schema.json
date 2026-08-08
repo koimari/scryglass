@@ -1,0 +1,1282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scryglass.xyz/schemas/model-v2/partial-draft-state.schema.json",
+  "title": "Scryglass partial Draft Score analysis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_version",
+    "as_of",
+    "season_id",
+    "calendar_year",
+    "analysis_kind",
+    "status",
+    "identity_mode",
+    "identity_intentionally_omitted",
+    "lineage",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/semver"},
+    "model_version": {"$ref": "common.schema.json#/$defs/model_version"},
+    "as_of": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "season_id": {"$ref": "common.schema.json#/$defs/season_id"},
+    "calendar_year": {"$ref": "common.schema.json#/$defs/calendar_year"},
+    "analysis_kind": {
+      "type": "string",
+      "enum": ["partial_draft_score", "archetype_extrapolation"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "unavailable", "research_only"]
+    },
+    "identity_mode": {"$ref": "common.schema.json#/$defs/identity_mode"},
+    "identity_intentionally_omitted": {"type": "boolean"},
+    "baseline_strength_equalized": {"type": "boolean"},
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "draft_state_id",
+        "event_id",
+        "competition_scope_id",
+        "competition_scope_kind",
+        "patch_id",
+        "protocol_id",
+        "side_mapping",
+        "source_record",
+        "side_to_act",
+        "actions",
+        "current_role_constraints",
+        "role_constraint_revisions",
+        "assignment_revisions",
+        "terminal"
+      ],
+      "properties": {
+        "draft_state_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "event_id": {
+          "oneOf": [
+            {"$ref": "common.schema.json#/$defs/stable_id"},
+            {"type": "null"}
+          ]
+        },
+        "competition_scope_id": {
+          "$ref": "common.schema.json#/$defs/stable_id",
+          "description": "Canonical league or named international event/meta scope used for calibration; never inferred from a participating team's domestic league."
+        },
+        "competition_scope_kind": {
+          "type": "string",
+          "enum": [
+            "regional_league",
+            "international_event",
+            "international_meta"
+          ]
+        },
+        "patch_id": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$"},
+        "protocol_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "side_mapping": {
+          "$ref": "common.schema.json#/$defs/draft_protocol_mapping"
+        },
+        "source_record": {
+          "$ref": "common.schema.json#/$defs/draft_source_record"
+        },
+        "side_to_act": {
+          "oneOf": [
+            {"$ref": "common.schema.json#/$defs/side"},
+            {"type": "null"}
+          ]
+        },
+        "actions": {
+          "type": "array",
+          "items": {"$ref": "common.schema.json#/$defs/draft_action"}
+        },
+        "current_role_constraints": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "common.schema.json#/$defs/role_constraint"}
+        },
+        "role_constraint_revisions": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/role_constraint_revision"
+          },
+          "x-history-policy": {
+            "append_only": true,
+            "order_by": "revision_index",
+            "chain_field": "supersedes_revision_id"
+          }
+        },
+        "assignment_revisions": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/role_assignment_revision"
+          },
+          "x-history-policy": {
+            "append_only": true,
+            "order_by": "revision_index",
+            "chain_field": "supersedes_revision_id"
+          }
+        },
+        "terminal": {"type": "boolean"},
+        "final_assignments": {
+          "$ref": "common.schema.json#/$defs/terminal_assignments"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"terminal": {"const": true}},
+            "required": ["terminal"]
+          },
+          "then": {
+            "properties": {"side_to_act": {"type": "null"}},
+            "required": ["final_assignments"]
+          },
+          "else": {
+            "properties": {
+              "side_to_act": {"$ref": "common.schema.json#/$defs/side"}
+            },
+            "not": {"required": ["final_assignments"]}
+          }
+        }
+      ]
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roster_a_id", "roster_b_id"],
+      "properties": {
+        "roster_a_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "roster_b_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "roster_a_snapshot_id": {
+          "$ref": "common.schema.json#/$defs/stable_id"
+        },
+        "roster_b_snapshot_id": {
+          "$ref": "common.schema.json#/$defs/stable_id"
+        },
+        "policy_a_snapshot_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "policy_b_snapshot_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "roster_a_fresh": {"type": "boolean"},
+        "roster_b_fresh": {"type": "boolean"},
+        "policy_a_fresh": {"type": "boolean"},
+        "policy_b_fresh": {"type": "boolean"}
+      }
+    },
+    "committed_value_logit_a": {"type": "number"},
+    "strategic_response_adjustment_logit_a": {
+      "type": "number",
+      "description": "Signed change from committed value induced by the registered future-response policy; it may be negative."
+    },
+    "strategic_value_logit_a": {"type": "number"},
+    "partial_score_a": {"$ref": "common.schema.json#/$defs/score_open_100"},
+    "partial_score_b": {"$ref": "common.schema.json#/$defs/score_open_100"},
+    "standardized_map_win_probability_a": {
+      "$ref": "common.schema.json#/$defs/probability_open"
+    },
+    "interval_95": {"$ref": "common.schema.json#/$defs/interval_probability_95"},
+    "flex_value_logit_a": {"type": "number"},
+    "evidence": {"$ref": "common.schema.json#/$defs/evidence"},
+    "reliability": {"$ref": "common.schema.json#/$defs/reliability"},
+    "search": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_id",
+        "method",
+        "temperature",
+        "exact",
+        "explored_state_count",
+        "coverage",
+        "deterministic_seed"
+      ],
+      "properties": {
+        "policy_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "method": {
+          "type": "string",
+          "enum": ["hard_minimax", "soft_minimax", "empirical_policy", "risk_aware"]
+        },
+        "temperature": {
+          "oneOf": [
+            {"type": "number", "exclusiveMinimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "exact": {"type": "boolean"},
+        "explored_state_count": {"type": "integer", "minimum": 1},
+        "coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["metric_id", "value"],
+          "properties": {
+            "metric_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+            "value": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "approximation_error_bound": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method_id", "value_logit"],
+          "properties": {
+            "method_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+            "value_logit": {"type": "number", "minimum": 0}
+          }
+        },
+        "deterministic_seed": {"type": "integer"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"exact": {"const": false}},
+            "required": ["exact"]
+          },
+          "then": {
+            "required": ["approximation_error_bound"],
+            "properties": {
+              "coverage": {
+                "properties": {
+                  "value": {"exclusiveMinimum": 0, "maximum": 1}
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "coverage": {
+                "properties": {"value": {"const": 1}}
+              }
+            },
+            "not": {"required": ["approximation_error_bound"]}
+          }
+        }
+      ],
+      "x-semantic-invariants": [
+        {
+          "id": "partial_approximate_search_reports_coverage_and_bound",
+          "applies_when": "exact == false",
+          "expression": "coverage.value > 0 && approximation_error_bound.method_id is registered && approximation_error_bound.value_logit >= 0",
+          "severity": "error"
+        },
+        {
+          "id": "partial_exact_search_full_coverage",
+          "applies_when": "exact == true",
+          "expression": "coverage.value == 1 && approximation_error_bound is absent",
+          "severity": "error"
+        }
+      ],
+      "x-negative-mutation-fixtures": [
+        {
+          "id": "partial_approximate_search_missing_bound",
+          "mutation": {
+            "op": "remove",
+            "path": "/search/approximation_error_bound"
+          },
+          "expected_schema_failure": true
+        },
+        {
+          "id": "partial_exact_search_partial_coverage",
+          "mutation": [
+            {
+              "op": "replace",
+              "path": "/search/exact",
+              "value": true
+            },
+            {
+              "op": "replace",
+              "path": "/search/coverage/value",
+              "value": 0.93
+            }
+          ],
+          "expected_schema_failure": true
+        }
+      ]
+    },
+    "recommendations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rank",
+          "action",
+          "posterior_mean_value_change_for_acting_side_logit",
+          "delta_interval_95",
+          "downside_probability",
+          "option_diversity",
+          "best_responses"
+        ],
+        "properties": {
+          "rank": {"type": "integer", "minimum": 1},
+          "action": {"$ref": "common.schema.json#/$defs/draft_action"},
+          "posterior_mean_value_change_for_acting_side_logit": {
+            "type": "number"
+          },
+          "delta_interval_95": {"$ref": "common.schema.json#/$defs/interval_real_95"},
+          "downside_probability": {
+            "$ref": "common.schema.json#/$defs/probability_open"
+          },
+          "option_diversity": {"type": "number", "minimum": 0},
+          "best_responses": {
+            "type": "array",
+            "items": {"$ref": "common.schema.json#/$defs/draft_action"}
+          }
+        }
+      }
+    },
+    "neutral_comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "partial_score_a",
+        "partial_score_b",
+        "standardized_map_win_probability_a"
+      ],
+      "properties": {
+        "partial_score_a": {
+          "$ref": "common.schema.json#/$defs/score_open_100"
+        },
+        "partial_score_b": {
+          "$ref": "common.schema.json#/$defs/score_open_100"
+        },
+        "standardized_map_win_probability_a": {
+          "$ref": "common.schema.json#/$defs/probability_open"
+        }
+      }
+    },
+    "terminal_delegation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delegation_method",
+        "terminal_model_version",
+        "terminal_prediction_id",
+        "terminal_output_sha256",
+        "score_a",
+        "score_b",
+        "standardized_map_win_probability_a",
+        "interval_95"
+      ],
+      "properties": {
+        "delegation_method": {"const": "canonical_terminal_draft_score"},
+        "terminal_model_version": {
+          "$ref": "common.schema.json#/$defs/model_version"
+        },
+        "terminal_prediction_id": {
+          "$ref": "common.schema.json#/$defs/stable_id"
+        },
+        "terminal_output_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "score_a": {"$ref": "common.schema.json#/$defs/score_open_100"},
+        "score_b": {"$ref": "common.schema.json#/$defs/score_open_100"},
+        "standardized_map_win_probability_a": {
+          "$ref": "common.schema.json#/$defs/probability_open"
+        },
+        "interval_95": {
+          "$ref": "common.schema.json#/$defs/interval_probability_95"
+        }
+      }
+    },
+    "archetype_extrapolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extrapolation_id",
+        "ordinal_only",
+        "support_gap",
+        "fallback",
+        "uncertainty",
+        "recommendation_groups"
+      ],
+      "properties": {
+        "extrapolation_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "ordinal_only": {"const": true},
+        "support_gap": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "champion_id",
+            "competition_scope_id",
+            "competition_scope_kind",
+            "patch_id",
+            "role_set",
+            "gap_types",
+            "verified_eligible_appearance_count"
+          ],
+          "properties": {
+            "champion_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+            "competition_scope_id": {
+              "$ref": "common.schema.json#/$defs/stable_id"
+            },
+            "competition_scope_kind": {
+              "type": "string",
+              "enum": [
+                "regional_league",
+                "international_event",
+                "international_meta"
+              ]
+            },
+            "patch_id": {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+$"
+            },
+            "role_set": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 5,
+              "uniqueItems": true,
+              "items": {"$ref": "common.schema.json#/$defs/role"}
+            },
+            "gap_types": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "zero_play_exact_cell",
+                  "unobserved_role",
+                  "unobserved_patch",
+                  "unobserved_competition_scope"
+                ]
+              }
+            },
+            "verified_eligible_appearance_count": {"const": 0}
+          }
+        },
+        "fallback": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "prior_id",
+            "fallback_levels",
+            "basis",
+            "material",
+            "unsupported_exact_residuals_included",
+            "limitations"
+          ],
+          "properties": {
+            "prior_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+            "fallback_levels": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": ["F2", "F3", "F4", "F5"]
+              }
+            },
+            "basis": {
+              "type": "string",
+              "enum": [
+                "registered_role_archetype_prior",
+                "registered_role_patch_neutral_prior",
+                "registered_team_player_archetype_fit_prior"
+              ]
+            },
+            "material": {"const": true},
+            "unsupported_exact_residuals_included": {"const": false},
+            "limitations": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "uncertainty": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "ordinal_stability",
+            "quantitative_interval_available",
+            "reasons"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["wide", "unresolved"]
+            },
+            "ordinal_stability": {
+              "type": "string",
+              "enum": ["low", "unknown"]
+            },
+            "quantitative_interval_available": {"const": false},
+            "reasons": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "recommendation_groups": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "group_id",
+              "group_order",
+              "within_group_ordered",
+              "actions"
+            ],
+            "properties": {
+              "group_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+              "group_order": {"type": "integer", "minimum": 1},
+              "within_group_ordered": {"const": false},
+              "actions": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "common.schema.json#/$defs/draft_action"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "research_interpretation": {
+      "const": "Research-only ordinal archetype extrapolation for an unsupported exact cell; the output supports relative grouping only."
+    },
+    "literal_interpretation": {
+      "type": "string",
+      "enum": [
+        "Out of 100, the projected standardized map-win probability for side A under the registered future-response policy, after accounting for committed picks and remaining options, equalizing baseline roster and league strength, and neutralizing in-game side advantage.",
+        "Terminal draft state delegated without recomputation to canonical Terminal Draft Score for identical inputs and terminal model version."
+      ]
+    },
+    "error": {"$ref": "common.schema.json#/$defs/error"},
+    "lineage": {"$ref": "common.schema.json#/$defs/lineage"},
+    "provenance": {"$ref": "prediction-provenance.schema.json"}
+  },
+  "examples": [
+    {
+      "schema_version": "2.0.0",
+      "model_version": "partial-draft-v2.0.0",
+      "as_of": "2026-07-27T18:00:00Z",
+      "season_id": "scryglass:season:lpl-2026",
+      "calendar_year": 2026,
+      "analysis_kind": "archetype_extrapolation",
+      "status": "research_only",
+      "identity_mode": "contextual",
+      "identity_intentionally_omitted": false,
+      "state": {
+        "draft_state_id": "scryglass:draft:research-only-example",
+        "event_id": null,
+        "competition_scope_id": "scryglass:competition-scope:lpl",
+        "competition_scope_kind": "regional_league",
+        "patch_id": "26.14",
+        "protocol_id": "scryglass:protocol:pro-standard-2026",
+        "side_mapping": {
+          "side_a_game_side": "blue",
+          "side_b_game_side": "red",
+          "side_a_draft_order": "first",
+          "side_b_draft_order": "second",
+          "mapping_source_id": "scryglass:source:protocol-example",
+          "available_at": "2026-07-27T17:55:00Z",
+          "mapping_basis": "authoritative_protocol_reconstruction"
+        },
+        "source_record": {
+          "source_id": "scryglass:source:analysis-input",
+          "source_record_id": "scryglass:draft-source:research-only",
+          "source_revision_id": "scryglass:draft-source-revision:research-1",
+          "supersedes_source_revision_id": null,
+          "observed_at": "2026-07-27T17:55:00Z",
+          "available_at": "2026-07-27T17:55:00Z",
+          "action_order_source": "authoritative_protocol_reconstruction"
+        },
+        "side_to_act": "A",
+        "actions": [],
+        "current_role_constraints": [],
+        "role_constraint_revisions": [],
+        "assignment_revisions": [],
+        "terminal": false
+      },
+      "context": {
+        "roster_a_id": "scryglass:roster:research-a",
+        "roster_b_id": "scryglass:roster:research-b",
+        "roster_a_snapshot_id": "scryglass:roster-snapshot:research-a",
+        "roster_b_snapshot_id": "scryglass:roster-snapshot:research-b",
+        "policy_a_snapshot_id": "scryglass:policy:research-a",
+        "policy_b_snapshot_id": "scryglass:policy:research-b",
+        "roster_a_fresh": true,
+        "roster_b_fresh": true,
+        "policy_a_fresh": true,
+        "policy_b_fresh": true
+      },
+      "archetype_extrapolation": {
+        "extrapolation_id": "scryglass:extrapolation:zero-play-example",
+        "ordinal_only": true,
+        "support_gap": {
+          "champion_id": "riot:champion:999",
+          "competition_scope_id": "scryglass:competition-scope:lpl",
+          "competition_scope_kind": "regional_league",
+          "patch_id": "26.14",
+          "role_set": ["mid"],
+          "gap_types": ["zero_play_exact_cell"],
+          "verified_eligible_appearance_count": 0
+        },
+        "fallback": {
+          "prior_id": "scryglass:prior:team-player-mid-archetype",
+          "fallback_levels": ["F4"],
+          "basis": "registered_team_player_archetype_fit_prior",
+          "material": true,
+          "unsupported_exact_residuals_included": false,
+          "limitations": [
+            "No verified eligible appearance exists in the exact competition-patch-role cell."
+          ]
+        },
+        "uncertainty": {
+          "status": "wide",
+          "ordinal_stability": "low",
+          "quantitative_interval_available": false,
+          "reasons": [
+            "Ordering is driven by a broad registered archetype-fit prior."
+          ]
+        },
+        "recommendation_groups": [
+          {
+            "group_id": "scryglass:ordinal-group:research-1",
+            "group_order": 1,
+            "within_group_ordered": false,
+            "actions": [
+              {
+                "action_id": "scryglass:draft-action:research-1",
+                "slot": 1,
+                "kind": "pick",
+                "canonical_side": "A",
+                "champion_id": "riot:champion:999",
+                "role_set": ["mid"]
+              }
+            ]
+          }
+        ]
+      },
+      "research_interpretation": "Research-only ordinal archetype extrapolation for an unsupported exact cell; the output supports relative grouping only.",
+      "lineage": {
+        "manifest_id": "scryglass:manifest:partial-draft-v2.0.0",
+        "training_snapshot_id": "scryglass:training:example",
+        "source_snapshot_ids": ["scryglass:source:oe-example"],
+        "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "source_tree_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "evaluation_report_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "code_commit": "1111111111111111111111111111111111111111",
+        "environment_lock_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "train_cutoff": "2026-07-26T23:59:59Z"
+      },
+      "provenance": {
+        "schema_version": "2.0.0",
+        "model_version": "partial-draft-v2.0.0",
+        "as_of": "2026-07-27T18:00:00Z",
+        "prediction_id": "scryglass:prediction:research-only-example",
+        "mode": "current_analysis",
+        "created_at": "2026-07-27T18:00:01Z",
+        "event_start": null,
+        "related_forecast_id": null,
+        "input_snapshot_id": "scryglass:input:research-only-example",
+        "estimator_id": "scryglass:estimator:archetype-extrapolation-v2",
+        "required_input_status": "complete",
+        "freshness_checks": [
+          {
+            "input_id": "scryglass:source:analysis-input",
+            "source_updated_at": "2026-07-27T17:56:00Z",
+            "limit_seconds": 3600,
+            "fresh": true
+          }
+        ],
+        "input_conflicts": [],
+        "fallback_levels": ["F4"],
+        "out_of_distribution_flags": ["zero_play_exact_cell"],
+        "output_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "immutable": true,
+        "lineage": {
+          "manifest_id": "scryglass:manifest:partial-draft-v2.0.0",
+          "training_snapshot_id": "scryglass:training:example",
+          "source_snapshot_ids": ["scryglass:source:oe-example"],
+          "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source_tree_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "evaluation_report_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "code_commit": "1111111111111111111111111111111111111111",
+          "environment_lock_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "train_cutoff": "2026-07-26T23:59:59Z"
+        }
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {"status": {"const": "research_only"}},
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "analysis_kind": {"const": "archetype_extrapolation"}
+        }
+      },
+      "else": {
+        "properties": {
+          "analysis_kind": {"const": "partial_draft_score"},
+          "status": {"enum": ["ok", "unavailable"]}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "analysis_kind": {"const": "archetype_extrapolation"}
+        },
+        "required": ["analysis_kind"]
+      },
+      "then": {
+        "properties": {"status": {"const": "research_only"}}
+      }
+    },
+    {
+      "if": {
+        "properties": {"identity_mode": {"const": "contextual"}},
+        "required": ["identity_mode"]
+      },
+      "then": {
+        "properties": {
+          "identity_intentionally_omitted": {"const": false}
+        }
+      },
+      "else": {
+        "properties": {"identity_intentionally_omitted": {"const": true}},
+        "not": {
+          "anyOf": [
+            {"required": ["context"]},
+            {"required": ["baseline_strength_equalized"]},
+            {"required": ["neutral_comparison"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"const": "ok"}},
+        "required": ["status"]
+      },
+      "then": {
+        "required": [
+          "state",
+          "evidence",
+          "reliability",
+          "literal_interpretation"
+        ],
+        "properties": {
+          "provenance": {
+            "required": ["probability_transform"],
+            "properties": {
+              "required_input_status": {"const": "complete"},
+              "freshness_checks": {
+                "minItems": 1,
+                "items": {
+                  "properties": {"fresh": {"const": true}},
+                  "required": ["fresh"]
+                }
+              },
+              "input_conflicts": {"maxItems": 0}
+            }
+          },
+          "reliability": {
+            "properties": {
+              "probability_wording_approved": {"const": true}
+            }
+          }
+        },
+        "not": {"required": ["error"]}
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"const": "unavailable"}},
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["error"],
+        "not": {
+          "anyOf": [
+            {"required": ["partial_score_a"]},
+            {"required": ["partial_score_b"]},
+            {"required": ["standardized_map_win_probability_a"]},
+            {"required": ["recommendations"]},
+            {"required": ["terminal_delegation"]},
+            {"required": ["neutral_comparison"]},
+            {"required": ["archetype_extrapolation"]},
+            {"required": ["research_interpretation"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "ok"},
+          "state": {
+            "properties": {"terminal": {"const": false}},
+            "required": ["terminal"]
+          }
+        },
+        "required": ["status", "state"]
+      },
+      "then": {
+        "required": [
+          "committed_value_logit_a",
+          "strategic_response_adjustment_logit_a",
+          "strategic_value_logit_a",
+          "partial_score_a",
+          "partial_score_b",
+          "standardized_map_win_probability_a",
+          "interval_95",
+          "flex_value_logit_a",
+          "search",
+          "recommendations"
+        ],
+        "properties": {
+          "literal_interpretation": {
+            "const": "Out of 100, the projected standardized map-win probability for side A under the registered future-response policy, after accounting for committed picks and remaining options, equalizing baseline roster and league strength, and neutralizing in-game side advantage."
+          },
+          "provenance": {
+            "required": ["partial_probability_calibration"],
+            "properties": {
+              "partial_probability_calibration": {
+                "properties": {
+                  "probability_wording_approved": {"const": true},
+                  "probability_domain": {"const": "open_0_1"}
+                }
+              }
+            }
+          }
+        },
+        "not": {"required": ["terminal_delegation"]}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "ok"},
+          "state": {
+            "properties": {"terminal": {"const": true}},
+            "required": ["terminal"]
+          }
+        },
+        "required": ["status", "state"]
+      },
+      "then": {
+        "required": ["terminal_delegation"],
+        "properties": {
+          "literal_interpretation": {
+            "const": "Terminal draft state delegated without recomputation to canonical Terminal Draft Score for identical inputs and terminal model version."
+          }
+        },
+        "not": {
+          "anyOf": [
+            {"required": ["committed_value_logit_a"]},
+            {"required": ["strategic_response_adjustment_logit_a"]},
+            {"required": ["strategic_value_logit_a"]},
+            {"required": ["partial_score_a"]},
+            {"required": ["partial_score_b"]},
+            {"required": ["standardized_map_win_probability_a"]},
+            {"required": ["interval_95"]},
+            {"required": ["flex_value_logit_a"]},
+            {"required": ["search"]},
+            {"required": ["recommendations"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "ok"},
+          "identity_mode": {"const": "contextual"}
+        },
+        "required": ["status", "identity_mode"]
+      },
+      "then": {
+        "required": [
+          "context",
+          "baseline_strength_equalized",
+          "neutral_comparison"
+        ],
+        "properties": {
+          "baseline_strength_equalized": {"const": true},
+          "context": {
+            "required": ["policy_a_snapshot_id", "policy_b_snapshot_id"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"const": "research_only"}},
+        "required": ["status"]
+      },
+      "then": {
+        "required": [
+          "state",
+          "archetype_extrapolation",
+          "research_interpretation"
+        ],
+        "properties": {
+          "analysis_kind": {"const": "archetype_extrapolation"},
+          "state": {
+            "properties": {"terminal": {"const": false}}
+          },
+          "provenance": {
+            "properties": {
+              "required_input_status": {"const": "complete"},
+              "freshness_checks": {
+                "minItems": 1,
+                "items": {
+                  "properties": {"fresh": {"const": true}},
+                  "required": ["fresh"]
+                }
+              },
+              "input_conflicts": {"maxItems": 0},
+              "out_of_distribution_flags": {"minItems": 1}
+            },
+            "not": {
+              "anyOf": [
+                {"required": ["calibration_id"]},
+                {"required": ["probability_transform"]},
+                {"required": ["partial_probability_calibration"]}
+              ]
+            }
+          }
+        },
+        "not": {
+          "anyOf": [
+            {"required": ["committed_value_logit_a"]},
+            {"required": ["strategic_response_adjustment_logit_a"]},
+            {"required": ["strategic_value_logit_a"]},
+            {"required": ["partial_score_a"]},
+            {"required": ["partial_score_b"]},
+            {"required": ["standardized_map_win_probability_a"]},
+            {"required": ["interval_95"]},
+            {"required": ["flex_value_logit_a"]},
+            {"required": ["evidence"]},
+            {"required": ["reliability"]},
+            {"required": ["search"]},
+            {"required": ["recommendations"]},
+            {"required": ["neutral_comparison"]},
+            {"required": ["terminal_delegation"]},
+            {"required": ["literal_interpretation"]},
+            {"required": ["error"]},
+            {"required": ["baseline_strength_equalized"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "research_only"},
+          "identity_mode": {"const": "contextual"}
+        },
+        "required": ["status", "identity_mode"]
+      },
+      "then": {
+        "required": ["context"],
+        "properties": {
+          "identity_intentionally_omitted": {"const": false},
+          "context": {
+            "required": [
+              "roster_a_snapshot_id",
+              "roster_b_snapshot_id",
+              "policy_a_snapshot_id",
+              "policy_b_snapshot_id",
+              "roster_a_fresh",
+              "roster_b_fresh",
+              "policy_a_fresh",
+              "policy_b_fresh"
+            ],
+            "properties": {
+              "roster_a_fresh": {"const": true},
+              "roster_b_fresh": {"const": true},
+              "policy_a_fresh": {"const": true},
+              "policy_b_fresh": {"const": true}
+            }
+          },
+          "archetype_extrapolation": {
+            "properties": {
+              "fallback": {
+                "properties": {
+                  "basis": {
+                    "const": "registered_team_player_archetype_fit_prior"
+                  },
+                  "unsupported_exact_residuals_included": {"const": false}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "x-semantic-invariants": [
+    {
+      "id": "partial_value_decomposition",
+      "applies_when": "status == 'ok' && state.terminal == false",
+      "expression": "strategic_value_logit_a == committed_value_logit_a + strategic_response_adjustment_logit_a",
+      "severity": "error"
+    },
+    {
+      "id": "partial_score_probability_identity",
+      "applies_when": "status == 'ok' && state.terminal == false",
+      "expression": "partial_score_a == 100 * standardized_map_win_probability_a",
+      "severity": "error"
+    },
+    {
+      "id": "partial_score_complement_identity",
+      "applies_when": "status == 'ok' && state.terminal == false",
+      "expression": "partial_score_b == 100 - partial_score_a",
+      "severity": "error"
+    },
+    {
+      "id": "partial_interval_contains_probability",
+      "applies_when": "status == 'ok' && state.terminal == false",
+      "expression": "interval_95.lower <= standardized_map_win_probability_a && standardized_map_win_probability_a <= interval_95.upper",
+      "severity": "error"
+    },
+    {
+      "id": "partial_current_constraints_cover_picks",
+      "applies_when": "status in {'ok','research_only'}",
+      "expression": "set(state.current_role_constraints.action_id) == set(state.actions[kind == 'pick'].action_id)",
+      "severity": "error"
+    },
+    {
+      "id": "partial_current_constraints_are_latest_revision",
+      "applies_when": "status in {'ok','research_only'}",
+      "expression": "for each picked action, current_role_constraints.role_set equals its initial action.role_set or the revised_role_set of its greatest role_constraint_revisions.revision_index",
+      "severity": "error"
+    },
+    {
+      "id": "partial_role_revision_chain_append_only",
+      "applies_when": "status in {'ok','research_only'}",
+      "expression": "state.role_constraint_revisions.revision_index is strictly increasing && each supersedes_revision_id references only an earlier revision_id",
+      "severity": "error"
+    },
+    {
+      "id": "partial_assignment_revision_chain_append_only",
+      "applies_when": "status in {'ok','research_only'}",
+      "expression": "state.assignment_revisions.revision_index is strictly increasing && each supersedes_revision_id references only an earlier revision_id",
+      "severity": "error"
+    },
+    {
+      "id": "partial_terminal_assignments_match_latest_revisions",
+      "applies_when": "status == 'ok' && state.terminal == true",
+      "expression": "for each action_id with assignment revisions, state.final_assignments.role equals revised_role of its greatest state.assignment_revisions.revision_index",
+      "severity": "error"
+    },
+    {
+      "id": "partial_source_available",
+      "applies_when": "status in {'ok','research_only'}",
+      "expression": "state.side_mapping.available_at <= as_of && state.source_record.available_at <= as_of",
+      "severity": "error"
+    },
+    {
+      "id": "partial_action_slots_unique_and_protocol_legal",
+      "applies_when": "status in {'ok','research_only'}",
+      "expression": "state.actions.slot == sort(state.actions.slot) && count(distinct state.actions.slot) == count(state.actions) && every action is legal under state.protocol_id",
+      "severity": "error"
+    },
+    {
+      "id": "partial_competition_scope_taxonomy",
+      "applies_when": "status in {'ok','research_only'}",
+      "expression": "state.competition_scope_id resolves to exactly one taxonomy node of state.competition_scope_kind and is not inferred from a participant's domestic league; archetype support_gap uses the same canonical scope",
+      "severity": "error"
+    },
+    {
+      "id": "partial_neutral_comparison_identity",
+      "applies_when": "status == 'ok' && identity_mode == 'contextual'",
+      "expression": "neutral_comparison.partial_score_a == 100 * neutral_comparison.standardized_map_win_probability_a && neutral_comparison.partial_score_b == 100 - neutral_comparison.partial_score_a",
+      "severity": "error"
+    },
+    {
+      "id": "terminal_delegation_score_identity",
+      "applies_when": "status == 'ok' && state.terminal == true",
+      "expression": "terminal_delegation.score_a == 100 * terminal_delegation.standardized_map_win_probability_a && terminal_delegation.score_b == 100 - terminal_delegation.score_a",
+      "severity": "error"
+    },
+    {
+      "id": "terminal_delegation_exact_canonical_output",
+      "applies_when": "status == 'ok' && state.terminal == true",
+      "expression": "terminal_delegation fields equal the immutable canonical Terminal Draft Score identified by terminal_prediction_id and terminal_output_sha256 for identical state/context/as_of",
+      "severity": "error"
+    },
+    {
+      "id": "archetype_extrapolation_ordinal_groups",
+      "applies_when": "status == 'research_only'",
+      "expression": "archetype_extrapolation.recommendation_groups.group_order is unique and strictly increasing; actions within each group are unordered",
+      "severity": "error"
+    },
+    {
+      "id": "archetype_extrapolation_support_gap_matches_fallback",
+      "applies_when": "status == 'research_only'",
+      "expression": "verified_eligible_appearance_count == 0 && fallback.material == true && fallback.fallback_levels is nonempty && uncertainty.quantitative_interval_available == false",
+      "severity": "error"
+    },
+    {
+      "id": "archetype_extrapolation_noncanonical_boundary",
+      "applies_when": "status == 'research_only'",
+      "expression": "no score, probability, advantage, calibrated-transform, Reliability, or canonical recommendation field is present",
+      "severity": "error"
+    },
+    {
+      "id": "contextual_archetype_exact_context_fresh",
+      "applies_when": "status == 'research_only' && identity_mode == 'contextual'",
+      "expression": "both exact roster snapshots and both policy snapshots are present and fresh, provenance inputs are complete/fresh/conflict-free, fallback uses only the registered broad team/player archetype-fit prior, and unsupported exact residuals are absent",
+      "severity": "error"
+    }
+  ],
+  "x-negative-mutation-fixtures": [
+    {
+      "id": "partial_value_decomposition_break",
+      "mutation": {
+        "op": "replace",
+        "path": "/strategic_value_logit_a",
+        "value": 0.14
+      },
+      "expected_violation": "partial_value_decomposition"
+    },
+    {
+      "id": "partial_score_complement_break",
+      "mutation": {
+        "op": "replace",
+        "path": "/partial_score_b",
+        "value": 46.8
+      },
+      "expected_violation": "partial_score_complement_identity"
+    },
+    {
+      "id": "partial_missing_current_role_constraint",
+      "mutation": {
+        "op": "remove",
+        "path": "/state/current_role_constraints/0"
+      },
+      "expected_violation": "partial_current_constraints_cover_picks"
+    },
+    {
+      "id": "partial_terminal_without_delegation",
+      "mutation": {
+        "op": "replace",
+        "path": "/state/terminal",
+        "value": true
+      },
+      "expected_schema_failure": true
+    },
+    {
+      "id": "archetype_extrapolation_add_score_forbidden",
+      "applies_to": "status == 'research_only'",
+      "mutation": {
+        "op": "add",
+        "path": "/partial_score_a",
+        "value": 50
+      },
+      "expected_schema_failure": true
+    },
+    {
+      "id": "archetype_extrapolation_add_reliability_forbidden",
+      "applies_to": "status == 'research_only'",
+      "mutation": {
+        "op": "add",
+        "path": "/reliability",
+        "value_from": "canonical fixture /reliability"
+      },
+      "expected_schema_failure": true
+    },
+    {
+      "id": "archetype_extrapolation_add_transform_forbidden",
+      "applies_to": "status == 'research_only'",
+      "mutation": {
+        "op": "add",
+        "path": "/provenance/probability_transform",
+        "value_from": "canonical fixture /provenance/probability_transform"
+      },
+      "expected_schema_failure": true
+    },
+    {
+      "id": "archetype_extrapolation_nonzero_exact_cell_forbidden",
+      "applies_to": "status == 'research_only'",
+      "mutation": {
+        "op": "replace",
+        "path": "/archetype_extrapolation/support_gap/verified_eligible_appearance_count",
+        "value": 1
+      },
+      "expected_schema_failure": true
+    },
+    {
+      "id": "contextual_archetype_stale_roster_forbidden",
+      "applies_to": "status == 'research_only' && identity_mode == 'contextual'",
+      "mutation": {
+        "op": "replace",
+        "path": "/context/roster_a_fresh",
+        "value": false
+      },
+      "expected_schema_failure": true
+    },
+    {
+      "id": "contextual_archetype_exact_residual_forbidden",
+      "applies_to": "status == 'research_only' && identity_mode == 'contextual'",
+      "mutation": {
+        "op": "replace",
+        "path": "/archetype_extrapolation/fallback/unsupported_exact_residuals_included",
+        "value": true
+      },
+      "expected_schema_failure": true
+    },
+    {
+      "id": "archetype_extrapolation_future_source_forbidden",
+      "applies_to": "status == 'research_only'",
+      "mutation": {
+        "op": "replace",
+        "path": "/state/source_record/available_at",
+        "value": "2026-07-27T18:00:01Z"
+      },
+      "expected_violation": "partial_source_available"
+    },
+    {
+      "id": "archetype_extrapolation_pick_without_constraint_forbidden",
+      "applies_to": "status == 'research_only'",
+      "mutation": {
+        "op": "add",
+        "path": "/state/actions/0",
+        "value": {
+          "action_id": "scryglass:draft-action:unsupported-state",
+          "slot": 1,
+          "kind": "pick",
+          "canonical_side": "A",
+          "champion_id": "riot:champion:999",
+          "role_set": ["mid"]
+        }
+      },
+      "expected_violation": "partial_current_constraints_cover_picks"
+    },
+    {
+      "id": "archetype_extrapolation_revision_chain_break_forbidden",
+      "applies_to": "status == 'research_only'",
+      "mutation": {
+        "op": "add",
+        "path": "/state/role_constraint_revisions/0",
+        "value": {
+          "revision_id": "scryglass:role-revision:broken",
+          "revision_index": 2,
+          "supersedes_revision_id": "scryglass:role-revision:not-earlier",
+          "action_id": "scryglass:draft-action:unsupported-state",
+          "previous_role_set": ["mid"],
+          "revised_role_set": ["mid"],
+          "reason": "policy_narrowing",
+          "source_id": "scryglass:source:analysis-input",
+          "recorded_at": "2026-07-27T17:56:00Z",
+          "available_at": "2026-07-27T17:56:00Z"
+        }
+      },
+      "expected_violation": "partial_role_revision_chain_append_only"
+    }
+  ]
+}

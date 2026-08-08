@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scryglass.xyz/schemas/model-v2/player-rating.schema.json",
+  "title": "Scryglass Player Rating response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_version",
+    "as_of",
+    "season_id",
+    "calendar_year",
+    "status",
+    "rating_display",
+    "lineage",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/semver"},
+    "model_version": {"$ref": "common.schema.json#/$defs/model_version"},
+    "as_of": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "season_id": {"$ref": "common.schema.json#/$defs/season_id"},
+    "calendar_year": {"$ref": "common.schema.json#/$defs/calendar_year"},
+    "status": {"$ref": "common.schema.json#/$defs/status"},
+    "rating_display": {"$ref": "common.schema.json#/$defs/rating_display"},
+    "player_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "display_name": {"type": "string", "minLength": 1},
+    "role": {"$ref": "common.schema.json#/$defs/role"},
+    "league_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "rating_scope": {
+      "type": "string",
+      "enum": ["league", "global"]
+    },
+    "rating_basis": {
+      "type": "string",
+      "enum": [
+        "league_relative_player_contribution",
+        "globally_bridged_player_contribution"
+      ]
+    },
+    "league_rating_included": {
+      "const": false,
+      "description": "League Rating is a distinct league-environment term and is never relabeled as player skill."
+    },
+    "posterior_mean": {"type": "number"},
+    "interval_95": {"$ref": "common.schema.json#/$defs/interval_real_95"},
+    "evidence": {"$ref": "common.schema.json#/$defs/evidence"},
+    "reliability": {"$ref": "common.schema.json#/$defs/reliability"},
+    "settled": {"$ref": "common.schema.json#/$defs/settled"},
+    "rank_eligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "league",
+        "global",
+        "active",
+        "current",
+        "structurally_globally_eligible"
+      ],
+      "properties": {
+        "league": {"type": "boolean"},
+        "global": {"type": "boolean"},
+        "active": {"type": "boolean"},
+        "current": {"type": "boolean"},
+        "structurally_globally_eligible": {"type": "boolean"},
+        "reasons": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "literal_interpretation": {
+      "const": "Current role-adjusted player contribution on the selected league-relative or globally bridged player scale, estimated from information available at as_of; League Rating is not included."
+    },
+    "error": {"$ref": "common.schema.json#/$defs/error"},
+    "lineage": {"$ref": "common.schema.json#/$defs/lineage"},
+    "provenance": {"$ref": "prediction-provenance.schema.json"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"status": {"const": "ok"}},
+        "required": ["status"]
+      },
+      "then": {
+        "required": [
+          "player_id",
+          "display_name",
+          "role",
+          "league_id",
+          "rating_scope",
+          "rating_basis",
+          "league_rating_included",
+          "posterior_mean",
+          "interval_95",
+          "evidence",
+          "reliability",
+          "settled",
+          "rank_eligibility",
+          "literal_interpretation"
+        ],
+        "not": {"required": ["error"]}
+      },
+      "else": {
+        "required": ["error"],
+        "not": {
+          "anyOf": [
+            {"required": ["posterior_mean"]},
+            {"required": ["interval_95"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"rating_scope": {"const": "global"}},
+        "required": ["rating_scope"]
+      },
+      "then": {
+        "properties": {
+          "rating_basis": {
+            "const": "globally_bridged_player_contribution"
+          },
+          "rank_eligibility": {
+            "properties": {
+              "global": {"const": true},
+              "structurally_globally_eligible": {"const": true}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "rating_basis": {
+            "const": "league_relative_player_contribution"
+          },
+          "rank_eligibility": {
+            "properties": {"league": {"const": true}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"const": "ok"}},
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "properties": {
+              "required_input_status": {"const": "complete"},
+              "freshness_checks": {
+                "minItems": 1,
+                "items": {
+                  "properties": {"fresh": {"const": true}},
+                  "required": ["fresh"]
+                }
+              },
+              "input_conflicts": {"maxItems": 0}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "settled": {
+            "properties": {"value": {"const": true}},
+            "required": ["value"]
+          }
+        },
+        "required": ["settled"]
+      },
+      "then": {
+        "properties": {
+          "rank_eligibility": {
+            "properties": {
+              "active": {"const": true},
+              "current": {"const": true}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "rating_scope": {"const": "global"},
+          "settled": {
+            "properties": {"value": {"const": true}},
+            "required": ["value"]
+          }
+        },
+        "required": ["rating_scope", "settled"]
+      },
+      "then": {
+        "properties": {
+          "rank_eligibility": {
+            "properties": {
+              "global": {"const": true},
+              "structurally_globally_eligible": {"const": true}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "x-semantic-invariants": [
+    {
+      "id": "player_interval_contains_posterior_mean",
+      "applies_when": "status == 'ok'",
+      "expression": "interval_95.lower <= posterior_mean && posterior_mean <= interval_95.upper",
+      "severity": "error"
+    },
+    {
+      "id": "player_settled_width_matches_interval",
+      "applies_when": "status == 'ok'",
+      "expression": "settled.interval_width == interval_95.upper - interval_95.lower",
+      "severity": "error"
+    }
+  ],
+  "x-negative-mutation-fixtures": [
+    {
+      "id": "player_duplicate_writable_rating",
+      "mutation": {
+        "op": "add",
+        "path": "/rating",
+        "value_from": "/posterior_mean"
+      },
+      "expected_schema_failure": true
+    },
+    {
+      "id": "player_global_without_structural_eligibility",
+      "mutation": {
+        "op": "replace",
+        "path": "/rank_eligibility/structurally_globally_eligible",
+        "value": false
+      },
+      "expected_schema_failure": true
+    }
+  ]
+}

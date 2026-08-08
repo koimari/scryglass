@@ -1,0 +1,86 @@
+{
+  "schema_version": "g0-pair-registry-v1.4",
+  "registry_id": "scryglass:pair-registry:v1.4",
+  "contract_set_sha256": "22e8a93a650987026da8980309435a44207529dc42f049333f4a427732bac471",
+  "final_labels_read": false,
+  "g1_unified_authority_handoff": {
+    "status": "NOT_IMPLEMENTED_IN_V1_4",
+    "transition": "PROHIBITED_IN_V1_4_REQUIRES_G1_UNIFIED_AUTHORITY_BUNDLE",
+    "required_sample_identity": "PAIR_CANDIDATES_SHARE_ONE_AUTHORITY_DERIVED_OUTPUT_SAMPLE",
+    "unresolved_action": "TYPED_UNRESOLVED_PAIR_BLOCKS_COMPLEXITY_SELECTION"
+  },
+  "families": [
+    {
+      "pair_family_id": "complexity:global",
+      "kind": "SIMULTANEOUS_COMPLEXITY",
+      "pair_ids": [
+        "pair:partial_draft_score:scryglass-v2__minus__simplest-parent",
+        "pair:player_rating:scryglass-v2__minus__simplest-parent",
+        "pair:team_rating:scryglass-v2__minus__simplest-parent",
+        "pair:terminal_draft_score:scryglass-v2__minus__simplest-parent"
+      ]
+    }
+  ],
+  "pairs": [
+    {
+      "pair_id": "pair:partial_draft_score:scryglass-v2__minus__simplest-parent",
+      "pair_family_id": "complexity:global",
+      "candidate_a_id": "candidate:scryglass-v2",
+      "candidate_b_id": "candidate:scryglass-v2-simplest-parent",
+      "output_id": "partial_draft_score",
+      "orientation": "candidate_a_minus_candidate_b",
+      "score_kind": "LOG_LOSS",
+      "status": "TYPED_UNRESOLVED",
+      "unavailable": {
+        "reason_code": "G0_103_PAIR_EVIDENCE_UNRESOLVED",
+        "claim_effect": "BLOCK_COMPLEXITY_SELECTION"
+      },
+      "bootstrap_plan_sha256": "28e5da4d46ed84effce42f670035e57e605f308a18a9161faed61fa7c9c91c7b"
+    },
+    {
+      "pair_id": "pair:player_rating:scryglass-v2__minus__simplest-parent",
+      "pair_family_id": "complexity:global",
+      "candidate_a_id": "candidate:scryglass-v2",
+      "candidate_b_id": "candidate:scryglass-v2-simplest-parent",
+      "output_id": "player_rating",
+      "orientation": "candidate_a_minus_candidate_b",
+      "score_kind": "LOG_LOSS",
+      "status": "TYPED_UNRESOLVED",
+      "unavailable": {
+        "reason_code": "G0_103_PAIR_EVIDENCE_UNRESOLVED",
+        "claim_effect": "BLOCK_COMPLEXITY_SELECTION"
+      },
+      "bootstrap_plan_sha256": "28e5da4d46ed84effce42f670035e57e605f308a18a9161faed61fa7c9c91c7b"
+    },
+    {
+      "pair_id": "pair:team_rating:scryglass-v2__minus__simplest-parent",
+      "pair_family_id": "complexity:global",
+      "candidate_a_id": "candidate:scryglass-v2",
+      "candidate_b_id": "candidate:scryglass-v2-simplest-parent",
+      "output_id": "team_rating",
+      "orientation": "candidate_a_minus_candidate_b",
+      "score_kind": "LOG_LOSS",
+      "status": "TYPED_UNRESOLVED",
+      "unavailable": {
+        "reason_code": "G0_103_PAIR_EVIDENCE_UNRESOLVED",
+        "claim_effect": "BLOCK_COMPLEXITY_SELECTION"
+      },
+      "bootstrap_plan_sha256": "28e5da4d46ed84effce42f670035e57e605f308a18a9161faed61fa7c9c91c7b"
+    },
+    {
+      "pair_id": "pair:terminal_draft_score:scryglass-v2__minus__simplest-parent",
+      "pair_family_id": "complexity:global",
+      "candidate_a_id": "candidate:scryglass-v2",
+      "candidate_b_id": "candidate:scryglass-v2-simplest-parent",
+      "output_id": "terminal_draft_score",
+      "orientation": "candidate_a_minus_candidate_b",
+      "score_kind": "LOG_LOSS",
+      "status": "TYPED_UNRESOLVED",
+      "unavailable": {
+        "reason_code": "G0_103_PAIR_EVIDENCE_UNRESOLVED",
+        "claim_effect": "BLOCK_COMPLEXITY_SELECTION"
+      },
+      "bootstrap_plan_sha256": "28e5da4d46ed84effce42f670035e57e605f308a18a9161faed61fa7c9c91c7b"
+    }
+  ]
+}

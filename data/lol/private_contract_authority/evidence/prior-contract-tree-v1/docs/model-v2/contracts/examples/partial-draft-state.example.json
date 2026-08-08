@@ -1,0 +1,225 @@
+{
+  "schema_version": "2.0.0",
+  "model_version": "partial-draft-v2.0.0",
+  "as_of": "2026-07-27T18:00:00Z",
+  "season_id": "scryglass:season:lpl-2026",
+  "calendar_year": 2026,
+  "analysis_kind": "partial_draft_score",
+  "status": "ok",
+  "identity_mode": "neutral",
+  "identity_intentionally_omitted": true,
+  "state": {
+    "draft_state_id": "scryglass:draft:example-partial",
+    "event_id": null,
+    "competition_scope_id": "scryglass:competition-scope:lpl",
+    "competition_scope_kind": "regional_league",
+    "patch_id": "26.14",
+    "protocol_id": "scryglass:protocol:pro-standard-2026",
+    "side_mapping": {
+      "side_a_game_side": "blue",
+      "side_b_game_side": "red",
+      "side_a_draft_order": "first",
+      "side_b_draft_order": "second",
+      "mapping_source_id": "scryglass:source:protocol-example",
+      "available_at": "2026-07-27T17:55:00Z",
+      "mapping_basis": "authoritative_protocol_reconstruction"
+    },
+    "source_record": {
+      "source_id": "scryglass:source:analysis-input",
+      "source_record_id": "scryglass:draft-source:example-partial",
+      "source_revision_id": "scryglass:draft-source-revision:1",
+      "supersedes_source_revision_id": null,
+      "observed_at": "2026-07-27T17:55:00Z",
+      "available_at": "2026-07-27T17:55:00Z",
+      "action_order_source": "authoritative_protocol_reconstruction"
+    },
+    "side_to_act": "B",
+    "actions": [
+      {"action_id": "scryglass:draft-action:partial-1", "slot": 1, "kind": "pick", "canonical_side": "A", "champion_id": "riot:champion:50", "role_set": ["top", "mid", "support"]}
+    ],
+    "current_role_constraints": [
+      {
+        "action_id": "scryglass:draft-action:partial-1",
+        "canonical_side": "A",
+        "champion_id": "riot:champion:50",
+        "role_set": ["top", "mid"],
+        "as_of_revision_id": "scryglass:role-revision:partial-1"
+      }
+    ],
+    "role_constraint_revisions": [
+      {
+        "revision_id": "scryglass:role-revision:partial-1",
+        "revision_index": 1,
+        "supersedes_revision_id": null,
+        "action_id": "scryglass:draft-action:partial-1",
+        "previous_role_set": ["top", "mid", "support"],
+        "revised_role_set": ["top", "mid"],
+        "reason": "policy_narrowing",
+        "source_id": "scryglass:source:analysis-input",
+        "recorded_at": "2026-07-27T17:56:00Z",
+        "available_at": "2026-07-27T17:56:00Z"
+      }
+    ],
+    "assignment_revisions": [],
+    "terminal": false
+  },
+  "committed_value_logit_a": 0.08,
+  "strategic_response_adjustment_logit_a": 0.05,
+  "strategic_value_logit_a": 0.13,
+  "partial_score_a": 53.25,
+  "partial_score_b": 46.75,
+  "standardized_map_win_probability_a": 0.5325,
+  "interval_95": {"lower": 0.47, "upper": 0.594, "level": 0.95},
+  "flex_value_logit_a": 0.03,
+  "evidence": {
+    "posterior_displacement": {
+      "diagnostic_id": "scryglass:evidence:partial-displacement",
+      "method_id": "scryglass:evidence-method:kl-divergence",
+      "prior_id": "scryglass:prior:lpl-first-pick",
+      "value": 0.22,
+      "unit": "nats"
+    },
+    "precision": {
+      "diagnostic_id": "scryglass:evidence:partial-precision",
+      "method_id": "scryglass:evidence-method:central-probability-interval-width",
+      "reference_id": "scryglass:prior:lpl-first-pick",
+      "posterior_dispersion": 0.124,
+      "reference_dispersion": 0.21,
+      "unit": "probability_interval_width"
+    },
+    "source_context_coverage": {
+      "coverage_spec_id": "scryglass:coverage:partial-draft-v2",
+      "supported_source_family_ids": ["scryglass:source-family:drafts", "scryglass:source-family:policy-replays"],
+      "supported_context_ids": ["scryglass:context:first-pick-prefix", "scryglass:context:role-constraints"],
+      "missing_required_context_ids": [],
+      "identity_terms_status": "not_applicable",
+      "bridge_path_status": "not_applicable",
+      "fallback_levels": ["F1", "F2"],
+      "coverage_gaps": ["Sparse exact continuation support."]
+    }
+  },
+  "reliability": {
+    "label": "limited",
+    "validation_stratum_id": "scryglass:stratum:lpl-first-pick",
+    "stratum_match_status": "matched",
+    "stratum_mapping_sha256": "6767676767676767676767676767676767676767676767676767676767676767",
+    "benchmark_version": "2.0.0",
+    "baseline_id": "scryglass:baseline:partial-greedy-search",
+    "probability_wording_approved": true,
+    "validation_gate_passed": true,
+    "out_of_distribution": false,
+    "out_of_distribution_flags": [],
+    "log_loss": 0.674,
+    "baseline_log_loss": 0.682,
+    "log_loss_skill": 0.008,
+    "brier_score": 0.241,
+    "baseline_brier_score": 0.245,
+    "brier_skill": 0.004,
+    "calibration_intercept": 0.03,
+    "calibration_slope": 0.93,
+    "empirical_interval_coverage": 0.941,
+    "nominal_interval_coverage": 0.95,
+    "sample_count": 300,
+    "cluster_count": 150
+  },
+  "search": {
+    "policy_id": "scryglass:policy:soft-minimax-v2",
+    "method": "soft_minimax",
+    "temperature": 0.15,
+    "exact": false,
+    "explored_state_count": 12000,
+    "coverage": {
+      "metric_id": "scryglass:coverage-metric:explored-policy-mass",
+      "value": 0.93
+    },
+    "approximation_error_bound": {
+      "method_id": "scryglass:bound:registered-pruning-bound-v2",
+      "value_logit": 0.018
+    },
+    "deterministic_seed": 27
+  },
+  "recommendations": [
+    {
+      "rank": 1,
+      "action": {"action_id": "scryglass:draft-action:partial-2-candidate", "slot": 2, "kind": "pick", "canonical_side": "B", "champion_id": "riot:champion:101", "role_set": ["mid"]},
+      "posterior_mean_value_change_for_acting_side_logit": 0.04,
+      "delta_interval_95": {"lower": -0.01, "upper": 0.09, "level": 0.95},
+      "downside_probability": 0.08,
+      "option_diversity": 1.42,
+      "best_responses": [
+        {"action_id": "scryglass:draft-action:partial-3-response", "slot": 3, "kind": "pick", "canonical_side": "A", "champion_id": "riot:champion:115", "role_set": ["bot", "mid"]}
+      ]
+    }
+  ],
+  "literal_interpretation": "Out of 100, the projected standardized map-win probability for side A under the registered future-response policy, after accounting for committed picks and remaining options, equalizing baseline roster and league strength, and neutralizing in-game side advantage.",
+  "lineage": {
+    "manifest_id": "scryglass:manifest:partial-draft-v2.0.0",
+    "training_snapshot_id": "scryglass:training:example",
+    "source_snapshot_ids": ["scryglass:source:oe-example"],
+    "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "source_tree_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "calibration_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "evaluation_report_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "code_commit": "1111111111111111111111111111111111111111",
+    "environment_lock_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "train_cutoff": "2026-07-26T23:59:59Z"
+  },
+  "provenance": {
+    "schema_version": "2.0.0",
+    "model_version": "partial-draft-v2.0.0",
+    "as_of": "2026-07-27T18:00:00Z",
+    "prediction_id": "scryglass:prediction:partial-example",
+    "mode": "current_analysis",
+    "created_at": "2026-07-27T18:00:01Z",
+    "event_start": null,
+    "related_forecast_id": null,
+    "input_snapshot_id": "scryglass:input:partial-example",
+    "estimator_id": "scryglass:estimator:partial-v2",
+    "calibration_id": "scryglass:calibration:partial-v2",
+    "probability_transform": {
+      "transform_sha256": "1212121212121212121212121212121212121212121212121212121212121212",
+      "probability_domain": "open_0_1",
+      "monotonicity": "nondecreasing",
+      "complement_symmetry_verified": true,
+      "open_support_verified": true,
+      "transform_proof_sha256": "9090909090909090909090909090909090909090909090909090909090909090"
+    },
+    "partial_probability_calibration": {
+      "search_policy_id": "scryglass:policy:soft-minimax-v2",
+      "search_method": "soft_minimax",
+      "search_temperature": 0.15,
+      "search_artifact_sha256": "5656565656565656565656565656565656565656565656565656565656565656",
+      "transform_sha256": "1212121212121212121212121212121212121212121212121212121212121212",
+      "prefix_calibration_report_sha256": "3434343434343434343434343434343434343434343434343434343434343434",
+      "prefix_stratum_id": "scryglass:stratum:lpl-first-pick",
+      "probability_domain": "open_0_1",
+      "probability_wording_approved": true
+    },
+    "required_input_status": "complete",
+    "freshness_checks": [
+      {
+        "input_id": "scryglass:source:analysis-input",
+        "source_updated_at": "2026-07-27T17:56:00Z",
+        "limit_seconds": 3600,
+        "fresh": true
+      }
+    ],
+    "input_conflicts": [],
+    "fallback_levels": ["F1", "F2"],
+    "out_of_distribution_flags": [],
+    "output_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "immutable": true,
+    "lineage": {
+      "manifest_id": "scryglass:manifest:partial-draft-v2.0.0",
+      "training_snapshot_id": "scryglass:training:example",
+      "source_snapshot_ids": ["scryglass:source:oe-example"],
+      "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_tree_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "calibration_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "evaluation_report_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "code_commit": "1111111111111111111111111111111111111111",
+      "environment_lock_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "train_cutoff": "2026-07-26T23:59:59Z"
+    }
+  }
+}

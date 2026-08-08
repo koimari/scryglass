@@ -1,0 +1,36 @@
+{
+  "schema_version": "g0-authority-v1.4",
+  "authority_id": "scryglass:authority-derived-preflight:v1.4",
+  "contract_set_sha256": "22e8a93a650987026da8980309435a44207529dc42f049333f4a427732bac471",
+  "evidence_generator_identity": "scryglass-evidence-generator:g0-unbound",
+  "expected_reads": [
+    {
+      "relative_path": "baseline-registry.json",
+      "raw_sha256": "73805104e92242ee49952df7e167f34a14566c79b43bbf1209371cdd3248e298",
+      "semantic_sha256": "d794ef72571dcff663e156e45396e36d556bcb5715075aa0b7003330bee8fb80"
+    }
+  ],
+  "candidate_registry": {
+    "relative_path": "candidate-registry.json",
+    "raw_sha256": "02dc4bd730fb6162918eb5fc565d795dde0da1745f88b4439219254da6b42697",
+    "semantic_sha256": "3c51eae101d7364d6eab747380bb3d27b19fc09b75ac8dd8ef10598d01c68cba"
+  },
+  "pair_registry": {
+    "relative_path": "pair-registry.json",
+    "raw_sha256": "778fd4e61a812b09005e5c6bab58a6bd6609001fc1a436176bdb12e2fdb9268a",
+    "semantic_sha256": "508f47893a45a8a5c7978ec7902de590d894b6b3c593aef3327aaa62e7333a72"
+  },
+  "permit_ledger": {
+    "relative_path": "protected/permit-ledger",
+    "ledger_schema_version": "g0-ledger-v1.4"
+  },
+  "threat_model": {
+    "cooperative_process_only": true,
+    "not_cryptographically_unforgeable": true,
+    "production_requirements": [
+      "append-only ledger service or separately owned durable store",
+      "independently signed authority artifacts with verifier keys outside evidence-generator write access",
+      "separately owned verifier process without write access to authority or ledger roots"
+    ]
+  }
+}

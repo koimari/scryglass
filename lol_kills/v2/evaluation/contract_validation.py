@@ -59,22 +59,22 @@ CONTRACT_VALIDATION_TRUST_ROOT_PATH = Path(
     "data/lol/v2/evaluation/contract-validation-trust-root.json"
 )
 EXPECTED_CONTRACT_VALIDATION_TRUST_ROOT_RAW_SHA256 = (
-    "2b13b17b6e2f1f1d726c17737576459b754410ca425ae55642fcd21b7caad3f2"
+    "1b18526408d47035b20e3b8ec2ed3a28bac04d892a8334b95a84d6b906f1fb92"
 )
 EXPECTED_CONTRACT_VALIDATION_TRUST_ROOT_OBJECT_SHA256 = (
-    "582f6a1d679cccd8f6f4a6d94ce4b2e9ff601e806d53f3395624f8205c012525"
+    "ef707d9d6b4f2f5796ad439c4c182ef2eb74de66f8bf8fe7a518edb6b6069f29"
 )
 EXPECTED_CONTRACT_FIXTURE_AUTHORITY_RAW_SHA256 = (
-    "d7b95f4ddc365f7289f4d81726343d3a0a4c97e66a5f5ce5c844bfae55cffecb"
+    "0f6bbcd1d49397b9da28cb3b65246b1f6c02d3d3592adc58ab76507f3ae7d837"
 )
 EXPECTED_CONTRACT_FIXTURE_AUTHORITY_OBJECT_SHA256 = (
-    "9b938413fd8de6017fdf8a8aed544707436b29844300c7079cb74c30559a89d8"
+    "480660104fbf6ac0ee07d7415bcdc64e364a27e50af30effcdafbb982ecdfdd3"
 )
 EXPECTED_SEMANTIC_ARTIFACT_SHA256 = (
     "652aab70417ddf3f1727303836f059445dac8a51b2f615bbfad5d6eabe0c09ed"
 )
 EXPECTED_CONTRACT_CONTENT_SHA256 = (
-    "3a9435b05b4a95eae4488f3d232b8974d0d9671a29bb3a9b9710d85c83a431c0"
+    "2f92ea06b9e87c7423d4dc606698569ea8d0cc42a697d34602da9e91ea30af11"
 )
 if len(CONTRACT_SOURCE_TREE_ALLOWLIST) != 25:
     raise RuntimeError("frozen C0 allowlist must contain exactly 25 files")
@@ -161,13 +161,13 @@ EXAMPLE_FILES: Mapping[str, str] = {
 # These anchors intentionally live in L2. A frozen schema or example change must
 # be explicitly reconciled rather than silently changing evaluation behavior.
 EXPECTED_SCHEMA_SHA256: Mapping[str, str] = {
-    "player-rating.schema.json": "e76f0949dc3f44292edb2b6a3de57d15f7ab4459cc6d87f2f4595d6f84434c41",
-    "team-rating.schema.json": "b0284dc172435026c583b5dd7f032661eda380afb085123a2d5d336d34bf8b9c",
-    "draft-score.schema.json": "a11dd7bab9613c534d98c5631737f026417fd8286a232be1bf6e85688813106e",
-    "partial-draft-state.schema.json": "b33ea32b8ae17b1b193ebf236b68d559126d23b883f738e9285f9cb2f886cde4",
-    "tier-list.schema.json": "abc5041e8143cc678a43e363271eec220e45c61ed34aa2430747f53f531088ae",
-    "common.schema.json": "3b8791c0af75fdfd7056ad4db728f6fa6bf05548f4f1ec55aba4ecc9366803f7",
-    "prediction-provenance.schema.json": "ea74ec5034472a8139615697c6dda6f8d12888d09405477ed413e82af0f40e83",
+    "player-rating.schema.json": "af93fc0e143c47636641c071c7c1dd25e1438b86777ee0cb72c6f3b2aa78d25a",
+    "team-rating.schema.json": "d9b8f34719972f14b4e26e7a132c8f30b5f93d8c883456b1e27e7068e8e0d9a8",
+    "draft-score.schema.json": "ceb8e70f8055b375428f4db34cc7d77eb6a364dd4d4e273e400c06b08f40234c",
+    "partial-draft-state.schema.json": "bf59bc19aee7c3a3a9a513e3112dac4343245979981771439097d35a469a4a94",
+    "tier-list.schema.json": "71b30f5a2504f0ea9f407abb6dff706e01fc86bb4765fbaceb2af7b03a8463d7",
+    "common.schema.json": "1cc34d27a45bb2feb207c57ce0cad6ef75e954e1d67c1eb18702a0f4bd444e6a",
+    "prediction-provenance.schema.json": "4f33fc9d3f39167aa7469d982926125f24337cd98a6fbb91084256756c0fcc2e",
 }
 EXPECTED_EXAMPLE_SHA256: Mapping[str, str] = {
     "examples/player-rating.example.json": "25887d7f9d467c2affd188c07d22d0bf09319f03f26199b244b91f1316ab9aa3",
