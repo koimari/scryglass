@@ -68,31 +68,31 @@ export const EVIDENCE_CONTRACT = {
 } as const;
 
 const LABELS: Record<EvidenceState, string> = {
-  settled: "Settled",
-  observed: "Observed",
-  thin: "Thin",
-  stale: "Stale",
+  settled: "High confidence",
+  observed: "Medium confidence",
+  thin: "Low confidence",
+  stale: "Outdated",
   inactive: "Inactive",
-  disconnected: "Disconnected",
-  wide_interval: "Wide interval",
-  fallback: "Fallback",
-  ood: "Out of distribution",
-  unsupported: "Unsupported",
+  disconnected: "Unranked",
+  wide_interval: "Low confidence",
+  fallback: "Early estimate",
+  ood: "Unavailable",
+  unsupported: "Data unavailable",
 };
 
 const LAYMAN: Record<EvidenceState, string> = {
   settled:
-    "Evidence basis is met: tight interval, stable and fresh inputs, full support coverage, active eligibility.",
+    "Recent games support this rating, and it has remained stable.",
   observed:
-    "Evidence basis is partial: interval is reasonably tight and inputs are supported, but not enough for Settled.",
-  thin: "Still moving — fewer informative games than a settled row; treat the number gently.",
-  stale: "No recent games in the source window; the estimate may be outdated.",
-  inactive: "Row is not currently active (no games in the active window or no roster anchor).",
-  disconnected: "No supported league anchor; the row cannot be ranked on league evidence.",
-  wide_interval: "Interval is too wide for a stable label; treat the number as approximate.",
-  fallback: "Rests on a fallback/neutral prior rather than observed games.",
-  ood: "Row lies outside the supported distribution; result is unavailable.",
-  unsupported: "This pack predates the evidence contract or the row lacks required evidence fields.",
+    "This rating has solid game data, though it can still move.",
+  thin: "This rating has limited data and may move as more games arrive.",
+  stale: "This player or team has no recent games, so the rating may be outdated.",
+  inactive: "This player or team has no current roster or recent games.",
+  disconnected: "This rating has no supported league connection and is excluded from rankings.",
+  wide_interval: "This rating may move a lot as more games arrive.",
+  fallback: "This is an early estimate based on a neutral starting point.",
+  ood: "The available games do not support a public rating.",
+  unsupported: "The current data does not support a confidence label.",
 };
 
 function number(value: unknown): number | null {

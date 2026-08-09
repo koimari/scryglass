@@ -7,6 +7,7 @@ from lol_kills.export.pack_records import build_player_champion_records, public_
 from lol_kills.export.public_pack import (
     _ensure_year_column,
     _filter_years,
+    _public_player_rating_rows,
     _validate_public_record_tiers,
     source_identity_sha256,
 )
@@ -58,6 +59,16 @@ def test_player_champion_records_are_compact_and_sorted() -> None:
             "assists": 7.0,
         },
     ]
+
+
+def test_public_player_ratings_exclude_disconnected_rows() -> None:
+    rows = [
+        {"player": "Inspired", "evidence_disconnected": 0, "evidence_state": "observed"},
+        {"player": "Baus", "evidence_disconnected": 1, "evidence_state": "disconnected"},
+        {"player": "Caedrel", "evidence_disconnected": 0, "evidence_state": "disconnected"},
+    ]
+
+    assert _public_player_rating_rows(rows) == [rows[0]]
 
 
 def test_public_pack_withholds_raw_rows_models_and_studies() -> None:

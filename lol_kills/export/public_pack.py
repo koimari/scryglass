@@ -78,6 +78,17 @@ def _present(cols: Sequence[str], available: Iterable[str]) -> list[str]:
     return [c for c in cols if c in avail]
 
 
+def _public_player_rating_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Exclude players whose league graph cannot support a public rank."""
+
+    return [
+        row
+        for row in rows
+        if row.get("evidence_disconnected") != 1
+        and str(row.get("evidence_state") or "").lower() != "disconnected"
+    ]
+
+
 def _filter_years(table: pa.Table, years: Sequence[int], year_cols: Sequence[str]) -> pa.Table:
     years_list = list(years)
     # The live OE overlay can carry both the original ``year`` and the
@@ -479,6 +490,7 @@ def export_public_pack(
         dest = feat_dir / out_name
         rows = t.to_pylist()
         if out_name == "player_ratings_snapshot.json":
+            rows = _public_player_rating_rows(rows)
             for row in rows:
                 row["last_team"] = public_team_affiliation(row.get("last_team"))
         dest.write_text(json.dumps(rows), encoding="utf-8")

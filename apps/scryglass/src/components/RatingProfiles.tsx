@@ -53,7 +53,7 @@ export function TeamRatingProfile({
         <dl className={styles.metrics}>
           <div><dt>Adjusted rating</dt><dd>{adjustedRating(team, TEAM_SIGMA_MIN).toFixed(1)}</dd></div>
           <div><dt>Raw rating</dt><dd>{team.mu_total.toFixed(1)}</dd></div>
-          <div><dt>Evidence</dt><dd>{formatEvidenceCell(trust)}</dd></div>
+          <div><dt>Confidence</dt><dd>{formatEvidenceCell(trust)}</dd></div>
           <div><dt>Games</dt><dd>{record?.games ?? team.n_maps ?? "—"}</dd></div>
           <div><dt>Record</dt><dd>{record ? `${record.wins}–${record.games - record.wins}` : "—"}</dd></div>
           <div><dt>Win rate</dt><dd>{formatWr(record?.wr)}</dd></div>
@@ -124,7 +124,7 @@ export function PlayerRatingProfile({
         <dl className={styles.metrics}>
           <div><dt>Adjusted rating</dt><dd>{softMu(player.mu_total, player.sigma, PLAYER_SIGMA_MIN).toFixed(1)}</dd></div>
           <div><dt>Raw rating</dt><dd>{player.mu_total.toFixed(1)}</dd></div>
-          <div><dt>Evidence</dt><dd>{formatEvidenceCell(trust)}</dd></div>
+          <div><dt>Confidence</dt><dd>{formatEvidenceCell(trust)}</dd></div>
           <div><dt>Games</dt><dd>{record?.games ?? player.n_maps}</dd></div>
           <div><dt>Record</dt><dd>{record ? `${record.wins}–${record.games - record.wins}` : "—"}</dd></div>
           <div><dt>Win rate</dt><dd>{formatWr(record?.wr)}</dd></div>
