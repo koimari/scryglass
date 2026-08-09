@@ -31,7 +31,10 @@ AUTHORITY_LOCK_PATH = "_scryglass_retention/tierlist-authority-refresh-lock.json
 def _run_authority_refresh() -> dict[str, Any]:
     started = time.monotonic()
     print("[tier-authority] phase=prepare start", flush=True)
-    runtime_root = _WORKER._prepare_runtime_root(include_baseline_pack=False)
+    runtime_root = _WORKER._prepare_runtime_root(
+        include_baseline_pack=False,
+        include_model_inputs=False,
+    )
     print(
         f"[tier-authority] phase=prepare done seconds={time.monotonic() - started:.1f}",
         flush=True,
@@ -90,7 +93,10 @@ def _run_authority_refresh() -> dict[str, Any]:
             source="forward_evaluation",
         )
         if not forward_step["completed"]:
-            raise RuntimeError("forward evaluation failed")
+            raise RuntimeError(
+                "forward evaluation failed: "
+                f"{forward_step.get('stderr_tail') or forward_step.get('stdout_tail') or 'no step output'}"
+            )
         print("[tier-authority] phase=forward evaluation complete", flush=True)
 
         authority_step = _run_step(
@@ -105,7 +111,10 @@ def _run_authority_refresh() -> dict[str, Any]:
             source="independent_authority",
         )
         if not authority_step["completed"]:
-            raise RuntimeError("independent authority failed")
+            raise RuntimeError(
+                "independent authority failed: "
+                f"{authority_step.get('stderr_tail') or authority_step.get('stdout_tail') or 'no step output'}"
+            )
         print("[tier-authority] phase=independent authority complete", flush=True)
 
         bundle_step = _run_step(
@@ -118,7 +127,10 @@ def _run_authority_refresh() -> dict[str, Any]:
             source="production_bundle",
         )
         if not bundle_step["completed"]:
-            raise RuntimeError("production bundle failed")
+            raise RuntimeError(
+                "production bundle failed: "
+                f"{bundle_step.get('stderr_tail') or bundle_step.get('stdout_tail') or 'no step output'}"
+            )
         print("[tier-authority] phase=production bundle complete", flush=True)
 
         from lol_kills.v2.tierlists.live_refresh import publish_production_bundle

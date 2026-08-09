@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import sys
@@ -29,7 +30,7 @@ PACK_LOCK_PATH = "_scryglass_retention/pack-refresh-lock.json"
 def _run_pack_refresh() -> dict[str, Any]:
     started = time.monotonic()
     print("[pack-refresh] phase=prepare start", flush=True)
-    runtime_root = _WORKER._prepare_runtime_root()
+    runtime_root = _WORKER._prepare_runtime_root(include_model_inputs=False)
     print(f"[pack-refresh] phase=prepare done seconds={time.monotonic() - started:.1f}", flush=True)
     run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex}"
     prior_runtime_root = os.environ.get("SCRYGLASS_RUNTIME_ROOT")
@@ -46,10 +47,14 @@ def _run_pack_refresh() -> dict[str, Any]:
         lease = _WORKER._RefreshLease()
         lease.acquire()
         print("[pack-refresh] phase=lease acquired", flush=True)
-        from lol_kills.etl.restore_oe_pack_baseline import restore_baseline
-
-        baseline = restore_baseline(runtime_root)
-        print("[pack-refresh] phase=baseline restored", flush=True)
+        latest = json.loads((runtime_root / _WORKER.PACK_LATEST).read_text(encoding="utf-8"))
+        baseline = {
+            "pack_id": latest.get("pack_id"),
+            "source_latest": None,
+            "player_rows": None,
+            "team_rows": None,
+        }
+        print("[pack-refresh] phase=baseline pointer restored", flush=True)
         source_manifest = _WORKER._download_source_bundle(runtime_root)
         observed_as_of = source_manifest.get("source_observed_through")
         print(

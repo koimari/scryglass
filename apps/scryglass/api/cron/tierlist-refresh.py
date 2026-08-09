@@ -320,16 +320,21 @@ def _copy_tree(source: Path, destination: Path) -> None:
             raise link_error
 
 
-def _prepare_runtime_root(*, include_baseline_pack: bool = True) -> Path:
+def _prepare_runtime_root(
+    *,
+    include_baseline_pack: bool = True,
+    include_model_inputs: bool = True,
+) -> Path:
     """Copy writable model inputs into Vercel's temporary filesystem."""
 
     root = Path(tempfile.mkdtemp(prefix="scryglass-tier-refresh-", dir="/tmp"))
     try:
-        for relative in (
-            Path("data/lol/v2/champions"),
-            Path("data/lol/v2/models/draft-terminal"),
-        ):
-            _copy_tree(PROJECT_ROOT / relative, root / relative)
+        if include_model_inputs:
+            for relative in (
+                Path("data/lol/v2/champions"),
+                Path("data/lol/v2/models/draft-terminal"),
+            ):
+                _copy_tree(PROJECT_ROOT / relative, root / relative)
 
         # These paths are writable outputs for the refresh. They do not need
         # the historical research files from the main application bundle.
