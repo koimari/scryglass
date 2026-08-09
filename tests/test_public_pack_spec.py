@@ -9,12 +9,66 @@ from lol_kills.export.pack_records import (
     public_team_affiliation,
 )
 from lol_kills.export.public_pack import (
+    _attach_public_team_evidence,
+    _complete_player_game_ids,
     _ensure_year_column,
     _filter_years,
     _public_player_rating_rows,
     _validate_public_record_tiers,
     source_identity_sha256,
 )
+
+
+def test_public_team_ratings_receive_evidence_fields() -> None:
+    ratings = pd.DataFrame(
+        [
+            {
+                "team": "Gen.G",
+                "team_key": "gen-g",
+                "sigma": 20.0,
+                "n_series": 18,
+                "last_game_date": "2026-08-08T12:00:00Z",
+                "home_league": "LCK",
+                "international_series": 4,
+            }
+        ]
+    )
+
+    output = _attach_public_team_evidence(
+        ratings,
+        source_as_of=pd.Timestamp("2026-08-09T12:00:00Z"),
+        weekly_ranks={"by_team": {"Gen.G": {"mu_delta": -2.5}}},
+    )
+
+    row = output.iloc[0]
+    assert row["evidence_stability"] == 2.5
+    assert row["evidence_active"] == 1
+    assert row["evidence_state"] != "unsupported"
+
+
+def test_incomplete_or_ambiguous_player_maps_wait_for_later_refresh() -> None:
+    rows = []
+    for game_id, blue_bot, blue_support in (
+        ("complete", "Blue Bot", "Blue Support"),
+        ("duplicate", "unknown player", "unknown player"),
+    ):
+        for side, prefix in (("Blue", "Blue"), ("Red", "Red")):
+            for role in ("top", "jng", "mid", "bot", "sup"):
+                player = f"{prefix} {role}"
+                if side == "Blue" and role == "bot":
+                    player = blue_bot
+                if side == "Blue" and role == "sup":
+                    player = blue_support
+                rows.append(
+                    {
+                        "game_uid": game_id,
+                        "side": side,
+                        "position": role,
+                        "playername": player,
+                    }
+                )
+
+    assert _complete_player_game_ids(pd.DataFrame(rows)) == {"complete"}
 
 
 def test_public_pack_contains_only_rating_display_files() -> None:

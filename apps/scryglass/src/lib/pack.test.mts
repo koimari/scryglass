@@ -1,7 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compactPlayerRatings, type PlayerRating } from "./pack";
+import {
+  compactPlayerRatings,
+  scopedTeamWr,
+  type PlayerRating,
+  type TeamRecord,
+} from "./pack";
+
+test("Tier 1 scope reads the tier1 team record", () => {
+  const record: TeamRecord = {
+    leagues: ["LCK"],
+    primary: "LCK",
+    current_league: "LCK",
+    current_tier: "tier1",
+    intl: true,
+    wins: 12,
+    games: 20,
+    wr: 0.6,
+    by_tier: {
+      tier1: { wins: 12, games: 20, wr: 0.6 },
+    },
+  };
+
+  assert.equal(scopedTeamWr(record, ["TIER1"]), 0.6);
+});
 
 test("compact player ratings preserve the public evidence contract", () => {
   const row: PlayerRating = {
