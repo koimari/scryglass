@@ -298,6 +298,8 @@ def _run_step(root: Path, args: list[str], *, source: str) -> dict[str, Any]:
         "completed": result.returncode == 0,
         "stdout_bytes": len(result.stdout.encode("utf-8")),
         "stderr_bytes": len(result.stderr.encode("utf-8")),
+        "stdout_tail": result.stdout[-4000:],
+        "stderr_tail": result.stderr[-4000:],
     }
 
 
@@ -310,6 +312,22 @@ def _skipped_step(source: str, reason: str) -> dict[str, Any]:
         "skipped": True,
         "reason": reason,
     }
+
+
+def _source_step_failure(steps: list[dict[str, Any]]) -> str:
+    failures: list[str] = []
+    for step in steps:
+        if step.get("completed") is True:
+            continue
+        source = str(step.get("source") or "unknown")
+        reason = str(step.get("reason") or "step returned a non-zero status")
+        stderr = str(step.get("stderr_tail") or "").strip()
+        stdout = str(step.get("stdout_tail") or "").strip()
+        detail = stderr or stdout
+        if detail:
+            reason = f"{reason}; {detail[-1200:]}"
+        failures.append(f"{source}: {reason}")
+    return " | ".join(failures)
 
 
 def _verify_prebuilt_atom_bridge(root: Path) -> dict[str, Any]:
@@ -473,6 +491,14 @@ def refresh_candidate(
     else:
         grid_step = _skipped_step("grid", "source_mode_oe_only")
 
+    source_steps = [oe_step, oe_api_step, atom_step, live_source_step, rating_step, grid_step]
+    required_source_steps = [oe_api_step, atom_step, live_source_step]
+    if not all(step["completed"] for step in required_source_steps):
+        raise RuntimeError(
+            "tier refresh source preparation failed: "
+            + _source_step_failure(source_steps)
+        )
+
     previous = None
     movement_baseline: dict[str, Any] = {
         "kind": "previous_approved_artifact",
@@ -615,7 +641,7 @@ def refresh_candidate(
         "candidate_expected_live_as_of": candidate_expected_live_as_of,
         "source_observed_through": observed_as_of,
         "movement_baseline": movement_baseline,
-        "source_steps": [oe_step, oe_api_step, atom_step, live_source_step, rating_step, grid_step],
+        "source_steps": source_steps,
         "promotion_status": promotion_status,
         "promotion_steps": promotion_steps,
         "candidate": {
