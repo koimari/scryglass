@@ -1,7 +1,7 @@
 {
-  "pack_id": "v2026.08.09.1654",
+  "pack_id": "v2026.08.09.1907",
   "schema_version": "2.0.0",
-  "created_utc": "2026-08-09T16:57:46.586804+00:00",
+  "created_utc": "2026-08-09T19:12:47.322846+00:00",
   "filters": {
     "years": [
       2025,
@@ -37,51 +37,51 @@
       2025,
       2026
     ],
-    "map_rows": 17227,
-    "source_game_count": 17227,
-    "source_identity_sha256": "09ab802be1f5a9075bd4b9afe644dbd5aa3bf6df270e475dd4b6ec03831ebefc",
-    "team_rating_rows": 17107,
-    "player_rating_rows": 172270,
+    "map_rows": 17168,
+    "source_game_count": 17168,
+    "source_identity_sha256": "3ad149b668c7ec6155ed917250f1263a7a51ca8e01ba837e0575401a05381d1f",
+    "team_rating_rows": 17048,
+    "player_rating_rows": 171680,
     "affiliation_audit": {
-      "players": 3847,
-      "current_team_inherited": 3845,
-      "repaired_from_team_roster": 206,
+      "players": 3845,
+      "current_team_inherited": 3843,
+      "repaired_from_team_roster": 484,
       "unresolved_current_teams": 0,
       "remaining_team_player_conflicts": 0
     },
     "artifacts": {
       "features/team_weekly_ranks.json": {
-        "sha256": "862d7976fe7fe52c6a0ac54494fdf31d14ac5a1aeba597a50d73f7cbb686e754",
-        "bytes": 56267,
-        "rows": 528
+        "sha256": "655b253de6cb714af991bb78fe111fc2d150bca054bd3966feae46dc1761d1f9",
+        "bytes": 56162,
+        "rows": 527
       },
       "features/player_weekly_ranks.json": {
-        "sha256": "2d4a6add97dc5b83299d9905ac68ab8aa0f6e95951beaadf68a7d809c743005d",
-        "bytes": 298193,
+        "sha256": "b037b33f96483497e49d6f13038dea4684c62cde8b273264c9d963ad74af2ba5",
+        "bytes": 298212,
         "rows": 1931
       },
       "features/ratings_snapshot.json": {
-        "sha256": "5a41fa88549887cc969adbf73141bd6f16d590f666764fee3f4f6b6e51a26984",
-        "bytes": 176256,
-        "rows": 614
+        "sha256": "0926d963c4c7f458cee71418b6f9b572e0623fe9a4cf3796eaf82c3ef6e63521",
+        "bytes": 175578,
+        "rows": 612
       },
       "features/player_ratings_snapshot.json": {
-        "sha256": "83e64c20cb3fe2822d08ac673f9057daab921b01bc26424317e60959eb4efdab",
-        "bytes": 2041588,
-        "rows": 3847
+        "sha256": "aa0cf13de29fabad41b0ca376ecb841fbfceee80f8d42d9eeee50defd177e22d",
+        "bytes": 2039220,
+        "rows": 3843
       }
     },
     "claim_ceiling": "Source-bound descriptive ratings and weekly rank movement only."
   },
   "base_url": null,
-  "total_bytes": 10351100,
-  "total_files": 8,
+  "total_bytes": 14502759,
+  "total_files": 9,
   "files": [
     {
-      "rows": 528,
+      "rows": 527,
       "cols": null,
-      "bytes": 56267,
-      "sha256": "862d7976fe7fe52c6a0ac54494fdf31d14ac5a1aeba597a50d73f7cbb686e754",
+      "bytes": 56162,
+      "sha256": "655b253de6cb714af991bb78fe111fc2d150bca054bd3966feae46dc1761d1f9",
       "columns": null,
       "relative": "features/team_weekly_ranks.json",
       "path": "features/team_weekly_ranks.json"
@@ -89,8 +89,8 @@
     {
       "rows": 1931,
       "cols": null,
-      "bytes": 298193,
-      "sha256": "2d4a6add97dc5b83299d9905ac68ab8aa0f6e95951beaadf68a7d809c743005d",
+      "bytes": 298212,
+      "sha256": "b037b33f96483497e49d6f13038dea4684c62cde8b273264c9d963ad74af2ba5",
       "columns": null,
       "relative": "features/player_weekly_ranks.json",
       "path": "features/player_weekly_ranks.json"
@@ -98,35 +98,35 @@
     {
       "rows": 3251,
       "cols": null,
-      "bytes": 307238,
-      "sha256": "13cd38afb61e188378b731af52479ee04ee710fe907d8d41bb73e2f61e990c43",
+      "bytes": 307246,
+      "sha256": "60506c9212607fff45368858301d1d12054f6718c5385d229630ab1bb1e9a5d3",
       "columns": null,
       "relative": "features/player_metadata.json",
       "path": "features/player_metadata.json"
     },
     {
-      "rows": 614,
+      "rows": 612,
       "cols": null,
-      "bytes": 502620,
-      "sha256": "71f5040b9c4168880b2e23d708e5f71b99be596439f6025886938c9a4712521c",
+      "bytes": 501086,
+      "sha256": "70fd08e04ffda3276251c86e6fb93f19b7b963969ab248319f651ffd6106e729",
       "columns": null,
       "relative": "features/team_records.json",
       "path": "features/team_records.json"
     },
     {
-      "rows": 3847,
+      "rows": 3845,
       "cols": null,
-      "bytes": 2537141,
-      "sha256": "02c4c072f41936c99f7ab188fb85db14f747b5e7cb13efaa0dbb3251609e5112",
+      "bytes": 2535400,
+      "sha256": "d38db06fccaa404186616e8fd24162c63fe68d49de90f7c241026bcf085357d0",
       "columns": null,
       "relative": "features/player_records.json",
       "path": "features/player_records.json"
     },
     {
-      "rows": 43086,
+      "rows": 43069,
       "cols": 8,
-      "bytes": 4431797,
-      "sha256": "be1410100aa392e5e8ab8e36d1b11c145992baf7e864a2a1470003458ceb757a",
+      "bytes": 4429998,
+      "sha256": "4c15dfa05fd8d65b67ed75f8e6d68c45c48ceb2fa01be8598bbe911cccca50e3",
       "columns": [
         "champion",
         "games",
@@ -141,10 +141,19 @@
       "path": "features/player_champion_records.json"
     },
     {
-      "rows": 614,
+      "rows": 2961,
+      "cols": null,
+      "bytes": 4159857,
+      "sha256": "48a7488d079e2c3f446563adaa88160f20eb621f73b49f9befb492dbd6ddc901",
+      "columns": null,
+      "relative": "features/profile_records.json",
+      "path": "features/profile_records.json"
+    },
+    {
+      "rows": 612,
       "cols": 11,
-      "bytes": 176256,
-      "sha256": "5a41fa88549887cc969adbf73141bd6f16d590f666764fee3f4f6b6e51a26984",
+      "bytes": 175578,
+      "sha256": "0926d963c4c7f458cee71418b6f9b572e0623fe9a4cf3796eaf82c3ef6e63521",
       "columns": [
         "team",
         "team_key",
@@ -162,10 +171,10 @@
       "path": "features/ratings_snapshot.json"
     },
     {
-      "rows": 3847,
+      "rows": 3843,
       "cols": 18,
-      "bytes": 2041588,
-      "sha256": "83e64c20cb3fe2822d08ac673f9057daab921b01bc26424317e60959eb4efdab",
+      "bytes": 2039220,
+      "sha256": "aa0cf13de29fabad41b0ca376ecb841fbfceee80f8d42d9eeee50defd177e22d",
       "columns": [
         "player",
         "mu_total",
