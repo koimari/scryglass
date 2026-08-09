@@ -439,6 +439,9 @@ def fit_hierarchical_bt(
         rating = cfg.base_rating + LOGIT_TO_ELO * mean_logit
         team_obs = obs[(obs["team_a"] == team) | (obs["team_b"] == team)]
         intl = int(team_obs["international"].sum())
+        last_game_date = None
+        if not team_obs.empty and pd.notna(team_obs["date"].max()):
+            last_game_date = pd.Timestamp(team_obs["date"].max()).isoformat()
         bridge_gap = max(0.0, 1.0 - min(intl, cfg.bridge_target_series) / max(cfg.bridge_target_series, 1))
         sigma = math.sqrt(sigma * sigma + (cfg.unbridged_league_sigma * bridge_gap) ** 2)
         rows.append(
@@ -454,6 +457,7 @@ def fit_hierarchical_bt(
                 "n_maps": int(team_obs["n_maps"].sum()),
                 "international_series": intl,
                 "home_league": home,
+                "last_game_date": last_game_date,
                 "model": "hierarchical_bt",
             }
         )
@@ -517,27 +521,35 @@ def build_team_weekly_ranks(
     current, _ = fit_hierarchical_bt(maps, as_of=cutoff, write=False)
     previous, _ = fit_hierarchical_bt(maps, as_of=week_start - pd.Timedelta(microseconds=1), write=False)
 
-    def order(snapshot: pd.DataFrame) -> dict[str, int]:
+    def order(snapshot: pd.DataFrame) -> tuple[dict[str, int], dict[str, float]]:
         if snapshot.empty:
-            return {}
+            return {}, {}
         eligible = snapshot[snapshot["n_series"].fillna(0).ge(min_series)].copy()
         eligible["rank_value"] = pd.to_numeric(eligible["rating_p10"], errors="coerce")
+        eligible["mu_value"] = pd.to_numeric(eligible["mu_total"], errors="coerce")
         eligible = eligible.dropna(subset=["rank_value"])
         eligible["team_sort"] = eligible["team"].astype(str).str.casefold()
         eligible = eligible.sort_values(["rank_value", "team_sort"], ascending=[False, True])
-        return {str(team): rank for rank, team in enumerate(eligible["team"].astype(str), start=1)}
+        ranks = {str(team): rank for rank, team in enumerate(eligible["team"].astype(str), start=1)}
+        mus = {
+            str(team): float(mu) for team, mu in zip(eligible["team"].astype(str), eligible["mu_value"])
+        }
+        return ranks, mus
 
-    current_rank = order(current)
-    previous_rank = order(previous)
+    current_rank, current_mu = order(current)
+    previous_rank, previous_mu = order(previous)
     current_through = pd.Timestamp(cutoff)
     if current_through.tzinfo is not None:
         current_through = current_through.tz_convert("UTC").tz_localize(None)
     by_team: dict[str, dict[str, int | None]] = {}
     for team, rank in current_rank.items():
         prior = previous_rank.get(team)
+        prior_mu = previous_mu.get(team)
+        mu = current_mu.get(team)
         by_team[team] = {
             "rank": rank,
             "delta": (prior - rank) if prior is not None else None,
+            "mu_delta": (mu - prior_mu) if (mu is not None and prior_mu is not None) else None,
         }
 
     return {

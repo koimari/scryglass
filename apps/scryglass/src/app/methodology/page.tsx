@@ -116,9 +116,13 @@ export default async function MethodologyPage() {
           League chips on the Ratings page filter who appears while μ stays shared.
         </p>
         <p>
-          σ shrinks toward a floor as informative games arrive. Team floor is 25. When σ sits on that
-          floor, the Evidence label reads <em>Settled</em> — the rating is as tight as this model allows. Headroom
-          above the floor is what the adjusted rating penalizes:
+          σ shrinks toward a floor as informative games arrive. Team floor is 25; σ is a diagnostic,
+          not the evidence label. The Evidence label comes from the validated evidence contract:
+          95% interval width, relative precision versus the tightest rating in the same scope,
+          weekly stability, freshness, and support coverage. <em>Settled</em> requires strictly
+          greater-than-95% relative precision, known bounded stability, a fresh and active row,
+          and full support coverage. Anything missing or failing closes to Stale, Inactive,
+          Disconnected, Wide interval, Fallback, Out of distribution, or Unsupported.
         </p>
         <p className="font-mono text-sm">
           benchmark adjusted rating = μ − max(0, σ − σ_min)
@@ -131,10 +135,12 @@ export default async function MethodologyPage() {
 
       <MethodSection id="player-elo" title="Player ratings">
         <p>
-          Players are rated on their own Dual Elo track (player floor σ_min = 28). A team&apos;s
-          player-aggregated strength is a role-weighted blend of the five on the rift. Prefer player
-          ladders when rosters move. Evidence on a player at 28 is usually Settled because 28 is the
-          floor.
+          Players are rated on their own Dual Elo track (player floor σ_min = 28; the floor is a
+          diagnostic, not the evidence label). A team&apos;s player-aggregated strength is a
+          role-weighted blend of the five on the rift. Prefer player ladders when rosters move. The
+          Evidence label follows the same validated contract as teams: relative precision,
+          per-game stability, freshness, support coverage, active eligibility, and fallback/league
+          flags — a low σ alone never reads as Settled.
         </p>
       </MethodSection>
 
@@ -153,9 +159,16 @@ export default async function MethodologyPage() {
 
       <MethodSection id="evidence" title="Evidence and uncertainty">
         <p>
-          Evidence is a plain-language view of σ relative to its floor. Settled = at floor. Thin / Very thin =
-          headroom above the floor. Games counts sit beside it. Method owns the formula; the ladder
-          owns the sentence.
+          Evidence is a fail-closed state derived from the validated contract, not from σ alone.
+          Each rating row carries a 95% interval width, relative precision, stability, freshness,
+          support coverage, and fallback/active/disconnected/OOD flags; the label is computed from
+          those fields with exact thresholds. <strong>Settled</strong> = strictly greater-than-95%
+          relative precision, known bounded stability, fresh and active inputs, and full support
+          coverage. <strong>Observed</strong> = reasonably tight and supported but not Settled.
+          <strong>Thin</strong> = still moving. Stale, Inactive, Disconnected, Wide interval,
+          Fallback, Out of distribution, and Unsupported rows fail closed and never read as
+          settled. σ and game/series counts remain visible as separate diagnostics beside the
+          label.
         </p>
       </MethodSection>
 

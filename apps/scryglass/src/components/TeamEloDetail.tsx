@@ -11,9 +11,9 @@ import {
 } from "@/lib/duck";
 import { champIconUrl, formatGold } from "@/lib/format";
 import type { PlayerRating, TeamRating, TeamRecord } from "@/lib/pack";
+import { evidenceFields, evidenceInfo, formatEvidenceCell } from "@/lib/evidence";
 import {
   adjustedRating,
-  formatTrustCell,
   formatWr,
   packUpdatedLabel,
   PLAYER_SIGMA_MIN,
@@ -21,7 +21,6 @@ import {
   softMu,
   TEAM_SIGMA_MIN,
   teamSlug,
-  trustInfo,
   type PackManifest,
 } from "@/lib/pack";
 import profileStyles from "./ProfileHeader.module.css";
@@ -181,7 +180,7 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
   const [seriesLoaded, setSeriesLoaded] = useState(false);
   const [seriesError, setSeriesError] = useState<string | null>(null);
   const [seriesRetry, setSeriesRetry] = useState(0);
-  const trust = trustInfo(team.sigma, TEAM_SIGMA_MIN, record?.games);
+  const trust = evidenceInfo(evidenceFields(team as unknown as Record<string, unknown>), team.sigma, record?.games);
 
   useEffect(() => {
     let cancelled = false;
@@ -283,7 +282,7 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
             <strong>Raw rating</strong> {team.mu_total.toFixed(1)}
           </span>
           <span title={trust.layman}>
-            <strong>Evidence</strong> {formatTrustCell(trust)}
+            <strong>Evidence</strong> {formatEvidenceCell(trust)}
           </span>
           <span>
             <strong>Games</strong> {record?.games ?? "—"}
@@ -333,7 +332,7 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
           topRatedPlayers.map((p) => {
             const champs = byPlayer?.[p.player] ?? [];
             const expanded = champExpand[p.player];
-            const pTrust = trustInfo(p.sigma, PLAYER_SIGMA_MIN, p.n_maps);
+            const pTrust = evidenceInfo(evidenceFields(p as unknown as Record<string, unknown>), p.sigma, p.n_maps);
             return (
               <section key={p.player} className="border-t border-[var(--line)] pt-4 space-y-3">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -351,7 +350,7 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
                       {softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(1)}
                     </span>
                     <span title={pTrust.layman}>
-                      <strong>Evidence</strong> {formatTrustCell(pTrust)}
+                      <strong>Evidence</strong> {formatEvidenceCell(pTrust)}
                     </span>
                     <span>
                       <strong>Games</strong> {p.n_maps}

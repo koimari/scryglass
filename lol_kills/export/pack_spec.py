@@ -6,7 +6,7 @@ are out of the default pack.
 
 from __future__ import annotations
 
-SCHEMA_VERSION = "1.3.0"
+SCHEMA_VERSION = "1.4.0"
 
 # Inclusive calendar years on OE `year` / `oe_year`.
 DEFAULT_YEARS: tuple[int, ...] = (2025, 2026)
@@ -287,6 +287,19 @@ def maps_columns(available: list[str] | None = None) -> list[str]:
 
 
 # Features Elo
+EVIDENCE_STATE_COLS = (
+    "evidence_interval_width",
+    "evidence_precision_ratio",
+    "evidence_stability",
+    "evidence_freshness_days",
+    "evidence_support_coverage",
+    "evidence_fallback",
+    "evidence_active",
+    "evidence_disconnected",
+    "evidence_ood",
+    "evidence_state",
+)
+
 RATINGS_SNAPSHOT_COLS = (
     "team",
     "team_key",
@@ -300,6 +313,7 @@ RATINGS_SNAPSHOT_COLS = (
     "international_series",
     "home_league",
     "model",
+    *EVIDENCE_STATE_COLS,
 )
 PLAYER_RATINGS_SNAPSHOT_COLS = (
     "player",
@@ -309,6 +323,8 @@ PLAYER_RATINGS_SNAPSHOT_COLS = (
     "sigma",
     "n_maps",
     "last_team",
+    "home_league",
+    *EVIDENCE_STATE_COLS,
 )
 RATINGS_HISTORY_COLS = (
     "game_uid",

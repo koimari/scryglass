@@ -461,11 +461,20 @@ def export_public_pack(
         lineup_by_game=lineup_hashes_from_players(player_rating_input),
     )
     build_player_ratings(player_maps_for_ratings, player_rating_input)
+    player_snapshot_path = features_root / "player_ratings_snapshot.parquet"
+    if player_snapshot_path.exists():
+        player_snapshot = pd.read_parquet(player_snapshot_path)
+        player_snapshot = attach_player_evidence(
+            player_snapshot,
+            source_as_of=source_as_of,
+        )
+        player_snapshot.to_parquet(player_snapshot_path, index=False)
     public_ratings, public_ratings_meta = fit_hierarchical_bt(rating_input, write=True)
     public_ratings_meta["pack_years"] = list(years)
     public_ratings_meta["rating_window"] = "full canonical OE team-game window as this pack"
     public_ratings_meta["source_as_of"] = source_as_of.isoformat().replace("+00:00", "Z")
     public_ratings_meta["source_mode"] = "oe_live" if live_source else "warehouse"
+    public_ratings_meta["evidence_contract"] = "2026-08-09.1"
     features_root.mkdir(parents=True, exist_ok=True)
     (features_root / "ratings_meta.json").write_text(
         json.dumps(public_ratings_meta, indent=2),
@@ -522,6 +531,7 @@ def export_public_pack(
         player_meta["source_as_of"] = source_as_of.isoformat().replace("+00:00", "Z")
         player_meta["source_mode"] = "oe_live" if live_source else "warehouse"
         player_meta["window_years"] = list(years)
+        player_meta["evidence_contract"] = "2026-08-09.1"
         player_meta_path.write_text(json.dumps(player_meta, indent=2), encoding="utf-8")
     weekly_dest = feat_dir / "player_weekly_ranks.json"
     weekly_dest.write_text(json.dumps(weekly_ranks, indent=2), encoding="utf-8")

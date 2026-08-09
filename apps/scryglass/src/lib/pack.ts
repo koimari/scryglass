@@ -185,17 +185,6 @@ export const REGION_LEAGUES = [
 
 export const INTERREGIONAL_LEAGUES = ["AMERICAS"] as const;
 
-export type TrustKind = "settled" | "thin" | "very_thin";
-
-export type TrustInfo = {
-  kind: TrustKind;
-  label: string;
-  headroom: number;
-  sigma: number;
-  floor: number;
-  layman: string;
-};
-
 export async function loadManifest(origin = ""): Promise<PackManifest> {
   const res = await fetch(`${origin}/packs/manifest.json`, { cache: "no-store" });
   if (!res.ok) throw new Error(`manifest ${res.status}`);
@@ -273,30 +262,9 @@ export function adjustedRating(
   return Number.isFinite(rating.rating_p10) ? Number(rating.rating_p10) : softMu(rating.mu_total, rating.sigma, floor);
 }
 
-export function trustInfo(sigma: number, floor: number, games?: number | null): TrustInfo {
-  const headroom = Math.max(0, sigma - floor);
-  let kind: TrustKind = "settled";
-  if (headroom > 20) kind = "very_thin";
-  else if (headroom > 0.5) kind = "thin";
-  const label = kind === "settled" ? "Settled" : kind === "thin" ? "Thin" : "Very thin";
-  const gamesBit =
-    games != null && games > 0 ? ` · ${games} game${games === 1 ? "" : "s"} in sample` : "";
-  const layman =
-    kind === "settled"
-      ? `Rating is as settled as this model allows${gamesBit}.`
-      : kind === "thin"
-        ? `Still moving — fewer informative games than a settled org${gamesBit}.`
-        : `Very thin sample — treat the number gently${gamesBit}.`;
-  return { kind, label, headroom, sigma, floor, layman };
-}
-
 export function formatWr(wr: number | null | undefined): string {
   if (wr == null || !Number.isFinite(wr)) return "—";
   return `${(100 * wr).toFixed(1)}%`;
-}
-
-export function formatTrustCell(info: TrustInfo): string {
-  return info.label;
 }
 
 /** Common team aliases for fuzzy ladder / filter matching. */
