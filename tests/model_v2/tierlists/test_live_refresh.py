@@ -44,8 +44,16 @@ def test_blob_publication_writes_the_pointer_last() -> None:
 
     class FakeTransport:
         pointer_raw = b""
+        movement_raw = b""
 
         def get_blob(self, _store_id: str, pathname: str, *, deadline_epoch: int):
+            if pathname == live_refresh.BLOB_MOVEMENT_PATH:
+                if not self.movement_raw:
+                    return None
+                return (
+                    self.movement_raw,
+                    live_refresh.BlobIdentity(pathname, len(self.movement_raw), "movement-etag"),
+                )
             if pathname != live_refresh.BLOB_POINTER_PATH:
                 return None
             return (
@@ -64,8 +72,13 @@ def test_blob_publication_writes_the_pointer_last() -> None:
             assert plan.writes[-1].mode is live_refresh.WriteMode.NEW_IMMUTABLE
             assert all(
                 write.pathname.startswith("tierlists/releases/")
+                or write.pathname == live_refresh.BLOB_MOVEMENT_PATH
                 for write in plan.writes[:-1]
             )
+            movement_write = next(
+                write for write in plan.writes if write.pathname == live_refresh.BLOB_MOVEMENT_PATH
+            )
+            transport.movement_raw = movement_write.content
             transport.pointer_raw = plan.writes[-1].content
             return SimpleNamespace(
                 success=True,

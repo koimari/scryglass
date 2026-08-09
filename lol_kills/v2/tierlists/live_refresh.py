@@ -54,6 +54,7 @@ BLOB_TOKEN_FALLBACK_ENV = "VERCEL_BLOB_READ_WRITE_TOKEN"
 BLOB_STORE_ENV = "BLOB_STORE_ID"
 BLOB_STORE_FALLBACK_ENV = "VERCEL_BLOB_STORE_ID"
 BLOB_POINTER_PATH = "tierlists/index-v1.json"
+BLOB_MOVEMENT_PATH = "tierlists/movement-v1.json"
 BLOB_WRITER_ID = "scryglass-tierlist-worker"
 
 
@@ -192,6 +193,40 @@ def _publication_payloads(root: Path) -> dict[str, Any]:
     pointer_index = deepcopy(release_index)
     pointer_index["base_url"] = f"./releases/{release_id}/"
     pointer_raw = _production_artifact_bytes(pointer_index)
+    movement_snapshot = {
+        "schema_version": "scryglass:tier-list-movement-snapshot:v1",
+        "artifact_kind": "tier_list_movement_snapshot",
+        "status": "production",
+        "production_eligible": True,
+        "as_of": index["as_of"],
+        "source_index_artifact_sha256": index["artifact_sha256"],
+        "cells": [],
+    }
+    for cell_meta in index["cells"]:
+        locator = cell_meta.get("locator")
+        if not isinstance(locator, str):
+            raise PublicationError("production cell locator is malformed")
+        local_path = root / Path(locator)
+        cell_payload = json.loads(local_path.read_text(encoding="utf-8"))
+        movement_rows = []
+        for row in cell_payload.get("rows", []):
+            movement_rows.append(
+                {
+                    "champion_id": row.get("champion_id"),
+                    "champion_name": row.get("champion_name"),
+                    "rank": row.get("rank"),
+                    "rating": row.get("rating"),
+                }
+            )
+        movement_snapshot["cells"].append(
+            {
+                "scope_id": cell_meta["scope_id"],
+                "role": cell_meta["role"],
+                "as_of": cell_meta["as_of"],
+                "rows": movement_rows,
+            }
+        )
+    movement_raw = _production_artifact_bytes(movement_snapshot)
     return {
         "release_id": release_id,
         "release_index_path": f"tierlists/releases/{release_id}/index-v1.json",
@@ -201,6 +236,9 @@ def _publication_payloads(root: Path) -> dict[str, Any]:
         "pointer_raw": pointer_raw,
         "pointer_artifact_sha256": pointer_index["artifact_sha256"],
         "pointer_url_suffix": BLOB_POINTER_PATH,
+        "movement_raw": movement_raw,
+        "movement_artifact_sha256": movement_snapshot["artifact_sha256"],
+        "movement_url_suffix": BLOB_MOVEMENT_PATH,
         "cell_count": len(cell_bytes),
         "source_index_artifact_sha256": index["artifact_sha256"],
     }
@@ -215,6 +253,7 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
     transport = VercelBlobTransport(token, store_id)
     inventory = _blob_inventory(transport, store_id)
     pointer_identity = inventory.get(BLOB_POINTER_PATH)
+    movement_identity = inventory.get(BLOB_MOVEMENT_PATH)
     pointer_mode = WriteMode.NEW_IMMUTABLE
     if pointer_identity is not None:
         current = transport.get_blob(
@@ -226,6 +265,16 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
             raise PublicationError("existing tier-list pointer changed during inventory")
         _validate_existing_pointer(current[0])
         pointer_mode = WriteMode.OVERWRITE
+    movement_mode = WriteMode.NEW_IMMUTABLE
+    if movement_identity is not None:
+        current_movement = transport.get_blob(
+            store_id,
+            BLOB_MOVEMENT_PATH,
+            deadline_epoch=int(time.time()) + 30,
+        )
+        if current_movement is None or current_movement[1] != movement_identity:
+            raise PublicationError("existing tier-list movement snapshot changed during inventory")
+        movement_mode = WriteMode.OVERWRITE
 
     writes = [
         PlannedWrite(pathname, raw, WriteMode.NEW_IMMUTABLE)
@@ -236,6 +285,13 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
             payloads["release_index_path"],
             payloads["release_index_raw"],
             WriteMode.NEW_IMMUTABLE,
+        )
+    )
+    writes.append(
+        PlannedWrite(
+            BLOB_MOVEMENT_PATH,
+            payloads["movement_raw"],
+            movement_mode,
         )
     )
     writes.append(PlannedWrite(BLOB_POINTER_PATH, payloads["pointer_raw"], pointer_mode))
@@ -259,6 +315,13 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
     )
     if readback is None or readback[0] != payloads["pointer_raw"]:
         raise PublicationError("published tier-list pointer failed exact readback")
+    movement_readback = transport.get_blob(
+        store_id,
+        BLOB_MOVEMENT_PATH,
+        deadline_epoch=int(time.time()) + 30,
+    )
+    if movement_readback is None or movement_readback[0] != payloads["movement_raw"]:
+        raise PublicationError("published tier-list movement snapshot failed exact readback")
     return {
         "status": "published",
         "blob_store_id": store_id,
@@ -271,6 +334,10 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
         "release_index_artifact_sha256": payloads["release_index_artifact_sha256"],
         "cell_count": payloads["cell_count"],
         "pointer_mode": pointer_mode.value,
+        "movement_path": BLOB_MOVEMENT_PATH,
+        "movement_artifact_sha256": payloads["movement_artifact_sha256"],
+        "movement_mode": movement_mode.value,
+        "movement_readback_verified": True,
         "pointer_readback_verified": True,
         "retention": {
             "state": result.state.value,
@@ -284,6 +351,8 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
 
 
 def _run_step(root: Path, args: list[str], *, source: str) -> dict[str, Any]:
+    started = time.monotonic()
+    print(f"[tier-refresh] step={source} start", flush=True)
     environment = os.environ.copy()
     inherited_paths = [str(Path(item)) for item in sys.path if item and Path(item).is_dir()]
     configured_paths = [item for item in environment.get("PYTHONPATH", "").split(os.pathsep) if item]
@@ -297,6 +366,10 @@ def _run_step(root: Path, args: list[str], *, source: str) -> dict[str, Any]:
         capture_output=True,
         text=True,
         check=False,
+    )
+    print(
+        f"[tier-refresh] step={source} done returncode={result.returncode} seconds={time.monotonic() - started:.1f}",
+        flush=True,
     )
     return {
         "source": source,
@@ -515,6 +588,8 @@ def refresh_candidate(
     if previous_path is not None:
         previous_file = previous_path if previous_path.is_absolute() else root / previous_path
         previous = json.loads(previous_file.read_text(encoding="utf-8"))
+        movement_baseline["as_of"] = previous.get("as_of")
+        movement_baseline["artifact_kind"] = previous.get("artifact_kind")
         movement_baseline["artifact_sha256"] = previous.get("artifact_sha256")
     else:
         baseline_as_of = _previous_week_start(candidate_expected_live_as_of)
