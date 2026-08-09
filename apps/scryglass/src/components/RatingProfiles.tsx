@@ -197,7 +197,7 @@ export function TeamRatingProfile({
       </section>
 
       <section className={styles.section}>
-        <div className={styles.sectionHeader}><div><p>Latest results</p><h2>Recent maps</h2></div><span>Up to 10</span></div>
+        <div className={styles.sectionHeader}><div><p>Latest results</p><h2>Recent maps</h2></div><Link className="row-link" href="/matches">All matches →</Link></div>
         <RecentMatches games={recentGames} championImages={championImages} team={team.team} />
       </section>
     </div>
@@ -218,6 +218,7 @@ function GradeDetails({ grade }: { grade?: ProfileGrade }) {
 }
 
 export function MatchRatingProfile({ game, championImages }: { game: ProfileGame; championImages: Record<string, string> }) {
+  const gradesAvailable = game.players.some((player) => player.grade?.status === "available");
   const sides = (["Blue", "Red"] as const).map((side) => ({
     side,
     team: side === "Blue" ? game.blue_team : game.red_team,
@@ -226,11 +227,13 @@ export function MatchRatingProfile({ game, championImages }: { game: ProfileGame
   }));
   return (
     <div className={styles.page}>
-      <p className={styles.back}><Link className="row-link" href="/elo">← Ratings</Link></p>
+      <p className={styles.back}><Link className="row-link" href="/matches">← Matches</Link></p>
       <header className={styles.matchHero}>
         <p className={styles.scope}>{game.league} · {shortDate(game.date)}</p>
         <h1>{game.blue_team} vs {game.red_team}</h1>
-        <p>Player grades compare this map with the player’s prior form, their teammates, the same-role opponent, and the league-role baseline. Match result is excluded.</p>
+        <p>{gradesAvailable
+          ? "Player grades compare this map with the player’s prior form, their teammates, the same-role opponent, and the league-role baseline. Match result is excluded."
+          : "The result, roster, roles, and champions are available. Player grades will appear after the completed stat line reaches the accepted source."}</p>
       </header>
       <div className={styles.matchTeams}>
         {sides.map((side) => (
@@ -307,7 +310,7 @@ export function PlayerRatingProfile({
       </dl>
 
       <section className={styles.section}>
-        <div className={styles.sectionHeader}><div><p>Latest results</p><h2>Recent maps</h2></div><span>Up to 10</span></div>
+        <div className={styles.sectionHeader}><div><p>Latest results</p><h2>Recent maps</h2></div><Link className="row-link" href="/matches">All matches →</Link></div>
         <RecentMatches games={recentGames} championImages={championImages} player={player.player} />
       </section>
 

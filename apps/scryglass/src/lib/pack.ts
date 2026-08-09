@@ -177,6 +177,19 @@ export type ProfileRecords = {
   teams: Record<string, string[]>;
 };
 
+export function recentProfileGames(
+  records: ProfileRecords,
+  limit = 100,
+): ProfileGame[] {
+  if (!Number.isInteger(limit) || limit < 1) return [];
+  return Object.values(records.games)
+    .sort((a, b) => {
+      const byDate = Date.parse(b.date) - Date.parse(a.date);
+      return byDate || a.game_id.localeCompare(b.game_id);
+    })
+    .slice(0, limit);
+}
+
 export type EloCalibration = {
   team: { intercept: number; coef: number; temperature_400?: number };
   player: { intercept: number; coef: number; temperature_400?: number };

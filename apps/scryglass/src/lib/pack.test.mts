@@ -3,10 +3,40 @@ import test from "node:test";
 
 import {
   compactPlayerRatings,
+  recentProfileGames,
   scopedTeamWr,
   type PlayerRating,
+  type ProfileGame,
+  type ProfileRecords,
   type TeamRecord,
 } from "./pack";
+
+function profileGame(game_id: string, date: string): ProfileGame {
+  return {
+    game_id,
+    date,
+    league: "LCS",
+    blue_team: "Blue",
+    red_team: "Red",
+    blue_win: 1,
+    players: [],
+  };
+}
+
+test("recent match index orders accepted profile games newest first", () => {
+  const older = profileGame("older", "2026-07-18T12:00:00Z");
+  const newest = profileGame("newest", "2026-08-08T21:50:46Z");
+  const records: ProfileRecords = {
+    schema_version: "scryglass:profile-records:v2",
+    window_days: 120,
+    champion_images: {},
+    games: { older, newest },
+    players: {},
+    teams: {},
+  };
+
+  assert.deepEqual(recentProfileGames(records, 1), [newest]);
+});
 
 test("Tier 1 scope reads the tier1 team record", () => {
   const record: TeamRecord = {

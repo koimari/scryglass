@@ -1,0 +1,197 @@
+.page {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2rem;
+  align-items: end;
+  padding: 1rem 0 1.35rem;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.eyebrow {
+  margin: 0 0 0.45rem;
+  color: var(--accent-ink);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: clamp(2.5rem, 6vw, 4.8rem);
+  letter-spacing: -0.06em;
+  line-height: 0.92;
+}
+
+.header > div:first-child > p:last-child {
+  max-width: 64ch;
+  margin: 0.9rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+}
+
+.freshness {
+  display: grid;
+  min-width: 10rem;
+  gap: 0.12rem;
+  justify-items: end;
+  font-family: var(--font-mono), monospace;
+}
+
+.freshness span,
+.freshness small {
+  color: var(--ink-muted);
+  font-size: 0.64rem;
+}
+
+.freshness strong {
+  font-size: 0.92rem;
+}
+
+.ledger {
+  display: grid;
+  gap: 1.75rem;
+}
+
+.day {
+  display: grid;
+  grid-template-columns: minmax(9rem, 13rem) minmax(0, 1fr);
+  gap: 1.5rem;
+}
+
+.day h2 {
+  position: sticky;
+  top: calc(var(--header-h) + 1rem);
+  align-self: start;
+  margin: 0;
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.dayGames {
+  border-top: 1px solid var(--line-strong);
+}
+
+.match {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(16rem, 1fr) minmax(7.5rem, auto);
+  gap: 1rem;
+  align-items: center;
+  min-height: 5rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--line);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 5rem;
+}
+
+.meta {
+  display: grid;
+  gap: 0.15rem;
+  font-family: var(--font-mono), monospace;
+}
+
+.meta strong {
+  color: var(--accent-ink);
+  font-size: 0.66rem;
+}
+
+.meta time {
+  color: var(--ink-muted);
+  font-size: 0.6rem;
+}
+
+.teams {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.teams a {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1.5rem;
+  gap: 0.75rem;
+  color: var(--ink-muted);
+  font-size: 0.84rem;
+  text-decoration: none;
+}
+
+.teams a:hover span {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 0.2em;
+}
+
+.teams b {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.67rem;
+  font-weight: 500;
+  text-align: right;
+}
+
+.teams .winner {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.teams .winner b {
+  color: var(--accent-ink);
+}
+
+.open {
+  justify-self: end;
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.open span {
+  color: var(--accent-ink);
+}
+
+.open:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 0.2em;
+}
+
+.empty {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+@media (max-width: 760px) {
+  .header {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .freshness {
+    justify-items: start;
+  }
+
+  .day {
+    grid-template-columns: 1fr;
+    gap: 0.45rem;
+  }
+
+  .day h2 {
+    position: static;
+  }
+
+  .match {
+    grid-template-columns: 4.8rem minmax(0, 1fr);
+  }
+
+  .open {
+    grid-column: 2;
+    justify-self: start;
+    padding-bottom: 0.3rem;
+  }
+}
