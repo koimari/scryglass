@@ -22,7 +22,7 @@ import pandas as pd
 from lol_kills.etl.aliases import normalize_team
 
 
-TAXONOMY_VERSION = "2026-07-26.4"
+TAXONOMY_VERSION = "2026-08-09.1"
 
 # LTA was the 2025 Americas competition.  North and South were distinct
 # domestic circuits, while an unqualified LTA row is an Americas cross-region
@@ -106,6 +106,16 @@ TIER2_LEAGUES = frozenset(
 )
 
 COMPETITION_TIERS = frozenset({"tier1", "tier2", "tier3"})
+# These labels describe cross-league events. They do not describe a team's
+# current league membership. Historical rows keep the event label and tier.
+EVENT_ONLY_LEAGUES = frozenset(
+    {
+        "ASI",
+        "DCUP",
+        "KESPA",
+        "KESPA CUP",
+    }
+)
 TRANSPORT_LEAGUE_LABELS = frozenset(
     {
         "OE API",
@@ -183,6 +193,19 @@ def competition_tier(league: Any) -> str:
     if canonical in INTERREGIONAL_LEAGUES:
         return "interregional"
     return "tier3" if canonical else "other"
+
+
+def is_team_affiliation_league(league: Any) -> bool:
+    """Return whether a competition can define current team membership."""
+
+    canonical = canonical_league(league)
+    if not canonical:
+        return False
+    if canonical in INTERNATIONAL_LEAGUES or canonical in INTERREGIONAL_LEAGUES:
+        return False
+    if canonical in EVENT_ONLY_LEAGUES or canonical.endswith("CUP"):
+        return False
+    return competition_tier(canonical) in COMPETITION_TIERS
 
 
 def classify_competition(league: Any, tournament: Any = None) -> CompetitionLabel:

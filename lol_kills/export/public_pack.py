@@ -27,6 +27,7 @@ from lol_kills.export.pack_records import (
     build_team_records,
     filter_public_team_rating_maps,
     public_team_affiliation,
+    summarize_player_affiliations,
 )
 from lol_kills.export.player_metadata import build_player_metadata
 from lol_kills.etl.competition import TAXONOMY_VERSION, canonicalize_competition_frame, competition_tier
@@ -293,12 +294,26 @@ def export_public_pack(
     player_rating_input["game_uid"] = _normalized_game_uid(player_rating_input)
     if player_rating_input["game_uid"].isna().any():
         raise RuntimeError("public pack rating source has rows without a game identity")
+    team_records_payload = build_team_records(rating_input)
+    player_records_payload = build_player_records(
+        player_records_frame,
+        team_records=team_records_payload,
+    )
+    affiliation_audit = summarize_player_affiliations(
+        player_records_payload,
+        team_records_payload,
+    )
     build_dual_ratings(
         rating_input,
         lineup_by_game=lineup_hashes_from_players(player_rating_input),
         output_dir=features_root,
     )
-    build_player_ratings(player_maps_for_ratings, player_rating_input, output_dir=features_root)
+    build_player_ratings(
+        player_maps_for_ratings,
+        player_rating_input,
+        output_dir=features_root,
+        player_records=player_records_payload,
+    )
     player_snapshot_path = features_root / "player_ratings_snapshot.parquet"
     if player_snapshot_path.exists():
         player_snapshot = pd.read_parquet(player_snapshot_path)
@@ -329,8 +344,6 @@ def export_public_pack(
     # Write only the display JSON used by ratings pages.
     feat_dir = pack_dir / "features"
     feat_dir.mkdir(parents=True, exist_ok=True)
-    player_records_payload = build_player_records(player_records_frame)
-    team_records_payload = build_team_records(rating_input)
     _validate_public_record_tiers(team_records_payload, label="team")
     _validate_public_record_tiers(player_records_payload, label="player")
 
@@ -357,6 +370,7 @@ def export_public_pack(
         player_rating_input,
         as_of=pd.to_datetime(maps_for_records["date"], utc=True, errors="coerce").max(),
         min_games=20,
+        player_records=player_records_payload,
     )
     player_meta_path = features_root / "player_ratings_meta.json"
     if player_meta_path.exists():
@@ -499,6 +513,7 @@ def export_public_pack(
         "identity": {
             "taxonomy_version": TAXONOMY_VERSION,
             "team_key": "one canonical organization identity across regional and international events",
+            "team_affiliation": "current league membership excludes cup and cross-league event labels; players inherit league and tier from their current team",
             "league_source": "raw source label retained on rows for auditability",
             "competition_tier": "tier1/tier2/tier3 assigned from the canonical league taxonomy; international and interregional are separate scopes",
             "deprecated_leagues": {
@@ -524,6 +539,7 @@ def export_public_pack(
             "source_identity_sha256": source_identity_sha256(source_game_ids),
             "team_rating_rows": int(len(rating_input)),
             "player_rating_rows": int(len(player_rating_frame)),
+            "affiliation_audit": affiliation_audit,
             "artifacts": rating_artifact_paths,
             "claim_ceiling": "Source-bound descriptive ratings and weekly rank movement only.",
         },
