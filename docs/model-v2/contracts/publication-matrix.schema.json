@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scryglass.xyz/schemas/model-v2/publication-matrix.schema.json",
+  "title": "Scryglass source and artifact publication matrix",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_version",
+    "as_of",
+    "matrix_id",
+    "reviewed_at",
+    "rows",
+    "lineage"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/semver"},
+    "model_version": {"$ref": "common.schema.json#/$defs/model_version"},
+    "as_of": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "matrix_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "reviewed_at": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "row_id",
+          "source_id",
+          "source_name",
+          "source_url",
+          "owner",
+          "access_method",
+          "artifact_class",
+          "credential_required",
+          "terms_review_status",
+          "decision",
+          "field_allowlist",
+          "field_denylist",
+          "derivative_reconstruction_risk",
+          "reviewer",
+          "decision_evidence",
+          "next_review_at"
+        ],
+        "properties": {
+          "row_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+          "source_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+          "source_name": {"type": "string", "minLength": 1},
+          "source_url": {"type": "string", "format": "uri"},
+          "owner": {"type": "string", "minLength": 1},
+          "access_method": {
+            "type": "string",
+            "enum": ["download", "public_api", "authenticated_api", "partner_feed", "manual", "derived"]
+          },
+          "artifact_class": {
+            "type": "string",
+            "enum": [
+              "raw",
+              "derived_rows",
+              "aggregate",
+              "code",
+              "features",
+              "weights",
+              "evaluation",
+              "documentation",
+              "user_auth"
+            ]
+          },
+          "credential_required": {"type": "boolean"},
+          "secret_storage_class": {
+            "type": "string",
+            "enum": ["none", "server_secret", "partner_managed", "prohibited"]
+          },
+          "terms_review_status": {
+            "type": "string",
+            "enum": ["approved", "restricted", "pending", "prohibited"]
+          },
+          "license_or_terms": {"type": "string"},
+          "terms_reviewed_at": {"$ref": "common.schema.json#/$defs/timestamp"},
+          "storage_rule": {"type": "string"},
+          "redistribution_rule": {"type": "string"},
+          "retention_rule": {"type": "string"},
+          "attribution_rule": {"type": "string"},
+          "decision": {
+            "type": "string",
+            "enum": ["public", "authenticated", "private", "private_pending_review", "prohibited"]
+          },
+          "field_allowlist": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string"}
+          },
+          "field_denylist": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string"}
+          },
+          "deidentification_rule": {"type": "string"},
+          "derivative_reconstruction_risk": {
+            "type": "string",
+            "enum": ["low", "moderate", "high", "unknown"]
+          },
+          "reviewer": {"type": "string", "minLength": 1},
+          "decision_evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "next_review_at": {"$ref": "common.schema.json#/$defs/timestamp"}
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {"credential_required": {"const": true}},
+              "required": ["credential_required"]
+            },
+            "then": {
+              "required": ["secret_storage_class"],
+              "not": {
+                "properties": {"secret_storage_class": {"const": "none"}},
+                "required": ["secret_storage_class"]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {"decision": {"const": "public"}},
+              "required": ["decision"]
+            },
+            "then": {
+              "properties": {
+                "terms_review_status": {"const": "approved"},
+                "derivative_reconstruction_risk": {
+                  "enum": ["low", "moderate"]
+                }
+              },
+              "required": [
+                "license_or_terms",
+                "terms_reviewed_at",
+                "redistribution_rule",
+                "attribution_rule"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "lineage": {"$ref": "common.schema.json#/$defs/lineage"}
+  }
+}

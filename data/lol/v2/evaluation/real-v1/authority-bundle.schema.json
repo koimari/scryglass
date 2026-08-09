@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scryglass.local/schema/authority-bundle-v1.4.json",
+  "title": "Scryglass authority-derived preflight bundle v1.4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authority_id",
+    "contract_set_sha256",
+    "evidence_generator_identity",
+    "expected_reads",
+    "candidate_registry",
+    "pair_registry",
+    "permit_ledger",
+    "threat_model"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "g0-authority-v1.4"
+    },
+    "authority_id": {
+      "const": "scryglass:authority-derived-preflight:v1.4"
+    },
+    "contract_set_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "evidence_generator_identity": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$"
+    },
+    "expected_reads": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "relative_path",
+          "raw_sha256",
+          "semantic_sha256"
+        ],
+        "properties": {
+          "relative_path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\)[A-Za-z0-9._/-]+$"
+          },
+          "raw_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "semantic_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "candidate_registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "raw_sha256",
+        "semantic_sha256"
+      ],
+      "properties": {
+        "relative_path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\)[A-Za-z0-9._/-]+$"
+        },
+        "raw_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "semantic_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "pair_registry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "raw_sha256",
+        "semantic_sha256"
+      ],
+      "properties": {
+        "relative_path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\)[A-Za-z0-9._/-]+$"
+        },
+        "raw_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "semantic_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "permit_ledger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "ledger_schema_version"
+      ],
+      "properties": {
+        "relative_path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\)[A-Za-z0-9._/-]+$"
+        },
+        "ledger_schema_version": {
+          "const": "g0-ledger-v1.4"
+        }
+      }
+    },
+    "threat_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cooperative_process_only",
+        "not_cryptographically_unforgeable",
+        "production_requirements"
+      ],
+      "properties": {
+        "cooperative_process_only": {
+          "const": true
+        },
+        "not_cryptographically_unforgeable": {
+          "const": true
+        },
+        "production_requirements": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "schema_version": "scryglass:draft-terminal-l2-evaluation-contract:v1",
+  "artifact_id": "draft-terminal-l2-evaluation-contract-v1",
+  "status": "pending_independent_authority",
+  "production_eligible": false,
+  "public_probability_authorized": false,
+  "estimand": "pre-map descriptive association of a fully assigned five-role draft after side and baseline-strength equalization",
+  "neutral_policy": {
+    "exact_roster_required": false,
+    "player_champion_response_required": false,
+    "team_policy_response_required": false,
+    "neutral_context_required": true,
+    "g1_contextual_source_required": false,
+    "status": "neutral_model_is_the_current_serving_scope"
+  },
+  "contextual_policy": {
+    "exact_roster_required": true,
+    "player_champion_response_required": true,
+    "team_policy_response_required": true,
+    "baseline_team_rating_difference_in_served_draft_score": 0.0,
+    "league_rating_difference_in_served_draft_score": 0.0,
+    "in_game_side_advantage_in_served_draft_score": 0.0,
+    "neutral_fallback_when_context_is_missing": false,
+    "current_status": "contextual_fit_model_not_independently_validated"
+  },
+  "source_policy": {
+    "preevent_availability_required": true,
+    "exact_payload_hash_required": true,
+    "rights_review_required": true,
+    "source_revision_history_required": true,
+    "retrospective_reconstruction_authorizes_prediction": false
+  },
+  "dependence_clusters": {
+    "series_id": {"required": true, "split_policy": "same series stays in one fold"},
+    "participant_id": {"required": true, "split_policy": "participant dependence is clustered or held out", "development_status": "missing_from_current_snapshot"},
+    "team_id_proxy": {"allowed_for_diagnostics": true, "promotion_substitute_for_participant_id": false}
+  },
+  "fold_policy": {
+    "development": "chronological expanding folds",
+    "calibration": "nested after candidate fit and before outer test",
+    "outer_test": "future time, untouched during search",
+    "selection": "registered candidates only; no reselection on outer test",
+    "minimum_unit": "map rows grouped by series and dependence clusters"
+  },
+  "holdouts": {
+    "future_patch": "required_when_patch_labels_exist",
+    "league": "required",
+    "international_event_or_meta": "required_when_supported_by_source",
+    "roster_change": "not_required_for_neutral",
+    "sparse_or_new_champion": "required_support_diagnostic"
+  },
+  "calibration_policy": {
+    "registered_transforms": ["identity", "symmetric_temperature", "symmetrized_platt"],
+    "fit_data": "calibration fold only",
+    "outer_test_access_during_search": false,
+    "complement_symmetry_required": true,
+    "probability_domain": "open_0_1"
+  },
+  "replay_policy": {
+    "python_artifact_typescript_parity_required": true,
+    "exact_artifact_bytes_required": true,
+    "ledger_reconciliation_required": true,
+    "side_swap_complement_required": true,
+    "uncertainty_replay_required": true
+  },
+  "promotion_gates": [
+    "independent_l2_authority_record",
+    "sealed_outer_temporal_evaluation",
+    "approved_calibration_transform",
+    "protocol_specific_action_order_validation",
+    "reliability_record_with_baseline_and_dependence_support",
+    "python_artifact_typescript_replay_parity",
+    "source_rights_and_preevent_availability",
+    "non_betting_descriptive_claim_ceiling",
+    "grid_source_cohort_promotion_gate"
+  ],
+  "g1_contextual_gate": {
+    "applies_to": "contextual_only",
+    "required_fields": [
+      "preevent_payload",
+      "source_and_retrieval_timestamps",
+      "exact_starters_and_roles",
+      "rights_review",
+      "verifiable_payload_sha256"
+    ],
+    "neutral_mode_action": "does_not_block_neutral",
+    "missing_or_stale_action": "unavailable",
+    "speculative_reconstruction_action": "blocked"
+  },
+  "grid_promotion_gate": {
+    "baseline_source": "OE",
+    "candidate_source": "GRID",
+    "scope": "defined_competition_and_date_cohort",
+    "required_before_promotion": [
+      "exact_GRID_record_for_every_included_game",
+      "hash_verified_record_payloads",
+      "exact_source_payload_bytes_and_hash",
+      "complete_pre_draft_picks_roles_side_patch_and_result",
+      "zero_identity_sequence_or_leakage_failures",
+      "GRID_matches_or_improves_OE_on_predeclared_heldout_validation",
+      "GRID_matches_or_improves_OE_on_predeclared_heldout_calibration",
+      "heldout_results_hash_bound",
+      "replay_data_hash_bound_to_verified_records",
+      "replay_model_hash_bound_to_exact_model_bytes",
+      "second_replay_reproduces_identical_data_and_model_hashes"
+    ],
+    "heldout_metrics": ["log_loss", "brier_score", "ece"],
+    "predeclared_plan": {
+      "required": true,
+      "hash_bound": true,
+      "must_precede_cohort": true,
+      "fields": ["cohort_id", "baseline_source", "candidate_source", "metrics", "max_allowed_delta"]
+    },
+    "pass_action": "GRID_primary_for_that_cohort; OE_remains_public_reproducibility_benchmark",
+    "fail_action": "report_exact_missing_or_invalid_records; keep_OE_active",
+    "current_status": "not_passed"
+  }
+}

@@ -1,0 +1,6 @@
+apps/scryglass/public/packs/*
+!apps/scryglass/public/packs/manifest.json
+!apps/scryglass/public/packs/latest.json
+data/
+output/
+node_modules/

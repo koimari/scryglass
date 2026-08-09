@@ -1,0 +1,546 @@
+{
+  "artifact_kind": "PRE_BINDING_BENCHMARK_TEMPLATE",
+  "contract_id": "scryglass:real-benchmark:v1",
+  "schema_version": "1.4",
+  "acceptance": {
+    "status": "PENDING_INDEPENDENT_REVIEW",
+    "authority": "external_goal_control_ledger",
+    "source_independent_rules_status": "FROZEN_CANDIDATE",
+    "source_dependent_binding_status": "UNBOUND",
+    "binding_cannot_change_source_independent_rules": true
+  },
+  "final_labels_read": false,
+  "outputs": [
+    {
+      "id": "player_rating",
+      "scope": "Tier-1 regional and separately bridged-global player forecasts",
+      "public_status": "UNAVAILABLE_UNTIL_PROMOTED"
+    },
+    {
+      "id": "team_rating",
+      "scope": "exact active top-jungle-mid-bot-support roster forecasts",
+      "public_status": "UNAVAILABLE_UNTIL_PROMOTED"
+    },
+    {
+      "id": "terminal_draft_score",
+      "scope": "completed professional draft with separately reported neutral and contextual estimates",
+      "public_status": "UNAVAILABLE_UNTIL_PROMOTED"
+    },
+    {
+      "id": "partial_draft_score",
+      "scope": "professional draft prefixes at champion-pick depths 0 through 9; depth 10 is terminal",
+      "public_status": "UNAVAILABLE_UNTIL_DEPTH_PROMOTED"
+    }
+  ],
+  "population": {
+    "competition_tier": "tier1",
+    "domestic_leagues": [
+      {
+        "league_id": "LEC",
+        "region_id": "EUROPE"
+      },
+      {
+        "league_id": "LCK",
+        "region_id": "KOREA"
+      },
+      {
+        "league_id": "LPL",
+        "region_id": "CHINA"
+      },
+      {
+        "league_id": "LCS",
+        "region_id": "AMERICAS"
+      },
+      {
+        "league_id": "LCP",
+        "region_id": "PACIFIC"
+      }
+    ],
+    "international_events": [
+      "MSI",
+      "EWC",
+      "OTHER_NAMED_EVENT"
+    ],
+    "international_events_excluded_from_domestic_primary": true,
+    "league_membership_source": "G1 competition crosswalk bound as-of each event",
+    "missing_or_ambiguous_tier_action": "EXCLUDE_AND_BLOCK_AFFECTED_SCOPE"
+  },
+  "outcome": {
+    "name": "map_winner",
+    "unit": "professional_map",
+    "probability_event": "canonical_side_A_wins",
+    "series_atomic": true,
+    "unresolved_series_primary_action": "EXCLUDE",
+    "unresolved_series_inference_action": "DESCRIPTIVE_ONLY_NO_INTERVAL"
+  },
+  "partition_template": {
+    "status": "UNBOUND",
+    "row_identity_digest": "UNBOUND",
+    "source_snapshot_digest": "UNBOUND",
+    "required_before_binding": [
+      "real_source_snapshot",
+      "as_of_crosswalks",
+      "series_atomicity_audit",
+      "partition_overlap_audit",
+      "label_path_boundary_attestation"
+    ],
+    "overlap_rule": "A row ID may occur in exactly one role within one opening decision; maps in one series share a partition.",
+    "chronological_rule": "train < validation < calibration < test < final within every rolling origin fold"
+  },
+  "primary_comparison": {
+    "metric": "log_loss",
+    "direction": "lower_is_better",
+    "probability_clip": "NONE; non-finite or closed-boundary probabilities invalidate the row and run",
+    "paired_difference": "candidate_minus_baseline",
+    "aggregation": {
+      "level_1": "equal-weight mean of map losses within resolved series",
+      "level_2": "equal-weight mean of resolved series within league x fold",
+      "level_3": "equal-weight mean across exactly LEC,LCK,LPL,LCS,LCP within fold",
+      "level_4": "equal-weight mean across registered chronological folds",
+      "missing_registered_league_in_fold": "PRIMARY_UNAVAILABLE",
+      "international_handling": "separate named release-critical strata; never included in domestic macro-regional primary"
+    },
+    "strict_superiority": "Holm rejection plus unadjusted one-sided 95% WCR-inverted upper endpoint strictly below 0"
+  },
+  "diagnostics": [
+    {
+      "id": "brier",
+      "definition": "mean((p-y)^2) using the primary four-level aggregation",
+      "direction": "lower_is_better",
+      "support": "same rows as primary"
+    },
+    {
+      "id": "calibration_intercept",
+      "definition": "unpenalized logistic calibration y ~ 1 + offset(logit(p)); ideal 0",
+      "direction": "absolute_distance_to_0",
+      "support": "both outcomes and >=30 resolved series"
+    },
+    {
+      "id": "calibration_slope",
+      "definition": "unpenalized logistic calibration y ~ 1 + beta*logit(p); ideal 1",
+      "direction": "absolute_distance_to_1",
+      "support": "both outcomes, finite logits, >=30 resolved series, no complete separation"
+    },
+    {
+      "id": "reliability_diagram",
+      "definition": "10 fixed probability bins [0,.1),...,[.9,1], reporting count, mean p, observed rate and dependence-aware interval",
+      "direction": "diagnostic",
+      "support": "empty bins retained and marked unsupported"
+    },
+    {
+      "id": "sharpness",
+      "definition": "distribution of p and mean((p-0.5)^2)",
+      "direction": "diagnostic",
+      "support": "same rows as primary"
+    },
+    {
+      "id": "auc",
+      "definition": "ROC AUC per league x fold then equal-weight macro; descriptive only",
+      "direction": "higher_is_better_descriptive",
+      "support": "both outcomes in every included cell"
+    },
+    {
+      "id": "interval_behavior",
+      "definition": "empirical coverage and average width for registered predictive intervals; posterior parameter intervals are not substituted",
+      "direction": "coverage_then_width",
+      "support": "registered interval target and >=30 effective clusters"
+    },
+    {
+      "id": "transfer_new_roster",
+      "definition": "log loss on first tournament of a newly assembled exact roster, plus first-series sensitivity",
+      "direction": "lower_is_better",
+      "support": ">=30 resolved series, >=30 effective clusters, and both outcomes"
+    },
+    {
+      "id": "rank_stability",
+      "definition": "Spearman rank correlation and top-10 Jaccard between adjacent scheduled refreshes on the common active population",
+      "direction": "higher_is_better_descriptive",
+      "support": ">=20 common entities"
+    },
+    {
+      "id": "sparse_new_champion",
+      "definition": "log loss and Brier on masked-residual and genuinely unseen/new-champion strata, separately",
+      "direction": "lower_is_better",
+      "support": ">=30 resolved series, >=30 effective clusters, and both outcomes"
+    },
+    {
+      "id": "equal_strength_draft_increment",
+      "definition": "paired log-loss delta on preregistered near-equal-strength overlap rows",
+      "direction": "lower_is_better",
+      "support": ">=30 resolved series, >=30 effective clusters, and both outcomes"
+    }
+  ],
+  "output_diagnostics": {
+    "player_rating": [
+      "brier",
+      "calibration_intercept",
+      "calibration_slope",
+      "reliability_diagram",
+      "sharpness",
+      "auc",
+      "interval_behavior",
+      "transfer_new_roster",
+      "rank_stability"
+    ],
+    "team_rating": [
+      "brier",
+      "calibration_intercept",
+      "calibration_slope",
+      "reliability_diagram",
+      "sharpness",
+      "auc",
+      "interval_behavior",
+      "transfer_new_roster",
+      "rank_stability"
+    ],
+    "terminal_draft_score": [
+      "brier",
+      "calibration_intercept",
+      "calibration_slope",
+      "reliability_diagram",
+      "sharpness",
+      "auc",
+      "equal_strength_draft_increment",
+      "sparse_new_champion"
+    ],
+    "partial_draft_score": [
+      "brier",
+      "calibration_intercept",
+      "calibration_slope",
+      "reliability_diagram",
+      "sharpness",
+      "equal_strength_draft_increment",
+      "sparse_new_champion"
+    ]
+  },
+  "critical_strata": [
+    {
+      "id": "league",
+      "levels": [
+        "LEC",
+        "LCK",
+        "LPL",
+        "LCS",
+        "LCP"
+      ],
+      "support": {
+        "min_resolved_series": 30,
+        "min_effective_clusters": 30,
+        "both_outcomes": true
+      },
+      "unsupported_action": "DESCRIPTIVE_ONLY_BLOCK_INFERENCE_AND_PROMOTION"
+    },
+    {
+      "id": "patch",
+      "levels": [
+        "each held-out major.minor patch"
+      ],
+      "support": {
+        "min_resolved_series": 30,
+        "min_effective_clusters": 30,
+        "both_outcomes": true
+      },
+      "unsupported_action": "DESCRIPTIVE_ONLY_BLOCK_INFERENCE_AND_PROMOTION"
+    },
+    {
+      "id": "game_side",
+      "levels": [
+        "BLUE",
+        "RED"
+      ],
+      "support": {
+        "min_resolved_series": 30,
+        "min_effective_clusters": 30,
+        "both_outcomes": true
+      },
+      "unsupported_action": "DESCRIPTIVE_ONLY_BLOCK_INFERENCE_AND_PROMOTION"
+    },
+    {
+      "id": "roster_change",
+      "levels": [
+        "FIRST_TOURNAMENT_NEW_EXACT_ROSTER",
+        "STABLE_EXACT_ROSTER"
+      ],
+      "support": {
+        "min_resolved_series": 30,
+        "min_effective_clusters": 30,
+        "both_outcomes": true
+      },
+      "unsupported_action": "DESCRIPTIVE_ONLY_BLOCK_INFERENCE_AND_PROMOTION"
+    },
+    {
+      "id": "international_event",
+      "levels": [
+        "MSI",
+        "EWC",
+        "OTHER_NAMED_EVENT"
+      ],
+      "support": {
+        "min_resolved_series": 30,
+        "min_effective_clusters": 30,
+        "both_outcomes": true
+      },
+      "unsupported_action": "DESCRIPTIVE_ONLY_BLOCK_INFERENCE_AND_PROMOTION"
+    },
+    {
+      "id": "draft_depth",
+      "levels": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "support": {
+        "min_resolved_series": 30,
+        "min_effective_clusters": 30,
+        "both_outcomes": true
+      },
+      "unsupported_action": "DESCRIPTIVE_ONLY_BLOCK_INFERENCE_AND_PROMOTION"
+    }
+  ],
+  "dependence": {
+    "analysis_row": "one paired candidate-minus-baseline mean loss difference per resolved series",
+    "map_weight_within_series": "equal",
+    "cluster_dimensions": [
+      {
+        "id": "participant_component_28d",
+        "construction": "connected component linking series that share a team or player and whose event starts are <=28 days apart"
+      },
+      {
+        "id": "tournament_or_week",
+        "construction": "authoritative tournament ID; if absent, ISO UTC calendar week"
+      },
+      {
+        "id": "patch",
+        "construction": "major.minor patch, used as required shared-shock sensitivity"
+      }
+    ],
+    "resampling": "null-imposed wild cluster restricted bootstrap with exactly one selected bootstrap clustering dimension per run; each draw creates one pseudo-outcome vector, refits the weighted intercept, and recomputes the full active-dimension CGM covariance",
+    "bootstrap_replicates": 9999,
+    "deterministic_seed": 2026072901,
+    "minimum_effective_clusters": {
+      "formula": "Kish: (sum cluster series counts)^2 / sum(cluster series counts^2)",
+      "primary_dimensions": [
+        "participant_component_28d",
+        "tournament_or_week"
+      ],
+      "minimum_each": 30,
+      "patch_sensitivity_minimum": 30,
+      "below_minimum_action": "DESCRIPTIVE_ONLY_BLOCK_INFERENCE_AND_PROMOTION"
+    },
+    "small_cluster_correction": "for each selected bootstrap dimension use Webb six-point multipliers at 30-49 effective clusters and Rademacher multipliers at >=50; support below 30 blocks that run",
+    "algorithm": {
+    "algorithm_id": "multiway-wcr-cgm-v1.4-promotion-remand",
+    "wcr_input_contract": {
+      "bound_ordered_map_ids": true,
+      "candidate_and_baseline_probabilities": true,
+      "binary_outcomes": true,
+      "score_kind": [
+        "LOG_LOSS",
+        "BRIER"
+      ],
+      "registered_fold_inventory": true,
+      "league_and_macro_weights": "DERIVED_INTERNALLY_AND_SUBMITTED_WEIGHT_RECHECKED",
+      "critical_selectors": [
+        "participant_component_28d",
+        "tournament_or_week",
+        "patch",
+        "game_side",
+        "roster_change",
+        "international_event",
+        "draft_depth"
+      ],
+      "exact_roster_and_strength_fields": [
+        "exact_roster_id",
+        "series_order_within_exact_roster_tournament",
+        "strength_source_id",
+        "pre_outcome_candidate_strength",
+        "pre_outcome_baseline_strength"
+      ],
+      "secondary_projection_contract": {
+        "brier": "EXACT_PRIMARY_OBSERVATION_SURFACE_WITH_ONLY_STRATUM_AND_SCORE_KIND_PROJECTION",
+        "transfer_new_roster": "FIRST_TOURNAMENT_NEW_EXACT_ROSTER_WITH_SEPARATELY_DERIVED_FIRST_SERIES_SENSITIVITY",
+        "equal_strength_draft_increment": "INDEPENDENT_MEMBERSHIP_FROM_STRICTLY_PRE_OUTCOME_STRENGTH_RULE"
+      },
+      "required_digests": [
+        "input_sha256",
+        "candidate_prediction_sha256",
+        "baseline_prediction_sha256",
+        "row_order_sha256"
+      ],
+      "theta0": "DERIVED_FROM_REGISTERED_SLOT_AND_MARGIN_RULE_NOT_CALLER_SUPPLIED",
+      "inferential_critical_cell_outcomes": "BOTH_0_AND_1_REQUIRED",
+      "exact_plan": "REGISTERED_WCR_PLAN_REQUIRED"
+    },
+    "input_schema": "exact per-series fields: series_id,fold_id,registered_fold_ids,league_id,candidate_id,baseline_id,output_id,stratum_id,score_kind,map_ids,candidate_probabilities,baseline_probabilities,outcome,macro_weight,participant_component_28d,tournament_or_week,patch,game_side,roster_change,international_event,draft_depth,exact_roster_id,series_order_within_exact_roster_tournament,strength_source_id,pre_outcome_candidate_strength,pre_outcome_baseline_strength,resolved,input_sha256,candidate_prediction_sha256,baseline_prediction_sha256,row_order_sha256; probabilities are paired with binary outcomes and every inferential critical cell contains both outcomes",
+    "input_score": "derive d_i from the registered score_kind (LOG_LOSS or BRIER), candidate probabilities, baseline probabilities, and binary outcomes for one resolved series; canonicalize by unique series_id",
+    "macro_weights": "derive w_i internally as 1/(F*5*n_fold,league) from bound ordered registered_fold_ids and league_id; every chronological fold contains exactly the five registered domestic leagues, sum_i w_i=1, and any submitted macro_weight must exactly match the derivation",
+      "estimand": "Delta=sum_i w_i*d_i; never a raw map-weighted or series-weighted mean",
+      "active_variants": "primary uses P,T; required patch sensitivity uses P,T,H; no two-way substitute when H is unsupported",
+    "null_imposition": "derive registered theta0 from immutable slot decision_kind and its registered margin rule (never caller supplied), fit the restricted null theta0, set e0_i=d_i-theta0, draw one multiplier v_b,g for the selected bootstrap dimension D, and construct d*_i=theta0+v_b,g_D(i)e0_i",
+      "intersection_sets": "every nonempty subset of the active dimensions; primary has P,T,PT and patch sensitivity has all seven P,T,H,PT,PH,TH,PTH",
+      "intersection_cluster_id": "length-prefixed UTF-8 concatenation of canonical cluster IDs in dimension order",
+      "cluster_score": "after the unrestricted observed fit use q_i=w_i(d_i-theta_hat); after every bootstrap refit use q*_i=w_i(d*_i-theta*_b); Q_S,g is the sum of q or q* in intersection cluster g and every G_S must be >=2",
+      "finite_sample_correction": "c_S=G_S/(G_S-1); no regression degrees-of-freedom correction",
+      "covariance": "V=sum_nonempty_S (-1)^(|S|+1)*c_S*sum_g Q_S,g^2 for the weighted intercept score; the same full active-dimension CGM expression is recomputed from bootstrap residuals",
+      "multiplier_substream": "u64be(HMAC-SHA-256(key='2026072901', message='mw-wcb-v2|A='+active_dimensions+'|bootcluster='+D+'|replicate='+decimal(r)+'|cluster='+canonical_g+'|law='+law)[:8]) modulo support length; no runtime RNG, subset multiplier, candidate ID, or comparison ID",
+      "webb_support": [
+        "-sqrt(3/2)",
+        "-1",
+        "-sqrt(1/2)",
+        "sqrt(1/2)",
+        "1",
+        "sqrt(3/2)"
+      ],
+      "rademacher_support": [
+        "-1",
+        "1"
+      ],
+      "replicate_score": "one multiplier field on selected D creates d* once; refit theta*=sum_i w_i d*_i and never form a signed sum of independently multiplied subset scores",
+      "studentizer": "from e*_i=d*_i-theta* recompute every Q*_S,g and the full V*=sum_S sign(S)c_S sum_g(Q*_S,g)^2; t*=(theta*-theta0)/sqrt(V*)",
+      "variance_floor": 1e-12,
+      "nonpositive_variance_action": "DESCRIPTIVE_ONLY_BLOCK_INFERENCE_AND_PROMOTION",
+      "bootstrap_t": "(theta*_b-theta0)/sqrt(V*_b) after refitting and full active-dimension CGM re-studentization",
+      "quantile": "Hyndman-Fan type 7",
+      "one_sided_upper_endpoint": "invert the null-imposed lower-tail WCR test over theta0 with a deterministic verified bracket and monotonic bisection; a type-7 t* quantile endpoint is diagnostic only and cannot satisfy the gate",
+      "largest_cluster_tie_break": "largest resolved-series count, then lexicographically smallest canonical cluster ID",
+      "leave_largest_recompute": "for P, T, and H separately remove the selected cluster and fully recompute canonical rows, macro weights, fits, support, multiplier law, every primary P/T and patch P/T/H run, complete registered family p-value ordering, Holm ranks/rejections, unadjusted endpoints, and family decision",
+      "replicate_alignment": "replicate index r and authority-derived HMAC stream are shared across every comparison in a registered family; row sets may differ across harm and secondary cells"
+    },
+    "interval": "one-sided 95% upper confidence bound obtained by null-imposed WCR test inversion; empirical type-7 bootstrap-t endpoints are diagnostic only",
+    "leave_largest_sensitivity": "remove the largest cluster by series count in P, T, and H one dimension at a time and recompute the complete primary-plus-patch suite",
+    "decision_agreement": "for every complete registered family, full primary A={P,T}, full patch A={P,T,H}, and all P/T/H leave-largest primary-plus-patch variants must remain available; each variant recomputes Holm ordering and requires Holm rejection plus agreement with its unadjusted endpoint, otherwise promotion is blocked",
+    "singleton_or_map_independence_fallback": "PROHIBITED"
+  },
+  "margin_derivation": {
+    "status": "PROCEDURE_FROZEN_NUMBERS_DEFERRED",
+    "numeric_binding": "DEFERRED_UNTIL_DEVELOPMENT_EVIDENCE",
+    "entry_point": "lol_kills.v2.evaluation.benchmark_contract:derive_registered_margin",
+    "allowed_labels": "REGISTERED_DEVELOPMENT_ONLY",
+    "replicate_definition": "absolute difference in macro-regional chronological log loss between a reference baseline fit and a deterministic refresh/refit of the identical baseline specification on the identical evaluation rows",
+    "minimum_replicates": 30,
+    "statistic": "Hyndman-Fan type-7 95th percentile of absolute paired replicate differences",
+    "scope": "separate margin per output x baseline",
+    "required_binding": [
+      "development_snapshot_sha256",
+      "baseline_binding_sha256",
+      "evaluation_rows_sha256",
+      "replicate_payload_sha256",
+      "procedure_sha256",
+      "independent_review_id",
+      "replica_construction_id"
+    ],
+    "replica_construction_id": "scryglass:deterministic-refresh-refit-pairs:v1.3",
+    "replica_seed_schedule": "replicate i has ID refresh-refit-%04d and seed 2026072902+i in array order",
+    "fallback_when_unbound": "STRICT_SUPERIORITY_WITH_ZERO_MARGIN"
+  },
+  "promotion": {
+    "familywise_alpha": 0.05,
+    "multiplicity": {
+      "primary_family": "one complete candidate-scoped family containing every registered output x required-baseline primary comparison",
+      "harm_family": "one complete candidate-scoped family containing every applicable output x baseline x critical-cell slot; unavailable or low-support slots remain and block",
+      "secondary_family": "one complete candidate-scoped family containing every output x baseline x preregistered secondary-benefit slot; all evidence is required and at least one member must pass",
+      "method": "Holm step-down, one-sided, complete predeclared family; order by raw finite-p then immutable comparison ID; stop at first non-rejection",
+      "raw_p": "(1 + count(t*_r <= (Delta-theta)/se))/(9999+1)",
+      "adjusted_p": "at ordered rank r, min(1,max_{j<=r}((m-j+1)*p_(j)))",
+      "pass_coupling": "Holm rejection plus agreement with an unadjusted one-sided 95% WCR-inverted endpoint is required; U<theta for superiority/components and U<=theta for noninferiority/harm",
+      "missing_or_unsupported_member": "BLOCK_RELEVANT_PROMOTION",
+      "family_gate_entry_point": "lol_kills.v2.evaluation.benchmark_contract:compute_registered_holm"
+    },
+    "superiority_path": "all complete primary-family members have Holm rejection and an agreeing unadjusted one-sided 95% WCR-inverted upper endpoint < 0 in every full and leave-largest primary/patch variant",
+    "noninferiority_secondary_benefit_path": "UNAVAILABLE_UNTIL_A_SEPARATE_REGISTERED_MARGIN_THRESHOLD_PRIMARY_RULE_IS_FROZEN; zero-threshold primary evidence is never reused at a positive margin",
+    "material_harm": "candidate-minus-baseline critical-stratum log-loss upper bound must be <= bound margin; while margin is deferred the threshold is 0",
+    "supported_secondary_benefits": {
+      "player_rating": [
+        "brier",
+        "transfer_new_roster"
+      ],
+      "team_rating": [
+        "brier",
+        "transfer_new_roster"
+      ],
+      "terminal_draft_score": [
+        "brier",
+        "equal_strength_draft_increment"
+      ],
+      "partial_draft_score": [
+        "brier",
+        "equal_strength_draft_increment"
+      ]
+    },
+    "unresolved_action": "BLOCK_PROMOTION"
+  },
+  "complexity": {
+    "simplicity_rank_source": "candidate-registry.json",
+    "indistinguishable_rule": "both candidates independently pass their complete primary, harm, and secondary families before pair authority; all 20 registered centered wild-cluster CGM max-t sensitivity runs must remain available, agree, and have simultaneous two-sided 95% bands containing 0; every full or reduced sample is centered at its own internally derived macro-weighted estimate; neither candidate is materially worse",
+    "simultaneous_interval_entry_point": "lol_kills.v2.evaluation.benchmark_contract:compute_registered_pairwise_intervals; reports 20 separate centered wild-cluster CGM simultaneous max-t two-sided 95% bands, each centered at that full or reduced sample's own internally derived macro-weighted estimate and binding P/T/H plus PT/PH/TH/PTH intersections; not a pooled generic CI or inverted WCR endpoints",
+    "selection": "choose lower numeric simplicity_rank among indistinguishable passing candidates",
+    "ablation_rule": "every enabled named component must receive Holm rejection plus an agreeing unadjusted one-sided 95% WCR-inverted upper endpoint < 0 against its registered ablation; otherwise collapse to the supported parent or remove the component",
+    "tie_break": "lexicographically smaller immutable candidate ID",
+    "nonzero_or_ambiguous_pair_interval": "use interval sign for directional dominance; if no unique nondominated passing candidate return NO_WINNER_REMAND",
+    "unsupported_component_action": "COLLAPSE_OR_REMOVE"
+  },
+  "label_access": {
+    "boundary_id": "scryglass:authority-derived-preflight:v1.4",
+    "required_loader_entry_point": "lol_kills.v2.evaluation.benchmark_contract:verify_authoritative_preflight",
+    "forbidden_exact_basenames": [
+      "final-labels.json",
+      "final_labels.json",
+      "sealed-labels.json",
+      "sealed_labels.json",
+      "outcomes.json",
+      "targets.json"
+    ],
+    "forbidden_path_patterns": [
+      "**/final/**",
+      "**/holdout/outcomes.json",
+      "**/final-labels.json",
+      "**/final_labels.json",
+      "**/sealed-targets/**",
+      "**/sealed_labels/**"
+    ],
+    "forbidden_payload_keys": [
+      "label",
+      "labels",
+      "outcomes",
+      "target",
+      "targets",
+      "map_winner",
+      "final_label",
+      "final_labels",
+      "sealed_label",
+      "sealed_labels"
+    ],
+    "required_attestation_fields": [
+      "NONE_ACCEPTED_AS_AUTHORITY"
+    ],
+    "ordinary_preflight_requires_attestation": false,
+    "final_labels": "SEALED_NO_READ",
+    "opening_requires_independent_permit": true
+  },
+  "authority_model": {
+    "production_entry_points_accept_caller_authority": false,
+    "cooperative_process_claim_ceiling": "The in-process verifier prevents ordinary caller injection but is not unforgeable against hostile same-process monkeypatching, same-account file substitution, or intercepted I/O.",
+    "production_authority_status": "BLOCKED",
+    "required_external_boundary": [
+      "separately owned verifier process without write access to authority or ledger roots",
+      "independently signed authority artifacts with verifier keys outside evidence-generator write access",
+      "append-only ledger service or separately owned durable exact-once store"
+    ]
+  },
+  "opening_permit_schema": "opening-permit.schema.json",
+  "digest_policy": {
+    "semantic_digest": "SHA-256 of RFC-8785-like sorted compact JSON used for semantic identity",
+    "raw_digest": "SHA-256 of exact file bytes used to detect whitespace, encoding, or byte mutation",
+    "manifest_requires_both": true,
+    "contract_set_digest": "authority_contract_set_sha256 binds the noncyclic core rules and schemas; full contract_set_sha256 binds every package JSON including authority/candidate/pair registries plus executable authority-code raw bytes",
+    "authority_code_raw_binding_required": true
+  }
+}

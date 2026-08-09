@@ -1,0 +1,163 @@
+{
+  "artifact_sha256": "7b744150924ea7a217c524bb71928eb41644f59c1332bbc3de169ba90c18a611",
+  "authority": {
+    "betting_authority": false,
+    "expected_value_authority": false,
+    "model_validation_authority": false,
+    "odds_authority": false,
+    "player_rating_authority": false,
+    "probability_authority": false,
+    "recommendation_authority": false,
+    "team_rating_authority": false
+  },
+  "capture_contract": {
+    "candidate_and_both_comparators_captured": true,
+    "deterministic_replay_available": true,
+    "event_outcome_fields_rejected": true,
+    "exact_pre_event_roster_receipt_required": true,
+    "fixture_side_and_player_identity_bound": true,
+    "ledger_builder_user_timestamp_argument_present": false,
+    "ledger_locator": "data/lol/v2/evaluation/multileague-v3/prediction-ledger.json",
+    "ledger_system_clock_sampled_inside_builder": true,
+    "ledger_validation_rechecks_receipt_creation_order": true,
+    "model_ids": [
+      "hierarchical-orgw100-orgv025-retain100",
+      "predecessor-player-random-walk",
+      "predecessor-organization-random-walk"
+    ],
+    "no_clobber_writes": true,
+    "outcome_free_ledger_schema": "scryglass:multileague-rating-v3-prediction-ledger:v2",
+    "pre_event_patch_revision_receipt_required": true,
+    "prediction_cli_user_timestamp_argument_present": false,
+    "prediction_receipt_schema": "scryglass:multileague-rating-v3-pre-event-prediction:v2",
+    "prediction_system_clock_sampled_inside_builder": true,
+    "receipt_validation_rechecks_evidence_protocol_and_event_order": true,
+    "retrospective_backfill_qualifies": false,
+    "source_candidate_patch_roster_and_fixture_hash_bound": true
+  },
+  "claim_ceiling": "This receipt proves only that system-clocked, outcome-free pre-event capture machinery exists. The ledger is empty and unreviewed, so it grants no rating, probability, recommendation, or betting authority.",
+  "clock_attestation": {
+    "lock_time_not_after_builder_observation": true,
+    "observed_wall_clock_utc": "2026-08-01T23:58:00+00:00",
+    "source": "system_utc_clock_sampled_inside_builder",
+    "user_supplied_timestamp_allowed": false
+  },
+  "decision_outputs": {
+    "bet_recommendation": null,
+    "expected_value": null,
+    "fair_odds": null,
+    "match_probability": null,
+    "player_rating_authority": null,
+    "team_rating_authority": null
+  },
+  "implementation": {
+    "actual_future_prediction_evidence_present": false,
+    "independent_opening_approval_present": false,
+    "independent_protocol_review_present": false,
+    "ready_for_pre_event_capture": true
+  },
+  "ledger_state": {
+    "entries": 0,
+    "independently_pinned": false,
+    "metadata_support_met": false,
+    "opening_authority": false,
+    "outcomes_accessed": false,
+    "outcomes_present": false,
+    "status": "EMPTY_NOT_YET_CREATED"
+  },
+  "locked_at_utc": "2026-08-01T23:58:00+00:00",
+  "protocol_artifact_sha256": "996ce4067818799e7345cd49e6a9e450a7675563f3e15daeaa667a8c9846ef24",
+  "result_state": "SYSTEM_CLOCKED_PRE_EVENT_CAPTURE_IMPLEMENTATION_READY_EMPTY_LEDGER",
+  "schema_version": "scryglass:multileague-rating-v3-capture-readiness:v3",
+  "source_locks": [
+    {
+      "bytes": 17807,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_capture_readiness_v3.py",
+      "raw_sha256": "c8a629d8f4d71ebf97be748203331fa5fff8cf76d99f1607514efa97a45c8efa"
+    },
+    {
+      "bytes": 55640,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_prediction_ledger.py",
+      "raw_sha256": "c3d5843570aea6cbac0d0991c7244698de86fd43e2217eab3fdfb41d461ad707"
+    },
+    {
+      "bytes": 23614,
+      "locator": "lol_kills/pregame_roster_capture.py",
+      "raw_sha256": "052e07aae82edcc5c17c27b9299020f4dbefd50ff0cc806cb44deb98677e5b9b"
+    },
+    {
+      "bytes": 27457,
+      "locator": "lol_kills/etl/leaguepedia_patch_revisions.py",
+      "raw_sha256": "b9079a64c8dcba4d17c7762edda4c914a7a42b8b7680044910298b69014ebb58"
+    },
+    {
+      "bytes": 16638,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_capture_readiness_v2.py",
+      "raw_sha256": "6da0409929ddbe995ebe1e0ae1686d64401ecfac0d43b6f064bab2c54bcf95da"
+    },
+    {
+      "bytes": 2495,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_capture_registry_v2.py",
+      "raw_sha256": "d77cb59e886e48b0177ec53b09359fd1328e740e90326305e8c6ee4e5af576e4"
+    },
+    {
+      "bytes": 2550,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_preflight_v3_registry.py",
+      "raw_sha256": "562f632ba919c0ef1455627ab009144d94f2dbca1f0d557c0b46e5483059e24e"
+    },
+    {
+      "bytes": 20633,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_future_protocol_v3.py",
+      "raw_sha256": "53a105cfe5950b7d85411876900df960559a903db2dc830e99dcf49771c4fdf7"
+    },
+    {
+      "bytes": 2476,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_registry_v3.py",
+      "raw_sha256": "aa5244331ca44cc3ab9764c95c05a4346e1984fed52ab023003877fa3f53485d"
+    },
+    {
+      "bytes": 11608,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_temporal_failure_v2.py",
+      "raw_sha256": "5dc0c5a23d7bb6f2fdd2b3eec200ab69a9c47812c84a7c9e35a36836119a3275"
+    },
+    {
+      "bytes": 1924,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_temporal_failure_registry.py",
+      "raw_sha256": "4e93467bf9a1396ad968c82cd91b1bfd077f9882ef2c448617f86c5e41763082"
+    },
+    {
+      "bytes": 6608,
+      "locator": "data/lol/v2/models/player/multileague-v3/capture-readiness-v2.json",
+      "raw_sha256": "a5a0711f80e6234430425e9a6b281c51a3ab1f0367a63487d0cee8463691a0b8"
+    },
+    {
+      "bytes": 11678,
+      "locator": "data/lol/v2/models/player/multileague-v3/source-preflight-v3.json",
+      "raw_sha256": "01059e3725c4828a4173a09758640f5fe4974ac726955bc36aa4ff1b012bf931"
+    },
+    {
+      "bytes": 11119,
+      "locator": "data/lol/v2/models/player/multileague-v3/future-protocol-lock-v3.json",
+      "raw_sha256": "db9f2c1557247036ddfdbebdd7cccbd395cc22841cd9d574747fe4f60f446301"
+    },
+    {
+      "bytes": 3022,
+      "locator": "data/lol/v2/models/player/multileague-v3/temporal-failure-v2.json",
+      "raw_sha256": "138916e1b182bfb265acdcb8a00a91a7212781e6672cc2e7c731e5fb5f0f8c16"
+    }
+  ],
+  "source_preflight_artifact_sha256": "ef69122f9123d1415de8644a65fa4e100d527bf0e6f47d6353295c15bfc5c4f9",
+  "supersession": {
+    "candidate_changed": false,
+    "future_boundary_changed": false,
+    "future_outcomes_used_for_hardening": false,
+    "prediction_ledger_schema_changed": true,
+    "prediction_receipt_schema_changed": true,
+    "superseded_capture_artifact_sha256": "02654571004eaae20677e699b57ea65baea8c390d2f2075d0c335621905e0e5e",
+    "superseded_capture_locator": "data/lol/v2/models/player/multileague-v3/capture-readiness-v2.json",
+    "superseded_capture_qualifies_as_current_implementation_evidence": false,
+    "superseded_capture_raw_sha256": "a5a0711f80e6234430425e9a6b281c51a3ab1f0367a63487d0cee8463691a0b8",
+    "supersession_reason": "prediction_and_ledger_user_timestamp_inputs_removed",
+    "temporal_failure_artifact_sha256": "b5aeebf52af22c2407a42a1a8dcf524243f67ec4a6351cb288fd4cd944a9f5cc"
+  }
+}

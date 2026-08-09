@@ -1,0 +1,86 @@
+{
+  "artifact_kind": "synthetic_provisional_l5_team_mechanics_fixture",
+  "development_only": true,
+  "global": {
+    "covariance": [
+      [0.01, 0.001, 0.0, 0.0, 0.0],
+      [0.001, 0.012, 0.001, 0.0, 0.0],
+      [0.0, 0.001, 0.009, 0.001, 0.0],
+      [0.0, 0.0, 0.001, 0.011, 0.001],
+      [0.0, 0.0, 0.0, 0.001, 0.008]
+    ],
+    "league_rating": {
+      "centered": true,
+      "league_id": "SYN-LCK",
+      "mobility_bridge_full_rank": true,
+      "posterior_mean": 0.08,
+      "posterior_variance": 0.004,
+      "reference_constrained": true,
+      "separately_identified": true,
+      "transfer_continuity": true
+    },
+    "roster": {
+      "active": true,
+      "ambiguous": false,
+      "as_of": "2026-01-15T00:00:00Z",
+      "custom": false,
+      "effective_at": "2026-01-01T00:00:00Z",
+      "fresh": true,
+      "hypothetical": false,
+      "league_id": "SYN-LCK",
+      "official": true,
+      "organization_id": "SYN-ORG-A",
+      "players": [
+        {"active": true, "as_of": "2026-01-15T00:00:00Z", "league_id": "SYN-LCK", "player_id": "global-top", "posterior_mean": 0.10, "role": "top", "scope": "global"},
+        {"active": true, "as_of": "2026-01-15T00:00:00Z", "league_id": "SYN-LCK", "player_id": "global-jungle", "posterior_mean": -0.02, "role": "jungle", "scope": "global"},
+        {"active": true, "as_of": "2026-01-15T00:00:00Z", "league_id": "SYN-LCK", "player_id": "global-mid", "posterior_mean": 0.15, "role": "mid", "scope": "global"},
+        {"active": true, "as_of": "2026-01-15T00:00:00Z", "league_id": "SYN-LCK", "player_id": "global-bot", "posterior_mean": 0.05, "role": "bot", "scope": "global"},
+        {"active": true, "as_of": "2026-01-15T00:00:00Z", "league_id": "SYN-LCK", "player_id": "global-support", "posterior_mean": -0.01, "role": "support", "scope": "global"}
+      ],
+      "substitute": false
+    }
+  },
+  "missing_c2_dependency": true,
+  "regional": {
+    "covariance": [
+      [0.01, 0.002, 0.0, 0.0, 0.0],
+      [0.002, 0.02, -0.001, 0.0, 0.0],
+      [0.0, -0.001, 0.015, 0.001, 0.0],
+      [0.0, 0.0, 0.001, 0.018, 0.002],
+      [0.0, 0.0, 0.0, 0.002, 0.012]
+    ],
+    "roster": {
+      "active": true,
+      "ambiguous": false,
+      "as_of": "2026-01-15T00:00:00Z",
+      "custom": false,
+      "effective_at": "2026-01-01T00:00:00Z",
+      "fresh": true,
+      "hypothetical": false,
+      "league_id": "SYN-LEC",
+      "official": true,
+      "organization_id": "SYN-ORG-A",
+      "players": [
+        {"active": true, "as_of": "2026-01-15T00:00:00Z", "league_id": "SYN-LEC", "player_id": "regional-top", "posterior_mean": 0.12, "role": "top", "scope": "regional"},
+        {"active": true, "as_of": "2026-01-15T00:00:00Z", "league_id": "SYN-LEC", "player_id": "regional-jungle", "posterior_mean": -0.03, "role": "jungle", "scope": "regional"},
+        {"active": true, "as_of": "2026-01-15T00:00:00Z", "league_id": "SYN-LEC", "player_id": "regional-mid", "posterior_mean": 0.08, "role": "mid", "scope": "regional"},
+        {"active": true, "as_of": "2026-01-15T00:00:00Z", "league_id": "SYN-LEC", "player_id": "regional-bot", "posterior_mean": 0.04, "role": "bot", "scope": "regional"},
+        {"active": true, "as_of": "2026-01-15T00:00:00Z", "league_id": "SYN-LEC", "player_id": "regional-support", "posterior_mean": -0.02, "role": "support", "scope": "regional"}
+      ],
+      "substitute": false
+    }
+  },
+  "roster_change": {
+    "new_organization_id": "SYN-ORG-B",
+    "replacement": {
+      "active": true,
+      "as_of": "2026-01-15T00:00:00Z",
+      "league_id": "SYN-LEC",
+      "player_id": "regional-mid-new",
+      "posterior_mean": -0.01,
+      "role": "mid",
+      "scope": "regional"
+    },
+    "role": "mid"
+  }
+}

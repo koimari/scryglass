@@ -1,0 +1,371 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scryglass.xyz/schemas/model-v2/draft-score.schema.json",
+  "title": "Scryglass terminal Draft Score response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_version",
+    "as_of",
+    "season_id",
+    "calendar_year",
+    "status",
+    "identity_mode",
+    "identity_intentionally_omitted",
+    "lineage",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/semver"},
+    "model_version": {"$ref": "common.schema.json#/$defs/model_version"},
+    "as_of": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "season_id": {"$ref": "common.schema.json#/$defs/season_id"},
+    "calendar_year": {"$ref": "common.schema.json#/$defs/calendar_year"},
+    "status": {"$ref": "common.schema.json#/$defs/status"},
+    "identity_mode": {"$ref": "common.schema.json#/$defs/identity_mode"},
+    "identity_intentionally_omitted": {"type": "boolean"},
+    "baseline_strength_equalized": {"type": "boolean"},
+    "draft_state_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "event_id": {
+      "oneOf": [
+        {"$ref": "common.schema.json#/$defs/stable_id"},
+        {"type": "null"}
+      ]
+    },
+    "competition_scope_id": {
+      "$ref": "common.schema.json#/$defs/stable_id",
+      "description": "Canonical league or named international event/meta scope used for calibration; never inferred from a participating team's domestic league."
+    },
+    "competition_scope_kind": {
+      "type": "string",
+      "enum": [
+        "regional_league",
+        "international_event",
+        "international_meta"
+      ]
+    },
+    "patch_id": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$"},
+    "protocol_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "side_mapping": {
+      "$ref": "common.schema.json#/$defs/draft_protocol_mapping"
+    },
+    "source_record": {
+      "$ref": "common.schema.json#/$defs/draft_source_record"
+    },
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "common.schema.json#/$defs/draft_action"}
+    },
+    "final_assignments": {
+      "$ref": "common.schema.json#/$defs/terminal_assignments"
+    },
+    "role_constraint_revisions": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/role_constraint_revision"
+      },
+      "x-history-policy": {
+        "append_only": true,
+        "order_by": "revision_index",
+        "chain_field": "supersedes_revision_id"
+      }
+    },
+    "assignment_revisions": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/role_assignment_revision"
+      },
+      "x-history-policy": {
+        "append_only": true,
+        "order_by": "revision_index",
+        "chain_field": "supersedes_revision_id"
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roster_a_id", "roster_b_id"],
+      "properties": {
+        "roster_a_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "roster_b_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "policy_a_snapshot_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "policy_b_snapshot_id": {"$ref": "common.schema.json#/$defs/stable_id"}
+      }
+    },
+    "score_a": {"$ref": "common.schema.json#/$defs/score_open_100"},
+    "score_b": {"$ref": "common.schema.json#/$defs/score_open_100"},
+    "standardized_map_win_probability_a": {
+      "$ref": "common.schema.json#/$defs/probability_open"
+    },
+    "interval_95": {"$ref": "common.schema.json#/$defs/interval_probability_95"},
+    "uncalibrated_logit_a": {"type": "number"},
+    "calibration_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "evidence": {"$ref": "common.schema.json#/$defs/evidence"},
+    "reliability": {"$ref": "common.schema.json#/$defs/reliability"},
+    "ledger": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "common.schema.json#/$defs/ledger_entry"}
+    },
+    "ledger_logit_sum": {"type": "number"},
+    "reconciliation_tolerance": {"type": "number", "exclusiveMinimum": 0},
+    "neutral_comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "score_a",
+        "score_b",
+        "standardized_map_win_probability_a"
+      ],
+      "properties": {
+        "score_a": {"$ref": "common.schema.json#/$defs/score_open_100"},
+        "score_b": {"$ref": "common.schema.json#/$defs/score_open_100"},
+        "standardized_map_win_probability_a": {
+          "$ref": "common.schema.json#/$defs/probability_open"
+        }
+      }
+    },
+    "literal_interpretation": {
+      "const": "Out of 100, the model-estimated map-win probability for side A under this draft after equalizing baseline roster and league strength and neutralizing in-game side advantage."
+    },
+    "error": {"$ref": "common.schema.json#/$defs/error"},
+    "lineage": {"$ref": "common.schema.json#/$defs/lineage"},
+    "provenance": {"$ref": "prediction-provenance.schema.json"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"identity_mode": {"const": "contextual"}},
+        "required": ["identity_mode"]
+      },
+      "then": {
+        "properties": {
+          "identity_intentionally_omitted": {"const": false}
+        }
+      },
+      "else": {
+        "properties": {"identity_intentionally_omitted": {"const": true}},
+        "not": {
+          "anyOf": [
+            {"required": ["context"]},
+            {"required": ["baseline_strength_equalized"]},
+            {"required": ["neutral_comparison"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"const": "ok"}},
+        "required": ["status"]
+      },
+      "then": {
+        "required": [
+          "draft_state_id",
+          "event_id",
+          "competition_scope_id",
+          "competition_scope_kind",
+          "patch_id",
+          "protocol_id",
+          "side_mapping",
+          "source_record",
+          "actions",
+          "final_assignments",
+          "role_constraint_revisions",
+          "assignment_revisions",
+          "score_a",
+          "score_b",
+          "standardized_map_win_probability_a",
+          "interval_95",
+          "uncalibrated_logit_a",
+          "calibration_id",
+          "evidence",
+          "reliability",
+          "ledger",
+          "ledger_logit_sum",
+          "reconciliation_tolerance",
+          "literal_interpretation"
+        ],
+        "properties": {
+          "reliability": {
+            "properties": {
+              "probability_wording_approved": {"const": true}
+            }
+          },
+          "provenance": {
+            "required": ["probability_transform"],
+            "properties": {
+              "required_input_status": {"const": "complete"},
+              "freshness_checks": {
+                "minItems": 1,
+                "items": {
+                  "properties": {"fresh": {"const": true}},
+                  "required": ["fresh"]
+                }
+              },
+              "input_conflicts": {"maxItems": 0}
+            }
+          }
+        },
+        "not": {"required": ["error"]}
+      },
+      "else": {
+        "required": ["error"],
+        "not": {
+          "anyOf": [
+            {"required": ["score_a"]},
+            {"required": ["score_b"]},
+            {"required": ["standardized_map_win_probability_a"]},
+            {"required": ["neutral_comparison"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "ok"},
+          "identity_mode": {"const": "contextual"}
+        },
+        "required": ["status", "identity_mode"]
+      },
+      "then": {
+        "required": [
+          "context",
+          "baseline_strength_equalized",
+          "neutral_comparison"
+        ],
+        "properties": {
+          "baseline_strength_equalized": {"const": true},
+          "context": {
+            "required": ["policy_a_snapshot_id", "policy_b_snapshot_id"]
+          }
+        }
+      }
+    }
+  ],
+  "x-semantic-invariants": [
+    {
+      "id": "terminal_score_probability_identity",
+      "applies_when": "status == 'ok'",
+      "expression": "score_a == 100 * standardized_map_win_probability_a",
+      "severity": "error"
+    },
+    {
+      "id": "terminal_score_complement_identity",
+      "applies_when": "status == 'ok'",
+      "expression": "score_b == 100 - score_a",
+      "severity": "error"
+    },
+    {
+      "id": "terminal_ledger_reconciliation",
+      "applies_when": "status == 'ok'",
+      "expression": "abs(sum(ledger.signed_logit) - ledger_logit_sum) <= reconciliation_tolerance && abs(ledger_logit_sum - uncalibrated_logit_a) <= reconciliation_tolerance",
+      "severity": "error"
+    },
+    {
+      "id": "terminal_interval_contains_probability",
+      "applies_when": "status == 'ok'",
+      "expression": "interval_95.lower <= standardized_map_win_probability_a && standardized_map_win_probability_a <= interval_95.upper",
+      "severity": "error"
+    },
+    {
+      "id": "terminal_action_slots_unique_and_ordered",
+      "applies_when": "status == 'ok'",
+      "expression": "actions.slot == sort(actions.slot) && count(distinct actions.slot) == count(actions)",
+      "severity": "error"
+    },
+    {
+      "id": "terminal_side_mapping_source_available",
+      "applies_when": "status == 'ok'",
+      "expression": "side_mapping.available_at <= as_of && source_record.available_at <= as_of",
+      "severity": "error"
+    },
+    {
+      "id": "terminal_competition_scope_taxonomy",
+      "applies_when": "status == 'ok'",
+      "expression": "competition_scope_id resolves to exactly one taxonomy node of competition_scope_kind; international_event names one event such as MSI or EWC, international_meta names a registered meta scope, and neither is inferred from a participant's domestic league",
+      "severity": "error"
+    },
+    {
+      "id": "terminal_role_revision_chain_append_only",
+      "applies_when": "status == 'ok'",
+      "expression": "role_constraint_revisions.revision_index is strictly increasing && each supersedes_revision_id references only an earlier revision_id",
+      "severity": "error"
+    },
+    {
+      "id": "terminal_assignment_revision_chain_append_only",
+      "applies_when": "status == 'ok'",
+      "expression": "assignment_revisions.revision_index is strictly increasing && each supersedes_revision_id references only an earlier revision_id",
+      "severity": "error"
+    },
+    {
+      "id": "terminal_assignments_match_latest_revisions",
+      "applies_when": "status == 'ok'",
+      "expression": "for each action_id with assignment revisions, final_assignments.role equals revised_role of its greatest assignment_revisions.revision_index",
+      "severity": "error"
+    },
+    {
+      "id": "contextual_neutral_comparison_identity",
+      "applies_when": "status == 'ok' && identity_mode == 'contextual'",
+      "expression": "neutral_comparison.score_a == 100 * neutral_comparison.standardized_map_win_probability_a && neutral_comparison.score_b == 100 - neutral_comparison.score_a",
+      "severity": "error"
+    }
+  ],
+  "x-negative-mutation-fixtures": [
+    {
+      "id": "terminal_score_complement_break",
+      "mutation": {
+        "op": "replace",
+        "path": "/score_b",
+        "value": 43.9
+      },
+      "expected_violation": "terminal_score_complement_identity"
+    },
+    {
+      "id": "terminal_score_probability_break",
+      "mutation": {
+        "op": "replace",
+        "path": "/score_a",
+        "value": 56.3
+      },
+      "expected_violation": "terminal_score_probability_identity"
+    },
+    {
+      "id": "terminal_ledger_reconciliation_break",
+      "mutation": {
+        "op": "replace",
+        "path": "/ledger_logit_sum",
+        "value": 0.24
+      },
+      "expected_violation": "terminal_ledger_reconciliation"
+    },
+    {
+      "id": "terminal_assignment_overwrite_without_revision",
+      "mutation": {
+        "op": "replace",
+        "path": "/final_assignments/0/role",
+        "value": "mid"
+      },
+      "expected_violation": "terminal_assignments_match_latest_revisions"
+    },
+    {
+      "id": "neutral_response_with_contextual_comparison",
+      "mutation": [
+        {
+          "op": "replace",
+          "path": "/identity_mode",
+          "value": "neutral"
+        },
+        {
+          "op": "replace",
+          "path": "/identity_intentionally_omitted",
+          "value": true
+        }
+      ],
+      "expected_schema_failure": true
+    }
+  ]
+}

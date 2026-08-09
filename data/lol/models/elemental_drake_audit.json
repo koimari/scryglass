@@ -1,0 +1,204 @@
+{
+  "status": "pass",
+  "requiredGames": 6000,
+  "games": {
+    "rows": 6517,
+    "completed": 6504,
+    "series": 3256,
+    "duplicateKeys": 0
+  },
+  "events": {
+    "rows": 28266,
+    "validatedFirstDrakes": 6504,
+    "duplicateKeys": 0,
+    "firstElementDistribution": {
+      "chemtech": 1083,
+      "cloud": 1082,
+      "hextech": 1059,
+      "infernal": 1079,
+      "mountain": 1134,
+      "ocean": 1067
+    },
+    "medianStateLagSeconds": 0.941
+  },
+  "coverage": {
+    "exactPatch": 1.0,
+    "completeComposition": 0.9823,
+    "championArchetypes": 0.9667,
+    "completeRoster": 0.9732,
+    "validatedPreCaptureState": 1.0
+  },
+  "modelEligibility": {
+    "invalidSideAssignmentGames": 2,
+    "illegalOrPartialCapturePathGames": 6,
+    "excludedCaptureRows": 26,
+    "policy": "Exclude the complete game from joint modeling rather than repairing provider side or capture-path state."
+  },
+  "competitionCoverage": {
+    "status": "pass",
+    "tierOneGames": 1705,
+    "internationalGames": 752,
+    "otherProGames": 4047,
+    "unclassifiedGames": 0,
+    "tierOneByRegion": {
+      "china": 495,
+      "emea": 268,
+      "korea": 361,
+      "north-america": 166,
+      "pacific": 232,
+      "south-america": 183
+    }
+  },
+  "storageBytes": {
+    "gamesParquet": 508130,
+    "eventsParquet": 1450994
+  },
+  "errors": [],
+  "warnings": [
+    "model eligibility excludes 2 games with invalid side assignments and 6 games with incomplete or illegal elemental paths"
+  ],
+  "rawReconciliation": {
+    "status": "pass",
+    "rawSeries": 4,
+    "comparedSeries": 4,
+    "eventsCompared": 21,
+    "elementMatches": 21,
+    "ownerMatches": 21,
+    "timeWithinTwoSeconds": 21,
+    "series": [
+      {
+        "seriesId": "2967248",
+        "rawEvents": 5,
+        "normalizedEvents": 5,
+        "events": [
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          }
+        ]
+      },
+      {
+        "seriesId": "2974295",
+        "rawEvents": 6,
+        "normalizedEvents": 6,
+        "events": [
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          }
+        ]
+      },
+      {
+        "seriesId": "2974296",
+        "rawEvents": 4,
+        "normalizedEvents": 4,
+        "events": [
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          }
+        ]
+      },
+      {
+        "seriesId": "2974297",
+        "rawEvents": 6,
+        "normalizedEvents": 6,
+        "events": [
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          },
+          {
+            "element": true,
+            "timeWithinTwoSeconds": true,
+            "owner": true
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,251 @@
+{
+  "artifact_id": "draft-terminal-development-evaluation-summary-v1",
+  "baseline_adjustment": {
+    "config_sha256": "49de7c85653707b3fdda6ef6cd7a2c6db296bdb58836f1ac7149d6a58d0350d2",
+    "current_cluster_outcomes_update_after_cluster": true,
+    "current_map_outcome_used_for_current_baseline": false,
+    "development_only": true,
+    "expected_score": "elo_base10_scale_400",
+    "fit_scope": "pre_event_team_strength_is_fit_inside_each_temporal_fold",
+    "future_outcomes_used_for_current_baseline": false,
+    "initial_rating": 1500.0,
+    "k_factor": 20.0,
+    "kind": "pre_event_team_elo_logit",
+    "served_baseline_logit": 0.0,
+    "served_scope": "baseline_logit_is_fixed_to_zero_for_neutral_score",
+    "status": "development_nuisance_only",
+    "team_identifier": "teamid",
+    "team_identity_in_served_artifact": false,
+    "update_unit": "dependence_cluster"
+  },
+  "calibration_order": [
+    "identity",
+    "symmetric_temperature",
+    "symmetrized_platt"
+  ],
+  "candidate_order": [
+    "m0-role-additive",
+    "m1-role-additive-allied-synergy",
+    "m2-role-additive-allied-and-counter"
+  ],
+  "coefficient_artifact_status": "development_fixture_refit_with_baseline_adjustment_not_promoted",
+  "fold_locked_selected_test": [
+    {
+      "baseline_adjusted_brier_score": 0.24291831218236956,
+      "baseline_adjusted_log_loss": 0.6787612251452336,
+      "baseline_brier_score": 0.2617363578550251,
+      "baseline_log_loss": 0.7355734666458611,
+      "brier_score": 0.24887112721822924,
+      "candidate_id": "m0-role-additive",
+      "fold_id": "outer-00",
+      "log_loss": 0.690911624082177,
+      "transform": "symmetrized_platt",
+      "validation_brier_score": 0.2543133414130364,
+      "validation_log_loss": 0.7039277718393123
+    },
+    {
+      "baseline_adjusted_brier_score": 0.23735084943269552,
+      "baseline_adjusted_log_loss": 0.6674386181240196,
+      "baseline_brier_score": 0.23598375724703058,
+      "baseline_log_loss": 0.6671147039592918,
+      "brier_score": 0.2499668175867015,
+      "candidate_id": "m0-role-additive",
+      "fold_id": "outer-01",
+      "log_loss": 0.6931440058512038,
+      "transform": "symmetrized_platt",
+      "validation_brier_score": 0.2550139254350229,
+      "validation_log_loss": 0.705763759803126
+    },
+    {
+      "baseline_adjusted_brier_score": 0.23587870196640104,
+      "baseline_adjusted_log_loss": 0.6643123225810351,
+      "baseline_brier_score": 0.2269347658172828,
+      "baseline_log_loss": 0.6448311264466619,
+      "brier_score": 0.25176621122465354,
+      "candidate_id": "m0-role-additive",
+      "fold_id": "outer-02",
+      "log_loss": 0.6967248494493197,
+      "transform": "symmetrized_platt",
+      "validation_brier_score": 0.2531094767379586,
+      "validation_log_loss": 0.7019546874182016
+    }
+  ],
+  "fold_policy": {
+    "calibration_fit_inside_fold": true,
+    "candidate_selection_on_validation_only": true,
+    "chronological": true,
+    "dependence_clustered": true,
+    "feature_support_minimum": 10,
+    "outer_folds": 3,
+    "outer_test_opened_for_search": false,
+    "outer_test_scored_only_for_selected_candidate": true,
+    "participant_cluster_status": "team identifiers available; player participant identifiers unavailable",
+    "series_grouped": false,
+    "series_identity_status": "authoritative_series_ids_unavailable; outcome_free_proxy_used_for_development_blocking"
+  },
+  "grid_promotion_gate": {
+    "baseline_source": "OE",
+    "candidate_source": "GRID",
+    "primary_source_for_cohort": "OE",
+    "public_reproducibility_benchmark": "OE",
+    "reason": "no authorized complete hash-verified GRID Draft Score cohort has passed the gate",
+    "status": "not_passed",
+    "required_evidence": [
+      "exact_source_payload_bytes_and_hash",
+      "heldout_results_hash_bound",
+      "replay_data_hash_bound_to_verified_records",
+      "replay_model_hash_bound_to_exact_model_bytes"
+    ]
+  },
+  "holdouts": {
+    "future_patch": {
+      "patch_id": "16.13",
+      "promotion": false,
+      "rows": 357,
+      "series_clusters": 284,
+      "status": "development_diagnostic_only"
+    },
+    "international_event_or_meta": {
+      "leagues": [
+        "EWC",
+        "MSI"
+      ],
+      "promotion": false,
+      "rows": 409,
+      "status": "development_diagnostic_only"
+    },
+    "league": {
+      "scored_within_each_test_fold": true,
+      "status": "available"
+    },
+    "roster_change": {
+      "reason": "neutral estimator contains no player or exact-roster identity terms",
+      "status": "not_applicable"
+    },
+    "sparse_or_new_champion": {
+      "promotion": false,
+      "status": "development_diagnostic_only"
+    }
+  },
+  "population": {
+    "complete_rows": 16324,
+    "dependence_clusters": 13001,
+    "international_event_rows": 409,
+    "leagues": [
+      "AC",
+      "AL",
+      "ASI",
+      "ASIA MASTER",
+      "CBLOL",
+      "CCWS",
+      "CD",
+      "CT",
+      "DCUP",
+      "EBL",
+      "EM",
+      "EWC",
+      "FST",
+      "HC",
+      "HLL",
+      "HM",
+      "HW",
+      "IC",
+      "KESPA",
+      "LAS",
+      "LCK",
+      "LCKC",
+      "LCP",
+      "LCS",
+      "LEC",
+      "LES",
+      "LFL",
+      "LFL2",
+      "LIT",
+      "LJL",
+      "LPL",
+      "LPLOL",
+      "LRN",
+      "LRS",
+      "LVP SL",
+      "MSI",
+      "NACL",
+      "NEXO",
+      "NL",
+      "NLC",
+      "PCS",
+      "PRM",
+      "PRMP",
+      "RL",
+      "ROL",
+      "TCL",
+      "VCS",
+      "WLDS"
+    ],
+    "patches": [
+      "15.01",
+      "15.02",
+      "15.03",
+      "15.04",
+      "15.05",
+      "15.06",
+      "15.07",
+      "15.08",
+      "15.09",
+      "15.10",
+      "15.11",
+      "15.12",
+      "15.13",
+      "15.14",
+      "15.15",
+      "15.16",
+      "15.17",
+      "15.18",
+      "15.19",
+      "15.20",
+      "15.21",
+      "15.22",
+      "15.23",
+      "15.24",
+      "16.01",
+      "16.02",
+      "16.03",
+      "16.04",
+      "16.05",
+      "16.06",
+      "16.07",
+      "16.08",
+      "16.09",
+      "16.10",
+      "16.11",
+      "16.12",
+      "16.13"
+    ],
+    "proxy_clustered_rows": 6194,
+    "series_clusters": 13001,
+    "unclustered_single_game_rows": 10130
+  },
+  "production_eligible": false,
+  "public_probability_authorized": false,
+  "run_command": "python3 -W error -m lol_kills.v2.draft.terminal.development_evaluation",
+  "run_output_sha256": "74697f0d3aa21da844791c2ea6696b9b826806923b64eac76d2f35d435c4c3db",
+  "schema_version": "draft-terminal-development-evaluation-v1",
+  "selection": {
+    "reason": "the registered candidate was selected for the development artifact after baseline adjustment; this is not an independent L2 reliability or promotion record",
+    "status": "development_only_selected",
+    "winner_candidate_id": "m0-role-additive",
+    "winner_transform": "symmetrized_platt"
+  },
+  "source_snapshot": {
+    "availability_status": "snapshot_only_field_time_structurally_preevent_retrieval_unverified",
+    "dependence_cluster_proxy_artifact_sha256": "632a2c1046fce7ae5ee9d41abed7ae66a46ce13a8f7c6503d2d9cce551460e8c",
+    "dependence_cluster_proxy_raw_sha256": "722ab5674e0dc02cf5075a8d61a6fd494f8dbe510b8e254626717c98dae663d3",
+    "oe_metadata_snapshot_sha256": "707e2b10d680506c8fb0d84ecf5f54b66c8191c604919a6dba53527588e7977c",
+    "oe_players_snapshot_sha256": "97cd79708021c3adaa1fd7fc16e413662981bc8593b28fc80d7953aa01331ab3",
+    "rights_status": "not_revalidated_for_public_serving",
+    "source_ids": [
+      "scryglass:source:oracle-elixir-player-games",
+      "scryglass:development:outcome-free-dependence-cluster-proxy"
+    ]
+  },
+  "status": "development_only"
+}

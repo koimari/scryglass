@@ -1,0 +1,1 @@
+{"ally_synergy_logit":{"Ahri|Jinx":0.05},"calibration_intercept":0.0,"calibration_slope":1.0,"champion_role_logit":{"mid|Ahri":0.1,"top|Aatrox":0.2},"counter_logit":{"top|Aatrox|Gnar":0.12},"intercept":0.0,"model_as_of":"2026-06-30T23:59:59Z","model_version":"draft-terminal-dev-v1.0.0","uncertainty_logit_sd":0.15}

@@ -1,0 +1,151 @@
+{
+  "authority": {
+    "betting_authority": false,
+    "descriptive_warehouse_provenance": true,
+    "model_validation_authority": false,
+    "probability_authority": false,
+    "recommendation_authority": false
+  },
+  "claim_ceiling": "This manifest binds warehouse inputs and outputs only. It does not validate a model, probability, odds, recommendation, or wager.",
+  "combined_player_rows": 379450,
+  "combined_team_rows": 75890,
+  "grid_rows": 2,
+  "input_control": {
+    "grid_download_requested": false,
+    "grid_local_ingest_enabled": true,
+    "leaguepedia_local_ingest_enabled": true,
+    "oe_download_requested": false,
+    "oe_full_raw_rebuild": true,
+    "oe_strict_refresh_requested": false,
+    "oe_years_requested": null
+  },
+  "lp_side_rows": 2388,
+  "manifest_canonical_sha256": "62a79c4121ab51f764c773d629ad0c48abe6cfda737c25ae32dab596b6cf6142",
+  "n_maps": 12708,
+  "oe_matched": 0,
+  "oe_rows": 75890,
+  "outputs": {
+    "maps": {
+      "bytes": 7134106,
+      "locator": "data/lol/warehouse/parquet/maps.parquet",
+      "raw_sha256": "04d4d7016bc1639fecddd613c1af6de94c6222a9b77cc2daaebbc51f8223402f",
+      "rows": 12708
+    },
+    "player_games": {
+      "bytes": 60934347,
+      "locator": "data/lol/warehouse/parquet/oe_player_games.parquet",
+      "raw_sha256": "24a3d1f01f834b358b63dc3082961e5d4a50f16bf535cfee8533ba7eecebd8d3",
+      "rows": 379450
+    },
+    "rating_players": {
+      "bytes": 60933884,
+      "locator": "data/lol/warehouse/parquet/players.parquet",
+      "raw_sha256": "77d8df205fd88e78d23061fc7b9c6171362673f517311fe371ee1c27b7de5701",
+      "rows": 379450
+    },
+    "team_games": {
+      "bytes": 17478511,
+      "locator": "data/lol/warehouse/parquet/oe_team_games.parquet",
+      "raw_sha256": "784cac38bba9b13be98c1535b89d55acef0b3fa5669c67102b8c52ded9720de1",
+      "rows": 75890
+    }
+  },
+  "refreshed_at": "2026-08-01T23:17:35.146284+00:00",
+  "schema_version": "scryglass:warehouse-refresh-manifest:v2",
+  "source_counts": {
+    "oe": 75890
+  },
+  "sources": {
+    "grid_normalization_manifest": {
+      "bytes": 193,
+      "locator": "data/lol/warehouse/parquet/grid_meta.json",
+      "raw_sha256": "91c72c6ade02b05b79a990956afd745cc3b1c36d44cf2e7f9732bebf7410131b"
+    },
+    "leaguepedia_caches": [
+      {
+        "bytes": 737637,
+        "locator": "data/lol/draft_games.json",
+        "raw_sha256": "e965f663fb8f535ee457366bf0c0ead25730043d14b6cbcc3a3b9c55b89be482"
+      },
+      {
+        "bytes": 2239372,
+        "locator": "data/lol/draft_players.json",
+        "raw_sha256": "77b80dad8c5b543f9529aa91e27e961fa9505e59c90ce3a1565fc5eafc9b01a9"
+      }
+    ],
+    "oe_annual_files": [
+      {
+        "bytes": 85898775,
+        "columns_sha256": "5d81d09ba1aecd4d73d660b917b4df3100d578a3855059f44cc4c38070de8d94",
+        "date_max_utc": "2023-12-31T11:48:06+00:00",
+        "date_min_utc": "2023-01-10T17:07:16+00:00",
+        "game_count": 11106,
+        "league_count": 52,
+        "locator": "data/lol/warehouse/raw/2023_LoL_esports_match_data_from_OraclesElixir.csv",
+        "player_row_count": 111060,
+        "raw_sha256": "8cf6c1bbe4a4c75a73d0a38fca826ecea48dd1fb386f515e2a7986797f7c1f3a",
+        "row_count": 133272,
+        "team_row_count": 22212,
+        "year": 2023
+      },
+      {
+        "bytes": 79127713,
+        "columns_sha256": "5d81d09ba1aecd4d73d660b917b4df3100d578a3855059f44cc4c38070de8d94",
+        "date_max_utc": "2024-12-08T09:03:13+00:00",
+        "date_min_utc": "2024-01-01T05:13:15+00:00",
+        "game_count": 10195,
+        "league_count": 53,
+        "locator": "data/lol/warehouse/raw/2024_LoL_esports_match_data_from_OraclesElixir.csv",
+        "player_row_count": 101950,
+        "raw_sha256": "93b5ed6036435120d7d97541b947ffceed6c7158508df4e6cb9b0f8a35cb17ac",
+        "row_count": 122340,
+        "team_row_count": 20390,
+        "year": 2024
+      },
+      {
+        "bytes": 79169638,
+        "columns_sha256": "5d81d09ba1aecd4d73d660b917b4df3100d578a3855059f44cc4c38070de8d94",
+        "date_max_utc": "2025-12-29T10:52:27+00:00",
+        "date_min_utc": "2025-01-11T11:11:24+00:00",
+        "game_count": 10041,
+        "league_count": 45,
+        "locator": "data/lol/warehouse/raw/2025_LoL_esports_match_data_from_OraclesElixir.csv",
+        "player_row_count": 100410,
+        "raw_sha256": "c9a158b9e0a965a47d31d3674c127a26f75e6c91a324bd1858e4784b1336214a",
+        "row_count": 120492,
+        "team_row_count": 20082,
+        "year": 2025
+      },
+      {
+        "bytes": 52263564,
+        "columns_sha256": "5d81d09ba1aecd4d73d660b917b4df3100d578a3855059f44cc4c38070de8d94",
+        "date_max_utc": "2026-07-28T23:45:16+00:00",
+        "date_min_utc": "2026-01-08T17:08:27+00:00",
+        "game_count": 6603,
+        "league_count": 39,
+        "locator": "data/lol/warehouse/raw/2026_LoL_esports_match_data_from_OraclesElixir.csv",
+        "player_row_count": 66030,
+        "raw_sha256": "8a7e0215fe7505e824cef854e8795f502dabc460d4ef346310c65e344d65aca8",
+        "row_count": 79236,
+        "team_row_count": 13206,
+        "year": 2026
+      }
+    ],
+    "oe_normalization_manifest": {
+      "bytes": 8814,
+      "locator": "data/lol/warehouse/parquet/oe_meta.json",
+      "raw_sha256": "183520aee70930900953488cb5bcb839e5f395f4a769a76c3ec1c8f780931361"
+    },
+    "oe_transport_receipts": [
+      {
+        "bytes": 2178,
+        "locator": "data/lol/warehouse/receipts/oracles_elixir/oe-2026-20260801T225644470022Z-8a7e0215fe7505e8.json",
+        "raw_sha256": "813b439afd77fb282ffbdb08a7a952001896b41f7138e9bf85b200c58c9385b0",
+        "receipt_canonical_sha256": "927621b8758367f5dac3bddf107f215cf3ac754bb6424ce2d264f815fad923a2",
+        "retrieved_at_utc": "2026-08-01T22:56:44.470022+00:00",
+        "source_raw_sha256": "8a7e0215fe7505e824cef854e8795f502dabc460d4ef346310c65e344d65aca8",
+        "year": "2026"
+      }
+    ]
+  }
+}

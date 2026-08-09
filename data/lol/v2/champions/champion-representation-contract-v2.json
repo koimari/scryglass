@@ -1,0 +1,129 @@
+{
+  "canonical_hash": {
+    "algorithm": "sha256",
+    "self_reference": "exclude_representation_sha256",
+    "serialization": "json_sort_keys_compact_ascii"
+  },
+  "cutoff_rules": {
+    "learned_residual_embedding": "training_cutoff <= snapshot_as_of <= requested_as_of",
+    "response": "max_event_at <= snapshot_as_of <= requested_as_of"
+  },
+  "embedding": {
+    "activation_status": "disabled_pending_independent_evidence_registry",
+    "allowed_dimensions": [
+      2,
+      4
+    ],
+    "allowed_output_statuses": [
+      "unavailable"
+    ],
+    "allowed_snapshot_cell_statuses": [
+      "learned"
+    ],
+    "axis_order_rule": "fixed_snapshot_order",
+    "derivation": "forbidden_in_representation_builder"
+  },
+  "embedding_snapshot_schema_id": "scryglass.champion-learned-residual-embedding-snapshot.v1",
+  "exact_cell_rule": [
+    "champion_id",
+    "patch_id",
+    "role",
+    "league_id"
+  ],
+  "fallback_rules": {
+    "kit_semantic": "ontology_explicit_only_never_cross_role",
+    "learned_residual_embedding": "none",
+    "response": "none"
+  },
+  "kit_semantic_feature_order": [
+    "damage_profile.poke",
+    "damage_profile.burst",
+    "damage_profile.artillery",
+    "damage_profile.teamfight",
+    "effective_range.point_blank",
+    "effective_range.short",
+    "effective_range.mid",
+    "effective_range.long",
+    "engage.none",
+    "engage.single",
+    "engage.area",
+    "engage.hard",
+    "peel.none",
+    "peel.defensive",
+    "peel.forced",
+    "peel.zone",
+    "mobility.low",
+    "mobility.moderate",
+    "mobility.high",
+    "wave_control.trade",
+    "wave_control.push",
+    "wave_control.siege",
+    "wave_control.freeze",
+    "scaling.early",
+    "scaling.mid",
+    "scaling.late",
+    "scaling.late_spike",
+    "target_access.frontline",
+    "target_access.hook",
+    "target_access.reposition",
+    "target_access.split_push",
+    "durability_frontline.squishy",
+    "durability_frontline.frontline",
+    "durability_frontline.tank",
+    "durability_frontline.duelist",
+    "crowd_control.none",
+    "crowd_control.slow",
+    "crowd_control.root",
+    "crowd_control.silence",
+    "crowd_control.stun",
+    "sustain.none",
+    "sustain.self_heal",
+    "sustain.shield",
+    "sustain.drain",
+    "tempo.slow_buildup",
+    "tempo.early_spread",
+    "tempo.mid_pressure",
+    "tempo.late_reset"
+  ],
+  "kit_semantic": {
+    "allowed_output_statuses": [
+      "exact",
+      "fallback_prior",
+      "unavailable"
+    ],
+    "exact_requested_patch_rule": "resolved_patch_id == requested_patch_id",
+    "fallback_availability": "available_prior_not_exact"
+  },
+  "layer_order": [
+    "kit_semantic",
+    "response",
+    "learned_residual_embedding"
+  ],
+  "representation_schema_id": "scryglass.champion-representation.v2",
+  "response": {
+    "allowed_output_statuses": [
+      "observed",
+      "unavailable",
+      "blocked_missing_semantic_anchor"
+    ],
+    "allowed_snapshot_cell_statuses": [
+      "observed"
+    ],
+    "content_addressing_confers_predictive_authority": false,
+    "observation_count_location": "evidence",
+    "snapshot_sha256_required": true,
+    "sigma_location": "uncertainty"
+  },
+  "response_feature_order": [
+    "empirical_residual_mean"
+  ],
+  "response_snapshot_schema_id": "scryglass.champion-response-snapshot.v1",
+  "role_order": [
+    "top",
+    "jungle",
+    "mid",
+    "bot",
+    "support"
+  ],
+  "schema_id": "scryglass.champion-representation-contract.v2"
+}

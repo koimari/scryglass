@@ -1,0 +1,134 @@
+{
+  "artifact_sha256": "d60f1d5db16aa06d8e5686c754c74c67905f4c9cc5f528e928328b7b3bc23514",
+  "authority": {
+    "betting_authority": false,
+    "contextual_probability_authority": false,
+    "expected_value_authority": false,
+    "incremental_draft_authority": false,
+    "model_validation_authority": false,
+    "neutral_probability_authority": false,
+    "odds_authority": false,
+    "recommendation_authority": false
+  },
+  "capture_contract": {
+    "actual_map_start_authority_captured_separately": true,
+    "actual_map_start_receipt_schema": "scryglass:draft-terminal-map-start-receipt:v1",
+    "actual_map_start_source_must_not_predate_claimed_start": true,
+    "atomic_no_clobber_writes": true,
+    "deterministic_prediction_replay_available": true,
+    "draft_model_and_source_must_precede_prediction": true,
+    "event_outcome_fields_rejected_recursively": true,
+    "exact_five_role_assignments_per_side_required": true,
+    "exact_frozen_ratings_prediction_receipt_required": true,
+    "exact_terminal_draft_payload_bytes_and_hash_required": true,
+    "fixture_team_side_patch_and_map_identity_bound": true,
+    "ledger_cli_user_timestamp_argument_present": false,
+    "ledger_locator": "data/lol/v2/evaluation/draft-terminal-v1/prediction-ledger.json",
+    "ledger_system_clock_sampled_inside_builder": true,
+    "ledger_validation_reloads_and_revalidates_bound_receipt_bytes": true,
+    "map_start_cli_user_timestamp_argument_present": false,
+    "map_start_system_clock_sampled_inside_builder": true,
+    "neutral_output_directly_outcome_calibrated": false,
+    "outcome_free_ledger_schema": "scryglass:draft-terminal-future-prediction-ledger:v1",
+    "prediction_cli_user_timestamp_argument_present": false,
+    "prediction_must_strictly_precede_actual_map_start": true,
+    "prediction_receipt_schema": "scryglass:draft-terminal-future-prediction:v1",
+    "prediction_system_clock_sampled_inside_builder": true,
+    "ratings_candidate_id": "hierarchical-orgw100-orgv025-retain100",
+    "retrospective_backfill_qualifies": false,
+    "source_payload_outcome_fields_rejected_recursively": true,
+    "terminal_action_order_and_pick_ban_validation_required": true,
+    "terminal_draft_payload_must_be_strict_outcome_free_json": true,
+    "terminal_draft_source_rights_review_required": true
+  },
+  "claim_ceiling": "This receipt proves only that system-clocked, outcome-free future Draft Score capture machinery exists. The ledger is empty and unreviewed, so it grants no probability, odds, expected-value, recommendation, or betting authority.",
+  "clock_attestation": {
+    "lock_time_not_after_builder_observation": true,
+    "observed_wall_clock_utc": "2026-08-02T01:30:00+00:00",
+    "source": "system_utc_clock_sampled_inside_builder",
+    "user_supplied_timestamp_allowed": false
+  },
+  "decision_outputs": {
+    "bet_recommendation": null,
+    "contextual_probability": null,
+    "expected_value": null,
+    "fair_odds": null,
+    "incremental_draft_authority": null,
+    "neutral_probability": null
+  },
+  "draft_protocol": {
+    "artifact_sha256": "c4c9ceb0fbdb3943f684de4983d28d2021fecb5d1c92069c514ff304c9f722f8",
+    "locator": "data/lol/v2/models/draft-terminal/future-protocol-lock-v1.json",
+    "locked_at_utc": "2026-08-02T01:00:00+00:00",
+    "raw_sha256": "46826584081e8f9e8bd177c96d7eaf5c2239dba5d9d33b94a50dafe7b3b10a87"
+  },
+  "empty_ledger_template": {
+    "artifact_sha256": "a720e806ea034595662bbb45d8c8aaa14a73a29ee4052717396a371665a62297",
+    "created_at_utc": "2026-08-02T01:30:00+00:00",
+    "entries": 0,
+    "schema_version": "scryglass:draft-terminal-future-prediction-ledger:v1",
+    "status": "COLLECTING_OUTCOME_FREE_DRAFT_PREDICTIONS"
+  },
+  "implementation": {
+    "actual_future_prediction_evidence_present": false,
+    "independent_ledger_pin_present": false,
+    "independent_opening_approval_present": false,
+    "independent_protocol_review_present": false,
+    "ready_for_outcome_free_future_capture": true
+  },
+  "ledger_state": {
+    "entries": 0,
+    "independently_pinned": false,
+    "metadata_support_met": false,
+    "opening_authority": false,
+    "outcomes_accessed": false,
+    "outcomes_present": false,
+    "status": "EMPTY_NOT_YET_CREATED"
+  },
+  "locked_at_utc": "2026-08-02T01:30:00+00:00",
+  "ratings_capture": {
+    "artifact_sha256": "7b744150924ea7a217c524bb71928eb41644f59c1332bbc3de169ba90c18a611",
+    "locator": "data/lol/v2/models/player/multileague-v3/capture-readiness-v3.json",
+    "locked_at_utc": "2026-08-01T23:58:00+00:00",
+    "raw_sha256": "7426cb9603b07b8f45dfb78537e4315271436ea20362fcff5b2af2b7b55c0d6e"
+  },
+  "result_state": "SYSTEM_CLOCKED_TERMINAL_DRAFT_CAPTURE_IMPLEMENTATION_READY_EMPTY_LEDGER",
+  "schema_version": "scryglass:draft-terminal-future-capture-readiness:v1",
+  "source_locks": [
+    {
+      "bytes": 18008,
+      "locator": "lol_kills/v2/draft/terminal/capture_readiness_v1.py",
+      "raw_sha256": "e21759f76d3de74215d403ae879af5f0e3b50b5374ecaed4a9ab000de91324dd"
+    },
+    {
+      "bytes": 68732,
+      "locator": "lol_kills/v2/draft/terminal/future_prediction_ledger.py",
+      "raw_sha256": "ef881dca83cbf3138b4362a2e5c6d40f15f82adab6d7a165b0a86d1288127f64"
+    },
+    {
+      "bytes": 2503,
+      "locator": "lol_kills/v2/draft/terminal/future_protocol_registry_v1.py",
+      "raw_sha256": "a168e9766085bb7d46db0dd4618f1ed269abbf2f521807d4b962a4b5cf121fd2"
+    },
+    {
+      "bytes": 55640,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_prediction_ledger.py",
+      "raw_sha256": "c3d5843570aea6cbac0d0991c7244698de86fd43e2217eab3fdfb41d461ad707"
+    },
+    {
+      "bytes": 2493,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_capture_registry_v3.py",
+      "raw_sha256": "50517c5f171162b83f8d5e5ed6c37f208415f6d50065a870139877d47599b45b"
+    },
+    {
+      "bytes": 9828,
+      "locator": "data/lol/v2/models/draft-terminal/future-protocol-lock-v1.json",
+      "raw_sha256": "46826584081e8f9e8bd177c96d7eaf5c2239dba5d9d33b94a50dafe7b3b10a87"
+    },
+    {
+      "bytes": 7165,
+      "locator": "data/lol/v2/models/player/multileague-v3/capture-readiness-v3.json",
+      "raw_sha256": "7426cb9603b07b8f45dfb78537e4315271436ea20362fcff5b2af2b7b55c0d6e"
+    }
+  ]
+}

@@ -1,0 +1,132 @@
+# <recommended_plugins>
+Here is a list of plugins that are available but not installed.
+
+- Atlassian R
+
+| | |
+|---|---|
+| Session | `019fb598-3a3d-7580-b28d-5dd348a89667` |
+| Started | 2026-07-31T00:34:40.512Z |
+| CWD | `/Users/river/Projects/lol-strength-analysis` |
+| Model provider | openai |
+| CLI | 0.146.0-alpha.9.2 |
+| Completed | True |
+| Rollout | `/Users/river/.codex/sessions/2026/07/30/rollout-2026-07-30T21-34-40-019fb598-3a3d-7580-b28d-5dd348a89667.jsonl` |
+
+Tags: draft, champion-atoms, grubs, live, market, frontend, data-warehouse, leaguepedia, evaluation, deploy, replay
+
+## Codex rollout summary
+
+```text
+thread_id: 019fb598-3a3d-7580-b28d-5dd348a89667
+updated_at: 2026-07-31T04:31:58+00:00
+rollout_path: /Users/river/.codex/sessions/2026/07/30/rollout-2026-07-30T21-34-40-019fb598-3a3d-7580-b28d-5dd348a89667.jsonl
+cwd: /Users/river/Projects/lol-strength-analysis
+git_branch: codex/fix-build-ci
+
+# Calculator delivery boundary was hardened, committed, pushed, and documented in PR #7
+
+Rollout context: The user asked to commit and push the scoped replay-readiness work, then create/update a PR against Axword’s `main`, with a brief high-level explanation of calculator capabilities and remaining blockers. The repository had extensive unrelated dirty and untracked research/UI work that had to remain untouched.
+
+## Task 1: Audit and advance project toward deliverability
+
+Outcome: success
+
+Preference signals:
+- The user’s objective required preserving unrelated dirty-worktree changes and continuing until the project was genuinely deliverable -> future work should establish an explicit file allowlist and avoid broad staging.
+- The user wanted blockers expressed at a high level: “we are able to calculate X Y and Z now @ A B and C conditions” -> PR/status copy should lead with user-visible capabilities and conditions, not implementation detail.
+
+Key steps:
+- Confirmed branch `codex/fix-build-ci`, HEAD `920edb2`, and a heavily dirty worktree with many unrelated research artifacts.
+- Verified existing calculator-ready evidence for GRID `2970132`, game 1 / Riot `LOLTMNT01-428534`: `living_post_seed_v1`, 10/10 HP and combat seeds, 16,960/16,960 rank slots, 14,725/14,725 required living post-seed slots, and 3,479 identity-bound basic attacks.
+- Added/validated replay build preflight behavior, public-vs-embedded patch separation, hosted bundle reproduction tooling, identity/display-name handling, and evidence receipts.
+- Confirmed the current local client is `16.15.801.3452` while target replays include `16.13.790.6961` and `16.14.794.9266`; `--require-build-match` fails closed with exit code 5 before any Replay API request.
+
+Reusable knowledge:
+- The calculator is product-ready for a verified same-match replay when selected living units have trusted HP, combat stats, ability ranks, live positions, and required action coverage. It outputs bounded combat outcomes, strength bands, and heuristic model edge—not calibrated probabilities, odds, prices, or betting recommendations.
+- The first real product-ready professional replay is GRID `2970132` game 1 / `LOLTMNT01-428534`; strict all-frame readiness remains false because honest pre-seed/dead gaps remain unavailable.
+- Additional GRID matches are research-validated but remain product-blocked; do not promote GRID-derived fields into product timelines without independent same-match product fusion.
+- `scripts/rofl_replay_api_probe.py --require-build-match` is a read-only compatibility preflight and must run before playback/API access.
+
+Failures and how to do differently:
+- Direct push to `origin` (`Axword/lol-strength-analysis`) failed with permission denied for the authenticated `koimari` account. The correct fallback was pushing to `fork` and using a cross-fork PR.
+- GitHub connector PR creation returned 403; authenticated `gh` successfully inspected and edited the existing PR instead.
+- Browser verification could not run because Chrome was not installed; deterministic SSR/UI checks and server/build validation were used instead.
+
+References:
+- Commit: `b7c884c` — “Harden replay readiness and document delivery boundary”.
+- Focused validation: 79 replay ingest/probe tests, 11 hosted-bundle tests, lint, production build, and `git diff --check` passed.
+- Main evidence: `docs/reproduction-evidence/2026-07-31-replay-client-build-blocker.md` and `docs/reproducible-match-bundles.md`.
+
+## Task 2: Publish and update PR
+
+Outcome: success
+
+Preference signals:
+- The user requested a brief PR explanation with precise blockers and calculator status -> keep PR bodies concise, capability-led, and explicit about the ceiling of one product-ready match.
+
+Key steps:
+- Staged only an explicit 20-file allowlist covering replay readiness, bundle reproduction, documentation, tests, and evidence receipts.
+- Committed and pushed `codex/fix-build-ci` to `koimari/lol-strength-analysis`.
+- Found an existing draft PR rather than creating a duplicate, then updated it.
+
+Reusable knowledge:
+- PR: https://github.com/Axword/lol-strength-analysis/pull/7
+- PR targets `Axword:main`, remains draft/open, and now states: one product-ready professional match plus additional research evidence; blockers are independent second-machine reproduction, compatible replay-client access, and independent product fusion for another match.
+- Unrelated dirty files remained unstaged and untouched after publishing.
+
+References:
+- Fork push: `git push -u fork codex/fix-build-ci`.
+- PR title: “Harden replay readiness and document calculator delivery boundary”.
+```
+
+## User prompts
+
+### 1
+
+<recommended_plugins>
+Here is a list of plugins that are available but not installed.
+
+- Atlassian Rovo (atlassian-rovo@openai-curated-remote)
+- Box (box@openai-curated-remote)
+- Figma (figma@openai-curated-remote)
+- Gmail (gmail@openai-curated-remote)
+- Google Calendar (google-calendar@openai-curated-remote)
+- Notion (notion@openai-curated-remote)
+- Outlook Calendar (outlook-calendar@openai-curated-remote)
+- Outlook Email (outlook-email@openai-curated-remote)
+- SharePoint (sharepoint@openai-curated-remote)
+- Slack (slack@openai-curated-remote)
+- Teams (teams@openai-curated-remote)
+</recommend
+
+*(+46 further user messages; see rollout JSONL)*
+
+## Final agent message
+
+Done.
+
+- Commit: `b7c884c`
+- Pushed to the fork: `koimari/codex/fix-build-ci`
+- Updated draft PR against Axword `main`: [PR #7](https://github.com/Axword/lol-strength-analysis/pull/7)
+- Validation: 79 replay tests, 11 bundle tests, lint, and build passed.
+- Unrelated dirty files remain untouched.
+
+The PR states that the calculator currently handles bounded same-match combat outcomes, strength bands, and heuristic model edge when HP, combat stats, ranks, positions, and action coverage are verified. Remaining blockers are second-machine reproduction and compatible-client/product-fusion evidence for a second match.
+
+::git-stage{cwd="/Users/river/Projects/lol-strength-analysis"}
+::git-commit{cwd="/Users/river/Projects/lol-strength-analysis"}
+::git-push{cwd="/Users/river/Projects/lol-strength-analysis" branch="codex/fix-build-ci"}
+::git-create-pr{cwd="/Users/river/Projects/lol-strength-analysis" branch="codex/fix-build-ci" url="https://github.com/Axword/lol-strength-analysis/pull/7" isDraft=true}
+
+<oai-mem-citation>
+<citation_entries>
+MEMORY.md:618-621|note=[calculator-ready scope and dirty-worktree preservation]
+MEMORY.md:635-636|note=[GitHub connector fallback behavior]
+</citation_ent
+
+## Tools and files
+
+| Tool | Calls |
+|---|---|
+| wait | 84 |

@@ -1,0 +1,19 @@
+{
+  "framework": "nextjs",
+  "installCommand": "npm install",
+  "buildCommand": "node scripts/prepare-tier-worker.mjs && npm run build",
+  "outputDirectory": ".next",
+  "functions": {
+    "api/cron/tierlist-refresh.py": {
+      "maxDuration": 800,
+      "includeFiles": ".tier-worker/**",
+      "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,fixtures/**,__fixtures__/**,testdata/**,sample-data/**}"
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/tierlist-refresh",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}

@@ -1,0 +1,128 @@
+# <recommended_plugins>
+Here is a list of plugins that are available but not installed.
+
+- Atlassian R
+
+| | |
+|---|---|
+| Session | `019fb4b4-f9f1-7c50-a9bd-3f5370dd5529` |
+| Started | 2026-07-30T20:26:27.214Z |
+| CWD | `/Users/river/scryglass` |
+| Model provider | openai |
+| CLI | 0.146.0-alpha.9.2 |
+| Completed | True |
+| Rollout | `/Users/river/.codex/sessions/2026/07/30/rollout-2026-07-30T17-26-27-019fb4b4-f9f1-7c50-a9bd-3f5370dd5529.jsonl` |
+
+Tags: draft, ratings, tier-list, champion-atoms, grubs, live, market, frontend, data-warehouse, leaguepedia, evaluation, deploy, replay
+
+## Codex rollout summary
+
+```text
+thread_id: 019fb4b4-f9f1-7c50-a9bd-3f5370dd5529
+updated_at: 2026-07-31T03:27:10+00:00
+rollout_path: /Users/river/.codex/sessions/2026/07/30/rollout-2026-07-30T17-26-27-019fb4b4-f9f1-7c50-a9bd-3f5370dd5529.jsonl
+cwd: /Users/river/scryglass
+git_branch: codex/app-visual-revamp
+
+# Scryglass public-MVP hardening and Draft Score gating advanced substantially, but the overarching goal remains incomplete
+
+Rollout context: Work occurred in `/Users/river/scryglass` on 2026-07-30/31. The user’s roadmap separated a descriptive public MVP from a research-proof Draft Score lane, required fail-closed predictive claims, one bounded source-procurement attempt, and separate readiness reporting.
+
+## Task 1: Public MVP claim-boundary and presentation hardening
+
+Outcome: partial
+
+Preference signals:
+- The user required Draft Score to remain “clearly unavailable” and wanted descriptive ratings, match exploration, articles, methodology, and reproducibility presented without overstated predictive claims -> future public copy should explicitly distinguish descriptive benchmarks, completed records, and unavailable predictive outputs.
+- The user required preservation of dirty-worktree ownership and the non-betting publication boundary -> avoid broad rewrites, staging, commits, or betting-oriented surfaces when working in this checkout.
+
+Key steps:
+- Reworked public labels and copy across ratings, match pages, methodology, reproduction, navigation, home, and README so ratings are described as descriptive benchmarks and predictive comparisons are withheld.
+- Centralized fail-closed Draft Score behavior in `apps/lol-atlas/src/lib/publicDraftGate.ts`; legacy draft APIs return the same unavailable `503` response by default.
+- Removed unreviewed Draft Score artifacts from future public-pack allowlists and added `tests/test_public_pack_spec.py` regression coverage.
+- Removed public match accuracy/model-vs-result claims and hid incomplete combat statistics rather than displaying misleading zero KDA values.
+- Verified direct HTTP checks: home returned `200`; `/sandbox` rendered withheld copy; `/api/draft-wr` and `/api/draft-sandbox` returned `503` with `Draft estimates are withheld while the independent review is incomplete.`
+
+Failures and how to do differently:
+- Playwright visual verification could not run because the configured Chrome distribution was absent (`Chromium distribution 'chrome' is not found`). Direct HTTP checks were used instead; do not claim visual verification without installing/providing a browser.
+- The public release slice was locally verified, but release acceptance/deployment acceptance was not established. Do not report it as fully released.
+
+Reusable knowledge:
+- Frontend entrypoint is `apps/lol-atlas`; key public routes are `/`, `/articles`, `/elo`, `/browse`, `/browse/head-to-head`, `/methodology`, `/reproduce`, and `/sandbox`.
+- Public Draft Score must remain fail-closed even though development implementation remains in the repository. The canonical v2 route exists but is also unavailable until promotion authority is present.
+
+References:
+- `apps/lol-atlas/src/lib/publicDraftGate.ts` and `publicDraftGate.test.mts`
+- `apps/lol-atlas/src/app/api/draft-wr/route.ts`
+- `apps/lol-atlas/src/app/api/draft-sandbox/route.ts`
+- `apps/lol-atlas/src/app/api/v2/draft/score/route.ts`
+- Verification: `npm test` -> 15 tests passed in the earlier MVP pass; later expanded suite -> 30 tests passed; `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` passed at the corresponding checkpoints.
+
+## Task 2: Canonical Draft Score L7/C3 path and G1/GRID gates
+
+Outcome: partial
+
+Preference signals:
+- The user explicitly rejected Karpathy autoresearch for this tabular esports probability task and required a bounded Scryglass-specific harness only on permitted development folds -> do not use nanochat/`val_bpb`/five-minute GPU loops as the evaluation protocol.
+- The user required exact source evidence, timestamps, starters, rights, hashes, uncertainty, replay parity, and structured unavailable results -> treat missing or self-asserted evidence as unavailable, not as a reason to substitute or infer.
+- The user required one focused procurement attempt and then stopping speculative reconstruction -> the rollout performed bounded Cito/GRID checks and recorded G1 as externally blocked; do not resume exploratory roster reconstruction without changed external evidence.
+
+Key steps:
+- Established a canonical terminal estimator with neutral and contextual modes, legal five-role validation, side-swap symmetry, source/as-of checks, structured unavailable responses, and Python/artifact/TypeScript replay tests.
+- Strengthened contextual G1 validation so evidence must include canonical base64 of the exact source payload bytes; the runtime recomputes the SHA-256, parses strict UTF-8 JSON, and verifies payload metadata and both exact five-player role rosters.
+- Added an explicit OE-baseline/GRID cohort promotion gate. GRID can become primary only for a defined cohort whose records, source bytes, held-out results, model bytes, and replay hashes all validate; otherwise OE remains active.
+- Strengthened the GRID gate to bind exact source payload bytes, held-out result hashes, replay data hashes to the verified manifest, and replay model hashes to exact model bytes. Added regression tests for tampered payloads, unbound replay hashes, and tampered held-out metrics.
+- Recorded the single procurement attempt as externally blocked. The inspected GRID series (`2974293`) lacked pre-draft roles/patch, source availability and retrieval receipts, independent identity/sequence/leakage checks, held-out OE comparison, and second-replay hashes. Cito’s roster-history endpoint was documented as requiring approved API access; no authorizing payload was obtained.
+
+Failures and how to do differently:
+- The final full-regression/readiness command was interrupted by the user after it started, so the last combined verification was not fully observed. Earlier focused checks passed: 11 gate/readiness tests, 35 Python Draft Score tests, 30 TypeScript tests, type-check, build, syntax checks, and diff check.
+- The overarching Draft Score objective was not complete: independent L2 authority, reliability evidence, participant/series source-time replay, qualifying GRID cohort, and promotion receipt remained absent. Keep the goal active rather than marking success.
+
+Reusable knowledge:
+- Readiness report from `inspect_l2_readiness()` showed `promotion_eligible: false`, `public_probability_authorized: false`, G1 `externally_blocked`, GRID promotion `not_passed`, and `primary_source_for_cohort: OE`.
+- Development artifacts are not public authority. The candidate registry remains preregistered/development-only; promotion requires an independently issued, hash-bound authority record and all L2 contract gates.
+- Contextual G1 is contextual-only and does not block neutral development, but missing/stale/retrospective roster evidence must return unavailable and never silently fall back to neutral.
+
+References:
+- `lol_kills/v2/draft/terminal/grid_promotion_gate.py`
+- `lol_kills/v2/draft/terminal/l2_readiness.py`
+- `lol_kills/v2/draft/terminal/g1_roster.py`
+- `apps/lol-atlas/src/lib/draftTerminalScore.ts`
+- `apps/lol-atlas/src/lib/draftTerminalServer.ts`
+- `docs/draft-score-research-decision.md`
+- `docs/model-v2/g1-roster-source-decision.md`
+- `data/lol/v2/models/draft-terminal/g1-grid-procurement-attempt.json`
+- Exact error/source evidence: `DEMO_KEY_RESTRICTED`; GRID series `2974293`; readiness status `blocked`; OE remains the public reproducibility benchmark.
+```
+
+## User prompts
+
+### 1
+
+<recommended_plugins>
+Here is a list of plugins that are available but not installed.
+
+- Atlassian Rovo (atlassian-rovo@openai-curated-remote)
+- Box (box@openai-curated-remote)
+- Figma (figma@openai-curated-remote)
+- Gmail (gmail@openai-curated-remote)
+- Google Calendar (google-calendar@openai-curated-remote)
+- Notion (notion@openai-curated-remote)
+- Outlook Calendar (outlook-calendar@openai-curated-remote)
+- Outlook Email (outlook-email@openai-curated-remote)
+- SharePoint (sharepoint@openai-curated-remote)
+- Slack (slack@openai-curated-remote)
+- Teams (teams@openai-curated-remote)
+</recommend
+
+*(+63 further user messages; see rollout JSONL)*
+
+## Final agent message
+
+The stronger gate passes its positive fixture and rejects unbound source, replay, and result hashes; I’m doing the full terminal regression now and checking that the readiness report still keeps OE active.
+
+## Tools and files
+
+| Tool | Calls |
+|---|---|
+| wait | 164 |

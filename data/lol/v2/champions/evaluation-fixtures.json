@@ -1,0 +1,110 @@
+{
+  "masked": [
+    {
+      "fixture_id": "masked-neeko-zero-play",
+      "champion_id": "riot:champion:518",
+      "role": "mid",
+      "patch_id": "26.14",
+      "league_id": "LEC",
+      "expected_tier_list_eligible": false,
+      "expected_reason": "no_verified_appearances:LEC",
+      "expected_residual_status": "prior_only",
+      "expected_fallback_level": "none"
+    },
+    {
+      "fixture_id": "masked-unknown-new-champion",
+      "champion_id": "riot:champion:999",
+      "role": "mid",
+      "patch_id": "26.14",
+      "league_id": "LEC",
+      "expected_tier_list_eligible": false,
+      "expected_reason": "missing_champion",
+      "expected_residual_status": "missing_ontology",
+      "expected_fallback_level": "missing_ontology"
+    },
+    {
+      "fixture_id": "masked-legacy-patch-no-prior",
+      "champion_id": "riot:champion:115",
+      "role": "mid",
+      "patch_id": "26.13",
+      "league_id": "LEC",
+      "expected_tier_list_eligible": false,
+      "expected_reason": "patch_no_prior:26.13:26.14",
+      "expected_residual_status": "masked",
+      "expected_fallback_level": "no_prior_patch"
+    }
+  ],
+  "transfer": [
+    {
+      "fixture_id": "transfer-triad-mid-arc",
+      "champion_ids": [
+        "riot:champion:115",
+        "riot:champion:101",
+        "riot:champion:161"
+      ],
+      "role": "mid",
+      "patch_id": "26.14",
+      "league_id": "LEC",
+      "max_pair_distance": 0.8,
+        "min_pair_distance": 0.001
+    }
+  ],
+  "leave_one_out": [
+    {
+      "fixture_id": "loo-triad-contract-only-v1",
+      "schema_version": "v2-leave-one-out-fixture-1",
+      "c0_contract_hash": "8748bbe48b273593b09304ac80923f11384de808b835f6e83e97c6fef48661dd",
+      "as_of": "2026-07-27T12:40:00Z",
+      "synthetic_contract_only": true,
+      "role": "mid",
+      "patch_id": "26.14",
+      "league_id": "LEC",
+      "target_champion_ids": [
+        "riot:champion:115",
+        "riot:champion:101",
+        "riot:champion:161"
+      ],
+      "cells": [
+        {
+          "champion_id": "riot:champion:115",
+          "patch_id": "26.14",
+          "role": "mid",
+          "league_id": "LEC",
+          "residual": {
+            "status": "observed",
+            "mean": 0.12,
+            "sigma": 0.8,
+            "observation_count": 12
+          },
+          "verified_appearance_count": 12
+        },
+        {
+          "champion_id": "riot:champion:101",
+          "patch_id": "26.14",
+          "role": "mid",
+          "league_id": "LEC",
+          "residual": {
+            "status": "observed",
+            "mean": 0.22,
+            "sigma": 0.82,
+            "observation_count": 10
+          },
+          "verified_appearance_count": 10
+        },
+        {
+          "champion_id": "riot:champion:161",
+          "patch_id": "26.14",
+          "role": "mid",
+          "league_id": "LEC",
+          "residual": {
+            "status": "observed",
+            "mean": 0.06,
+            "sigma": 0.78,
+            "observation_count": 11
+          },
+          "verified_appearance_count": 11
+        }
+      ]
+    }
+  ]
+}

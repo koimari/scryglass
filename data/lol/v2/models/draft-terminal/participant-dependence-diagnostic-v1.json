@@ -1,0 +1,77 @@
+{
+  "artifact_sha256": "cec12bd72a1527629832f16a639e5f2be789e3921c1a7899055b39bb5d4b832a",
+  "authority": {
+    "betting_authority": false,
+    "expected_value_authority": false,
+    "model_validation_authority": false,
+    "odds_authority": false,
+    "probability_authority": false,
+    "recommendation_authority": false,
+    "reliability_authority": false
+  },
+  "claim_ceiling": "Retrospective participant-dependence diagnostic only. It does not validate Draft Score, reliability, probability, odds, expected value, recommendations, or betting.",
+  "created_at_utc": "2026-08-02T08:35:00+00:00",
+  "decision": {
+    "participant_atomic_component_split_available": false,
+    "participant_dependence_support_verified": false,
+    "participant_identity_available_for_development_diagnostic": true,
+    "participant_identity_complete_for_all_snapshot_maps": false,
+    "promotion_eligible": false,
+    "reliability_gate_passed": false,
+    "required_next_evidence": "A predeclared and independently reviewed participant-dependence method that does not treat the single connected component as independent observations, followed by untouched future evaluation."
+  },
+  "inputs": {
+    "development_snapshot_manifest_artifact_sha256": "da4812bd1b45e0601cc6d50fe4b53730ce2018fb2aee3c44e189fe3819be6f4b",
+    "development_snapshot_manifest_locator": "data/lol/v2/models/draft-terminal/development-cohort-clustered-v2.manifest.json",
+    "development_snapshot_manifest_raw_sha256": "f395e0da4c138eaaaae6a749359e866a9f4fa71cfd24f334e104e2b458a74e48",
+    "development_snapshot_payload_raw_sha256": "e8105027c7b2406f735cdcca592e60071ed25fc6489f4966a663dd91bea4a7d8",
+    "players_parquet_locator": "data/lol/warehouse/parquet/players.parquet",
+    "players_parquet_raw_sha256": "12f1cca978d683a0df8ceec0772999aeb03c723b4465f98674247f327dea71fa"
+  },
+  "population": {
+    "chronological_overlap": {
+      "maps_per_block": [
+        1917,
+        1917,
+        1917
+      ],
+      "participants_all_three_blocks": 335,
+      "participants_block_0_and_1": 482,
+      "participants_block_0_and_2": 356,
+      "participants_block_1_and_2": 444,
+      "partition": "three_equal_map_count_chronological_blocks"
+    },
+    "component_graph": {
+      "all_valid_maps_in_one_component": true,
+      "atomic_component_temporal_split_available": false,
+      "graph_definition": "games_are_connected_when_they_share_at_least_one_exact_player_id",
+      "largest_component_fraction": 1.0,
+      "largest_component_maps": 5751,
+      "transitive_component_count": 1
+    },
+    "development_rows": 6194,
+    "exact_assignment_coverage_fraction": 0.9284791733936067,
+    "joined_player_rows": 61940,
+    "maps_joined_to_player_rows": 6194,
+    "maps_with_exact_ten_unique_players_and_roles": 5751,
+    "maps_without_exact_ten_unique_players_and_roles": 443,
+    "participant_assignment_sha256": "62711d27ea4665b679baf592df2d4d31d41d7ea0566a2f8717094f6ed191b530",
+    "snapshot_maps": 6194,
+    "unique_participants": 970
+  },
+  "result_state": "PARTICIPANT_IDENTITIES_AVAILABLE_ATOMIC_COMPONENT_SPLIT_DEGENERATE",
+  "schema_version": "scryglass:draft-terminal-participant-dependence-diagnostic:v1",
+  "source_locks": [
+    {
+      "bytes": 16380,
+      "locator": "lol_kills/v2/draft/terminal/participant_dependence_diagnostic_v1.py",
+      "raw_sha256": "4fee052bcb609f36986023e0b24e30a3129e9216b6b1d8d2d6906a2c5befa2fa"
+    },
+    {
+      "bytes": 14934,
+      "locator": "lol_kills/v2/draft/terminal/development_snapshot.py",
+      "raw_sha256": "2a3d12990591b77eb42fa65f99a419167199a42950e61d157a0cc40da5b48218"
+    }
+  ]
+}
+

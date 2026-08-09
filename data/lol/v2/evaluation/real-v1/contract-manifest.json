@@ -1,0 +1,65 @@
+{
+  "manifest_id": "scryglass:real-benchmark-manifest:v1.4",
+  "status": "FROZEN_CANDIDATE_PENDING_INDEPENDENT_REVIEW",
+  "digest_intent": {
+    "raw_sha256": "exact UTF-8 file bytes",
+    "semantic_sha256": "sorted compact JSON semantics"
+  },
+  "files": {
+    "benchmark-contract.schema.json": {
+      "raw_sha256": "052125540abf0e4ed5016736e912970adb8d22104d7b13eded8f5d24088534b1",
+      "semantic_sha256": "877641607afb65b49f736eac6faa80665c06c2bbc25a5f61122b8acac741c536"
+    },
+    "baseline-registry.schema.json": {
+      "raw_sha256": "a84cd6a24491499ea522d82a154b5e75175c185ca67780a3f6acac6e383d370f",
+      "semantic_sha256": "78a0371466e66b79341cd82e1d3adbebc2123ebc86c716cd3e863e453a5ec419"
+    },
+    "opening-permit.schema.json": {
+      "raw_sha256": "51b014f5ab45b6c8fb177f77230de5a08fd73b6e6f48314227c922344aec7d20",
+      "semantic_sha256": "66f0aea758ee01560b05fcbc50b287f069377ce55b59c0340957ac539188fd85"
+    },
+    "authority-bundle.schema.json": {
+      "raw_sha256": "7c2d5e6154c5454ca86f7c901c7ab2156ef08021b63154820490a59e81ccc544",
+      "semantic_sha256": "cf3231dcf2af25aa5be2356dd27d5492e2915d4d8dde822f51a9dc4b1e029a37"
+    },
+    "candidate-registry.schema.json": {
+      "raw_sha256": "ac2a3eab8e49d7372273e5bee6a0e3c7149a98e3adc9560974b401799c608d6e",
+      "semantic_sha256": "42e7b34788fc3019e3ea24b0cfccfeb4f2893880623cb5dc4ad475cebe069419"
+    },
+    "pair-registry.schema.json": {
+      "raw_sha256": "8dee0513f91352a600ad7ccd97d561bb2de78ee1de265be9ca7b46420665389f",
+      "semantic_sha256": "1340718cc6f9cc6108d019e3f7d93709587fed241d1e69dfe0ff171f64bd99e5"
+    },
+    "benchmark-contract.json": {
+      "raw_sha256": "b77fe451105d6e216b71928ad2381117c1ba5d0a5bce30b0b658414ab8559128",
+      "semantic_sha256": "238df96ba8357e617c23cc30f16962fb23077038a1abfe07eb9fb86c39afa841"
+    },
+    "baseline-registry.json": {
+      "raw_sha256": "73805104e92242ee49952df7e167f34a14566c79b43bbf1209371cdd3248e298",
+      "semantic_sha256": "d794ef72571dcff663e156e45396e36d556bcb5715075aa0b7003330bee8fb80"
+    },
+    "opening-permit-template.json": {
+      "raw_sha256": "aaa670f30570409dca5c5b63c5c166772f4f637f702070bff40a542fc9962cf1",
+      "semantic_sha256": "008244475121ab2ee612dad929fd7644463ee0141386889024ba243a3d60466f"
+    },
+    "authority-bundle.json": {
+      "raw_sha256": "51a696297e6afc282a765dc08f9682b5c63c16ad35487db2b659be468b8d5b86",
+      "semantic_sha256": "f09299cfd008719af0ba2dc0619da23b1d2f5bf63a2371563bff089d84ffe5b0"
+    },
+    "candidate-registry.json": {
+      "raw_sha256": "02dc4bd730fb6162918eb5fc565d795dde0da1745f88b4439219254da6b42697",
+      "semantic_sha256": "3c51eae101d7364d6eab747380bb3d27b19fc09b75ac8dd8ef10598d01c68cba"
+    },
+    "pair-registry.json": {
+      "raw_sha256": "778fd4e61a812b09005e5c6bab58a6bd6609001fc1a436176bdb12e2fdb9268a",
+      "semantic_sha256": "508f47893a45a8a5c7978ec7902de590d894b6b3c593aef3327aaa62e7333a72"
+    }
+  },
+  "authority_code": {
+    "lol_kills/v2/evaluation/benchmark_contract.py": {
+      "raw_sha256": "f706b4e2583560e5591ba508555d9130ea50cd18eb22d405b698bdad9d2991e8"
+    }
+  },
+  "authority_contract_set_sha256": "22e8a93a650987026da8980309435a44207529dc42f049333f4a427732bac471",
+  "contract_set_sha256": "d0adbef347af8b366b2427c943516383921753fdf5e9cf6884927318c8c67195"
+}

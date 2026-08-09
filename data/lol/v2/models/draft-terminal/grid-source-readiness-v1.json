@@ -1,0 +1,236 @@
+{
+  "artifact_sha256": "2aa23f24e281fc34926e96851ce5aff36046c31ebef857b41bc8910e51cc732c",
+  "authority": {
+    "betting_authority": false,
+    "contextual_probability_authority": false,
+    "expected_value_authority": false,
+    "incremental_draft_authority": false,
+    "model_validation_authority": false,
+    "neutral_probability_authority": false,
+    "odds_authority": false,
+    "recommendation_authority": false
+  },
+  "capability_conclusion": {
+    "archive_count": 5,
+    "observed_last_draft_to_start_seconds_max": 135.385,
+    "observed_last_draft_to_start_seconds_min": 66.871,
+    "observed_latency_is_not_prospective_authority": true,
+    "prestart_role_assignment_available_from_grid": false,
+    "prospective_system_receipts_required": true,
+    "retrospective_archives_qualify_future_evidence": false,
+    "reviewed_separate_role_assignment_required": true,
+    "terminal_pick_ban_prestart_observed_in_all_archives": true
+  },
+  "claim_ceiling": "Private retrospective source-capability evidence only. The five completed archives do not qualify as future predictions, GRID did not expose pre-start role assignment in the observed events, and this receipt grants no model, probability, odds, recommendation, or betting authority.",
+  "clock_attestation": {
+    "lock_time_not_after_builder_observation": true,
+    "observed_wall_clock_utc": "2026-08-02T01:27:57.849474+00:00",
+    "source": "system_utc_clock_sampled_inside_builder",
+    "user_supplied_timestamp_allowed": false
+  },
+  "grid_catalog": {
+    "canonical_sha256": "94fb8703d8bcdaab416c1b5f8ce727d5f486789267ae66e5b06f784766d127ed",
+    "catalog_version": "1.0.0",
+    "external_to_repository": true,
+    "generated_at": "2026-07-30T13:24:31.609855Z",
+    "logical_locator": "query-grid-research/assets/grid-capability-catalog.v1.json",
+    "raw_sha256": "dbf09c1f7727fb61e981ace5a1b635f96d16ddc5410d1d687b60f23589f8db8d",
+    "schema_version": "scryglass.grid.capability-catalog.v1"
+  },
+  "locked_at_utc": "2026-08-02T01:27:57.849474+00:00",
+  "prospective_capture_contract": {
+    "action_slots_1_through_20_required": true,
+    "ambiguous_or_incomplete_role_assignment_fails_closed": true,
+    "api_key_persisted": false,
+    "exact_grid_series_game_team_and_side_binding_required": true,
+    "exact_websocket_message_bytes_and_hash_required": true,
+    "five_picks_and_five_bans_per_side_required": true,
+    "future_prediction_ledger_remains_required": true,
+    "map_start_raw_full_state_must_be_sanitized": true,
+    "receipt_envelope_schema": "scryglass:grid-series-events-receipt-envelope:v1",
+    "separate_reviewed_role_assignment_required": true,
+    "system_receive_time_sampled_inside_receiver_required": true,
+    "target_map_start_must_not_be_received_at_prediction_time": true
+  },
+  "result_state": "RETROSPECTIVE_GRID_PRESTART_PICK_BAN_CAPABILITY_OBSERVED",
+  "retrospective_archive_assays": [
+    {
+      "all_draft_actions_strictly_before_map_start": true,
+      "archive_bytes": 624470,
+      "archive_locator": "data/lol/warehouse/raw_grid/events_2974293_grid.jsonl.zip",
+      "archive_raw_sha256": "6fd44641cf87fc3546a0836f447d9bb21f1e904bb2d2573d572ee5cef861da91",
+      "ban_count": 10,
+      "completed_archive_qualifies_future_evidence": false,
+      "counts_by_side_and_kind": {
+        "blue_ban": 5,
+        "blue_pick": 5,
+        "red_ban": 5,
+        "red_pick": 5
+      },
+      "draft_action_count": 20,
+      "draft_action_slots": {
+        "contiguous": true,
+        "first": 1,
+        "last": 20
+      },
+      "draft_transaction_sequences": {
+        "first": 3,
+        "last": 22,
+        "strictly_increasing": true
+      },
+      "first_map_start_transaction_sequence": 23,
+      "last_draft_to_map_start_seconds": 80.488,
+      "one_exact_game_identity_across_draft_and_start": true,
+      "pick_count": 10,
+      "post_start_transactions_parsed": false,
+      "series_id": "2974293",
+      "unique_action_character_and_champion_identifiers": true
+    },
+    {
+      "all_draft_actions_strictly_before_map_start": true,
+      "archive_bytes": 601460,
+      "archive_locator": "data/lol/warehouse/raw_grid/events_2974294_grid.jsonl.zip",
+      "archive_raw_sha256": "4d008a30cca8b317855f12ef17ceac61dbffb237f372fd1806480e8e2e677ffa",
+      "ban_count": 10,
+      "completed_archive_qualifies_future_evidence": false,
+      "counts_by_side_and_kind": {
+        "blue_ban": 5,
+        "blue_pick": 5,
+        "red_ban": 5,
+        "red_pick": 5
+      },
+      "draft_action_count": 20,
+      "draft_action_slots": {
+        "contiguous": true,
+        "first": 1,
+        "last": 20
+      },
+      "draft_transaction_sequences": {
+        "first": 3,
+        "last": 22,
+        "strictly_increasing": true
+      },
+      "first_map_start_transaction_sequence": 23,
+      "last_draft_to_map_start_seconds": 68.879,
+      "one_exact_game_identity_across_draft_and_start": true,
+      "pick_count": 10,
+      "post_start_transactions_parsed": false,
+      "series_id": "2974294",
+      "unique_action_character_and_champion_identifiers": true
+    },
+    {
+      "all_draft_actions_strictly_before_map_start": true,
+      "archive_bytes": 734394,
+      "archive_locator": "data/lol/warehouse/raw_grid/events_2974295_grid.jsonl.zip",
+      "archive_raw_sha256": "3c3310bea2a7e19823c3c3ba6a6844a2d25a52c783ab1e9880f483a0c0493efd",
+      "ban_count": 10,
+      "completed_archive_qualifies_future_evidence": false,
+      "counts_by_side_and_kind": {
+        "blue_ban": 5,
+        "blue_pick": 5,
+        "red_ban": 5,
+        "red_pick": 5
+      },
+      "draft_action_count": 20,
+      "draft_action_slots": {
+        "contiguous": true,
+        "first": 1,
+        "last": 20
+      },
+      "draft_transaction_sequences": {
+        "first": 3,
+        "last": 22,
+        "strictly_increasing": true
+      },
+      "first_map_start_transaction_sequence": 23,
+      "last_draft_to_map_start_seconds": 135.385,
+      "one_exact_game_identity_across_draft_and_start": true,
+      "pick_count": 10,
+      "post_start_transactions_parsed": false,
+      "series_id": "2974295",
+      "unique_action_character_and_champion_identifiers": true
+    },
+    {
+      "all_draft_actions_strictly_before_map_start": true,
+      "archive_bytes": 587598,
+      "archive_locator": "data/lol/warehouse/raw_grid/events_2974296_grid.jsonl.zip",
+      "archive_raw_sha256": "096b06562d8a92054d2cd3632ab6b311cfe94c1a672a008789768a7e23471e06",
+      "ban_count": 10,
+      "completed_archive_qualifies_future_evidence": false,
+      "counts_by_side_and_kind": {
+        "blue_ban": 5,
+        "blue_pick": 5,
+        "red_ban": 5,
+        "red_pick": 5
+      },
+      "draft_action_count": 20,
+      "draft_action_slots": {
+        "contiguous": true,
+        "first": 1,
+        "last": 20
+      },
+      "draft_transaction_sequences": {
+        "first": 3,
+        "last": 22,
+        "strictly_increasing": true
+      },
+      "first_map_start_transaction_sequence": 23,
+      "last_draft_to_map_start_seconds": 66.871,
+      "one_exact_game_identity_across_draft_and_start": true,
+      "pick_count": 10,
+      "post_start_transactions_parsed": false,
+      "series_id": "2974296",
+      "unique_action_character_and_champion_identifiers": true
+    },
+    {
+      "all_draft_actions_strictly_before_map_start": true,
+      "archive_bytes": 720487,
+      "archive_locator": "data/lol/warehouse/raw_grid/events_2974297_grid.jsonl.zip",
+      "archive_raw_sha256": "81cc43fe1f0b149721a43315e11b75a9b684769077f2a24bb5bf0b3175e35f75",
+      "ban_count": 10,
+      "completed_archive_qualifies_future_evidence": false,
+      "counts_by_side_and_kind": {
+        "blue_ban": 5,
+        "blue_pick": 5,
+        "red_ban": 5,
+        "red_pick": 5
+      },
+      "draft_action_count": 20,
+      "draft_action_slots": {
+        "contiguous": true,
+        "first": 1,
+        "last": 20
+      },
+      "draft_transaction_sequences": {
+        "first": 3,
+        "last": 22,
+        "strictly_increasing": true
+      },
+      "first_map_start_transaction_sequence": 23,
+      "last_draft_to_map_start_seconds": 84.72,
+      "one_exact_game_identity_across_draft_and_start": true,
+      "pick_count": 10,
+      "post_start_transactions_parsed": false,
+      "series_id": "2974297",
+      "unique_action_character_and_champion_identifiers": true
+    }
+  ],
+  "schema_version": "scryglass:grid-terminal-draft-source-readiness:v1",
+  "source_locks": [
+    {
+      "bytes": 26077,
+      "locator": "lol_kills/v2/draft/terminal/grid_source_readiness_v1.py",
+      "raw_sha256": "0886342d56d1f310e5bb99729333d9fdb1806edb25735c6103c31ef584acc4b6"
+    },
+    {
+      "bytes": 40288,
+      "locator": "lol_kills/v2/draft/terminal/grid_future_source_v1.py",
+      "raw_sha256": "4dec1dbec7f36c945c7c10cfc1eae289cc38013463985a543ea5946b16b58975"
+    },
+    {
+      "bytes": 27131,
+      "locator": "lol_kills/etl/grid_series_events.py",
+      "raw_sha256": "f0c8c8b5bdd7ab572d9f3372cc29d2c3066e9cb6ca8b882ca97d79ed0a292ccd"
+    }
+  ]
+}

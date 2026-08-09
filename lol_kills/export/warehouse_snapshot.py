@@ -30,7 +30,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_POINTER = ROOT / "data" / "lol" / "warehouse_snapshot.json"
-DEFAULT_PACK_ROOT = ROOT / "apps" / "lol-atlas" / "public" / "packs"
+DEFAULT_PACK_ROOT = ROOT / "apps" / "scryglass" / "public" / "packs"
 SNAPSHOT_SCHEMA = 1
 SNAPSHOT_PATH = "state/scryglass-warehouse-v1.tar.gz"
 

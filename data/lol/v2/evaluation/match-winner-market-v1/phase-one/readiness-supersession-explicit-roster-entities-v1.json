@@ -1,0 +1,68 @@
+{
+  "artifact_sha256": "0c8cc7baec73ef3c032470d5b56c1087f0c689850f9e53db64f8b27c0843dc5b",
+  "authority": {
+    "betting_authority": false,
+    "expected_value_authority": false,
+    "model_validation_authority": false,
+    "odds_authority": false,
+    "probability_authority": false,
+    "recommendation_authority": false
+  },
+  "claim_ceiling": "Pre-boundary evaluator identity hardening and audit trail only; no future evidence, model pass, probability, odds, expected value, recommendation, or betting authority.",
+  "created_at_utc": "2026-08-02T08:56:00+00:00",
+  "future_boundary_utc": "2026-08-03T00:00:00+00:00",
+  "identity_contract": {
+    "distinct_organization_ids_required": 2,
+    "distinct_player_ids_required": 10,
+    "exact_teams_required": 2,
+    "nonempty_string_ids_required": true,
+    "players_per_team_required": 5,
+    "validated_before_entity_network_sensitivity": true,
+    "validated_prediction_receipt_still_required": true
+  },
+  "preconditions": {
+    "candidate_or_threshold_selected_from_future_outcomes": false,
+    "old_readiness_bytes_preserved": true,
+    "performed_before_future_boundary": true,
+    "phase_one_outcome_cohorts_present": 0,
+    "phase_one_outcomes_accessed": false,
+    "phase_one_parity_registries_present": 0,
+    "phase_one_prediction_events_present": 0
+  },
+  "prior_supersession": {
+    "artifact_sha256": "8bd72f0306db8384b44cf7fa54631c119d5069e259d11593f5b294f4ff2653f3",
+    "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/readiness-supersession-entity-network-hac-v1.json",
+    "raw_sha256": "0509da8b2e93f5ef8b9c684e9961c50d6d038e018e1252d9ca8eb025604acf9d"
+  },
+  "reason": "The sealed evaluator carried roster identities into the participant-aware sensitivity but relied on nested receipt access and indirect coverage. Before future outcomes, identity extraction was made an explicit fail-closed boundary and given focused positive and duplicate-player tests.",
+  "replacement": {
+    "phase_one_evaluation_readiness": {
+      "artifact_sha256": "dfd19ad7578c8b862ff9ab7f90ba3b554e9c3ded67421f6eb748cd1ebf649108",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/evaluation-readiness-v1.json",
+      "locked_at_utc": "2026-08-02T08:54:42.439430+00:00",
+      "raw_sha256": "78776f27ddb772921e36019cb96f8b82bb967fe3f75b739399f628d793d566d8"
+    },
+    "probability_pipeline_readiness": {
+      "artifact_sha256": "107430e1e9a45516b02aca1576c4a9d55222992e90fdf46e4907fbb4fc2533bd",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/probability-pipeline-readiness-v1.json",
+      "locked_at_utc": "2026-08-02T08:55:07.941909+00:00",
+      "raw_sha256": "b0ff39e70877dd51ff9e90e58b5c841a029582cc6741e01af66487846f5c55ef"
+    }
+  },
+  "schema_version": "scryglass:pre-boundary-readiness-supersession:v1",
+  "superseded": {
+    "phase_one_evaluation_readiness": {
+      "artifact_sha256": "7e1ce1bfd5a2ab80c51c0f354d695c6aab0d6e47fdabc49086535e34982bf4f5",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/superseded/evaluation-readiness-v1-after-entity-hac-before-explicit-entity-extraction.json",
+      "locked_at_utc": "2026-08-02T08:48:00+00:00",
+      "raw_sha256": "4dac0d0f0dcccfb52c91ef11641e06fdf349ca92b71765ef9077a6cfd041aa99"
+    },
+    "probability_pipeline_readiness": {
+      "artifact_sha256": "2bef14d8676a2e9c1559de5c0eb6fabc2bd97676fec59bb348a8f1d4cfa00b44",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/superseded/probability-pipeline-readiness-v1-after-entity-hac-before-explicit-entity-extraction.json",
+      "locked_at_utc": "2026-08-02T08:49:00+00:00",
+      "raw_sha256": "01c2fd61c45847893f658628ca17df3e0b6df35ffdd4c131609bb98bed7daabe"
+    }
+  },
+  "supersession_id": "phase-one-explicit-roster-entity-extraction-20260802"
+}

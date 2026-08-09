@@ -1,0 +1,1214 @@
+{
+  "registry_id": "scryglass:real-baselines:v1",
+  "schema_version": "1.4",
+  "artifact_kind": "PRE_BINDING_BASELINE_TEMPLATE",
+  "acceptance": {
+    "status": "PENDING_INDEPENDENT_REVIEW",
+    "source_independent_inventory_status": "FROZEN_CANDIDATE",
+    "source_dependent_execution_bindings_status": "UNBOUND"
+  },
+  "final_labels_read": false,
+  "binding_contract": {
+    "source_bound_transition": "PROHIBITED_IN_V1_4_REQUIRES_G1_UNIFIED_AUTHORITY_BUNDLE",
+    "typed_unavailable_required_fields": [
+      "reason_code",
+      "evidence_locator",
+      "resolution_task",
+      "claim_effect"
+    ],
+    "null_placeholders_prohibited": true,
+    "required_comparator_effect": "A required typed-unavailable comparator remains in every multiplicity family and blocks the affected promotion."
+  },
+  "baselines": [
+    {
+      "id": "rating.constant_league_side_frequency",
+      "family": "rating",
+      "comparison_output": "player_rating",
+      "simplicity_rank": 0,
+      "applies_to_draft_depths": [
+        -1
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "NO_FROZEN_LABEL_SAFE_ADAPTER",
+        "evidence_locator": "roadmap:G0-101",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "rating.classical_elo",
+      "family": "rating",
+      "comparison_output": "player_rating",
+      "simplicity_rank": 10,
+      "applies_to_draft_depths": [
+        -1
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "NO_FROZEN_LABEL_SAFE_ADAPTER",
+        "evidence_locator": "lol_kills/features/build.py:attach_elo_features",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "rating.static_bradley_terry",
+      "family": "rating",
+      "comparison_output": "team_rating",
+      "simplicity_rank": 20,
+      "applies_to_draft_depths": [
+        -1
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "NO_REPRODUCIBLE_PRE_EVENT_IMPLEMENTATION",
+        "evidence_locator": "roadmap:G0-101",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "rating.current_dual_elo",
+      "family": "rating",
+      "comparison_output": "team_rating",
+      "simplicity_rank": 30,
+      "applies_to_draft_depths": [
+        -1
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "NO_FROZEN_LABEL_SAFE_ADAPTER",
+        "evidence_locator": "lol_kills/ratings/dual_elo.py:build_dual_ratings",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "rating.current_hierarchical_bradley_terry",
+      "family": "rating",
+      "comparison_output": "team_rating",
+      "simplicity_rank": 40,
+      "applies_to_draft_depths": [
+        -1
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "NO_PRE_EVENT_FORECAST_ADAPTER",
+        "evidence_locator": "lol_kills/ratings/hierarchical_bt.py:fit_hierarchical_bt",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "rating.dynamic_uncertainty",
+      "family": "rating",
+      "comparison_output": "player_rating",
+      "simplicity_rank": 50,
+      "applies_to_draft_depths": [
+        -1
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "MODEL_FAMILY_NOT_YET_BOUND",
+        "evidence_locator": "docs/model-v2/evaluation-contract.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "rating.reproducible_state_space",
+      "family": "rating",
+      "comparison_output": "player_rating",
+      "simplicity_rank": 60,
+      "applies_to_draft_depths": [
+        -1
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "NO_REPRODUCIBLE_IMPLEMENTATION",
+        "evidence_locator": "roadmap:G0-101",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "rating.conditional_trueskill2",
+      "family": "rating",
+      "comparison_output": "player_rating",
+      "simplicity_rank": 70,
+      "applies_to_draft_depths": [
+        -1
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "CONDITIONAL_TRUESKILL2_NOT_IMPLEMENTED",
+        "evidence_locator": "external-specification:TrueSkill2",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "team.player_average_no_policy_synergy",
+      "family": "rating",
+      "comparison_output": "team_rating",
+      "simplicity_rank": 15,
+      "applies_to_draft_depths": [
+        -1
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "G1_EXACT_ROSTER_ADAPTER_REQUIRED",
+        "evidence_locator": "docs/model-v2/evaluation-contract.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "team.exact_roster_no_league_rating",
+      "family": "rating",
+      "comparison_output": "team_rating",
+      "simplicity_rank": 25,
+      "applies_to_draft_depths": [
+        -1
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "G1_EXACT_ROSTER_ADAPTER_REQUIRED",
+        "evidence_locator": "docs/model-v2/evaluation-contract.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "draft.league_patch_side_frequency",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 0,
+      "applies_to_draft_depths": [
+        10
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "NO_FROZEN_LABEL_SAFE_ADAPTER",
+        "evidence_locator": "roadmap:G0-102",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "draft.role_aware_additive",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 10,
+      "applies_to_draft_depths": [
+        10
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "NO_FROZEN_LABEL_SAFE_ADAPTER",
+        "evidence_locator": "lol_kills/v2/draft/interactions/model.py",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "draft.same_role_matchup",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 20,
+      "applies_to_draft_depths": [
+        10
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "NO_FROZEN_LABEL_SAFE_ADAPTER",
+        "evidence_locator": "lol_kills/v2/draft/interactions/structured_prior.py",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "draft.all_pair_ally_enemy",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 30,
+      "applies_to_draft_depths": [
+        10
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "NO_FROZEN_LABEL_SAFE_ADAPTER",
+        "evidence_locator": "lol_kills/v2/draft/interactions/model.py",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "draft.factorization",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 40,
+      "applies_to_draft_depths": [
+        10
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "NO_FROZEN_LABEL_SAFE_ADAPTER",
+        "evidence_locator": "lol_kills/v2/draft/interactions/model.py",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "draft.current_served_estimator",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 60,
+      "applies_to_draft_depths": [
+        10
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "NO_AUTHORIZED_SERVING_IDENTITY",
+        "evidence_locator": "apps/lol-atlas/src/lib/draftScore.ts",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "draft.ablation.no_team_player_context",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 5,
+      "applies_to_draft_depths": [
+        10
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "CONTEXTUAL_ABLATION_NOT_INSTANTIATED",
+        "evidence_locator": "docs/model-v2/evaluation-contract.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "draft.ablation.no_draft_component",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 1,
+      "applies_to_draft_depths": [
+        10
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "NO_DRAFT_ABLATION_NOT_INSTANTIATED",
+        "evidence_locator": "docs/model-v2/evaluation-contract.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "draft.ablation.neutral_no_archetype_transfer",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 35,
+      "applies_to_draft_depths": [
+        10
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "ARCHETYPE_ABLATION_NOT_INSTANTIATED",
+        "evidence_locator": "lol_kills/v2/draft/interactions/model.py",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "draft.ablation.neutral_no_patch_league_deviation",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 36,
+      "applies_to_draft_depths": [
+        10
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "PATCH_LEAGUE_ABLATION_NOT_INSTANTIATED",
+        "evidence_locator": "lol_kills/v2/draft/interactions/model.py",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "draft.ablation.contextual_no_player_champion_fit",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 50,
+      "applies_to_draft_depths": [
+        10
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "PLAYER_CHAMPION_ABLATION_NOT_INSTANTIATED",
+        "evidence_locator": "docs/model-v2/evaluation-contract.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "draft.ablation.contextual_no_team_policy",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 51,
+      "applies_to_draft_depths": [
+        10
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "TEAM_POLICY_ABLATION_NOT_INSTANTIATED",
+        "evidence_locator": "docs/model-v2/evaluation-contract.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "partial.league_patch_side_frequency",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 0,
+      "applies_to_draft_depths": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "PARTIAL_DEPTH_ADAPTER_NOT_IMPLEMENTED",
+        "evidence_locator": "docs/model-v2/research-register.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "partial.observed_behavior_frequency",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 1,
+      "applies_to_draft_depths": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "PARTIAL_BEHAVIOR_POLICY_NOT_BOUND",
+        "evidence_locator": "docs/model-v2/research-register.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "partial.role_aware_additive",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 10,
+      "applies_to_draft_depths": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "PARTIAL_DEPTH_ADAPTER_NOT_IMPLEMENTED",
+        "evidence_locator": "docs/model-v2/research-register.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "partial.same_role_matchup",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 20,
+      "applies_to_draft_depths": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "PARTIAL_DEPTH_ADAPTER_NOT_IMPLEMENTED",
+        "evidence_locator": "docs/model-v2/research-register.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "partial.all_pair_ally_enemy",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 30,
+      "applies_to_draft_depths": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "PARTIAL_DEPTH_ADAPTER_NOT_IMPLEMENTED",
+        "evidence_locator": "docs/model-v2/research-register.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "partial.factorization",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 40,
+      "applies_to_draft_depths": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "PARTIAL_DEPTH_ADAPTER_NOT_IMPLEMENTED",
+        "evidence_locator": "docs/model-v2/research-register.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "partial.current_served_search_policy",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 60,
+      "applies_to_draft_depths": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "NO_PROSPECTIVE_OR_VALID_OPE_EVIDENCE",
+        "evidence_locator": "docs/model-v2/research-register.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "partial.ablation.no_team_player_context",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 5,
+      "applies_to_draft_depths": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "PARTIAL_CONTEXTUAL_ABLATION_NOT_INSTANTIATED",
+        "evidence_locator": "docs/model-v2/research-register.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "partial.ablation.no_draft_component",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 2,
+      "applies_to_draft_depths": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "PARTIAL_NO_DRAFT_ABLATION_NOT_INSTANTIATED",
+        "evidence_locator": "docs/model-v2/research-register.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "partial.ablation.neutral_no_archetype_transfer",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 35,
+      "applies_to_draft_depths": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "PARTIAL_ARCHETYPE_ABLATION_NOT_INSTANTIATED",
+        "evidence_locator": "docs/model-v2/research-register.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "partial.ablation.neutral_no_patch_league_deviation",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 36,
+      "applies_to_draft_depths": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "PARTIAL_PATCH_LEAGUE_ABLATION_NOT_INSTANTIATED",
+        "evidence_locator": "docs/model-v2/research-register.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "partial.ablation.contextual_no_player_champion_fit",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 50,
+      "applies_to_draft_depths": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "PARTIAL_PLAYER_CHAMPION_ABLATION_NOT_INSTANTIATED",
+        "evidence_locator": "docs/model-v2/research-register.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "partial.ablation.contextual_no_team_policy",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 51,
+      "applies_to_draft_depths": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {
+        "reason_code": "PARTIAL_TEAM_POLICY_ABLATION_NOT_INSTANTIATED",
+        "evidence_locator": "docs/model-v2/research-register.md",
+        "resolution_task": "G1-018",
+        "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"
+      }
+    },
+    {
+      "id": "rating.ablation.no_temporal_dynamics_decay",
+      "family": "rating",
+      "comparison_output": "player_rating",
+      "simplicity_rank": 80,
+      "applies_to_draft_depths": [-1],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "rating.ablation.no_individual_auxiliary_channels",
+      "family": "rating",
+      "comparison_output": "player_rating",
+      "simplicity_rank": 81,
+      "applies_to_draft_depths": [-1],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "team.ablation.no_team_policy",
+      "family": "rating",
+      "comparison_output": "team_rating",
+      "simplicity_rank": 45,
+      "applies_to_draft_depths": [-1],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "team.ablation.no_lineup_synergy",
+      "family": "rating",
+      "comparison_output": "team_rating",
+      "simplicity_rank": 46,
+      "applies_to_draft_depths": [-1],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "draft.ablation.no_ontology_priors",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 61,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "draft.ablation.no_champion_residuals",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 62,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "draft.ablation.no_ally_pairs",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 63,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "draft.ablation.no_enemy_pairs",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 64,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "draft.ablation.no_whole_team_residual",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 65,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "draft.ablation.no_cross_team_residual",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 66,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "draft.ablation.no_functional_anova_projection",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 67,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "draft.ablation.no_legal_support_rank_cooccurrence",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 68,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "draft.ablation.no_contextual_h_vs_q_identification",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 69,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "draft.ablation.no_patch_deviation",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 70,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "draft.ablation.no_league_deviation",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 71,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "draft.ablation.no_role_deviation",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 72,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "draft.ablation.no_exact_contextual_equalization",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 73,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "draft.ablation.no_calibration",
+      "family": "draft",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 74,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "tier.raw_win_rate",
+      "family": "tier",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 75,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "TIER_COMPARATOR_NOT_IMPLEMENTED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "tier.strength_controlled_additive_champion_value",
+      "family": "tier",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 76,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "TIER_COMPARATOR_NOT_IMPLEMENTED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "tier.ablation.incremental_without_counterability",
+      "family": "tier",
+      "comparison_output": "terminal_draft_score",
+      "simplicity_rank": 77,
+      "applies_to_draft_depths": [10],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "TIER_COMPARATOR_NOT_IMPLEMENTED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "partial.greedy_terminal_search",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 61,
+      "applies_to_draft_depths": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "GREEDY_TERMINAL_SEARCH_NOT_IMPLEMENTED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "partial.hard_minimax",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 62,
+      "applies_to_draft_depths": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "HARD_MINIMAX_NOT_IMPLEMENTED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "partial.reproducible_published_tree_search",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 63,
+      "applies_to_draft_depths": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "PUBLISHED_TREE_SEARCH_NOT_REPRODUCIBLY_BOUND", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "partial.ablation.no_strategic_response_adjustment",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 64,
+      "applies_to_draft_depths": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    },
+    {
+      "id": "partial.ablation.no_flex_handling",
+      "family": "partial",
+      "comparison_output": "partial_draft_score",
+      "simplicity_rank": 65,
+      "applies_to_draft_depths": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      "status": "TYPED_UNAVAILABLE",
+      "label_access": "NO_FINAL_LABEL_ACCESS",
+      "unavailable": {"reason_code": "REQUIRED_ABLATION_NOT_INSTANTIATED", "evidence_locator": "docs/model-v2/evaluation-contract.md", "resolution_task": "G1-018", "claim_effect": "REQUIRED_COMPARISON_BLOCKED_UNTIL_RESOLVED"}
+    }
+  ],
+  "component_ablation_registry": [
+    {
+      "component_id": "exact_roster_aggregation",
+      "ablation_baseline_id": "team.player_average_no_policy_synergy",
+      "output": "team_rating",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "league_rating",
+      "ablation_baseline_id": "team.exact_roster_no_league_rating",
+      "output": "team_rating",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "team_player_context",
+      "ablation_baseline_id": "draft.ablation.no_team_player_context",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "all_draft_information",
+      "ablation_baseline_id": "draft.ablation.no_draft_component",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "archetype_transfer",
+      "ablation_baseline_id": "draft.ablation.neutral_no_archetype_transfer",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "patch_league_deviation",
+      "ablation_baseline_id": "draft.ablation.neutral_no_patch_league_deviation",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "player_champion_fit",
+      "ablation_baseline_id": "draft.ablation.contextual_no_player_champion_fit",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "draft_team_policy",
+      "ablation_baseline_id": "draft.ablation.contextual_no_team_policy",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "partial_team_player_context",
+      "ablation_baseline_id": "partial.ablation.no_team_player_context",
+      "output": "partial_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "partial_all_draft_information",
+      "ablation_baseline_id": "partial.ablation.no_draft_component",
+      "output": "partial_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "partial_archetype_transfer",
+      "ablation_baseline_id": "partial.ablation.neutral_no_archetype_transfer",
+      "output": "partial_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "partial_patch_league_deviation",
+      "ablation_baseline_id": "partial.ablation.neutral_no_patch_league_deviation",
+      "output": "partial_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "partial_player_champion_fit",
+      "ablation_baseline_id": "partial.ablation.contextual_no_player_champion_fit",
+      "output": "partial_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "partial_team_policy",
+      "ablation_baseline_id": "partial.ablation.contextual_no_team_policy",
+      "output": "partial_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "partial_search_policy",
+      "ablation_baseline_id": "partial.observed_behavior_frequency",
+      "output": "partial_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "temporal_dynamics_decay",
+      "ablation_baseline_id": "rating.ablation.no_temporal_dynamics_decay",
+      "output": "player_rating",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "individual_auxiliary_channels",
+      "ablation_baseline_id": "rating.ablation.no_individual_auxiliary_channels",
+      "output": "player_rating",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "team_rating_policy",
+      "ablation_baseline_id": "team.ablation.no_team_policy",
+      "output": "team_rating",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "lineup_synergy",
+      "ablation_baseline_id": "team.ablation.no_lineup_synergy",
+      "output": "team_rating",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "ontology_priors",
+      "ablation_baseline_id": "draft.ablation.no_ontology_priors",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "champion_residuals",
+      "ablation_baseline_id": "draft.ablation.no_champion_residuals",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "ally_pairs",
+      "ablation_baseline_id": "draft.ablation.no_ally_pairs",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "enemy_pairs",
+      "ablation_baseline_id": "draft.ablation.no_enemy_pairs",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "whole_team_residual",
+      "ablation_baseline_id": "draft.ablation.no_whole_team_residual",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "cross_team_residual",
+      "ablation_baseline_id": "draft.ablation.no_cross_team_residual",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "functional_anova_projection",
+      "ablation_baseline_id": "draft.ablation.no_functional_anova_projection",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "legal_support_rank_cooccurrence",
+      "ablation_baseline_id": "draft.ablation.no_legal_support_rank_cooccurrence",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "contextual_h_vs_q_identification",
+      "ablation_baseline_id": "draft.ablation.no_contextual_h_vs_q_identification",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "patch_deviation",
+      "ablation_baseline_id": "draft.ablation.no_patch_deviation",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "league_deviation",
+      "ablation_baseline_id": "draft.ablation.no_league_deviation",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "role_deviation",
+      "ablation_baseline_id": "draft.ablation.no_role_deviation",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "exact_contextual_equalization",
+      "ablation_baseline_id": "draft.ablation.no_exact_contextual_equalization",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "calibration",
+      "ablation_baseline_id": "draft.ablation.no_calibration",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "partial_strategic_response_adjustment",
+      "ablation_baseline_id": "partial.ablation.no_strategic_response_adjustment",
+      "output": "partial_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "partial_flex_handling",
+      "ablation_baseline_id": "partial.ablation.no_flex_handling",
+      "output": "partial_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    },
+    {
+      "component_id": "tier_counterability",
+      "ablation_baseline_id": "tier.ablation.incremental_without_counterability",
+      "output": "terminal_draft_score",
+      "required_decision": "HOLM_REJECTION_PLUS_UNADJUSTED_ONE_SIDED_95_WCR_INVERTED_UPPER_BOUND_BELOW_ZERO"
+    }
+  ]
+}

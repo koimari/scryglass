@@ -1,0 +1,41 @@
+{
+  "authority": {
+    "betting_authority": false,
+    "model_validation_authority": false,
+    "probability_authority": false,
+    "rating_authority": false,
+    "recommendation_authority": false,
+    "replayable_source_provenance": true
+  },
+  "claim_ceiling": "This package proves exact source replay only. It does not validate or authorize a player rating, team rating, probability, or wager.",
+  "created_from_refresh_at_utc": "2026-08-01T23:25:46.262103+00:00",
+  "files": {
+    "maps": {
+      "bytes": 7133822,
+      "locator": "data/lol/v2/snapshots/multileague-v3/90cbaccb8fbc1ac21a7ea433441e65375d7012ca7f92f60d2b3ba1b74a208438/maps.parquet",
+      "raw_sha256": "04c0cce1d86a4358d9eeb5937f61d5288358953e66c693a1ce88b0b650295d08",
+      "rows": 12708
+    },
+    "players": {
+      "bytes": 60933578,
+      "locator": "data/lol/v2/snapshots/multileague-v3/90cbaccb8fbc1ac21a7ea433441e65375d7012ca7f92f60d2b3ba1b74a208438/players.parquet",
+      "raw_sha256": "12f1cca978d683a0df8ceec0772999aeb03c723b4465f98674247f327dea71fa",
+      "rows": 379450
+    },
+    "warehouse_refresh_manifest": {
+      "bytes": 5869,
+      "canonical_sha256": "a1cf511485dc25aac6f5dde8d7cfecf04ad61227d2c07a72d43d915036093e61",
+      "locator": "data/lol/v2/snapshots/multileague-v3/90cbaccb8fbc1ac21a7ea433441e65375d7012ca7f92f60d2b3ba1b74a208438/warehouse-refresh-manifest.json",
+      "raw_sha256": "8e460e01935eb56b2ac09c22d84819dda2cbd1fa73b1d4a1b1d938a158e5e09b"
+    }
+  },
+  "information_boundary": {
+    "all_outcomes_present_in_snapshot_are_adaptive_development": true,
+    "future_sealed_start": null,
+    "future_sealed_targets_present": false,
+    "note": "A separate protocol lock must choose a future boundary after this snapshot; this source package does not create or open a holdout."
+  },
+  "manifest_canonical_sha256": "011c955af8190e032a8fdf433102d9f3955d2acfd11b363895d67135781713d3",
+  "package_id": "90cbaccb8fbc1ac21a7ea433441e65375d7012ca7f92f60d2b3ba1b74a208438",
+  "schema_version": "scryglass:multileague-rating-source-snapshot:v1"
+}

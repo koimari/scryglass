@@ -1,0 +1,381 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scryglass.xyz/schemas/model-v2/team-rating.schema.json",
+  "title": "Scryglass Team Rating response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_version",
+    "as_of",
+    "season_id",
+    "calendar_year",
+    "status",
+    "rating_display",
+    "lineage",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/semver"},
+    "model_version": {"$ref": "common.schema.json#/$defs/model_version"},
+    "as_of": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "season_id": {"$ref": "common.schema.json#/$defs/season_id"},
+    "calendar_year": {"$ref": "common.schema.json#/$defs/calendar_year"},
+    "status": {"$ref": "common.schema.json#/$defs/status"},
+    "rating_display": {"$ref": "common.schema.json#/$defs/rating_display"},
+    "organization_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "display_name": {"type": "string", "minLength": 1},
+    "roster_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "league_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "competition_tier": {
+      "type": "string",
+      "enum": ["tier1", "tier2", "tier3"]
+    },
+    "rating_scope": {
+      "type": "string",
+      "enum": ["league", "global"]
+    },
+    "roster": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["player_id", "display_name", "role", "active_main"],
+        "properties": {
+          "player_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+          "display_name": {"type": "string", "minLength": 1},
+          "role": {"$ref": "common.schema.json#/$defs/role"},
+          "active_main": {"const": true}
+        }
+      },
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "properties": {"role": {"const": "top"}},
+            "required": ["role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": {"role": {"const": "jungle"}},
+            "required": ["role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": {"role": {"const": "mid"}},
+            "required": ["role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": {"role": {"const": "bot"}},
+            "required": ["role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": {"role": {"const": "support"}},
+            "required": ["role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "posterior_mean": {"type": "number"},
+    "interval_95": {"$ref": "common.schema.json#/$defs/interval_real_95"},
+    "component_unit": {"const": "elo_points"},
+    "roster_strength_component": {
+      "type": "number",
+      "description": "c_E times the policy-weighted five-player aggregation A^q, excluding lineup synergy gamma and League Rating lambda."
+    },
+    "league_rating_component": {
+      "type": "number",
+      "description": "Zero for league scope; c_E times League Rating lambda_L for global scope."
+    },
+    "lineup_synergy_component": {
+      "type": "number",
+      "description": "c_E times the exact-lineup synergy state gamma^q; it is not included in roster_strength_component."
+    },
+    "policy_snapshot_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "evidence": {"$ref": "common.schema.json#/$defs/evidence"},
+    "reliability": {"$ref": "common.schema.json#/$defs/reliability"},
+    "settled": {"$ref": "common.schema.json#/$defs/settled"},
+    "rank_eligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "league",
+        "global",
+        "active",
+        "current",
+        "structurally_globally_eligible"
+      ],
+      "properties": {
+        "league": {"type": "boolean"},
+        "global": {"type": "boolean"},
+        "active": {"type": "boolean"},
+        "current": {"type": "boolean"},
+        "structurally_globally_eligible": {"type": "boolean"},
+        "statistical_bridge_strength": {
+          "type": "string",
+          "enum": ["strong", "moderate", "weak", "unidentified"]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "literal_interpretation": {
+      "const": "Current neutral-draft strength of the exact five-player main roster in the selected scope, estimated at as_of."
+    },
+    "error": {"$ref": "common.schema.json#/$defs/error"},
+    "lineage": {"$ref": "common.schema.json#/$defs/lineage"},
+    "provenance": {"$ref": "prediction-provenance.schema.json"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"status": {"const": "ok"}},
+        "required": ["status"]
+      },
+      "then": {
+        "required": [
+          "organization_id",
+          "display_name",
+          "roster_id",
+          "league_id",
+          "competition_tier",
+          "rating_scope",
+          "roster",
+          "posterior_mean",
+          "interval_95",
+          "component_unit",
+          "roster_strength_component",
+          "league_rating_component",
+          "lineup_synergy_component",
+          "policy_snapshot_id",
+          "evidence",
+          "reliability",
+          "settled",
+          "rank_eligibility",
+          "literal_interpretation"
+        ],
+        "not": {"required": ["error"]}
+      },
+      "else": {
+        "required": ["error"],
+        "not": {
+          "anyOf": [
+            {"required": ["posterior_mean"]},
+            {"required": ["interval_95"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"rating_scope": {"const": "global"}},
+        "required": ["rating_scope"]
+      },
+      "then": {
+        "properties": {
+          "competition_tier": {"const": "tier1"},
+          "rank_eligibility": {
+            "properties": {
+              "global": {"const": true},
+              "structurally_globally_eligible": {"const": true}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"rating_scope": {"const": "league"}},
+        "required": ["rating_scope"]
+      },
+      "then": {
+        "properties": {
+          "league_rating_component": {"const": 0}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "competition_tier": {"enum": ["tier2", "tier3"]}
+        },
+        "required": ["competition_tier"]
+      },
+      "then": {
+        "properties": {
+          "rank_eligibility": {
+            "properties": {
+              "global": {"const": false},
+              "structurally_globally_eligible": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "settled": {
+            "properties": {"value": {"const": true}},
+            "required": ["value"]
+          }
+        },
+        "required": ["settled"]
+      },
+      "then": {
+        "properties": {
+          "settled": {
+            "properties": {
+              "entity_active": {"const": true},
+              "current_for_scope": {"const": true}
+            }
+          },
+          "rank_eligibility": {
+            "properties": {
+              "active": {"const": true},
+              "current": {"const": true}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "rating_scope": {"const": "global"},
+          "settled": {
+            "properties": {"value": {"const": true}},
+            "required": ["value"]
+          }
+        },
+        "required": ["rating_scope", "settled"]
+      },
+      "then": {
+        "properties": {
+          "rank_eligibility": {
+            "properties": {
+              "global": {"const": true},
+              "structurally_globally_eligible": {"const": true}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"const": "ok"}},
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "properties": {
+              "required_input_status": {"const": "complete"},
+              "freshness_checks": {
+                "minItems": 1,
+                "items": {
+                  "properties": {"fresh": {"const": true}},
+                  "required": ["fresh"]
+                }
+              },
+              "input_conflicts": {"maxItems": 0}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "x-semantic-invariants": [
+    {
+      "id": "team_exact_five_unique_players",
+      "applies_when": "status == 'ok'",
+      "expression": "count(roster) == 5 && count(distinct roster.player_id) == 5 && set(roster.role) == {'top','jungle','mid','bot','support'}",
+      "severity": "error"
+    },
+    {
+      "id": "team_rating_component_identity",
+      "applies_when": "status == 'ok'",
+      "expression": "posterior_mean == rating_display.anchor + roster_strength_component + league_rating_component + lineup_synergy_component",
+      "severity": "error"
+    },
+    {
+      "id": "team_component_estimand_units",
+      "applies_when": "status == 'ok'",
+      "expression": "component_unit == 'elo_points' && roster_strength_component == c_E * A^q && lineup_synergy_component == c_E * gamma^q && league_rating_component == (rating_scope == 'global' ? c_E * lambda_L : 0)",
+      "severity": "error"
+    },
+    {
+      "id": "team_interval_contains_posterior_mean",
+      "applies_when": "status == 'ok'",
+      "expression": "interval_95.lower <= posterior_mean && posterior_mean <= interval_95.upper",
+      "severity": "error"
+    },
+    {
+      "id": "team_settled_width_matches_interval",
+      "applies_when": "status == 'ok'",
+      "expression": "settled.interval_width == interval_95.upper - interval_95.lower",
+      "severity": "error"
+    }
+  ],
+  "x-negative-mutation-fixtures": [
+    {
+      "id": "team_duplicate_writable_rating",
+      "mutation": {
+        "op": "add",
+        "path": "/rating",
+        "value_from": "/posterior_mean"
+      },
+      "expected_schema_failure": true
+    },
+    {
+      "id": "team_duplicate_roster_player",
+      "mutation": {
+        "op": "copy",
+        "from": "/roster/0/player_id",
+        "path": "/roster/1/player_id"
+      },
+      "expected_violation": "team_exact_five_unique_players"
+    },
+    {
+      "id": "team_regional_league_component_forbidden",
+      "mutation": [
+        {
+          "op": "replace",
+          "path": "/rating_scope",
+          "value": "league"
+        },
+        {
+          "op": "replace",
+          "path": "/league_rating_component",
+          "value": 18.4
+        }
+      ],
+      "expected_schema_failure": true
+    }
+  ]
+}

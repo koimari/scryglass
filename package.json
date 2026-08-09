@@ -1,10 +1,10 @@
 {
   "name": "scryglass",
   "private": true,
-  "description": "Monorepo root — Vercel builds apps/lol-atlas (see vercel.json).",
+  "description": "Monorepo root — Vercel builds apps/scryglass (see vercel.json).",
   "scripts": {
-    "build": "npm run build --prefix apps/lol-atlas",
-    "dev": "npm run dev --prefix apps/lol-atlas",
-    "lint": "npm run lint --prefix apps/lol-atlas"
+    "build": "npm run build --prefix apps/scryglass",
+    "dev": "npm run dev --prefix apps/scryglass",
+    "lint": "npm run lint --prefix apps/scryglass"
   }
 }

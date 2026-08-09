@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Private Market Audit</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2314745f'/%3E%3Cpath d='M8 10h16v3H8zm0 6h11v3H8zm0 6h7v3H8z' fill='white'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">Scryglass · personal instrument</p>
+        <h1>Private market audit</h1>
+        <p class="intro">
+          Enter only states and prices you can verify. Research diagnostics are kept
+          separate from any authorized probability, fair price, edge, or decision.
+        </p>
+      </div>
+      <div class="local-seal" aria-label="Local-only tool">
+        <span></span>
+        Local only
+      </div>
+    </header>
+
+    <main>
+      <form id="worksheet" novalidate>
+        <section class="setup-sheet" aria-labelledby="match-heading">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Match and draft</p>
+              <h2 id="match-heading">Pregame identity</h2>
+            </div>
+            <p id="model-date" class="quiet">Loading local model…</p>
+          </div>
+
+          <div class="match-meta">
+            <label>
+              <span>League</span>
+              <select id="league" name="league"></select>
+            </label>
+            <label class="minute-field">
+              <span>Game minute</span>
+              <input id="minute" name="minute" type="number" min="1" max="90" step="0.1" inputmode="decimal" />
+            </label>
+            <label class="minute-field">
+              <span>Exact patch</span>
+              <input id="patch" name="patch" type="text" inputmode="decimal" placeholder="16.14" />
+            </label>
+            <label class="event-field">
+              <span>Event / map ID</span>
+              <input id="event-id" name="event_id" type="text" autocomplete="off" placeholder="Required to bind a captured market quote" />
+            </label>
+            <label class="event-time-field">
+              <span>Event start · RFC 3339</span>
+              <input id="event-start" name="event_start" type="text" autocomplete="off" placeholder="2026-08-01T17:00:00Z" />
+            </label>
+            <label class="event-time-field">
+              <span>Draft source available · RFC 3339</span>
+              <input id="draft-source-available-at" name="draft_source_available_at" type="text" autocomplete="off" placeholder="Must be before event start" />
+            </label>
+          </div>
+
+          <div class="draft-board">
+            <fieldset class="team-card team-blue">
+              <legend>Blue side</legend>
+              <label class="team-select">
+                <span>Team</span>
+                <select id="blue-team" name="blue_team"></select>
+              </label>
+              <div id="blue-picks" class="pick-list"></div>
+            </fieldset>
+            <div class="versus" aria-hidden="true"><span>versus</span></div>
+            <fieldset class="team-card team-red">
+              <legend>Red side</legend>
+              <label class="team-select">
+                <span>Team</span>
+                <select id="red-team" name="red_team"></select>
+              </label>
+              <div id="red-picks" class="pick-list"></div>
+            </fieldset>
+          </div>
+          <datalist id="champions"></datalist>
+        </section>
+
+        <section class="state-sheet" aria-labelledby="state-heading">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Verified state</p>
+              <h2 id="state-heading">What is true right now?</h2>
+            </div>
+            <p class="quiet">Gold may be required for totals when the validated model selected it; missing inputs fail closed.</p>
+          </div>
+
+          <div class="score-entry">
+            <div class="score-side is-blue">
+              <label><span>Blue kills</span><input id="blue-kills" type="number" min="0" max="99" step="1" inputmode="numeric" /></label>
+              <label><span>Blue gold</span><input id="blue-gold" type="number" min="1" step="1" inputmode="numeric" placeholder="optional" /></label>
+            </div>
+            <div class="clock-face">
+              <span>At minute</span>
+              <strong id="clock-readout">15:00</strong>
+              <small>Manual snapshot</small>
+            </div>
+            <div class="score-side is-red">
+              <label><span>Red kills</span><input id="red-kills" type="number" min="0" max="99" step="1" inputmode="numeric" /></label>
+              <label><span>Red gold</span><input id="red-gold" type="number" min="1" step="1" inputmode="numeric" placeholder="optional" /></label>
+            </div>
+          </div>
+
+          <div class="objective-grid">
+            <div class="objective-labels" aria-hidden="true">
+              <span>Dragons</span><span>Towers</span><span>Grubs</span><span>Heralds</span><span>Barons</span><span>Inhibitors</span>
+            </div>
+            <div id="blue-objectives" class="objective-row is-blue"></div>
+            <div id="red-objectives" class="objective-row is-red"></div>
+          </div>
+        </section>
+
+        <section class="market-sheet" aria-labelledby="market-heading">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Market worksheet</p>
+              <h2 id="market-heading">Offered prices</h2>
+            </div>
+          </div>
+          <div class="winner-market-input">
+            <div class="market-subhead">
+              <div>
+                <strong>Winner</strong>
+                <span>Current decimal odds</span>
+              </div>
+              <span>Both sides are required for descriptive no-vig context</span>
+            </div>
+            <div class="winner-input-grid">
+              <label class="winner-odds-field is-blue">
+                <span id="blue-winner-name">Blue winner</span>
+                <input id="blue-win-odds" type="number" min="1.001" max="100" step="0.01" inputmode="decimal" placeholder="—" />
+              </label>
+              <label class="winner-odds-field is-red">
+                <span id="red-winner-name">Red winner</span>
+                <input id="red-win-odds" type="number" min="1.001" max="100" step="0.01" inputmode="decimal" placeholder="—" />
+              </label>
+            </div>
+          </div>
+          <div class="totals-subhead">
+            <div>
+              <strong>Total kills</strong>
+              <span>Line and current decimal odds</span>
+            </div>
+            <button id="add-line" class="text-button" type="button">Add a line</button>
+          </div>
+          <div class="market-input-head" aria-hidden="true">
+            <span>Line</span><span>Offered over</span><span>Offered under</span><span></span>
+          </div>
+          <div id="market-lines" class="market-lines"></div>
+        </section>
+
+        <div class="action-rail">
+          <p id="form-error" class="form-error" role="alert"></p>
+          <button class="price-button" type="submit">
+            <span>Audit this state</span>
+            <small>Fails closed when authority or provenance is missing</small>
+          </button>
+          <button id="reset-example" class="secondary-button" type="button">Reset example</button>
+        </div>
+      </form>
+
+      <section id="results" class="results" aria-live="polite" aria-busy="false">
+        <div class="empty-state">
+          <p class="section-kicker">Price ladder</p>
+          <h2>Enter the live state, then audit it.</h2>
+          <p>Your last worksheet stays in this browser. Nothing is sent outside this computer.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      Private research instrument. It never places a wager and is intentionally separate
+      from the public Scryglass <code>/live</code> page.
+    </footer>
+
+    <template id="pick-template">
+      <label class="pick-field">
+        <span></span>
+        <input list="champions" autocomplete="off" />
+      </label>
+    </template>
+
+    <template id="objective-template">
+      <label><span></span><input type="number" min="0" step="1" inputmode="numeric" /></label>
+    </template>
+
+    <template id="line-template">
+      <div class="market-input-row">
+        <label><span class="sr-only">Total-kills line</span><input class="market-line" type="number" min="0.5" max="99.5" step="1" inputmode="decimal" /></label>
+        <label><span class="sr-only">Offered over odds</span><input class="market-over" type="number" min="1.001" step="0.01" inputmode="decimal" placeholder="—" /></label>
+        <label><span class="sr-only">Offered under odds</span><input class="market-under" type="number" min="1.001" step="0.01" inputmode="decimal" placeholder="—" /></label>
+        <button class="remove-line" type="button" aria-label="Remove line">×</button>
+      </div>
+    </template>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

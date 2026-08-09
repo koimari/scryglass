@@ -1,0 +1,1098 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scryglass.xyz/schemas/model-v2/common.schema.json",
+  "title": "Scryglass model v2 common definitions",
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "model_version": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*-v[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "stable_id": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 256
+    },
+    "season_id": {
+      "allOf": [{"$ref": "#/$defs/stable_id"}],
+      "description": "Canonical competition season identifier. This is not derived from calendar_year."
+    },
+    "calendar_year": {
+      "type": "integer",
+      "minimum": 2020,
+      "maximum": 2100,
+      "description": "Derived calendar-year query/display field; it must not be used as a season reset signal."
+    },
+    "role": {
+      "type": "string",
+      "enum": ["top", "jungle", "mid", "bot", "support"]
+    },
+    "side": {
+      "type": "string",
+      "enum": ["A", "B"],
+      "description": "Canonical model side, independent of actual blue/red game side and first/second draft order."
+    },
+    "game_side": {
+      "type": "string",
+      "enum": ["blue", "red"]
+    },
+    "draft_order": {
+      "type": "string",
+      "enum": ["first", "second"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "unavailable"]
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "state_snapshot",
+        "current_analysis",
+        "forecast",
+        "forecast_simulation",
+        "hindsight"
+      ]
+    },
+    "identity_mode": {
+      "type": "string",
+      "enum": ["neutral", "contextual"]
+    },
+    "probability_open": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 1
+    },
+    "score_open_100": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 100
+    },
+    "rating_display": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anchor", "logistic_scale"],
+      "properties": {
+        "anchor": {"const": 1500},
+        "logistic_scale": {"const": 400}
+      }
+    },
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_id",
+        "training_snapshot_id",
+        "source_snapshot_ids",
+        "artifact_sha256",
+        "source_tree_sha256",
+        "train_cutoff"
+      ],
+      "properties": {
+        "manifest_id": {"$ref": "#/$defs/stable_id"},
+        "training_snapshot_id": {"$ref": "#/$defs/stable_id"},
+        "source_snapshot_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/stable_id"}
+        },
+        "artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "source_tree_sha256": {"$ref": "#/$defs/sha256"},
+        "calibration_sha256": {
+          "oneOf": [
+            {"$ref": "#/$defs/sha256"},
+            {"type": "null"}
+          ]
+        },
+        "evaluation_report_sha256": {"$ref": "#/$defs/sha256"},
+        "code_commit": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{40}$"
+            },
+            {"type": "null"}
+          ]
+        },
+        "environment_lock_sha256": {"$ref": "#/$defs/sha256"},
+        "train_cutoff": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "interval_probability_95": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lower", "upper", "level"],
+      "properties": {
+        "lower": {"$ref": "#/$defs/probability_open"},
+        "upper": {"$ref": "#/$defs/probability_open"},
+        "level": {"const": 0.95}
+      },
+      "x-semantic-invariants": [
+        {
+          "id": "interval_probability_order",
+          "expression": "lower <= upper",
+          "severity": "error"
+        }
+      ],
+      "x-negative-mutation-fixtures": [
+        {
+          "id": "interval_probability_reversed",
+          "mutation": {
+            "op": "replace",
+            "path": "/interval_95/lower",
+            "value_from": "/interval_95/upper + 0.01"
+          },
+          "expected_violation": "interval_probability_order"
+        }
+      ]
+    },
+    "interval_real_95": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lower", "upper", "level"],
+      "properties": {
+        "lower": {"type": "number"},
+        "upper": {"type": "number"},
+        "level": {"const": 0.95}
+      },
+      "x-semantic-invariants": [
+        {
+          "id": "interval_real_order",
+          "expression": "lower <= upper",
+          "severity": "error"
+        }
+      ],
+      "x-negative-mutation-fixtures": [
+        {
+          "id": "interval_real_reversed",
+          "mutation": {
+            "op": "replace",
+            "path": "/interval_95/lower",
+            "value_from": "/interval_95/upper + 1"
+          },
+          "expected_violation": "interval_real_order"
+        }
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "posterior_displacement",
+        "precision",
+        "source_context_coverage"
+      ],
+      "properties": {
+        "posterior_displacement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "diagnostic_id",
+            "method_id",
+            "prior_id",
+            "value",
+            "unit"
+          ],
+          "properties": {
+            "diagnostic_id": {"$ref": "#/$defs/stable_id"},
+            "method_id": {"$ref": "#/$defs/stable_id"},
+            "prior_id": {"$ref": "#/$defs/stable_id"},
+            "value": {"type": "number"},
+            "unit": {"type": "string", "minLength": 1}
+          }
+        },
+        "precision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "diagnostic_id",
+            "method_id",
+            "reference_id",
+            "posterior_dispersion",
+            "reference_dispersion",
+            "unit"
+          ],
+          "properties": {
+            "diagnostic_id": {"$ref": "#/$defs/stable_id"},
+            "method_id": {"$ref": "#/$defs/stable_id"},
+            "reference_id": {"$ref": "#/$defs/stable_id"},
+            "posterior_dispersion": {"type": "number", "minimum": 0},
+            "reference_dispersion": {"type": "number", "minimum": 0},
+            "unit": {"type": "string", "minLength": 1}
+          }
+        },
+        "source_context_coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "coverage_spec_id",
+            "supported_source_family_ids",
+            "supported_context_ids",
+            "missing_required_context_ids",
+            "identity_terms_status",
+            "bridge_path_status",
+            "fallback_levels",
+            "coverage_gaps"
+          ],
+          "properties": {
+            "coverage_spec_id": {"$ref": "#/$defs/stable_id"},
+            "supported_source_family_ids": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"$ref": "#/$defs/stable_id"}
+            },
+            "supported_context_ids": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {"$ref": "#/$defs/stable_id"}
+            },
+            "missing_required_context_ids": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {"$ref": "#/$defs/stable_id"}
+            },
+            "identity_terms_status": {
+              "type": "string",
+              "enum": ["supported", "not_applicable", "unsupported"]
+            },
+            "bridge_path_status": {
+              "type": "string",
+              "enum": ["supported", "weak", "not_applicable", "unavailable"]
+            },
+            "fallback_levels": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": ["F0", "F1", "F2", "F3", "F4", "F5"]
+              }
+            },
+            "coverage_gaps": {
+              "type": "array",
+              "items": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      },
+      "x-semantic-invariants": [
+        {
+          "id": "evidence_concepts_remain_separate",
+          "expression": "posterior_displacement, precision, and source_context_coverage are reported independently; no aggregate evidence scalar is computed",
+          "severity": "error"
+        },
+        {
+          "id": "evidence_not_volume_proxy",
+          "expression": "no evidence diagnostic is defined by game count, pick rate, popularity, or raw champion volume",
+          "severity": "error"
+        }
+      ],
+      "x-negative-mutation-fixtures": [
+        {
+          "id": "evidence_aggregate_scalar_forbidden",
+          "mutation": {
+            "op": "add",
+            "path": "/evidence/overall",
+            "value": 0.8
+          },
+          "expected_schema_failure": true
+        },
+        {
+          "id": "evidence_game_count_proxy_forbidden",
+          "mutation": {
+            "op": "add",
+            "path": "/evidence/game_count",
+            "value": 100
+          },
+          "expected_schema_failure": true
+        }
+      ]
+    },
+    "reliability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "validation_stratum_id",
+        "stratum_match_status",
+        "stratum_mapping_sha256",
+        "benchmark_version",
+        "baseline_id",
+        "probability_wording_approved",
+        "validation_gate_passed",
+        "out_of_distribution",
+        "out_of_distribution_flags",
+        "log_loss",
+        "baseline_log_loss",
+        "log_loss_skill",
+        "brier_score",
+        "baseline_brier_score",
+        "brier_skill",
+        "calibration_intercept",
+        "calibration_slope",
+        "empirical_interval_coverage",
+        "nominal_interval_coverage",
+        "sample_count",
+        "cluster_count"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "enum": ["high", "moderate", "limited", "unrated"]
+        },
+        "validation_stratum_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stable_id"},
+            {"type": "null"}
+          ]
+        },
+        "stratum_match_status": {
+          "type": "string",
+          "enum": ["matched", "unmatched"]
+        },
+        "stratum_mapping_sha256": {"$ref": "#/$defs/sha256"},
+        "benchmark_version": {"$ref": "#/$defs/semver"},
+        "baseline_id": {"$ref": "#/$defs/stable_id"},
+        "probability_wording_approved": {"type": "boolean"},
+        "validation_gate_passed": {"type": "boolean"},
+        "out_of_distribution": {"type": "boolean"},
+        "out_of_distribution_flags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "log_loss": {"type": "number", "minimum": 0},
+        "baseline_log_loss": {"type": "number", "minimum": 0},
+        "log_loss_skill": {
+          "type": "number",
+          "description": "baseline_log_loss - log_loss; positive values favor the candidate."
+        },
+        "brier_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "baseline_brier_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "brier_skill": {
+          "type": "number",
+          "description": "baseline_brier_score - brier_score; positive values favor the candidate."
+        },
+        "calibration_intercept": {"type": "number"},
+        "calibration_slope": {"type": "number"},
+        "empirical_interval_coverage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "nominal_interval_coverage": {"const": 0.95},
+        "sample_count": {"type": "integer", "minimum": 1},
+        "cluster_count": {"type": "integer", "minimum": 1}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"stratum_match_status": {"const": "matched"}},
+            "required": ["stratum_match_status"]
+          },
+          "then": {
+            "properties": {
+              "validation_stratum_id": {"$ref": "#/$defs/stable_id"}
+            }
+          },
+          "else": {
+            "properties": {
+              "validation_stratum_id": {"type": "null"},
+              "label": {"const": "unrated"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"out_of_distribution": {"const": false}},
+            "required": ["out_of_distribution"]
+          },
+          "then": {
+            "properties": {"out_of_distribution_flags": {"maxItems": 0}}
+          },
+          "else": {
+            "properties": {"out_of_distribution_flags": {"minItems": 1}}
+          }
+        },
+        {
+          "if": {
+            "properties": {"label": {"const": "high"}},
+            "required": ["label"]
+          },
+          "then": {
+            "properties": {
+              "probability_wording_approved": {"const": true},
+              "validation_gate_passed": {"const": true},
+              "stratum_match_status": {"const": "matched"},
+              "out_of_distribution": {"const": false},
+              "out_of_distribution_flags": {"maxItems": 0},
+              "sample_count": {"minimum": 1},
+              "cluster_count": {"minimum": 1}
+            }
+          }
+        }
+      ],
+      "x-semantic-invariants": [
+        {
+          "id": "reliability_log_loss_skill_identity",
+          "expression": "log_loss_skill == baseline_log_loss - log_loss",
+          "severity": "error"
+        },
+        {
+          "id": "reliability_brier_skill_identity",
+          "expression": "brier_skill == baseline_brier_score - brier_score",
+          "severity": "error"
+        },
+        {
+          "id": "reliability_total_stratum_mapping",
+          "expression": "stratum_mapping_sha256 identifies the manifest-frozen total context/OOD mapping; stratum_match_status == 'unmatched' implies label == 'unrated'",
+          "severity": "error"
+        }
+      ],
+      "x-negative-mutation-fixtures": [
+        {
+          "id": "reliability_high_missing_baseline",
+          "mutation": {
+            "op": "remove",
+            "path": "/reliability/baseline_id"
+          },
+          "expected_schema_failure": true
+        },
+        {
+          "id": "reliability_high_zero_clusters",
+          "mutation": {
+            "op": "replace",
+            "path": "/reliability/cluster_count",
+            "value": 0
+          },
+          "expected_schema_failure": true
+        },
+        {
+          "id": "reliability_high_ood",
+          "mutation": {
+            "op": "replace",
+            "path": "/reliability/out_of_distribution",
+            "value": true
+          },
+          "expected_schema_failure": true
+        },
+        {
+          "id": "reliability_high_unmatched_stratum",
+          "mutation": [
+            {
+              "op": "replace",
+              "path": "/reliability/stratum_match_status",
+              "value": "unmatched"
+            },
+            {
+              "op": "replace",
+              "path": "/reliability/validation_stratum_id",
+              "value": null
+            }
+          ],
+          "expected_schema_failure": true
+        }
+      ]
+    },
+    "settled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "rating_resolution",
+        "posterior_precision_probability",
+        "interval_width",
+        "interval_contains_posterior_mean",
+        "stability_window_id",
+        "stability_change",
+        "posterior_stability_probability",
+        "stability_within_resolution",
+        "entity_active",
+        "current_for_scope",
+        "inputs_complete",
+        "inputs_fresh",
+        "material_fallback_levels",
+        "out_of_distribution_flags",
+        "coverage_gate_passed"
+      ],
+      "properties": {
+        "value": {"type": "boolean"},
+        "rating_resolution": {"type": "number", "exclusiveMinimum": 0},
+        "posterior_precision_probability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "interval_width": {"type": "number", "minimum": 0},
+        "interval_contains_posterior_mean": {"type": "boolean"},
+        "stability_window_id": {"$ref": "#/$defs/stable_id"},
+        "stability_change": {"type": "number", "minimum": 0},
+        "posterior_stability_probability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "stability_within_resolution": {"type": "boolean"},
+        "entity_active": {"type": "boolean"},
+        "current_for_scope": {"type": "boolean"},
+        "inputs_complete": {"type": "boolean"},
+        "inputs_fresh": {"type": "boolean"},
+        "material_fallback_levels": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["F0", "F1", "F2", "F3", "F4", "F5"]
+          }
+        },
+        "out_of_distribution_flags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "coverage_gate_passed": {"type": "boolean"},
+        "reasons": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"value": {"const": true}},
+            "required": ["value"]
+          },
+          "then": {
+            "properties": {
+              "posterior_precision_probability": {"exclusiveMinimum": 0.95},
+              "interval_contains_posterior_mean": {"const": true},
+              "posterior_stability_probability": {"exclusiveMinimum": 0.95},
+              "stability_within_resolution": {"const": true},
+              "entity_active": {"const": true},
+              "current_for_scope": {"const": true},
+              "inputs_complete": {"const": true},
+              "inputs_fresh": {"const": true},
+              "material_fallback_levels": {"maxItems": 0},
+              "out_of_distribution_flags": {"maxItems": 0},
+              "coverage_gate_passed": {"const": true}
+            }
+          }
+        }
+      ],
+      "x-semantic-invariants": [
+        {
+          "id": "settled_interval_width_at_resolution",
+          "applies_when": "value == true",
+          "expression": "interval_width <= 2 * rating_resolution",
+          "severity": "error"
+        },
+        {
+          "id": "settled_stability_change_at_resolution",
+          "applies_when": "value == true",
+          "expression": "stability_change <= rating_resolution",
+          "severity": "error"
+        }
+      ],
+      "x-negative-mutation-fixtures": [
+        {
+          "id": "settled_probability_equal_boundary",
+          "mutation": {
+            "op": "replace",
+            "path": "/settled/posterior_stability_probability",
+            "value": 0.95
+          },
+          "expected_schema_failure": true
+        }
+      ]
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable", "missing_fields", "stale_fields"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "invalid_request",
+            "unknown_entity",
+            "ambiguous_roster",
+            "illegal_draft_state",
+            "patch_conflict",
+            "missing_required_input",
+            "stale_context",
+            "model_not_promoted",
+            "calibration_not_approved",
+            "prefix_calibration_not_approved",
+            "artifact_hash_mismatch",
+            "schema_mismatch",
+            "semantic_validation_failed",
+            "prediction_time_violation",
+            "source_access_blocked",
+            "internal_error"
+          ]
+        },
+        "message": {"type": "string", "minLength": 1, "maxLength": 500},
+        "retryable": {"type": "boolean"},
+        "missing_fields": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string"}
+        },
+        "stale_fields": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string"}
+        }
+      },
+      "examples": [
+        {
+          "code": "stale_context",
+          "message": "The selected roster context is older than this model permits.",
+          "retryable": true,
+          "missing_fields": [],
+          "stale_fields": ["roster_a.policy_snapshot"]
+        }
+      ]
+    },
+    "draft_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_id",
+        "slot",
+        "kind",
+        "canonical_side",
+        "champion_id"
+      ],
+      "properties": {
+        "action_id": {"$ref": "#/$defs/stable_id"},
+        "slot": {"type": "integer", "minimum": 1},
+        "kind": {"type": "string", "enum": ["pick", "ban"]},
+        "canonical_side": {"$ref": "#/$defs/side"},
+        "champion_id": {"$ref": "#/$defs/stable_id"},
+        "role_set": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/role"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"kind": {"const": "pick"}},
+            "required": ["kind"]
+          },
+          "then": {"required": ["role_set"]},
+          "else": {"not": {"required": ["role_set"]}}
+        }
+      ]
+    },
+    "role_constraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_id",
+        "canonical_side",
+        "champion_id",
+        "role_set",
+        "as_of_revision_id"
+      ],
+      "properties": {
+        "action_id": {"$ref": "#/$defs/stable_id"},
+        "canonical_side": {"$ref": "#/$defs/side"},
+        "champion_id": {"$ref": "#/$defs/stable_id"},
+        "role_set": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/role"}
+        },
+        "as_of_revision_id": {"$ref": "#/$defs/stable_id"}
+      }
+    },
+    "role_constraint_revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision_id",
+        "revision_index",
+        "supersedes_revision_id",
+        "action_id",
+        "previous_role_set",
+        "revised_role_set",
+        "reason",
+        "source_id",
+        "recorded_at",
+        "available_at"
+      ],
+      "properties": {
+        "revision_id": {"$ref": "#/$defs/stable_id"},
+        "revision_index": {"type": "integer", "minimum": 1},
+        "supersedes_revision_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stable_id"},
+            {"type": "null"}
+          ]
+        },
+        "action_id": {"$ref": "#/$defs/stable_id"},
+        "previous_role_set": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/role"}
+        },
+        "revised_role_set": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/role"}
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "source_correction",
+            "role_resolution",
+            "policy_narrowing",
+            "manual_hypothesis",
+            "terminal_assignment"
+          ]
+        },
+        "source_id": {"$ref": "#/$defs/stable_id"},
+        "recorded_at": {"$ref": "#/$defs/timestamp"},
+        "available_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "role_assignment_revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision_id",
+        "revision_index",
+        "supersedes_revision_id",
+        "action_id",
+        "previous_role",
+        "revised_role",
+        "reason",
+        "source_id",
+        "recorded_at",
+        "available_at"
+      ],
+      "properties": {
+        "revision_id": {"$ref": "#/$defs/stable_id"},
+        "revision_index": {"type": "integer", "minimum": 1},
+        "supersedes_revision_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stable_id"},
+            {"type": "null"}
+          ]
+        },
+        "action_id": {"$ref": "#/$defs/stable_id"},
+        "previous_role": {
+          "oneOf": [
+            {"$ref": "#/$defs/role"},
+            {"type": "null"}
+          ]
+        },
+        "revised_role": {"$ref": "#/$defs/role"},
+        "reason": {
+          "type": "string",
+          "enum": [
+            "initial_resolution",
+            "source_correction",
+            "hindsight_reassignment"
+          ]
+        },
+        "source_id": {"$ref": "#/$defs/stable_id"},
+        "recorded_at": {"$ref": "#/$defs/timestamp"},
+        "available_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "draft_protocol_mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "side_a_game_side",
+        "side_b_game_side",
+        "side_a_draft_order",
+        "side_b_draft_order",
+        "mapping_source_id",
+        "available_at"
+      ],
+      "properties": {
+        "side_a_game_side": {"$ref": "#/$defs/game_side"},
+        "side_b_game_side": {"$ref": "#/$defs/game_side"},
+        "side_a_draft_order": {"$ref": "#/$defs/draft_order"},
+        "side_b_draft_order": {"$ref": "#/$defs/draft_order"},
+        "mapping_source_id": {"$ref": "#/$defs/stable_id"},
+        "available_at": {"$ref": "#/$defs/timestamp"},
+        "mapping_basis": {
+          "type": "string",
+          "enum": ["observed", "authoritative_protocol_reconstruction"]
+        }
+      },
+      "x-semantic-invariants": [
+        {
+          "id": "draft_protocol_mapping_bijective_game_side",
+          "expression": "side_a_game_side != side_b_game_side",
+          "severity": "error"
+        },
+        {
+          "id": "draft_protocol_mapping_bijective_order",
+          "expression": "side_a_draft_order != side_b_draft_order",
+          "severity": "error"
+        }
+      ]
+    },
+    "draft_source_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "source_record_id",
+        "source_revision_id",
+        "supersedes_source_revision_id",
+        "observed_at",
+        "available_at",
+        "action_order_source"
+      ],
+      "properties": {
+        "source_id": {"$ref": "#/$defs/stable_id"},
+        "source_record_id": {"$ref": "#/$defs/stable_id"},
+        "source_revision_id": {"$ref": "#/$defs/stable_id"},
+        "supersedes_source_revision_id": {
+          "oneOf": [
+            {"$ref": "#/$defs/stable_id"},
+            {"type": "null"}
+          ]
+        },
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "available_at": {"$ref": "#/$defs/timestamp"},
+        "action_order_source": {
+          "type": "string",
+          "enum": ["observed", "authoritative_protocol_reconstruction"]
+        }
+      }
+    },
+    "terminal_assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "canonical_side", "champion_id", "role"],
+      "properties": {
+        "action_id": {"$ref": "#/$defs/stable_id"},
+        "canonical_side": {"$ref": "#/$defs/side"},
+        "champion_id": {"$ref": "#/$defs/stable_id"},
+        "role": {"$ref": "#/$defs/role"}
+      }
+    },
+    "terminal_assignments": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/terminal_assignment"},
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "canonical_side": {"const": "A"},
+              "role": {"const": "top"}
+            },
+            "required": ["canonical_side", "role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "canonical_side": {"const": "A"},
+              "role": {"const": "jungle"}
+            },
+            "required": ["canonical_side", "role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "canonical_side": {"const": "A"},
+              "role": {"const": "mid"}
+            },
+            "required": ["canonical_side", "role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "canonical_side": {"const": "A"},
+              "role": {"const": "bot"}
+            },
+            "required": ["canonical_side", "role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "canonical_side": {"const": "A"},
+              "role": {"const": "support"}
+            },
+            "required": ["canonical_side", "role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "canonical_side": {"const": "B"},
+              "role": {"const": "top"}
+            },
+            "required": ["canonical_side", "role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "canonical_side": {"const": "B"},
+              "role": {"const": "jungle"}
+            },
+            "required": ["canonical_side", "role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "canonical_side": {"const": "B"},
+              "role": {"const": "mid"}
+            },
+            "required": ["canonical_side", "role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "canonical_side": {"const": "B"},
+              "role": {"const": "bot"}
+            },
+            "required": ["canonical_side", "role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "canonical_side": {"const": "B"},
+              "role": {"const": "support"}
+            },
+            "required": ["canonical_side", "role"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ],
+      "x-semantic-invariants": [
+        {
+          "id": "terminal_assignment_unique_champions",
+          "expression": "count(distinct champion_id) == 10",
+          "severity": "error"
+        },
+        {
+          "id": "terminal_assignment_matches_pick_actions",
+          "expression": "set(action_id) == set(parent.actions[kind == 'pick'].action_id)",
+          "severity": "error"
+        }
+      ],
+      "x-negative-mutation-fixtures": [
+        {
+          "id": "terminal_assignment_missing_side_role",
+          "mutation": {
+            "op": "replace",
+            "path": "/final_assignments/9/role",
+            "value": "mid"
+          },
+          "expected_schema_failure": true
+        },
+        {
+          "id": "terminal_assignment_duplicate_champion",
+          "mutation": {
+            "op": "copy",
+            "from": "/final_assignments/0/champion_id",
+            "path": "/final_assignments/1/champion_id"
+          },
+          "expected_violation": "terminal_assignment_unique_champions"
+        }
+      ]
+    },
+    "ledger_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry_id",
+        "component_type",
+        "signed_logit",
+        "participant_ids",
+        "allocation_method"
+      ],
+      "properties": {
+        "entry_id": {"$ref": "#/$defs/stable_id"},
+        "component_type": {
+          "type": "string",
+          "enum": [
+            "protocol_order",
+            "champion_role_main",
+            "ally_pair",
+            "enemy_pair",
+            "whole_team",
+            "cross_team",
+            "player_champion_context",
+            "team_policy_context"
+          ]
+        },
+        "signed_logit": {"type": "number"},
+        "participant_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/stable_id"}
+        },
+        "allocation_method": {
+          "type": "string",
+          "enum": ["direct", "equal_pair_split", "exact_shapley", "exact_owen"]
+        },
+        "fallback_level": {
+          "type": "string",
+          "enum": ["F0", "F1", "F2", "F3", "F4", "F5"]
+        }
+      }
+    }
+  }
+}

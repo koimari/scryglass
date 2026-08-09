@@ -82,11 +82,14 @@ def _observations(
     half_life_days: float,
 ) -> pd.DataFrame:
     frame = canonicalize_competition_frame(maps)
-    frame["date"] = pd.to_datetime(frame.get("date"), errors="coerce")
+    frame["date"] = pd.to_datetime(frame.get("date"), errors="coerce", utc=True).dt.tz_localize(None)
     frame["y_blue_win"] = pd.to_numeric(frame.get("y_blue_win"), errors="coerce")
     frame = frame.dropna(subset=["date", "y_blue_win"]).copy()
     if as_of is not None:
-        frame = frame[frame["date"] <= pd.Timestamp(as_of)].copy()
+        cutoff = pd.Timestamp(as_of)
+        if cutoff.tzinfo is not None:
+            cutoff = cutoff.tz_convert("UTC").tz_localize(None)
+        frame = frame[frame["date"] <= cutoff].copy()
     frame = frame.sort_values("date")
     if frame.empty:
         return pd.DataFrame()
@@ -319,3 +322,64 @@ def fit_hierarchical_bt(
         (FEATURES_DIR / "ratings_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         (FEATURES_DIR / "ratings_hierarchical_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return snapshot, meta
+
+
+def _sunday_utc(as_of: pd.Timestamp | None) -> pd.Timestamp:
+    stamp = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp.now(tz="UTC")
+    if stamp.tzinfo is not None:
+        stamp = stamp.tz_convert("UTC").tz_localize(None)
+    return stamp.normalize() - pd.Timedelta(days=(stamp.weekday() + 1) % 7)
+
+
+def build_team_weekly_ranks(
+    maps: pd.DataFrame,
+    *,
+    as_of: pd.Timestamp | None = None,
+    min_series: int = 5,
+) -> dict[str, Any]:
+    """Return team rank movement from consecutive Sunday snapshots.
+
+    Both snapshots use the same hierarchical fit and the same conservative
+    ``rating_p10`` ordering as the public team ladder. New games therefore
+    change the ladder and its weekly movement in one refresh.
+    """
+
+    if min_series < 1:
+        raise ValueError("min_series must be positive")
+    week_start = _sunday_utc(as_of)
+    previous_start = week_start - pd.Timedelta(days=7)
+    cutoff = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp.now(tz="UTC")
+    current, _ = fit_hierarchical_bt(maps, as_of=cutoff, write=False)
+    previous, _ = fit_hierarchical_bt(maps, as_of=week_start - pd.Timedelta(microseconds=1), write=False)
+
+    def order(snapshot: pd.DataFrame) -> dict[str, int]:
+        if snapshot.empty:
+            return {}
+        eligible = snapshot[snapshot["n_series"].fillna(0).ge(min_series)].copy()
+        eligible["rank_value"] = pd.to_numeric(eligible["rating_p10"], errors="coerce")
+        eligible = eligible.dropna(subset=["rank_value"])
+        eligible["team_sort"] = eligible["team"].astype(str).str.casefold()
+        eligible = eligible.sort_values(["rank_value", "team_sort"], ascending=[False, True])
+        return {str(team): rank for rank, team in enumerate(eligible["team"].astype(str), start=1)}
+
+    current_rank = order(current)
+    previous_rank = order(previous)
+    current_through = pd.Timestamp(cutoff)
+    if current_through.tzinfo is not None:
+        current_through = current_through.tz_convert("UTC").tz_localize(None)
+    by_team: dict[str, dict[str, int | None]] = {}
+    for team, rank in current_rank.items():
+        prior = previous_rank.get(team)
+        by_team[team] = {
+            "rank": rank,
+            "delta": (prior - rank) if prior is not None else None,
+        }
+
+    return {
+        "as_of": f"{week_start.isoformat()}Z",
+        "previous_as_of": f"{previous_start.isoformat()}Z",
+        "current_through": f"{current_through.isoformat()}Z",
+        "min_series": int(min_series),
+        "by_team": by_team,
+        "note": "Rank movement compares conservative team rating at Sunday 00:00 UTC snapshots; positive delta means a climb.",
+    }

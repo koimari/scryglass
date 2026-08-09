@@ -1,0 +1,1398 @@
+{
+  "artifact_sha256": "89c8009b0441c640d791c382db7f078d329a1448ef049f68f82ff27a06fb0942",
+  "atom_snapshots": [
+    {
+      "bridge_artifact_sha256": "1b781f70e0899157bcd3c6e197785a47a33467a2490b5e776c955b4a7aff92d9",
+      "effective_from": "2026-07-28T18:00:00.000Z",
+      "effective_to": null,
+      "generated_at": "2026-08-07T20:55:44.102200Z",
+      "official_patch": "26.15",
+      "patch": "26.15",
+      "source": {
+        "data_patch": "26.15",
+        "lcc_commit": "f8e40deb8782b8adb1c345facf9d17389cedd18c",
+        "locator": "data/lol/v2/champions/lcc-atom-bridge-v1.json",
+        "sha256": "35aaa81d0fd8b1a6a633c5e8c34ab956af7a4dc1344cf3c3129d988dff13555f"
+      }
+    }
+  ],
+  "audit": {
+    "ambiguity_policy": "missing evidence, a changed hash, an unknown token, or a missing atom snapshot returns unavailable",
+    "audited_at": "2026-08-08T12:13:56Z",
+    "method": {
+      "atom_policy": "the current LCC bridge is one 26.15 snapshot; historical tokens remain unavailable for atom resolution",
+      "lag_policy": "professional competition can remain on an older patch after a live release; the exact OE token is retained and no nearest-patch substitution is made",
+      "oe_interval": "deduplicate OE player rows by gameid, then group exact source patch tokens after the scope start",
+      "official_match": "match the OE season minor to the official Riot patch minor, then require the first OE observation to be on or after the Riot patch-note publication time",
+      "time_safe_lookup": "resolver requires as_of inside the hash-bound OE interval and on or after the official release"
+    }
+  },
+  "authority": {
+    "exact_atom_snapshot": "only rows with a registered snapshot and time-safe as_of",
+    "exact_official_patch": true,
+    "prediction": false,
+    "publication": false
+  },
+  "mapping_version": "oe-official-atom-v1",
+  "mappings": [
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 315,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.01']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-s1-1-notes/",
+          "published_at": "2025-01-07T19:00:00.000Z",
+          "selector": "official patch-note title '25.S1.1' and JSON-LD datePublished",
+          "sha256": "a47864856d81415d61b5cd5648184a3ea5a7f9a89885cd0794f0a14b6454a453"
+        }
+      ],
+      "observed_game_count": 315,
+      "oe_observed_interval": {
+        "end": "2025-01-31T18:54:02Z",
+        "start": "2025-01-11T11:11:24Z"
+      },
+      "oe_token": "15.01",
+      "official_label": "25.S1.1",
+      "official_patch": "25.01",
+      "official_release_at": "2025-01-07T19:00:00.000Z",
+      "source_tokens": [
+        "15.01"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 536,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.02']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-s1-2-notes/",
+          "published_at": "2025-01-22T19:00:00.000Z",
+          "selector": "official patch-note title '25.S1.2' and JSON-LD datePublished",
+          "sha256": "10ba4b7a0dcb3dd2b667416e6898af7c37c705f76d643c9aa03de35e4811e237"
+        }
+      ],
+      "observed_game_count": 536,
+      "oe_observed_interval": {
+        "end": "2025-02-16T11:10:52Z",
+        "start": "2025-01-24T09:34:15Z"
+      },
+      "oe_token": "15.02",
+      "official_label": "25.S1.2",
+      "official_patch": "25.02",
+      "official_release_at": "2025-01-22T19:00:00.000Z",
+      "source_tokens": [
+        "15.02"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 569,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.03']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-2025-s1-3-notes/",
+          "published_at": "2025-02-04T19:00:00.000Z",
+          "selector": "official patch-note title '2025.S1.3' and JSON-LD datePublished",
+          "sha256": "22a1b5cd554df5bc55af2378e5b56b112ce0c85c7d2be9d674412273d716bbdb"
+        }
+      ],
+      "observed_game_count": 569,
+      "oe_observed_interval": {
+        "end": "2025-03-02T19:02:17Z",
+        "start": "2025-02-08T10:19:56Z"
+      },
+      "oe_token": "15.03",
+      "official_label": "2025.S1.3",
+      "official_patch": "25.03",
+      "official_release_at": "2025-02-04T19:00:00.000Z",
+      "source_tokens": [
+        "15.03"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 371,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.04']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-04-notes/",
+          "published_at": "2025-02-19T19:00:00.000Z",
+          "selector": "official patch-note title '25.04' and JSON-LD datePublished",
+          "sha256": "e034431a7b271712889c7f410efea65b4366899b787d8176c59460381409ead0"
+        }
+      ],
+      "observed_game_count": 371,
+      "oe_observed_interval": {
+        "end": "2025-03-10T19:20:30Z",
+        "start": "2025-02-21T19:07:39Z"
+      },
+      "oe_token": "15.04",
+      "official_label": "25.04",
+      "official_patch": "25.04",
+      "official_release_at": "2025-02-19T19:00:00.000Z",
+      "source_tokens": [
+        "15.04"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 214,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.05']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-05-notes/",
+          "published_at": "2025-03-04T19:00:00.000Z",
+          "selector": "official patch-note title '25.05' and JSON-LD datePublished",
+          "sha256": "02f5daad744839bf48aabc4ec615e2b6b2f822f41760531cd07622423e40da90"
+        }
+      ],
+      "observed_game_count": 214,
+      "oe_observed_interval": {
+        "end": "2025-03-30T13:00:35Z",
+        "start": "2025-03-09T15:43:45Z"
+      },
+      "oe_token": "15.05",
+      "official_label": "25.05",
+      "official_patch": "25.05",
+      "official_release_at": "2025-03-04T19:00:00.000Z",
+      "source_tokens": [
+        "15.05"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 464,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.06']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-06-notes/",
+          "published_at": "2025-03-18T18:00:00.000Z",
+          "selector": "official patch-note title '25.06' and JSON-LD datePublished",
+          "sha256": "8fbb3f2dfd92d32a85a10aa0d2fa4021a07e02ff98a29853edd43c5c2169e8f0"
+        }
+      ],
+      "observed_game_count": 464,
+      "oe_observed_interval": {
+        "end": "2025-04-13T14:17:34Z",
+        "start": "2025-03-22T08:12:20Z"
+      },
+      "oe_token": "15.06",
+      "official_label": "25.06",
+      "official_patch": "25.06",
+      "official_release_at": "2025-03-18T18:00:00.000Z",
+      "source_tokens": [
+        "15.06"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 820,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.07']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-07-notes/",
+          "published_at": "2025-04-01T18:00:00.000Z",
+          "selector": "official patch-note title '25.07' and JSON-LD datePublished",
+          "sha256": "b4f8001491b6ce2d43a2bc34740fd6ca9a0d2ae2fa008bf836dd2c6dbba0b93c"
+        }
+      ],
+      "observed_game_count": 820,
+      "oe_observed_interval": {
+        "end": "2025-04-23T18:37:30Z",
+        "start": "2025-04-04T08:09:04Z"
+      },
+      "oe_token": "15.07",
+      "official_label": "25.07",
+      "official_patch": "25.07",
+      "official_release_at": "2025-04-01T18:00:00.000Z",
+      "source_tokens": [
+        "15.07"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 796,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.08']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-08-notes/",
+          "published_at": "2025-04-15T18:00:00.000Z",
+          "selector": "official patch-note title '25.08' and JSON-LD datePublished",
+          "sha256": "11cc7be294ad718b9bc5cad947b94dc6df28cae4dbddff00e74278fa8f4251ad"
+        }
+      ],
+      "observed_game_count": 796,
+      "oe_observed_interval": {
+        "end": "2025-05-09T19:37:01Z",
+        "start": "2025-04-17T15:17:17Z"
+      },
+      "oe_token": "15.08",
+      "official_label": "25.08",
+      "official_patch": "25.08",
+      "official_release_at": "2025-04-15T18:00:00.000Z",
+      "source_tokens": [
+        "15.08"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 875,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.09']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-09-notes/",
+          "published_at": "2025-04-29T18:00:00.000Z",
+          "selector": "official patch-note title '25.09' and JSON-LD datePublished",
+          "sha256": "63a21a44fe6420a4a93338cde252b075556d4491487807c8f11ef661449fee2a"
+        }
+      ],
+      "observed_game_count": 875,
+      "oe_observed_interval": {
+        "end": "2025-05-24T11:01:07Z",
+        "start": "2025-05-02T14:19:22Z"
+      },
+      "oe_token": "15.09",
+      "official_label": "25.09",
+      "official_patch": "25.09",
+      "official_release_at": "2025-04-29T18:00:00.000Z",
+      "source_tokens": [
+        "15.09"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 652,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.1']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-10-notes/",
+          "published_at": "2025-05-13T18:00:00.000Z",
+          "selector": "official patch-note title '25.10' and JSON-LD datePublished",
+          "sha256": "9353b7646cca5f1cf512a1708d659803a8def51a0b1cbc49022ec9e8014bec67"
+        }
+      ],
+      "observed_game_count": 652,
+      "oe_observed_interval": {
+        "end": "2025-06-15T19:39:19Z",
+        "start": "2025-05-15T20:09:10Z"
+      },
+      "oe_token": "15.10",
+      "official_label": "25.10",
+      "official_patch": "25.10",
+      "official_release_at": "2025-05-13T18:00:00.000Z",
+      "source_tokens": [
+        "15.1"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 445,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.11']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-11-notes/",
+          "published_at": "2025-05-27T18:00:00.000Z",
+          "selector": "official patch-note title '25.11' and JSON-LD datePublished",
+          "sha256": "837ea0fe863b9f09a8ce63ce5968e4d64e7db50d4cef86710dc125e40e325142"
+        }
+      ],
+      "observed_game_count": 445,
+      "oe_observed_interval": {
+        "end": "2025-06-22T12:49:53Z",
+        "start": "2025-05-31T06:22:44Z"
+      },
+      "oe_token": "15.11",
+      "official_label": "25.11",
+      "official_patch": "25.11",
+      "official_release_at": "2025-05-27T18:00:00.000Z",
+      "source_tokens": [
+        "15.11"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 166,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.12']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-12-notes/",
+          "published_at": "2025-06-10T18:05:00.000Z",
+          "selector": "official patch-note title '25.12' and JSON-LD datePublished",
+          "sha256": "0ddbdc24e32eb052601443b0c44e55f19a925e4bed7783c54ce5389754eac004"
+        }
+      ],
+      "observed_game_count": 166,
+      "oe_observed_interval": {
+        "end": "2025-06-28T14:50:23Z",
+        "start": "2025-06-12T20:16:28Z"
+      },
+      "oe_token": "15.12",
+      "official_label": "25.12",
+      "official_patch": "25.12",
+      "official_release_at": "2025-06-10T18:05:00.000Z",
+      "source_tokens": [
+        "15.12"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 385,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.13']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-13-notes/",
+          "published_at": "2025-06-24T18:00:00.000Z",
+          "selector": "official patch-note title '25.13' and JSON-LD datePublished",
+          "sha256": "ab22a7e7bdd0fbb0c1e60eccdc11a07f9d2b3b9c238e6dbeae8bad2c0c07ca8d"
+        }
+      ],
+      "observed_game_count": 385,
+      "oe_observed_interval": {
+        "end": "2025-07-29T19:05:40Z",
+        "start": "2025-06-27T19:13:18Z"
+      },
+      "oe_token": "15.13",
+      "official_label": "25.13",
+      "official_patch": "25.13",
+      "official_release_at": "2025-06-24T18:00:00.000Z",
+      "source_tokens": [
+        "15.13"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 598,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.14']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-14-notes/",
+          "published_at": "2025-07-15T18:00:00.000Z",
+          "selector": "official patch-note title '25.14' and JSON-LD datePublished",
+          "sha256": "1d345f4f78eba94edf5a0409b32a43c3b9be93967d371611745467e8ebd92f7d"
+        }
+      ],
+      "observed_game_count": 598,
+      "oe_observed_interval": {
+        "end": "2025-08-03T21:22:56Z",
+        "start": "2025-07-17T21:08:26Z"
+      },
+      "oe_token": "15.14",
+      "official_label": "25.14",
+      "official_patch": "25.14",
+      "official_release_at": "2025-07-15T18:00:00.000Z",
+      "source_tokens": [
+        "15.14"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 637,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.15']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-15-notes/",
+          "published_at": "2025-07-29T18:00:00.000Z",
+          "selector": "official patch-note title '25.15' and JSON-LD datePublished",
+          "sha256": "7fd282e86c2dcf3a8188eb1e628e2efb92c669dd5a7737f3b6f7225105579328"
+        }
+      ],
+      "observed_game_count": 637,
+      "oe_observed_interval": {
+        "end": "2025-08-19T18:19:39Z",
+        "start": "2025-07-31T21:21:56Z"
+      },
+      "oe_token": "15.15",
+      "official_label": "25.15",
+      "official_patch": "25.15",
+      "official_release_at": "2025-07-29T18:00:00.000Z",
+      "source_tokens": [
+        "15.15"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 613,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.16']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-16-notes/",
+          "published_at": "2025-08-12T18:00:00.000Z",
+          "selector": "official patch-note title '25.16' and JSON-LD datePublished",
+          "sha256": "150ee2de660e69a503b60acb3bbb6846227d17f3b2c22c462a1f9a2501620eff"
+        }
+      ],
+      "observed_game_count": 613,
+      "oe_observed_interval": {
+        "end": "2025-09-12T18:44:09Z",
+        "start": "2025-08-14T21:07:07Z"
+      },
+      "oe_token": "15.16",
+      "official_label": "25.16",
+      "official_patch": "25.16",
+      "official_release_at": "2025-08-12T18:00:00.000Z",
+      "source_tokens": [
+        "15.16"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 622,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.17']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-17-notes/",
+          "published_at": "2025-08-26T18:00:00.000Z",
+          "selector": "official patch-note title '25.17' and JSON-LD datePublished",
+          "sha256": "f31bdad41b8a17ad4b66f86c4b5894feab9eb0846fffb3635b57a4a96bd92af1"
+        }
+      ],
+      "observed_game_count": 622,
+      "oe_observed_interval": {
+        "end": "2025-10-01T05:08:31Z",
+        "start": "2025-08-28T13:10:30Z"
+      },
+      "oe_token": "15.17",
+      "official_label": "25.17",
+      "official_patch": "25.17",
+      "official_release_at": "2025-08-26T18:00:00.000Z",
+      "source_tokens": [
+        "15.17"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 180,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.18']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-18-notes/",
+          "published_at": "2025-09-09T18:00:00.000Z",
+          "selector": "official patch-note title '25.18' and JSON-LD datePublished",
+          "sha256": "cedce97faf65573b21ff9e8b09d4d2570d511fd8d205e56864ae05fc5966b414"
+        }
+      ],
+      "observed_game_count": 180,
+      "oe_observed_interval": {
+        "end": "2025-09-28T22:54:04Z",
+        "start": "2025-09-13T20:14:47Z"
+      },
+      "oe_token": "15.18",
+      "official_label": "25.18",
+      "official_patch": "25.18",
+      "official_release_at": "2025-09-09T18:00:00.000Z",
+      "source_tokens": [
+        "15.18"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 378,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.19']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-19-notes/",
+          "published_at": "2025-09-23T18:00:00.000Z",
+          "selector": "official patch-note title '25.19' and JSON-LD datePublished",
+          "sha256": "28c6344ae0851d6a7dea936045b284aea429e2f0df894db84c5f49497a614850"
+        }
+      ],
+      "observed_game_count": 378,
+      "oe_observed_interval": {
+        "end": "2025-10-13T10:46:43Z",
+        "start": "2025-09-27T16:11:30Z"
+      },
+      "oe_token": "15.19",
+      "official_label": "25.19",
+      "official_patch": "25.19",
+      "official_release_at": "2025-09-23T18:00:00.000Z",
+      "source_tokens": [
+        "15.19"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 192,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.2']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-20-notes/",
+          "published_at": "2025-10-07T18:00:00.000Z",
+          "selector": "official patch-note title '25.20' and JSON-LD datePublished",
+          "sha256": "ceb77dcc496eb9e212ac65e6c3dc8c473546725b2728946703fc138ea06a89cf"
+        }
+      ],
+      "observed_game_count": 192,
+      "oe_observed_interval": {
+        "end": "2025-11-09T11:31:30Z",
+        "start": "2025-10-11T16:04:11Z"
+      },
+      "oe_token": "15.20",
+      "official_label": "25.20",
+      "official_patch": "25.20",
+      "official_release_at": "2025-10-07T18:00:00.000Z",
+      "source_tokens": [
+        "15.2"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 60,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.21']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-21-notes/",
+          "published_at": "2025-10-21T18:00:00.000Z",
+          "selector": "official patch-note title '25.21' and JSON-LD datePublished",
+          "sha256": "74dcf7593a5e6c746f96dc19d43d99c8cbe10c81828d59115f8bd65f42c0dfb1"
+        }
+      ],
+      "observed_game_count": 60,
+      "oe_observed_interval": {
+        "end": "2025-11-16T11:34:09Z",
+        "start": "2025-11-01T05:05:27Z"
+      },
+      "oe_token": "15.21",
+      "official_label": "25.21",
+      "official_patch": "25.21",
+      "official_release_at": "2025-10-21T18:00:00.000Z",
+      "source_tokens": [
+        "15.21"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 19,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.22']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-22-notes/",
+          "published_at": "2025-11-04T19:00:00.000Z",
+          "selector": "official patch-note title '25.22' and JSON-LD datePublished",
+          "sha256": "a42c454d8a0bd8661928abcb2e1b17b793a942644b62c11fbef6b86d859b9fe1"
+        }
+      ],
+      "observed_game_count": 19,
+      "oe_observed_interval": {
+        "end": "2025-11-22T21:20:17Z",
+        "start": "2025-11-11T17:05:26Z"
+      },
+      "oe_token": "15.22",
+      "official_label": "25.22",
+      "official_patch": "25.22",
+      "official_release_at": "2025-11-04T19:00:00.000Z",
+      "source_tokens": [
+        "15.22"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 56,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.23']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-23-notes/",
+          "published_at": "2025-11-18T19:00:00.000Z",
+          "selector": "official patch-note title '25.23' and JSON-LD datePublished",
+          "sha256": "af0923b58d3de18dd21da58d9e538c8a199d2948a36e28a25dc4e2e3057f7271"
+        }
+      ],
+      "observed_game_count": 56,
+      "oe_observed_interval": {
+        "end": "2025-12-14T11:40:05Z",
+        "start": "2025-12-06T06:06:51Z"
+      },
+      "oe_token": "15.23",
+      "official_label": "25.23",
+      "official_patch": "25.23",
+      "official_release_at": "2025-11-18T19:00:00.000Z",
+      "source_tokens": [
+        "15.23"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 78,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['15.24']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-25-24-notes/",
+          "published_at": "2025-12-02T19:00:00.000Z",
+          "selector": "official patch-note title '25.24' and JSON-LD datePublished",
+          "sha256": "8841d244f5c90069739dd4a8c9cc31f5995af1f60b9a75ed68823d789b29ae79"
+        }
+      ],
+      "observed_game_count": 78,
+      "oe_observed_interval": {
+        "end": "2025-12-29T10:52:27Z",
+        "start": "2025-12-15T07:18:38Z"
+      },
+      "oe_token": "15.24",
+      "official_label": "25.24",
+      "official_patch": "25.24",
+      "official_release_at": "2025-12-02T19:00:00.000Z",
+      "source_tokens": [
+        "15.24"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 433,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.01']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-26-1-notes/",
+          "published_at": "2026-01-07T19:00:00.000Z",
+          "selector": "official patch-note title '26.1' and JSON-LD datePublished",
+          "sha256": "e3486ed150b7e98eb569e3110233a277b1a1e5fc813749cb60af0574a9cffb46"
+        }
+      ],
+      "observed_game_count": 433,
+      "oe_observed_interval": {
+        "end": "2026-01-30T18:57:52Z",
+        "start": "2026-01-08T17:08:27Z"
+      },
+      "oe_token": "16.01",
+      "official_label": "26.1",
+      "official_patch": "26.01",
+      "official_release_at": "2026-01-07T19:00:00.000Z",
+      "source_tokens": [
+        "16.01"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 546,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.02']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-26-2-notes/",
+          "published_at": "2026-01-21T19:00:00.000Z",
+          "selector": "official patch-note title '26.2' and JSON-LD datePublished",
+          "sha256": "41d0762d56350d60be2c5f293ef5372d18a0408f5c592544edb480607a7e5b2c"
+        }
+      ],
+      "observed_game_count": 546,
+      "oe_observed_interval": {
+        "end": "2026-02-11T12:10:08Z",
+        "start": "2026-01-24T15:51:32Z"
+      },
+      "oe_token": "16.02",
+      "official_label": "26.2",
+      "official_patch": "26.02",
+      "official_release_at": "2026-01-21T19:00:00.000Z",
+      "source_tokens": [
+        "16.02"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 623,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.03']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/patch-26-3-notes/",
+          "published_at": "2026-02-03T19:00:00.000Z",
+          "selector": "official patch-note title '26.3' and JSON-LD datePublished",
+          "sha256": "222999b140f96e12fc343791db674300fc77e3c49b089b21acc501ec4a6abb0f"
+        }
+      ],
+      "observed_game_count": 623,
+      "oe_observed_interval": {
+        "end": "2026-03-08T12:04:35Z",
+        "start": "2026-02-07T01:38:49Z"
+      },
+      "oe_token": "16.03",
+      "official_label": "26.3",
+      "official_patch": "26.03",
+      "official_release_at": "2026-02-03T19:00:00.000Z",
+      "source_tokens": [
+        "16.03"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 320,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.04']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/league-of-legends-patch-26-4-notes/",
+          "published_at": "2026-02-18T19:00:00.000Z",
+          "selector": "official patch-note title '26.4' and JSON-LD datePublished",
+          "sha256": "590406130621cfdb136128d34905c989f20cabe36b06bcd60297dec749940b2e"
+        }
+      ],
+      "observed_game_count": 320,
+      "oe_observed_interval": {
+        "end": "2026-03-15T10:52:45Z",
+        "start": "2026-02-20T21:09:00Z"
+      },
+      "oe_token": "16.04",
+      "official_label": "26.4",
+      "official_patch": "26.04",
+      "official_release_at": "2026-02-18T19:00:00.000Z",
+      "source_tokens": [
+        "16.04"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 306,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.05']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/league-of-legends-patch-26-5-notes/",
+          "published_at": "2026-03-03T19:00:00.000Z",
+          "selector": "official patch-note title '26.5' and JSON-LD datePublished",
+          "sha256": "39ab8fe841505f8d60c6ceb1675ffdf1d9167606a224d078f24e6ecc683fce91"
+        }
+      ],
+      "observed_game_count": 306,
+      "oe_observed_interval": {
+        "end": "2026-03-29T14:15:48Z",
+        "start": "2026-03-05T16:32:02Z"
+      },
+      "oe_token": "16.05",
+      "official_label": "26.5",
+      "official_patch": "26.05",
+      "official_release_at": "2026-03-03T19:00:00.000Z",
+      "source_tokens": [
+        "16.05"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 326,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.06']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/league-of-legends-patch-26-6-notes/",
+          "published_at": "2026-03-17T18:00:00.000Z",
+          "selector": "official patch-note title '26.6' and JSON-LD datePublished",
+          "sha256": "dc04e2acd40255688f795183d1d2c7d33453947629d91bc88a600d0f729042db"
+        }
+      ],
+      "observed_game_count": 326,
+      "oe_observed_interval": {
+        "end": "2026-04-05T11:13:31Z",
+        "start": "2026-03-23T16:02:03Z"
+      },
+      "oe_token": "16.06",
+      "official_label": "26.6",
+      "official_patch": "26.06",
+      "official_release_at": "2026-03-17T18:00:00.000Z",
+      "source_tokens": [
+        "16.06"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 730,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.07']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/league-of-legends-patch-26-7-notes/",
+          "published_at": "2026-03-31T18:00:00.000Z",
+          "selector": "official patch-note title '26.7' and JSON-LD datePublished",
+          "sha256": "ab0b32d23b2fc99d074312d316656c6541eaa99d1bffdb0c8abf33c123e2b44e"
+        }
+      ],
+      "observed_game_count": 730,
+      "oe_observed_interval": {
+        "end": "2026-04-24T19:45:45Z",
+        "start": "2026-04-04T07:13:58Z"
+      },
+      "oe_token": "16.07",
+      "official_label": "26.7",
+      "official_patch": "26.07",
+      "official_release_at": "2026-03-31T18:00:00.000Z",
+      "source_tokens": [
+        "16.07"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 700,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.08']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/league-of-legends-patch-26-8-notes/",
+          "published_at": "2026-04-14T18:00:00.000Z",
+          "selector": "official patch-note title '26.8' and JSON-LD datePublished",
+          "sha256": "717688e4020ec32e0709ca5abd89cc8e4fe0f9a611f62420fb47269e794bd8f3"
+        }
+      ],
+      "observed_game_count": 700,
+      "oe_observed_interval": {
+        "end": "2026-05-03T13:22:08Z",
+        "start": "2026-04-18T04:07:45Z"
+      },
+      "oe_token": "16.08",
+      "official_label": "26.8",
+      "official_patch": "26.08",
+      "official_release_at": "2026-04-14T18:00:00.000Z",
+      "source_tokens": [
+        "16.08"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 747,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.09']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/league-of-legends-patch-26-9-notes/",
+          "published_at": "2026-04-28T18:00:00.000Z",
+          "selector": "official patch-note title '26.9' and JSON-LD datePublished",
+          "sha256": "912e1f952b8df12d6b281823534c4de97c161b9b0d0a30c3fbbd4d78ac20c206"
+        }
+      ],
+      "observed_game_count": 747,
+      "oe_observed_interval": {
+        "end": "2026-05-28T11:03:37Z",
+        "start": "2026-05-01T16:13:42Z"
+      },
+      "oe_token": "16.09",
+      "official_label": "26.9",
+      "official_patch": "26.09",
+      "official_release_at": "2026-04-28T18:00:00.000Z",
+      "source_tokens": [
+        "16.09"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 795,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.1']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/league-of-legends-patch-26-10-notes/",
+          "published_at": "2026-05-12T18:00:00.000Z",
+          "selector": "official patch-note title '26.10' and JSON-LD datePublished",
+          "sha256": "8168ea78760eeba1d9dd3766937e20756fa0f2aad2b4ef2849108c326f70c5b0"
+        }
+      ],
+      "observed_game_count": 795,
+      "oe_observed_interval": {
+        "end": "2026-06-14T10:20:00Z",
+        "start": "2026-05-14T20:09:18Z"
+      },
+      "oe_token": "16.10",
+      "official_label": "26.10",
+      "official_patch": "26.10",
+      "official_release_at": "2026-05-12T18:00:00.000Z",
+      "source_tokens": [
+        "16.1"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 383,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.11']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/league-of-legends-patch-26-11-notes/",
+          "published_at": "2026-05-27T18:00:00.000Z",
+          "selector": "official patch-note title '26.11' and JSON-LD datePublished",
+          "sha256": "bde10d4518c9f632199e468d90115cc640c50729d0c32ffe753080aef2c2ec9a"
+        }
+      ],
+      "observed_game_count": 383,
+      "oe_observed_interval": {
+        "end": "2026-06-21T11:38:09Z",
+        "start": "2026-05-30T16:11:23Z"
+      },
+      "oe_token": "16.11",
+      "official_label": "26.11",
+      "official_patch": "26.11",
+      "official_release_at": "2026-05-27T18:00:00.000Z",
+      "source_tokens": [
+        "16.11"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 27,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.12']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/league-of-legends-patch-26-12-notes/",
+          "published_at": "2026-06-09T18:00:00.000Z",
+          "selector": "official patch-note title '26.12' and JSON-LD datePublished",
+          "sha256": "854bcc379fb3c701b948e0a540a48c50a9de3b482768c0d1433cb6e77fca4a84"
+        }
+      ],
+      "observed_game_count": 27,
+      "oe_observed_interval": {
+        "end": "2026-06-20T23:37:16Z",
+        "start": "2026-06-17T20:08:02Z"
+      },
+      "oe_token": "16.12",
+      "official_label": "26.12",
+      "official_patch": "26.12",
+      "official_release_at": "2026-06-09T18:00:00.000Z",
+      "source_tokens": [
+        "16.12"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 379,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.13']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/league-of-legends-patch-26-13-notes/",
+          "published_at": "2026-06-23T18:00:00.000Z",
+          "selector": "official patch-note title '26.13' and JSON-LD datePublished",
+          "sha256": "ab5f09bf38f807d0df4f1e174a96a8343854de20ef44fa377fcfa95f1e40c74a"
+        }
+      ],
+      "observed_game_count": 379,
+      "oe_observed_interval": {
+        "end": "2026-07-20T10:07:25Z",
+        "start": "2026-06-28T03:10:49Z"
+      },
+      "oe_token": "16.13",
+      "official_label": "26.13",
+      "official_patch": "26.13",
+      "official_release_at": "2026-06-23T18:00:00.000Z",
+      "source_tokens": [
+        "16.13"
+      ]
+    },
+    {
+      "ambiguity_status": "atom_snapshot_unavailable",
+      "atom_snapshot_patch": null,
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 542,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.14']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/league-of-legends-patch-26-14-notes/",
+          "published_at": "2026-07-14T18:00:00.000Z",
+          "selector": "official patch-note title '26.14' and JSON-LD datePublished",
+          "sha256": "40667a12bc309e73ae33de05f64939bb84d3445341512d675703fb6e388d15fe"
+        }
+      ],
+      "observed_game_count": 542,
+      "oe_observed_interval": {
+        "end": "2026-08-03T19:04:50Z",
+        "start": "2026-07-18T23:07:23Z"
+      },
+      "oe_token": "16.14",
+      "official_label": "26.14",
+      "official_patch": "26.14",
+      "official_release_at": "2026-07-14T18:00:00.000Z",
+      "source_tokens": [
+        "16.14"
+      ]
+    },
+    {
+      "ambiguity_status": "none",
+      "atom_snapshot_patch": "26.15",
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 311,
+          "selector": "unique gameid rows; date >= 2025-01-01T00:00:00Z; patch in ['16.15']",
+          "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/league-of-legends-patch-26-15-notes/",
+          "published_at": "2026-07-28T18:00:00.000Z",
+          "selector": "official patch-note title '26.15' and JSON-LD datePublished",
+          "sha256": "e47fbce5ed68d8f2fee021e57a63463ced20b8bdd6cc6eab2dc43b8160c3edd4"
+        }
+      ],
+      "observed_game_count": 311,
+      "oe_observed_interval": {
+        "end": "2026-08-08T12:13:56Z",
+        "start": "2026-07-31T15:08:55Z"
+      },
+      "oe_token": "16.15",
+      "official_label": "26.15",
+      "official_patch": "26.15",
+      "official_release_at": "2026-07-28T18:00:00.000Z",
+      "source_tokens": [
+        "16.15"
+      ]
+    }
+  ],
+  "schema_version": "scryglass:oe-atom-patch-map:v1",
+  "source_window": {
+    "end": "2026-08-08T12:13:56Z",
+    "source_game_count": 17209,
+    "source_mode": "oe_only",
+    "source_token_count": 39,
+    "start": "2025-01-01T00:00:00Z"
+  },
+  "sources": [
+    {
+      "kind": "oe_live_player_games",
+      "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+      "mutable_live_source": true,
+      "role": "OE token and source interval evidence",
+      "sha256": "a2c8a295e6674ffa91e622876c3e25706623ea5bb7936fdd4cd6981f540b942e"
+    },
+    {
+      "kind": "oe_live_meta",
+      "locator": "data/lol/warehouse/parquet/oe_live/meta.json",
+      "mutable_live_source": true,
+      "role": "current source watermark and OE-only composition",
+      "sha256": "74268c54bbd86423b58cf52e63303d013228feefc07f854b3e9663eb575a35a6"
+    },
+    {
+      "bridge_artifact_sha256": "1b781f70e0899157bcd3c6e197785a47a33467a2490b5e776c955b4a7aff92d9",
+      "kind": "lcc_atom_bridge",
+      "locator": "data/lol/v2/champions/lcc-atom-bridge-v1.json",
+      "mutable_source": true,
+      "role": "atom snapshot provenance",
+      "semantic_sha256": "6c99cb25d981954e5e08231a89c3cab23b2062988cd7ccfc3eb7c79d38092bbd",
+      "sha256": "35aaa81d0fd8b1a6a633c5e8c34ab956af7a4dc1344cf3c3129d988dff13555f"
+    }
+  ]
+}

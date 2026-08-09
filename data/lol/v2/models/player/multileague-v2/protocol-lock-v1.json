@@ -1,0 +1,543 @@
+{
+  "schema_version": "scryglass:multileague-rating-v2-protocol-lock:v1",
+  "protocol_id": "scryglass:multileague-rating-v2:adaptive-lock-2026-08-01",
+  "locked_at": "2026-08-01T00:00:00Z",
+  "result_state": "PROTOCOL_LOCKED_SEALED_FINAL_UNOPENED",
+  "source_locks": [
+    {
+      "kind": "warehouse_maps",
+      "locator": "data/lol/warehouse/parquet/maps.parquet",
+      "bytes": 7133822,
+      "raw_sha256": "04c0cce1d86a4358d9eeb5937f61d5288358953e66c693a1ce88b0b650295d08"
+    },
+    {
+      "kind": "warehouse_players",
+      "locator": "data/lol/warehouse/parquet/players.parquet",
+      "bytes": 60933578,
+      "raw_sha256": "12f1cca978d683a0df8ceec0772999aeb03c723b4465f98674247f327dea71fa"
+    },
+    {
+      "kind": "predecessor_rating_artifact",
+      "locator": "data/lol/v2/models/player/multileague-v1/private-development-artifact-v1.json",
+      "bytes": 527781,
+      "raw_sha256": "593b1d63c54d5c1089723afab2faf10048cd26f61dc3c402527679a9f54fdb4f"
+    },
+    {
+      "kind": "predecessor_benchmark_artifact",
+      "locator": "data/lol/v2/models/player/multileague-v1/strong-baseline-benchmark-v1.json",
+      "bytes": 88831,
+      "raw_sha256": "5557a36eaf06dc5a2360dcd535b7abdedfc7e2c8f31f14c0082c588fb6ac455c"
+    },
+    {
+      "kind": "input_adapter_source",
+      "locator": "lol_kills/v2/ratings/player/multileague_development.py",
+      "bytes": 35782,
+      "raw_sha256": "6db6a684c87112262560439075960f7b3fc3fa6d41eb74bf00b56fba1be55cd8"
+    },
+    {
+      "kind": "predecessor_runner_source",
+      "locator": "lol_kills/v2/ratings/player/multileague_runner.py",
+      "bytes": 60965,
+      "raw_sha256": "d7d52b5f30fe7cd69a9b18fe88bf2fc54f74969c49a2f37fb418b6c114e2956b"
+    },
+    {
+      "kind": "benchmark_source",
+      "locator": "lol_kills/v2/ratings/player/multileague_benchmark.py",
+      "bytes": 28633,
+      "raw_sha256": "53420c30e8ac5f272d1a3f16e1817786f4782a30dd881f8c3055ebe1f2e09632"
+    },
+    {
+      "kind": "protocol_source",
+      "locator": "lol_kills/v2/ratings/player/multileague_v2_protocol.py",
+      "bytes": 22297,
+      "raw_sha256": "d172098800ad39c0fed3fa1127e7838b52b7a20d91e7f7381900b4da7effc268"
+    }
+  ],
+  "input_binding": {
+    "maps_sha256": "04c0cce1d86a4358d9eeb5937f61d5288358953e66c693a1ce88b0b650295d08",
+    "players_sha256": "12f1cca978d683a0df8ceec0772999aeb03c723b4465f98674247f327dea71fa",
+    "cluster_partition_sha256": "d7c59b5eb0fb278f6c7c8aadf4193d8d5f42993f717dc95932b37822c6c48906",
+    "development_selected_rows_sha256": "ac1a4ef420419d55c801a62dae5dba879b2245db1593e2aa5c9a6bf123d04d1a",
+    "sealed_selected_metadata_sha256": "7ea5bc0ce9f599a630ade72ff718444d91761c36fb55a6dec4b20f9f051805c0",
+    "predecessor_rating_raw_sha256": "593b1d63c54d5c1089723afab2faf10048cd26f61dc3c402527679a9f54fdb4f",
+    "predecessor_rating_artifact_sha256": "116a835e4e5c5a801a8b8faa1519e39171ca64b4c5e3edfb80b8a98201222287",
+    "predecessor_benchmark_raw_sha256": "5557a36eaf06dc5a2360dcd535b7abdedfc7e2c8f31f14c0082c588fb6ac455c",
+    "predecessor_benchmark_artifact_sha256": "6b75f43071765cf78336ae2dd067ec6304702477aaaeda9f4a68756ed4202687"
+  },
+  "information_boundary": {
+    "outcomes_available_for_adaptive_development_before": "2026-04-01T00:00:00",
+    "sealed_final_start_inclusive": "2026-04-01T00:00:00",
+    "sealed_final_end_inclusive_metadata": "2026-07-26T23:12:26",
+    "sealed_final_series": 398,
+    "sealed_final_maps": 1007,
+    "sealed_final_targets_accessed": false,
+    "sealed_final_metadata_only": true,
+    "source_time_semantics": "timezone-naive warehouse timestamp",
+    "availability_embargo_hours": 48
+  },
+  "validation_disclosure": {
+    "status": "RECLASSIFIED_AS_ADAPTIVE_DEVELOPMENT",
+    "disclosed_on": "2026-08-01",
+    "reason": "the predecessor 2026-Q1 validation metrics and roster-change failures were inspected before this successor protocol was locked",
+    "prohibited_claim": "no successor result on any pre-2026-04-01 outcome may be described as independent validation or final holdout evidence"
+  },
+  "adaptive_development": {
+    "warm_start": {
+      "start_inclusive": "2025-01-01T00:00:00",
+      "end_exclusive": "2025-07-01T00:00:00"
+    },
+    "windows": [
+      {
+        "window_id": "adaptive-2025q3",
+        "start_inclusive": "2025-07-01T00:00:00",
+        "end_exclusive": "2025-10-01T00:00:00",
+        "historical_fold_label": "DEVELOPMENT"
+      },
+      {
+        "window_id": "adaptive-2025q4",
+        "start_inclusive": "2025-10-01T00:00:00",
+        "end_exclusive": "2026-01-01T00:00:00",
+        "historical_fold_label": "DEVELOPMENT"
+      },
+      {
+        "window_id": "adaptive-2026q1-observed",
+        "start_inclusive": "2026-01-01T00:00:00",
+        "end_exclusive": "2026-04-01T00:00:00",
+        "historical_fold_label": "VALIDATION"
+      }
+    ],
+    "series_frozen_predictions": true,
+    "outcome_updates_strictly_after_series_end_plus_hours": 48,
+    "selection_unit": "series_macro",
+    "dependence_unit": "source_or_derived_series_cluster",
+    "selection_rule": {
+      "stage_1_finite_psd_replay_required": true,
+      "stage_2_each_window_metrics_required": [
+        "log_loss",
+        "brier"
+      ],
+      "stage_3_rank": [
+        "minimum_worst_window_log_loss_regret_against_better_baseline",
+        "minimum_pooled_series_macro_log_loss",
+        "minimum_pooled_series_macro_brier",
+        "candidate_id"
+      ],
+      "better_baseline_per_window": "minimum_loss_of_player_random_walk_and_organization_random_walk",
+      "maximum_allowed_worst_window_log_loss_regret": 0.01,
+      "minimum_series_per_scored_window": 20,
+      "selection_is_exploratory_not_authority": true
+    }
+  },
+  "baselines": [
+    {
+      "baseline_id": "constant-half",
+      "probability": 0.5
+    },
+    {
+      "baseline_id": "predecessor-player-random-walk",
+      "candidate_id": "random_walk_no_reset",
+      "artifact_sha256": "116a835e4e5c5a801a8b8faa1519e39171ca64b4c5e3edfb80b8a98201222287"
+    },
+    {
+      "baseline_id": "predecessor-organization-random-walk",
+      "candidate_id": "organization_random_walk_no_reset",
+      "artifact_sha256": "6b75f43071765cf78336ae2dd067ec6304702477aaaeda9f4a68756ed4202687"
+    }
+  ],
+  "candidate_family": {
+    "kind": "full_covariance_dynamic_player_plus_organization_residual",
+    "candidates": [
+      {
+        "candidate_id": "hierarchical-orgw025-orgv025-retain050",
+        "latent_components": [
+          "player",
+          "organization_residual",
+          "bridge_identified_home_league",
+          "blue_side"
+        ],
+        "player_weight_per_role": 0.2,
+        "player_prior_variance": 1.0,
+        "player_process_variance_per_day": 0.0005,
+        "organization_weight": 0.25,
+        "organization_prior_variance": 0.25,
+        "organization_process_variance_per_day": 0.0005,
+        "organization_roster_retention": {
+          "kind": "retained_player_fraction_with_floor",
+          "floor": 0.5,
+          "formula": "floor_plus_one_minus_floor_times_retained_exact_players_over_five"
+        },
+        "lineup_synergy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        },
+        "team_policy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        }
+      },
+      {
+        "candidate_id": "hierarchical-orgw025-orgv025-retain100",
+        "latent_components": [
+          "player",
+          "organization_residual",
+          "bridge_identified_home_league",
+          "blue_side"
+        ],
+        "player_weight_per_role": 0.2,
+        "player_prior_variance": 1.0,
+        "player_process_variance_per_day": 0.0005,
+        "organization_weight": 0.25,
+        "organization_prior_variance": 0.25,
+        "organization_process_variance_per_day": 0.0005,
+        "organization_roster_retention": {
+          "kind": "retained_player_fraction_with_floor",
+          "floor": 1.0,
+          "formula": "floor_plus_one_minus_floor_times_retained_exact_players_over_five"
+        },
+        "lineup_synergy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        },
+        "team_policy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        }
+      },
+      {
+        "candidate_id": "hierarchical-orgw025-orgv100-retain050",
+        "latent_components": [
+          "player",
+          "organization_residual",
+          "bridge_identified_home_league",
+          "blue_side"
+        ],
+        "player_weight_per_role": 0.2,
+        "player_prior_variance": 1.0,
+        "player_process_variance_per_day": 0.0005,
+        "organization_weight": 0.25,
+        "organization_prior_variance": 1.0,
+        "organization_process_variance_per_day": 0.0005,
+        "organization_roster_retention": {
+          "kind": "retained_player_fraction_with_floor",
+          "floor": 0.5,
+          "formula": "floor_plus_one_minus_floor_times_retained_exact_players_over_five"
+        },
+        "lineup_synergy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        },
+        "team_policy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        }
+      },
+      {
+        "candidate_id": "hierarchical-orgw025-orgv100-retain100",
+        "latent_components": [
+          "player",
+          "organization_residual",
+          "bridge_identified_home_league",
+          "blue_side"
+        ],
+        "player_weight_per_role": 0.2,
+        "player_prior_variance": 1.0,
+        "player_process_variance_per_day": 0.0005,
+        "organization_weight": 0.25,
+        "organization_prior_variance": 1.0,
+        "organization_process_variance_per_day": 0.0005,
+        "organization_roster_retention": {
+          "kind": "retained_player_fraction_with_floor",
+          "floor": 1.0,
+          "formula": "floor_plus_one_minus_floor_times_retained_exact_players_over_five"
+        },
+        "lineup_synergy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        },
+        "team_policy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        }
+      },
+      {
+        "candidate_id": "hierarchical-orgw050-orgv025-retain050",
+        "latent_components": [
+          "player",
+          "organization_residual",
+          "bridge_identified_home_league",
+          "blue_side"
+        ],
+        "player_weight_per_role": 0.2,
+        "player_prior_variance": 1.0,
+        "player_process_variance_per_day": 0.0005,
+        "organization_weight": 0.5,
+        "organization_prior_variance": 0.25,
+        "organization_process_variance_per_day": 0.0005,
+        "organization_roster_retention": {
+          "kind": "retained_player_fraction_with_floor",
+          "floor": 0.5,
+          "formula": "floor_plus_one_minus_floor_times_retained_exact_players_over_five"
+        },
+        "lineup_synergy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        },
+        "team_policy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        }
+      },
+      {
+        "candidate_id": "hierarchical-orgw050-orgv025-retain100",
+        "latent_components": [
+          "player",
+          "organization_residual",
+          "bridge_identified_home_league",
+          "blue_side"
+        ],
+        "player_weight_per_role": 0.2,
+        "player_prior_variance": 1.0,
+        "player_process_variance_per_day": 0.0005,
+        "organization_weight": 0.5,
+        "organization_prior_variance": 0.25,
+        "organization_process_variance_per_day": 0.0005,
+        "organization_roster_retention": {
+          "kind": "retained_player_fraction_with_floor",
+          "floor": 1.0,
+          "formula": "floor_plus_one_minus_floor_times_retained_exact_players_over_five"
+        },
+        "lineup_synergy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        },
+        "team_policy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        }
+      },
+      {
+        "candidate_id": "hierarchical-orgw050-orgv100-retain050",
+        "latent_components": [
+          "player",
+          "organization_residual",
+          "bridge_identified_home_league",
+          "blue_side"
+        ],
+        "player_weight_per_role": 0.2,
+        "player_prior_variance": 1.0,
+        "player_process_variance_per_day": 0.0005,
+        "organization_weight": 0.5,
+        "organization_prior_variance": 1.0,
+        "organization_process_variance_per_day": 0.0005,
+        "organization_roster_retention": {
+          "kind": "retained_player_fraction_with_floor",
+          "floor": 0.5,
+          "formula": "floor_plus_one_minus_floor_times_retained_exact_players_over_five"
+        },
+        "lineup_synergy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        },
+        "team_policy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        }
+      },
+      {
+        "candidate_id": "hierarchical-orgw050-orgv100-retain100",
+        "latent_components": [
+          "player",
+          "organization_residual",
+          "bridge_identified_home_league",
+          "blue_side"
+        ],
+        "player_weight_per_role": 0.2,
+        "player_prior_variance": 1.0,
+        "player_process_variance_per_day": 0.0005,
+        "organization_weight": 0.5,
+        "organization_prior_variance": 1.0,
+        "organization_process_variance_per_day": 0.0005,
+        "organization_roster_retention": {
+          "kind": "retained_player_fraction_with_floor",
+          "floor": 1.0,
+          "formula": "floor_plus_one_minus_floor_times_retained_exact_players_over_five"
+        },
+        "lineup_synergy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        },
+        "team_policy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        }
+      },
+      {
+        "candidate_id": "hierarchical-orgw100-orgv025-retain050",
+        "latent_components": [
+          "player",
+          "organization_residual",
+          "bridge_identified_home_league",
+          "blue_side"
+        ],
+        "player_weight_per_role": 0.2,
+        "player_prior_variance": 1.0,
+        "player_process_variance_per_day": 0.0005,
+        "organization_weight": 1.0,
+        "organization_prior_variance": 0.25,
+        "organization_process_variance_per_day": 0.0005,
+        "organization_roster_retention": {
+          "kind": "retained_player_fraction_with_floor",
+          "floor": 0.5,
+          "formula": "floor_plus_one_minus_floor_times_retained_exact_players_over_five"
+        },
+        "lineup_synergy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        },
+        "team_policy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        }
+      },
+      {
+        "candidate_id": "hierarchical-orgw100-orgv025-retain100",
+        "latent_components": [
+          "player",
+          "organization_residual",
+          "bridge_identified_home_league",
+          "blue_side"
+        ],
+        "player_weight_per_role": 0.2,
+        "player_prior_variance": 1.0,
+        "player_process_variance_per_day": 0.0005,
+        "organization_weight": 1.0,
+        "organization_prior_variance": 0.25,
+        "organization_process_variance_per_day": 0.0005,
+        "organization_roster_retention": {
+          "kind": "retained_player_fraction_with_floor",
+          "floor": 1.0,
+          "formula": "floor_plus_one_minus_floor_times_retained_exact_players_over_five"
+        },
+        "lineup_synergy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        },
+        "team_policy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        }
+      },
+      {
+        "candidate_id": "hierarchical-orgw100-orgv100-retain050",
+        "latent_components": [
+          "player",
+          "organization_residual",
+          "bridge_identified_home_league",
+          "blue_side"
+        ],
+        "player_weight_per_role": 0.2,
+        "player_prior_variance": 1.0,
+        "player_process_variance_per_day": 0.0005,
+        "organization_weight": 1.0,
+        "organization_prior_variance": 1.0,
+        "organization_process_variance_per_day": 0.0005,
+        "organization_roster_retention": {
+          "kind": "retained_player_fraction_with_floor",
+          "floor": 0.5,
+          "formula": "floor_plus_one_minus_floor_times_retained_exact_players_over_five"
+        },
+        "lineup_synergy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        },
+        "team_policy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        }
+      },
+      {
+        "candidate_id": "hierarchical-orgw100-orgv100-retain100",
+        "latent_components": [
+          "player",
+          "organization_residual",
+          "bridge_identified_home_league",
+          "blue_side"
+        ],
+        "player_weight_per_role": 0.2,
+        "player_prior_variance": 1.0,
+        "player_process_variance_per_day": 0.0005,
+        "organization_weight": 1.0,
+        "organization_prior_variance": 1.0,
+        "organization_process_variance_per_day": 0.0005,
+        "organization_roster_retention": {
+          "kind": "retained_player_fraction_with_floor",
+          "floor": 1.0,
+          "formula": "floor_plus_one_minus_floor_times_retained_exact_players_over_five"
+        },
+        "lineup_synergy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        },
+        "team_policy_component": {
+          "status": "UNAVAILABLE",
+          "value": null
+        }
+      }
+    ],
+    "league_bridge_policy": "home_league_effects_enter only when identities were available before an MSI or EWC bridge series",
+    "identifiability": "player and organization decomposition is prior-regularized; only their joint predictive contrast is treated as identified by map outcomes",
+    "missing_component_policy": "unavailable_is_null_and_never_zero"
+  },
+  "sealed_final_gate": {
+    "opened": false,
+    "opening_requires_independent_approval_receipt": true,
+    "opening_requires_locked_winner_artifact_sha256": true,
+    "one_time_evaluation": true,
+    "bootstrap_samples": 10000,
+    "bootstrap_seed": 20260821,
+    "cluster_unit": "source_or_derived_series_cluster",
+    "minimum_series": {
+      "overall": 100,
+      "each_domestic_league": 20,
+      "one_or_both_rosters_changed": 20
+    },
+    "required_comparators": [
+      "predecessor-player-random-walk",
+      "predecessor-organization-random-walk"
+    ],
+    "required_metrics": [
+      "log_loss",
+      "brier"
+    ],
+    "pass_rule": "candidate_minus_each_comparator upper 95 percent series-cluster bootstrap bound must be nonpositive overall, for LCS, and for the one-or-both-rosters-changed stratum",
+    "reliability_required": true,
+    "failure_policy": "remain_unavailable_and_do_not_open_another_holdout",
+    "passing_is_necessary_not_sufficient_for_probability_or_betting": true
+  },
+  "post_holdout_authorities_still_required": [
+    "independent_model_review",
+    "calibration_transform_authority",
+    "exact_pre_event_roster_registry",
+    "event_bound_rating_registry",
+    "freshness_and_patch_authority",
+    "market_definition_authority",
+    "immutable_bookmaker_quote_registry",
+    "uncertainty_aware_decision_policy"
+  ],
+  "claim_ceiling": {
+    "development_diagnostic": true,
+    "production_rating": false,
+    "match_probability": false,
+    "fair_odds": false,
+    "expected_value": false,
+    "bet_recommendation": false,
+    "public_betting_surface": false
+  },
+  "decision_outputs": {
+    "match_probability": null,
+    "fair_odds": null,
+    "expected_value": null,
+    "bet_recommendation": null
+  },
+  "artifact_sha256": "d8b3659de74114000c9d39c3d63bcee3d2bd1375c71deb670869c3248a0a5cff"
+}

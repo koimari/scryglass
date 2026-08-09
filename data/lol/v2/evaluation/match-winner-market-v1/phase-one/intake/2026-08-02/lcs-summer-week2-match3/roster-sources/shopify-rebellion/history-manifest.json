@@ -1,0 +1,48 @@
+{
+  "captured_at": "2026-08-02T06:58:43Z",
+  "manifest_sha256": "cd96c24b33be6fbcdf0d91f6aaafc5dbf83ab4e7dc44f1ec681a3e5c13cf6391",
+  "newest": "2026-08-02T06:58:24Z",
+  "oldest": "2025-08-02T06:58:24Z",
+  "pages": [
+    {
+      "payload_sha256": "5d6ec967f2b0b60b70542f7d60b471f0284084e47818141ed1356957de93bec8",
+      "raw_file": "history-000.json",
+      "revision_count": 7,
+      "source_url": "https://lol.fandom.com/api.php?action=query&prop=revisions&titles=Shopify+Rebellion&rvprop=ids%7Ctimestamp&rvlimit=max&rvstart=2026-08-02T06%3A58%3A24Z&rvend=2025-08-02T06%3A58%3A24Z&rvdir=older&format=json&formatversion=2"
+    }
+  ],
+  "resolved_title": "Shopify Rebellion",
+  "revisions": [
+    {
+      "revision_id": 4331343,
+      "revision_timestamp": "2025-11-20T02:50:10Z"
+    },
+    {
+      "revision_id": 4334096,
+      "revision_timestamp": "2025-11-20T15:12:58Z"
+    },
+    {
+      "revision_id": 4337113,
+      "revision_timestamp": "2025-11-28T11:35:22Z"
+    },
+    {
+      "revision_id": 4337128,
+      "revision_timestamp": "2025-11-28T16:04:48Z"
+    },
+    {
+      "revision_id": 4345888,
+      "revision_timestamp": "2025-12-24T15:10:30Z"
+    },
+    {
+      "revision_id": 4403851,
+      "revision_timestamp": "2026-03-15T20:55:06Z"
+    },
+    {
+      "revision_id": 4487872,
+      "revision_timestamp": "2026-07-17T09:01:03Z"
+    }
+  ],
+  "schema_version": "scryglass:roster-receipts:v1",
+  "status": "ok",
+  "team_page": "Shopify Rebellion"
+}

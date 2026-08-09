@@ -1,0 +1,104 @@
+{
+  "artifact_sha256": "56407922787b0a954d90447a6ebb10c164005de74d8ad214c0c2520a53b7d9d5",
+  "authority": {
+    "betting_authority": false,
+    "bookmaker_terms_authority": false,
+    "expected_value_authority": false,
+    "probability_authority": false,
+    "recommendation_authority": false,
+    "settlement_authority": false
+  },
+  "bookmaker_id": "betano-brazil",
+  "claim_ceiling": "Exact public help-center bytes and limited extracted statements only. This incomplete snapshot is not bookmaker-terms alignment review, settlement authority, quote authority, or betting authority.",
+  "clock_attestation": {
+    "observed_wall_clock_utc": "2026-08-02T02:13:59.564289+00:00",
+    "source": "system_utc_clock_sampled_inside_fetch_and_builder",
+    "user_supplied_timestamp_allowed": false
+  },
+  "coverage": {
+    "complete_bookmaker_terms_snapshot": false,
+    "confirmed": [
+      "public_lol_map_winner_description",
+      "general_same_day_postponement_cancellation_handling"
+    ],
+    "independent_alignment_review_present": false,
+    "unresolved": [
+      "esports_specific_remake",
+      "esports_specific_forfeit",
+      "map_specific_void_priority",
+      "bookmaker_result_provider",
+      "conflicting_rule_priority",
+      "price_acceptance_limits_and_execution"
+    ]
+  },
+  "decision_outputs": {
+    "expected_value": null,
+    "fair_odds": null,
+    "probability": null,
+    "recommendation": null,
+    "settled_result": null,
+    "stake": null
+  },
+  "locked_at_utc": "2026-08-02T02:13:59.564289+00:00",
+  "result_state": "PUBLIC_TERMS_BYTES_CAPTURED_INCOMPLETE_NON_AUTHORIZING",
+  "schema_version": "scryglass:betano-br-public-terms-snapshot:v1",
+  "source_lock": {
+    "bytes": 19723,
+    "locator": "lol_kills/v2/market/betano_terms_snapshot_v1.py",
+    "raw_sha256": "2b8ba4844a43936d26a6cee640c45021b86c7827733d9587a9a8c7420759362a"
+  },
+  "sources": [
+    {
+      "article_id": 34703909314589,
+      "extraction": {
+        "article_id": 34703909314589,
+        "edited_at": "2026-03-17T18:40:47Z",
+        "extraction_is_complete_settlement_rule": false,
+        "html_url": "https://support.betano.bet.br/hc/pt-br/articles/34703909314589-Como-se-joga-o-E-sport-League-of-Legends-LoL",
+        "meaning": "map_winner_is_team_that_destroys_enemy_base",
+        "required_markers_present": true,
+        "title": "Como se joga o E-sport League of Legends (LoL)?",
+        "updated_at": "2026-07-25T13:16:29Z"
+      },
+      "final_url": "https://support.betano.bet.br/api/v2/help_center/pt-br/articles/34703909314589.json",
+      "http_status": 200,
+      "name": "league_of_legends_market_description",
+      "raw_base64": "eyJhcnRpY2xlIjp7ImlkIjozNDcwMzkwOTMxNDU4OSwidXJsIjoiaHR0cHM6Ly9iZXRhbm9ici56ZW5kZXNrLmNvbS9hcGkvdjIvaGVscF9jZW50ZXIvcHQtYnIvYXJ0aWNsZXMvMzQ3MDM5MDkzMTQ1ODkuanNvbiIsImh0bWxfdXJsIjoiaHR0cHM6Ly9zdXBwb3J0LmJldGFuby5iZXQuYnIvaGMvcHQtYnIvYXJ0aWNsZXMvMzQ3MDM5MDkzMTQ1ODktQ29tby1zZS1qb2dhLW8tRS1zcG9ydC1MZWFndWUtb2YtTGVnZW5kcy1Mb0wiLCJhdXRob3JfaWQiOjIzNjcyMjIwNTgzODM3LCJjb21tZW50c19kaXNhYmxlZCI6dHJ1ZSwiZHJhZnQiOmZhbHNlLCJwcm9tb3RlZCI6ZmFsc2UsInBvc2l0aW9uIjo1LCJ2b3RlX3N1bSI6MSwidm90ZV9jb3VudCI6OSwic2VjdGlvbl9pZCI6NjQxMzg4NTY1MjM4MSwiY3JlYXRlZF9hdCI6IjIwMjYtMDMtMTdUMTg6MzY6NThaIiwidXBkYXRlZF9hdCI6IjIwMjYtMDctMjVUMTM6MTY6MjlaIiwibmFtZSI6IkNvbW8gc2Ugam9nYSBvIEUtc3BvcnQgTGVhZ3VlIG9mIExlZ2VuZHMgKExvTCk/IiwidGl0bGUiOiJDb21vIHNlIGpvZ2EgbyBFLXNwb3J0IExlYWd1ZSBvZiBMZWdlbmRzIChMb0wpPyIsInNvdXJjZV9sb2NhbGUiOiJwdC1iciIsImxvY2FsZSI6InB0LWJyIiwib3V0ZGF0ZWQiOmZhbHNlLCJvdXRkYXRlZF9sb2NhbGVzIjpbXSwiZWRpdGVkX2F0IjoiMjAyNi0wMy0xN1QxODo0MDo0N1oiLCJ1c2VyX3NlZ21lbnRfaWQiOm51bGwsInBlcm1pc3Npb25fZ3JvdXBfaWQiOjE1NzMzNTQsImNvbnRlbnRfdGFnX2lkcyI6W10sImxhYmVsX25hbWVzIjpbXSwiYm9keSI6IjxwPjxzdHJvbmc+Rm9ybWF0bzogPC9zdHJvbmc+MTAgam9nYWRvcmVzIGRpdmlkaWRvcyBlbSAyIGVxdWlwZXMgZGUgNTwvcD48cD48c3Ryb25nPlBvc2nDp8O1ZXM6IDwvc3Ryb25nPlRvcG8sIE1laW8sIEF0aXJhZG9yIChBRCBDYXJyeSksIFN1cG9ydGUgZSBDYcOnYWRvciAoSnVuZ2xlcik8L3A+PHA+PHN0cm9uZz5PYmpldGl2bzogPC9zdHJvbmc+ZGVzdHJ1aXIgYSBiYXNlIChOZXh1cykgZGEgZXF1aXBlIGFkdmVyc8OhcmlhLjwvcD48cD5PIGpvZ28gYWNvbnRlY2Ugbm8gbWFwYSBcIlN1bW1vbmVy4oCZcyBSaWZ0XCIsIGNvbSB0b3JyZXMsIGluaWJpZG9yZXMgZSBvbmRhcyBkZSBtaW5pb25zLiBBIGRlc3RydWnDp8OjbyBkZSBpbmliaWRvcmVzIGdlcmEgc3VwZXIgbWluaW9ucy4gRXF1aXBlcyB0YW1iw6ltIGRpc3B1dGFtIG1vbnN0cm9zIGNvbW8gRHJhZ8O1ZXMsIEFyYXV0byBkbyBWYWxlIGUgbyBCYXLDo28sIHF1ZSBjb25jZWRlbSByZWZvcsOnb3MgdGVtcG9yw6FyaW9zLjxicj7CoDwvcD48aDMgaWQ9XCJoXzAxS0tZSEpZNEZQUDdRSlFFR0pFMUtaQVBEXCI+PHN0cm9uZz5NZXJjYWRvcyBwcmluY2lwYWlzOjwvc3Ryb25nPjwvaDM+PHVsPlxuPGxpIGRhdGEtbGlzdC1pdGVtLWlkPVwiZTMyNWJlOWNjOGE0YzA4NzU4YmM3N2JlYTdiODcyODFjXCI+XG48c3Ryb25nPlZlbmNlZG9yIGRhIFBhcnRpZGE6PC9zdHJvbmc+IHF1ZW0gdmVuY2VyIDIgbWFwYXMgZW0gMyBvdSAzIG1hcGFzIGVtIDUuPC9saT5cbjxsaSBkYXRhLWxpc3QtaXRlbS1pZD1cImUyYWY3MTM3NjM1MGFkNThkNzhhYjJlZTEyNjQyMzEwMlwiPlxuPHN0cm9uZz5WZW5jZWRvciBkbyBNYXBhOjwvc3Ryb25nPiBxdWVtIGRlc3RydWlyIGEgYmFzZSBpbmltaWdhLjwvbGk+XG48bGkgZGF0YS1saXN0LWl0ZW0taWQ9XCJlMDZmN2JjNGQzNjI3MmVmYWU3NjMxYjYwNzQyYTVmZjlcIj5cbjxzdHJvbmc+VG90YWwgZGUgTWFwYXM6IDwvc3Ryb25nPm7Dum1lcm8gdG90YWwgZGUgbWFwYXMgam9nYWRvcy48L2xpPlxuPC91bD4iLCJ1c2VyX3NlZ21lbnRfaWRzIjpbXX19",
+      "raw_sha256": "dc3390f77d1abcdc7882092393d0c065d3094b68284c3ab120124fefffd4c914",
+      "request_started_at_utc": "2026-08-02T02:13:58.825824+00:00",
+      "request_url": "https://support.betano.bet.br/api/v2/help_center/pt-br/articles/34703909314589.json",
+      "response_headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "W/\"dc3390f77d1abcdc7882092393d0c065\""
+      },
+      "response_received_at_utc": "2026-08-02T02:13:59.200338+00:00",
+      "transport_elapsed_seconds": 0.374514
+    },
+    {
+      "article_id": 6414148470301,
+      "extraction": {
+        "article_id": 6414148470301,
+        "edited_at": "2026-03-11T19:39:39Z",
+        "extraction_is_complete_settlement_rule": false,
+        "html_url": "https://support.betano.bet.br/hc/pt-br/articles/6414148470301-O-que-acontece-se-o-jogo-em-que-apostei-for-adiado-ou-cancelado",
+        "meaning": "general_same_day_continuation_and_next_day_void_refund_rule",
+        "required_markers_present": true,
+        "title": "O que acontece se o jogo em que apostei for adiado ou cancelado?",
+        "updated_at": "2026-08-01T23:20:16Z"
+      },
+      "final_url": "https://support.betano.bet.br/api/v2/help_center/pt-br/articles/6414148470301.json",
+      "http_status": 200,
+      "name": "general_postponement_and_cancellation",
+      "raw_base64": "eyJhcnRpY2xlIjp7ImlkIjo2NDE0MTQ4NDcwMzAxLCJ1cmwiOiJodHRwczovL2JldGFub2JyLnplbmRlc2suY29tL2FwaS92Mi9oZWxwX2NlbnRlci9wdC1ici9hcnRpY2xlcy82NDE0MTQ4NDcwMzAxLmpzb24iLCJodG1sX3VybCI6Imh0dHBzOi8vc3VwcG9ydC5iZXRhbm8uYmV0LmJyL2hjL3B0LWJyL2FydGljbGVzLzY0MTQxNDg0NzAzMDEtTy1xdWUtYWNvbnRlY2Utc2Utby1qb2dvLWVtLXF1ZS1hcG9zdGVpLWZvci1hZGlhZG8tb3UtY2FuY2VsYWRvIiwiYXV0aG9yX2lkIjozODI0MzMwOTI5NTgsImNvbW1lbnRzX2Rpc2FibGVkIjp0cnVlLCJkcmFmdCI6ZmFsc2UsInByb21vdGVkIjpmYWxzZSwicG9zaXRpb24iOjAsInZvdGVfc3VtIjotMjA4NSwidm90ZV9jb3VudCI6NzMwMywic2VjdGlvbl9pZCI6NjQxMzkyMDI5NzI0NSwiY3JlYXRlZF9hdCI6IjIwMjItMDgtMjJUMDM6MjQ6NTFaIiwidXBkYXRlZF9hdCI6IjIwMjYtMDgtMDFUMjM6MjA6MTZaIiwibmFtZSI6Ik8gcXVlIGFjb250ZWNlIHNlIG8gam9nbyBlbSBxdWUgYXBvc3RlaSBmb3IgYWRpYWRvIG91IGNhbmNlbGFkbz8iLCJ0aXRsZSI6Ik8gcXVlIGFjb250ZWNlIHNlIG8gam9nbyBlbSBxdWUgYXBvc3RlaSBmb3IgYWRpYWRvIG91IGNhbmNlbGFkbz8iLCJzb3VyY2VfbG9jYWxlIjoicHQtYnIiLCJsb2NhbGUiOiJwdC1iciIsIm91dGRhdGVkIjpmYWxzZSwib3V0ZGF0ZWRfbG9jYWxlcyI6W10sImVkaXRlZF9hdCI6IjIwMjYtMDMtMTFUMTk6Mzk6MzlaIiwidXNlcl9zZWdtZW50X2lkIjpudWxsLCJwZXJtaXNzaW9uX2dyb3VwX2lkIjoxNTczMzU0LCJjb250ZW50X3RhZ19pZHMiOltdLCJsYWJlbF9uYW1lcyI6W10sImJvZHkiOiI8cD5OYSBCZXRhbm8gZXhpc3RlbSByZWdyYXMgY2xhcmFzIHBhcmEgcHJvdGVnZXIgbyBzZXUgcGFscGl0ZSBuZXNzYXMgc2l0dWHDp8O1ZXMsIGdhcmFudGluZG8gcXVlIHZvY8OqIG7Do28gc2VqYSBwcmVqdWRpY2FkbyBwb3IgaW1wcmV2aXN0b3MuPGJyPsKgPC9wPjxoNCBpZD1cImhfMDFLS0Y2RjBSU0UzVjlLV0IxVEZRM0g2NkJcIj48c3Ryb25nPkEgcmVncmEgZ2VyYWw6IG8gcHJpbmPDrXBpbyBkbyBcIk1lc21vIERpYVwiPC9zdHJvbmc+PC9oND48cD5TZSBvIGV2ZW50byBlbSBxdWUgdm9jw6ogYXBvc3RvdSBmb3IgYWRpYWRvIG91IGNhbmNlbGFkbywgYSByZWdyYSBwcmluY2lwYWwgw6kgdmVyaWZpY2FyIHF1YW5kbyBlbGUgc2Vyw6EgcmVhbGl6YWRvLjwvcD48dWw+XG48bGkgZGF0YS1saXN0LWl0ZW0taWQ9XCJlNDYyMTAyMWUyYTVmOGNkYTcwZWZiMTY5OWJhN2E1MTlcIj5cbjxzdHJvbmc+UGFyYSBqb2dvcyBhIHNlcmVtIGpvZ2Fkb3Mgbm8gbWVzbW8gZGlhOjwvc3Ryb25nPiBhIGFwb3N0YSBjb250aW51YSB2w6FsaWRhPC9saT5cbjxsaSBkYXRhLWxpc3QtaXRlbS1pZD1cImViNjE0M2JlMmY0MWMyNzUxM2EzN2YwMGRjNGZiYmM1Y1wiPlxuPHN0cm9uZz5BZGlhZG8gcGFyYSBvdXRybyBkaWE6PC9zdHJvbmc+IHNlIG8gam9nbyBuw6NvIGFjb250ZWNlciBvdSBuw6NvIGZvciBjb25jbHXDrWRvIG5vIG1lc21vIGRpYSBwcm9ncmFtYWRvIG9yaWdpbmFsbWVudGUsIGEgYXBvc3RhIHNlcsOhIGFudWxhZGEgZSBvIHZhbG9yIHNlcsOhIHJlZW1ib2xzYWRvLjxicj7CoDwvbGk+XG48L3VsPjxoNCBpZD1cImhfMDFLS0Y2RjM2UTlKMUI2MlhTQkNYRlhZR1BcIj48c3Ryb25nPkpvZ29zIGludGVycm9tcGlkb3Mgb3Ugc3VzcGVuc29zPC9zdHJvbmc+PC9oND48dWw+PGxpIGRhdGEtbGlzdC1pdGVtLWlkPVwiZTYwZmVmMjVkZjkyODU0OGJjNGIyZDM1Nzg5NDRkN2ZkXCI+U2UgYSBwYXJ0aWRhIGZvciBzdXNwZW5zYSBlIG7Do28gZm9yIHJldG9tYWRhIG91IGNvbmNsdcOtZGEgbm8gbWVzbW8gZGlhLCB0b2RhcyBhcyBhcG9zdGFzIHBlbmRlbnRlcyByZWxhY2lvbmFkYXMgYSBlc3NlIGV2ZW50byBzZXLDo28gYW51bGFkYXMgZSByZWVtYm9sc2FkYXMuPC9saT48L3VsPiIsInVzZXJfc2VnbWVudF9pZHMiOltdfX0=",
+      "raw_sha256": "77652c6a26c06a46393f4e85765e5bfeb3de27a19253e1933284bf4a449601ef",
+      "request_started_at_utc": "2026-08-02T02:13:59.200747+00:00",
+      "request_url": "https://support.betano.bet.br/api/v2/help_center/pt-br/articles/6414148470301.json",
+      "response_headers": {
+        "content-type": "application/json; charset=utf-8",
+        "etag": "W/\"77652c6a26c06a46393f4e85765e5bfe\""
+      },
+      "response_received_at_utc": "2026-08-02T02:13:59.563880+00:00",
+      "transport_elapsed_seconds": 0.363133
+    }
+  ]
+}

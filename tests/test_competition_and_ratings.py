@@ -201,8 +201,33 @@ class CompetitionIdentityTests(unittest.TestCase):
         )
         self.assertEqual(payload["as_of"], "2026-07-26T00:00:00Z")
         self.assertEqual(payload["previous_as_of"], "2026-07-19T00:00:00Z")
+        self.assertEqual(payload["current_through"], "2026-07-26T12:00:00Z")
         self.assertIn("A0", payload["by_player"])
         self.assertIn("tier1", payload["by_player"]["A0"])
+
+    def test_player_game_uid_falls_back_per_row_to_gameid(self) -> None:
+        rows = []
+        roles = ["top", "jng", "mid", "bot", "sup"]
+        for side, team, result in (("Blue", "A", 1), ("Red", "B", 0)):
+            for role in roles:
+                rows.append(
+                    {
+                        "game_uid": None,
+                        "gameid": "g1",
+                        "date": "2026-01-01",
+                        "league": "LCS",
+                        "side": side,
+                        "position": role,
+                        "playername": f"{team}-{role}",
+                        "teamname": team,
+                        "result": result,
+                    }
+                )
+
+        maps = build_maps_frame_from_players(pd.DataFrame(rows))
+
+        self.assertEqual(len(maps), 1)
+        self.assertEqual(maps.iloc[0]["game_uid"], "g1")
 
 
 class HierarchicalRatingTests(unittest.TestCase):

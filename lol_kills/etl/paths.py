@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+# Keep source-code imports anchored to the checkout.  A hosted refresh worker
+# can set SCRYGLASS_RUNTIME_ROOT to a writable /tmp overlay before importing
+# the ETL modules.  Local runs keep the existing checkout paths.
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(os.environ.get("SCRYGLASS_RUNTIME_ROOT", SOURCE_ROOT)).resolve()
 DATA = ROOT / "data" / "lol"
 WAREHOUSE_DIR = DATA / "warehouse"
 RAW_OE_DIR = WAREHOUSE_DIR / "raw"
+OE_RECEIPT_DIR = WAREHOUSE_DIR / "receipts" / "oracles_elixir"
 PARQUET_DIR = WAREHOUSE_DIR / "parquet"
 FEATURES_DIR = DATA / "features"
 MODELS_DIR = DATA / "models"

@@ -1,0 +1,394 @@
+"""Immutable, no-row pre-fit contract for private G5 draft exploration.
+
+This module is intentionally declarative.  It cannot load a target, a feature
+row, or the final holdout, and it contains no fitting or scoring entrypoint.
+It freezes the one later execution protocol and its exact byte dependencies.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import importlib.metadata
+import json
+import os
+from pathlib import Path
+import stat
+import tempfile
+from typing import Any, Mapping
+
+
+ROOT = Path(__file__).resolve().parents[5]
+NAMESPACE = ROOT / "data/lol/v2/models/draft-interactions/g5-exploratory"
+SCHEMA = "scryglass:g5-private-exploratory-prefit-contract:v2"
+REVIEW_SCHEMA = "scryglass:g5-private-exploratory-prefit-review:v2"
+ROLES = ["top", "jungle", "mid", "bot", "support"]
+
+
+class G5PreFitError(ValueError):
+    """A G5 pre-fit freeze invariant was violated."""
+
+
+def canonical_bytes(value: Any) -> bytes:
+    try:
+        return json.dumps(value, allow_nan=False, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise G5PreFitError("noncanonical G5 payload") from error
+
+
+def sha256(value: Any) -> str:
+    return hashlib.sha256(canonical_bytes(value)).hexdigest()
+
+
+def _raw_sha256(path: Path) -> str:
+    metadata = os.lstat(path)
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        raise G5PreFitError("unsafe bound dependency")
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _verify_bound(locator: str, expected: str) -> dict[str, str]:
+    actual = _raw_sha256(ROOT / locator)
+    if actual != expected:
+        raise G5PreFitError(f"bound dependency changed: {locator}")
+    return {"locator": locator, "raw_sha256": actual}
+
+
+def _verify_canonical_content_addressed_json(locator: str, raw_expected: str, canonical_expected: str, field: str) -> dict[str, Any]:
+    """Verify a small metadata artifact without opening any feature/source row."""
+
+    path = ROOT / locator
+    if _raw_sha256(path) != raw_expected:
+        raise G5PreFitError(f"bound dependency changed: {locator}")
+    raw = path.read_bytes()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise G5PreFitError("bound metadata is not JSON") from error
+    if raw != canonical_bytes(payload) + b"\n":
+        raise G5PreFitError("bound metadata is not canonical")
+    unsigned = dict(payload)
+    if unsigned.pop(field, None) != canonical_expected or sha256(unsigned) != canonical_expected:
+        raise G5PreFitError("bound metadata canonical identity mismatch")
+    return payload
+
+
+# Identity only.  No function in this module opens G1 rows, target evidence,
+# or final-holdout material.  The feature slice is separately accepted and is
+# the sole future completed-draft input.
+G1 = {
+    "adapter_locator": "lol_kills/v2/ratings/player/real_v1_adapter.py",
+    "adapter_raw_sha256": "f3979521109193f7607e2c8b0d0e689a14072998f635bfdc08298dcb936074ed",
+    "manifest_locator": "data/lol/v2/snapshots/real-v1/lpl-private-development-manifest.json",
+    "manifest_sha256": "3af87fffb2b32fd95aeb920409abe0254fa158b3dc7f079650b3472731d4ff72",
+    "rows_locator": "data/lol/v2/snapshots/real-v1/lpl-private-development-rows.jsonl",
+    "rows_sha256": "4ed79abb0b2471a666ab5643b91edf33c2fdde19e361c456aa589d2e9a4df846",
+    "selected_target_sha256": "4c332fa4e6cb155341bcffd83bd0ee1be2e04f3b5950b8a7745931253dd8bd2d",
+    "split_payload_sha256": "1695cee14ad6b4221526ec6187206b8c61a560a00005d2f799f808ed901ee014",
+    "allowed_folds": ["TRAIN", "DEVELOPMENT", "VALIDATION"],
+    "final_holdout": "prohibited_not_loaded",
+}
+
+G1_FEATURES = {
+    "loader_verifier_locator": "lol_kills/v2/data/g1_draft_features.py",
+    "loader_verifier_raw_sha256": "b5c366ede303bd4011d2d03ebbb638236b7e7caa43b3eaa1d1b1cd59cd913def",
+    "focused_test_locator": "tests/model_v2/data/test_g1_draft_features.py",
+    "focused_test_raw_sha256": "ae8c9aaed41e33c901278b13cb24055d96f6cdd9b30292ec60860248240516de",
+    "manifest_locator": "data/lol/v2/snapshots/real-v1/lpl-private-draft-features-manifest.json",
+    "manifest_raw_sha256": "c806505ac5dfb9eabf00921ed5176f6d295af84bf577179fab3ccf68c216690f",
+    "manifest_canonical_sha256": "35947a49c9840d2944f90e932b3e6fffcb3f05ccc382a5d3fa79f30f7b9961ea",
+    "rows_locator": "data/lol/v2/snapshots/real-v1/lpl-private-draft-features-rows.jsonl",
+    "rows_raw_sha256": "e742631e1c12fb1af7148468a0d595ff6cf23e816af4edb20af162a04a6a9680",
+    "rows_canonical_sha256": "52d59dd0c41a212f7eb07b6f6132841f3c152f28324308b376042f8e262c141d",
+    "independent_review_locator": "data/lol/v2/snapshots/real-v1/lpl-private-draft-features-review.json",
+    "independent_review_raw_sha256": "eb8bde9730421469520a60383282d2810904fffc5896f24263135a0b96a079fb",
+    "independent_review_canonical_sha256": "a73ba02cd14083f702fd96fde9df6d616c4d0fec81b21d7ae0bc98c128ce517e",
+    "independent_review_disposition": "ACCEPT_PRIVATE_COMPLETED_DRAFT_FEATURE_SLICE_V1",
+}
+
+G2 = {
+    "runner_locator": "lol_kills/v2/ratings/player/private_development_runner.py",
+    "runner_raw_sha256": "800755c6c4b425bb74690cce8ee8aea38db3cddf45016c7bec35a10ed5bfc5c7",
+    "model_locator": "lol_kills/v2/ratings/player/model.py",
+    "model_raw_sha256": "122493f55bc9d4c17357948163cbe7599c9db1abd2aaf772934986ea46131e2a",
+    "artifact_locator": "data/lol/v2/models/player/real-v1/private-development-artifact.json",
+    "artifact_raw_sha256": "b0d8276fd164735db0abd9b2353c7e10168c599e5607e4db3d15cd12bd9d7b50",
+    "artifact_canonical_sha256": "35e8831fb4d39fd60ec7f8f59b934ff5571f788ec8dc1151c78661b67ab6d4fd",
+    "accepted_candidate": "static_baseline",
+    "required_primitives": ["Candidate(static_baseline, STATIC, process_variance_per_day=0.0)", "_update", "_predict", "_state_for_exact_origins", "posterior_predictive_expected_result"],
+}
+
+CLUSTERS = {
+    "proxy_locator": "lol_kills/v2/draft/interactions/series_cluster_proxy.py",
+    "proxy_raw_sha256": "d63ee58bb93015e0c0427c7aac584b098884a1567da32849e4ed1993e54dae48",
+    "artifact_locator": "data/lol/v2/models/draft-interactions/series-cluster-proxy.json",
+    "artifact_raw_sha256": "5d89bcc3029d3fa912d76af9c702888f76f4183933dd1d1e2e660b8f2a8bdd2a",
+    "artifact_canonical_sha256": "e456d267797a23dae94f8ecc9a31ca91593d48e830b6f334191f0c025bf19ada",
+    "required_primitive": "map_weighted_cluster_bootstrap_replicate",
+}
+
+RUNTIME = {
+    "optimizer": {"library": "scipy", "distribution_version": "1.13.1", "entrypoint": "scipy.optimize.minimize", "method": "L-BFGS-B", "analytic_jacobian": True, "bounds": None},
+    "numeric": {"library": "numpy", "distribution_version": "2.0.2", "rng": "numpy.random.default_rng", "stable_softplus": "numpy.logaddexp(0.0,z)", "stable_sigmoid": "scipy.special.expit(z)", "clipping": "forbidden_for_logits_and_probabilities"},
+}
+
+D2_OMISSION = {
+    "status": "OMITTED",
+    "reason_code": "NO_ACCEPTED_REAL_DATA_VALIDATED_INTERACTION_PRIMITIVE",
+    "effect": "no_pair_terms_no_synergy_terms_no_missing_pair_default",
+}
+
+
+def _candidate_protocol() -> dict[str, Any]:
+    return {
+        "eligible_candidates": [
+            {
+                "candidate_id": "B0",
+                "definition": "accepted_G2_STATIC_player_only_model",
+                "formula": "p_B0=accepted_logistic_normal_posterior_predictive(eta_B0_mean, eta_B0_variance)",
+                "train_state": "chronological TRAIN-only prequential replay: score each TRAIN target before its own G2 STATIC update; retain exact state after the final TRAIN update",
+                "development_validation_state": "the retained end-of-TRAIN STATIC state is frozen for every DEVELOPMENT and VALIDATION score; no state update, target-conditioned replay, or refit may use DEVELOPMENT or VALIDATION outcomes",
+            },
+            {
+                "candidate_id": "D1",
+                "definition": "B0_offset_plus_role_aware_champion_main_effects_only",
+                "fit": "TRAIN_only_penalized_Bernoulli_logistic_offset",
+                "formula": "logit(p_D1)=eta_B0+X beta; theta[r,c]=mu[c]+delta[r,c]; d_D1=sum_blue(theta[r,c])-sum_red(theta[r,c])",
+                "design": {
+                    "stable_champion_vocabulary": "unique stable_champion_id values in complete TRAIN feature maps only, sorted by UTF-8 byte order",
+                    "mu_column": "one signed column per TRAIN-vocabulary champion: +1 blue, -1 red",
+                    "delta_column": "one signed column per observed TRAIN (role, champion) pair: +1 blue, -1 red",
+                    "intercept": "absent",
+                    "role_order": ROLES,
+                    "prohibited_terms": ["side", "draft_order", "team", "patch", "resource", "comfort", "policy", "synergy", "pair", "archetype", "league"],
+                },
+                "priors_and_penalty": {
+                    "mu": {"distribution": "Normal(0,0.20^2)", "sigma": 0.20, "lambda": 12.5},
+                    "delta": {"distribution": "Normal(0,0.10^2)", "sigma": 0.10, "lambda": 50.0},
+                    "objective": "negative Bernoulli log likelihood plus 0.5*12.5*sum(mu^2)+0.5*50.0*sum(delta^2)",
+                    "identifiability": "proper independent Gaussian priors define the mu/delta decomposition; no sum-to-zero constraint is imposed",
+                },
+                "numerical_objective": {
+                    "eta": "z_i=eta_B0_i+x_i^T beta; eta_B0_i and every x_i coordinate must be finite, y_i in {0,1}",
+                    "negative_log_likelihood": "sum_i(numpy.logaddexp(0.0,z_i)-y_i*z_i)",
+                    "penalty_diagonal": "Lambda_j=12.5 for every mu coordinate and 50.0 for every fitted delta coordinate",
+                    "objective": "F(beta)=sum_i(softplus(z_i)-y_i*z_i)+0.5*beta^T Lambda beta",
+                    "gradient": "g(beta)=X^T(scipy.special.expit(z)-y)+Lambda beta; analytic jacobian is passed to L-BFGS-B; finite differences are forbidden",
+                    "hessian": "H_MAP=X^T diag(p_i*(1-p_i)) X+Lambda at converged TRAIN MAP, with p_i=scipy.special.expit(z_i)",
+                    "domain": "unbounded finite real logits; no logit or probability clipping; stable softplus is numpy.logaddexp and stable sigmoid is scipy.special.expit",
+                    "failure": "nonfinite input/objective/analytic gradient/Hessian, solver failure, or gradient infinity norm above tolerance is EXECUTION_BLOCKED:SOLVER_OR_OBJECTIVE_FAILURE, never candidate loss or NO_INCREMENTAL_DRAFT_WINNER",
+                },
+                "solver": {"start": "all coefficients exactly 0.0", "determinism": "single deterministic call; no random restart", "seed": 2026073005, "maxiter": 1000, "gtol": 1e-8, "ftol": 1e-12, "maxls": 50, "success_required": True, "gradient_infinity_norm_at_MAP_at_most": 1e-6, "jacobian": "analytic_only", "bounds": "none"},
+            },
+        ],
+        "D2": D2_OMISSION,
+        "selection": {
+            "TRAIN": "B0 state learning, D1 vocabulary/design/offsets/fit, priors, penalties, and transformations only",
+            "DEVELOPMENT": "one paired mean-map-log-loss comparison; select D1 iff mean(LL_B0-LL_D1)>0, otherwise select B0; lock immediately",
+            "VALIDATION": "evaluate the locked candidate exactly once; no refit, reselection, tuning, threshold change, or reuse",
+            "validation_d1_winner_rule": {"all_required": ["D1_was_locked_by_DEVELOPMENT", "mean(LL_B0-LL_D1)>=0.005", "one_sided_paired_series_cluster_bootstrap_95_lower_bound>0"], "otherwise": "NO_INCREMENTAL_DRAFT_WINNER"},
+        },
+    }
+
+
+def _uncertainty_and_availability() -> dict[str, Any]:
+    return {
+        "availability": {
+            "full_completed_draft_only": True,
+            "required": {"picks": 10, "roles_per_side": ROLES, "stable_champion_ids": True, "globally_unique_champions": True},
+            "champion_absent_from_TRAIN": "EXECUTION_BLOCKED:CHAMPION_ABSENT_FROM_TRAIN",
+            "seen_champion_unseen_exact_role": "use absent fitted-delta point contribution 0.0 and independent conditional prior variance 0.01 exactly; ledger flag PRIOR_ONLY_ROLE_DELTA; never silently treat as observed-role evidence",
+            "prior_only_coordinate_rules": "a prior-only (role,champion) delta is absent from beta and C, is counted once, and must not be inserted into fitted covariance; global champion uniqueness means it cannot repeat, otherwise EXECUTION_BLOCKED:PRIOR_ONLY_ROLE_DELTA_DUPLICATED",
+            "D2": "omitted: no pair feature, pair estimate, synergy explanation, or missing-pair default exists",
+        },
+        "score_outputs": {
+            "B0_probability": "private retrospective accepted-G2 logistic-normal posterior-predictive score",
+            "D1_logit_increment": "d_D1 conditional fitted coefficient mean relative to B0",
+            "neutral_completed_draft_probability": "accepted logistic-normal posterior-predictive primitive applied to eta_B0_mean+d_D1 with accepted B0 latent variance",
+            "probability_increment_over_B0": "neutral_completed_draft_probability-B0_probability",
+            "labels": "private retrospective exploratory only; never forecast, current, live, calibrated-production, reliability, or public",
+        },
+        "parameter_uncertainty": {
+            "B0": "accepted G2 latent/player posterior mean and variance; use accepted logistic-normal posterior-predictive primitive for each point score",
+            "D1": "conditional-on-frozen-B0 Laplace covariance C=(X'WX+diag(lambda))^-1 at the converged TRAIN MAP only",
+            "regularity": ["finite symmetric Hessian within absolute tolerance 1e-12", "strict positive-definite Cholesky factorization", "finite nonnegative diagonal and quadratic forms", "otherwise EXECUTION_BLOCKED:CONDITIONAL_COVARIANCE_UNAVAILABLE"],
+            "D1_conditional_variance": "Var_D1(d)=x_fitted^T C x_fitted+0.01*N_prior_only_role_deltas; N_prior_only_role_deltas counts unique absent fitted (role,champion) delta coordinates only",
+            "interval": "D1 conditional 95% logit interval d_D1 +/- 1.959963984540054*sqrt(Var_D1(d)); report separately from B0 uncertainty",
+            "prior_only_ledger": "aggregate result emits prior_only_role_delta_count and prior_only_role_slot_membership_sha256 over canonical sorted internal (source_side,role,stable_champion_id) slots; raw slot IDs are never emitted",
+            "prohibition": "do not report a total B0+D1 interval or assume their independence",
+        },
+        "invariances": {
+            "side_swap": "eta_B0_mean and d_D1 change sign, eta_B0_variance and Var_D1(d) are unchanged, and each logistic-normal probability complements exactly",
+            "record_order": "input-record order with fixed roles is invariant after canonical (side, role) sorting",
+            "role_relabel": "not invariant",
+            "reconciliation": "the ten signed champion logit contributions sum to d_D1 within absolute tolerance 1e-12; otherwise EXECUTION_BLOCKED:CONTRIBUTION_RECONCILIATION_FAILURE",
+        },
+        "contextual_score": {"status": "unavailable_by_default", "requirements": ["dated_exact_five_receipt_before_event", "independently_bound_pre_event_player_champion_evidence_for_all_ten", "all_ten_identity_bound"], "blocker": "CONTEXTUAL_EXACT_FIVE_OR_PLAYER_CHAMPION_EVIDENCE_UNAVAILABLE", "supplementary_rows_not_sufficient": True},
+    }
+
+
+def _bootstrap() -> dict[str, Any]:
+    return {
+        "statistic": "delta_i=LL_B0_i-LL_D1_i; point estimate=sum_i(delta_i)/n over locked-candidate VALIDATION maps",
+        "membership": "every validation source_game_id must have exactly one bound dependence_cluster_id; clusters must contain only VALIDATION maps for this comparison",
+        "replicates": 2000,
+        "base_seed": 2026073005,
+        "sampling": "for replicate b=0..1999 call the bound map_weighted_cluster_bootstrap_replicate with seed=2026073005+b; sample exactly K sorted observed cluster IDs uniformly with replacement, carry cluster totals and map counts, then compute sampled_total/sampled_count",
+        "lower_bound": {"confidence": 0.95, "quantile": 0.05, "method": "numpy.quantile(method='linear')", "strict_rule": "lower_bound > 0.0"},
+        "failure": "missing/duplicated cluster membership, nonfinite loss, empty cluster set, bootstrap error, or quantile error is EXECUTION_BLOCKED, never zero and never empirical no-winner",
+    }
+
+
+def _claim_ceiling() -> dict[str, bool]:
+    return {"prefit_contract": True, "execution_authorization": False, "private_retrospective_exploratory_score_after_future_winner_only": True, "model_fit_now": False, "rank_selection_now": False, "prediction": False, "forecast": False, "publication": False, "promotion": False, "sota": False, "reliability": False, "current": False, "live": False, "calibrated_production": False, "public_pack": False, "final_holdout": False}
+
+
+def _output_schema() -> dict[str, Any]:
+    return {
+        "terminal_states": ["PREFIT_CONTRACT_FROZEN_EXECUTION_NOT_AUTHORIZED", "PRIVATE_EXPLORATORY_INCREMENTAL_DRAFT_WINNER", "NO_INCREMENTAL_DRAFT_WINNER", "EXECUTION_BLOCKED"],
+        "winner_only_fields": ["private_retrospective_exploratory_score_probability", "fit_evidence", "rank_selection_evidence", "B0_probability", "D1_logit_increment", "neutral_completed_draft_probability", "probability_increment_over_B0", "D1_conditional_interval"],
+        "required_execution_result": ["state", "blocker", "selected_candidate", "counts", "membership_hashes", "source_and_feature_review_pins", "G2_core_pins", "development_metric", "validation_metric", "bootstrap", "objective_gradient_hessian_diagnostics", "solver_diagnostics", "uncertainty", "prior_only_variance_components", "coverage_and_prior_only_flags", "invariance_tests", "contribution_reconciliation", "claim_ceiling"],
+        "aggregate_evidence_only": True,
+        "raw_row_ids": "prohibited",
+        "nonrun": "PREFIT_CONTRACT_FROZEN_EXECUTION_NOT_AUTHORIZED is not NO_INCREMENTAL_DRAFT_WINNER",
+        "solver_or_uncertainty_failure": "EXECUTION_BLOCKED; withhold D1 and neutral score probabilities; never serialize as NO_INCREMENTAL_DRAFT_WINNER",
+        "candidate_loss": "NO_INCREMENTAL_DRAFT_WINNER only after a valid executed D1 comparison fails the locked selection or validation rule",
+    }
+
+
+def _research_record() -> dict[str, Any]:
+    return {
+        "scispace": {"queries": ["What primary methodological literature supports sparse hierarchical logistic regression with Gaussian priors and Laplace covariance approximations for uncertainty in a fixed-design Bernoulli logistic model?", "What primary methodological literature defines the nonparametric cluster bootstrap for inference when observations within a cluster may be dependent?"], "primary_citations": [{"title": "Laplace Approximation in High-Dimensional Bayesian Regression", "authors": "Barber, Drton, Tan", "doi": "10.1007/978-3-319-27099-9_2", "use": "Laplace approximation precedent only, not performance evidence"}, {"title": "Bootstrapping clustered data", "authors": "Field, Welsh", "doi": "10.1111/J.1467-9868.2007.00593.X", "use": "cluster-resampling precedent only, not performance evidence"}]},
+        "wolfram": {"query": "FullSimplify logistic complement, signed additive sum, and sign-reversed Normal variance", "result": [True, True, True], "use": "algebra check only"},
+        "academic_writing_toolkit": {"review": "paragraph logic review: no issues found", "use": "claim-ceiling wording only"},
+    }
+
+
+def _review_subjects() -> dict[str, str]:
+    return {"package_init": "lol_kills/v2/draft/interactions/g5_exploratory/__init__.py", "contract": "lol_kills/v2/draft/interactions/g5_exploratory/contract.py", "focused_test": "tests/model_v2/draft/interactions/test_g5_exploratory_contract.py"}
+
+
+def verify_bound_dependencies() -> dict[str, Any]:
+    """Verify approved dependency bytes and package-version boundaries only."""
+
+    bindings: dict[str, Any] = {}
+    for namespace, payload in (("g1", G1), ("g1_features", G1_FEATURES), ("g2", G2), ("clusters", CLUSTERS)):
+        for key, locator in payload.items():
+            if key.endswith("_locator"):
+                raw_key = key[:-8] + "_raw_sha256"
+                # A pre-fit review must not open any row container.  The
+                # separately accepted review binds row raw/canonical hashes.
+                if raw_key in payload and key != "rows_locator":
+                    bindings[f"{namespace}_{key[:-8]}"] = _verify_bound(locator, payload[raw_key])
+    feature_manifest = _verify_canonical_content_addressed_json(
+        G1_FEATURES["manifest_locator"], G1_FEATURES["manifest_raw_sha256"], G1_FEATURES["manifest_canonical_sha256"], "manifest_sha256"
+    )
+    feature_review = _verify_canonical_content_addressed_json(
+        G1_FEATURES["independent_review_locator"], G1_FEATURES["independent_review_raw_sha256"], G1_FEATURES["independent_review_canonical_sha256"], "review_sha256"
+    )
+    if feature_review.get("disposition") != G1_FEATURES["independent_review_disposition"]:
+        raise G5PreFitError("supplementary independent review is not accepted")
+    subject = feature_review.get("subject", {})
+    if subject.get("feature_rows") != {"locator": G1_FEATURES["rows_locator"], "raw_sha256": G1_FEATURES["rows_raw_sha256"], "canonical_sha256": G1_FEATURES["rows_canonical_sha256"]}:
+        raise G5PreFitError("supplementary feature row review binding mismatch")
+    if feature_manifest.get("rows_raw_sha256") != G1_FEATURES["rows_raw_sha256"] or feature_manifest.get("rows_canonical_sha256") != G1_FEATURES["rows_canonical_sha256"]:
+        raise G5PreFitError("supplementary feature manifest row binding mismatch")
+    bindings["g1_features_accepted_metadata"] = {"manifest_canonical_sha256": feature_manifest["manifest_sha256"], "review_canonical_sha256": feature_review["review_sha256"]}
+    for library, expected in (("scipy", RUNTIME["optimizer"]["distribution_version"]), ("numpy", RUNTIME["numeric"]["distribution_version"])):
+        actual = importlib.metadata.version(library)
+        if actual != expected:
+            raise G5PreFitError(f"bound runtime changed: {library}")
+        bindings[f"runtime_{library}"] = {"distribution": library, "version": actual}
+    return bindings
+
+
+def build_prefit_bundle() -> dict[str, dict[str, Any]]:
+    """Create a contract bundle without reading source rows or outcomes."""
+
+    # The freeze is not merely a list of remembered hashes: every permitted
+    # metadata/code dependency is checked before these content addresses exist.
+    # `verify_bound_dependencies` intentionally cannot open either G1 row file.
+    verify_bound_dependencies()
+    contract = {"schema_id": SCHEMA, "state": "PREFIT_CONTRACT_FROZEN_EXECUTION_NOT_AUTHORIZED", "execution_authorization": False, "input_identities": {"G1": G1, "G1_features": G1_FEATURES, "G2": G2, "clusters": CLUSTERS, "runtime": RUNTIME}, "candidate_protocol": _candidate_protocol(), "bootstrap": _bootstrap(), "mathematics_availability_uncertainty": _uncertainty_and_availability(), "target_access": {"pre_freeze_target_or_outcome_row_reads": 0, "final_holdout_reads": 0, "allowed_prefit_data": "identities, dependency bytes, and no rows", "later_execution_requires": "separate approval plus a sealed target adapter; this contract grants neither"}, "research_record": _research_record(), "claim_ceiling": _claim_ceiling(), "execution_result_schema": _output_schema()}
+    contract["artifact_sha256"] = sha256(contract)
+    core = {"schema_id": "scryglass:g5-private-exploratory-review-core:v2", "contract_sha256": contract["artifact_sha256"], "review_subject_bytes": {name: {"locator": locator, "raw_sha256": _raw_sha256(ROOT / locator)} for name, locator in _review_subjects().items()}, "dependency_pins": contract["input_identities"], "review_requirements": ["no_row_reads_before_freeze", "G1_feature_review_accepted", "B0_train_only_frozen_after_train", "D1_proper_priors_no_sum_to_zero", "validation_locked_once", "bootstrap_fail_closed", "private_claim_ceiling"]}
+    core["artifact_sha256"] = sha256(core)
+    review = review_prefit_contract(contract, core)
+    review["artifact_sha256"] = sha256(review)
+    return {"contract.json": contract, "review-core.json": core, "pre-fit-review.json": review}
+
+
+def review_prefit_contract(contract: Mapping[str, Any], core: Mapping[str, Any]) -> dict[str, Any]:
+    """Hostile review of metadata only; it does not authorize execution."""
+
+    candidates = contract.get("candidate_protocol", {})
+    selection = candidates.get("selection", {})
+    math = contract.get("mathematics_availability_uncertainty", {})
+    bootstrap = contract.get("bootstrap", {})
+    ceiling = contract.get("claim_ceiling", {})
+    identities = contract.get("input_identities", {})
+    eligible = candidates.get("eligible_candidates", [])
+    d1 = eligible[1] if isinstance(eligible, list) and len(eligible) == 2 else {}
+    expected_d1 = _candidate_protocol()["eligible_candidates"][1]
+    expected_math = _uncertainty_and_availability()
+    checks = {
+        "zero_prefit_target_or_outcome_reads": contract.get("target_access", {}).get("pre_freeze_target_or_outcome_row_reads") == 0,
+        "sealed_final_holdout": contract.get("target_access", {}).get("final_holdout_reads") == 0 and identities.get("G1", {}).get("final_holdout") == "prohibited_not_loaded",
+        "accepted_supplementary_input_bound": identities.get("G1_features") == G1_FEATURES,
+        "candidate_family_exact": [item.get("candidate_id") for item in eligible] == ["B0", "D1"] and candidates.get("D2") == D2_OMISSION,
+        "b0_train_prequential_then_frozen": "prequential" in str(candidates) and "no state update" in str(candidates),
+        "train_development_validation_leakage_blocked": d1.get("fit") == "TRAIN_only_penalized_Bernoulli_logistic_offset" and selection.get("TRAIN") == "B0 state learning, D1 vocabulary/design/offsets/fit, priors, penalties, and transformations only",
+        "d1_proper_priors_no_false_constraint": d1.get("priors_and_penalty", {}).get("identifiability") == "proper independent Gaussian priors define the mu/delta decomposition; no sum-to-zero constraint is imposed",
+        "d1_objective_gradient_hessian_frozen": d1.get("numerical_objective") == expected_d1["numerical_objective"] and d1.get("solver") == expected_d1["solver"],
+        "development_validation_lock": selection.get("DEVELOPMENT", "").find("iff") >= 0 and "no refit" in selection.get("VALIDATION", ""),
+        "validation_gate_exact": selection.get("validation_d1_winner_rule", {}).get("all_required") == ["D1_was_locked_by_DEVELOPMENT", "mean(LL_B0-LL_D1)>=0.005", "one_sided_paired_series_cluster_bootstrap_95_lower_bound>0"],
+        "bootstrap_exact_and_fail_closed": bootstrap.get("replicates") == 2000 and bootstrap.get("base_seed") == 2026073005 and bootstrap.get("lower_bound", {}).get("method") == "numpy.quantile(method='linear')" and "EXECUTION_BLOCKED" in bootstrap.get("failure", ""),
+        "availability_prior_only_and_d2_no_pair": math.get("availability", {}).get("seen_champion_unseen_exact_role") == expected_math["availability"]["seen_champion_unseen_exact_role"] and math.get("availability", {}).get("prior_only_coordinate_rules") == expected_math["availability"]["prior_only_coordinate_rules"] and "no pair" in str(math.get("availability", {})),
+        "separate_uncertainty_no_false_total": math.get("parameter_uncertainty", {}).get("D1_conditional_variance") == expected_math["parameter_uncertainty"]["D1_conditional_variance"] and math.get("parameter_uncertainty", {}).get("interval") == expected_math["parameter_uncertainty"]["interval"] and math.get("parameter_uncertainty", {}).get("prior_only_ledger") == expected_math["parameter_uncertainty"]["prior_only_ledger"] and "do not report a total" in str(math.get("parameter_uncertainty", {})),
+        "invariance_reconciliation_declared": all(key in math.get("invariances", {}) for key in ("side_swap", "record_order", "role_relabel", "reconciliation")),
+        "contextual_overreach_blocked": math.get("contextual_score", {}).get("status") == "unavailable_by_default" and math.get("contextual_score", {}).get("supplementary_rows_not_sufficient") is True,
+        "terminal_and_claim_schema": contract.get("execution_result_schema", {}).get("terminal_states") == ["PREFIT_CONTRACT_FROZEN_EXECUTION_NOT_AUTHORIZED", "PRIVATE_EXPLORATORY_INCREMENTAL_DRAFT_WINNER", "NO_INCREMENTAL_DRAFT_WINNER", "EXECUTION_BLOCKED"] and {"objective_gradient_hessian_diagnostics", "prior_only_variance_components"} <= set(contract.get("execution_result_schema", {}).get("required_execution_result", [])) and "EXECUTION_BLOCKED" in contract.get("execution_result_schema", {}).get("solver_or_uncertainty_failure", "") and all(ceiling.get(key) is False for key in ("execution_authorization", "model_fit_now", "rank_selection_now", "prediction", "forecast", "publication", "promotion", "sota", "reliability", "current", "live", "final_holdout")),
+        "review_core_bound": core.get("contract_sha256") == contract.get("artifact_sha256") and set(core.get("review_subject_bytes", {})) == set(_review_subjects()),
+    }
+    issues = [name.upper() for name, passed in checks.items() if not passed]
+    return {"schema_id": REVIEW_SCHEMA, "disposition": "ACCEPT_PREFIT_ONLY" if not issues else "REMAND", "issues": issues, "hostile_checks": checks, "reviewed_contract_sha256": contract.get("artifact_sha256"), "reviewed_core_sha256": core.get("artifact_sha256"), "execution_authorization": False, "target_outcome_row_reads": 0, "final_holdout_reads": 0, "formal_task_disposition": "G5_PREFIT_FREEZE_ACCEPTED_PRIVATE_EXPLORATORY_ONLY" if not issues else "G5_PREFIT_FREEZE_REMAND"}
+
+
+def _safe_directory(directory: Path) -> None:
+    current = ROOT.resolve()
+    try:
+        parts = directory.absolute().relative_to(current).parts
+    except ValueError as error:
+        raise G5PreFitError("output outside repository") from error
+    for part in parts:
+        current = current / part
+        if current.exists():
+            metadata = os.lstat(current)
+            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+                raise G5PreFitError("unsafe output parent")
+        else:
+            current.mkdir()
+
+
+def _atomic_write(path: Path, payload: bytes) -> None:
+    if path.exists():
+        metadata = os.lstat(path)
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise G5PreFitError("unsafe output leaf")
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(payload); stream.flush(); os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def write_frozen_artifacts(directory: Path = NAMESPACE) -> dict[str, str]:
+    """Write only this pre-fit bundle; never call it as execution authority."""
+
+    _safe_directory(directory)
+    artifacts = build_prefit_bundle()
+    for name, payload in artifacts.items():
+        _atomic_write(directory / name, canonical_bytes(payload) + b"\n")
+    return {name: payload["artifact_sha256"] for name, payload in artifacts.items()}

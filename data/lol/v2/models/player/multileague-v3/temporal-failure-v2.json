@@ -1,0 +1,61 @@
+{
+  "artifact_sha256": "b5aeebf52af22c2407a42a1a8dcf524243f67ec4a6351cb288fd4cd944a9f5cc",
+  "authority": {
+    "betting_authority": false,
+    "model_validation_authority": false,
+    "probability_authority": false,
+    "rating_authority": false,
+    "recommendation_authority": false
+  },
+  "claim_ceiling": "This failure receipt rejects future-dated timing claims. It preserves lineage only and grants no rating, probability, recommendation, or betting authority.",
+  "failures": [
+    {
+      "artifact_sha256": "bb2abaa30f657d15345796a076dfb19a7e116ed235030d29b82b625896b9c6ec",
+      "declared_time_field": "built_at_utc",
+      "declared_time_utc": "2026-08-01T23:50:00+00:00",
+      "failure": "artifact_existed_before_its_declared_lock_or_build_time",
+      "filesystem_created_at_utc": "2026-08-01T15:00:00+00:00",
+      "kind": "corrected_source_preflight_v2",
+      "locator": "data/lol/v2/models/player/multileague-v3/source-preflight-v2.json",
+      "observed_existing_at_utc": "2026-08-01T23:48:55.873475+00:00",
+      "raw_sha256": "e86f9c660278bef68d6abe873756050180603da7dfaed07edb5b605ce67f493b"
+    },
+    {
+      "artifact_sha256": "49c91c8d1af525514b6125a453185bc41f16717ff60b011712fd7d8ce40425e2",
+      "declared_time_field": "locked_at_utc",
+      "declared_time_utc": "2026-08-02T00:00:00+00:00",
+      "failure": "artifact_existed_before_its_declared_lock_or_build_time",
+      "filesystem_created_at_utc": "2026-08-01T15:00:00+00:00",
+      "kind": "future_protocol_v2",
+      "locator": "data/lol/v2/models/player/multileague-v3/future-protocol-lock-v2.json",
+      "observed_existing_at_utc": "2026-08-01T23:48:55.873475+00:00",
+      "raw_sha256": "106a36b0eafa069bee3d48c8e44c70a2e17efa087f4ea41653b812c707510127"
+    },
+    {
+      "artifact_sha256": "593f8abb0e4dae2774462ebe4195485990fe07db72ffc31e9622592c57113114",
+      "declared_time_field": "locked_at_utc",
+      "declared_time_utc": "2026-08-02T12:00:00+00:00",
+      "failure": "artifact_existed_before_its_declared_lock_or_build_time",
+      "filesystem_created_at_utc": "2026-08-01T15:00:00+00:00",
+      "kind": "capture_readiness_v1",
+      "locator": "data/lol/v2/models/player/multileague-v3/capture-readiness-v1.json",
+      "observed_existing_at_utc": "2026-08-01T23:48:55.873475+00:00",
+      "raw_sha256": "75a84655d952f868dcec7eb698e95aab76d105ba03e490c9c7a2186d46cbfd80"
+    }
+  ],
+  "observed_at_utc": "2026-08-01T23:48:55.873475+00:00",
+  "outcome_access": {
+    "future_holdout_maps_present": 0,
+    "future_holdout_targets_accessed": false
+  },
+  "policy": {
+    "artifacts_qualify_as_future_evidence": false,
+    "capture_implementation_must_be_relocked": true,
+    "future_outcomes_used": false,
+    "new_clock_checked_preflight_required": true,
+    "new_hash_distinct_protocol_required": true,
+    "numerical_diagnostics_may_be_rehearsed_again": true
+  },
+  "result_state": "FUTURE_DATED_RECEIPTS_REJECTED_AND_SUPERSESSION_REQUIRED",
+  "schema_version": "scryglass:multileague-rating-v3-temporal-failure:v1"
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "League Wiki Query"
+  short_description: "Query the ingested League Wiki with page and revision provenance"
+  default_prompt: "Use $league-wiki-query to answer this League of Legends Wiki question with source-backed evidence."

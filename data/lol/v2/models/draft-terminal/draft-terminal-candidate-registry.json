@@ -1,0 +1,107 @@
+{
+  "artifact_id": "draft-terminal-candidate-registry-l7-v1",
+  "schema_version": "1.0.0",
+  "status": "preregistered_pending_source",
+  "production_eligible": false,
+  "public_probability_authorized": false,
+  "claim_ceiling": {
+    "descriptive_premap_association": false,
+    "causal_draft_effect": false,
+    "recommendation": false,
+    "betting": false,
+    "sota": false
+  },
+  "estimand": "neutral_terminal_draft_association_after_role_and_side_standardization",
+  "candidate_order": [
+    "m0-role-additive",
+    "m1-role-additive-allied-synergy",
+    "m2-role-additive-allied-and-counter"
+  ],
+  "candidates": [
+    {
+      "candidate_id": "m0-role-additive",
+      "family": "role_champion_additive",
+      "interaction_blocks": [],
+      "order_term": "excluded_by_convention",
+      "contextual_strength_terms": false,
+      "artifact_locator": "data/lol/v2/models/draft-terminal/terminal-model-neutral-development-v1.json",
+      "artifact_sha256": "bef2f994291df322f0eb5cd1e5d9e5131c989eebd2a38d0874f7801a7073b23f",
+      "artifact_status": "development_only_not_promoted",
+      "status": "registered"
+    },
+    {
+      "candidate_id": "m1-role-additive-allied-synergy",
+      "family": "role_champion_plus_allied_pair",
+      "interaction_blocks": [
+        "within_side_allied_pair"
+      ],
+      "order_term": "excluded_by_convention",
+      "contextual_strength_terms": false,
+      "status": "registered"
+    },
+    {
+      "candidate_id": "m2-role-additive-allied-and-counter",
+      "family": "role_champion_plus_allied_pair_plus_same_role_counter",
+      "interaction_blocks": [
+        "within_side_allied_pair",
+        "same_role_cross_side_counter"
+      ],
+      "order_term": "excluded_by_convention",
+      "contextual_strength_terms": false,
+      "artifact_locator": "data/lol/v2/models/draft-terminal/terminal-model-development-v1.json",
+      "artifact_sha256": "f977e5982bc0ee471ec847ab402e567b60148392119748e4a9183fef94a78d74",
+      "status": "registered"
+    }
+  ],
+  "evaluation_policy": {
+    "status": "development_diagnostic_complete",
+    "blocked_reason": "independent L2 evaluation authority and source-time authority are not available",
+    "selected_candidate_id": "m0-role-additive",
+    "selection_artifact": "data/lol/v2/models/draft-terminal/terminal-model-neutral-development-report.json",
+    "selection_rule": "registered candidates only; equalized-draft validation log loss then brier, calibration inside fold, simplicity only after noninferiority",
+    "development_folds": "chronological, source-sealed, outcome-free dependence-cluster-grouped; authoritative series ids unavailable",
+    "calibration_folds": "nested after candidate fit and before untouched outer test",
+    "outer_test_folds": "future time and future patch; never opened for search",
+    "dependence_clusters": [
+      "development_dependence_cluster_id",
+      "team_id_proxy"
+    ],
+    "stress_holdouts": [
+      "future_patch",
+      "league",
+      "international_event_or_meta",
+      "roster_change",
+      "sparse_or_new_champion"
+    ],
+    "calibration_candidates": [
+      "identity",
+      "symmetric_temperature",
+      "symmetrized_platt"
+    ],
+    "source_gate": {
+      "baseline_source": "OE",
+      "candidate_source": "GRID",
+      "scope": "defined_competition_and_date_cohort",
+      "status": "not_passed",
+      "pass_action": "GRID_primary_for_cohort; OE_public_reproducibility_benchmark",
+      "fail_action": "report_exact_missing_or_invalid_records; keep_OE_active",
+      "required_evidence": [
+        "complete_exact_hash_verified_GRID_records",
+        "exact_source_payload_bytes_and_hash",
+        "zero_identity_sequence_or_leakage_failures",
+        "heldout_validation_and_calibration_noninferiority_to_OE",
+        "heldout_results_hash_bound",
+        "replay_data_hash_bound_to_verified_records",
+        "replay_model_hash_bound_to_exact_model_bytes",
+        "second_replay_identical_data_and_model_hashes"
+      ]
+    },
+    "reliability_artifact": null
+  },
+  "source_snapshot_ids": [
+    "scryglass:source:oracle-elixir-player-games",
+    "scryglass:development:outcome-free-dependence-cluster-proxy"
+  ],
+  "training_cutoff": "2026-06-30T23:59:59Z",
+  "independent_l2_authority": false
+}

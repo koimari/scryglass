@@ -1,0 +1,61 @@
+{
+  "draft": {
+    "event_start": "2026-07-01T12:00:00Z",
+    "mode": "neutral",
+    "side_a": {
+      "bot": "Jinx",
+      "jungle": "Nidalee",
+      "mid": "Ahri",
+      "support": "Thresh",
+      "top": "Aatrox"
+    },
+    "side_b": {
+      "bot": "Aphelios",
+      "jungle": "Sejuani",
+      "mid": "Orianna",
+      "support": "Rakan",
+      "top": "Gnar"
+    },
+    "source_available_at": "2026-07-01T11:00:00Z",
+    "source_payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "source_record_id": "source:terminal-fixture",
+    "source_rights_status": "reviewed"
+  },
+  "model_artifact_sha256": "f977e5982bc0ee471ec847ab402e567b60148392119748e4a9183fef94a78d74",
+  "expected_development": {
+    "claim_ceiling": {
+      "betting": false,
+      "causal": false,
+      "recommendation": false
+    },
+    "input_id": "0236ac39cccbcc1893ee0e980d0b2dada9888bc8cd92202b404cb74b613485a3",
+    "interval_95": {
+      "level": 0.95,
+      "lower": 0.543888112229586,
+      "upper": 0.6822203752021133
+    },
+    "ledger": [
+      {"champion_id": "Aatrox", "component_type": "champion_role", "role": "top", "signed_logit": 0.2},
+      {"champion_id": "Nidalee", "component_type": "champion_role", "role": "jungle", "signed_logit": 0.0},
+      {"champion_id": "Ahri", "component_type": "champion_role", "role": "mid", "signed_logit": 0.1},
+      {"champion_id": "Jinx", "component_type": "champion_role", "role": "bot", "signed_logit": 0.0},
+      {"champion_id": "Thresh", "component_type": "champion_role", "role": "support", "signed_logit": 0.0},
+      {"champion_ids": ["Ahri", "Jinx"], "component_type": "ally_synergy", "role": "mid", "signed_logit": 0.05},
+      {"champion_id": "Gnar", "component_type": "champion_role", "role": "top", "signed_logit": 0.0},
+      {"champion_id": "Sejuani", "component_type": "champion_role", "role": "jungle", "signed_logit": 0.0},
+      {"champion_id": "Orianna", "component_type": "champion_role", "role": "mid", "signed_logit": 0.0},
+      {"champion_id": "Aphelios", "component_type": "champion_role", "role": "bot", "signed_logit": 0.0},
+      {"champion_id": "Rakan", "component_type": "champion_role", "role": "support", "signed_logit": 0.0},
+      {"champion_ids": ["Aatrox", "Gnar"], "component_type": "counter", "role": "top", "signed_logit": 0.12}
+    ],
+    "ledger_logit_sum": 0.47000000000000003,
+    "lineage_id": "3baca29a4c2afdd64fb0ffe48892471232ae0c8eaa53eadb25c584a1d6264366",
+    "model_version": "draft-terminal-dev-v1.0.0",
+    "score_a": 61.538375639118215,
+    "score_b": 38.461624360881785,
+    "standardized_map_win_probability_a": 0.6153837563911821,
+    "standardized_map_win_probability_b": 0.38461624360881785,
+    "status": "development_only",
+    "uncalibrated_logit_a": 0.47000000000000003
+  }
+}

@@ -1,0 +1,367 @@
+{
+  "artifact_sha256": "32f11f7981d850cd46a953c8b751340fbf90993cbe95a34aed7fc7e6e9228b8a",
+  "authority": {
+    "betting_authority": false,
+    "calibration_authority": false,
+    "draft_validation_authority": false,
+    "expected_value_authority": false,
+    "odds_authority": false,
+    "probability_authority": false,
+    "ratings_validation_authority": false,
+    "recommendation_authority": false,
+    "staking_authority": false
+  },
+  "claim_ceiling": "This is an empty two-stage prospective evaluation lock. It grants no rating, Draft Score, probability, odds, expected-value, recommendation, staking, transaction, or betting authority.",
+  "clock_attestation": {
+    "lock_time_after_all_prerequisites": true,
+    "lock_time_before_phase_one_boundary": true,
+    "observed_wall_clock_utc": "2026-08-02T02:00:00+00:00",
+    "source": "system_utc_clock_sampled_inside_builder",
+    "user_supplied_timestamp_allowed": false
+  },
+  "decision_outputs": {
+    "bet_recommendation": null,
+    "edge": null,
+    "expected_value": null,
+    "fair_odds": null,
+    "model_probability": null,
+    "probability_interval": null,
+    "stake": null
+  },
+  "evaluation": {
+    "all_predeclared_gates_required": true,
+    "calibration_gates": {
+      "calibration_intercept_interval_must_include_zero": true,
+      "calibration_slope_interval_must_include_one": true,
+      "ece_equal_frequency_10_bins_maximum": 0.03,
+      "ece_series_cluster_upper_95_bound_maximum": 0.05,
+      "league_patch_roster_change_and_sparse_strata_reported": true,
+      "no_supported_stratum_log_loss_point_delta_vs_market_above": 0.02
+    },
+    "capture_gates": {
+      "extractor_replay_mismatch_count_maximum": 0,
+      "prediction_to_quote_response_p95_seconds_maximum": 30.0,
+      "quote_after_map_start_count_maximum": 0,
+      "quote_coverage_minimum": 0.8,
+      "team_or_map_binding_mismatch_count_maximum": 0
+    },
+    "failure_action": "no_probability_no_fair_odds_no_expected_value_no_recommendation_no_betting",
+    "market_benchmark": "two_way_normalized_implied_probability_no_vig",
+    "no_post_opening_tuning": true,
+    "primary_comparisons": [
+      "recalibrated_combined_model_minus_no_vig_market",
+      "recalibrated_combined_model_minus_recalibrated_rating_only"
+    ],
+    "primary_metrics": [
+      "log_loss",
+      "brier_score"
+    ],
+    "probabilistic_pass_rule": {
+      "all_comparisons_and_metrics_must_pass": true,
+      "at_least_one_market_delta_upper_95_bound_strictly_below_zero": true,
+      "each_primary_delta_upper_95_bound_maximum": 0.0,
+      "each_primary_point_delta_maximum": 0.0
+    },
+    "shadow_policy": {
+      "cluster_bootstrap_roi_lower_95_bound_strictly_above_zero": true,
+      "execution_haircut_fraction_of_positive_profit": 0.01,
+      "if_both_sides_qualify": "event_unavailable_as_inconsistent",
+      "maximum_drawdown_and_longest_losing_run_reported": true,
+      "minimum_qualifying_maps": 100,
+      "one_unit_flat_stake_for_evaluation_only": true,
+      "point_roi_after_haircut_strictly_above_zero": true,
+      "quoted_shadow_return_is_not_proof_of_executable_return": true,
+      "selection_rule": "choose_the_only_side_if_lower_95_probability_bound_times_offered_decimal_odds_minus_one_is_at_least_0.02",
+      "stake_or_bankroll_size_authorized": false
+    },
+    "uncertainty": {
+      "confidence_level": 0.95,
+      "method": "paired_series_cluster_bootstrap",
+      "resamples_minimum": 10000,
+      "seed_frozen_before_opening": true
+    },
+    "unit": "map_with_series_clustered_uncertainty"
+  },
+  "event_uncertainty": {
+    "candidate_and_hyperparameters_remain_fixed": true,
+    "confidence_level": 0.95,
+    "draft_terms_refit_in_each_resample": true,
+    "event_outcome_or_market_price_used_in_interval": false,
+    "failure_or_nonconvergence_action": "event_probability_unavailable",
+    "interval_is_epistemic_not_a_guarantee_of_binary_outcome_coverage": true,
+    "method": "series_cluster_bootstrap_full_prediction_pipeline",
+    "percentile_interval": [
+      0.025,
+      0.975
+    ],
+    "phase_one_recalibration_refit_in_each_resample": true,
+    "random_seed_and_implementation_sha256_frozen_before_phase_two": true,
+    "ratings_state_refit_in_each_resample": true,
+    "resamples_minimum": 2000,
+    "resampling_units": {
+      "development_fit": "series",
+      "phase_one_recalibration": "series"
+    },
+    "status": "IMPLEMENTATION_NOT_YET_FROZEN"
+  },
+  "locked_at_utc": "2026-08-02T02:00:00+00:00",
+  "phase_one": {
+    "both_independent_opening_reviews_required": true,
+    "draft_protocol_and_capture_must_pass_their_registered_rules": true,
+    "either_model_failure_action": "phase_two_unavailable_no_substitution",
+    "model_or_hyperparameter_reselection_after_opening_permitted": false,
+    "phase_one_itself_is_market_or_betting_authority": false,
+    "phase_one_outcomes_may_be_used_for_phase_two_recalibration_only_after_both_pass": true,
+    "purpose": "validate_frozen_ratings_and_incremental_terminal_draft",
+    "ratings_protocol_and_capture_must_pass_their_registered_rules": true,
+    "same_event_predictions_must_bind_exact_rating_and_draft_receipts": true,
+    "start_inclusive_source_time": "2026-08-03T00:00:00+00:00",
+    "status": "EMPTY_OUTCOMES_SEALED"
+  },
+  "phase_two": {
+    "cohort_disjoint_from_phase_one": true,
+    "eligibility": {
+      "event_outcome_fields_forbidden_from_all_pre_event_receipts": true,
+      "exact_fixture_series_map_patch_sides_and_ten_players_required": true,
+      "leagues": [
+        "LCS",
+        "LEC",
+        "LCK",
+        "LPL",
+        "MSI",
+        "EWC"
+      ],
+      "market_open_and_two_way_cash_prices_required": true,
+      "prediction_model_must_not_receive_quote_or_market_features": true,
+      "professional_maps_only": true,
+      "registered_betano_quote_and_transport_receipt_required": true,
+      "registered_bookmaker_terms_and_settlement_contract_required": true,
+      "registered_event_probability_and_interval_required": true,
+      "registered_pre_event_rating_prediction_required": true,
+      "registered_pre_event_roster_receipt_required": true,
+      "registered_terminal_draft_prediction_and_map_start_required": true,
+      "retrospective_backfill_qualifies": false
+    },
+    "first_quote_source_time_strictly_after_phase_two_lock": true,
+    "metadata_only_stopping_rule": {
+      "distinct_future_patches_minimum": 3,
+      "domestic_leagues": [
+        "LCS",
+        "LEC",
+        "LCK",
+        "LPL"
+      ],
+      "each_domestic_league_quoted_maps_minimum": 75,
+      "eligible_quoted_maps_maximum_if_shadow_support_not_met": 1000,
+      "eligible_quoted_maps_minimum": 500,
+      "eligible_series_minimum": 125,
+      "international_quoted_maps_minimum": 50,
+      "latest_patch_quoted_maps_minimum": 100,
+      "one_or_both_rosters_changed_maps_minimum": 50,
+      "outcomes_must_remain_unopened_while_checking_support": true,
+      "quote_coverage_of_otherwise_eligible_maps_minimum": 0.8,
+      "shadow_policy_qualifying_maps_minimum": 100,
+      "sparse_or_new_player_or_champion_maps_minimum": 50,
+      "stop_at_first_independently_pinned_ledger_meeting_all_minima": true,
+      "thresholds_are_metadata_floors_not_a_post_hoc_power_claim": true
+    },
+    "outcomes_sealed_until_metadata_only_stopping_rule": true,
+    "purpose": "fresh_market_comparison_and_shadow_policy_evaluation",
+    "start_boundary": "strictly_after_independent_phase_one_pass_recalibration_and_uncertainty_registry_lock",
+    "status": "NOT_OPEN_NOT_STARTED"
+  },
+  "prerequisites": {
+    "draft_capture_readiness": {
+      "artifact_sha256": "d60f1d5db16aa06d8e5686c754c74c67905f4c9cc5f528e928328b7b3bc23514",
+      "locator": "data/lol/v2/models/draft-terminal/future-capture-readiness-v1.json",
+      "locked_at_utc": "2026-08-02T01:30:00+00:00",
+      "raw_sha256": "84f66287df739ddc57a643ce5612a7933c4ae9caa87835c360ac4c838ed8c11f"
+    },
+    "draft_future_protocol": {
+      "artifact_sha256": "c4c9ceb0fbdb3943f684de4983d28d2021fecb5d1c92069c514ff304c9f722f8",
+      "locator": "data/lol/v2/models/draft-terminal/future-protocol-lock-v1.json",
+      "locked_at_utc": "2026-08-02T01:00:00+00:00",
+      "raw_sha256": "46826584081e8f9e8bd177c96d7eaf5c2239dba5d9d33b94a50dafe7b3b10a87"
+    },
+    "grid_terminal_draft_source_readiness": {
+      "artifact_sha256": "2aa23f24e281fc34926e96851ce5aff36046c31ebef857b41bc8910e51cc732c",
+      "locator": "data/lol/v2/models/draft-terminal/grid-source-readiness-v1.json",
+      "locked_at_utc": "2026-08-02T01:27:57.849474+00:00",
+      "raw_sha256": "1f06b057adac8c0e35c15dfed40cca01681bf34ab7be61dc780b0b968ae1440c"
+    },
+    "ratings_capture_readiness": {
+      "artifact_sha256": "7b744150924ea7a217c524bb71928eb41644f59c1332bbc3de169ba90c18a611",
+      "locator": "data/lol/v2/models/player/multileague-v3/capture-readiness-v3.json",
+      "locked_at_utc": "2026-08-01T23:58:00+00:00",
+      "raw_sha256": "7426cb9603b07b8f45dfb78537e4315271436ea20362fcff5b2af2b7b55c0d6e"
+    },
+    "ratings_future_protocol": {
+      "artifact_sha256": "996ce4067818799e7345cd49e6a9e450a7675563f3e15daeaa667a8c9846ef24",
+      "locator": "data/lol/v2/models/player/multileague-v3/future-protocol-lock-v3.json",
+      "locked_at_utc": "2026-08-01T23:54:00+00:00",
+      "raw_sha256": "db9f2c1557247036ddfdbebdd7cccbd395cc22841cd9d574747fe4f60f446301"
+    }
+  },
+  "quote_capture_contract": {
+    "adapter_id_and_source_sha256_required": true,
+    "bookmaker_id": "betano-brazil",
+    "deterministic_extraction_replay_required": true,
+    "exact_response_body_bytes_and_sha256_required": true,
+    "exact_two_team_prices_required": true,
+    "generic_receipt_builder_time_counts_as_transport_time": false,
+    "market_status_must_be_open": true,
+    "market_type": "match_winner",
+    "monotonic_transport_duration_required": true,
+    "prediction_receipt_must_precede_quote_request": true,
+    "prediction_to_quote_response_seconds_maximum": 30.0,
+    "price_extraction_schema_version": "scryglass.private-bookmaker-price-extraction.v1",
+    "quote_capture_itself_is_betting_authority": false,
+    "quote_presence_does_not_prove_acceptance_limit_or_execution": true,
+    "quote_receipt_schema_version": "scryglass.private-bookmaker-quote.v2",
+    "quote_response_must_precede_actual_map_start": true,
+    "quote_response_to_actual_map_start_seconds_minimum": 5.0,
+    "response_body_must_exclude_request_headers_cookies_and_credentials": true,
+    "retrospective_backfill_qualifies": false,
+    "settlement_contract_sha256": "6f1e885f7d49ee27555bdad7babb9579c8ee9b5057951e728957d44dbe253405",
+    "settlement_rule_id": "betano-br-map-winner-shadow-v1",
+    "source_specific_adapter_frozen_before_first_phase_two_quote": true,
+    "transport_request_started_system_utc_required": true,
+    "transport_response_received_system_utc_required": true,
+    "user_supplied_capture_timestamp_allowed": false
+  },
+  "quote_capture_contract_sha256": "06dc090de7c93d2625bc78c3ba7163eafda598e3d14deaea3f325c829cb55c68",
+  "recalibration": {
+    "fit_dataset": "complete_independently_opened_phase_one_draft_cohort",
+    "fit_only_after_phase_one_passes": true,
+    "formula": "sigmoid(intercept+slope*logit(clipped_raw_probability))",
+    "initial_parameters": {
+      "intercept": 0.0,
+      "slope": 1.0
+    },
+    "intercept_bounds": [
+      -2.0,
+      2.0
+    ],
+    "maximum_iterations": 10000,
+    "method": "bounded_logistic_recalibration",
+    "objective": "unweighted_map_log_loss",
+    "optimizer": "scipy.optimize.minimize:L-BFGS-B",
+    "optimizer_ftol": 1e-12,
+    "optimizer_gtol": 1e-08,
+    "parameters_and_implementation_sha256_frozen_before_phase_two": true,
+    "phase_two_refit_or_online_update_permitted": false,
+    "rating_only_comparator_recalibrated_by_identical_procedure": true,
+    "raw_probability": "frozen_rating_plus_terminal_draft_contextual_probability",
+    "raw_probability_clip": [
+      1e-06,
+      0.999999
+    ],
+    "slope_bounds": [
+      0.25,
+      4.0
+    ],
+    "status": "NOT_YET_FIT"
+  },
+  "registries": {
+    "bookmaker_terms": null,
+    "market_authority": null,
+    "phase_one_evaluation_authority": null,
+    "phase_two_outcome_opening_authority": null,
+    "phase_two_prediction_ledger": null,
+    "phase_two_quote_ledger": null,
+    "recalibration_and_uncertainty": null,
+    "source_specific_quote_adapter": null
+  },
+  "result_state": "TWO_STAGE_PROSPECTIVE_MARKET_PROTOCOL_LOCKED_EMPTY",
+  "schema_version": "scryglass:private-map-winner-future-market-protocol:v1",
+  "scope": {
+    "bookmaker_id": "betano-brazil",
+    "currency_or_stake_assumption": null,
+    "market_type": "match_winner",
+    "market_unit": "single_map",
+    "public_scryglass_remains_non_betting": true,
+    "transaction_automation": false,
+    "visibility": "private_personal_research_only"
+  },
+  "settlement_contract": {
+    "ambiguous_or_conflicting_result": "unavailable_not_manually_overridden",
+    "bookmaker_specific_terms_snapshot_required_before_phase_two": true,
+    "bookmaker_terms_alignment_independent_review_required": true,
+    "bookmaker_terms_snapshot_status": "NOT_YET_CAPTURED_OR_REVIEWED",
+    "bookmaker_void_or_refund": "void_zero_profit_zero_loss",
+    "cash_out_free_bet_boost_builder_or_promotion_qualifies": false,
+    "exact_market_label_and_map_number_must_match": true,
+    "manual_post_outcome_exclusion_permitted": false,
+    "non_started_map": "void",
+    "official_result_receipt_required": true,
+    "postponement_cancellation_remake_forfeit": "unavailable_unless_exact_registered_bookmaker_terms_and_settlement_record_resolve_it",
+    "same_day_resumption": "follow_exact_registered_bookmaker_terms",
+    "scope": "single_map_league_of_legends_winner_two_way_cash_odds",
+    "settlement_rule_id": "betano-br-map-winner-shadow-v1",
+    "team_aliases_must_resolve_before_quote_capture": true,
+    "winning_selection": "winner:<canonical_team_id> whose team is the official final map winner"
+  },
+  "settlement_contract_sha256": "6f1e885f7d49ee27555bdad7babb9579c8ee9b5057951e728957d44dbe253405",
+  "source_locks": [
+    {
+      "bytes": 30246,
+      "locator": "lol_kills/v2/market/match_winner_future_protocol_v1.py",
+      "raw_sha256": "9c11827fae7929825d6503ab65a5b9e3f77706ff05b6feda5add3c2bc34c6bac"
+    },
+    {
+      "bytes": 34148,
+      "locator": "lol_kills/bookmaker_quote_capture.py",
+      "raw_sha256": "cb81466de8bcca4944d315f50fcfc75d8e0e41ed7278f9a74140eb37b1fd0c49"
+    },
+    {
+      "bytes": 2476,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_registry_v3.py",
+      "raw_sha256": "aa5244331ca44cc3ab9764c95c05a4346e1984fed52ab023003877fa3f53485d"
+    },
+    {
+      "bytes": 2493,
+      "locator": "lol_kills/v2/ratings/player/multileague_v3_capture_registry_v3.py",
+      "raw_sha256": "50517c5f171162b83f8d5e5ed6c37f208415f6d50065a870139877d47599b45b"
+    },
+    {
+      "bytes": 2503,
+      "locator": "lol_kills/v2/draft/terminal/future_protocol_registry_v1.py",
+      "raw_sha256": "a168e9766085bb7d46db0dd4618f1ed269abbf2f521807d4b962a4b5cf121fd2"
+    },
+    {
+      "bytes": 2526,
+      "locator": "lol_kills/v2/draft/terminal/capture_readiness_registry_v1.py",
+      "raw_sha256": "1e9bf72a017187fbe3bf8459ff4c239b7eb6e83b2a9c064ad738c4bcf7c33c00"
+    },
+    {
+      "bytes": 2571,
+      "locator": "lol_kills/v2/draft/terminal/grid_source_readiness_registry_v1.py",
+      "raw_sha256": "8f164ea8551e8cf5bde212316eb043a55289ebd176c5625e56ca5d69f328c22c"
+    },
+    {
+      "bytes": 11119,
+      "locator": "data/lol/v2/models/player/multileague-v3/future-protocol-lock-v3.json",
+      "raw_sha256": "db9f2c1557247036ddfdbebdd7cccbd395cc22841cd9d574747fe4f60f446301"
+    },
+    {
+      "bytes": 7165,
+      "locator": "data/lol/v2/models/player/multileague-v3/capture-readiness-v3.json",
+      "raw_sha256": "7426cb9603b07b8f45dfb78537e4315271436ea20362fcff5b2af2b7b55c0d6e"
+    },
+    {
+      "bytes": 9828,
+      "locator": "data/lol/v2/models/draft-terminal/future-protocol-lock-v1.json",
+      "raw_sha256": "46826584081e8f9e8bd177c96d7eaf5c2239dba5d9d33b94a50dafe7b3b10a87"
+    },
+    {
+      "bytes": 6213,
+      "locator": "data/lol/v2/models/draft-terminal/future-capture-readiness-v1.json",
+      "raw_sha256": "84f66287df739ddc57a643ce5612a7933c4ae9caa87835c360ac4c838ed8c11f"
+    },
+    {
+      "bytes": 9017,
+      "locator": "data/lol/v2/models/draft-terminal/grid-source-readiness-v1.json",
+      "raw_sha256": "1f06b057adac8c0e35c15dfed40cca01681bf34ab7be61dc780b0b968ae1440c"
+    }
+  ]
+}

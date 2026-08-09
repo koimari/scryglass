@@ -1,0 +1,52 @@
+{
+  "authority": {
+    "betting": false,
+    "model_validation": false,
+    "publication": false,
+    "recommendation": false,
+    "source_freshness": true
+  },
+  "candidate": {
+    "artifact_sha256": "f4db2fb6f6d206483f4827f06cc4756cf16748182886508a1fdd384ab8cb69c9",
+    "as_of": "2026-07-28T23:45:16Z",
+    "locator": "data/lol/v2/tierlists/champion-elo-candidate-v1.json",
+    "maps_in_live_window": 323,
+    "maps_replayed": 16644,
+    "raw_sha256": "458ac1f629d3272e0585edc5a7150e6203e2558f4e98c22ca43863559dd63015",
+    "source_complete_through_expected_live_as_of": false,
+    "source_mode": "oe_only"
+  },
+  "claim_ceiling": "This receipt records source refresh and a development replay only.",
+  "expected_live_as_of": "2026-08-08T23:59:59Z",
+  "live_window_start": "2026-07-18T00:00:00Z",
+  "receipt_canonical_sha256": "d61580eb1da7d0e04f75add379eaf239c2a0c3e4d67f25067a524dad9afd6069",
+  "retrieved_at": "2026-08-08T14:40:04.982406Z",
+  "schema_version": "scryglass:tierlist-live-refresh:v1",
+  "source_mode": "oe_only",
+  "source_steps": [
+    {
+      "command": [
+        "lol_kills.refresh_warehouse",
+        "--oe-years",
+        "2025",
+        "2026",
+        "--refresh-oe",
+        "--skip-lp",
+        "--skip-grid"
+      ],
+      "completed": false,
+      "returncode": 1,
+      "stderr_bytes": 3692,
+      "stdout_bytes": 97
+    },
+    {
+      "command": [],
+      "completed": false,
+      "reason": "source_mode_oe_only",
+      "returncode": null,
+      "skipped": true
+    }
+  ],
+  "status": "blocked_source_incomplete",
+  "window_start": "2025-01-01T00:00:00Z"
+}

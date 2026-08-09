@@ -1,0 +1,64 @@
+{
+  "schema_version": "scryglass:public-roster-source-package:v1",
+  "captured_at_utc": "2026-08-02T06:58:50Z",
+  "event_id": "LCS/2026 Season/Summer Season_Week 2_3_1",
+  "event_start_utc": "2026-08-02T20:00:00Z",
+  "sources": [
+    {
+      "kind": "leaguepedia_team_page_revision_and_render",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/intake/2026-08-02/lcs-summer-week2-match3/roster-sources/lyon/payload-4471044.json",
+      "raw_sha256": "bec8d92e65eb37eaa1b11769037461c69842f6d03928f0c91113d927e482cc27",
+      "revision_id": 4471044,
+      "revision_timestamp": "2026-06-15T07:29:34Z",
+      "team": "LYON (2024 American Team)",
+      "extracted_active_rows": [
+        {"role": "top", "player": "Dhokla"},
+        {"role": "jungle", "player": "Armao"},
+        {"role": "jungle", "player": "Inspired"},
+        {"role": "mid", "player": "Saint"},
+        {"role": "bot", "player": "Berserker"},
+        {"role": "support", "player": "Isles"}
+      ]
+    },
+    {
+      "kind": "dated_player_interview",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/intake/2026-08-02/lcs-summer-week2-match3/roster-sources/prodiff/armao-interview-august-2026.html",
+      "raw_sha256": "8ce9c5f1af9d8b6c05323f3accb709c191da398912527304d121cdb5dcd0febe",
+      "published_date": "2026-08-01",
+      "source_url": "https://prodiff.gg/p/armao-interview-august-2026",
+      "extracted_assertion": "Armao still has a couple more weeks filling in for Inspired."
+    },
+    {
+      "kind": "leaguepedia_team_page_revision_and_render",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/intake/2026-08-02/lcs-summer-week2-match3/roster-sources/shopify-rebellion/payload-4487872.json",
+      "raw_sha256": "dcb0b187203b7f214bb68d6234b646b617f197341efa661bad8a5bd36ca0c5b9",
+      "revision_id": 4487872,
+      "revision_timestamp": "2026-07-17T09:01:03Z",
+      "team": "Shopify Rebellion",
+      "extracted_active_rows": [
+        {"role": "top", "player": "Fudge"},
+        {"role": "jungle", "player": "Contractz"},
+        {"role": "mid", "player": "Zinie"},
+        {"role": "bot", "player": "Bvoy"},
+        {"role": "support", "player": "Zeyzal"}
+      ]
+    },
+    {
+      "kind": "leaguepedia_match_schedule",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/intake/2026-08-02/lcs-summer-week2-match3/patch-revision/raw/schedule/schedule-000.json",
+      "raw_sha256": "a3cd2eca1f264f96b096b83321a997b9d18266e18b35ec93b978d264f50d3deb",
+      "team1": "LYON (2024 American Team)",
+      "team2": "Shopify Rebellion",
+      "blue_red_side_fields_present": false
+    }
+  ],
+  "resolved_exact_players": {
+    "LYON": ["Dhokla", "Armao", "Saint", "Berserker", "Isles"],
+    "Shopify Rebellion": ["Fudge", "Contractz", "Zinie", "Bvoy", "Zeyzal"]
+  },
+  "blue_red_side_authority": "unavailable",
+  "outcomes_present": false,
+  "outcomes_accessed": false,
+  "public_redistribution_authorized": false,
+  "private_evaluation_capture_only": true
+}

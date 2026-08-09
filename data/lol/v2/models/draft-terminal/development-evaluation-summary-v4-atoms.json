@@ -1,0 +1,484 @@
+{
+ "artifact_sha256": "d4e107fc9910f67cfa237e65fa5f251fb7bf6d1461a9504e5aafce5f74016ea5",
+ "atom_candidates": [
+  "m3-role-additive-atom-presence",
+  "m4-atom-presence-only"
+ ],
+ "claim_scope": "R-22 development diagnostic; no authority",
+ "code_bindings": {
+  "development_evaluation_helpers": "586f215003ea1955d76d90c48bfff1cbc635352568e7f8bf2d1e83966c65cae8",
+  "development_evaluation_v2_fit": "15dc9fa46a055bd8c022d80c638908aa9755d542269b156643cecc97ce49c2a1",
+  "development_evaluation_v4_atoms": "7e6eb0e6cb28b174ef2ece2aceeec132287a869c4699d2776f3db14a28ed4303",
+  "development_snapshot": "2a3d12990591b77eb42fa65f99a419167199a42950e61d157a0cc40da5b48218"
+ },
+ "development_only": true,
+ "folds": [
+  {
+   "fold_id": "outer-00",
+   "m0_role_additive_reference": {
+    "selected_variant": "m0-role-additive@ridge-0.05",
+    "test_brier_score": 0.2389764950100671,
+    "test_log_loss": 0.6981930629176252
+   },
+   "results": {
+    "m3-role-additive-atom-presence": {
+     "incremental_vs_baseline_only": {
+      "brier_score": -0.002654708307484238,
+      "log_loss": -0.00705559992043836,
+      "negative_is_better": true,
+      "pass_rule": "both deltas must be nonpositive",
+      "passed": true
+     },
+     "incremental_vs_m0": {
+      "brier_score": -0.000575878996268181,
+      "log_loss": -0.001551363498326297,
+      "negative_is_better": true,
+      "pass_rule": "both deltas must be nonpositive"
+     },
+     "selected_variant": "m3-role-additive-atom-presence@ridge-0.05",
+     "test_brier_score": 0.23840061601379892,
+     "test_log_loss": 0.6966416994192989,
+     "validation_variants": [
+      {
+       "brier_score": 0.22571387845292826,
+       "log_loss": 0.642315660746037,
+       "ridge_strength": 0.02,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.02"
+      },
+      {
+       "brier_score": 0.22483503045240522,
+       "log_loss": 0.6407515216463365,
+       "ridge_strength": 0.05,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.05"
+      },
+      {
+       "brier_score": 0.22488521069249826,
+       "log_loss": 0.641239532999869,
+       "ridge_strength": 0.1,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.10"
+      },
+      {
+       "brier_score": 0.22528633136895568,
+       "log_loss": 0.6424454625432519,
+       "ridge_strength": 0.2,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.20"
+      },
+      {
+       "brier_score": 0.22573910852553022,
+       "log_loss": 0.6436699243896168,
+       "ridge_strength": 0.4,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.40"
+      }
+     ]
+    },
+    "m4-atom-presence-only": {
+     "incremental_vs_baseline_only": {
+      "brier_score": -0.0007860687421903656,
+      "log_loss": -0.0016603515753387255,
+      "negative_is_better": true,
+      "pass_rule": "both deltas must be nonpositive",
+      "passed": true
+     },
+     "incremental_vs_m0": {
+      "brier_score": 0.0012927605690256916,
+      "log_loss": 0.0038438848467733377,
+      "negative_is_better": true,
+      "pass_rule": "both deltas must be nonpositive"
+     },
+     "selected_variant": "m4-atom-presence-only@ridge-0.05",
+     "test_brier_score": 0.2402692555790928,
+     "test_log_loss": 0.7020369477643985,
+     "validation_variants": [
+      {
+       "brier_score": 0.22624432174965994,
+       "log_loss": 0.6446622824343206,
+       "ridge_strength": 0.02,
+       "variant_id": "m4-atom-presence-only@ridge-0.02"
+      },
+      {
+       "brier_score": 0.22615480307261035,
+       "log_loss": 0.6446064676711298,
+       "ridge_strength": 0.05,
+       "variant_id": "m4-atom-presence-only@ridge-0.05"
+      },
+      {
+       "brier_score": 0.22618729914909447,
+       "log_loss": 0.6447753775805769,
+       "ridge_strength": 0.1,
+       "variant_id": "m4-atom-presence-only@ridge-0.10"
+      },
+      {
+       "brier_score": 0.2262761225413867,
+       "log_loss": 0.6450465905927866,
+       "ridge_strength": 0.2,
+       "variant_id": "m4-atom-presence-only@ridge-0.20"
+      },
+      {
+       "brier_score": 0.22637465482749256,
+       "log_loss": 0.645314067419147,
+       "ridge_strength": 0.4,
+       "variant_id": "m4-atom-presence-only@ridge-0.40"
+      }
+     ]
+    }
+   },
+   "zero_play_transfer_diagnostic": {
+    "atom_logit_for_unseen_champion": -0.046499,
+    "cohort_champion_count": 170,
+    "note": "bridge atom presence gives a never-seen champion a nonzero composition value by construction",
+    "probe_champion_id": "riot:champion:11",
+    "probe_display_name": "Master Yi",
+    "probe_family_presence": {
+     "crowd-control-mobility": true,
+     "damage": true,
+     "heal-shield": true,
+     "interaction": true,
+     "stack-transform-summon-resource": true,
+     "vision-economy": false
+    },
+    "status": "checked",
+    "structurally_possible": true
+   }
+  },
+  {
+   "fold_id": "outer-01",
+   "m0_role_additive_reference": {
+    "selected_variant": "m0-role-additive@ridge-0.05",
+    "test_brier_score": 0.2669422919969988,
+    "test_log_loss": 0.755009628419815
+   },
+   "results": {
+    "m3-role-additive-atom-presence": {
+     "incremental_vs_baseline_only": {
+      "brier_score": -0.00015015564300391304,
+      "log_loss": -0.0005469157210681308,
+      "negative_is_better": true,
+      "pass_rule": "both deltas must be nonpositive",
+      "passed": true
+     },
+     "incremental_vs_m0": {
+      "brier_score": -0.00028771605980770776,
+      "log_loss": -0.0006288994457934738,
+      "negative_is_better": true,
+      "pass_rule": "both deltas must be nonpositive"
+     },
+     "selected_variant": "m3-role-additive-atom-presence@ridge-0.10",
+     "test_brier_score": 0.2666545759371911,
+     "test_log_loss": 0.7543807289740215,
+     "validation_variants": [
+      {
+       "brier_score": 0.23042352159552795,
+       "log_loss": 0.659546782196392,
+       "ridge_strength": 0.02,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.02"
+      },
+      {
+       "brier_score": 0.22993752036209875,
+       "log_loss": 0.6580064719394623,
+       "ridge_strength": 0.05,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.05"
+      },
+      {
+       "brier_score": 0.22997934275421222,
+       "log_loss": 0.6579438747916763,
+       "ridge_strength": 0.1,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.10"
+      },
+      {
+       "brier_score": 0.2302556444192708,
+       "log_loss": 0.6585225005409482,
+       "ridge_strength": 0.2,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.20"
+      },
+      {
+       "brier_score": 0.23058606894822087,
+       "log_loss": 0.6592782927871943,
+       "ridge_strength": 0.4,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.40"
+      }
+     ]
+    },
+    "m4-atom-presence-only": {
+     "incremental_vs_baseline_only": {
+      "brier_score": 0.00016189214468254054,
+      "log_loss": 0.0005543514831427565,
+      "negative_is_better": true,
+      "pass_rule": "both deltas must be nonpositive",
+      "passed": false
+     },
+     "incremental_vs_m0": {
+      "brier_score": 2.4331727878745824e-05,
+      "log_loss": 0.0004723677584174135,
+      "negative_is_better": true,
+      "pass_rule": "both deltas must be nonpositive"
+     },
+     "selected_variant": "m4-atom-presence-only@ridge-0.05",
+     "test_brier_score": 0.26696662372487756,
+     "test_log_loss": 0.7554819961782324,
+     "validation_variants": [
+      {
+       "brier_score": 0.23086138452418262,
+       "log_loss": 0.6598194248362776,
+       "ridge_strength": 0.02,
+       "variant_id": "m4-atom-presence-only@ridge-0.02"
+      },
+      {
+       "brier_score": 0.23082383944132046,
+       "log_loss": 0.6597511357964984,
+       "ridge_strength": 0.05,
+       "variant_id": "m4-atom-presence-only@ridge-0.05"
+      },
+      {
+       "brier_score": 0.230856451620162,
+       "log_loss": 0.6598515749699986,
+       "ridge_strength": 0.1,
+       "variant_id": "m4-atom-presence-only@ridge-0.10"
+      },
+      {
+       "brier_score": 0.23093942586251534,
+       "log_loss": 0.660070400887854,
+       "ridge_strength": 0.2,
+       "variant_id": "m4-atom-presence-only@ridge-0.20"
+      },
+      {
+       "brier_score": 0.23103741771660596,
+       "log_loss": 0.6603194067606626,
+       "ridge_strength": 0.4,
+       "variant_id": "m4-atom-presence-only@ridge-0.40"
+      }
+     ]
+    }
+   },
+   "zero_play_transfer_diagnostic": {
+    "atom_logit_for_unseen_champion": -0.091151,
+    "cohort_champion_count": 170,
+    "note": "bridge atom presence gives a never-seen champion a nonzero composition value by construction",
+    "probe_champion_id": "riot:champion:11",
+    "probe_display_name": "Master Yi",
+    "probe_family_presence": {
+     "crowd-control-mobility": true,
+     "damage": true,
+     "heal-shield": true,
+     "interaction": true,
+     "stack-transform-summon-resource": true,
+     "vision-economy": false
+    },
+    "status": "checked",
+    "structurally_possible": true
+   }
+  },
+  {
+   "fold_id": "outer-02",
+   "m0_role_additive_reference": {
+    "selected_variant": "m0-role-additive@ridge-0.02",
+    "test_brier_score": 0.2298634562418204,
+    "test_log_loss": 0.6603120544348726
+   },
+   "results": {
+    "m3-role-additive-atom-presence": {
+     "incremental_vs_baseline_only": {
+      "brier_score": 0.00013012703812168014,
+      "log_loss": 0.0004545307999127557,
+      "negative_is_better": true,
+      "pass_rule": "both deltas must be nonpositive",
+      "passed": false
+     },
+     "incremental_vs_m0": {
+      "brier_score": 0.0003004643964801268,
+      "log_loss": 0.0006378590319188193,
+      "negative_is_better": true,
+      "pass_rule": "both deltas must be nonpositive"
+     },
+     "selected_variant": "m3-role-additive-atom-presence@ridge-0.02",
+     "test_brier_score": 0.23016392063830052,
+     "test_log_loss": 0.6609499134667914,
+     "validation_variants": [
+      {
+       "brier_score": 0.2224116403553295,
+       "log_loss": 0.6434772431367608,
+       "ridge_strength": 0.02,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.02"
+      },
+      {
+       "brier_score": 0.22400373963085465,
+       "log_loss": 0.6466256804382423,
+       "ridge_strength": 0.05,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.05"
+      },
+      {
+       "brier_score": 0.22523372470705505,
+       "log_loss": 0.6492595130776777,
+       "ridge_strength": 0.1,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.10"
+      },
+      {
+       "brier_score": 0.22630921454180306,
+       "log_loss": 0.6516350633713113,
+       "ridge_strength": 0.2,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.20"
+      },
+      {
+       "brier_score": 0.2271234300744606,
+       "log_loss": 0.6534595693021229,
+       "ridge_strength": 0.4,
+       "variant_id": "m3-role-additive-atom-presence@ridge-0.40"
+      }
+     ]
+    },
+    "m4-atom-presence-only": {
+     "incremental_vs_baseline_only": {
+      "brier_score": 0.0010053418727791752,
+      "log_loss": 0.002207501740503992,
+      "negative_is_better": true,
+      "pass_rule": "both deltas must be nonpositive",
+      "passed": false
+     },
+     "incremental_vs_m0": {
+      "brier_score": 0.0011756792311376218,
+      "log_loss": 0.0023908299725100557,
+      "negative_is_better": true,
+      "pass_rule": "both deltas must be nonpositive"
+     },
+     "selected_variant": "m4-atom-presence-only@ridge-0.02",
+     "test_brier_score": 0.231039135472958,
+     "test_log_loss": 0.6627028844073827,
+     "validation_variants": [
+      {
+       "brier_score": 0.22724152960156893,
+       "log_loss": 0.6540260629573881,
+       "ridge_strength": 0.02,
+       "variant_id": "m4-atom-presence-only@ridge-0.02"
+      },
+      {
+       "brier_score": 0.22733127360099734,
+       "log_loss": 0.6541518058593027,
+       "ridge_strength": 0.05,
+       "variant_id": "m4-atom-presence-only@ridge-0.05"
+      },
+      {
+       "brier_score": 0.22751182078552187,
+       "log_loss": 0.654493776306963,
+       "ridge_strength": 0.1,
+       "variant_id": "m4-atom-presence-only@ridge-0.10"
+      },
+      {
+       "brier_score": 0.22774533279682246,
+       "log_loss": 0.6549592800886359,
+       "ridge_strength": 0.2,
+       "variant_id": "m4-atom-presence-only@ridge-0.20"
+      },
+      {
+       "brier_score": 0.22796404832493966,
+       "log_loss": 0.6554111785927665,
+       "ridge_strength": 0.4,
+       "variant_id": "m4-atom-presence-only@ridge-0.40"
+      }
+     ]
+    }
+   },
+   "zero_play_transfer_diagnostic": {
+    "atom_logit_for_unseen_champion": -0.10646,
+    "cohort_champion_count": 170,
+    "note": "bridge atom presence gives a never-seen champion a nonzero composition value by construction",
+    "probe_champion_id": "riot:champion:11",
+    "probe_display_name": "Master Yi",
+    "probe_family_presence": {
+     "crowd-control-mobility": true,
+     "damage": true,
+     "heal-shield": true,
+     "interaction": true,
+     "stack-transform-summon-resource": true,
+     "vision-economy": false
+    },
+    "status": "checked",
+    "structurally_possible": true
+   }
+  }
+ ],
+ "generated_at": "2026-08-07T19:27:21.722758Z",
+ "resolver_provenance": {
+  "bridge_artifact_sha256": "e4e4dcc38635cf6d73a2733cb0bd8e387453b1df0eefb3dda006a9738a966366",
+  "bridge_generated_at": "2026-08-07T19:00:12.658717Z",
+  "bridge_lcc_commit": "59f6a7aa1199a5a6996feee05c1a9657333e8d40",
+  "bridge_schema_id": "scryglass.lcc-atom-bridge.v1",
+  "crosswalk_raw_sha256": "96193678d122609ed47f7ec28de73d109188debde769e8c82423b30fa3d5bfa0"
+ },
+ "ridge_strengths": [
+  0.02,
+  0.05,
+  0.1,
+  0.2,
+  0.4
+ ],
+ "schema_version": "draft-terminal-development-evaluation-v4-atoms",
+ "source_snapshot": {
+  "availability_status": "frozen_retrospective_development_only",
+  "development_snapshot_manifest_artifact_sha256": "da4812bd1b45e0601cc6d50fe4b53730ce2018fb2aee3c44e189fe3819be6f4b",
+  "development_snapshot_manifest_raw_sha256": "f395e0da4c138eaaaae6a749359e866a9f4fa71cfd24f334e104e2b458a74e48",
+  "development_snapshot_payload_raw_sha256": "e8105027c7b2406f735cdcca592e60071ed25fc6489f4966a663dd91bea4a7d8",
+  "development_snapshot_population": {
+   "complete_clustered_rows": 6194,
+   "dependence_clusters": 2871,
+   "end": "2026-07-18T16:33:48Z",
+   "excluded_without_cluster_assignment": 31724,
+   "leagues": [
+    "AMERICAS",
+    "CBLOL",
+    "EWC",
+    "FST",
+    "LCK",
+    "LCP",
+    "LCS",
+    "LEC",
+    "LJL",
+    "LPL",
+    "MSI",
+    "PCS",
+    "TCL",
+    "VCS"
+   ],
+   "patches": [
+    "15.01",
+    "15.02",
+    "15.03",
+    "15.04",
+    "15.05",
+    "15.06",
+    "15.07",
+    "15.08",
+    "15.09",
+    "15.10",
+    "15.11",
+    "15.12",
+    "15.13",
+    "15.14",
+    "15.15",
+    "15.16",
+    "15.17",
+    "15.18",
+    "15.19",
+    "16.01",
+    "16.02",
+    "16.03",
+    "16.04",
+    "16.05",
+    "16.06",
+    "16.07",
+    "16.08",
+    "16.09",
+    "16.10",
+    "16.11",
+    "16.13"
+   ],
+   "start": "2025-01-12T09:24:17Z"
+  },
+  "development_snapshot_source": {
+   "dependence_cluster_proxy_artifact_sha256": "632a2c1046fce7ae5ee9d41abed7ae66a46ce13a8f7c6503d2d9cce551460e8c",
+   "dependence_cluster_proxy_raw_sha256": "722ab5674e0dc02cf5075a8d61a6fd494f8dbe510b8e254626717c98dae663d3",
+   "oe_metadata_snapshot_sha256": "4a1f23299692260ea8dedaa1b37a2ff95bf13317740cb2e5763cee6c53726240",
+   "oe_players_snapshot_sha256": "12f1cca978d683a0df8ceec0772999aeb03c723b4465f98674247f327dea71fa"
+  },
+  "rights_status": "not_revalidated_for_public_serving"
+ },
+ "summary_schema_version": "scryglass:draft-terminal-development-evaluation-summary:v4-atoms"
+}

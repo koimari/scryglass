@@ -1,0 +1,36 @@
+{
+  "artifact_sha256": "10f7480bc82fa0711498280ac7318fb5e0a1c9d2cfc233b7b56b94122a3351fd",
+  "authority": {
+    "betting_authority": false,
+    "model_validation_authority": false,
+    "probability_authority": false,
+    "rating_authority": false,
+    "recommendation_authority": false
+  },
+  "claim_ceiling": "This is a source-schema failure receipt only. It grants no rating, probability, recommendation, or betting authority.",
+  "diagnostic": {
+    "adapter_error": "selected multi-league map population is empty",
+    "cause": "OE numeric 0/1 was not normalized before Parquet publication",
+    "field": "playoffs",
+    "observed_dtype": "float64",
+    "required_semantics": "boolean_or_nullable_boolean"
+  },
+  "outcome_access": {
+    "future_holdout_maps_present": 0,
+    "future_holdout_targets_accessed": false
+  },
+  "protocol_artifact_sha256": "87ebfb6be662820f1597a6583f2bee250dec97f6407523945adfcb2081e69bb4",
+  "remediation": {
+    "policy": "supersede_before_future_boundary_without_reusing_any_future_outcome",
+    "required": [
+      "normalize playoffs 0/1 to nullable boolean",
+      "rebuild full raw warehouse",
+      "freeze a new joint maps-plus-players snapshot",
+      "rerun adapter and posterior preflight",
+      "issue a hash-distinct superseding protocol"
+    ]
+  },
+  "result_state": "SOURCE_SCHEMA_PREFLIGHT_FAILED",
+  "schema_version": "scryglass:multileague-rating-v3-source-preflight:v1",
+  "source_snapshot_manifest_sha256": "588cef19c45184f9baa2076eeee7fab3086c43733d02a608928215842e85385c"
+}

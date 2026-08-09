@@ -1,0 +1,51 @@
+% Scryglass formulas
+% Public MVP note: the match probability and Draft Score expressions below are
+% development references only; those estimates are withheld from public serving.
+% Active article expression: Void-grubs contest bar.
+
+\section{Dual Elo soft rating (league-aware)}
+\label{eq:soft-mu}
+\[
+\mu_{\mathrm{aware}}
+=
+\mu - \max(0,\sigma - \sigma_{\min})
+\]
+Team \(\sigma_{\min}=25\). Player \(\sigma_{\min}=28\).
+Used on Ratings ladders and profiles as \textbf{League-aware} rating.
+
+\section{Elo to win probability (development reference; withheld in MVP)}
+\label{eq:elo-wr}
+\[
+\operatorname{logit}(p)
+=
+a + b\cdot\frac{\mu_i-\mu_j}{400},
+\qquad
+p=\sigma(\operatorname{logit})
+\]
+Calibration coefficients from \texttt{models/elo\_wr\_calibration.json}. This expression is not
+served as a public pre-match estimate in the current MVP.
+
+\section{Draft Score (development reference; withheld in MVP)}
+\label{eq:draft}
+\[
+p_{\mathrm{blue}}
+=
+\tfrac12 + \Bigl(\sigma(t\cdot e)- \tfrac12\Bigr)\cdot c
+\]
+where \(e\) is draft win-edge (champ logits + role pairs), \(t\) is league/tier temperature,
+and \(c\) is confidence shrink.
+Elo-controlled bump:
+\[
+\Delta\mathrm{WR}_{\mathrm{pp}}
+\approx
+100\cdot \kappa\cdot e\cdot c
+\]
+with \(\kappa\) from residual ridge in \texttt{draft\_wr\_calibration.json}. The Draft Score
+expression is retained for reproducibility work and is not a public estimate until its independent
+terminal and prefix evaluations are accepted.
+
+\section{Void grubs contest bar (article)}
+\label{eq:grubs}
+At even gold, leave for the two-wave farm reference until fight-win probability reaches
+the opportunity-cost break-even (≈58.9\% in the published reference). Gold@10→map-win uses a
+side-neutral associational logit; see the article pack JSON for fitted coefficients.

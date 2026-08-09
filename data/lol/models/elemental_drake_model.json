@@ -1,0 +1,4217 @@
+{
+  "status": "ready",
+  "cohort": {
+    "completedGames": 6504,
+    "firstDrakeRows": 6378,
+    "stackRows": 27708,
+    "series": 3256,
+    "dateMin": "2025-09-20",
+    "dateMax": "2026-07-27"
+  },
+  "validation": {
+    "firstBrierBeatsNull": true,
+    "firstEceAtMostEightPp": true,
+    "stackBrierBeatsNull": true,
+    "stackEceAtMostTenPp": true
+  },
+  "estimand": "Adjusted association between elemental identity and the capturing team's map-win probability among observed professional captures.",
+  "firstDragon": {
+    "diagnostics": {
+      "trainRows": 2145,
+      "holdoutRows": 1830,
+      "holdoutStart": "2026-03-01T06:00:00+00:00",
+      "holdoutEnd": "2026-05-01T00:00:00+00:00",
+      "trainSeries": 1137,
+      "holdoutSeries": 889,
+      "postHoldoutRows": 2403,
+      "auc": 0.7366,
+      "brier": 0.2029,
+      "nullBrier": 0.2388,
+      "logLoss": 0.5879,
+      "ece10": 0.0562,
+      "selectedAlpha": 0.3,
+      "innerValidationBrier": 0.2001
+    },
+    "elements": [
+      {
+        "element": "ocean",
+        "adjustedWinProbability": 0.6558,
+        "relativePp": 1.83,
+        "interval95": {
+          "lowPp": 0.5,
+          "highPp": 4.01
+        }
+      },
+      {
+        "element": "hextech",
+        "adjustedWinProbability": 0.646,
+        "relativePp": 0.85,
+        "interval95": {
+          "lowPp": -0.68,
+          "highPp": 2.9
+        }
+      },
+      {
+        "element": "infernal",
+        "adjustedWinProbability": 0.639,
+        "relativePp": 0.15,
+        "interval95": {
+          "lowPp": -1.37,
+          "highPp": 1.57
+        }
+      },
+      {
+        "element": "chemtech",
+        "adjustedWinProbability": 0.6331,
+        "relativePp": -0.44,
+        "interval95": {
+          "lowPp": -2.05,
+          "highPp": 1.18
+        }
+      },
+      {
+        "element": "mountain",
+        "adjustedWinProbability": 0.6308,
+        "relativePp": -0.67,
+        "interval95": {
+          "lowPp": -2.51,
+          "highPp": 1.03
+        }
+      },
+      {
+        "element": "cloud",
+        "adjustedWinProbability": 0.6203,
+        "relativePp": -1.72,
+        "interval95": {
+          "lowPp": -3.56,
+          "highPp": -0.39
+        }
+      }
+    ],
+    "bootstrap": {
+      "replicates": 200,
+      "cluster": "GRID series",
+      "seed": 461
+    }
+  },
+  "compounding": {
+    "diagnostics": {
+      "trainRows": 9427,
+      "holdoutRows": 8009,
+      "holdoutStart": "2026-03-01T06:00:00+00:00",
+      "holdoutEnd": "2026-05-01T00:00:00+00:00",
+      "trainSeries": 1138,
+      "holdoutSeries": 890,
+      "postHoldoutRows": 10272,
+      "auc": 0.829,
+      "brier": 0.1515,
+      "nullBrier": 0.2131,
+      "logLoss": 0.4597,
+      "ece10": 0.0272,
+      "selectedAlpha": 0.1,
+      "innerValidationBrier": 0.1576
+    },
+    "legalPaths": [
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "ocean",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "infernal",
+          "ocean",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9094,
+        "relativePp": 1.19
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "infernal",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "ocean",
+          "infernal",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9094,
+        "relativePp": 1.19
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "ocean",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "mountain",
+          "ocean",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9092,
+        "relativePp": 1.17
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "mountain",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "ocean",
+          "mountain",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9092,
+        "relativePp": 1.17
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "chemtech",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "ocean",
+          "chemtech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9084,
+        "relativePp": 1.09
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "ocean",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "chemtech",
+          "ocean",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9084,
+        "relativePp": 1.09
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "cloud",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "ocean",
+          "cloud",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9064,
+        "relativePp": 0.89
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "ocean",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "cloud",
+          "ocean",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9064,
+        "relativePp": 0.89
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "mountain",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "infernal",
+          "mountain",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9059,
+        "relativePp": 0.84
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "infernal",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "mountain",
+          "infernal",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9059,
+        "relativePp": 0.84
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "chemtech",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "infernal",
+          "chemtech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.905,
+        "relativePp": 0.75
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "hextech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "ocean",
+          "hextech",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.905,
+        "relativePp": 0.75
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "ocean",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "hextech",
+          "ocean",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.905,
+        "relativePp": 0.75
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "infernal",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "chemtech",
+          "infernal",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.905,
+        "relativePp": 0.75
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "chemtech",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "mountain",
+          "chemtech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9049,
+        "relativePp": 0.74
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "mountain",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "chemtech",
+          "mountain",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9049,
+        "relativePp": 0.74
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "hextech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "mountain",
+          "hextech",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.9039,
+        "relativePp": 0.64
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "mountain",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "hextech",
+          "mountain",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.9039,
+        "relativePp": 0.64
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "hextech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "infernal",
+          "hextech",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.9038,
+        "relativePp": 0.63
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "infernal",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "hextech",
+          "infernal",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.9038,
+        "relativePp": 0.63
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "cloud",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "infernal",
+          "cloud",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9029,
+        "relativePp": 0.54
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "infernal",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "cloud",
+          "infernal",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9029,
+        "relativePp": 0.54
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "chemtech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "hextech",
+          "chemtech",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.9029,
+        "relativePp": 0.54
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "hextech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "chemtech",
+          "hextech",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.9029,
+        "relativePp": 0.54
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "cloud",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "mountain",
+          "cloud",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9028,
+        "relativePp": 0.53
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "hextech",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "ocean",
+          "hextech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.9028,
+        "relativePp": 0.53
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "mountain",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "cloud",
+          "mountain",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9028,
+        "relativePp": 0.53
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "ocean",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "hextech",
+          "ocean",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.9028,
+        "relativePp": 0.53
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "chemtech",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "cloud",
+          "chemtech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9019,
+        "relativePp": 0.44
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "cloud",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "chemtech",
+          "cloud",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.9019,
+        "relativePp": 0.44
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "hextech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "infernal",
+          "hextech",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.9018,
+        "relativePp": 0.43
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "infernal",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "hextech",
+          "infernal",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.9018,
+        "relativePp": 0.43
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "hextech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "cloud",
+          "hextech",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.9008,
+        "relativePp": 0.33
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "cloud",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "hextech",
+          "cloud",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.9008,
+        "relativePp": 0.33
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "chemtech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "hextech",
+          "chemtech",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.9007,
+        "relativePp": 0.32
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "hextech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "chemtech",
+          "hextech",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.9007,
+        "relativePp": 0.32
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "hextech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "ocean",
+          "hextech",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.9002,
+        "relativePp": 0.27
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "ocean",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "hextech",
+          "ocean",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.9002,
+        "relativePp": 0.27
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "ocean",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "infernal",
+          "ocean",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.9,
+        "relativePp": 0.25
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "infernal",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "ocean",
+          "infernal",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.9,
+        "relativePp": 0.25
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "hextech",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "mountain",
+          "hextech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8994,
+        "relativePp": 0.19
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "hextech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "ocean",
+          "hextech",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8994,
+        "relativePp": 0.19
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "mountain",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "hextech",
+          "mountain",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8994,
+        "relativePp": 0.19
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "ocean",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "hextech",
+          "ocean",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8994,
+        "relativePp": 0.19
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "hextech",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "infernal",
+          "hextech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8991,
+        "relativePp": 0.16
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "infernal",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "hextech",
+          "infernal",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8991,
+        "relativePp": 0.16
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "cloud",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "ocean",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8989,
+        "relativePp": 2.17
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "chemtech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "ocean",
+          "chemtech",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8988,
+        "relativePp": 0.13
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "ocean",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "chemtech",
+          "ocean",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8988,
+        "relativePp": 0.13
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "mountain",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "infernal",
+          "mountain",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8985,
+        "relativePp": 0.1
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "infernal",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "mountain",
+          "infernal",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8985,
+        "relativePp": 0.1
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "hextech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "cloud",
+          "hextech",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8985,
+        "relativePp": 0.1
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "cloud",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "hextech",
+          "cloud",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8985,
+        "relativePp": 0.1
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "mountain",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "ocean",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8978,
+        "relativePp": 2.06
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "chemtech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "mountain",
+          "chemtech",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8976,
+        "relativePp": 0.01
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "mountain",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "chemtech",
+          "mountain",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8976,
+        "relativePp": 0.01
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "chemtech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "infernal",
+          "chemtech",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8974,
+        "relativePp": -0.01
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "infernal",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "chemtech",
+          "infernal",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8974,
+        "relativePp": -0.01
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "ocean",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "mountain",
+          "ocean",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8973,
+        "relativePp": -0.02
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "mountain",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "ocean",
+          "mountain",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8973,
+        "relativePp": -0.02
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "infernal",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "ocean",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8972,
+        "relativePp": 2.0
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "ocean",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "infernal",
+          "ocean",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.897,
+        "relativePp": -0.05
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "infernal",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "ocean",
+          "infernal",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.897,
+        "relativePp": -0.05
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "cloud",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "ocean",
+          "cloud",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8967,
+        "relativePp": -0.08
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "ocean",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "cloud",
+          "ocean",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8967,
+        "relativePp": -0.08
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "hextech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "mountain",
+          "hextech",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8964,
+        "relativePp": -0.11
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "mountain",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "hextech",
+          "mountain",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8964,
+        "relativePp": -0.11
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "hextech",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "cloud",
+          "hextech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8961,
+        "relativePp": -0.14
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "cloud",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "hextech",
+          "cloud",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8961,
+        "relativePp": -0.14
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "hextech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "infernal",
+          "hextech",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8957,
+        "relativePp": -0.18
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "infernal",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "hextech",
+          "infernal",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8957,
+        "relativePp": -0.18
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "chemtech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "hextech",
+          "chemtech",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8957,
+        "relativePp": -0.18
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "hextech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "chemtech",
+          "hextech",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8957,
+        "relativePp": -0.18
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "chemtech",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "ocean",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8957,
+        "relativePp": 1.85
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "hextech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "mountain",
+          "hextech",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8956,
+        "relativePp": -0.19
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "mountain",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "hextech",
+          "mountain",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8956,
+        "relativePp": -0.19
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "chemtech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "infernal",
+          "chemtech",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8954,
+        "relativePp": -0.21
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "cloud",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "mountain",
+          "cloud",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8954,
+        "relativePp": -0.21
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "mountain",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "cloud",
+          "mountain",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8954,
+        "relativePp": -0.21
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "infernal",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "chemtech",
+          "infernal",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8954,
+        "relativePp": -0.21
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "cloud",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "infernal",
+          "cloud",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8952,
+        "relativePp": -0.23
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "infernal",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "cloud",
+          "infernal",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8952,
+        "relativePp": -0.23
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "cloud",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "infernal",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8952,
+        "relativePp": 1.8
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "cloud",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "mountain",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.895,
+        "relativePp": 1.78
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "chemtech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "hextech",
+          "chemtech",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8947,
+        "relativePp": -0.28
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "hextech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "chemtech",
+          "hextech",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8947,
+        "relativePp": -0.28
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "ocean",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "mountain",
+          "ocean",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8943,
+        "relativePp": -0.32
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "mountain",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "ocean",
+          "mountain",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8943,
+        "relativePp": -0.32
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "chemtech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "cloud",
+          "chemtech",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8942,
+        "relativePp": -0.33
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "cloud",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "chemtech",
+          "cloud",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8942,
+        "relativePp": -0.33
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "mountain",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "infernal",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8941,
+        "relativePp": 1.69
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "cloud",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "chemtech",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8941,
+        "relativePp": 1.69
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "cloud",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "ocean",
+          "cloud",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.894,
+        "relativePp": -0.35
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "ocean",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "cloud",
+          "ocean",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.894,
+        "relativePp": -0.35
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "ocean",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "infernal",
+          "ocean",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8938,
+        "relativePp": -0.37
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "infernal",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "ocean",
+          "infernal",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8938,
+        "relativePp": -0.37
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "ocean",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "mountain",
+          "ocean",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8937,
+        "relativePp": -0.38
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "mountain",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "ocean",
+          "mountain",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8937,
+        "relativePp": -0.38
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "mountain",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "infernal",
+          "mountain",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8935,
+        "relativePp": -0.4
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "infernal",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "mountain",
+          "infernal",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8935,
+        "relativePp": -0.4
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "chemtech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "ocean",
+          "chemtech",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8935,
+        "relativePp": -0.4
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "hextech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "cloud",
+          "hextech",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8935,
+        "relativePp": -0.4
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "hextech",
+          "cloud",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "hextech",
+          "cloud",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8935,
+        "relativePp": -0.4
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "ocean",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "chemtech",
+          "ocean",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8935,
+        "relativePp": -0.4
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "infernal",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "mountain",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8933,
+        "relativePp": 1.61
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "cloud",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "infernal",
+          "cloud",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8932,
+        "relativePp": -0.43
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "infernal",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "cloud",
+          "infernal",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8932,
+        "relativePp": -0.43
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "mountain",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "chemtech",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8929,
+        "relativePp": 1.57
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "chemtech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "ocean",
+          "chemtech",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8927,
+        "relativePp": -0.48
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "ocean",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "chemtech",
+          "ocean",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8927,
+        "relativePp": -0.48
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "infernal",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "chemtech",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8924,
+        "relativePp": 1.52
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "chemtech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "cloud",
+          "chemtech",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.892,
+        "relativePp": -0.55
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "cloud",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "chemtech",
+          "cloud",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.892,
+        "relativePp": -0.55
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "chemtech",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "infernal",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8919,
+        "relativePp": 1.47
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "chemtech",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "mountain",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8917,
+        "relativePp": 1.45
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "ocean",
+          "cloud",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "ocean",
+          "cloud",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8913,
+        "relativePp": -0.62
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "ocean",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "cloud",
+          "ocean",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8913,
+        "relativePp": -0.62
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "cloud",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "hextech",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8911,
+        "relativePp": 1.39
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "mountain",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "cloud",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8906,
+        "relativePp": 1.34
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "cloud",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "mountain",
+          "cloud",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8904,
+        "relativePp": -0.71
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "mountain",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "cloud",
+          "mountain",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8904,
+        "relativePp": -0.71
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "infernal",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "cloud",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8901,
+        "relativePp": 1.29
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "cloud",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "infernal",
+          "cloud",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.89,
+        "relativePp": -0.75
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "infernal",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "cloud",
+          "infernal",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.89,
+        "relativePp": -0.75
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "mountain",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "infernal",
+          "mountain",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8899,
+        "relativePp": -0.76
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "infernal",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "mountain",
+          "infernal",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8899,
+        "relativePp": -0.76
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "mountain",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "hextech",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8899,
+        "relativePp": 1.27
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "chemtech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "mountain",
+          "chemtech",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8896,
+        "relativePp": -0.79
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "mountain",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "chemtech",
+          "mountain",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8896,
+        "relativePp": -0.79
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "infernal",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "hextech",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8893,
+        "relativePp": 1.21
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "infernal",
+          "chemtech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "infernal",
+          "chemtech",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8888,
+        "relativePp": -0.87
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "chemtech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "mountain",
+          "chemtech",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8888,
+        "relativePp": -0.87
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "infernal",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "chemtech",
+          "infernal",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8888,
+        "relativePp": -0.87
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "mountain",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "chemtech",
+          "mountain",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8888,
+        "relativePp": -0.87
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "chemtech",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "cloud",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8884,
+        "relativePp": 1.12
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "chemtech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "hextech",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8877,
+        "relativePp": 1.05
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "mountain",
+          "cloud",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "mountain",
+          "cloud",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8873,
+        "relativePp": -1.02
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "mountain",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "cloud",
+          "mountain",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8873,
+        "relativePp": -1.02
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "cloud",
+          "chemtech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "cloud",
+          "chemtech",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8864,
+        "relativePp": -1.11
+      },
+      {
+        "controlPattern": "perfect-control",
+        "spawnPath": [
+          "chemtech",
+          "cloud",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "chemtech",
+          "cloud",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8864,
+        "relativePp": -1.11
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "ocean",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "infernal",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.886,
+        "relativePp": 0.88
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "ocean",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "mountain",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8858,
+        "relativePp": 0.86
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "cloud",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "hextech",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8857,
+        "relativePp": 0.85
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "cloud",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "mountain",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8853,
+        "relativePp": 0.81
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "cloud",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "infernal",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8851,
+        "relativePp": 0.79
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "ocean",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "chemtech",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8847,
+        "relativePp": 0.75
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "cloud",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "chemtech",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.884,
+        "relativePp": 0.68
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "mountain",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "infernal",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8839,
+        "relativePp": 0.67
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "infernal",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "hextech",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8838,
+        "relativePp": 0.66
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "cloud",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "ocean",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8836,
+        "relativePp": 0.64
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "hextech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "mountain",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8835,
+        "relativePp": 0.63
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "infernal",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "mountain",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8834,
+        "relativePp": 0.62
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "hextech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "infernal",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8833,
+        "relativePp": 0.61
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "mountain",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "chemtech",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8828,
+        "relativePp": 0.56
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "ocean",
+          "hextech",
+          "hextech"
+        ],
+        "teamPath": [
+          "cloud",
+          "hextech",
+          "hextech",
+          "hextech"
+        ],
+        "adjustedWinProbability": 0.8823,
+        "relativePp": 0.51
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "chemtech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "hextech",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8822,
+        "relativePp": 0.5
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "infernal",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "chemtech",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8822,
+        "relativePp": 0.5
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "hextech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "chemtech",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8822,
+        "relativePp": 0.5
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "cloud",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "hextech",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.882,
+        "relativePp": 0.48
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "infernal",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "ocean",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8818,
+        "relativePp": 0.46
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "hextech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "ocean",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8818,
+        "relativePp": 0.46
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "chemtech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "mountain",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8817,
+        "relativePp": 0.45
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "chemtech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "infernal",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8815,
+        "relativePp": 0.43
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "mountain",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "hextech",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8808,
+        "relativePp": 0.36
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "mountain",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "cloud",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8804,
+        "relativePp": 0.32
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "infernal",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "hextech",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8802,
+        "relativePp": 0.3
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "chemtech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "ocean",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8801,
+        "relativePp": 0.29
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "cloud",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "infernal",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8798,
+        "relativePp": 0.26
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "infernal",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "cloud",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8798,
+        "relativePp": 0.26
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "hextech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "cloud",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.8798,
+        "relativePp": 0.26
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "cloud",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "ocean",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8797,
+        "relativePp": 0.25
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "cloud",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "hextech",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8789,
+        "relativePp": 0.17
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "cloud",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "chemtech",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8785,
+        "relativePp": 0.13
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "mountain",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "ocean",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8784,
+        "relativePp": 0.12
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "hextech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "infernal",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.878,
+        "relativePp": 0.08
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "chemtech",
+          "ocean",
+          "ocean"
+        ],
+        "teamPath": [
+          "cloud",
+          "ocean",
+          "ocean",
+          "ocean"
+        ],
+        "adjustedWinProbability": 0.878,
+        "relativePp": 0.08
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "hextech",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "ocean",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8778,
+        "relativePp": 0.06
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "infernal",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "ocean",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8777,
+        "relativePp": 0.05
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "mountain",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "hextech",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8776,
+        "relativePp": 0.04
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "infernal",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "chemtech",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8766,
+        "relativePp": -0.06
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "hextech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "chemtech",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8766,
+        "relativePp": -0.06
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "cloud",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "ocean",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8765,
+        "relativePp": -0.07
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "chemtech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "infernal",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8762,
+        "relativePp": -0.1
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "ocean",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "hextech",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.876,
+        "relativePp": -0.12
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "cloud",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "mountain",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8757,
+        "relativePp": -0.15
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "cloud",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "infernal",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8753,
+        "relativePp": -0.19
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "chemtech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "hextech",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8752,
+        "relativePp": -0.2
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "mountain",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "ocean",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8751,
+        "relativePp": -0.21
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "hextech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "ocean",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8745,
+        "relativePp": -0.27
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "infernal",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "cloud",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8741,
+        "relativePp": -0.31
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "hextech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "cloud",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8741,
+        "relativePp": -0.31
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "mountain",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "hextech",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.874,
+        "relativePp": -0.32
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "mountain",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "infernal",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8739,
+        "relativePp": -0.33
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "infernal",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "mountain",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8738,
+        "relativePp": -0.34
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "hextech",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "mountain",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8738,
+        "relativePp": -0.34
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "infernal",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "hextech",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8734,
+        "relativePp": -0.38
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "hextech",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "infernal",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8733,
+        "relativePp": -0.39
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "chemtech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "ocean",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8727,
+        "relativePp": -0.45
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "chemtech",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "cloud",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8723,
+        "relativePp": -0.49
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "cloud",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "mountain",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8721,
+        "relativePp": -0.51
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "ocean",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "hextech",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.872,
+        "relativePp": -0.52
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "mountain",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "ocean",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8718,
+        "relativePp": -0.54
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "chemtech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "hextech",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8715,
+        "relativePp": -0.57
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "hextech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "ocean",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8712,
+        "relativePp": -0.6
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "infernal",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "ocean",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8711,
+        "relativePp": -0.61
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "cloud",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "chemtech",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.871,
+        "relativePp": -0.62
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "mountain",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "cloud",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8704,
+        "relativePp": -0.68
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "hextech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "mountain",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8701,
+        "relativePp": -0.71
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "ocean",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "infernal",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8698,
+        "relativePp": -0.74
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "infernal",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "cloud",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8698,
+        "relativePp": -0.74
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "hextech",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "cloud",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8698,
+        "relativePp": -0.74
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "mountain",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "chemtech",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8696,
+        "relativePp": -0.76
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "ocean",
+          "chemtech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "ocean",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8693,
+        "relativePp": -0.79
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "hextech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "chemtech",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.869,
+        "relativePp": -0.82
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "ocean",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "hextech",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8685,
+        "relativePp": -0.87
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "ocean",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "chemtech",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8684,
+        "relativePp": -0.88
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "chemtech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "mountain",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8682,
+        "relativePp": -0.9
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "mountain",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "infernal",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8673,
+        "relativePp": -0.99
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "mountain",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "cloud",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8672,
+        "relativePp": -1.0
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "hextech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "infernal",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8667,
+        "relativePp": -1.05
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "hextech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "mountain",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8667,
+        "relativePp": -1.05
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "infernal",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "mountain",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8666,
+        "relativePp": -1.06
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "hextech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "cloud",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8665,
+        "relativePp": -1.07
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "mountain",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "chemtech",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8661,
+        "relativePp": -1.11
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "ocean",
+          "mountain",
+          "mountain"
+        ],
+        "teamPath": [
+          "cloud",
+          "mountain",
+          "mountain",
+          "mountain"
+        ],
+        "adjustedWinProbability": 0.8658,
+        "relativePp": -1.14
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "infernal",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "chemtech",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8654,
+        "relativePp": -1.18
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "hextech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "chemtech",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8654,
+        "relativePp": -1.18
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "ocean",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "mountain",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8653,
+        "relativePp": -1.19
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "ocean",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "infernal",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8648,
+        "relativePp": -1.24
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "chemtech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "infernal",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8648,
+        "relativePp": -1.24
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "hextech",
+          "ocean",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "hextech",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8648,
+        "relativePp": -1.24
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "chemtech",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "mountain",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8647,
+        "relativePp": -1.25
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "chemtech",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "cloud",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8646,
+        "relativePp": -1.26
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "ocean",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "mountain",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8613,
+        "relativePp": -1.59
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "ocean",
+          "chemtech",
+          "chemtech"
+        ],
+        "teamPath": [
+          "cloud",
+          "chemtech",
+          "chemtech",
+          "chemtech"
+        ],
+        "adjustedWinProbability": 0.8611,
+        "relativePp": -1.61
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "ocean",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "chemtech",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8601,
+        "relativePp": -1.71
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "infernal",
+          "ocean",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "infernal",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8578,
+        "relativePp": -1.94
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "mountain",
+          "ocean",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "mountain",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8577,
+        "relativePp": -1.95
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "cloud",
+          "ocean",
+          "infernal",
+          "infernal"
+        ],
+        "teamPath": [
+          "cloud",
+          "infernal",
+          "infernal",
+          "infernal"
+        ],
+        "adjustedWinProbability": 0.8575,
+        "relativePp": -1.97
+      },
+      {
+        "controlPattern": "second-traded",
+        "spawnPath": [
+          "chemtech",
+          "ocean",
+          "cloud",
+          "cloud"
+        ],
+        "teamPath": [
+          "chemtech",
+          "cloud",
+          "cloud",
+          "cloud"
+        ],
+        "adjustedWinProbability": 0.8564,
+        "relativePp": -2.08
+      }
+    ],
+    "legalPathRule": "Global spawns are A, B, C, C. The first owner reaches four stacks as A, B, C, C under perfect control or A, C, C, C after trading the second spawn."
+  },
+  "controls": [
+    "pre-capture gold, kills, towers, clock, and side",
+    "pre-capture loadout value, unspent gold, and leading-player net worth",
+    "own and opposing champion archetype counts",
+    "prior-game organization Elo",
+    "prior-game five-player aggregate Elo",
+    "tournament scope and calendar year",
+    "exact GRID title version",
+    "regularization selected inside pre-March 2026 training data",
+    "locked March-April 2026 temporal evaluation window",
+    "continuous model features standardized and capped at eight standard deviations"
+  ],
+  "limitations": [
+    "Capture is selected, not randomized; estimates are not causal objective values.",
+    "GRID state is the latest event state before capture and may lag by up to 60 seconds.",
+    "Champion fit uses static multi-label archetypes rather than item-level kit simulation.",
+    "May-July 2026 games were excluded from evaluation and used only in the post-validation full refit.",
+    "Legal-path results are exploratory point estimates without path-level bootstrap intervals."
+  ]
+}

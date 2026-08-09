@@ -1,6 +1,7 @@
 name: Refresh public Scryglass pack
 
 on:
+  # Manual only until the publication, storage, and cost gates are approved.
   workflow_dispatch:
     inputs:
       grid_days:
@@ -18,10 +19,6 @@ on:
         required: false
         default: ""
         type: string
-  schedule:
-    # Hourly freshness is enough for completed-match ratings. Ad hoc runs
-    # remain available through workflow_dispatch when a series just ended.
-    - cron: "7 * * * *"
 
 concurrency:
   group: refresh-public-pack

@@ -1,10 +1,8 @@
 name: Reconcile Oracle's Elixir baseline
 
 on:
+  # Manual only until the publication, storage, and cost gates are approved.
   workflow_dispatch:
-  schedule:
-    # OE is a slower reconciliation source; GRID handles the 15-minute path.
-    - cron: "17 */6 * * *"
 
 concurrency:
   group: refresh-public-pack

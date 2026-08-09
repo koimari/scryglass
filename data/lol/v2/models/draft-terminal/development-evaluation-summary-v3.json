@@ -1,0 +1,329 @@
+{
+  "artifact_id": "draft-terminal-development-evaluation-summary-v3",
+  "claim_ceiling": {
+    "betting": false,
+    "causal_draft_effect": false,
+    "development_diagnostic": true,
+    "equal_strength_composition_index": true,
+    "outcome_calibrated_neutral_probability": false,
+    "recommendation": false,
+    "reliability": false
+  },
+  "code_bindings": {
+    "development_evaluation_helpers": "586f215003ea1955d76d90c48bfff1cbc635352568e7f8bf2d1e83966c65cae8",
+    "development_evaluation_v2_fit": "15dc9fa46a055bd8c022d80c638908aa9755d542269b156643cecc97ce49c2a1",
+    "development_evaluation_v3": "325901de0c769c2fff91dc4f0d053ff61b354870993b242272f86795ae136d8d",
+    "development_snapshot": "2a3d12990591b77eb42fa65f99a419167199a42950e61d157a0cc40da5b48218"
+  },
+  "development_candidate_for_future_freeze": {
+    "all_validation_folds_nonharmful": true,
+    "authorizes_future_probability": false,
+    "authorizes_retrospective_claim": false,
+    "candidate_id": "m0-role-additive",
+    "folds": 3,
+    "independent_validation": false,
+    "mean_validation_brier_delta": -0.0021521056946462447,
+    "mean_validation_log_loss_delta": -0.00512722110312062,
+    "ridge_strength": 0.05,
+    "selection_scope": "incremental_chronological_validation_only",
+    "validation_brier_deltas": [
+      -0.001699423928345184,
+      -0.0008372030900514749,
+      -0.003919690065542075
+    ],
+    "validation_log_loss_deltas": [
+      -0.0049557612106004845,
+      -0.0015472820042824464,
+      -0.008878620094478928
+    ],
+    "variant_id": "m0-role-additive@ridge-0.05"
+  },
+  "estimands": {
+    "causal_draft_effect_identified": false,
+    "neutral_probability_calibration_directly_identified": false,
+    "selection_target": "incremental_predictive_value_of_context_plus_draft_over_same_input_context_only_model",
+    "served_neutral_target": "equal_strength_composition_logit_index"
+  },
+  "fold_locked_selected_test": [
+    {
+      "baseline_calibration_transform": "symmetrized_platt",
+      "candidate_calibration_transform": "symmetric_temperature",
+      "candidate_id": "m1-role-additive-allied-synergy",
+      "fold_id": "outer-00",
+      "locked_outer_test_context_with_draft": {
+        "brier_score": 0.22958987382483562,
+        "dependence_cluster_count": 287,
+        "log_loss": 0.6511646591929942,
+        "row_count": 479
+      },
+      "locked_outer_test_context_without_draft": {
+        "brier_score": 0.23134003779866671,
+        "dependence_cluster_count": 287,
+        "log_loss": 0.6553993145714,
+        "row_count": 479
+      },
+      "locked_outer_test_incremental_vs_baseline_only": {
+        "brier_score": -0.0017501639738310981,
+        "log_loss": -0.004234655378405838,
+        "negative_is_better": true,
+        "pass_rule": "both deltas must be nonpositive",
+        "passed": true
+      },
+      "ridge_strength": 0.05,
+      "status": "draft_variant_selected_on_incremental_validation",
+      "variant_id": "m1-role-additive-allied-synergy@ridge-0.05"
+    },
+    {
+      "baseline_calibration_transform": "symmetric_temperature",
+      "candidate_calibration_transform": "symmetric_temperature",
+      "candidate_id": "m0-role-additive",
+      "fold_id": "outer-01",
+      "locked_outer_test_context_with_draft": {
+        "brier_score": 0.24260322417179622,
+        "dependence_cluster_count": 287,
+        "log_loss": 0.679800372016256,
+        "row_count": 672
+      },
+      "locked_outer_test_context_without_draft": {
+        "brier_score": 0.242563915193789,
+        "dependence_cluster_count": 287,
+        "log_loss": 0.6795823077027048,
+        "row_count": 672
+      },
+      "locked_outer_test_incremental_vs_baseline_only": {
+        "brier_score": 3.9308978007218665e-05,
+        "log_loss": 0.00021806431355120282,
+        "negative_is_better": true,
+        "pass_rule": "both deltas must be nonpositive",
+        "passed": false
+      },
+      "ridge_strength": 0.1,
+      "status": "draft_variant_selected_on_incremental_validation",
+      "variant_id": "m0-role-additive@ridge-0.10"
+    },
+    {
+      "baseline_calibration_transform": "symmetrized_platt",
+      "candidate_calibration_transform": "symmetrized_platt",
+      "candidate_id": "m0-role-additive",
+      "fold_id": "outer-02",
+      "locked_outer_test_context_with_draft": {
+        "brier_score": 0.21866289056158078,
+        "dependence_cluster_count": 575,
+        "log_loss": 0.627847953464979,
+        "row_count": 1399
+      },
+      "locked_outer_test_context_without_draft": {
+        "brier_score": 0.21929367560688162,
+        "dependence_cluster_count": 575,
+        "log_loss": 0.6293247414682372,
+        "row_count": 1399
+      },
+      "locked_outer_test_incremental_vs_baseline_only": {
+        "brier_score": -0.0006307850453008412,
+        "log_loss": -0.0014767880032582337,
+        "negative_is_better": true,
+        "pass_rule": "both deltas must be nonpositive",
+        "passed": true
+      },
+      "ridge_strength": 0.02,
+      "status": "draft_variant_selected_on_incremental_validation",
+      "variant_id": "m0-role-additive@ridge-0.02"
+    }
+  ],
+  "grid_promotion_gate": {
+    "baseline_source": "OE",
+    "candidate_source": "GRID",
+    "primary_source_for_cohort": "OE",
+    "public_reproducibility_benchmark": "OE",
+    "reason": "no authorized complete hash-verified GRID Draft Score cohort has passed the gate",
+    "status": "not_passed"
+  },
+  "holdouts": {
+    "future_patch": {
+      "patch_id": "16.13",
+      "promotion": false,
+      "rows": 119,
+      "status": "development_diagnostic_only"
+    },
+    "international_event_or_meta": {
+      "leagues": [
+        "EWC",
+        "MSI"
+      ],
+      "promotion": false,
+      "rows": 407,
+      "status": "development_diagnostic_only"
+    },
+    "league": {
+      "promotion": false,
+      "status": "development_diagnostic_only"
+    },
+    "roster_change": {
+      "reason": "neutral composition terms contain no player identity",
+      "status": "not_applicable"
+    },
+    "sparse_or_new_champion": {
+      "promotion": false,
+      "status": "development_diagnostic_only"
+    }
+  },
+  "objective": {
+    "baseline_comparator_fit_separately": true,
+    "candidate_baseline_nuisance_penalized": false,
+    "draft_penalty": "0.5_times_ridge_strength_times_squared_l2",
+    "loss": "mean_binary_log_loss",
+    "ridge_strength_order": [
+      0.02,
+      0.05,
+      0.1,
+      0.2,
+      0.4
+    ],
+    "sample_size_invariant": true
+  },
+  "population": {
+    "complete_rows": 6194,
+    "dependence_clusters": 2871,
+    "international_event_rows": 407,
+    "leagues": [
+      "AMERICAS",
+      "CBLOL",
+      "EWC",
+      "FST",
+      "LCK",
+      "LCP",
+      "LCS",
+      "LEC",
+      "LJL",
+      "LPL",
+      "MSI",
+      "PCS",
+      "TCL",
+      "VCS"
+    ],
+    "patches": [
+      "15.01",
+      "15.02",
+      "15.03",
+      "15.04",
+      "15.05",
+      "15.06",
+      "15.07",
+      "15.08",
+      "15.09",
+      "15.10",
+      "15.11",
+      "15.12",
+      "15.13",
+      "15.14",
+      "15.15",
+      "15.16",
+      "15.17",
+      "15.18",
+      "15.19",
+      "16.01",
+      "16.02",
+      "16.03",
+      "16.04",
+      "16.05",
+      "16.06",
+      "16.07",
+      "16.08",
+      "16.09",
+      "16.10",
+      "16.11",
+      "16.13"
+    ],
+    "unclustered_rows": 0
+  },
+  "production_eligible": false,
+  "public_probability_authorized": false,
+  "run_command": "python3 -W error -m lol_kills.v2.draft.terminal.development_evaluation_v3",
+  "run_output_sha256": "7c81a04e203624ae4e526c12848d116201fb5cb715645f09877c11bab9d7aa99",
+  "schema_version": "scryglass:draft-terminal-development-evaluation-summary:v3",
+  "source_snapshot": {
+    "availability_status": "frozen_retrospective_development_only",
+    "development_snapshot_manifest_artifact_sha256": "da4812bd1b45e0601cc6d50fe4b53730ce2018fb2aee3c44e189fe3819be6f4b",
+    "development_snapshot_manifest_raw_sha256": "f395e0da4c138eaaaae6a749359e866a9f4fa71cfd24f334e104e2b458a74e48",
+    "development_snapshot_payload_raw_sha256": "e8105027c7b2406f735cdcca592e60071ed25fc6489f4966a663dd91bea4a7d8",
+    "development_snapshot_population": {
+      "complete_clustered_rows": 6194,
+      "dependence_clusters": 2871,
+      "end": "2026-07-18T16:33:48Z",
+      "excluded_without_cluster_assignment": 31724,
+      "leagues": [
+        "AMERICAS",
+        "CBLOL",
+        "EWC",
+        "FST",
+        "LCK",
+        "LCP",
+        "LCS",
+        "LEC",
+        "LJL",
+        "LPL",
+        "MSI",
+        "PCS",
+        "TCL",
+        "VCS"
+      ],
+      "patches": [
+        "15.01",
+        "15.02",
+        "15.03",
+        "15.04",
+        "15.05",
+        "15.06",
+        "15.07",
+        "15.08",
+        "15.09",
+        "15.10",
+        "15.11",
+        "15.12",
+        "15.13",
+        "15.14",
+        "15.15",
+        "15.16",
+        "15.17",
+        "15.18",
+        "15.19",
+        "16.01",
+        "16.02",
+        "16.03",
+        "16.04",
+        "16.05",
+        "16.06",
+        "16.07",
+        "16.08",
+        "16.09",
+        "16.10",
+        "16.11",
+        "16.13"
+      ],
+      "start": "2025-01-12T09:24:17Z"
+    },
+    "development_snapshot_source": {
+      "dependence_cluster_proxy_artifact_sha256": "632a2c1046fce7ae5ee9d41abed7ae66a46ce13a8f7c6503d2d9cce551460e8c",
+      "dependence_cluster_proxy_raw_sha256": "722ab5674e0dc02cf5075a8d61a6fd494f8dbe510b8e254626717c98dae663d3",
+      "oe_metadata_snapshot_sha256": "4a1f23299692260ea8dedaa1b37a2ff95bf13317740cb2e5763cee6c53726240",
+      "oe_players_snapshot_sha256": "12f1cca978d683a0df8ceec0772999aeb03c723b4465f98674247f327dea71fa"
+    },
+    "rights_status": "not_revalidated_for_public_serving"
+  },
+  "split_policy": {
+    "calibration_fit_after_candidate_selection": true,
+    "candidate_must_be_nonharmful_on_brier_and_log_loss": true,
+    "candidate_search_opened_on_outer_test": false,
+    "candidate_selection_on_validation_only": true,
+    "chronological": true,
+    "dependence_clustered": true,
+    "folds": 3,
+    "future_candidate_selected_from_validation_only": true,
+    "outer_test_scored_only_for_fold_selected_variant": true,
+    "participant_cluster_status": "unavailable",
+    "series_grouped": false,
+    "series_identity_status": "outcome_free_proxy_only_not_authoritative",
+    "unclustered_maps_excluded": true
+  },
+  "status": "development_only"
+}

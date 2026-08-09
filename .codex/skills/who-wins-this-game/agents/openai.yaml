@@ -1,0 +1,4 @@
+interface:
+  display_name: "Who Wins This Game"
+  short_description: "Draft, win expectation, and fair odds"
+  default_prompt: "Use $who-wins-this-game to predict this League of Legends map and calculate fair odds."

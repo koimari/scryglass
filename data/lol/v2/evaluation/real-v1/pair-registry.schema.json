@@ -1,0 +1,308 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scryglass.local/schema/pair-registry-v1.4.json",
+  "title": "Scryglass frozen candidate-pair family registry v1.4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "registry_id",
+    "contract_set_sha256",
+    "final_labels_read",
+    "g1_unified_authority_handoff",
+    "families",
+    "pairs"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "g0-pair-registry-v1.4"
+    },
+    "registry_id": {
+      "const": "scryglass:pair-registry:v1.4"
+    },
+    "contract_set_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "final_labels_read": {
+      "const": false
+    },
+    "g1_unified_authority_handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "transition",
+        "required_sample_identity",
+        "unresolved_action"
+      ],
+      "properties": {
+        "status": { "const": "NOT_IMPLEMENTED_IN_V1_4" },
+        "transition": {
+          "const": "PROHIBITED_IN_V1_4_REQUIRES_G1_UNIFIED_AUTHORITY_BUNDLE"
+        },
+        "required_sample_identity": {
+          "const": "PAIR_CANDIDATES_SHARE_ONE_AUTHORITY_DERIVED_OUTPUT_SAMPLE"
+        },
+        "unresolved_action": { "const": "TYPED_UNRESOLVED_PAIR_BLOCKS_COMPLEXITY_SELECTION" }
+      }
+    },
+    "families": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pair_family_id",
+          "kind",
+          "pair_ids"
+        ],
+        "properties": {
+          "pair_family_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+          },
+          "kind": {
+            "const": "SIMULTANEOUS_COMPLEXITY"
+          },
+          "pair_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+            }
+          }
+        }
+      }
+    },
+    "pairs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "pair_id",
+              "pair_family_id",
+              "candidate_a_id",
+              "candidate_b_id",
+              "output_id",
+              "orientation",
+              "score_kind",
+              "bootstrap_plan_sha256",
+              "status",
+              "unavailable"
+            ],
+            "properties": {
+              "pair_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "pair_family_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "candidate_a_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "candidate_b_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "output_id": {
+                "enum": [
+                  "player_rating",
+                  "team_rating",
+                  "terminal_draft_score",
+                  "partial_draft_score"
+                ]
+              },
+              "orientation": {
+                "const": "candidate_a_minus_candidate_b"
+              },
+              "score_kind": { "const": "LOG_LOSS" },
+              "bootstrap_plan_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "status": {
+                "const": "TYPED_UNRESOLVED"
+              },
+              "unavailable": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reason_code",
+                  "claim_effect"
+                ],
+                "properties": {
+                  "reason_code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "claim_effect": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "pair_id",
+              "pair_family_id",
+              "candidate_a_id",
+              "candidate_b_id",
+              "output_id",
+              "orientation",
+              "score_kind",
+              "registered_fold_ids_sha256",
+              "league_ids_sha256",
+              "status",
+              "aligned_row_ids_sha256",
+              "difference_rows_sha256",
+              "bootstrap_plan_sha256",
+              "macro_weights_sha256",
+              "outcomes_sha256",
+              "pth_assignments_sha256",
+              "critical_selectors_sha256",
+              "cluster_assignments_sha256",
+              "candidate_a_prediction_rows_sha256",
+              "candidate_b_prediction_rows_sha256",
+              "input_rows_sha256",
+              "analysis_rows_sha256",
+              "evidence"
+            ],
+            "properties": {
+              "pair_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "pair_family_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "candidate_a_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "candidate_b_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "output_id": {
+                "enum": [
+                  "player_rating",
+                  "team_rating",
+                  "terminal_draft_score",
+                  "partial_draft_score"
+                ]
+              },
+              "orientation": {
+                "const": "candidate_a_minus_candidate_b"
+              },
+              "score_kind": {
+                "const": "LOG_LOSS"
+              },
+              "registered_fold_ids_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "league_ids_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "status": {
+                "const": "RESOLVED",
+                "not": {}
+              },
+              "aligned_row_ids_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "difference_rows_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "bootstrap_plan_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "macro_weights_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "outcomes_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "pth_assignments_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "critical_selectors_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "cluster_assignments_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "candidate_a_prediction_rows_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "candidate_b_prediction_rows_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "input_rows_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "analysis_rows_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "evidence": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "relative_path",
+                  "raw_sha256",
+                  "semantic_sha256"
+                ],
+                "properties": {
+                  "relative_path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\)[A-Za-z0-9._/-]+$"
+                  },
+                  "raw_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "semantic_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

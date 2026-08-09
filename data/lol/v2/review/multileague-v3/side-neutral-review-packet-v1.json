@@ -1,0 +1,135 @@
+{
+  "admission_implementation": [
+    {
+      "bytes": 9637,
+      "locator": "lol_kills/v2/ratings/player/side_neutral_protocol_review_v1.py",
+      "raw_sha256": "5dc70f5d1994d2cf590d3526af5c11d60490739a9202efc22cc2a861d10c6230",
+      "role": "external_review_validation"
+    },
+    {
+      "bytes": 22747,
+      "locator": "lol_kills/v2/market/side_neutral_ledger_v1.py",
+      "raw_sha256": "034a5bcdac01def8ee0f01ab8e50c108c8e4cc7ff393bc4cf4418450be9ec02a",
+      "role": "post_review_bundle_admission"
+    }
+  ],
+  "artifact_sha256": "12ec9cf48c4612447cb65bf51b53beee74f6e4b3349495e3bd35ea3d29bca442",
+  "authority": {
+    "betting_authority": false,
+    "draft_validation_authority": false,
+    "expected_value_authority": false,
+    "model_validation_authority": false,
+    "odds_authority": false,
+    "outcome_opening_authority": false,
+    "player_rating_authority": false,
+    "probability_authority": false,
+    "prospective_collection_authority": false,
+    "recommendation_authority": false,
+    "team_rating_authority": false
+  },
+  "claim_ceiling": "Independent-review request only. The packet inventories frozen bytes and review questions but is not a review, approval, collection authority, outcome-opening authority, rating, probability, odds, EV, recommendation, or betting authority.",
+  "clock_attestation": {
+    "observed_wall_clock_utc": "2026-08-02T00:03:00+00:00",
+    "source": "system_utc_clock_sampled_inside_builder",
+    "user_supplied_timestamp_allowed": false
+  },
+  "created_at_utc": "2026-08-02T00:03:00+00:00",
+  "implementation": {
+    "bytes": 15912,
+    "locator": "lol_kills/v2/ratings/player/side_neutral_review_packet_v1.py",
+    "raw_sha256": "79fafeaf7aeb2b89fb055c60ebc64ab95909cccd040f7198250f695ce11e9a6a"
+  },
+  "pre_review_inventory": {
+    "complete_bundles": 0,
+    "legacy_prediction_receipts": 0,
+    "legacy_prediction_registry_present": false,
+    "outcomes_accessed": false,
+    "outcomes_present": false,
+    "pre_side_envelopes": 0,
+    "side_bindings": 0,
+    "side_neutral_terminal_drafts": 0
+  },
+  "protocol": {
+    "artifact_sha256": "755538eacecb404437175e27ad9c3c9efe2a6838309c783a79e3f13b9ac67058",
+    "locator": "data/lol/v2/models/player/multileague-v3/side-neutral-protocol-supersession-v2.json",
+    "locked_at_utc": "2026-08-02T00:02:00+00:00",
+    "raw_sha256": "0861d751172e032c961553db2e1cde0a83c42b41d8b3e29de79da2121e46f6d5",
+    "source_locks": [
+      {
+        "bytes": 18595,
+        "locator": "lol_kills/v2/ratings/player/multileague_v3_side_neutral_protocol_v2.py",
+        "raw_sha256": "19f8c4ced9d9c619b9196f65e3e1dbab34082756c52b11d597212d664aeae44d"
+      },
+      {
+        "bytes": 4711,
+        "locator": "docs/model-v2/side-neutral-prospective-capture-v1.md",
+        "raw_sha256": "86dc3332010535069f2751f06a8cf5d3d419d6b3dd47b60366ffcbc01e429160"
+      },
+      {
+        "bytes": 32455,
+        "locator": "lol_kills/v2/ratings/player/pre_side_rating_envelope_v1.py",
+        "raw_sha256": "6525f6159a43a57197a996ea876206119323ce206311682cdc228dbd84b7cc37"
+      },
+      {
+        "bytes": 27762,
+        "locator": "lol_kills/v2/ratings/player/pre_side_rating_binding_v1.py",
+        "raw_sha256": "9d5bb9c91ab568bd1e00513794058291e203d81f19b7cee88e88b94de59b22ed"
+      },
+      {
+        "bytes": 20143,
+        "locator": "lol_kills/v2/draft/terminal/side_neutral_prediction_v1.py",
+        "raw_sha256": "c5bb55c80aabcf44c551e4e3352c1e29d5272718ce03358de31e82cd18fee80f"
+      },
+      {
+        "bytes": 19418,
+        "locator": "lol_kills/v2/market/side_neutral_capture_bundle_v1.py",
+        "raw_sha256": "3046ada98a77757f8724bdbd165961ec1748a6bc29a7dd64955eb4d7ed8cca4d"
+      },
+      {
+        "bytes": 19738,
+        "locator": "lol_kills/v2/ratings/player/multileague_v3_side_neutral_protocol_v1.py",
+        "raw_sha256": "5905f1706feb3d441641d3e00af4db451512d5e97f0e401c345af3bf6ca87ce8"
+      },
+      {
+        "bytes": 2530,
+        "locator": "lol_kills/v2/ratings/player/multileague_v3_side_neutral_protocol_registry_v1.py",
+        "raw_sha256": "ac6b1f7eaa76977e7a6696effa5a38c90898950e7bfca5a0eae3cbcc0acd4020"
+      },
+      {
+        "bytes": 11521,
+        "locator": "data/lol/v2/models/player/multileague-v3/side-neutral-protocol-supersession-v1.json",
+        "raw_sha256": "2bef4831c615e04e39dd5035cf794b48e62420fc1572e18a5cd5ead1ca693c49"
+      }
+    ]
+  },
+  "requested_authorization": {
+    "betting": false,
+    "outcome_opening": false,
+    "probability_odds_ev_or_recommendation": false,
+    "prospective_outcome_free_collection_only": true,
+    "rating_or_draft_deployment": false
+  },
+  "requested_review_record": {
+    "external_raw_sha256_required": true,
+    "required_locator": "data/lol/v2/authorities/multileague-v3/side-neutral-protocol-review-v2.json",
+    "retrospective_capture_eligibility_permitted": false,
+    "review_effective_time_must_precede_every_eligible_pre_side_capture": true,
+    "review_must_bind_protocol_and_all_listed_implementation_hashes": true,
+    "reviewer_must_be_independent_human": true,
+    "schema_version": "scryglass:side-neutral-protocol-independent-review:v1"
+  },
+  "result_state": "AWAITING_INDEPENDENT_HUMAN_REVIEW_NO_COLLECTION_AUTHORITY",
+  "review_questions": [
+    "Verify every protocol and implementation byte hash against the supplied locators.",
+    "Verify exact ten-player roster and patch bytes are shared by both pre-side orientations.",
+    "Verify schedule, page, bookmaker, and UI order cannot become blue/red authority.",
+    "Verify public side evidence can only select an existing rating receipt and cannot refit.",
+    "Verify terminal Draft binds the selected rating bytes and complete legal pick/ban sequence.",
+    "Verify pre-side, side, Draft, and actual-start timing is strictly prospective.",
+    "Verify duplicate or ambiguous side bindings invalidate a map and retrospective admission is impossible.",
+    "Verify recursively outcome-bearing inputs, overwrite attempts, and forged authority fail closed.",
+    "Verify the model, source snapshot, future boundary, stopping rule, comparators, evaluation, and uncertainty are unchanged.",
+    "Confirm no future outcome or conditional prediction was accessed while reviewing this revision."
+  ],
+  "schema_version": "scryglass:side-neutral-independent-review-packet:v1"
+}

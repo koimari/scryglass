@@ -1,0 +1,38 @@
+{
+ "artifact_kind": "provisional_l5_team_mechanics_config",
+ "development_only": true,
+ "display": {
+  "anchor": 1500.0,
+  "scale": 173.71779276130073
+ },
+ "missing_c2_dependency": true,
+ "policy": {
+  "available": false,
+  "blocker": "policy estimand is not identified",
+  "component": null,
+  "estimand": null,
+  "reason": "resource-policy selection was deferred",
+  "status": "unavailable"
+ },
+ "reference_convention": {
+  "computational_offset": 0.0,
+  "consumer_rule": "must_not_be_treated_as_an_estimate",
+  "contributes_exactly_zero": true,
+  "status": "non_estimated"
+ },
+ "roles": [
+  "top",
+  "jungle",
+  "mid",
+  "bot",
+  "support"
+ ],
+ "synergy": {
+  "available": false,
+  "blocker": "synergy estimand is not identified",
+  "component": null,
+  "estimand": null,
+  "reason": "lineup-synergy identification was deferred",
+  "status": "unavailable"
+ }
+}

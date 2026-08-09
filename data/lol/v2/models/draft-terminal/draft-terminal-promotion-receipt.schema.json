@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scryglass:draft-terminal-promotion-receipt:v1",
+  "title": "Draft Score independent promotion receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "model_version",
+    "artifact_sha256",
+    "l2_contract_sha256",
+    "development_evaluation_sha256",
+    "candidate_registry_sha256",
+    "calibration_transform_sha256",
+    "reliability_artifact_sha256",
+    "replay_parity_evidence_sha256",
+    "independent_authority_record_sha256",
+    "independent_l2_authority",
+    "final_temporal_holdout_sealed",
+    "public_probability_authorized",
+    "replay_parity_verified",
+    "reliability_gate_passed",
+    "contextual_g1_authority",
+    "authority_record_id",
+    "issued_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "draft-terminal-promotion-receipt-v1"},
+    "status": {"const": "approved"},
+    "model_version": {"type": "string", "minLength": 1},
+    "artifact_sha256": {"$ref": "#/$defs/sha256"},
+    "l2_contract_sha256": {"$ref": "#/$defs/sha256"},
+    "development_evaluation_sha256": {"$ref": "#/$defs/sha256"},
+    "candidate_registry_sha256": {"$ref": "#/$defs/sha256"},
+    "calibration_transform_sha256": {"$ref": "#/$defs/sha256"},
+    "reliability_artifact_sha256": {"$ref": "#/$defs/sha256"},
+    "replay_parity_evidence_sha256": {"$ref": "#/$defs/sha256"},
+    "independent_authority_record_sha256": {"$ref": "#/$defs/sha256"},
+    "independent_l2_authority": {"const": true},
+    "final_temporal_holdout_sealed": {"const": true},
+    "public_probability_authorized": {"const": true},
+    "replay_parity_verified": {"const": true},
+    "reliability_gate_passed": {"const": true},
+    "contextual_g1_authority": {"enum": ["not_applicable", "approved"]},
+    "authority_record_id": {"type": "string", "minLength": 1},
+    "issued_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

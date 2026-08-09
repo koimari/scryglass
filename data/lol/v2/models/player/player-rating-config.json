@@ -1,0 +1,113 @@
+{
+  "artifact_id": "player-rating-config-l4-development-v2",
+  "schema_version": "2.0.0",
+  "model_version": "player_rating-v2.0.0-development",
+  "principal_estimand": "posterior-mean role-adjusted individual contribution at as_of",
+  "rating_display": {"anchor": 1500, "logistic_scale": 400},
+  "league_rating_included": false,
+  "prior": {"mean": 0.0, "variance": 1.0},
+  "transfer": {"cross_league_variance": 0.2},
+  "selection": {"minimum_eligible_origins": 4, "evaluation_target_context": {"season_id":"2026","calendar_year":2026}, "require_complete_candidate_origin_identity": true},
+  "reference_policy": {
+    "policy_id": "equal-role-reference-policy-v1",
+    "population_id": "synthetic-role-reference-population-v1",
+    "frozen": true,
+    "lineup_synergy_reference": 0.0,
+    "role_weights": {"top": 0.2, "jungle": 0.2, "mid": 0.2, "bot": 0.2, "support": 0.2}
+  },
+  "league_centers": {"L01": 0.0, "L02": 0.05},
+  "global_bridge": {
+    "minimum_bridge_support": 2,
+    "observation_scale": 0.8,
+    "global_center": 0.03,
+    "bridge_variance": 0.35,
+    "centering_spec_id": "synthetic-global-bridge-centering-v1"
+  },
+  "team_outcome_anchor": {
+    "anchor_id": "binary-team-outcome-player-anchor-v1",
+    "likelihood": "single Bernoulli logistic roster likelihood",
+    "design_vector": "+reference_role_weight for blue and -reference_role_weight for red",
+    "approximation": "one-step Laplace assumed-density rank-one Gaussian update",
+    "information_rank_per_match": 1,
+    "minimum_curvature": 1e-9,
+    "covariance_update": "Sigma_post = Sigma - W/(1+W*xT*Sigma*x)*(Sigma*x)*(Sigma*x)T",
+    "availability_rule": "outcome_available_at must be at or before replay cutoff and strictly after serialized forecast"
+  },
+  "posterior_predictive": {
+    "integration": "adaptive_gauss_hermite",
+    "orders": [32,64,128,256,512,1024,2048,4096],
+    "successive_order_tolerance": 1e-7,
+    "safety_maximum_absolute_mean": 20.0,
+    "safety_maximum_variance": 400.0,
+    "guaranteed_convergence_domain": {"maximum_absolute_mean":5.0,"maximum_variance":25.0},
+    "outside_guaranteed_domain_semantics": "attempt adaptive integration within safety bounds; return unavailable on nonconvergence",
+    "evaluated_extreme_counterexamples": [{"mean":5.0,"variance":100.0},{"mean":20.0,"variance":400.0}],
+    "failure_policy": "unavailable",
+    "covariance_assumption": "full registered rank-one roster covariance plus independent resource-state covariance"
+  },
+  "evidence": {
+    "evidence_spec_id": "player-evidence-components-v1",
+    "displacement_method_id": "absolute-posterior-shift-over-prior-sd-v1",
+    "precision_method_id": "posterior-sd-versus-prior-sd-v1",
+    "coverage_method_id": "registered-required-context-fraction-v1",
+    "required_context_ids": ["team_outcome_anchor", "combat", "map_impact", "objective", "vision_nonfarm"]
+  },
+  "auxiliary_channels": [
+    {
+      "channel_id": "role_normalized_nonresource_impact",
+      "provenance_id": "role-normalized-nonresource-impact-v1",
+      "transform": "within-role robust z-score frozen before forecast",
+      "unit": "role_standard_deviation",
+      "timing": "post-map",
+      "availability_rule": "available_at >= event_end and usable only when available_at < forecast event_start",
+      "missingness": "missing values are skipped and never zero-imputed",
+      "coverage_rule": "source_context contributes only to its registered required context",
+      "leakage_rule": "same-timestamp and future availability are excluded from forecasts",
+      "routing": "skill",
+      "resource_channel": false
+    },
+    {
+      "channel_id": "same_map_resource_share",
+      "provenance_id": "same-map-resource-share-policy-v1",
+      "transform": "within-role centered logit resource share",
+      "unit": "centered_logit_share",
+      "timing": "post-map endogenous policy measurement",
+      "availability_rule": "available_at >= event_end and usable only by later forecasts",
+      "missingness": "missing values are skipped",
+      "coverage_rule": "policy diagnostics only",
+      "leakage_rule": "same-map value cannot enter its own forecast or canonical player skill update",
+      "routing": "policy_only",
+      "resource_channel": true
+    }
+  ],
+  "decay_candidates": [
+    {"candidate_id": "random_walk_no_reset", "kind": "random_walk_no_reset", "process_variance_per_day": 0.0005, "minimum_variance": 0.01},
+    {"candidate_id": "mean_reversion", "kind": "mean_reversion", "half_life_days": 120.0, "process_variance_per_day": 0.0005, "minimum_variance": 0.01},
+    {"candidate_id": "patch_roster_shock", "kind": "patch_roster_shock", "patch_retention": 0.85, "roster_retention": 0.9, "process_variance_per_day": 0.0005, "minimum_variance": 0.01},
+    {"candidate_id": "season_shock", "kind": "season_shock", "retention": 0.75, "process_variance_per_day": 0.0005, "minimum_variance": 0.01},
+    {"candidate_id": "calendar_boundary_shock", "kind": "calendar_boundary_shock", "retention": 0.9, "process_variance_per_day": 0.0005, "minimum_variance": 0.01},
+    {"candidate_id": "full_reset", "kind": "full_reset", "reset_boundary": "season_change", "process_variance_per_day": 0.0005, "minimum_variance": 0.01}
+  ],
+  "resource_candidates": [
+    {"candidate_id": "joint_resource_to_performance", "mechanics":"joint_latent_resource_performance", "forecast_coefficient": 0.08, "policy_prior_variance":1.0, "double_count_skill_sensitivity": false, "skill_sensitivity_coefficient": 0.0, "skill_sensitivity_variance": 10.0},
+    {"candidate_id": "no_resource", "mechanics":"resource_excluded", "forecast_coefficient": 0.0, "policy_prior_variance":1.0, "double_count_skill_sensitivity": false, "skill_sensitivity_coefficient": 0.0, "skill_sensitivity_variance": 10.0},
+    {"candidate_id": "lagged_pre_map_policy", "mechanics":"lagged_observed_policy", "forecast_coefficient": 0.05, "policy_prior_variance":1.0, "double_count_skill_sensitivity": false, "skill_sensitivity_coefficient": 0.0, "skill_sensitivity_variance": 10.0},
+    {"candidate_id": "player_policy_double_count_sensitivity", "mechanics":"double_count_collider_sensitivity", "forecast_coefficient": 0.08, "policy_prior_variance":1.0, "double_count_skill_sensitivity": true, "skill_sensitivity_coefficient": 0.2, "skill_sensitivity_variance": 2.0}
+  ],
+  "claim_ceiling": {
+    "synthetic_only": true,
+    "development_only": true,
+    "production_eligible": false,
+    "predictive_performance_authorized": false,
+    "real_data_fit_authorized": false,
+    "calibrated_public_probability_authorized": false,
+    "empirical_95_coverage_authorized": false,
+    "reliability_authorized": false,
+    "probability_wording_authorized": false,
+    "promotion_authorized": false,
+    "publication_authorized": false,
+    "sota_authorized": false,
+    "pass_b2": false,
+    "c2": false
+  }
+}

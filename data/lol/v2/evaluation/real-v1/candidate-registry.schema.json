@@ -1,0 +1,605 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scryglass.local/schema/candidate-registry-v1.4.json",
+  "title": "Scryglass frozen candidate family and slot registry v1.4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "registry_id",
+    "contract_set_sha256",
+    "final_labels_read",
+    "wcr_evidence_binding_contract",
+    "g1_unified_authority_handoff",
+    "held_out_patch_inventory",
+    "secondary_authority",
+    "candidates",
+    "families",
+    "slots"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "g0-candidate-registry-v1.4"
+    },
+    "registry_id": {
+      "const": "scryglass:candidate-registry:v1.4"
+    },
+    "contract_set_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "final_labels_read": {
+      "const": false
+    },
+    "wcr_evidence_binding_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_row_fields",
+        "derived_and_checked",
+        "unresolved_action"
+      ],
+      "properties": {
+        "input_row_fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "derived_and_checked": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "unresolved_action": { "const": "TYPED_UNRESOLVED_SLOT_BLOCKS_RELEVANT_PROMOTION" }
+      }
+    },
+    "g1_unified_authority_handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "transition",
+        "required_boundary",
+        "authorization_path",
+        "reviewer_identity",
+        "approval_scope",
+        "authority_artifact",
+        "approved_actions",
+        "excluded_scopes"
+      ],
+      "properties": {
+        "status": {
+          "const": "NOT_IMPLEMENTED_IN_V1_4"
+        },
+        "transition": {
+          "const": "PROHIBITED_IN_V1_4_REQUIRES_G1_UNIFIED_AUTHORITY_BUNDLE"
+        },
+        "required_boundary": {
+          "const": "SEALED_PRE_OUTCOME_INPUT_PLUS_SEPARATELY_OWNED_REPLAY_FROM_RAW_SCORING_DERIVATION"
+        },
+        "authorization_path": {
+          "const": "oe_target_evidence.require_exact_human_authority->representation_rank_private_runner"
+        },
+        "reviewer_identity": {
+          "const": "KOI_MARI"
+        },
+        "approval_scope": {
+          "const": "private_retrospective_oe_target_v1"
+        },
+        "authority_artifact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["relative_path", "raw_sha256"],
+          "properties": {
+            "relative_path": {
+              "const": "data/lol/v2/models/draft-interactions/oe-private-target-authority.json"
+            },
+            "raw_sha256": {
+              "const": "b1d0a6e37abb9a74dee8689dc19ab54d30fd15516bd4ee454906a075d8f20788"
+            }
+          }
+        },
+        "approved_actions": {
+          "const": ["model_fit", "rank_selection"]
+        },
+        "excluded_scopes": {
+          "const": [
+            "final_temporal_holdout",
+            "G9_final_opening",
+            "promotion",
+            "publication",
+            "public_claims"
+          ]
+        }
+      }
+    },
+    "held_out_patch_inventory": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["status", "unavailable"],
+          "properties": {
+            "status": { "const": "TYPED_UNRESOLVED" },
+            "unavailable": { "type": "object", "additionalProperties": false, "required": ["reason_code", "claim_effect"], "properties": { "reason_code": { "type": "string", "minLength": 1 }, "claim_effect": { "type": "string", "minLength": 1 } } }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["status", "patches", "patches_sha256"],
+          "properties": {
+            "status": { "const": "RESOLVED", "not": {} },
+            "patches": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+            "patches_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        }
+      ]
+    },
+    "secondary_authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["equal_strength_draft_increment", "transfer_new_roster"],
+      "properties": {
+        "equal_strength_draft_increment": {
+          "oneOf": [
+            {
+              "type": "object", "additionalProperties": false,
+              "required": ["status", "unavailable"],
+              "properties": {
+                "status": { "const": "TYPED_UNRESOLVED" },
+                "unavailable": { "type": "object", "additionalProperties": false, "required": ["reason_code", "claim_effect"], "properties": { "reason_code": { "type": "string", "minLength": 1 }, "claim_effect": { "type": "string", "minLength": 1 } } }
+              }
+            },
+            {
+              "type": "object", "additionalProperties": false,
+              "required": ["status", "strength_source_id", "as_of_rule", "distance_metric", "tolerance", "missing_policy", "tie_policy"],
+              "properties": {
+                "status": { "const": "RESOLVED", "not": {} },
+                "strength_source_id": { "type": "string", "minLength": 1 },
+                "as_of_rule": { "const": "STRICTLY_BEFORE_SERIES_START" },
+                "distance_metric": { "const": "ABSOLUTE_DIFFERENCE" },
+                "tolerance": { "type": "number", "minimum": 0 },
+                "missing_policy": { "const": "EXCLUDE_AND_BLOCK_IF_EMPTY" },
+                "tie_policy": { "const": "INCLUDE_AT_OR_BELOW_TOLERANCE" }
+              }
+            }
+          ]
+        },
+        "transfer_new_roster": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "unavailable"],
+          "properties": {
+            "status": { "const": "TYPED_UNRESOLVED" },
+            "unavailable": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["reason_code", "claim_effect"],
+              "properties": {
+                "reason_code": { "type": "string", "minLength": 1 },
+                "claim_effect": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "candidate_id",
+              "simplicity_rank",
+              "status",
+              "unavailable"
+            ],
+            "properties": {
+              "candidate_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "simplicity_rank": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "status": {
+                "const": "TYPED_UNRESOLVED"
+              },
+              "unavailable": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reason_code",
+                  "claim_effect"
+                ],
+                "properties": {
+                  "reason_code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "claim_effect": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+        "candidate_id",
+        "simplicity_rank",
+        "status",
+        "candidate_artifact_relative_path",
+        "candidate_artifact_raw_sha256",
+              "candidate_artifact_semantic_sha256",
+              "executable_adapter_relative_path",
+              "executable_adapter_raw_sha256",
+              "executable_adapter_entry_point",
+              "config_relative_path",
+              "config_raw_sha256",
+              "environment_lock_relative_path",
+              "environment_lock_raw_sha256",
+              "source_snapshot_relative_path",
+              "source_snapshot_raw_sha256",
+              "partition_bindings_relative_path",
+              "partition_bindings_raw_sha256",
+              "fixture_input",
+              "fixture_output",
+              "fixture_sha256",
+              "execution_authority"
+            ],
+            "properties": {
+              "candidate_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "simplicity_rank": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "status": {
+                "const": "RESOLVED",
+                "not": {}
+              },
+      "candidate_artifact_raw_sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "candidate_artifact_relative_path": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\)[A-Za-z0-9._/-]+$"
+      },
+              "candidate_artifact_semantic_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "executable_adapter_relative_path": { "type": "string", "minLength": 1 },
+              "executable_adapter_raw_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "executable_adapter_entry_point": { "type": "string", "minLength": 1 },
+              "config_relative_path": { "type": "string", "minLength": 1 },
+              "config_raw_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "environment_lock_relative_path": { "type": "string", "minLength": 1 },
+              "environment_lock_raw_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "source_snapshot_relative_path": { "type": "string", "minLength": 1 },
+              "source_snapshot_raw_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "partition_bindings_relative_path": { "type": "string", "minLength": 1 },
+              "partition_bindings_raw_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "fixture_input": { "type": "object" },
+              "fixture_output": {},
+              "fixture_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "execution_authority": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "authority_id", "receipt_sha256"],
+                "properties": {
+                  "kind": { "const": "AUTHORITY_SIDE_REEXECUTION" },
+                  "authority_id": { "const": "scryglass:authority-derived-preflight:v1.4" },
+                  "receipt_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "families": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "family_id",
+          "kind",
+          "candidate_id",
+          "slot_ids"
+        ],
+        "properties": {
+          "family_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+          },
+          "kind": {
+            "enum": [
+              "PRIMARY_HOLM",
+              "HARM_HOLM",
+              "SECONDARY_HOLM"
+            ]
+          },
+          "candidate_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+          },
+          "slot_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+            }
+          }
+        }
+      }
+    },
+    "slots": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slot_id",
+              "family_id",
+              "candidate_id",
+              "baseline_id",
+              "output_id",
+              "stratum_id",
+              "decision_kind",
+              "threshold_source",
+              "status",
+              "unavailable"
+            ],
+            "properties": {
+              "slot_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "family_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "candidate_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "baseline_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "output_id": {
+                "enum": [
+                  "player_rating",
+                  "team_rating",
+                  "terminal_draft_score",
+                  "partial_draft_score"
+                ]
+              },
+              "stratum_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "decision_kind": {
+                "enum": [
+                  "SUPERIORITY",
+                  "NONINFERIORITY",
+                  "HARM"
+                ]
+              },
+              "threshold_source": {
+                "enum": [
+                  "ZERO",
+                  "REGISTERED_MARGIN",
+                  "REGISTERED_MARGIN_OR_ZERO_FALLBACK"
+                ]
+              },
+              "status": {
+                "const": "TYPED_UNRESOLVED"
+              },
+              "unavailable": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reason_code",
+                  "claim_effect"
+                ],
+                "properties": {
+                  "reason_code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "claim_effect": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slot_id",
+              "family_id",
+              "candidate_id",
+              "baseline_id",
+              "output_id",
+              "stratum_id",
+              "decision_kind",
+              "threshold_source",
+              "status",
+              "evidence",
+              "execution_authority"
+            ],
+            "properties": {
+              "slot_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "family_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "candidate_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "baseline_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "output_id": {
+                "enum": [
+                  "player_rating",
+                  "team_rating",
+                  "terminal_draft_score",
+                  "partial_draft_score"
+                ]
+              },
+              "stratum_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,191}$"
+              },
+              "decision_kind": {
+                "enum": [
+                  "SUPERIORITY",
+                  "NONINFERIORITY",
+                  "HARM"
+                ]
+              },
+              "threshold_source": {
+                "enum": [
+                  "ZERO",
+                  "REGISTERED_MARGIN",
+                  "REGISTERED_MARGIN_OR_ZERO_FALLBACK"
+                ]
+              },
+              "status": {
+                "const": "RESOLVED",
+                "not": {}
+              },
+              "execution_authority": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "authority_id", "receipt_sha256"],
+                "properties": {
+                  "kind": { "const": "AUTHORITY_SIDE_REEXECUTION" },
+                  "authority_id": { "const": "scryglass:authority-derived-preflight:v1.4" },
+                  "receipt_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                }
+              },
+              "evidence": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "relative_path",
+                  "raw_sha256",
+                  "semantic_sha256"
+                ],
+                "properties": {
+                  "relative_path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\)[A-Za-z0-9._/-]+$"
+                  },
+                  "raw_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "semantic_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  }
+                }
+              },
+              "margin_binding": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "relative_path",
+                  "raw_sha256",
+                  "semantic_sha256",
+                  "development_snapshot_sha256",
+                  "baseline_binding_sha256",
+                  "evaluation_rows_sha256",
+                  "procedure_sha256",
+                  "replicate_payload_sha256",
+                  "independent_review_id",
+                  "replica_construction_id"
+                ],
+                "properties": {
+                  "relative_path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\)[A-Za-z0-9._/-]+$"
+                  },
+                  "raw_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "semantic_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "development_snapshot_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "baseline_binding_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "evaluation_rows_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "procedure_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "replicate_payload_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "independent_review_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "replica_construction_id": {
+                    "const": "scryglass:deterministic-refresh-refit-pairs:v1.3"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

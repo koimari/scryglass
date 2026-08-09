@@ -1,0 +1,172 @@
+{
+  "schema_version": "2.0.0",
+  "model_version": "tier-list-v2.0.0",
+  "as_of": "2026-07-27T18:00:00Z",
+  "season_id": "scryglass:season:lpl-2026",
+  "calendar_year": 2026,
+  "status": "ok",
+  "competition_scope_id": "scryglass:competition-scope:lpl",
+  "competition_scope_kind": "regional_league",
+  "patch_id": "26.14",
+  "role": "mid",
+  "current_patch_verified": true,
+  "refresh_trigger_map_id": "oe:map:example",
+  "reference_mixture_id": "scryglass:mixture:lpl-26.14-mid",
+  "counterability_policy_id": "scryglass:counterability:lpl-v2",
+  "counterability_weight": 0.25,
+  "ranking_tie_break_policy_id": "scryglass:ranking-policy:tier-value-interval-id-v2",
+  "entries": [
+    {
+      "rank": 1,
+      "champion_id": "riot:champion:101",
+      "display_name": "Example Artillery Mage",
+      "verified_appearance_count": 3,
+      "incremental_value_pp": 2.4,
+      "counterability_pp": 0.8,
+      "tier_value_pp": 2.2,
+      "interval_95": {"lower": -0.4, "upper": 4.8, "level": 0.95},
+      "evidence": {
+        "posterior_displacement": {
+          "diagnostic_id": "scryglass:evidence:tier-entry-displacement",
+          "method_id": "scryglass:evidence-method:standardized-posterior-displacement",
+          "prior_id": "scryglass:prior:lpl-26.14-mid",
+          "value": 0.92,
+          "unit": "prior_standard_deviations"
+        },
+        "precision": {
+          "diagnostic_id": "scryglass:evidence:tier-entry-precision",
+          "method_id": "scryglass:evidence-method:central-interval-width",
+          "reference_id": "scryglass:prior:lpl-26.14-mid",
+          "posterior_dispersion": 5.2,
+          "reference_dispersion": 7.6,
+          "unit": "percentage_points_interval_width"
+        },
+        "source_context_coverage": {
+          "coverage_spec_id": "scryglass:coverage:tier-list-v2",
+          "supported_source_family_ids": ["scryglass:source-family:drafts", "scryglass:source-family:match-results"],
+          "supported_context_ids": ["scryglass:context:lpl-26.14-mid", "scryglass:context:plausible-responses"],
+          "missing_required_context_ids": [],
+          "identity_terms_status": "not_applicable",
+          "bridge_path_status": "not_applicable",
+          "fallback_levels": ["F1", "F2"],
+          "coverage_gaps": ["Only three verified appearances in the exact cell."]
+        }
+      },
+      "provisional": true
+    },
+    {
+      "rank": 2,
+      "champion_id": "riot:champion:102",
+      "display_name": "Example Control Mage",
+      "verified_appearance_count": 5,
+      "incremental_value_pp": 1.8,
+      "counterability_pp": 0.4,
+      "tier_value_pp": 1.7,
+      "interval_95": {"lower": -0.8, "upper": 4.2, "level": 0.95},
+      "evidence": {
+        "posterior_displacement": {
+          "diagnostic_id": "scryglass:evidence:tier-entry-2-displacement",
+          "method_id": "scryglass:evidence-method:standardized-posterior-displacement",
+          "prior_id": "scryglass:prior:lpl-26.14-mid",
+          "value": 0.73,
+          "unit": "prior_standard_deviations"
+        },
+        "precision": {
+          "diagnostic_id": "scryglass:evidence:tier-entry-2-precision",
+          "method_id": "scryglass:evidence-method:central-interval-width",
+          "reference_id": "scryglass:prior:lpl-26.14-mid",
+          "posterior_dispersion": 5.0,
+          "reference_dispersion": 7.6,
+          "unit": "percentage_points_interval_width"
+        },
+        "source_context_coverage": {
+          "coverage_spec_id": "scryglass:coverage:tier-list-v2",
+          "supported_source_family_ids": ["scryglass:source-family:drafts", "scryglass:source-family:match-results"],
+          "supported_context_ids": ["scryglass:context:lpl-26.14-mid", "scryglass:context:plausible-responses"],
+          "missing_required_context_ids": [],
+          "identity_terms_status": "not_applicable",
+          "bridge_path_status": "not_applicable",
+          "fallback_levels": ["F1"],
+          "coverage_gaps": ["Five verified appearances still leave wide uncertainty."]
+        }
+      },
+      "provisional": true
+    }
+  ],
+  "reliability": {
+    "label": "limited",
+    "validation_stratum_id": "scryglass:stratum:lpl-26.14-mid",
+    "stratum_match_status": "matched",
+    "stratum_mapping_sha256": "6767676767676767676767676767676767676767676767676767676767676767",
+    "benchmark_version": "2.0.0",
+    "baseline_id": "scryglass:baseline:tier-list-no-counterability",
+    "probability_wording_approved": true,
+    "validation_gate_passed": true,
+    "out_of_distribution": false,
+    "out_of_distribution_flags": [],
+    "log_loss": 0.679,
+    "baseline_log_loss": 0.684,
+    "log_loss_skill": 0.005,
+    "brier_score": 0.243,
+    "baseline_brier_score": 0.246,
+    "brier_skill": 0.003,
+    "calibration_intercept": 0.04,
+    "calibration_slope": 0.91,
+    "empirical_interval_coverage": 0.938,
+    "nominal_interval_coverage": 0.95,
+    "sample_count": 84,
+    "cluster_count": 42
+  },
+  "literal_interpretation": "Model-estimated incremental draft value for champions actually played in this role, league, and current patch, adjusted by the validated counterability rule.",
+  "lineage": {
+    "manifest_id": "scryglass:manifest:tier-list-v2.0.0",
+    "training_snapshot_id": "scryglass:training:example",
+    "source_snapshot_ids": ["scryglass:source:oe-example"],
+    "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "source_tree_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "calibration_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "evaluation_report_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "code_commit": "1111111111111111111111111111111111111111",
+    "environment_lock_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "train_cutoff": "2026-07-26T23:59:59Z"
+  },
+  "provenance": {
+    "schema_version": "2.0.0",
+    "model_version": "tier-list-v2.0.0",
+    "as_of": "2026-07-27T18:00:00Z",
+    "prediction_id": "scryglass:prediction:tier-list-example",
+    "mode": "state_snapshot",
+    "created_at": "2026-07-27T18:00:01Z",
+    "event_start": null,
+    "related_forecast_id": null,
+    "input_snapshot_id": "scryglass:input:tier-list-example",
+    "estimator_id": "scryglass:estimator:tier-list-v2",
+    "calibration_id": "scryglass:calibration:draft-v2",
+    "required_input_status": "complete",
+    "freshness_checks": [
+      {
+        "input_id": "scryglass:source:oe-example",
+        "source_updated_at": "2026-07-27T17:00:00Z",
+        "limit_seconds": 86400,
+        "fresh": true
+      }
+    ],
+    "input_conflicts": [],
+    "fallback_levels": ["F1", "F2"],
+    "out_of_distribution_flags": [],
+    "output_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "immutable": true,
+    "lineage": {
+      "manifest_id": "scryglass:manifest:tier-list-v2.0.0",
+      "training_snapshot_id": "scryglass:training:example",
+      "source_snapshot_ids": ["scryglass:source:oe-example"],
+      "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_tree_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "calibration_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "evaluation_report_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "code_commit": "1111111111111111111111111111111111111111",
+      "environment_lock_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "train_cutoff": "2026-07-26T23:59:59Z"
+    }
+  }
+}

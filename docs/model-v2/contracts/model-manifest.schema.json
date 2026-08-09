@@ -1,0 +1,531 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scryglass.xyz/schemas/model-v2/model-manifest.schema.json",
+  "title": "Scryglass model v2 manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_version",
+    "as_of",
+    "season_id",
+    "calendar_year",
+    "manifest_id",
+    "status",
+    "output_type",
+    "estimator_id",
+    "training_snapshot_id",
+    "split_plan_id",
+    "train_cutoff",
+    "source_tree_sha256",
+    "config_sha256",
+    "rating_display",
+    "reliability_stratum_mapping",
+    "artifacts",
+    "evaluation",
+    "lineage"
+  ],
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/semver"},
+    "model_version": {"$ref": "common.schema.json#/$defs/model_version"},
+    "as_of": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "season_id": {"$ref": "common.schema.json#/$defs/season_id"},
+    "calendar_year": {"$ref": "common.schema.json#/$defs/calendar_year"},
+    "manifest_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "status": {
+      "type": "string",
+      "enum": ["candidate", "promoted", "retired", "rolled_back", "blocked"]
+    },
+    "output_type": {
+      "type": "string",
+      "enum": [
+        "player_rating",
+        "team_rating",
+        "league_rating",
+        "terminal_draft_score",
+        "partial_draft_score",
+        "archetype_extrapolation",
+        "tier_list",
+        "match_forecast"
+      ]
+    },
+    "estimator_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "estimator_family": {"type": "string", "minLength": 1},
+    "training_snapshot_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "split_plan_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+    "train_cutoff": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "source_tree_sha256": {
+      "$ref": "common.schema.json#/$defs/sha256",
+      "description": "Canonical digest of the exact allowlisted source paths and bytes used for the candidate."
+    },
+    "code_commit": {
+      "oneOf": [
+        {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+        {"type": "null"}
+      ]
+    },
+    "environment_lock_sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+    "config_sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+    "rating_display": {"$ref": "common.schema.json#/$defs/rating_display"},
+    "reliability_stratum_mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mapping_id",
+        "artifact_sha256",
+        "frozen",
+        "total_for_registered_context_and_ood",
+        "unmatched_label"
+      ],
+      "properties": {
+        "mapping_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "artifact_sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "frozen": {"const": true},
+        "total_for_registered_context_and_ood": {"const": true},
+        "unmatched_label": {"const": "unrated"}
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_id", "purpose", "media_type", "sha256"],
+        "properties": {
+          "artifact_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+          "purpose": {
+            "type": "string",
+            "enum": ["research", "calibration", "runtime", "typescript", "report"]
+          },
+          "media_type": {"type": "string", "minLength": 1},
+          "sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+          "numeric_representation": {"type": "string"}
+        }
+      }
+    },
+    "calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "calibration_id",
+        "family",
+        "artifact_sha256",
+        "transform_sha256",
+        "probability_domain",
+        "monotonicity",
+        "complement_symmetry_verified",
+        "open_support_verified",
+        "transform_proof_sha256",
+        "probability_wording_approved"
+      ],
+      "properties": {
+        "calibration_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "family": {"type": "string", "minLength": 1},
+        "artifact_sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "transform_sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "probability_wording_approved": {"type": "boolean"},
+        "probability_domain": {
+          "const": "open_0_1"
+        },
+        "monotonicity": {"const": "nondecreasing"},
+        "complement_symmetry_verified": {"const": true},
+        "open_support_verified": {"const": true},
+        "transform_proof_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "search_policy_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+        "search_method": {
+          "type": "string",
+          "enum": [
+            "hard_minimax",
+            "soft_minimax",
+            "empirical_policy",
+            "risk_aware"
+          ]
+        },
+        "search_temperature": {
+          "oneOf": [
+            {"type": "number", "exclusiveMinimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "search_artifact_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "prefix_calibration_report_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "terminal_consistency_report_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "approved_prefix_strata": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "common.schema.json#/$defs/stable_id"}
+        },
+        "prefix_probability_wording_approved": {"type": "boolean"}
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "benchmark_version",
+        "report_sha256",
+        "promotion_decision",
+        "sealed_holdout",
+        "serving_parity",
+        "sota_claim"
+      ],
+      "properties": {
+        "benchmark_version": {"$ref": "common.schema.json#/$defs/semver"},
+        "report_sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "promotion_decision": {
+          "type": "string",
+          "enum": ["pending", "pass", "fail", "rollback"]
+        },
+        "sealed_holdout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "holdout_id",
+            "open_count",
+            "opened_at",
+            "report_sha256"
+          ],
+          "properties": {
+            "holdout_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+            "open_count": {"type": "integer", "minimum": 0, "maximum": 1},
+            "opened_at": {
+              "oneOf": [
+                {"$ref": "common.schema.json#/$defs/timestamp"},
+                {"type": "null"}
+              ]
+            },
+            "report_sha256": {
+              "oneOf": [
+                {"$ref": "common.schema.json#/$defs/sha256"},
+                {"type": "null"}
+              ]
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {"open_count": {"const": 0}},
+                "required": ["open_count"]
+              },
+              "then": {
+                "properties": {
+                  "opened_at": {"type": "null"},
+                  "report_sha256": {"type": "null"}
+                }
+              },
+              "else": {
+                "properties": {
+                  "opened_at": {
+                    "$ref": "common.schema.json#/$defs/timestamp"
+                  },
+                  "report_sha256": {
+                    "$ref": "common.schema.json#/$defs/sha256"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "serving_parity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "report_sha256",
+            "runtime_ids",
+            "pre_rounding_tolerance"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["pending", "pass", "fail"]
+            },
+            "report_sha256": {
+              "oneOf": [
+                {"$ref": "common.schema.json#/$defs/sha256"},
+                {"type": "null"}
+              ]
+            },
+            "runtime_ids": {
+              "type": "array",
+              "minItems": 2,
+              "uniqueItems": true,
+              "items": {"$ref": "common.schema.json#/$defs/stable_id"}
+            },
+            "pre_rounding_tolerance": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {"status": {"const": "pass"}},
+                "required": ["status"]
+              },
+              "then": {
+                "properties": {
+                  "report_sha256": {
+                    "$ref": "common.schema.json#/$defs/sha256"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "sota_claim": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["not_claimed", "approved", "rejected"]
+            },
+            "evidence_report_sha256": {
+              "$ref": "common.schema.json#/$defs/sha256"
+            },
+            "dataset_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+            "time_window_id": {"$ref": "common.schema.json#/$defs/stable_id"},
+            "metric_ids": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"$ref": "common.schema.json#/$defs/stable_id"}
+            },
+            "baseline_ids": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"$ref": "common.schema.json#/$defs/stable_id"}
+            },
+            "limitations": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string", "minLength": 1}
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {"status": {"const": "approved"}},
+                "required": ["status"]
+              },
+              "then": {
+                "required": [
+                  "evidence_report_sha256",
+                  "dataset_id",
+                  "time_window_id",
+                  "metric_ids",
+                  "baseline_ids",
+                  "limitations"
+                ]
+              },
+              "else": {
+                "not": {
+                  "anyOf": [
+                    {"required": ["evidence_report_sha256"]},
+                    {"required": ["dataset_id"]},
+                    {"required": ["time_window_id"]},
+                    {"required": ["metric_ids"]},
+                    {"required": ["baseline_ids"]}
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "research_decisions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "common.schema.json#/$defs/stable_id"}
+    },
+    "lineage": {"$ref": "common.schema.json#/$defs/lineage"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "output_type": {
+            "enum": ["terminal_draft_score", "partial_draft_score", "match_forecast"]
+          }
+        },
+        "required": ["output_type"]
+      },
+      "then": {"required": ["calibration"]}
+    },
+    {
+      "if": {
+        "properties": {
+          "output_type": {"const": "archetype_extrapolation"}
+        },
+        "required": ["output_type"]
+      },
+      "then": {
+        "not": {"required": ["calibration"]}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "output_type": {"const": "partial_draft_score"}
+        },
+        "required": ["output_type"]
+      },
+      "then": {
+        "properties": {
+          "calibration": {
+            "required": [
+              "probability_domain",
+              "search_policy_id",
+              "search_method",
+              "search_temperature",
+              "search_artifact_sha256",
+              "transform_sha256",
+              "prefix_calibration_report_sha256",
+              "terminal_consistency_report_sha256",
+              "approved_prefix_strata",
+              "prefix_probability_wording_approved"
+            ],
+            "properties": {
+              "probability_domain": {"const": "open_0_1"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"const": "promoted"}},
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["code_commit"],
+        "properties": {
+          "code_commit": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "lineage": {
+            "required": ["code_commit"],
+            "properties": {
+              "code_commit": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{40}$"
+              }
+            }
+          },
+          "evaluation": {
+            "properties": {
+              "promotion_decision": {"const": "pass"},
+              "sealed_holdout": {
+                "properties": {
+                  "open_count": {"const": 1},
+                  "opened_at": {
+                    "$ref": "common.schema.json#/$defs/timestamp"
+                  },
+                  "report_sha256": {
+                    "$ref": "common.schema.json#/$defs/sha256"
+                  }
+                }
+              },
+              "serving_parity": {
+                "properties": {
+                  "status": {"const": "pass"},
+                  "report_sha256": {
+                    "$ref": "common.schema.json#/$defs/sha256"
+                  }
+                }
+              },
+              "sota_claim": {
+                "properties": {
+                  "status": {"enum": ["not_claimed", "approved"]}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "promoted"},
+          "output_type": {
+            "enum": [
+              "terminal_draft_score",
+              "partial_draft_score",
+              "match_forecast"
+            ]
+          }
+        },
+        "required": ["status", "output_type"]
+      },
+      "then": {
+        "properties": {
+          "calibration": {
+            "properties": {
+              "probability_wording_approved": {"const": true}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {"const": "promoted"},
+          "output_type": {"const": "partial_draft_score"}
+        },
+        "required": ["status", "output_type"]
+      },
+      "then": {
+        "properties": {
+          "calibration": {
+            "properties": {
+              "prefix_probability_wording_approved": {"const": true},
+              "approved_prefix_strata": {"minItems": 1}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "x-semantic-invariants": [
+    {
+      "id": "manifest_reliability_stratum_mapping_total",
+      "expression": "reliability_stratum_mapping is frozen before sealed evaluation, maps every registered context/OOD state to a validation stratum, and emits Reliability.label='unrated' when no registered stratum matches",
+      "severity": "error"
+    }
+  ],
+  "x-negative-mutation-fixtures": [
+    {
+      "id": "manifest_missing_reliability_stratum_mapping",
+      "mutation": {
+        "op": "remove",
+        "path": "/reliability_stratum_mapping"
+      },
+      "expected_schema_failure": true
+    },
+    {
+      "id": "manifest_non_total_reliability_mapping",
+      "mutation": {
+        "op": "replace",
+        "path": "/reliability_stratum_mapping/total_for_registered_context_and_ood",
+        "value": false
+      },
+      "expected_schema_failure": true
+    }
+  ]
+}

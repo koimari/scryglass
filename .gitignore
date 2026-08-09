@@ -45,7 +45,7 @@ data/lol/warehouse/
 data/lol/odds_journal.parquet
 **/*.joblib
 **/*.parquet
-!apps/lol-atlas/public/packs/**/*.parquet
+!apps/scryglass/public/packs/**/*.parquet
 
 # Local scratch
 tmp/
@@ -61,6 +61,23 @@ data/lol/draft_players.json
 data/lol/features/
 data/lol/games_raw.json
 data/lol/kill_models.json
+# Local, source-preserving League Wiki mirror; do not publish as an app bundle.
+data/lol/knowledge/obsidian/league-wiki/
+data/lol/knowledge/patch-packets/
+data/lol/knowledge/*.sqlite3
+data/lol/v2/experiments/
 data/lol/markets_model.json
+data/lol/v2/models/player/real-v1/
+data/lol/v2/models/team/real-v1/
+data/lol/v2/snapshots/real-v1/lpl-private-development-rows.jsonl
+data/lol/v2/snapshots/real-v1/lpl-private-development-manifest.json
+data/lol/v2/snapshots/real-v1/lpl-private-draft-features-review.json
 .vercel
 .env*
+
+# Local agent and browser artifacts
+.codex/hooks.json
+.playwright-cli/
+outputs/
+apps/elemental-drakes/--full-page
+current-draft-score-calculation.tldraw

@@ -1,0 +1,72 @@
+{
+  "authority": {
+    "betting": false,
+    "model_validation": false,
+    "publication": false,
+    "recommendation": false,
+    "source_freshness": true
+  },
+  "candidate": {
+    "artifact_sha256": "ddbdf5cb5224c5bfbc0aabff792b6150d9640597230889e06e78c56ec4865589",
+    "as_of": "2026-08-08T12:57:21Z",
+    "locator": "data/lol/v2/tierlists/champion-elo-candidate-v1.json",
+    "maps_in_live_window": 918,
+    "maps_replayed": 17239,
+    "raw_sha256": "8e1951778d2c019fd78f2238cb5bd5c9820f08ff2d12b91c321c0133c4173519",
+    "source_complete_through_expected_live_as_of": true,
+    "source_mode": "oe_only"
+  },
+  "candidate_expected_live_as_of": "2026-08-08T12:57:21Z",
+  "claim_ceiling": "This receipt records source refresh and a development replay only.",
+  "expected_live_as_of": "2026-08-08T23:59:59Z",
+  "live_window_start": "2026-07-18T00:00:00Z",
+  "receipt_canonical_sha256": "01779e93976ab069d11d37ebedf59536f7648ad9eeefc82f0596f3e72dda5ee4",
+  "retrieved_at": "2026-08-08T15:06:49.155560Z",
+  "schema_version": "scryglass:tierlist-live-refresh:v1",
+  "source_mode": "oe_only",
+  "source_observed_through": "2026-08-08T12:57:21Z",
+  "source_steps": [
+    {
+      "command": [
+        "lol_kills.refresh_warehouse",
+        "--oe-years",
+        "2025",
+        "2026",
+        "--refresh-oe",
+        "--skip-lp",
+        "--skip-grid"
+      ],
+      "completed": false,
+      "returncode": 1,
+      "source": "oe_annual",
+      "stderr_bytes": 3692,
+      "stdout_bytes": 97
+    },
+    {
+      "command": [
+        "lol_kills.etl.oe_api_ingest",
+        "--start",
+        "2026-07-18T00:00:00Z",
+        "--end",
+        "2026-08-08T23:59:59Z",
+        "--lookback-days",
+        "120"
+      ],
+      "completed": true,
+      "returncode": 0,
+      "source": "oe_api",
+      "stderr_bytes": 0,
+      "stdout_bytes": 1047
+    },
+    {
+      "command": [],
+      "completed": false,
+      "reason": "source_mode_oe_only",
+      "returncode": null,
+      "skipped": true,
+      "source": "grid"
+    }
+  ],
+  "status": "ready_for_authority_review",
+  "window_start": "2025-01-01T00:00:00Z"
+}

@@ -2,8 +2,8 @@
 """Upload a public pack to Vercel Blob (or copy into the atlas public/ folder).
 
 Without BLOB_READ_WRITE_TOKEN:
-  copies pack → apps/lol-atlas/public/packs/<pack_id>/
-  and writes apps/lol-atlas/public/packs/manifest.json with relative base_url.
+  copies pack → apps/scryglass/public/packs/<pack_id>/
+  and writes apps/scryglass/public/packs/manifest.json with relative base_url.
 
 With BLOB_READ_WRITE_TOKEN:
   uses Vercel Blob REST API (put) for each file under packs/<pack_id>/...
@@ -27,7 +27,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PACK_ROOT = ROOT / "output" / "public_pack"
-ATLAS_PUBLIC = ROOT / "apps" / "lol-atlas" / "public" / "packs"
+ATLAS_PUBLIC = ROOT / "apps" / "scryglass" / "public" / "packs"
 
 
 def _load_manifest(pack_dir: Path) -> dict[str, Any]:
@@ -161,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--local-only",
         action="store_true",
-        help="Skip Blob even if token is set; only copy into apps/lol-atlas/public/packs",
+        help="Skip Blob even if token is set; only copy into apps/scryglass/public/packs",
     )
     args = ap.parse_args(argv)
 

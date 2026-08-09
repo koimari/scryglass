@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scryglass:g1-pre-event-interface-receipt:v1",
+  "title": "Scryglass G1 pre-event interface receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "status",
+    "source_snapshot",
+    "feature_snapshot",
+    "row_interface",
+    "final_holdout",
+    "rights_status",
+    "claim_ceiling",
+    "typed_blockers",
+    "receipt_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": "scryglass:g1-pre-event-interface-receipt:v1"},
+    "artifact_kind": {"const": "G1_PRE_EVENT_INTERFACE_RECEIPT"},
+    "status": {"const": "PRIVATE_NONAUTHORIZING_PRE_EVENT_INPUT"},
+    "source_snapshot": {"$ref": "#/$defs/sourceSnapshot"},
+    "feature_snapshot": {"$ref": "#/$defs/featureSnapshot"},
+    "row_interface": {"$ref": "#/$defs/rowInterface"},
+    "final_holdout": {"$ref": "#/$defs/finalHoldout"},
+    "rights_status": {"const": "PRIVATE_REVIEWED"},
+    "claim_ceiling": {"$ref": "#/$defs/claimCeiling"},
+    "typed_blockers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/blocker"}
+    },
+    "receipt_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "locator": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/].*"
+    },
+    "sourceSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_locator",
+        "manifest_raw_sha256",
+        "manifest_sha256",
+        "rows_locator",
+        "rows_raw_sha256",
+        "source_scope",
+        "map_count",
+        "source_series_family_count",
+        "partition_counts",
+        "split_payload_sha256"
+      ],
+      "properties": {
+        "manifest_locator": {"$ref": "#/$defs/locator"},
+        "manifest_raw_sha256": {"$ref": "#/$defs/sha256"},
+        "manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "rows_locator": {"$ref": "#/$defs/locator"},
+        "rows_raw_sha256": {"$ref": "#/$defs/sha256"},
+        "source_scope": {"type": "string", "minLength": 1},
+        "map_count": {"type": "integer", "minimum": 1},
+        "source_series_family_count": {"type": "integer", "minimum": 1},
+        "partition_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["TRAIN", "DEVELOPMENT", "VALIDATION"],
+          "properties": {
+            "TRAIN": {"type": "integer", "minimum": 0},
+            "DEVELOPMENT": {"type": "integer", "minimum": 0},
+            "VALIDATION": {"type": "integer", "minimum": 0}
+          }
+        },
+        "split_payload_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "featureSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_locator",
+        "manifest_raw_sha256",
+        "manifest_sha256",
+        "rows_locator",
+        "rows_raw_sha256",
+        "rows_canonical_sha256",
+        "feature_row_count",
+        "pick_count",
+        "transform"
+      ],
+      "properties": {
+        "manifest_locator": {"$ref": "#/$defs/locator"},
+        "manifest_raw_sha256": {"$ref": "#/$defs/sha256"},
+        "manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "rows_locator": {"$ref": "#/$defs/locator"},
+        "rows_raw_sha256": {"$ref": "#/$defs/sha256"},
+        "rows_canonical_sha256": {"$ref": "#/$defs/sha256"},
+        "feature_row_count": {"type": "integer", "minimum": 1},
+        "pick_count": {"type": "integer", "minimum": 1},
+        "transform": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["locator", "raw_sha256", "config_sha256"],
+          "properties": {
+            "locator": {"$ref": "#/$defs/locator"},
+            "raw_sha256": {"$ref": "#/$defs/sha256"},
+            "config_sha256": {"$ref": "#/$defs/sha256"}
+          }
+        }
+      }
+    },
+    "rowInterface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "map_id",
+        "series_id",
+        "event_time",
+        "partition",
+        "lineups",
+        "availability",
+        "roster_authority",
+        "target_included"
+      ],
+      "properties": {
+        "map_id": {"const": "source_game_id"},
+        "series_id": {"const": "source_series_id"},
+        "event_time": {"const": "source_local_event_start"},
+        "partition": {"const": "partition"},
+        "lineups": {"const": "observed_lineups"},
+        "availability": {"const": "COMPLETED_DRAFT_AVAILABLE_AT_OR_BEFORE_EVENT_START"},
+        "roster_authority": {"const": "OBSERVED_MAP_PARTICIPANTS_NOT_PRE_EVENT_ROSTER_AUTHORITY"},
+        "target_included": {"const": false}
+      }
+    },
+    "finalHoldout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "accessed", "included"],
+      "properties": {
+        "status": {"const": "SEALED_UNREAD"},
+        "accessed": {"const": false},
+        "included": {"const": false}
+      }
+    },
+    "claimCeiling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "private_model_fit_feature_input",
+        "private_rank_selection_feature_input",
+        "current_roster",
+        "pre_event_roster",
+        "forecast",
+        "prediction",
+        "production",
+        "publication",
+        "promotion",
+        "sota",
+        "final_holdout"
+      ],
+      "properties": {
+        "private_model_fit_feature_input": {"const": true},
+        "private_rank_selection_feature_input": {"const": true},
+        "current_roster": {"const": false},
+        "pre_event_roster": {"const": false},
+        "forecast": {"const": false},
+        "prediction": {"const": false},
+        "production": {"const": false},
+        "publication": {"const": false},
+        "promotion": {"const": false},
+        "sota": {"const": false},
+        "final_holdout": {"const": false}
+      }
+    },
+    "blocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "scope", "claim_effect"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "scope": {"type": "string", "minLength": 1},
+        "claim_effect": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

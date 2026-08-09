@@ -1,0 +1,72 @@
+{
+  "artifact_id": "player-rating-synthetic-fixtures-l4-v2",
+  "schema_version": "2.0.0",
+  "synthetic_only": true,
+  "players": [
+    {"player_id":"a-top","display_name":"A Top","role":"top","global_eligibility":{"version":"eligibility-v2","valid_from":"2025-01-01T00:00:00Z","valid_until":null,"international_eligible":true,"connectivity_supported":true,"bridge_support_count":3,"bridge_component_id":"bridge-main-v1","current_league_tier":1,"active_status":"active","roster_membership":"main","roster_ambiguous":false}},
+    {"player_id":"a-jungle","display_name":"A Jungle","role":"jungle","global_eligibility":{"version":"eligibility-v2","valid_from":"2025-01-01T00:00:00Z","valid_until":null,"international_eligible":true,"connectivity_supported":true,"bridge_support_count":3,"bridge_component_id":"bridge-main-v1","current_league_tier":1,"active_status":"active","roster_membership":"main","roster_ambiguous":false}},
+    {"player_id":"a-mid","display_name":"A Mid","role":"mid","global_eligibility":{"version":"eligibility-v2","valid_from":"2025-01-01T00:00:00Z","valid_until":null,"international_eligible":true,"connectivity_supported":true,"bridge_support_count":3,"bridge_component_id":"bridge-main-v1","current_league_tier":1,"active_status":"active","roster_membership":"main","roster_ambiguous":false}},
+    {"player_id":"a-bot","display_name":"A Bot","role":"bot","global_eligibility":{"version":"eligibility-v2","valid_from":"2025-01-01T00:00:00Z","valid_until":null,"international_eligible":true,"connectivity_supported":true,"bridge_support_count":3,"bridge_component_id":"bridge-main-v1","current_league_tier":1,"active_status":"active","roster_membership":"main","roster_ambiguous":false}},
+    {"player_id":"a-support","display_name":"A Support","role":"support","global_eligibility":{"version":"eligibility-v2","valid_from":"2025-01-01T00:00:00Z","valid_until":null,"international_eligible":true,"connectivity_supported":true,"bridge_support_count":3,"bridge_component_id":"bridge-main-v1","current_league_tier":1,"active_status":"active","roster_membership":"main","roster_ambiguous":false}},
+    {"player_id":"b-top","display_name":"B Top","role":"top","global_eligibility":{"version":"eligibility-v2","valid_from":"2025-01-01T00:00:00Z","valid_until":null,"international_eligible":false,"connectivity_supported":false,"bridge_support_count":0,"bridge_component_id":"disconnected-v1","current_league_tier":1,"active_status":"active","roster_membership":"main","roster_ambiguous":false}},
+    {"player_id":"b-jungle","display_name":"B Jungle","role":"jungle","global_eligibility":{"version":"eligibility-v2","valid_from":"2025-01-01T00:00:00Z","valid_until":null,"international_eligible":true,"connectivity_supported":true,"bridge_support_count":3,"bridge_component_id":"bridge-main-v1","current_league_tier":1,"active_status":"active","roster_membership":"main","roster_ambiguous":false}},
+    {"player_id":"b-mid","display_name":"B Mid","role":"mid","global_eligibility":{"version":"eligibility-v2","valid_from":"2025-01-01T00:00:00Z","valid_until":null,"international_eligible":true,"connectivity_supported":true,"bridge_support_count":3,"bridge_component_id":"bridge-main-v1","current_league_tier":1,"active_status":"active","roster_membership":"main","roster_ambiguous":false}},
+    {"player_id":"b-bot","display_name":"B Bot","role":"bot","global_eligibility":{"version":"eligibility-v2","valid_from":"2025-01-01T00:00:00Z","valid_until":null,"international_eligible":true,"connectivity_supported":true,"bridge_support_count":3,"bridge_component_id":"bridge-main-v1","current_league_tier":1,"active_status":"active","roster_membership":"main","roster_ambiguous":false}},
+    {"player_id":"b-support","display_name":"B Support","role":"support","global_eligibility":{"version":"eligibility-v2","valid_from":"2025-01-01T00:00:00Z","valid_until":null,"international_eligible":true,"connectivity_supported":true,"bridge_support_count":3,"bridge_component_id":"bridge-main-v1","current_league_tier":1,"active_status":"active","roster_membership":"main","roster_ambiguous":false}},
+    {"player_id":"c-mid","display_name":"C Mid","role":"mid","global_eligibility":{"version":"eligibility-v2","valid_from":"2025-01-01T00:00:00Z","valid_until":null,"international_eligible":false,"connectivity_supported":true,"bridge_support_count":1,"bridge_component_id":"weak-v1","current_league_tier":2,"active_status":"inactive","roster_membership":"substitute","roster_ambiguous":false}}
+  ],
+  "matches": [
+    {
+      "match_id":"synthetic-001","event_start":"2025-12-20T12:00:00Z","event_end":"2025-12-20T12:45:00Z","outcome_available_at":"2025-12-20T13:00:00Z","season_id":"2025","calendar_year":2025,"patch_id":"25.24","league_id":"L01","league_tier":1,
+      "organization_ids":{"blue":"ORG-A","red":"ORG-B"},
+      "rosters":{"blue":{"top":"a-top","jungle":"a-jungle","mid":"a-mid","bot":"a-bot","support":"a-support"},"red":{"top":"b-top","jungle":"b-jungle","mid":"b-mid","bot":"b-bot","support":"b-support"}},
+      "blue_win":1,
+      "player_updates":[
+        {"player_id":"a-top","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":0.2,"observation_variance":0.5,"available_at":"2025-12-20T13:00:00Z","source_context":"combat"},
+        {"player_id":"a-jungle","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":0.1,"observation_variance":0.5,"available_at":"2025-12-20T13:00:00Z","source_context":"map_impact"},
+        {"player_id":"a-mid","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":0.5,"observation_variance":0.4,"available_at":"2025-12-20T13:00:00Z","source_context":"combat"},
+        {"player_id":"a-bot","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":0.3,"observation_variance":0.5,"available_at":"2025-12-20T13:00:00Z","source_context":"combat"},
+        {"player_id":"b-top","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":-0.2,"observation_variance":0.5,"available_at":"2025-12-20T13:00:00Z","source_context":"combat"},
+        {"player_id":"b-jungle","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":-0.1,"observation_variance":0.5,"available_at":"2025-12-20T13:00:00Z","source_context":"map_impact"},
+        {"player_id":"b-mid","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":-0.4,"observation_variance":0.4,"available_at":"2025-12-20T13:00:00Z","source_context":"combat"},
+        {"player_id":"b-bot","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":-0.2,"observation_variance":0.5,"available_at":"2025-12-20T13:00:00Z","source_context":"combat"}
+      ],
+      "policy_updates":[
+        {"player_id":"a-mid","channel_id":"same_map_resource_share","feature_provenance_id":"same-map-resource-share-policy-v1","value":0.35,"observation_variance":0.3,"available_at":"2025-12-20T13:00:00Z"},
+        {"player_id":"a-support","channel_id":"same_map_resource_share","feature_provenance_id":"same-map-resource-share-policy-v1","value":-0.65,"observation_variance":0.3,"available_at":"2025-12-20T13:00:00Z"}
+      ]
+    },
+    {
+      "match_id":"synthetic-002","event_start":"2026-01-10T12:00:00Z","event_end":"2026-01-10T12:45:00Z","outcome_available_at":"2026-01-10T13:00:00Z","season_id":"2026","calendar_year":2026,"patch_id":"26.1","league_id":"L01","league_tier":1,
+      "organization_ids":{"blue":"ORG-B","red":"ORG-A"},
+      "rosters":{"blue":{"top":"b-top","jungle":"b-jungle","mid":"a-mid","bot":"b-bot","support":"b-support"},"red":{"top":"a-top","jungle":"a-jungle","mid":"b-mid","bot":"a-bot","support":"a-support"}},
+      "blue_win":0,
+      "player_updates":[
+        {"player_id":"a-mid","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":0.4,"observation_variance":0.4,"available_at":"2026-01-10T13:00:00Z","source_context":"objective"},
+        {"player_id":"b-mid","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":-0.1,"observation_variance":0.4,"available_at":"2026-01-10T13:00:00Z","source_context":"objective"},
+        {"player_id":"a-support","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":0.25,"observation_variance":0.6,"available_at":"2026-01-10T13:00:00Z","source_context":"vision_nonfarm"},
+        {"player_id":"b-support","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":-0.15,"observation_variance":0.6,"available_at":"2026-01-10T13:00:00Z","source_context":"vision_nonfarm"}
+      ],
+      "policy_updates":[{"player_id":"a-mid","channel_id":"same_map_resource_share","feature_provenance_id":"same-map-resource-share-policy-v1","value":0.4,"observation_variance":0.3,"available_at":"2026-01-10T13:00:00Z"}]
+    },
+    {
+      "match_id":"synthetic-003","event_start":"2026-02-01T12:00:00Z","event_end":"2026-02-01T12:45:00Z","outcome_available_at":"2026-02-01T13:00:00Z","season_id":"2026","calendar_year":2026,"patch_id":"26.2","league_id":"L01","league_tier":1,
+      "organization_ids":{"blue":"ORG-A","red":"ORG-B"},
+      "rosters":{"blue":{"top":"a-top","jungle":"a-jungle","mid":"c-mid","bot":"a-bot","support":"a-support"},"red":{"top":"b-top","jungle":"b-jungle","mid":"b-mid","bot":"b-bot","support":"b-support"}},
+      "blue_win":1,
+      "player_updates":[{"player_id":"c-mid","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":0.15,"observation_variance":0.8,"available_at":"2026-02-01T13:00:00Z","source_context":"combat"}],
+      "policy_updates":[]
+    },
+    {
+      "match_id":"synthetic-004","event_start":"2026-03-01T12:00:00Z","event_end":"2026-03-01T12:45:00Z","outcome_available_at":"2026-03-01T13:00:00Z","season_id":"2026","calendar_year":2026,"patch_id":"26.4","league_id":"L02","league_tier":1,
+      "organization_ids":{"blue":"ORG-C","red":"ORG-D"},
+      "rosters":{"blue":{"top":"a-top","jungle":"a-jungle","mid":"a-mid","bot":"a-bot","support":"a-support"},"red":{"top":"b-top","jungle":"b-jungle","mid":"b-mid","bot":"b-bot","support":"b-support"}},
+      "blue_win":1,
+      "player_updates":[
+        {"player_id":"a-mid","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":0.55,"observation_variance":0.4,"available_at":"2026-03-01T13:00:00Z","source_context":"map_impact"},
+        {"player_id":"a-support","channel_id":"role_normalized_nonresource_impact","feature_provenance_id":"role-normalized-nonresource-impact-v1","value":0.2,"observation_variance":0.6,"available_at":"2026-03-01T13:00:00Z","source_context":"vision_nonfarm"}
+      ],
+      "policy_updates":[]
+    }
+  ]
+}

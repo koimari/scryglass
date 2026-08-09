@@ -1,0 +1,118 @@
+{
+  "artifact_version": "l2-contract-semantics-b1",
+  "protocols": {
+    "scryglass:protocol:pro-standard-2026": {
+      "action_slots": [
+        {"slot": 1, "kind": "pick", "canonical_side": "A"},
+        {"slot": 2, "kind": "pick", "canonical_side": "B"},
+        {"slot": 3, "kind": "pick", "canonical_side": "A"},
+        {"slot": 4, "kind": "pick", "canonical_side": "B"},
+        {"slot": 5, "kind": "pick", "canonical_side": "A"},
+        {"slot": 6, "kind": "pick", "canonical_side": "B"},
+        {"slot": 7, "kind": "pick", "canonical_side": "A"},
+        {"slot": 8, "kind": "pick", "canonical_side": "B"},
+        {"slot": 9, "kind": "pick", "canonical_side": "A"},
+        {"slot": 10, "kind": "pick", "canonical_side": "B"}
+      ]
+    }
+  },
+  "registries": {
+    "champion_ids": [
+      "riot:champion:1",
+      "riot:champion:2",
+      "riot:champion:3",
+      "riot:champion:4",
+      "riot:champion:5",
+      "riot:champion:6",
+      "riot:champion:7",
+      "riot:champion:8",
+      "riot:champion:9",
+      "riot:champion:10",
+      "riot:champion:50",
+      "riot:champion:101",
+      "riot:champion:102",
+      "riot:champion:999"
+    ],
+    "roles": ["top", "jungle", "mid", "bot", "support"],
+    "league_ids": ["scryglass:league:lpl"],
+    "competition_scopes": {
+      "scryglass:competition-scope:lpl": "regional_league",
+      "scryglass:competition-scope:lcs": "regional_league"
+    },
+    "taxonomy_ids": [
+      "scryglass:season:lpl-2026",
+      "scryglass:competition-scope:lpl",
+      "scryglass:competition-scope:lcs"
+    ],
+    "context_snapshot_ids": [
+      "scryglass:roster-snapshot:research-a",
+      "scryglass:roster-snapshot:research-b",
+      "scryglass:policy:research-a",
+      "scryglass:policy:research-b"
+    ]
+  },
+  "evidence_methods": {
+    "displacement": [
+      "scryglass:evidence-method:standardized-posterior-displacement",
+      "scryglass:evidence-method:wasserstein-distance",
+      "scryglass:evidence-method:kl-divergence"
+    ],
+    "precision": [
+      "scryglass:evidence-method:central-interval-width",
+      "scryglass:evidence-method:central-probability-interval-width"
+    ],
+    "source_context_coverage_prefix": "scryglass:coverage:"
+  },
+  "reliability_maps": {
+    "6767676767676767676767676767676767676767676767676767676767676767": {
+      "default": {"validation_stratum_id": null, "label": "unrated"},
+      "strata": {
+        "scryglass:stratum:lpl-mid": "high",
+        "scryglass:stratum:lpl-roster": "moderate",
+        "scryglass:stratum:lpl-future-patch": "moderate",
+        "scryglass:stratum:lpl-first-pick": "limited",
+        "scryglass:stratum:lpl-26.14-mid": "limited"
+      }
+    }
+  },
+  "tie_break_policies": {
+    "scryglass:ranking-policy:tier-value-interval-id-v2": {
+      "keys": [
+        {"field": "interval_95.lower", "direction": "descending"},
+        {"field": "champion_id", "direction": "ascending"}
+      ]
+    }
+  },
+  "counterability_policies": {
+    "scryglass:counterability:lpl-v2": 0.25
+  },
+  "search_policies": {
+    "scryglass:policy:soft-minimax-v2": {
+      "method": "soft_minimax",
+      "exact": false,
+      "coverage_metric_id": "scryglass:coverage-metric:explored-policy-mass",
+      "bound_method_id": "scryglass:bound:registered-pruning-bound-v2",
+      "bound_formula": "max(0, (1 - coverage) * temperature + 0.0075)"
+    },
+    "scryglass:policy:exact-minimax-v2": {
+      "method": "hard_minimax",
+      "exact": true,
+      "coverage_metric_id": "scryglass:coverage-metric:complete-state-space"
+    }
+  },
+  "team_component_policies": {
+    "scryglass:policy:example-five": {
+      "c_E": 400.0,
+      "A_q": 0.3665,
+      "gamma_q": 0.0195,
+      "lambda_L": 0.046,
+      "tolerance": 1e-09
+    }
+  },
+  "terminal_outputs": {
+    "scryglass:prediction:draft-example": {
+      "locator": "docs/model-v2/contracts/examples/draft-score.example.json",
+      "raw_sha256": "8e9b8cc3a90b55f0b0d1446926c81a1b9aef723a9f13c5161b766a970df54b8f"
+    }
+  }
+}

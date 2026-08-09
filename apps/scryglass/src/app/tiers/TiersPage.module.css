@@ -1,0 +1,68 @@
+.page {
+  display: grid;
+  gap: 1rem;
+}
+
+.header {
+  display: flex;
+  gap: 1.5rem 3rem;
+  align-items: end;
+  justify-content: space-between;
+  padding: 1.15rem 0 1rem;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.header h1 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-ui), system-ui, sans-serif;
+  font-size: 2.25rem;
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+}
+
+.header p {
+  max-width: 64ch;
+  margin: 0.45rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  align-items: baseline;
+  justify-content: flex-end;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.footer {
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line-strong);
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.footer a {
+  color: var(--ink);
+  text-underline-offset: 0.2em;
+}
+
+@media (max-width: 760px) {
+  .header {
+    display: block;
+  }
+  .header h1 {
+    font-size: 1.8rem;
+  }
+  .provenance {
+    justify-content: flex-start;
+  }
+}

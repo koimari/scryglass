@@ -20,16 +20,16 @@ python3 -m lol_kills.live_worker \
   --series-id 2970137 \
   --state-file /path/to/series-state.json \
   --sequence 12 \
-  --local-root apps/lol-atlas/public/live
+  --local-root apps/scryglass/public/live
 ```
 
 The resulting files are:
 
 ```text
-apps/lol-atlas/public/live/index.json
-apps/lol-atlas/public/live/health.json
-apps/lol-atlas/public/live/series/{series_id}/latest.json
-apps/lol-atlas/public/live/series/{series_id}/snapshots/{sequence}.json
+apps/scryglass/public/live/index.json
+apps/scryglass/public/live/health.json
+apps/scryglass/public/live/series/{series_id}/latest.json
+apps/scryglass/public/live/series/{series_id}/snapshots/{sequence}.json
 ```
 
 These are generated runtime artifacts. Do not commit a real live snapshot to
@@ -47,7 +47,7 @@ python3 -m lol_kills.live_worker \
 ```
 
 The worker resolves `GRID_API_KEY` using the same environment / `.env` lookup as
-the existing GRID ingestion bridge. It writes to local `apps/lol-atlas/public/live`
+the existing GRID ingestion bridge. It writes to local `apps/scryglass/public/live`
 when no Blob token is present. In production provide:
 
 ```text

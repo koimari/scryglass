@@ -1,0 +1,44 @@
+{
+  "blocker_counts": {},
+  "captured_at": "2026-08-02T06:58:33Z",
+  "claim_ceiling": {
+    "pre_event_patch_authority": true,
+    "publication": false,
+    "winner_prediction": false
+  },
+  "fixture_count": 1,
+  "history_manifest_count": 1,
+  "manifest_sha256": "bc3b6ffa0c4448792c5662f5dc220a1ed65b6f097455fc5f59057fc554524e27",
+  "outcome_fields_emitted": false,
+  "outcome_fields_requested": [],
+  "pre_event_revision_fixture_count": 1,
+  "pregame_authorized_fixture_count": 1,
+  "receipt_file": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/intake/2026-08-02/lcs-summer-week2-match3/patch-revision/patch-receipts.jsonl",
+  "receipt_file_sha256": "1f7e6ee16d478b4ef22a15cb8fb064666d5c340ff328f23c6280a1638190c99a",
+  "retrospective_manifest": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/intake/2026-08-02/lcs-summer-week2-match3/absent-retrospective-manifest.json",
+  "run_dir": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/intake/2026-08-02/lcs-summer-week2-match3",
+  "schedule_pages": [
+    {
+      "payload_sha256": "a3cd2eca1f264f96b096b83321a997b9d18266e18b35ec93b978d264f50d3deb",
+      "raw_file": "raw/schedule/schedule-000.json",
+      "requested_fields": [
+        "MatchSchedule.MatchId",
+        "MatchSchedule.OverviewPage",
+        "MatchSchedule.Patch",
+        "MatchSchedule.Tab",
+        "MatchSchedule.N_MatchInTab",
+        "MatchSchedule.N_Page",
+        "MatchSchedule.N_MatchInPage",
+        "MatchSchedule.Team1",
+        "MatchSchedule.Team2",
+        "MatchSchedule.DateTime_UTC",
+        "_pageName"
+      ],
+      "row_count": 1,
+      "source_url": "https://lol.fandom.com/wiki/Special:CargoExport?tables=MatchSchedule&fields=MatchSchedule.MatchId%2CMatchSchedule.OverviewPage%2CMatchSchedule.Patch%2CMatchSchedule.Tab%2CMatchSchedule.N_MatchInTab%2CMatchSchedule.N_Page%2CMatchSchedule.N_MatchInPage%2CMatchSchedule.Team1%2CMatchSchedule.Team2%2CMatchSchedule.DateTime_UTC%2C_pageName&where=%28MatchSchedule.MatchId%3D%22LCS%2F2026+Season%2FSummer+Season_Week+2_3%22%29&order_by=MatchSchedule.DateTime_UTC+ASC&limit=500&format=json"
+    }
+  ],
+  "schema_version": "scryglass:leaguepedia-patch-revisions:v1",
+  "selected_revision_count": 1,
+  "unavailable_fixture_count": 0
+}

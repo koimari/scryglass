@@ -1,0 +1,94 @@
+{
+  "artifact_sha256": "8bd72f0306db8384b44cf7fa54631c119d5069e259d11593f5b294f4ff2653f3",
+  "authority": {
+    "betting_authority": false,
+    "expected_value_authority": false,
+    "model_validation_authority": false,
+    "odds_authority": false,
+    "probability_authority": false,
+    "recommendation_authority": false
+  },
+  "claim_ceiling": "Pre-boundary evaluation strengthening and audit trail only; no future evidence, model pass, probability, odds, expected value, recommendation, or betting authority.",
+  "created_at_utc": "2026-08-02T08:50:00+00:00",
+  "future_boundary_utc": "2026-08-03T00:00:00+00:00",
+  "method": {
+    "both_metric_upper_95_bounds_must_be_nonpositive": true,
+    "critical_value": 2.1,
+    "dependency_rule": "maps may covary when they share a series, any exact player, or any exact organization",
+    "draft_required_strata": [
+      "overall"
+    ],
+    "minimum_participants": 50,
+    "minimum_series": 20,
+    "name": "shared_series_participant_or_organization_network_hac_sandwich_for_mean_paired_loss_delta",
+    "ratings_required_strata": [
+      "overall",
+      "league:LCS",
+      "league:LEC",
+      "league:LCK",
+      "league:LPL",
+      "roster_change"
+    ],
+    "supplements_not_replaces_series_bootstrap": true
+  },
+  "methodology_references": [
+    {
+      "title": "Robust Inference with Multi-way Clustering",
+      "url": "https://www.nber.org/papers/t0327"
+    },
+    {
+      "title": "Cluster-Robust Variance Estimation for Dyadic Data",
+      "url": "https://arxiv.org/abs/1312.3398"
+    },
+    {
+      "title": "Limit Theorems for Network Dependent Random Variables",
+      "url": "https://arxiv.org/abs/1903.01059"
+    }
+  ],
+  "preconditions": {
+    "candidate_or_threshold_selected_from_future_outcomes": false,
+    "old_readiness_bytes_preserved": true,
+    "performed_before_future_boundary": true,
+    "phase_one_outcome_cohorts_present": 0,
+    "phase_one_outcomes_accessed": false,
+    "phase_one_parity_registries_present": 0,
+    "phase_one_prediction_events_present": 0
+  },
+  "prior_supersession": {
+    "artifact_sha256": "d3f401def440e2645f94089f483a0a8877caf7ee48732f7b164bfb7572f01b3f",
+    "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/readiness-supersession-map-start-replay-v1.json",
+    "raw_sha256": "aaa202d9ddd2726d667c306b02fd6be87bb1b230aed0119ba8a97a70e02bafb3"
+  },
+  "reason": "The participant-dependence diagnostic found exact player identity on 5751 development maps but one transitive shared-player component, so the sealed evaluation was strengthened before outcomes with a required network-HAC loss-delta sensitivity over shared series, participants, or organizations.",
+  "replacement": {
+    "phase_one_evaluation_readiness": {
+      "artifact_sha256": "7e1ce1bfd5a2ab80c51c0f354d695c6aab0d6e47fdabc49086535e34982bf4f5",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/evaluation-readiness-v1.json",
+      "locked_at_utc": "2026-08-02T08:48:00+00:00",
+      "raw_sha256": "4dac0d0f0dcccfb52c91ef11641e06fdf349ca92b71765ef9077a6cfd041aa99"
+    },
+    "probability_pipeline_readiness": {
+      "artifact_sha256": "2bef14d8676a2e9c1559de5c0eb6fabc2bd97676fec59bb348a8f1d4cfa00b44",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/probability-pipeline-readiness-v1.json",
+      "locked_at_utc": "2026-08-02T08:49:00+00:00",
+      "raw_sha256": "01c2fd61c45847893f658628ca17df3e0b6df35ffdd4c131609bb98bed7daabe"
+    }
+  },
+  "schema_version": "scryglass:pre-boundary-readiness-supersession:v1",
+  "superseded": {
+    "phase_one_evaluation_readiness": {
+      "artifact_sha256": "340ed6f1a35420ad75a9e695aed1db28f6cd4849e206157d0da0341c5d5a8d48",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/superseded/evaluation-readiness-v1-after-map-start-before-entity-hac.json",
+      "locked_at_utc": "2026-08-02T08:27:11.142561+00:00",
+      "raw_sha256": "aa15a391a1a6bf2a5e10c9d5c93bdf320b52ab1b742ff2ef510299b25aeb4b29"
+    },
+    "probability_pipeline_readiness": {
+      "artifact_sha256": "b5eeaa24a74b4434e83de6587471d09ca8e656691d078c4968dfd57f5e39b4a8",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/superseded/probability-pipeline-readiness-v1-after-map-start-before-entity-hac.json",
+      "locked_at_utc": "2026-08-02T08:27:35.950873+00:00",
+      "raw_sha256": "bc7d2ae06e76360805a987994f8f63a6049ffb5c03c2faf88b494cba2fa3439a"
+    }
+  },
+  "supersession_id": "phase-one-entity-network-dependence-sensitivity-20260802"
+}
+

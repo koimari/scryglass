@@ -1,0 +1,59 @@
+{
+  "artifact_sha256": "93f13bc0a02ae0788804d66afca4436ebb9d8ccce1c91d97a68f84400a29f532",
+  "authority": {
+    "betting_authority": false,
+    "expected_value_authority": false,
+    "model_validation_authority": false,
+    "odds_authority": false,
+    "probability_authority": false,
+    "recommendation_authority": false
+  },
+  "claim_ceiling": "Pre-boundary post-pass freshness hardening only; no future evidence, model pass, rating authority, probability, odds, expected value, recommendation, or betting authority.",
+  "created_at_utc": "2026-08-02T09:28:00+00:00",
+  "fresh_rating_refit_contract": {
+    "availability_embargo_hours": 48,
+    "cross_team_covariance_retained": true,
+    "exact_pre_event_roster_and_patch_receipts_required": true,
+    "full_pipeline_uncertainty_binding_status": "required_not_yet_wired_fail_closed",
+    "immutable_fresh_source_bytes_required": true,
+    "independently_registered_phase_one_pass_required": true,
+    "maximum_data_age_seconds": 1209600,
+    "model_family_and_hyperparameters_changed": false,
+    "strict_target_event_cutoff": true,
+    "target_event_outcome_or_market_price_used": false,
+    "unidentified_synergy_and_policy_remain_null": true
+  },
+  "future_boundary_utc": "2026-08-03T00:00:00+00:00",
+  "preconditions": {
+    "candidate_or_threshold_selected_from_future_outcomes": false,
+    "old_readiness_bytes_preserved": true,
+    "performed_before_future_boundary": true,
+    "phase_one_outcome_cohorts_present": 0,
+    "phase_one_outcomes_accessed": false,
+    "phase_one_prediction_events_present": 0
+  },
+  "prior_supersession": {
+    "artifact_sha256": "0c8cc7baec73ef3c032470d5b56c1087f0c689850f9e53db64f8b27c0843dc5b",
+    "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/readiness-supersession-explicit-roster-entities-v1.json",
+    "raw_sha256": "228387db80c105819f0b3d018c7d1ce8f555c4e75179757c8c1c8b688aacb1a9"
+  },
+  "reason": "The frozen phase-one source is appropriate for independent evaluation but would become stale across a multi-patch phase-two market test. Before future outcomes, a post-pass pre-event refit path was added for exact immutable fresh source bytes, the locked model family, strict event cutoff, freshness, exact roster identity, and covariance-aware team strength. The readiness contract explicitly keeps the full-pipeline binding unavailable until it is wired and reviewed.",
+  "replacement": {
+    "probability_pipeline_readiness": {
+      "artifact_sha256": "43e87a8fa7297e484abc9b57d27f92c000e0f3dca7213274b731ecde5b5a7e45",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/probability-pipeline-readiness-v1.json",
+      "locked_at_utc": "2026-08-02T09:27:31.114006+00:00",
+      "raw_sha256": "267fd467e5d171f6a060c9cad1b44422abbb1f2693aa5b2f5930c25372b7d794"
+    }
+  },
+  "schema_version": "scryglass:pre-boundary-readiness-supersession:v1",
+  "superseded": {
+    "probability_pipeline_readiness": {
+      "artifact_sha256": "107430e1e9a45516b02aca1576c4a9d55222992e90fdf46e4907fbb4fc2533bd",
+      "locator": "data/lol/v2/evaluation/match-winner-market-v1/phase-one/superseded/probability-pipeline-readiness-v1-after-explicit-entity-before-fresh-refit-requirement.json",
+      "locked_at_utc": "2026-08-02T08:55:07.941909+00:00",
+      "raw_sha256": "b0ff39e70877dd51ff9e90e58b5c841a029582cc6741e01af66487846f5c55ef"
+    }
+  },
+  "supersession_id": "post-pass-fresh-rating-refit-requirement-20260802"
+}
