@@ -291,6 +291,7 @@ def _authorized(handler: BaseHTTPRequestHandler) -> bool:
         value.strip()
         for value in (
             os.environ.get("SCRYGLASS_TIERLIST_INGEST_TOKEN", ""),
+            os.environ.get("SCRYGLASS_MANUAL_REFRESH_TOKEN", ""),
             os.environ.get("CRON_SECRET", ""),
         )
         if value.strip()
@@ -335,6 +336,19 @@ def _prepare_runtime_root(
                 Path("data/lol/v2/models/draft-terminal"),
             ):
                 _copy_tree(PROJECT_ROOT / relative, root / relative)
+
+        # Production lineage hashes these files. Keep them beside the
+        # writable artifacts when the slim runtime omits the source tree.
+        for relative in (
+            Path("lol_kills/v2/tierlists/forward_evaluation.py"),
+            Path("lol_kills/v2/tierlists/production_bundle.py"),
+        ):
+            source = PROJECT_ROOT / relative
+            if not source.is_file():
+                raise WorkerConfigurationError(f"required worker source is missing: {source}")
+            destination = root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
 
         # These paths are writable outputs for the refresh. They do not need
         # the historical research files from the main application bundle.

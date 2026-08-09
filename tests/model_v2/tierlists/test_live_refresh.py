@@ -7,7 +7,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pandas as pd
+
 from lol_kills.v2.tierlists import live_refresh
+from lol_kills.etl.oe_live_source import _merge
 
 
 def _candidate(*, source_mode: str) -> dict[str, object]:
@@ -21,6 +24,20 @@ def _candidate(*, source_mode: str) -> dict[str, object]:
             "maps_in_live_window": 2,
         },
     }
+
+
+def test_live_merge_deduplicates_prefixed_and_canonical_game_ids() -> None:
+    rows = [
+        {"game_uid": "oe-api:g1", "gameid": "oe-api:g1", "date": "2026-08-08", "league": "LCK", "side": "Blue", "teamname": "A", "result": 1},
+        {"game_uid": "oe-api:g1", "gameid": "oe-api:g1", "date": "2026-08-08", "league": "LCK", "side": "Red", "teamname": "B", "result": 0},
+    ]
+    supplement = [{**row, "game_uid": "g1", "gameid": "g1"} for row in rows]
+
+    merged = _merge(pd.DataFrame(rows), pd.DataFrame(supplement), with_players=False)
+
+    assert len(merged) == 2
+    assert set(merged["game_uid"]) == {"g1"}
+    assert set(merged["gameid"]) == {"g1"}
 
 
 def test_blob_publication_payloads_keep_cells_immutable_and_pointer_last() -> None:

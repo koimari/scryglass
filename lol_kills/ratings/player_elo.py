@@ -20,6 +20,7 @@ import pandas as pd
 from lol_kills.etl.aliases import normalize_team
 from lol_kills.etl.competition import canonicalize_competition_frame
 from lol_kills.etl.paths import FEATURES_DIR, PARQUET_DIR
+from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.dual_elo import DualEloConfig, _is_intl, expected_score
 
 # Slight role weights for aggregation (still sums≈5)
@@ -104,11 +105,13 @@ def _lineups_by_game(players: pd.DataFrame) -> dict[str, dict[str, list[tuple[st
         return {}
     p = players.copy()
     if "game_uid" in p.columns:
-        game_uid = p["game_uid"].astype("string")
-        fallback = p["gameid"].astype("string") if "gameid" in p.columns else pd.Series("", index=p.index, dtype="string")
-        p["_gid"] = game_uid.where(game_uid.notna() & game_uid.str.strip().ne(""), fallback)
+        fallback = p["gameid"] if "gameid" in p.columns else None
+        p["_gid"] = [
+            canonical_source_game_key(value, fallback.loc[index] if fallback is not None else None)
+            for index, value in p["game_uid"].items()
+        ]
     elif "gameid" in p.columns:
-        p["_gid"] = p["gameid"].astype("string")
+        p["_gid"] = p["gameid"].map(canonical_source_game_key)
     else:
         return {}
     p = p[p["_gid"].notna() & p["_gid"].str.strip().ne("")]
@@ -207,7 +210,17 @@ def _run_player_elo(
     df = canonicalize_competition_frame(maps).copy()
     df["date"] = pd.to_datetime(df.get("date"), errors="coerce", utc=True).dt.tz_localize(None)
     df = df.sort_values("date").reset_index(drop=True)
-    df["game_uid"] = df["game_uid"].astype(str)
+    if "game_uid" in df.columns:
+        fallback = df["gameid"] if "gameid" in df.columns else None
+        df["game_uid"] = [
+            canonical_source_game_key(value, fallback.loc[index] if fallback is not None else None)
+            for index, value in df["game_uid"].items()
+        ]
+    elif "gameid" in df.columns:
+        df["game_uid"] = df["gameid"].map(canonical_source_game_key)
+    else:
+        raise ValueError("player Elo maps have no game identity column")
+    df = df[df["game_uid"].str.strip().ne("")].copy()
     lineups = _lineups_by_game(players)
     states: dict[str, PlayerState] = {}
     targets = sorted({pd.Timestamp(value).tz_localize(None) for value in (checkpoint_dates or [])})
@@ -455,11 +468,13 @@ def build_maps_frame_from_players(players: pd.DataFrame) -> pd.DataFrame:
     """One map row per OE game_uid from player rows (full history, not warehouse-filtered)."""
     pl = players.copy()
     if "game_uid" in pl.columns:
-        game_uid = pl["game_uid"].astype("string")
-        fallback = pl["gameid"].astype("string") if "gameid" in pl.columns else pd.Series("", index=pl.index, dtype="string")
-        pl["_gid"] = game_uid.where(game_uid.notna() & game_uid.str.strip().ne(""), fallback)
+        fallback = pl["gameid"] if "gameid" in pl.columns else None
+        pl["_gid"] = [
+            canonical_source_game_key(value, fallback.loc[index] if fallback is not None else None)
+            for index, value in pl["game_uid"].items()
+        ]
     elif "gameid" in pl.columns:
-        pl["_gid"] = pl["gameid"].astype("string")
+        pl["_gid"] = pl["gameid"].map(canonical_source_game_key)
     else:
         return pd.DataFrame()
     pl = pl[pl["_gid"].notna() & pl["_gid"].str.strip().ne("")]

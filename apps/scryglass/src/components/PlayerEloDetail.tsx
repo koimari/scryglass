@@ -6,7 +6,6 @@ import {
   groupMapsIntoSeries,
   queryMapsYears,
   queryPlayerChampStats,
-  queryPlayerRole,
   queryPlayersForGame,
   type ChampAgg,
   type QueryRow,
@@ -64,13 +63,13 @@ export function PlayerEloDetail({
   const [yearFilter, setYearFilter] = useState<number | "all">("all");
   const [leagueFilter, setLeagueFilter] = useState("");
   const [compare, setCompare] = useState<"league" | "intl">("league");
-  const [sideWr, setSideWr] = useState<{ blue: number | null; red: number | null }>({
-    blue: null,
-    red: null,
-  });
   const [err, setErr] = useState<string | null>(null);
   const [seriesLoaded, setSeriesLoaded] = useState(false);
-  const [role, setRole] = useState<string | null>(null);
+  const currentTeam = record?.current_team ?? player.last_team;
+  const sideWr = {
+    blue: record?.blue_wr ?? null,
+    red: record?.red_wr ?? null,
+  };
 
   const trust = trustInfo(player.sigma, PLAYER_SIGMA_MIN, player.n_maps);
   const leagueAware = softMu(player.mu_total, player.sigma, PLAYER_SIGMA_MIN);
@@ -102,18 +101,8 @@ export function PlayerEloDetail({
 
   useEffect(() => {
     let cancelled = false;
-    queryPlayerRole(baseUrl, years, player.player).then((value) => {
-      if (!cancelled) setRole(value);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [baseUrl, years, player.player]);
-
-  useEffect(() => {
-    let cancelled = false;
     (async () => {
-      if (!player.last_team) {
+      if (!currentTeam) {
         setSeries([]);
         setSeriesLoaded(true);
         return;
@@ -121,19 +110,15 @@ export function PlayerEloDetail({
       try {
         const ys = yearFilter === "all" ? years : [yearFilter];
         const maps = await queryMapsYears(baseUrl, ys, {
-          team: player.last_team,
+          team: currentTeam,
           league: leagueFilter || undefined,
           limit: 100,
         });
         // keep games where player appears
         const withPlayer: QueryRow[] = [];
-        let blueW = 0;
-        let blueN = 0;
-        let redW = 0;
-        let redN = 0;
         for (const m of maps.slice(0, 40)) {
           const year = Number(m._year ?? String(m.date).slice(0, 4));
-          const id = String(m.oe_gameid ?? "");
+          const id = String(m.oe_gameid ?? m.game_uid ?? "");
           try {
             const plist = await queryPlayersForGame(baseUrl, year, id);
             const me = plist.find(
@@ -141,25 +126,12 @@ export function PlayerEloDetail({
             );
             if (!me) continue;
             withPlayer.push(m);
-            const side = String(me.side);
-            const won = Number(me.result) === 1;
-            if (side === "Blue") {
-              blueN += 1;
-              if (won) blueW += 1;
-            } else {
-              redN += 1;
-              if (won) redW += 1;
-            }
           } catch {
             /* skip */
           }
         }
         if (!cancelled) {
           setSeries(groupMapsIntoSeries(withPlayer).slice(0, 10));
-          setSideWr({
-            blue: blueN ? blueW / blueN : null,
-            red: redN ? redW / redN : null,
-          });
           setSeriesLoaded(true);
         }
       } catch (e) {
@@ -172,7 +144,7 @@ export function PlayerEloDetail({
     return () => {
       cancelled = true;
     };
-  }, [baseUrl, years, player.player, player.last_team, yearFilter, leagueFilter]);
+  }, [baseUrl, years, player.player, currentTeam, yearFilter, leagueFilter]);
 
   const sortedChamps = useMemo(() => {
     if (!champs) return [];
@@ -199,7 +171,7 @@ export function PlayerEloDetail({
   }, [champs, col, dir, expandChamps]);
 
   const leagues = record?.leagues ?? [];
-  const roleLabel = role
+  const roleLabel = record?.primary_role
     ? ({
         top: "Top",
         jungle: "Jungle",
@@ -208,9 +180,10 @@ export function PlayerEloDetail({
         bot: "Bot",
         adc: "Bot",
         sup: "Support",
-      }[role.toLowerCase()] ?? role)
+        support: "Support",
+      }[record.primary_role.toLowerCase()] ?? record.primary_role)
     : null;
-  const teamLabel = team?.team ?? player.last_team ?? null;
+  const teamLabel = team?.team ?? currentTeam ?? null;
 
   return (
     <div className="profile-page player-profile-page space-y-6">
@@ -218,11 +191,11 @@ export function PlayerEloDetail({
         <Link href="/elo?tab=players" className="row-link">
           ← Players
         </Link>
-        {player.last_team && (
+        {currentTeam && (
           <>
             {" · "}
-            <Link href={`/elo/team/${teamSlug(player.last_team)}`} className="row-link">
-              {player.last_team}
+            <Link href={`/elo/team/${teamSlug(currentTeam)}`} className="row-link">
+              {currentTeam}
             </Link>
           </>
         )}
@@ -423,7 +396,7 @@ export function PlayerEloDetail({
           <ul className="space-y-2">
             {series.map((s) => {
               const g0 = s.games[0];
-              const id = String(g0?.oe_gameid ?? "");
+              const id = String(g0?.oe_gameid ?? g0?.game_uid ?? "");
               return (
                 <li key={s.key} className="text-sm">
                   <span className="font-mono muted">{s.date}</span> · {s.league} ·{" "}

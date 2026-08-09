@@ -28,8 +28,9 @@ export default async function PlayerEloPage({ params }: Props) {
   if (!player) notFound();
 
   const rec = playerRecords[player.player];
-  const team = player.last_team
-    ? teams.find((t) => t.team.toLowerCase() === player.last_team!.toLowerCase())
+  const currentTeam = rec?.current_team ?? player.last_team;
+  const team = currentTeam
+    ? teams.find((t) => t.team.toLowerCase() === currentTeam.toLowerCase())
     : null;
 
   // Peers: same primary league when available, else same last_team pool / top sample
@@ -38,8 +39,8 @@ export default async function PlayerEloPage({ params }: Props) {
   if (primary) {
     const narrowed = peers.filter((p) => playerRecords[p.player]?.primary === primary);
     if (narrowed.length >= 10) peers = narrowed;
-  } else if (player.last_team) {
-    peers = peers.filter((p) => p.last_team === player.last_team);
+  } else if (currentTeam) {
+    peers = peers.filter((p) => (playerRecords[p.player]?.current_team ?? p.last_team) === currentTeam);
   }
   const intlPeers = players.filter(
     (p) => (p.n_maps ?? 0) >= 20 && Boolean(playerRecords[p.player]?.intl),
