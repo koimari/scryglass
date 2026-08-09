@@ -9,6 +9,7 @@ import pandas as pd
 from lol_kills.etl.competition import (
     TRANSPORT_LEAGUE_LABELS,
     canonicalize_competition_frame,
+    is_team_affiliation_league,
     source_league,
     team_identity_key,
 )
@@ -124,24 +125,40 @@ def filter_public_team_rating_maps(maps: pd.DataFrame) -> pd.DataFrame:
     return maps.loc[keep].copy()
 
 
+def _affiliation_rows(group: pd.DataFrame) -> pd.DataFrame:
+    """Return rows that can define a team's current league membership."""
+
+    if group.empty or "league" not in group.columns:
+        return group.iloc[0:0].copy()
+    return group[group["league"].map(is_team_affiliation_league)]
+
+
+def _latest_row(group: pd.DataFrame) -> pd.Series | None:
+    """Return the latest dated row, with input order as the tie-break."""
+
+    if group.empty:
+        return None
+    dates = (
+        pd.to_datetime(group["date"], errors="coerce", utc=True)
+        if "date" in group.columns
+        else pd.Series(pd.NaT, index=group.index)
+    )
+    if not dates.notna().any():
+        return None
+    return group.loc[dates.idxmax()]
+
+
 def _primary_league(group: pd.DataFrame) -> str | None:
-    """Return the latest domestic affiliation, with a frequency fallback.
+    """Return the latest observed league-membership affiliation.
 
     Cross-region events provide useful evidence but must not overwrite the
-    team's domestic league.  A latest-date rule also reflects migrations such
-    as LTA South → CBLOL and PCS → LCP in the public label.
+    team's domestic league. Domestic cups follow the same rule. A latest-date
+    rule still reflects migrations such as LTA South to CBLOL and PCS to LCP.
     """
 
-    candidates = group[group["competition_tier"].isin({"tier1", "tier2", "tier3"})]
-    if candidates.empty:
-        candidates = group
-    dates = (
-        pd.to_datetime(candidates["date"], errors="coerce")
-        if "date" in candidates.columns
-        else pd.Series(pd.NaT, index=candidates.index)
-    )
-    if dates.notna().any():
-        latest = candidates.loc[dates.idxmax()]
+    candidates = _affiliation_rows(group)
+    latest = _latest_row(candidates)
+    if latest is not None:
         return str(latest["league"])
     counts = candidates["league"].value_counts()
     return str(counts.index[0]) if not counts.empty else None
@@ -207,8 +224,8 @@ def build_team_records(maps: pd.DataFrame) -> dict[str, dict[str, Any]]:
             by_tier[str(tier)] = {"wins": wins, "games": games, "wr": _wr(wins, games)}
 
         primary = _primary_league(group)
-        current = group[group["competition_tier"].isin({"tier1", "tier2", "tier3"})]
-        current_row = current.loc[pd.to_datetime(current["date"], errors="coerce").idxmax()] if not current.empty and pd.to_datetime(current["date"], errors="coerce").notna().any() else None
+        current_row = _latest_row(_affiliation_rows(group))
+        last_event_row = _latest_row(group)
         wins = int(round(float(group["win"].sum())))
         games = int(len(group))
         records[display] = {
@@ -220,6 +237,9 @@ def build_team_records(maps: pd.DataFrame) -> dict[str, dict[str, Any]]:
             "current_tier": str(current_row["competition_tier"]) if current_row is not None else None,
             "current_team": display,
             "current_date": str(current_row["date"]) if current_row is not None else None,
+            "last_event_league": str(last_event_row["league"]) if last_event_row is not None else None,
+            "last_event_tier": str(last_event_row["competition_tier"]) if last_event_row is not None else None,
+            "last_event_date": str(last_event_row["date"]) if last_event_row is not None else None,
             "intl": bool(group["is_international"].any()),
             "interregional": bool(group["is_interregional"].any()),
             "wins": wins,
@@ -231,8 +251,12 @@ def build_team_records(maps: pd.DataFrame) -> dict[str, dict[str, Any]]:
     return records
 
 
-def build_player_records(players: pd.DataFrame) -> dict[str, dict[str, Any]]:
-    """Aggregate player results from one pack window without team aggregate rows."""
+def build_player_records(
+    players: pd.DataFrame,
+    *,
+    team_records: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Aggregate player results and align current affiliation to current team."""
 
     if players is None or players.empty or "playername" not in players.columns:
         return {}
@@ -247,6 +271,10 @@ def build_player_records(players: pd.DataFrame) -> dict[str, dict[str, Any]]:
     if frame.empty:
         return {}
 
+    team_by_key = {
+        str(record.get("team_key") or team_identity_key(team)): record
+        for team, record in (team_records or {}).items()
+    }
     records: dict[str, dict[str, Any]] = {}
     for player, group in frame.groupby(frame["playername"].astype(str), sort=True):
         wins = int(round(float(group["result"].sum())))
@@ -254,22 +282,49 @@ def build_player_records(players: pd.DataFrame) -> dict[str, dict[str, Any]]:
         valid_league = ~group["league"].astype(str).str.upper().isin(INVALID_COMPETITION_LABELS)
         classified = group[valid_league]
         leagues = sorted(str(x) for x in classified["league"].dropna().unique())
-        current = classified[classified["competition_tier"].isin({"tier1", "tier2", "tier3"})]
-        current_row = None
-        if not current.empty:
-            dates = pd.to_datetime(current["date"], errors="coerce") if "date" in current.columns else pd.Series(pd.NaT, index=current.index)
-            if dates.notna().any():
-                current_row = current.loc[dates.idxmax()]
-        latest_valid = None
-        if not classified.empty:
-            dates = pd.to_datetime(classified["date"], errors="coerce") if "date" in classified.columns else pd.Series(pd.NaT, index=classified.index)
-            if dates.notna().any():
-                latest_valid = classified.loc[dates.idxmax()]
-        observed = group
-        observed_dates = pd.to_datetime(observed["date"], errors="coerce") if "date" in observed.columns else pd.Series(pd.NaT, index=observed.index)
-        observed_row = observed.loc[observed_dates.idxmax()] if observed_dates.notna().any() else None
-        primary = str(current_row["league"]) if current_row is not None else (
-            str(latest_valid["league"]) if latest_valid is not None else None
+        player_affiliation_row = _latest_row(_affiliation_rows(classified))
+        event_affiliation_row = _latest_row(
+            classified[classified["competition_tier"].isin({"tier1", "tier2", "tier3"})]
+        )
+        latest_valid = _latest_row(classified)
+        observed_row = _latest_row(group)
+        current_team = (
+            public_team_affiliation(observed_row.get("teamname"))
+            if observed_row is not None
+            else None
+        )
+        team_record = team_by_key.get(team_identity_key(current_team)) if current_team else None
+        player_league = (
+            str(player_affiliation_row["league"])
+            if player_affiliation_row is not None
+            else None
+        )
+        player_tier = (
+            str(player_affiliation_row["competition_tier"])
+            if player_affiliation_row is not None
+            else None
+        )
+        event_league = (
+            str(event_affiliation_row["league"])
+            if event_affiliation_row is not None
+            else None
+        )
+        event_tier = (
+            str(event_affiliation_row["competition_tier"])
+            if event_affiliation_row is not None
+            else None
+        )
+        if team_record is not None:
+            primary = team_record.get("current_league")
+            current_tier = team_record.get("current_tier")
+            affiliation_source = "current_team"
+        else:
+            primary = player_league
+            current_tier = player_tier
+            affiliation_source = "player_history" if player_affiliation_row is not None else None
+        affiliation_repaired = bool(
+            team_record is not None
+            and (primary != event_league or current_tier != event_tier)
         )
         role_counts: dict[str, int] = {}
         if "position" in group.columns:
@@ -293,9 +348,13 @@ def build_player_records(players: pd.DataFrame) -> dict[str, dict[str, Any]]:
             "leagues": leagues,
             "primary": primary,
             "current_league": primary,
-            "current_tier": str(current_row["competition_tier"]) if current_row is not None else None,
-            "current_team": public_team_affiliation(observed_row.get("teamname")) if observed_row is not None else None,
+            "current_tier": current_tier,
+            "current_team": current_team,
             "current_date": str(observed_row["date"]) if observed_row is not None else None,
+            "affiliation_source": affiliation_source,
+            "affiliation_repaired": affiliation_repaired,
+            "last_event_league": str(latest_valid["league"]) if latest_valid is not None else None,
+            "last_event_tier": str(latest_valid["competition_tier"]) if latest_valid is not None else None,
             "intl": bool(group["is_international"].any()),
             "interregional": bool(group.get("is_interregional", pd.Series(dtype=bool)).any()),
             "blue_games": int(len(blue)),
@@ -308,3 +367,41 @@ def build_player_records(players: pd.DataFrame) -> dict[str, dict[str, Any]]:
             "primary_role": roles[0] if roles else None,
         }
     return records
+
+
+def summarize_player_affiliations(
+    player_records: dict[str, dict[str, Any]],
+    team_records: dict[str, dict[str, Any]],
+) -> dict[str, int]:
+    """Summarize roster-affiliation repairs without blocking pack creation."""
+
+    team_by_key = {
+        str(record.get("team_key") or team_identity_key(team)): record
+        for team, record in team_records.items()
+    }
+    inherited = 0
+    repaired = 0
+    unresolved_teams = 0
+    remaining_conflicts = 0
+    for record in player_records.values():
+        current_team = record.get("current_team")
+        if not current_team:
+            continue
+        team_record = team_by_key.get(team_identity_key(current_team))
+        if team_record is None:
+            unresolved_teams += 1
+            continue
+        inherited += 1
+        repaired += int(bool(record.get("affiliation_repaired")))
+        if (
+            record.get("current_league") != team_record.get("current_league")
+            or record.get("current_tier") != team_record.get("current_tier")
+        ):
+            remaining_conflicts += 1
+    return {
+        "players": len(player_records),
+        "current_team_inherited": inherited,
+        "repaired_from_team_roster": repaired,
+        "unresolved_current_teams": unresolved_teams,
+        "remaining_team_player_conflicts": remaining_conflicts,
+    }

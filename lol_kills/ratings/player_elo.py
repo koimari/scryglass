@@ -24,13 +24,14 @@ from __future__ import annotations
 import json
 import math
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
 
 from lol_kills.etl.aliases import normalize_team
-from lol_kills.etl.competition import canonicalize_competition_frame
+from lol_kills.etl.competition import canonicalize_competition_frame, is_team_affiliation_league
 from lol_kills.etl.paths import FEATURES_DIR, PARQUET_DIR
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.dual_elo import DualEloConfig, _is_intl, expected_score
@@ -57,6 +58,7 @@ class PlayerState:
     last_date: pd.Timestamp | None = None
     n_maps: int = 0
     last_team: str | None = None
+    home_league: str | None = None
 
 
 @dataclass
@@ -341,7 +343,7 @@ def _run_player_elo(
                 st.last_date = d
             st.last_team = bt
             league = str(row.get("league") or "")
-            if league:
+            if is_team_affiliation_league(league):
                 st.home_league = league
             states[name] = st
         for name, role in red_lu[:5]:
@@ -357,7 +359,7 @@ def _run_player_elo(
                 st.last_date = d
             st.last_team = rt
             league = str(row.get("league") or "")
-            if league:
+            if is_team_affiliation_league(league):
                 st.home_league = league
             states[name] = st
 
@@ -380,6 +382,7 @@ def build_player_ratings(
     players: pd.DataFrame,
     cfg: PlayerEloConfig | None = None,
     output_dir: Path | None = None,
+    player_records: Mapping[str, Mapping[str, object]] | None = None,
 ) -> pd.DataFrame:
     """Sequential player Elo; player ratings travel across org changes."""
 
@@ -391,6 +394,13 @@ def build_player_ratings(
     out.to_parquet(path, index=False)
 
     snap = _snapshot_rows(states, recent_mus)
+    if player_records is not None:
+        for row in snap:
+            record = player_records.get(str(row["player"]))
+            if record is None:
+                continue
+            row["last_team"] = record.get("current_team")
+            row["home_league"] = record.get("current_league") or "UNKNOWN"
     snap_df = pd.DataFrame(snap).sort_values("mu_total", ascending=False)
     snap_df.to_parquet(destination / "player_ratings_snapshot.parquet", index=False)
     (destination / "player_ratings_meta.json").write_text(
@@ -426,6 +436,7 @@ def build_player_weekly_ranks(
     *,
     as_of: pd.Timestamp | None = None,
     min_games: int = 20,
+    player_records: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Return current ranks and movement from the preceding Sunday snapshot.
 
@@ -460,7 +471,7 @@ def build_player_weekly_ranks(
     # developmental player in the current Tier 1 board.
     from lol_kills.export.pack_records import build_player_records
 
-    current_records = build_player_records(players)
+    current_records = dict(player_records) if player_records is not None else build_player_records(players)
     current_tiers = {
         player: record.get("current_tier")
         for player, record in current_records.items()
