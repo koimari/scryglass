@@ -131,6 +131,8 @@ async function copyBaselinePack(sourceRoot) {
     `${packRoot}/manifest.json`,
     `${packRoot}/player_games`,
     `${packRoot}/team_games`,
+    `${packRoot}/models`,
+    `${packRoot}/studies`,
   ]) {
     await copyFrom(sourceRoot, relative);
   }
