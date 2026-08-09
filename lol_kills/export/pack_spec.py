@@ -98,6 +98,7 @@ PUBLIC_RATING_REQUIRED_FILES: tuple[str, ...] = (
     "features/team_records.json",
     "features/team_weekly_ranks.json",
     "features/player_records.json",
+    "features/player_champion_records.json",
     "features/player_weekly_ranks.json",
     "features/player_metadata.json",
 )

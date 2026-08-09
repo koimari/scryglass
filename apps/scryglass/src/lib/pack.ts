@@ -108,6 +108,17 @@ export type PlayerMetadata = {
   flag?: string | null;
 };
 
+export type PlayerChampionRecord = {
+  champion: string;
+  games: number;
+  wins: number;
+  losses: number;
+  wr: number | null;
+  kills: number | null;
+  deaths: number | null;
+  assists: number | null;
+};
+
 export type EloCalibration = {
   team: { intercept: number; coef: number; temperature_400?: number };
   player: { intercept: number; coef: number; temperature_400?: number };

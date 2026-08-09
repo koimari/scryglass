@@ -10,6 +10,7 @@ import {
   TEAM_SIGMA_MIN,
   teamSlug,
   type PackManifest,
+  type PlayerChampionRecord,
   type PlayerRating,
   type PlayerRecord,
   type TeamRating,
@@ -90,11 +91,13 @@ export function TeamRatingProfile({
 
 export function PlayerRatingProfile({
   player,
+  champions,
   record,
   team,
   manifest,
 }: {
   player: PlayerRating;
+  champions: PlayerChampionRecord[];
   record?: PlayerRecord;
   team?: TeamRating | null;
   manifest: PackManifest;
@@ -130,6 +133,35 @@ export function PlayerRatingProfile({
           <div><dt>Updated</dt><dd>{packUpdatedLabel(manifest)}</dd></div>
         </dl>
       </header>
+
+      <section className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <h2>Champions</h2>
+          <span>{champions.length} played</span>
+        </div>
+        {champions.length ? (
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr><th>Champion</th><th>Games</th><th>Record</th><th>Win rate</th><th>Average K / D / A</th></tr>
+              </thead>
+              <tbody>
+                {champions.map((champion) => (
+                  <tr key={champion.champion}>
+                    <td>{champion.champion}</td>
+                    <td>{champion.games}</td>
+                    <td>{champion.wins}–{champion.losses}</td>
+                    <td>{formatWr(champion.wr)}</td>
+                    <td>
+                      {champion.kills?.toFixed(1) ?? "—"} / {champion.deaths?.toFixed(1) ?? "—"} / {champion.assists?.toFixed(1) ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className={styles.empty}>No champion records are available for this player.</p>}
+      </section>
     </div>
   );
 }

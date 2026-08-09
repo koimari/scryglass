@@ -137,6 +137,21 @@ def test_live_validation_rejects_incomplete_players(tmp_path: Path) -> None:
         validate_live_source(tmp_path, ["game-2"])
 
 
+def test_live_validation_uses_fallback_game_identity_columns(tmp_path: Path) -> None:
+    _write_live(tmp_path, "game-2")
+    live = tmp_path / "data/lol/warehouse/parquet/oe_live"
+    for filename in ("maps.parquet", "oe_team_games.parquet", "oe_player_games.parquet"):
+        path = live / filename
+        frame = pd.read_parquet(path)
+        frame["gameid"] = "oe-api:game-2"
+        frame["game_uid"] = ""
+        frame.to_parquet(path, index=False)
+
+    result = validate_live_source(tmp_path, ["game-2"])
+
+    assert result["game_ids"] == ["game-2"]
+
+
 def test_pack_validation_rejects_a_changed_file(tmp_path: Path) -> None:
     pack_dir = tmp_path / "pack"
     manifest = _manifest(pack_dir, ["game-2"])

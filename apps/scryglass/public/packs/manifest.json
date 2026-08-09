@@ -1,7 +1,7 @@
 {
-  "pack_id": "v2026.08.09.1613",
+  "pack_id": "v2026.08.09.1654",
   "schema_version": "2.0.0",
-  "created_utc": "2026-08-09T16:17:31.857269+00:00",
+  "created_utc": "2026-08-09T16:57:46.586804+00:00",
   "filters": {
     "years": [
       2025,
@@ -74,8 +74,8 @@
     "claim_ceiling": "Source-bound descriptive ratings and weekly rank movement only."
   },
   "base_url": null,
-  "total_bytes": 5919303,
-  "total_files": 7,
+  "total_bytes": 10351100,
+  "total_files": 8,
   "files": [
     {
       "rows": 528,
@@ -121,6 +121,24 @@
       "columns": null,
       "relative": "features/player_records.json",
       "path": "features/player_records.json"
+    },
+    {
+      "rows": 43086,
+      "cols": 8,
+      "bytes": 4431797,
+      "sha256": "be1410100aa392e5e8ab8e36d1b11c145992baf7e864a2a1470003458ceb757a",
+      "columns": [
+        "champion",
+        "games",
+        "wins",
+        "losses",
+        "wr",
+        "kills",
+        "deaths",
+        "assists"
+      ],
+      "relative": "features/player_champion_records.json",
+      "path": "features/player_champion_records.json"
     },
     {
       "rows": 614,

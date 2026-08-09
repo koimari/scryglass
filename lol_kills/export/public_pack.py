@@ -23,6 +23,7 @@ import pyarrow.parquet as pq
 from lol_kills.export import pack_spec as spec
 from lol_kills.export.pack_records import (
     build_maps_frame_from_team_games,
+    build_player_champion_records,
     build_player_records,
     build_team_records,
     filter_public_team_rating_maps,
@@ -299,6 +300,7 @@ def export_public_pack(
         player_records_frame,
         team_records=team_records_payload,
     )
+    player_champions_payload = build_player_champion_records(player_rating_frame)
     affiliation_audit = summarize_player_affiliations(
         player_records_payload,
         team_records_payload,
@@ -432,6 +434,31 @@ def export_public_pack(
             },
             f"features/{filename}",
         )
+
+    player_champions_dest = feat_dir / "player_champion_records.json"
+    player_champions_dest.write_text(
+        json.dumps(player_champions_payload, separators=(",", ":"), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    register(
+        {
+            "rows": sum(len(rows) for rows in player_champions_payload.values()),
+            "cols": 8,
+            "bytes": player_champions_dest.stat().st_size,
+            "sha256": _sha256(player_champions_dest),
+            "columns": [
+                "champion",
+                "games",
+                "wins",
+                "losses",
+                "wr",
+                "kills",
+                "deaths",
+                "assists",
+            ],
+        },
+        "features/player_champion_records.json",
+    )
 
     for src_name, cols, out_name in (
         ("ratings_snapshot.parquet", spec.RATINGS_SNAPSHOT_COLS, "ratings_snapshot.json"),
