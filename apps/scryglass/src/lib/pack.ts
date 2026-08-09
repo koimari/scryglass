@@ -56,6 +56,16 @@ export type TeamRating = {
   international_series?: number;
   home_league?: string;
   model?: string;
+  evidence_interval_width?: number | null;
+  evidence_precision_ratio?: number | null;
+  evidence_stability?: number | null;
+  evidence_freshness_days?: number | null;
+  evidence_support_coverage?: number | null;
+  evidence_fallback?: number | null;
+  evidence_active?: number | null;
+  evidence_disconnected?: number | null;
+  evidence_ood?: number | null;
+  evidence_state?: string | null;
 };
 
 export type TeamWeeklyRank = {
@@ -499,7 +509,9 @@ export function scopedTeamWr(
 ): number | null {
   if (!rec) return null;
   if (!selected.length) return rec.wr;
-  const tierSelected = selected.filter((scope) => scope.startsWith("TIER")).map((scope) => scope.toLowerCase().replace("tier", ""));
+  const tierSelected = selected
+    .filter((scope) => scope.startsWith("TIER"))
+    .map((scope) => scope.toLowerCase());
   const regionalSelected = selected.filter((scope) => REGION_LEAGUES.includes(scope as (typeof REGION_LEAGUES)[number]));
   const internationalSelected = selected.filter((scope) => scope === "INTL" || isIntlLeague(scope));
   if (regionalSelected.length) {

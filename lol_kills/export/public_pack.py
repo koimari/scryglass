@@ -13,7 +13,7 @@ import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 import pandas as pd
 import pyarrow as pa
@@ -35,7 +35,7 @@ from lol_kills.export.player_metadata import build_player_metadata
 from lol_kills.etl.competition import TAXONOMY_VERSION, canonicalize_competition_frame, competition_tier
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.dual_elo import build_dual_ratings, lineup_hashes_from_players
-from lol_kills.ratings.evidence import attach_player_evidence
+from lol_kills.ratings.evidence import attach_player_evidence, attach_team_evidence
 from lol_kills.ratings.hierarchical_bt import build_team_weekly_ranks, fit_hierarchical_bt
 from lol_kills.ratings.player_elo import (
     build_maps_frame_from_players,
@@ -108,6 +108,68 @@ def _public_player_rating_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any
         if row.get("evidence_disconnected") != 1
         and str(row.get("evidence_state") or "").lower() != "disconnected"
     ]
+
+
+def _attach_public_team_evidence(
+    ratings: pd.DataFrame,
+    *,
+    source_as_of: pd.Timestamp,
+    weekly_ranks: Mapping[str, Any],
+) -> pd.DataFrame:
+    """Attach the public evidence contract to every team rating row."""
+
+    stability: dict[str, float] = {}
+    by_team = weekly_ranks.get("by_team", {})
+    if isinstance(by_team, Mapping):
+        for team, row in by_team.items():
+            if not isinstance(row, Mapping):
+                continue
+            value = pd.to_numeric(row.get("mu_delta"), errors="coerce")
+            if pd.notna(value):
+                stability[str(team)] = abs(float(value))
+    return attach_team_evidence(
+        ratings,
+        source_as_of=source_as_of,
+        weekly_stability=stability,
+    )
+
+
+def _complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
+    """Return game IDs with two complete, uniquely identified five-player sides."""
+
+    required = {"game_uid", "playername", "side", "position"}
+    if frame.empty or not required.issubset(frame.columns):
+        return set()
+    rows = frame.dropna(subset=["game_uid", "playername", "side", "position"]).copy()
+    if rows.empty:
+        return set()
+    rows["game_uid"] = rows["game_uid"].astype(str)
+    rows["side"] = rows["side"].astype(str).str.title()
+    rows = rows[rows["side"].isin({"Blue", "Red"})]
+    games = rows.groupby("game_uid", sort=False).agg(
+        rows=("playername", "size"),
+        players=("playername", "nunique"),
+        sides=("side", "nunique"),
+    )
+    sides = rows.groupby(["game_uid", "side"], sort=False).agg(
+        rows=("playername", "size"),
+        roles=("position", "nunique"),
+    )
+    complete_games = set(
+        games.index[
+            games["rows"].eq(10)
+            & games["players"].eq(10)
+            & games["sides"].eq(2)
+        ].astype(str)
+    )
+    complete_sides = sides["rows"].eq(5) & sides["roles"].eq(5)
+    side_counts = complete_sides.groupby(level="game_uid").agg(["size", "sum"])
+    complete_side_games = set(
+        side_counts.index[
+            side_counts["size"].eq(2) & side_counts["sum"].eq(2)
+        ].astype(str)
+    )
+    return complete_games.intersection(complete_side_games)
 
 
 def _filter_years(table: pa.Table, years: Sequence[int], year_cols: Sequence[str]) -> pa.Table:
@@ -281,6 +343,49 @@ def export_public_pack(
     maps = _filter_years(maps, years, ("year", "oe_year"))
     maps_for_records = _canonicalize_game_ids(maps.to_pandas())
     maps = pa.Table.from_pandas(maps_for_records, preserve_index=False)
+    live_source = (warehouse / "meta.json").exists()
+    source_completeness_audit: dict[str, Any] = {
+        "policy": "publish only maps with two complete, uniquely identified five-player sides",
+        "rejected_incomplete_player_maps": 0,
+    }
+    if live_source:
+        identity_columns = _present(
+            (
+                "gameid", "game_uid", "oe_gameid", "year", "oe_year",
+                "playername", "side", "position",
+            ),
+            player_available,
+        )
+        player_identity = _filter_year_frame(
+            _canonicalize_game_ids(
+                pq.read_table(player_path, columns=identity_columns).to_pandas()
+            ),
+            years,
+            ("year", "oe_year"),
+        )
+        player_identity["game_uid"] = _normalized_game_uid(player_identity)
+        complete_ids = _complete_player_game_ids(player_identity)
+        original_ids = set(_normalized_game_uid(maps_for_records).dropna().astype(str))
+        accepted_ids = original_ids.intersection(complete_ids)
+        rejected_ids = original_ids.difference(accepted_ids)
+        if not accepted_ids:
+            raise RuntimeError("public pack source has no complete player maps")
+        maps_for_records = maps_for_records[
+            _normalized_game_uid(maps_for_records).isin(accepted_ids)
+        ].copy()
+        team_maps_for_ratings = team_maps_for_ratings[
+            _normalized_game_uid(team_maps_for_ratings).isin(accepted_ids)
+        ].copy()
+        source_completeness_audit.update(
+            {
+                "candidate_maps": len(original_ids),
+                "accepted_maps": len(accepted_ids),
+                "rejected_incomplete_player_maps": len(rejected_ids),
+                "rejected_identity_sha256": source_identity_sha256(rejected_ids),
+            }
+        )
+        del player_identity, complete_ids, original_ids, accepted_ids, rejected_ids
+        maps = pa.Table.from_pandas(maps_for_records, preserve_index=False)
     source_as_of = pd.to_datetime(maps_for_records["date"], utc=True, errors="coerce").max()
     if pd.isna(source_as_of):
         raise RuntimeError("public pack source has no usable map dates")
@@ -292,7 +397,6 @@ def export_public_pack(
     # The feature-oriented maps table intentionally covers the major/public
     # event slice.  Team ladders need the full OE team-game population so
     # Tier 2 and Tier 3 organizations receive both records and estimates.
-    live_source = (warehouse / "meta.json").exists()
     rating_input = (
         maps_for_records
         if live_source
@@ -335,12 +439,14 @@ def export_public_pack(
     )
     if not live_source:
         player_records_frame = canonicalize_competition_frame(player_records_frame)
-    player_rating_row_count = len(player_records_frame)
     player_records_frame["game_uid"] = _normalized_game_uid(player_records_frame)
     if player_records_frame["game_uid"].isna().any():
         raise RuntimeError("public pack rating source has rows without a game identity")
     if live_source:
         map_ids = set(source_game_ids)
+        player_records_frame = player_records_frame[
+            player_records_frame["game_uid"].astype(str).isin(map_ids)
+        ].copy()
         player_ids = set(player_records_frame["game_uid"].dropna().astype(str))
         if player_ids != map_ids:
             raise RuntimeError(
@@ -365,6 +471,7 @@ def export_public_pack(
         ):
             raise RuntimeError("public pack rating source has incomplete player maps")
         del map_ids, player_ids, player_rows, side_rows
+    player_rating_row_count = len(player_records_frame)
 
     player_records_frame.drop(
         columns=[
@@ -404,6 +511,11 @@ def export_public_pack(
     )
     if not live_source:
         player_rating_input = canonicalize_competition_frame(player_rating_input)
+    else:
+        player_rating_input["game_uid"] = _normalized_game_uid(player_rating_input)
+        player_rating_input = player_rating_input[
+            player_rating_input["game_uid"].astype(str).isin(source_game_ids)
+        ].copy()
     player_maps_for_ratings = (
         maps_for_records
         if live_source
@@ -464,6 +576,11 @@ def export_public_pack(
         rating_input,
         as_of=source_as_of,
         min_series=5,
+    )
+    public_ratings = _attach_public_team_evidence(
+        public_ratings,
+        source_as_of=source_as_of,
+        weekly_ranks=team_weekly_ranks,
     )
     team_weekly_dest = feat_dir / "team_weekly_ranks.json"
     team_weekly_dest.write_text(json.dumps(team_weekly_ranks, indent=2), encoding="utf-8")
@@ -560,6 +677,11 @@ def export_public_pack(
         years,
         ("year", "oe_year"),
     )
+    if live_source:
+        player_profile_frame["game_uid"] = _normalized_game_uid(player_profile_frame)
+        player_profile_frame = player_profile_frame[
+            player_profile_frame["game_uid"].astype(str).isin(source_game_ids)
+        ].copy()
     champion_image_urls = _champion_image_urls(project)
     player_champions_payload = build_player_champion_records(player_profile_frame)
     profile_records_payload = build_profile_records(
@@ -735,6 +857,7 @@ def export_public_pack(
             "map_rows": int(len(maps_for_records)),
             "source_game_count": len(source_game_ids),
             "source_identity_sha256": source_identity_sha256(source_game_ids),
+            "source_completeness": source_completeness_audit,
             "team_rating_rows": int(len(rating_input)),
             "player_rating_rows": int(player_rating_row_count),
             "player_model": player_model_manifest,
