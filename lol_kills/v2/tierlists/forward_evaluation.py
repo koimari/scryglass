@@ -20,7 +20,6 @@ from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import brier_score_loss, log_loss
 
 
 SCHEMA_VERSION = "scryglass:tierlist-forward-evaluation:v1"
@@ -51,6 +50,26 @@ TEAM_K = 20.0
 
 class ForwardEvaluationError(ValueError):
     """Raised when the forward evidence cannot be built safely."""
+
+
+def _binary_log_loss(labels: np.ndarray, probabilities: np.ndarray) -> float:
+    """Compute binary log loss without a training-library dependency."""
+
+    y = np.asarray(labels, dtype=float)
+    p = np.clip(np.asarray(probabilities, dtype=float), 1e-15, 1.0 - 1e-15)
+    if y.size == 0 or y.shape != p.shape:
+        raise ValueError("binary log loss requires equally sized non-empty arrays")
+    return float(np.mean(-(y * np.log(p) + (1.0 - y) * np.log1p(-p))))
+
+
+def _brier_score(labels: np.ndarray, probabilities: np.ndarray) -> float:
+    """Compute the binary Brier score with the registered definition."""
+
+    y = np.asarray(labels, dtype=float)
+    p = np.asarray(probabilities, dtype=float)
+    if y.size == 0 or y.shape != p.shape:
+        raise ValueError("Brier score requires equally sized non-empty arrays")
+    return float(np.mean((p - y) ** 2))
 
 
 @dataclass(frozen=True)
@@ -255,8 +274,8 @@ def _logit(value: float) -> float:
 def _score(labels: np.ndarray, probabilities: np.ndarray) -> dict[str, float]:
     clipped = np.clip(probabilities, 1e-6, 1.0 - 1e-6)
     return {
-        "log_loss": float(log_loss(labels, clipped, labels=[0, 1])),
-        "brier": float(brier_score_loss(labels, clipped)),
+        "log_loss": _binary_log_loss(labels, clipped),
+        "brier": _brier_score(labels, clipped),
     }
 
 

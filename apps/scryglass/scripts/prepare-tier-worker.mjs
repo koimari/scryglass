@@ -8,12 +8,23 @@ const execFileAsync = promisify(execFile);
 const appRoot = process.cwd();
 const repoRoot = path.resolve(appRoot, "../..");
 const bundleRoot = path.join(appRoot, ".tier-worker");
+const remoteBundleRoot = path.join(appRoot, ".tier-worker-remote");
 
-async function copy(relative) {
-  const source = path.join(repoRoot, relative);
+async function copyFrom(sourceRoot, relative, { required = true } = {}) {
+  const source = path.join(sourceRoot, relative);
   const destination = path.join(bundleRoot, relative);
   await mkdir(path.dirname(destination), { recursive: true });
-  await cp(source, destination, { recursive: true });
+  try {
+    await cp(source, destination, { recursive: true });
+  } catch (error) {
+    if (!required && error?.code === "ENOENT") return false;
+    throw error;
+  }
+  return true;
+}
+
+async function copy(relative, options) {
+  return copyFrom(repoRoot, relative, options);
 }
 
 function privateBlobUrl(bundlePath, token) {
@@ -98,52 +109,56 @@ async function unpackRemoteBundle() {
       `Tier worker bundle download failed: HTTP ${response.status}`,
     );
   }
-  const archive = path.join(
-    os.tmpdir(),
-    `scryglass-tier-worker-${process.pid}.tar.gz`,
-  );
+  const archive = path.join(os.tmpdir(), `scryglass-tier-worker-${process.pid}.tar.gz`);
   await writeFile(archive, Buffer.from(await response.arrayBuffer()));
-  await mkdir(bundleRoot, { recursive: true });
-  await execFileAsync("tar", ["-xzf", archive, "-C", bundleRoot]);
+  await rm(remoteBundleRoot, { recursive: true, force: true });
+  await mkdir(remoteBundleRoot, { recursive: true });
+  await execFileAsync("tar", ["-xzf", archive, "-C", remoteBundleRoot]);
   await rm(archive, { force: true });
-  return true;
+  return remoteBundleRoot;
+}
+
+async function copyBaselinePack(sourceRoot) {
+  const latestPath = path.join(sourceRoot, "apps/scryglass/public/packs/latest.json");
+  const latest = JSON.parse(await readFile(latestPath, "utf8"));
+  if (typeof latest.pack_id !== "string" || !/^[A-Za-z0-9._-]+$/.test(latest.pack_id)) {
+    throw new Error("The tier worker pack id is invalid");
+  }
+  const packRoot = `apps/scryglass/public/packs/${latest.pack_id}`;
+  for (const relative of [
+    "apps/scryglass/public/packs/latest.json",
+    "apps/scryglass/public/packs/manifest.json",
+    `${packRoot}/manifest.json`,
+    `${packRoot}/player_games`,
+    `${packRoot}/team_games`,
+  ]) {
+    await copyFrom(sourceRoot, relative);
+  }
 }
 
 await rm(bundleRoot, { recursive: true, force: true });
+await mkdir(bundleRoot, { recursive: true });
 
 const remoteBundle = await unpackRemoteBundle();
 for (const relative of [
   "lol_kills",
   "data/lol/v2/champions",
-  "data/lol/v2/tierlists",
+  "data/lol/v2/models/draft-terminal",
 ]) {
   await copy(relative);
 }
 
 if (remoteBundle) {
+  await copyBaselinePack(remoteBundle);
   process.stdout.write("[tier-worker] unpacked private Vercel Blob bundle\n");
 } else {
-  for (const relative of [
-    "data/lol/features",
-    "data/lol/models",
-    "output/pdf",
-  ]) {
-    await copy(relative);
-  }
-
-  const latestPath = path.join(repoRoot, "apps/scryglass/public/packs/latest.json");
-  const latest = JSON.parse(await readFile(latestPath, "utf8"));
-  if (typeof latest.pack_id !== "string" || !/^[A-Za-z0-9._-]+$/.test(latest.pack_id)) {
-    throw new Error("The committed public pack id is invalid");
-  }
-
-  for (const relative of [
-    "apps/scryglass/public/packs/latest.json",
-    "apps/scryglass/public/packs/manifest.json",
-    `apps/scryglass/public/packs/${latest.pack_id}`,
-  ]) {
-    await copy(relative);
-  }
+  await copyBaselinePack(repoRoot);
 }
 
-await publishRuntimeBundle();
+try {
+  await publishRuntimeBundle();
+} finally {
+  if (remoteBundle) {
+    await rm(remoteBundleRoot, { recursive: true, force: true });
+  }
+}
