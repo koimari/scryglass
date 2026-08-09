@@ -27,11 +27,28 @@ from lol_kills.etl.paths import PARQUET_DIR, WAREHOUSE_DIR
 from lol_kills.etl.source_keys import canonical_source_game_key
 
 API_BASE = "https://oe.datalisk.io"
-SCHEMA_VERSION = "scryglass:oe-api-live-bridge:v1"
+SCHEMA_VERSION = "scryglass:oe-api-live-bridge:v2"
 DEFAULT_LOOKBACK_DAYS = 120
 DEFAULT_MAX_WORKERS = 8
 DEFAULT_DISCOVERY_CACHE_HOURS = 6
 ROLES = ("top", "jng", "mid", "bot", "sup")
+PLAYER_STAT_FIELDS = {
+    "kills": "kills",
+    "deaths": "deaths",
+    "assists": "assists",
+    "teamkills": "teamKills",
+    "dpm": "dpm",
+    "totalgold": "goldEarned",
+    "cspm": "cspm",
+    "wpm": "wpm",
+    "wcpm": "wcpm",
+    "golddiffat10": "gxd10",
+}
+REQUIRED_PLAYER_STAT_FIELDS = tuple(
+    source_field
+    for output_field, source_field in PLAYER_STAT_FIELDS.items()
+    if output_field != "golddiffat10"
+)
 PLAYER_OUTPUT = PARQUET_DIR / "oe_api_player_games.parquet"
 TEAM_OUTPUT = PARQUET_DIR / "oe_api_team_games.parquet"
 META_OUTPUT = PARQUET_DIR / "oe_api_meta.json"
@@ -389,7 +406,7 @@ def _fetch_full_games(
     api_key: str,
     max_workers: int,
 ) -> tuple[dict[str, dict[str, Any]], int]:
-    """Fetch the player names that the compact team-game endpoint omits."""
+    """Fetch complete player identities and post-game statistics."""
 
     def fetch(game: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
         game_id = str(game.get("oeGameId") or game.get("gameId") or "")
@@ -421,10 +438,17 @@ def _fetch_full_games(
 
 
 def _complete_player_detail(detail: Mapping[str, Any]) -> bool:
-    """Require ten distinct named players before a game can enter ratings."""
+    """Require ten named players and the complete public grade input set."""
 
     names: list[str] = []
     placeholders = {"unknown", "unknown player", "tbd", "none", "nan"}
+    metadata = detail.get("metadata")
+    duration = pd.to_numeric(
+        metadata.get("gameDuration") if isinstance(metadata, Mapping) else None,
+        errors="coerce",
+    )
+    if pd.isna(duration) or float(duration) <= 0:
+        return False
     for team_key in ("blueTeam", "redTeam"):
         team = detail.get(team_key)
         players = team.get("players") if isinstance(team, Mapping) else None
@@ -435,12 +459,28 @@ def _complete_player_detail(detail: Mapping[str, Any]) -> bool:
             name = str(player.get("name") or "").strip() if isinstance(player, Mapping) else ""
             if not name or name.casefold() in placeholders:
                 return False
+            for source_field in REQUIRED_PLAYER_STAT_FIELDS:
+                value = pd.to_numeric(player.get(source_field), errors="coerce")
+                if pd.isna(value):
+                    return False
             names.append(name)
     return len(names) == 10 and len({name.casefold() for name in names}) == 10
 
 
+def _normalized_player_stats(player: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep the provider fields that feed public match records and grades."""
+
+    stats: dict[str, Any] = {
+        "player_id": str(player.get("playerId") or "").strip() or None,
+    }
+    for output_field, source_field in PLAYER_STAT_FIELDS.items():
+        value = pd.to_numeric(player.get(source_field), errors="coerce")
+        stats[output_field] = None if pd.isna(value) else float(value)
+    return stats
+
+
 def _cached_full_games(path: Path) -> dict[str, dict[str, Any]]:
-    """Reuse player names from the previous completed API bridge receipt."""
+    """Reuse complete player details from the previous bridge receipt."""
 
     if not path.is_file():
         return {}
@@ -456,22 +496,38 @@ def _cached_full_games(path: Path) -> dict[str, dict[str, Any]]:
             continue
         game_id = str(game.get("oe_game_id") or "").strip()
         players = game.get("players")
-        if not game_id or not isinstance(players, Mapping):
+        player_stats = game.get("player_stats")
+        duration = pd.to_numeric(game.get("game_duration"), errors="coerce")
+        if (
+            not game_id
+            or not isinstance(players, Mapping)
+            or not isinstance(player_stats, Mapping)
+            or pd.isna(duration)
+        ):
             continue
-        detail: dict[str, Any] = {}
+        detail: dict[str, Any] = {"metadata": {"gameDuration": float(duration)}}
         complete = True
         for side, team_key in (("blue", "blueTeam"), ("red", "redTeam")):
             side_players = players.get(side)
-            if not isinstance(side_players, Mapping):
+            side_stats = player_stats.get(side)
+            if not isinstance(side_players, Mapping) or not isinstance(side_stats, Mapping):
                 complete = False
                 break
-            detail_players: dict[str, dict[str, str]] = {}
+            detail_players: dict[str, dict[str, Any]] = {}
             for role in ROLES:
                 name = str(side_players.get(role) or "").strip()
-                if not name:
+                stats = side_stats.get(role)
+                if not name or not isinstance(stats, Mapping):
                     complete = False
                     break
-                detail_players[role] = {"name": name}
+                detail_players[role] = {
+                    "name": name,
+                    "playerId": stats.get("player_id"),
+                    **{
+                        source_field: stats.get(output_field)
+                        for output_field, source_field in PLAYER_STAT_FIELDS.items()
+                    },
+                }
             if not complete:
                 break
             detail[team_key] = {"players": detail_players}
@@ -533,6 +589,11 @@ def _rows_from_games(
         if not isinstance(detail, Mapping) or not _complete_player_detail(detail):
             continue
         game_id = game_uid
+        detail_metadata = detail.get("metadata")
+        game_duration = pd.to_numeric(
+            detail_metadata.get("gameDuration") if isinstance(detail_metadata, Mapping) else None,
+            errors="coerce",
+        )
         common = {
             "gameid": game_id,
             "game_uid": game_uid,
@@ -554,21 +615,43 @@ def _rows_from_games(
             "playoffs": pd.NA,
             "result": None,
         }
+        accepted_player_stats: dict[str, dict[str, dict[str, Any]]] = {"blue": {}, "red": {}}
         for side_name, team_name, side_result in (
             ("Blue", blue_team, blue_result),
             ("Red", red_team, 1 - blue_result),
         ):
-            row = {**common, "side": side_name, "teamname": team_name, "position": "team", "result": side_result}
+            row = {
+                **common,
+                "side": side_name,
+                "teamname": team_name,
+                "position": "team",
+                "gamelength": float(game_duration),
+                "result": side_result,
+            }
             team_rows.append(row)
+            team_key = "blueTeam" if side_name == "Blue" else "redTeam"
+            team_detail = detail.get(team_key, {}) if isinstance(detail, Mapping) else {}
+            players_detail = team_detail.get("players", {}) if isinstance(team_detail, Mapping) else {}
+            team_dpm = sum(
+                float(pd.to_numeric((players_detail.get(role) or {}).get("dpm"), errors="coerce"))
+                for role in roles
+                if isinstance(players_detail.get(role), Mapping)
+                and pd.notna(pd.to_numeric((players_detail.get(role) or {}).get("dpm"), errors="coerce"))
+            )
             for role in roles:
                 player_detail = {}
-                team_key = "blueTeam" if side_name == "Blue" else "redTeam"
-                team_detail = detail.get(team_key, {}) if isinstance(detail, Mapping) else {}
-                players_detail = team_detail.get("players", {}) if isinstance(team_detail, Mapping) else {}
                 if isinstance(players_detail, Mapping):
                     candidate = players_detail.get(role, {})
                     if isinstance(candidate, Mapping):
                         player_detail = candidate
+                stats = _normalized_player_stats(player_detail)
+                damage_share = stats["dpm"] / team_dpm if team_dpm > 0 else None
+                output_stats = {
+                    **{field: stats[field] for field in PLAYER_STAT_FIELDS},
+                    "gamelength": float(game_duration),
+                    "damageshare": damage_share,
+                }
+                accepted_player_stats[side_name.casefold()][role] = stats
                 player_rows.append(
                     {
                         **common,
@@ -577,7 +660,8 @@ def _rows_from_games(
                         "position": role,
                         "champion": str(game[f"{'blue' if side_name == 'Blue' else 'red'}{role}"]).strip(),
                         "playername": str(player_detail.get("name") or "").strip() or pd.NA,
-                        "player_id": str(player_detail.get("playerId") or "").strip() or pd.NA,
+                        "player_id": stats["player_id"] or pd.NA,
+                        **output_stats,
                         "result": side_result,
                     }
                 )
@@ -593,6 +677,7 @@ def _rows_from_games(
                 "blue_team": blue_team,
                 "red_team": red_team,
                 "blue_result": blue_result,
+                "game_duration": float(game_duration),
                 "roles": {
                     "blue": {role: str(game[f"blue{role}"]).strip() for role in roles},
                     "red": {role: str(game[f"red{role}"]).strip() for role in roles},
@@ -611,6 +696,7 @@ def _rows_from_games(
                         for role in roles
                     },
                 },
+                "player_stats": accepted_player_stats,
             }
         )
     if not accepted_games:
@@ -776,6 +862,8 @@ def ingest_oe_api(
         "full_detail_games_cached": len(cached_detail_ids),
         "games_with_full_details": len(full_detail_ids),
         "games_missing_full_details": full_games_missing,
+        "player_identity_complete": full_games_missing == 0,
+        "player_statistics_complete": full_games_missing == 0,
         "player_detail_complete": full_games_missing == 0,
         "player_detail_floor": primary_latest.isoformat().replace("+00:00", "Z") if primary_latest is not None else None,
         "team_rows": len(team_frame),

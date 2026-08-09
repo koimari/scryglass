@@ -183,7 +183,7 @@ export type ProfileGame = {
 
 export type ProfileRecords = {
   schema_version: "scryglass:profile-records:v1" | "scryglass:profile-records:v2";
-  grade_contract?: "scryglass:player-map-grade:v1";
+  grade_contract?: "scryglass:player-map-grade:v1" | "scryglass:player-map-grade:v2";
   window_days: number;
   champion_images: Record<string, string>;
   games: Record<string, ProfileGame>;

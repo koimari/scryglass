@@ -153,7 +153,7 @@ def test_profile_records_normalize_recent_games_without_raw_tables() -> None:
     )
 
     assert payload["schema_version"] == "scryglass:profile-records:v2"
-    assert payload["grade_contract"] == "scryglass:player-map-grade:v1"
+    assert payload["grade_contract"] == "scryglass:player-map-grade:v2"
     assert payload["players"]["Inspired"] == ["game-1"]
     assert payload["teams"]["LYON"] == ["game-1"]
     game = payload["games"]["game-1"]

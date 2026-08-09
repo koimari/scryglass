@@ -478,12 +478,12 @@ def build_profile_records(
             "teamkills",
             "gamelength",
             "dpm",
-            "earned gpm",
             "damageshare",
-            "vspm",
-            "golddiffat15",
-            "xpdiffat15",
-            "csdiffat15",
+            "totalgold",
+            "cspm",
+            "wpm",
+            "wcpm",
+            "golddiffat10",
         )
         if column in players.columns
     ]
