@@ -26,3 +26,19 @@ test("compact player ratings preserve the public evidence contract", () => {
 
   assert.deepEqual(compactPlayerRatings([row]), [row]);
 });
+
+test("compact player ratings exclude disconnected players", () => {
+  const disconnected: PlayerRating = {
+    player: "Baus",
+    mu_total: 1672.2,
+    mu_regional: 1672.2,
+    mu_meta: 0,
+    sigma: 28,
+    n_maps: 120,
+    last_team: null,
+    evidence_disconnected: 1,
+    evidence_state: "disconnected",
+  };
+
+  assert.deepEqual(compactPlayerRatings([disconnected]), []);
+});

@@ -279,6 +279,11 @@ export function softMu(mu: number, sigma: number, floor = TEAM_SIGMA_MIN): numbe
 export function compactPlayerRatings(players: PlayerRating[]): PlayerRating[] {
   return players
     .filter((player) => (player.n_maps ?? 0) >= 5)
+    .filter(
+      (player) =>
+        player.evidence_disconnected !== 1 &&
+        player.evidence_state?.toLowerCase() !== "disconnected",
+    )
     .map((player) => ({
       player: player.player,
       mu_total: player.mu_total,

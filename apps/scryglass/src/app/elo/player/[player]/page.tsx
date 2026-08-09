@@ -6,6 +6,7 @@ import type {
   PlayerRecord,
   TeamRating,
 } from "@/lib/pack";
+import { compactPlayerRatings } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 export const revalidate = 21_600;
@@ -16,7 +17,8 @@ export default async function PlayerEloPage({ params }: Props) {
   const { player: raw } = await params;
   const name = decodeURIComponent(raw);
   const man = await readPackManifest();
-  const players = await readPackJson<PlayerRating[]>(man, "features/player_ratings_snapshot.json");
+  const playerRows = await readPackJson<PlayerRating[]>(man, "features/player_ratings_snapshot.json");
+  const players = compactPlayerRatings(playerRows);
   const teams = await readPackJson<TeamRating[]>(man, "features/ratings_snapshot.json");
   let playerRecords: Record<string, PlayerRecord> = {};
   let playerChampions: Record<string, PlayerChampionRecord[]> = {};

@@ -607,12 +607,12 @@ export function EloLadders({
                     onSort={onTeamSort}
                   />
                   <SortTh
-                    label="Evidence"
+                    label="Confidence"
                     col="trust"
                     active={teamCol === "trust"}
                     dir={teamDir}
                     align="num"
-                    title="Evidence state from the validated contract: interval width, precision, stability, freshness, and coverage. Settled requires all gates; anything missing fails closed."
+                    title="How well recent games support this rating."
                     onSort={onTeamSort}
                   />
                   <SortTh
@@ -679,7 +679,7 @@ export function EloLadders({
                     <span className={styles.cardMeta}>
                       {formatAffiliation(rec?.current_tier, rec?.current_league ?? rec?.primary)}
                       {" · "}
-                      {formatEvidenceCell(trust)} evidence
+                      {formatEvidenceCell(trust)}
                       {rec?.games ? `, ${rec.games} games` : ""}
                       {wr != null ? ` · ${formatWr(wr)} scoped win rate` : ""}
                     </span>
@@ -733,12 +733,12 @@ export function EloLadders({
                   />
                   <SortTh label="Raw rating" col="mu" active={playerCol === "mu"} dir={playerDir} align="num" onSort={onPlayerSort} />
                   <SortTh
-                    label="Evidence"
+                    label="Confidence"
                     col="trust"
                     active={playerCol === "trust"}
                     dir={playerDir}
                     align="num"
-                    title="Evidence state from the validated contract; a low sigma alone never reads as Settled."
+                    title="How well recent games support this rating."
                     onSort={onPlayerSort}
                   />
                   <SortTh label="Games" col="games" active={playerCol === "games"} dir={playerDir} align="num" onSort={onPlayerSort} />
