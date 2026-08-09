@@ -14,6 +14,7 @@ import {
   type PlayerRating,
   type PlayerRecord,
   type ProfileGame,
+  type ProfileGrade,
   type ProfileParticipant,
   type TeamRating,
   type TeamRecord,
@@ -53,6 +54,29 @@ function teamWon(game: ProfileGame, team: string): boolean {
   return game.blue_team.toLowerCase() === team.toLowerCase() ? game.blue_win === 1 : game.blue_win === 0;
 }
 
+function scoreGrade(score: number): string {
+  if (score >= 90) return "A+";
+  if (score >= 75) return "A";
+  if (score >= 55) return "B";
+  if (score >= 35) return "C";
+  if (score >= 15) return "D";
+  return "F";
+}
+
+function gradeSummary(games: ProfileGame[], player: string): { grade: string; trend: string; maps: number } | null {
+  const grades = games
+    .map((game) => playerInGame(game, player)?.grade)
+    .filter((grade): grade is Extract<ProfileGrade, { status: "available" }> => grade?.status === "available");
+  if (!grades.length) return null;
+  const score = grades.reduce((total, grade) => total + grade.score, 0) / grades.length;
+  const self = grades.reduce((total, grade) => total + grade.components.self, 0) / grades.length;
+  return {
+    grade: scoreGrade(score),
+    trend: self >= 0.35 ? "Above own standard" : self <= -0.35 ? "Below own standard" : "Near own standard",
+    maps: grades.length,
+  };
+}
+
 function ChampionPortrait({ name, imageUrl, size = "small" }: { name: string | null; imageUrl?: string | null; size?: "small" | "large" }) {
   return (
     <span className={`${styles.portrait} ${size === "large" ? styles.portraitLarge : ""}`} title={name ?? undefined}>
@@ -77,7 +101,7 @@ function RecentMatches({ games, championImages, player, team }: { games: Profile
         const won = focusTeam ? teamWon(game, focusTeam) : false;
         const opponent = game.blue_team.toLowerCase() === focusTeam.toLowerCase() ? game.red_team : game.blue_team;
         return (
-          <article className={styles.matchRow} key={game.game_id}>
+          <Link className={styles.matchRow} href={`/matches/${encodeURIComponent(game.game_id)}`} key={game.game_id}>
             <span className={`${styles.resultMark} ${won ? styles.win : styles.loss}`}>{won ? "W" : "L"}</span>
             {participant ? <ChampionPortrait name={participant.champion} imageUrl={participant.champion ? championImages[participant.champion] : null} /> : null}
             <div className={styles.matchMain}>
@@ -86,11 +110,11 @@ function RecentMatches({ games, championImages, player, team }: { games: Profile
             </div>
             {participant ? (
               <div className={styles.matchScore}>
-                <strong>{participant.kills ?? "—"} / {participant.deaths ?? "—"} / {participant.assists ?? "—"}</strong>
+                <strong>{participant.grade?.status === "available" ? participant.grade.grade : "—"} · {participant.kills ?? "—"} / {participant.deaths ?? "—"} / {participant.assists ?? "—"}</strong>
                 <span>{roleLabel(participant.role)}</span>
               </div>
             ) : <span className={styles.matchSide}>{game.blue_team === focusTeam ? "Blue" : "Red"}</span>}
-          </article>
+          </Link>
         );
       })}
     </div>
@@ -154,11 +178,13 @@ export function TeamRatingProfile({
             {players.map((player) => {
               const playerRecord = playerRecords[player.player];
               const roleRank = roleRanks[player.player];
+              const recent = gradeSummary(recentGames, player.player);
               const content = <>
                   <span className={styles.rosterRole}>{roleLabel(player.role ?? playerRecord?.primary_role)}</span>
                   <strong>{player.player}</strong>
                   <span className={styles.rosterRating}>{player.rating ? softMu(player.rating.mu_total, player.rating.sigma, PLAYER_SIGMA_MIN).toFixed(1) : "Pending"}</span>
                   <small>{roleRank?.rank > 0 ? `#${roleRank.rank} of ${roleRank.total} ${roleLabel(player.role).toLowerCase()}s` : player.ratingNote ?? "Role rank unavailable"}</small>
+                  <small>{recent ? `Last ${recent.maps}: ${recent.grade} · ${recent.trend}` : "Recent grade unavailable"}</small>
                 </>;
               return player.rating ? (
                 <Link className={styles.rosterCard} href={`/elo/player/${playerSlug(player.player)}`} key={player.player}>{content}</Link>
@@ -174,6 +200,52 @@ export function TeamRatingProfile({
         <div className={styles.sectionHeader}><div><p>Latest results</p><h2>Recent maps</h2></div><span>Up to 10</span></div>
         <RecentMatches games={recentGames} championImages={championImages} team={team.team} />
       </section>
+    </div>
+  );
+}
+
+function GradeDetails({ grade }: { grade?: ProfileGrade }) {
+  if (!grade || grade.status !== "available") {
+    return <span className={styles.gradeUnavailable}>{grade?.reason ?? "Grade unavailable"}</span>;
+  }
+  return (
+    <div className={styles.gradeDetails}>
+      <strong>{grade.grade}</strong>
+      <span>{grade.score.toFixed(1)}</span>
+      <small>Usual form {grade.components.self.toFixed(2)} · Teammates {grade.components.team.toFixed(2)} · Opposing role {grade.components.opponent.toFixed(2)} · League peers {grade.components.league_role.toFixed(2)}</small>
+    </div>
+  );
+}
+
+export function MatchRatingProfile({ game, championImages }: { game: ProfileGame; championImages: Record<string, string> }) {
+  const sides = (["Blue", "Red"] as const).map((side) => ({
+    side,
+    team: side === "Blue" ? game.blue_team : game.red_team,
+    won: side === "Blue" ? game.blue_win === 1 : game.blue_win === 0,
+    players: game.players.filter((player) => player.side === side).sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role)),
+  }));
+  return (
+    <div className={styles.page}>
+      <p className={styles.back}><Link className="row-link" href="/elo">← Ratings</Link></p>
+      <header className={styles.matchHero}>
+        <p className={styles.scope}>{game.league} · {shortDate(game.date)}</p>
+        <h1>{game.blue_team} vs {game.red_team}</h1>
+        <p>Player grades compare this map with the player’s prior form, their teammates, the same-role opponent, and the league-role baseline. Match result is excluded.</p>
+      </header>
+      <div className={styles.matchTeams}>
+        {sides.map((side) => (
+          <section className={styles.matchTeam} key={side.side}>
+            <div className={styles.sectionHeader}><div><p>{side.side} side</p><h2><Link className="row-link" href={`/elo/team/${teamSlug(side.team)}`}>{side.team}</Link></h2></div><span>{side.won ? "Win" : "Loss"}</span></div>
+            {side.players.map((player) => (
+              <article className={styles.matchPlayer} key={player.player}>
+                <ChampionPortrait name={player.champion} imageUrl={player.champion ? championImages[player.champion] : null} size="large" />
+                <div><span>{roleLabel(player.role)}</span><strong><Link className="row-link" href={`/elo/player/${playerSlug(player.player)}`}>{player.player}</Link></strong><small>{player.champion} · {player.kills ?? "—"} / {player.deaths ?? "—"} / {player.assists ?? "—"}</small></div>
+                <GradeDetails grade={player.grade} />
+              </article>
+            ))}
+          </section>
+        ))}
+      </div>
     </div>
   );
 }
@@ -213,7 +285,7 @@ export function PlayerRatingProfile({
           <h1>{player.player}</h1>
           <p className={styles.summary}>
             {team ? <><Link className="row-link" href={`/elo/team/${teamSlug(team.team)}`}>{team.team}</Link> · {role}. </> : role !== "—" ? `${role}. ` : null}
-            This rating tracks the strength of team results with this player in the lineup. Individual map grades appear in the next profile update.
+            This rating tracks the strength of team results with this player in the lineup. Recent map grades describe individual performance against four comparison baselines.
           </p>
         </div>
         <div className={styles.ratingBlock}>

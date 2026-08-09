@@ -50,6 +50,28 @@ export default function MethodologyPage() {
           </p>
         </section>
 
+        <section id="map-grades">
+          <h2>Player map grades</h2>
+          <p>
+            A map grade describes one player&apos;s performance. It compares nine
+            match statistics with four references: the player&apos;s earlier maps,
+            their teammates in that map, the opposing player in the same role,
+            and earlier league results for that role. Each reference has equal
+            weight in the final score.
+          </p>
+          <p>
+            The calculation uses only reference games from earlier calendar
+            days. It does not use the map winner. A grade appears after the
+            player has ten earlier comparable maps and the source contains two
+            complete five-player lineups. Missing inputs make the grade
+            unavailable.
+          </p>
+          <p>
+            These grades describe recorded map performance. They do not change
+            the long-term player rating and do not predict the next match.
+          </p>
+        </section>
+
         <section id="tier-lists">
           <h2>Champion tier lists</h2>
           <p>

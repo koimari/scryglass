@@ -128,7 +128,24 @@ export type ProfileParticipant = {
   kills: number | null;
   deaths: number | null;
   assists: number | null;
+  grade?: ProfileGrade;
 };
+
+export type ProfileGrade =
+  | {
+      status: "available";
+      grade: string;
+      score: number;
+      baseline_games: number;
+      self_baseline_games: number;
+      components: {
+        self: number;
+        team: number;
+        opponent: number;
+        league_role: number;
+      };
+    }
+  | { status: "unavailable"; reason: string };
 
 export type ProfileGame = {
   game_id: string;
@@ -141,7 +158,8 @@ export type ProfileGame = {
 };
 
 export type ProfileRecords = {
-  schema_version: "scryglass:profile-records:v1";
+  schema_version: "scryglass:profile-records:v1" | "scryglass:profile-records:v2";
+  grade_contract?: "scryglass:player-map-grade:v1";
   window_days: number;
   champion_images: Record<string, string>;
   games: Record<string, ProfileGame>;
