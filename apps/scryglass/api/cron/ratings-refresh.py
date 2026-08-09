@@ -59,6 +59,11 @@ def _run_ratings_refresh() -> dict[str, Any]:
             "player_rows": None,
             "team_rows": None,
         }
+        shutil.rmtree(runtime_root / _WORKER.PACKS_ROOT, ignore_errors=True)
+        shutil.rmtree(
+            runtime_root / "data/lol/v2/models/draft-terminal",
+            ignore_errors=True,
+        )
         print("[ratings-refresh] phase=baseline pointer read", flush=True)
         raw_source = _WORKER._download_source_bundle(
             runtime_root,
