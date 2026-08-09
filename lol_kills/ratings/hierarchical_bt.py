@@ -67,21 +67,118 @@ def _is_missing(value: Any) -> bool:
     return value is None or (isinstance(value, float) and pd.isna(value)) or str(value).strip() in {"", "nan", "None"}
 
 
-def _series_key(row: pd.Series) -> str:
+def _authoritative_series_id(row: pd.Series) -> str | None:
+    """Return the source-provided series id when present.
+
+    Only the GRID adapter writes ``grid_series_id`` today; it is the
+    authoritative series identity and carries source evidence with it (the
+    ``source``/``source_grid`` flags on the row and the adapter revision in
+    ``lol_kills/etl/grid_ingest.py``).  A missing or empty id means the source
+    has no safe series identity for this map.
+    """
+
     explicit = row.get("grid_series_id")
     if not _is_missing(explicit):
-        return f"grid:{explicit}"
-    date = pd.Timestamp(row["date"]).floor("4h") if pd.notna(row.get("date")) else "unknown-date"
+        return str(explicit).strip()
+    return None
+
+
+def _game_key(row: pd.Series) -> str:
+    """Return a stable game-level identity that never merges unrelated maps.
+
+    ``game_uid`` is the canonical per-map identity in every warehouse frame
+    (Oracle's Elixir ``gameid`` or Leaguepedia ``GameId``) and is unique per
+    match.  When a frame lacks it, fall back to a date/teams/game-number key.
+
+    The four-hour date bucket and sorted-team pairing are intentionally NOT
+    used as a grouping key here: they merge unrelated matches and change
+    outcome, side, recency, series count, uncertainty, and every downstream
+    rating.
+    """
+
+    uid = row.get("game_uid")
+    if not _is_missing(uid):
+        return f"game:{str(uid).strip()}"
+    date = (
+        pd.Timestamp(row["date"]).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if pd.notna(row.get("date"))
+        else "unknown-date"
+    )
     a, b = sorted((team_identity_key(row.get("blue_team")), team_identity_key(row.get("red_team"))))
-    return f"derived:{date}|{a}|{b}"
+    game = row.get("game")
+    game_bit = f"|game-{game}" if not _is_missing(game) else ""
+    return f"derived-map:{date}|{a}|{b}{game_bit}"
+
+
+def _series_identity(frame_rows: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Assign every map an explicit series identity; audit unsafe/tied maps.
+
+    Rules (issue #44):
+
+    * An authoritative source series id (``grid_series_id``) groups maps into
+      one series observation only when the group is internally consistent:
+      the same unordered team pair appears in every map of the group.  A
+      reused id that points at different team pairs is unsafe and its maps
+      fall back to stable game-level keys.
+    * Without a safe series id, each map keeps its own stable game-level key.
+      There is no derived time/team bucket.
+    * Series maps whose results do not produce a strict majority (a tied or
+      incomplete feed) are unresolved: they are preserved in the returned
+      audit trail and excluded from primary series inference because the
+      series outcome is not identified.
+
+    Returns ``(frame_rows, audit)`` where ``frame_rows`` gains ``series_key``
+    and ``series_source`` columns (``grid`` or ``none``).
+    """
+
+    out = frame_rows.copy()
+    out["series_key"] = out.apply(_game_key, axis=1)
+    out["series_source"] = "none"
+    out["series_id_present"] = out["grid_series_id"].fillna("").astype(str).str.strip().ne("")
+
+    unsafe: set[str] = set()
+    authoritative = out[out["series_id_present"]].copy()
+    if not authoritative.empty:
+        authoritative["_pair"] = authoritative.apply(
+            lambda row: "|".join(sorted((str(row["blue"]), str(row["red"])))), axis=1
+        )
+        pair_counts = authoritative.groupby("grid_series_id")["_pair"].nunique()
+        unsafe = set(str(value) for value in pair_counts[pair_counts > 1].index)
+        safe = authoritative[~authoritative["grid_series_id"].astype(str).isin(unsafe)]
+        out.loc[safe.index, "series_key"] = "grid:" + safe["grid_series_id"].astype(str)
+        out.loc[safe.index, "series_source"] = "grid"
+
+    audit: dict[str, Any] = {
+        "unsafe_series_ids": sorted(unsafe),
+        "n_unsafe_maps": int(out["series_id_present"].sum() - (out["series_source"] == "grid").sum()),
+    }
+    return out, audit
 
 
 def _observations(
     maps: pd.DataFrame,
     as_of: pd.Timestamp | None,
     half_life_days: float,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Build series-collapsed observations with explicit series identity.
+
+    Returns ``(observations, audit)``.  Each row of ``observations`` is either
+    one authoritative source series (``series_source == "grid"``) or one map
+    with a stable game-level key (``series_source == "none"``).  The audit
+    dict records maps excluded from primary inference (unsafe series ids and
+    tied/incomplete feeds) so they stay inspectable.
+    """
+
     frame = canonicalize_competition_frame(maps)
+    if frame is None or frame.empty:
+        return pd.DataFrame(), {
+            "n_unresolved_maps": 0,
+            "n_unresolved_series": 0,
+            "unresolved_series_ids": [],
+            "unresolved_map_uids": [],
+            "unsafe_series_ids": [],
+            "n_unsafe_maps": 0,
+        }
     frame["date"] = pd.to_datetime(frame.get("date"), errors="coerce", utc=True).dt.tz_localize(None)
     frame["y_blue_win"] = pd.to_numeric(frame.get("y_blue_win"), errors="coerce")
     frame = frame.dropna(subset=["date", "y_blue_win"]).copy()
@@ -92,7 +189,14 @@ def _observations(
         frame = frame[frame["date"] <= cutoff].copy()
     frame = frame.sort_values("date")
     if frame.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), {
+            "n_unresolved_maps": 0,
+            "n_unresolved_series": 0,
+            "unresolved_series_ids": [],
+            "unresolved_map_uids": [],
+            "unsafe_series_ids": [],
+            "n_unsafe_maps": 0,
+        }
 
     # Home league is the latest observed regional affiliation before the
     # match.  A first domestic row establishes the affiliation only after its
@@ -110,9 +214,11 @@ def _observations(
         source_league = str(row.get("league") or "UNKNOWN")
         blue_home = home_league.get(blue, source_league if source_league in REGIONAL_LEAGUES else "UNKNOWN")
         red_home = home_league.get(red, source_league if source_league in REGIONAL_LEAGUES else "UNKNOWN")
+        game_uid = row.get("game_uid")
+        grid_series_id = _authoritative_series_id(row) or ""
+        game = row.get("game")
         records.append(
             {
-                "series_key": _series_key(row),
                 "date": row["date"],
                 "blue": blue,
                 "red": red,
@@ -123,7 +229,9 @@ def _observations(
                 "y_blue": float(row["y_blue_win"]),
                 "league": source_league,
                 "is_international": bool(row.get("is_international", source_league in INTERNATIONAL_LEAGUES)),
-                "blue_side": 1.0,
+                "game_uid": "" if _is_missing(game_uid) else str(game_uid).strip(),
+                "grid_series_id": grid_series_id,
+                "game": "" if _is_missing(game) else str(game).strip(),
             }
         )
         if source_league in REGIONAL_LEAGUES:
@@ -131,23 +239,43 @@ def _observations(
             home_league[red] = source_league
 
     frame_rows = pd.DataFrame(records)
+    frame_rows, identity_audit = _series_identity(frame_rows)
+
     collapsed: list[dict[str, Any]] = []
-    for _, group in frame_rows.groupby("series_key", sort=False):
-        first = group.iloc[0]
-        a, b = sorted((str(first["blue"]), str(first["red"])))
+    unresolved: list[dict[str, Any]] = []
+    for key, group in frame_rows.groupby("series_key", sort=False):
+        pairs = set(
+            group.apply(
+                lambda row: "|".join(sorted((str(row["blue"]), str(row["red"])))), axis=1
+            )
+        )
+        if len(pairs) != 1:
+            # Exact-duplicate fallback keys with different team pairs cannot
+            # be merged into one observation; keep them for audit only.
+            unresolved.extend(group.to_dict("records"))
+            continue
+        a, b = sorted((str(group["blue"].iloc[0]), str(group["red"].iloc[0])))
         a_rows = group[group["blue"].eq(a)]
         a_wins = float(a_rows["y_blue"].sum()) + float((group[group["red"].eq(a)]["y_blue"] == 0).sum())
         n_maps = len(group)
-        # Complete series normally have an odd number of maps.  For an
-        # incomplete/duplicate feed, use the first map only on a tie.
-        y_a = 1.0 if a_wins > n_maps / 2 else 0.0 if a_wins < n_maps / 2 else (float(first["y_blue"]) if first["blue"] == a else 1.0 - float(first["y_blue"]))
-        a_row = group[group["blue"].eq(a)]
-        b_row = group[group["blue"].eq(b)]
-        source_a = a_row.iloc[0] if not a_row.empty else first
-        source_b = b_row.iloc[0] if not b_row.empty else first
+        if a_wins * 2 == n_maps:
+            # Tied/incomplete feed: the series outcome is not identified.
+            # Preserve the maps for audit; exclude from primary inference.
+            unresolved.extend(group.to_dict("records"))
+            continue
+        # A strict majority over ALL maps defines the series winner; the
+        # first map is never selected as an outcome shortcut.
+        y_a = 1.0 if a_wins > n_maps / 2 else 0.0
+        a_blue_share = float(a_rows["blue"].eq(a).sum()) / n_maps
+        first = group.iloc[0]
+        source_a = a_rows.iloc[0] if not a_rows.empty else first
+        b_rows = group[group["blue"].eq(b)]
+        source_b = b_rows.iloc[0] if not b_rows.empty else first
         collapsed.append(
             {
-                "series_key": first["series_key"],
+                "series_key": key,
+                "series_source": str(group["series_source"].iloc[0]),
+                "game_uid": ",".join(str(value) for value in group["game_uid"] if str(value)),
                 "date": first["date"],
                 "team_a": a,
                 "team_b": b,
@@ -157,8 +285,8 @@ def _observations(
                 "home_b": source_b["blue_home"] if source_b["blue"] == b else source_b["red_home"],
                 "y_a": y_a,
                 "n_maps": n_maps,
+                "a_blue_share": a_blue_share,
                 "international": bool(group["is_international"].any()),
-                "a_was_blue": 1.0 if first["blue"] == a else -1.0,
             }
         )
     out = pd.DataFrame(collapsed).sort_values("date").reset_index(drop=True)
@@ -167,7 +295,29 @@ def _observations(
         out["weight"] = np.exp(
             -((cutoff - out["date"]).dt.total_seconds() / 86400.0) / max(half_life_days, 1.0)
         )
-    return out
+    unresolved_frame = pd.DataFrame(unresolved)
+    unresolved_ids: list[str] = []
+    unresolved_uids: list[str] = []
+    if not unresolved_frame.empty:
+        unresolved_ids = sorted(
+            set(
+                str(value)
+                for value in unresolved_frame["grid_series_id"].fillna("")
+                if str(value)
+            )
+        )
+        unresolved_uids = sorted(
+            set(str(value) for value in unresolved_frame["game_uid"] if str(value))
+        )
+    audit: dict[str, Any] = {
+        "n_unresolved_maps": len(unresolved),
+        "n_unresolved_series": int(unresolved_frame["series_key"].nunique()) if not unresolved_frame.empty else 0,
+        "unresolved_series_ids": unresolved_ids,
+        "unresolved_map_uids": unresolved_uids,
+        "unsafe_series_ids": identity_audit["unsafe_series_ids"],
+        "n_unsafe_maps": identity_audit["n_unsafe_maps"],
+    }
+    return out, audit
 
 
 def _design(observations: pd.DataFrame) -> tuple[np.ndarray, list[str], list[str]]:
@@ -185,7 +335,10 @@ def _design(observations: pd.DataFrame) -> tuple[np.ndarray, list[str], list[str
             X[i, len(teams) + league_idx[row["home_a"]]] += 1.0
         if row["home_b"] in league_idx:
             X[i, len(teams) + league_idx[row["home_b"]]] -= 1.0
-        X[i, -1] = float(row["a_was_blue"])
+        # Side exposure: the observation's team A blue share minus team B's.
+        # For a Bo1 this is +/-1 exactly; for a multi-map series it keeps
+        # every map's side information instead of the first map only.
+        X[i, -1] = 2.0 * float(row["a_blue_share"]) - 1.0
     return X, teams, leagues
 
 
@@ -199,7 +352,7 @@ def fit_hierarchical_bt(
 
     cfg = cfg or HierarchicalBTConfig()
     input_audit = audit_rating_inputs(maps)
-    obs = _observations(maps, as_of, cfg.half_life_days)
+    obs, series_audit = _observations(maps, as_of, cfg.half_life_days)
     if obs.empty:
         empty = pd.DataFrame(columns=["team", "team_key", "mu_total", "sigma"])
         return empty, {
@@ -207,6 +360,12 @@ def fit_hierarchical_bt(
             "n_series": 0,
             "taxonomy_version": TAXONOMY_VERSION,
             "input_audit": input_audit,
+            "series_identity": {
+                "revision": "2026-08-09.1",
+                "n_authoritative_series": 0,
+                "n_game_level_maps": 0,
+                **series_audit,
+            },
         }
 
     X, teams, leagues = _design(obs)
@@ -311,7 +470,13 @@ def fit_hierarchical_bt(
         "optimizer_success": bool(result.success),
         "optimizer_message": str(result.message),
         "input_audit": input_audit,
-        "note": "Series-collapsed penalized MAP Bradley-Terry with local Laplace uncertainty plus explicit uncertainty inflation for teams without international bridges; use rating_p10 for conservative rank.",
+        "series_identity": {
+            "revision": "2026-08-09.1",
+            "n_authoritative_series": int((obs["series_source"] == "grid").sum()),
+            "n_game_level_maps": int((obs["series_source"] == "none").sum()),
+            **series_audit,
+        },
+        "note": "Series-collapsed penalized MAP Bradley-Terry with explicit series identity (authoritative GRID series id when safe, stable game-level keys otherwise) and local Laplace uncertainty plus explicit uncertainty inflation for teams without international bridges; use rating_p10 for conservative rank.",
     }
     if write:
         FEATURES_DIR.mkdir(parents=True, exist_ok=True)
