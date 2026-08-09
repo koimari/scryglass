@@ -119,8 +119,9 @@ def test_aggregate_team_rating_wiring_opens_components(bridge) -> None:
         "organization_id": "SYN-ORG-A",
         "substitute": False,
         "players": [
-            {"player_id": f"p-{i}", "role": role, "league_id": "SYN-LEC",
-             "scope": "regional", "posterior_mean": mean, "active": True,
+            {"player_id": f"p-{i}", "display_name": f"Player {i}", "role": role,
+             "league_id": "SYN-LEC", "scope": "regional",
+             "posterior_mean": mean, "active": True,
              "as_of": "2026-08-01T00:00:00Z"}
             for i, (role, mean) in enumerate(
                 zip(ROLES, (0.3, 0.1, 0.5, 0.4, 0.2)))

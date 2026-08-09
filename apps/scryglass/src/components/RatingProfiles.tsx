@@ -46,6 +46,11 @@ function shortDate(value: string): string {
   return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 
+function rosterEvidenceLabel(value: string): string {
+  const readable = value.replaceAll("_", " ");
+  return readable.charAt(0).toUpperCase() + readable.slice(1);
+}
+
 function playerInGame(game: ProfileGame, player: string): ProfileParticipant | undefined {
   return game.players.find((participant) => participant.player.toLowerCase() === player.toLowerCase());
 }
@@ -146,6 +151,17 @@ export function TeamRatingProfile({
   const players = [...roster].sort((a, b) => {
     return ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role);
   });
+  const exactRoster = team.exact_roster?.players.length === 5 ? team.exact_roster : null;
+  const rosterSource = exactRoster
+    ? "Published exact roster"
+    : recentGames.length
+      ? "Latest observed lineup"
+      : "Affiliation snapshot";
+  const rosterEvidence = exactRoster
+    ? `${rosterEvidenceLabel(exactRoster.evidence_state)} evidence · ${exactRoster.model_scope} model · effective ${shortDate(exactRoster.roster_effective_at)} · source receipt ${exactRoster.roster_receipt_sha256.slice(0, 12)}…`
+    : recentGames.length
+      ? `Recorded in the latest accepted map on ${shortDate(recentGames[0].date)}. A later lineup will appear after another accepted map arrives.`
+      : "These player affiliations come from the ratings snapshot. An accepted played-map lineup is unavailable.";
 
   return (
     <div className={styles.page}>
@@ -172,7 +188,8 @@ export function TeamRatingProfile({
       </dl>
 
       <section className={styles.section}>
-        <div className={styles.sectionHeader}><div><p>Current roster</p><h2>Players by role</h2></div><span>{players.length} listed</span></div>
+        <div className={styles.sectionHeader}><div><p>{rosterSource}</p><h2>Players by role</h2></div><span>{players.length} listed</span></div>
+        <p className={styles.empty}>{rosterEvidence}</p>
         {players.length ? (
           <div className={styles.rosterGrid}>
             {players.map((player) => {
@@ -193,7 +210,7 @@ export function TeamRatingProfile({
               );
             })}
           </div>
-        ) : <p className={styles.empty}>No current player affiliation is available for this team.</p>}
+        ) : <p className={styles.empty}>No roster source is available for this team.</p>}
       </section>
 
       <section className={styles.section}>

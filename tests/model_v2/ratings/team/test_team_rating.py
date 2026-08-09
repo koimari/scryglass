@@ -113,13 +113,17 @@ def test_organization_change_alone_does_not_change_roster_identity_or_rating(fix
     first = ExactRoster.from_mapping(first_value)
     second = ExactRoster.from_mapping(second_value)
     assert first.roster_id == second.roster_id
+    # Organization identity is part of the SOURCE receipt (it binds where the
+    # roster came from) but never part of the strength identity.
+    assert first.source_receipt_sha256 != second.source_receipt_sha256
     first_rating = aggregate_team_rating(
         first, fixtures["regional"]["covariance"], scope="regional"
     )
     second_rating = aggregate_team_rating(
         second, fixtures["regional"]["covariance"], scope="regional"
     )
-    assert first_rating == second_rating
+    assert first_rating.posterior_mean == second_rating.posterior_mean
+    assert first_rating.roster_id == second_rating.roster_id
 
 
 def test_regional_has_zero_league_component_and_component_identity(fixtures):

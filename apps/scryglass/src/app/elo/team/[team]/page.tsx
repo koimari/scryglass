@@ -49,7 +49,27 @@ export default async function TeamEloPage({ params }: Props) {
       : null;
   const ratingByPlayer = new Map(players.map((player) => [player.player.toLowerCase(), player]));
   const rawRatingByPlayer = new Map(playerRows.map((player) => [player.player.toLowerCase(), player]));
-  const roster: TeamRosterEntry[] = latestGame && latestSide
+  const publishedRoster = team.exact_roster?.players.length === 5
+    ? team.exact_roster.players
+    : null;
+  const roster: TeamRosterEntry[] = publishedRoster
+    ? publishedRoster.map((publishedPlayer) => {
+      const displayName = publishedPlayer.display_name || publishedPlayer.player_id;
+      const rating = ratingByPlayer.get(displayName.toLowerCase())
+        ?? ratingByPlayer.get(publishedPlayer.player_id.toLowerCase())
+        ?? null;
+      const rawRating = rawRatingByPlayer.get(displayName.toLowerCase())
+        ?? rawRatingByPlayer.get(publishedPlayer.player_id.toLowerCase());
+      return {
+        player: displayName,
+        role: publishedPlayer.role,
+        rating,
+        ratingNote: (rawRating?.n_maps ?? 0) < 5
+          ? "Rating needs 5 maps"
+          : "Rating unavailable",
+      };
+    })
+    : latestGame && latestSide
     ? latestGame.players
       .filter((participant) => participant.side === latestSide)
       .map((participant) => ({

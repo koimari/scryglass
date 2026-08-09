@@ -56,6 +56,20 @@ export type TeamRating = {
   international_series?: number;
   home_league?: string;
   model?: string;
+  /**
+   * Exact match-ready five from the v2 Team Rating publication contract
+   * (issue #47).  Present only when an authorized exact-roster artifact is
+   * published for this org; the descriptive snapshot rows never fill this.
+   */
+  exact_roster?: {
+    roster_id: string;
+    model_scope: "regional" | "global";
+    players: { player_id: string; display_name: string; role: string }[];
+    roster_effective_at: string;
+    roster_as_of: string;
+    roster_receipt_sha256: string;
+    evidence_state: string;
+  } | null;
   evidence_interval_width?: number | null;
   evidence_precision_ratio?: number | null;
   evidence_stability?: number | null;
