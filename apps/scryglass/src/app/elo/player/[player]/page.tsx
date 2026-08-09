@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { PlayerRatingProfile } from "@/components/RatingProfiles";
 import type {
+  PlayerChampionRecord,
   PlayerRating,
   PlayerRecord,
   TeamRating,
@@ -18,10 +19,16 @@ export default async function PlayerEloPage({ params }: Props) {
   const players = await readPackJson<PlayerRating[]>(man, "features/player_ratings_snapshot.json");
   const teams = await readPackJson<TeamRating[]>(man, "features/ratings_snapshot.json");
   let playerRecords: Record<string, PlayerRecord> = {};
+  let playerChampions: Record<string, PlayerChampionRecord[]> = {};
   try {
     playerRecords = await readPackJson(man, "features/player_records.json");
   } catch {
     playerRecords = {};
+  }
+  try {
+    playerChampions = await readPackJson(man, "features/player_champion_records.json");
+  } catch {
+    playerChampions = {};
   }
 
   const player = players.find((p) => p.player.toLowerCase() === name.toLowerCase());
@@ -36,6 +43,7 @@ export default async function PlayerEloPage({ params }: Props) {
   return (
     <PlayerRatingProfile
       player={player}
+      champions={playerChampions[player.player] ?? []}
       record={rec}
       team={team}
       manifest={man}

@@ -109,11 +109,21 @@ def _identity_frame(path: Path, required: Sequence[str] = ()) -> pd.DataFrame:
     if not path.is_file():
         raise RefreshValidationError(f"missing live source file: {path}")
     columns = pq.ParquetFile(path).schema_arrow.names
-    identity = next((name for name in ("game_uid", "gameid", "oe_gameid") if name in columns), None)
-    if identity is None or any(name not in columns for name in required):
+    identity_columns = [name for name in ("game_uid", "gameid", "oe_gameid") if name in columns]
+    if not identity_columns or any(name not in columns for name in required):
         raise RefreshValidationError(f"live source schema is incomplete: {path}")
-    frame = pd.read_parquet(path, columns=[identity, *required])
-    frame["_game_id"] = [canonical_source_game_key(value) for value in frame[identity]]
+    frame = pd.read_parquet(path, columns=[*identity_columns, *required])
+    frame["_game_id"] = [
+        next(
+            (
+                key
+                for column in identity_columns
+                if (key := canonical_source_game_key(row[column]))
+            ),
+            "",
+        )
+        for _, row in frame.iterrows()
+    ]
     if frame["_game_id"].eq("").any():
         raise RefreshValidationError(f"live source contains an empty game identity: {path}")
     return frame
@@ -156,14 +166,14 @@ def validate_live_source(root: Path, new_game_ids: Sequence[str]) -> dict[str, A
 
 
 def validate_pack(pack_dir: Path, manifest: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
-    """Verify the seven-file ratings pack and its source identity binding."""
+    """Verify the compact ratings pack and its source identity binding."""
 
     files = manifest.get("files")
     if not isinstance(files, list):
         raise RefreshValidationError("pack manifest has no file inventory")
     paths = {str(item.get("path")) for item in files if isinstance(item, dict)}
     if paths != set(pack_spec.PUBLIC_RATING_REQUIRED_FILES):
-        raise RefreshValidationError("pack inventory differs from the seven-file public ratings contract")
+        raise RefreshValidationError("pack inventory differs from the public ratings contract")
     total_bytes = 0
     root = pack_dir.resolve()
     for item in files:

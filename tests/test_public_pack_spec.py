@@ -1,8 +1,9 @@
 import pyarrow as pa
+import pandas as pd
 import pytest
 
 from lol_kills.export import pack_spec
-from lol_kills.export.pack_records import public_team_affiliation
+from lol_kills.export.pack_records import build_player_champion_records, public_team_affiliation
 from lol_kills.export.public_pack import (
     _ensure_year_column,
     _filter_years,
@@ -18,9 +19,45 @@ def test_public_pack_contains_only_rating_display_files() -> None:
         "features/team_records.json",
         "features/team_weekly_ranks.json",
         "features/player_records.json",
+        "features/player_champion_records.json",
         "features/player_weekly_ranks.json",
         "features/player_metadata.json",
     }
+
+
+def test_player_champion_records_are_compact_and_sorted() -> None:
+    records = build_player_champion_records(
+        pd.DataFrame(
+            [
+                {"playername": "Inspired", "position": "jng", "champion": "Ivern", "result": 1, "kills": 2, "deaths": 1, "assists": 12},
+                {"playername": "Inspired", "position": "jng", "champion": "Ivern", "result": 0, "kills": 1, "deaths": 3, "assists": 8},
+                {"playername": "Inspired", "position": "jng", "champion": "Xin Zhao", "result": 1, "kills": 5, "deaths": 2, "assists": 7},
+            ]
+        )
+    )
+
+    assert records["Inspired"] == [
+        {
+            "champion": "Ivern",
+            "games": 2,
+            "wins": 1,
+            "losses": 1,
+            "wr": 0.5,
+            "kills": 1.5,
+            "deaths": 2.0,
+            "assists": 10.0,
+        },
+        {
+            "champion": "Xin Zhao",
+            "games": 1,
+            "wins": 1,
+            "losses": 0,
+            "wr": 1.0,
+            "kills": 5.0,
+            "deaths": 2.0,
+            "assists": 7.0,
+        },
+    ]
 
 
 def test_public_pack_withholds_raw_rows_models_and_studies() -> None:

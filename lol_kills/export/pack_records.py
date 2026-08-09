@@ -39,6 +39,13 @@ def _wr(wins: int, games: int) -> float | None:
     return round(wins / games, 4) if games else None
 
 
+def _mean(group: pd.DataFrame, column: str) -> float | None:
+    if column not in group.columns:
+        return None
+    values = pd.to_numeric(group[column], errors="coerce").dropna()
+    return round(float(values.mean()), 2) if not values.empty else None
+
+
 def public_team_affiliation(value: Any) -> str | None:
     """Return a displayable team name under the public rating contract."""
 
@@ -366,6 +373,53 @@ def build_player_records(
             "roles": roles,
             "primary_role": roles[0] if roles else None,
         }
+    return records
+
+
+def build_player_champion_records(players: pd.DataFrame) -> dict[str, list[dict[str, Any]]]:
+    """Precompute compact champion records for each public player profile."""
+
+    required = {"playername", "champion", "result"}
+    if players is None or players.empty or not required.issubset(players.columns):
+        return {}
+    frame = players.copy()
+    if "position" in frame.columns:
+        frame = frame[frame["position"].astype(str).str.lower().ne("team")]
+    frame["playername"] = frame["playername"].astype("string").str.strip()
+    frame["champion"] = frame["champion"].astype("string").str.strip()
+    frame["result"] = pd.to_numeric(frame["result"], errors="coerce")
+    frame = frame[
+        frame["playername"].notna()
+        & frame["playername"].ne("")
+        & frame["champion"].notna()
+        & frame["champion"].ne("")
+        & frame["result"].isin({0, 1})
+    ]
+    if frame.empty:
+        return {}
+
+    records: dict[str, list[dict[str, Any]]] = {}
+    for player, player_group in frame.groupby("playername", sort=True):
+        champions: list[dict[str, Any]] = []
+        for champion, group in player_group.groupby("champion", sort=True):
+            games = int(len(group))
+            wins = int(round(float(group["result"].sum())))
+            champions.append(
+                {
+                    "champion": str(champion),
+                    "games": games,
+                    "wins": wins,
+                    "losses": games - wins,
+                    "wr": _wr(wins, games),
+                    "kills": _mean(group, "kills"),
+                    "deaths": _mean(group, "deaths"),
+                    "assists": _mean(group, "assists"),
+                }
+            )
+        records[str(player)] = sorted(
+            champions,
+            key=lambda row: (-row["games"], -row["wins"], row["champion"].casefold()),
+        )
     return records
 
 
