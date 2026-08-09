@@ -284,9 +284,16 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
 
 
 def _run_step(root: Path, args: list[str], *, source: str) -> dict[str, Any]:
+    environment = os.environ.copy()
+    inherited_paths = [str(Path(item)) for item in sys.path if item and Path(item).is_dir()]
+    configured_paths = [item for item in environment.get("PYTHONPATH", "").split(os.pathsep) if item]
+    environment["PYTHONPATH"] = os.pathsep.join(
+        dict.fromkeys([*inherited_paths, *configured_paths])
+    )
     result = subprocess.run(
         [sys.executable, "-m", *args],
         cwd=root,
+        env=environment,
         capture_output=True,
         text=True,
         check=False,
