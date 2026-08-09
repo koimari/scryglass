@@ -13,10 +13,7 @@
     "api/cron/pack-refresh.py": {
       "memory": 3009,
       "maxDuration": 800,
-      "includeFiles": [
-        ".tier-worker/**",
-        "api/cron/tierlist-refresh.py"
-      ],
+      "includeFiles": "{.tier-worker/**,api/cron/tierlist-refresh.py}",
       "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,fixtures/**,__fixtures__/**,testdata/**,sample-data/**}"
     }
   },
