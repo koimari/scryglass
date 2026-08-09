@@ -54,6 +54,7 @@ def test_ratings_refresh_is_a_separate_six_hour_job() -> None:
     assert "_refresh_rating_inputs" in worker
     assert "_publish_source_bundle" in worker
     assert "RATINGS_LOCK_PATH" in worker
+    assert "restore_baseline" not in worker
 
 
 def test_pack_refresh_is_a_separate_six_hour_job() -> None:
