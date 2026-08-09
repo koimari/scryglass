@@ -30,7 +30,7 @@ RATINGS_LOCK_PATH = _WORKER.RATINGS_LOCK_PATH
 def _run_ratings_refresh() -> dict[str, Any]:
     started = time.monotonic()
     print("[ratings-refresh] phase=prepare start", flush=True)
-    runtime_root = _WORKER._prepare_runtime_root()
+    runtime_root = _WORKER._prepare_runtime_root(include_baseline_pack=False)
     print(
         f"[ratings-refresh] phase=prepare done seconds={time.monotonic() - started:.1f}",
         flush=True,
@@ -59,11 +59,6 @@ def _run_ratings_refresh() -> dict[str, Any]:
             "player_rows": None,
             "team_rows": None,
         }
-        shutil.rmtree(runtime_root / _WORKER.PACKS_ROOT, ignore_errors=True)
-        shutil.rmtree(
-            runtime_root / "data/lol/v2/models/draft-terminal",
-            ignore_errors=True,
-        )
         print("[ratings-refresh] phase=baseline pointer read", flush=True)
         raw_source = _WORKER._download_source_bundle(
             runtime_root,

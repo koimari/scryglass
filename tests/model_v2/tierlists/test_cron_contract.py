@@ -25,7 +25,7 @@ def test_cron_worker_is_a_direct_python_function_with_a_distributed_lease() -> N
     ).read_text(encoding="utf-8")
     assert "class handler" in worker
     assert "CRON_SECRET" in worker
-    assert "restore_baseline" in worker
+    assert "PACK_LATEST" in worker
     assert "_publish_public_pack" in worker
     assert "RetentionPlan" in worker
     assert "_RefreshLease" in worker
@@ -55,7 +55,7 @@ def test_ratings_refresh_is_a_separate_six_hour_job() -> None:
     assert "_publish_source_bundle" in worker
     assert "RATINGS_LOCK_PATH" in worker
     assert "restore_baseline" not in worker
-    assert "PACKS_ROOT" in worker
+    assert "include_baseline_pack=False" in worker
 
 
 def test_pack_refresh_is_a_separate_six_hour_job() -> None:
