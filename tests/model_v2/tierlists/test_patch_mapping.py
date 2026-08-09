@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from lol_kills.v2.tierlists.patch_mapping import (
     PatchMappingError,
+    _live_source_binding,
     load_mapping,
     normalize_oe_token,
     resolve_atom_snapshot_patch,
@@ -109,3 +112,62 @@ def test_every_audited_row_has_release_order_and_two_evidence_sources() -> None:
             "oe_source",
             "riot_patch_notes",
         }
+
+
+def test_live_binding_uses_canonical_game_uid_for_map_count(tmp_path: Path) -> None:
+    player_path = tmp_path / "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet"
+    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_live/meta.json"
+    player_path.parent.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {
+                "gameid": "annual-1",
+                "game_uid": None,
+                "date": "2026-08-08T12:00:00Z",
+                "patch": "16.15",
+            },
+            {
+                "gameid": "annual-1",
+                "game_uid": "canonical-1",
+                "date": "2026-08-08T12:01:00Z",
+                "patch": "16.15",
+            },
+            {
+                "gameid": "api-2",
+                "game_uid": "canonical-2",
+                "date": "2026-08-08T12:02:00Z",
+                "patch": "16.15",
+            },
+        ]
+    ).to_parquet(player_path, index=False)
+    meta_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "scryglass:oe-live-source:v1",
+                "source_mode": "oe_only",
+                "source_latest": "2026-08-08T12:02:00Z",
+                "maps": 3,
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload = {
+        "source_window": {"start": "2026-08-08T00:00:00Z"},
+        "sources": [
+            {
+                "kind": "oe_live_player_games",
+                "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+                "mutable_live_source": True,
+            },
+            {
+                "kind": "oe_live_meta",
+                "locator": "data/lol/warehouse/parquet/oe_live/meta.json",
+                "mutable_live_source": True,
+            },
+        ],
+        "mappings": [{"oe_token": "16.15"}],
+    }
+
+    _intervals, binding = _live_source_binding(payload, repo_root=tmp_path)
+
+    assert binding["source_game_count"] == 3
