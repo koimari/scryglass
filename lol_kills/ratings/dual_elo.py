@@ -57,6 +57,7 @@ def build_dual_ratings(
     maps: pd.DataFrame,
     cfg: DualEloConfig | None = None,
     lineup_by_game: dict[str, str] | None = None,
+    output_dir: Path | None = None,
 ) -> pd.DataFrame:
     """
     Sequential dual Elo. Returns frame aligned to maps index with pre-match features.
@@ -152,8 +153,9 @@ def build_dual_ratings(
         states[bt], states[rt] = sb, sr
 
     out = pd.DataFrame(rows)
-    FEATURES_DIR.mkdir(parents=True, exist_ok=True)
-    path = FEATURES_DIR / "ratings.parquet"
+    destination = Path(output_dir or FEATURES_DIR)
+    destination.mkdir(parents=True, exist_ok=True)
+    path = destination / "ratings.parquet"
     out.to_parquet(path, index=False)
 
     # snapshot final ratings
@@ -168,9 +170,9 @@ def build_dual_ratings(
         for t, s in states.items()
     ]
     snap_df = pd.DataFrame(snap).sort_values("mu_total", ascending=False)
-    snap_df.to_parquet(FEATURES_DIR / "ratings_dual_snapshot.parquet", index=False)
-    snap_df.to_parquet(FEATURES_DIR / "ratings_snapshot.parquet", index=False)
-    (FEATURES_DIR / "ratings_meta.json").write_text(
+    snap_df.to_parquet(destination / "ratings_dual_snapshot.parquet", index=False)
+    snap_df.to_parquet(destination / "ratings_snapshot.parquet", index=False)
+    (destination / "ratings_meta.json").write_text(
         json.dumps({"n_maps": len(out), "n_teams": len(snap), "config": cfg.__dict__}, indent=2)
     )
     print(f"[ratings] wrote {path} n={len(out)} teams={len(snap)}")

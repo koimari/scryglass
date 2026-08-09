@@ -1,5 +1,11 @@
 # Scryglass changelog
 
+## 2026-08-09
+
+- Public scope reduced to team ratings, player ratings, champion tier lists, and methodology.
+- Tier lists now use one pooled board per patch and role.
+- Public data reduced to small cached ranking files with a six-hour refresh target.
+
 ## 2026-07-25
 
 - Public Dual Elo ladders with Trust (Settled / Thin), league chips, player profiles.

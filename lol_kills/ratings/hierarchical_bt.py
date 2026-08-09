@@ -347,6 +347,7 @@ def fit_hierarchical_bt(
     cfg: HierarchicalBTConfig | None = None,
     as_of: pd.Timestamp | None = None,
     write: bool = True,
+    output_dir: Path | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Fit the current conservative ladder and optionally persist its snapshot."""
 
@@ -483,13 +484,14 @@ def fit_hierarchical_bt(
         "note": "Series-collapsed penalized MAP Bradley-Terry with explicit series identity (authoritative GRID series id when safe, stable game-level keys otherwise) and local Laplace uncertainty plus explicit uncertainty inflation for teams without international bridges; use rating_p10 for conservative rank.",
     }
     if write:
-        FEATURES_DIR.mkdir(parents=True, exist_ok=True)
-        snapshot.to_parquet(FEATURES_DIR / "ratings_hierarchical_snapshot.parquet", index=False)
+        destination = Path(output_dir or FEATURES_DIR)
+        destination.mkdir(parents=True, exist_ok=True)
+        snapshot.to_parquet(destination / "ratings_hierarchical_snapshot.parquet", index=False)
         # The hierarchical fit is the public ladder snapshot.  The sequential
         # benchmark remains available as ratings_dual_snapshot.parquet.
-        snapshot.to_parquet(FEATURES_DIR / "ratings_snapshot.parquet", index=False)
-        (FEATURES_DIR / "ratings_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        (FEATURES_DIR / "ratings_hierarchical_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        snapshot.to_parquet(destination / "ratings_snapshot.parquet", index=False)
+        (destination / "ratings_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        (destination / "ratings_hierarchical_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return snapshot, meta
 
 

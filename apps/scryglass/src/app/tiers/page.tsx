@@ -5,7 +5,7 @@ import styles from "./TiersPage.module.css";
 export const metadata = {
   title: "Role tier lists — Scryglass",
   description:
-    "Production champion tier lists by role, league level, matchup shape, and weekly rank movement.",
+    "Patch-wide champion tier lists by role across professional play.",
 };
 
 export default function TiersPage() {
@@ -15,28 +15,23 @@ export default function TiersPage() {
         <div>
           <h1>Role tier lists</h1>
           <p>
-            Every role has its own board. Blind tiers reward champions whose
-            weak matchups remain strong. Counter tiers reward champions that
-            beat the widest range of same-role picks after team-strength control.
+            Each patch pools eligible professional games across regions,
+            leagues, and tournaments. Every role has its own board.
           </p>
         </div>
         <div className={styles.provenance}>
           <span>all roles</span>
-          <span>Tier 1 to Tier 3</span>
-          <span>source-bound watermark</span>
+          <span>patch-wide pool</span>
+          <span>cached display file</span>
         </div>
       </header>
       <TierListExplorer />
       <footer className={styles.footer}>
         <p>
           Method:{" "}
-          <Link href="/methodology">methodology</Link> ·{" "}
-          <Link href="/reproduce">reproduce</Link> · Tier Value =
-          the champion-role value in the approved tier-list artifact. Played-only
-          means a champion must have verified appearances in the exact
-          league/event and role. The patch shown on each board is the latest
-          source watermark. Positive rank movement means a climb
-          from the previous artifact.
+          <Link href="/methodology">Read the method</Link>. A champion must have
+          verified appearances in the selected patch and role. Positive
+          movement means that the champion climbed since the prior update.
         </p>
       </footer>
     </main>

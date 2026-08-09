@@ -6,12 +6,17 @@ from typing import Any
 
 import pandas as pd
 
-from lol_kills.etl.competition import canonicalize_competition_frame, team_identity_key
+from lol_kills.etl.competition import (
+    TRANSPORT_LEAGUE_LABELS,
+    canonicalize_competition_frame,
+    source_league,
+    team_identity_key,
+)
 from lol_kills.etl.source_keys import canonical_source_game_key
 
 
 PUBLIC_TEAM_RATING_EXCLUSIONS = frozenset({"los-ratones"})
-INVALID_COMPETITION_LABELS = frozenset({"", "UNKNOWN", "ORACLE_ELIXIR_API", "OE_API"})
+INVALID_COMPETITION_LABELS = frozenset({"", "UNKNOWN", *TRANSPORT_LEAGUE_LABELS})
 PUBLIC_ROLE_ORDER = ("top", "jungle", "mid", "bot", "support")
 PUBLIC_ROLE_ALIASES = {
     "top": "top",
@@ -31,6 +36,17 @@ PUBLIC_ROLE_ALIASES = {
 
 def _wr(wins: int, games: int) -> float | None:
     return round(wins / games, 4) if games else None
+
+
+def public_team_affiliation(value: Any) -> str | None:
+    """Return a displayable team name under the public rating contract."""
+
+    if value is None or pd.isna(value):
+        return None
+    display = str(value).strip()
+    if not display or team_identity_key(display) in PUBLIC_TEAM_RATING_EXCLUSIONS:
+        return None
+    return display
 
 
 def build_maps_frame_from_team_games(team_games: pd.DataFrame) -> pd.DataFrame:
@@ -101,6 +117,10 @@ def filter_public_team_rating_maps(maps: pd.DataFrame) -> pd.DataFrame:
         return maps.copy()
     keep = ~maps[blue_column].map(team_identity_key).isin(PUBLIC_TEAM_RATING_EXCLUSIONS)
     keep &= ~maps[red_column].map(team_identity_key).isin(PUBLIC_TEAM_RATING_EXCLUSIONS)
+    if "league" in maps.columns:
+        keep &= ~maps["league"].map(source_league).isin(INVALID_COMPETITION_LABELS)
+    if "competition_tier" in maps.columns:
+        keep &= maps["competition_tier"].astype(str).ne("other")
     return maps.loc[keep].copy()
 
 
@@ -274,7 +294,7 @@ def build_player_records(players: pd.DataFrame) -> dict[str, dict[str, Any]]:
             "primary": primary,
             "current_league": primary,
             "current_tier": str(current_row["competition_tier"]) if current_row is not None else None,
-            "current_team": str(observed_row["teamname"]) if observed_row is not None and pd.notna(observed_row.get("teamname")) else None,
+            "current_team": public_team_affiliation(observed_row.get("teamname")) if observed_row is not None else None,
             "current_date": str(observed_row["date"]) if observed_row is not None else None,
             "intl": bool(group["is_international"].any()),
             "interregional": bool(group.get("is_interregional", pd.Series(dtype=bool)).any()),

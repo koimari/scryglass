@@ -815,9 +815,13 @@ def build_pooled_candidate(
         )
         patch_meta_counts[patch_meta["mapping_status"]] += 1
         resolution_counts[patch_meta["mapping_reason"]] += 1
+        patch_scope_id = f"patch:{patch_meta['oe_patch']}"
         prepared_game = dict(game)
         prepared_game.update(
             {
+                "scope_id": patch_scope_id,
+                "scope_kind": "patch",
+                "scope_label": f"Patch {patch_meta['oe_patch']}",
                 "stable_roles": stable_roles,
                 "weight": weight,
                 "team_logit": offset,
@@ -830,12 +834,12 @@ def build_pooled_candidate(
         prepared.append(prepared_game)
         for role in ROLES:
             for side in ("blue", "red"):
-                appearance_counts[(game["scope_id"], role)][stable_roles[role][side]] += 1
+                appearance_counts[(patch_scope_id, role)][stable_roles[role][side]] += 1
         observations.append(
             JointMapObservation(
                 map_id=str(game["game_id"]),
                 outcome=int(game["y_blue_win"]),
-                scope_id=str(game["scope_id"]),
+                scope_id=patch_scope_id,
                 oe_patch_id=str(patch_meta["oe_patch"]),
                 picks={role: (stable_roles[role]["blue"], stable_roles[role]["red"]) for role in ROLES},
                 atom_pair_features=atom_vectors,
@@ -875,11 +879,14 @@ def build_pooled_candidate(
         scope_games = scope_observations[scope_id]
         latest_game = max(scope_games, key=lambda game: (game["date"], game["game_id"]))
         patch_id = str(latest_game["oe_patch_id"])
-        # Tier cells describe the current patch. A league can have no game on
-        # the current patch while its present-day matchup shape remains
-        # evaluable from the audited atom snapshot. Historical game rows keep
-        # their own patch provenance in the fit and in the cell metadata.
-        exact_atom_patch = resolver.snapshot_patch if current_patch_verified else None
+        # Each board pools every eligible competition in one patch. Exact atom
+        # features remain available only when that patch has an audited mapping.
+        exact_atom_patch = (
+            patch_id
+            if mapping is not None
+            and any(game.get("atom_snapshot_patch") == patch_id for game in scope_games)
+            else None
+        )
         for role in ROLES:
             counts = appearance_counts[(scope_id, role)]
             champions = sorted(
@@ -928,20 +935,12 @@ def build_pooled_candidate(
                         "atom_patch_last_changed": (bridge.profile(row["champion_id"]) or {}).get("lcc_patch_last_changed"),
                     }
                 )
-            scope_kind = "international" if scope_id.startswith("event:") else "league"
-            if scope_kind == "international":
-                scope_label = str(scope_games[0]["scope_label"])
-                league = None
-                competition_tier = "international"
-                event_kind = scope_label.casefold()
-                region = "international"
-            else:
-                _, league_token, tier = scope_id.split(":", 2)
-                scope_label = league_token.upper()
-                league = scope_label
-                competition_tier = tier
-                event_kind = None
-                region = None
+            scope_kind = "patch"
+            scope_label = f"Patch {patch_id}"
+            league = None
+            competition_tier = None
+            event_kind = None
+            region = None
             cell = {
                 "scope_id": scope_id,
                 "scope_kind": scope_kind,
@@ -951,7 +950,7 @@ def build_pooled_candidate(
                 "event_kind": event_kind,
                 "competition_tier": competition_tier,
                 "role": role,
-                "patches": sorted({str(game["patch"]) for game in scope_games}),
+                "patches": [patch_id],
                 "oe_patches": sorted({str(game["oe_patch_id"]) for game in scope_games}),
                 "official_patches": sorted({str(game["official_patch"]) for game in scope_games if game.get("official_patch")}),
                 "atom_snapshot_patches": sorted({str(game["atom_snapshot_patch"]) for game in scope_games if game.get("atom_snapshot_patch")})
@@ -1053,21 +1052,18 @@ def build_pooled_candidate(
         "stability": stability,
         "current_patch_verified": current_patch_verified,
         "options": {
-            "leagues": sorted({cell["league"] for cell in cells if cell["league"]}),
-            "event_kinds": sorted({cell["event_kind"] for cell in cells if cell["event_kind"]}),
-            "competition_tiers": sorted({cell["competition_tier"] for cell in cells if cell["competition_tier"]}),
             "roles": list(ROLES),
             "patches": sorted({patch for cell in cells for patch in cell["patches"]}),
             "tier_buckets": list(TIER_BUCKETS),
         },
         "rating_method": {
-            "name": "joint five-role pooled map likelihood with pre-map team Elo control",
+            "name": "patch-wide joint five-role pooled map likelihood with pre-map team Elo control",
             "initial_rating": INITIAL_RATING,
             "team_k": TEAM_K,
             "recency_half_life_days": RECENCY_HALF_LIFE_DAYS,
             "fit": "penalized maximum a posteriori with full observed-Hessian diagonal Laplace covariance",
             "fit_coordinates": "sparse reference-coded joint map rows",
-            "update_order": "team control is chronological; the champion posterior uses every completed map once",
+            "update_order": "team control is chronological; each patch board pools every eligible completed map once across leagues and events",
             "maximum_supported_strength_contrast_sd": STRENGTH_MAX_CONTRAST_SD,
             "rating_claim": "standardized descriptive paired-comparison strength; not an outcome-calibrated probability",
         },

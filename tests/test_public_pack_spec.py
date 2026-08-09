@@ -1,31 +1,35 @@
 import pyarrow as pa
+import pytest
 
 from lol_kills.export import pack_spec
-from lol_kills.export.public_pack import _ensure_year_column, _filter_years
+from lol_kills.export.pack_records import public_team_affiliation
+from lol_kills.export.public_pack import (
+    _ensure_year_column,
+    _filter_years,
+    _validate_public_record_tiers,
+    source_identity_sha256,
+)
 
 
-def test_public_pack_does_not_pin_unreviewed_draft_artifacts() -> None:
-    assert set(pack_spec.PINNED_MODEL_FILES).isdisjoint(pack_spec.WITHHELD_MODEL_FILES)
-    assert "draft_wr_calibration.json" not in pack_spec.PINNED_MODEL_FILES
-    assert "draft_recommendation.json" not in pack_spec.PINNED_MODEL_FILES
+def test_public_pack_contains_only_rating_display_files() -> None:
+    assert set(pack_spec.PUBLIC_RATING_REQUIRED_FILES) == {
+        "features/ratings_snapshot.json",
+        "features/player_ratings_snapshot.json",
+        "features/team_records.json",
+        "features/team_weekly_ranks.json",
+        "features/player_records.json",
+        "features/player_weekly_ranks.json",
+        "features/player_metadata.json",
+    }
 
 
-def test_pack_readme_declares_withheld_draft_artifacts() -> None:
-    assert "Draft Score calibration" in pack_spec.PACK_README
-
-
-def test_public_reproduction_contract_cites_only_available_public_inputs() -> None:
-    required = set(pack_spec.PUBLIC_REPRODUCTION_REQUIRED_FILES)
-    assert "features/major_teams.json" not in required
-    assert "studies/grubs/void_grubs_scrap_value_and_contest_rationality.pdf" in required
-    assert required.isdisjoint(pack_spec.WITHHELD_PUBLIC_FILES)
-
-
-def test_public_pack_withholds_draft_context_as_well_as_draft_models() -> None:
-    assert "features/draft_context.json" in pack_spec.WITHHELD_PUBLIC_FILES
-    assert set(pack_spec.WITHHELD_MODEL_FILES).issubset(
-        {path.rsplit("/", 1)[-1] for path in pack_spec.WITHHELD_PUBLIC_FILES}
-    )
+def test_public_pack_withholds_raw_rows_models_and_studies() -> None:
+    forbidden = set(pack_spec.FORBIDDEN_PUBLIC_MODEL_FILES)
+    assert "models/" in forbidden
+    assert "studies/" in forbidden
+    assert "team_games/" in forbidden
+    assert "player_games/" in forbidden
+    assert "maps/" in forbidden
 
 
 def test_live_map_overlay_gets_partition_year_from_date() -> None:
@@ -55,3 +59,40 @@ def test_live_overlay_prefers_normalized_oe_year_when_columns_disagree() -> None
         "year": [2025, 2025],
         "oe_year": [2025, 2026],
     }
+
+
+def test_source_identity_digest_is_canonical_order_independent() -> None:
+    left = source_identity_sha256(["oe-api:game-2", "game-1", "oe-api:game-1"])
+    right = source_identity_sha256(["game-1", "game-2"])
+    assert left == right
+
+
+def test_excluded_team_has_no_public_affiliation() -> None:
+    assert public_team_affiliation("Los Ratones") is None
+    assert public_team_affiliation("Gen.G") == "Gen.G"
+
+
+def test_public_record_tier_must_match_the_canonical_league() -> None:
+    _validate_public_record_tiers(
+        {"Gen.G": {"leagues": ["LCK"], "current_league": "LCK", "current_tier": "tier1"}},
+        label="team",
+    )
+    with pytest.raises(RuntimeError, match="inconsistent league tier"):
+        _validate_public_record_tiers(
+            {"Gen.G": {"leagues": ["LCK"], "current_league": "LCK", "current_tier": "tier3"}},
+            label="team",
+        )
+
+
+def test_public_record_rejects_transport_label_as_a_league() -> None:
+    with pytest.raises(RuntimeError, match="transport label"):
+        _validate_public_record_tiers(
+            {
+                "Gen.G": {
+                    "leagues": ["ORACLE_ELIXIR_API"],
+                    "current_league": "ORACLE_ELIXIR_API",
+                    "current_tier": "tier3",
+                }
+            },
+            label="team",
+        )

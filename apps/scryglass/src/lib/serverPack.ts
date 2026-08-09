@@ -2,10 +2,13 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { packUrl, type PackManifest } from "./pack";
 
-const localManifestPath = path.join(process.cwd(), "public", "packs", "manifest.json");
+function localPackRoot(): string {
+  const configured = process.env.SCRYGLASS_PACK_ROOT?.trim();
+  return configured ? path.resolve(configured) : path.join(process.cwd(), "public", "packs");
+}
 
 async function readLocalManifest(): Promise<PackManifest> {
-  return JSON.parse(await fs.readFile(localManifestPath, "utf8")) as PackManifest;
+  return JSON.parse(await fs.readFile(path.join(localPackRoot(), "manifest.json"), "utf8")) as PackManifest;
 }
 
 function liveManifestUrl(local: PackManifest): string | null {
@@ -25,10 +28,7 @@ export async function readPackManifest(): Promise<PackManifest> {
   if (!remoteUrl) return local;
 
   try {
-    // Blob overwrites can take up to a minute to propagate. A minute-bucketed
-    // query avoids a browser/CDN holding yesterday's pointer indefinitely.
-    const bucket = Math.floor(Date.now() / 60_000);
-    const response = await fetch(`${remoteUrl}?v=${bucket}`, { cache: "no-store" });
+    const response = await fetch(remoteUrl, { next: { revalidate: 21_600 } });
     if (response.ok) {
       const remote = (await response.json()) as PackManifest;
       if (remote.pack_id && remote.base_url) return remote;
@@ -43,13 +43,15 @@ export async function readPackManifest(): Promise<PackManifest> {
 export async function readPackJson<T>(manifest: PackManifest, relativePath: string): Promise<T> {
   if (manifest.base_url?.startsWith("http")) {
     try {
-      const response = await fetch(packUrl(manifest, relativePath), { cache: "no-store" });
+      const response = await fetch(packUrl(manifest, relativePath), {
+        next: { revalidate: 21_600 },
+      });
       if (response.ok) return (await response.json()) as T;
     } catch {
       // The local-only publication path remains useful when Blob is unavailable.
     }
   }
 
-  const localPath = path.join(process.cwd(), "public", "packs", manifest.pack_id, relativePath);
+  const localPath = path.join(localPackRoot(), manifest.pack_id, relativePath);
   return JSON.parse(await fs.readFile(localPath, "utf8")) as T;
 }
