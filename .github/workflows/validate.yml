@@ -40,8 +40,16 @@ jobs:
           node -e '
             const pkg = require("./package.json");
             const script = (pkg.scripts && pkg.scripts.test) || "";
-            const nodeForm = /^node --import tsx --test /.test(script);
-            const ipcForm = /(^|\s)tsx(\s|$)/.test(script);
+            const tokens = script.split(/\s+/).filter(Boolean);
+            const commands = [tokens[0], ...script
+              .split(/&&|\|\|/)
+              .map((part) => part.split(/\s+/).filter(Boolean)[0])
+              .filter(Boolean)
+              .map((first) => first.replace(/^npx\s+/, ""))];
+            const nodeForm = tokens[0] === "node" &&
+              tokens.includes("--import") && tokens[tokens.indexOf("--import") + 1] === "tsx" &&
+              tokens.includes("--test");
+            const ipcForm = commands.some((command) => command === "tsx");
             if (!nodeForm || ipcForm) {
               console.error("test script regressed to the tsx CLI IPC-listener form (listen EPERM failure mode):");
               console.error("  script = " + JSON.stringify(script));
