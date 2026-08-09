@@ -319,7 +319,7 @@ def _copy_tree(source: Path, destination: Path) -> None:
             raise link_error
 
 
-def _prepare_runtime_root() -> Path:
+def _prepare_runtime_root(*, include_baseline_pack: bool = True) -> Path:
     """Copy writable model inputs into Vercel's temporary filesystem."""
 
     root = Path(tempfile.mkdtemp(prefix="scryglass-tier-refresh-", dir="/tmp"))
@@ -344,16 +344,17 @@ def _prepare_runtime_root() -> Path:
         latest_destination = root / PACK_LATEST
         latest_destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(latest_source, latest_destination)
-        latest = json.loads(latest_source.read_text(encoding="utf-8"))
-        pack_id = _safe_pack_id(latest.get("pack_id"))
-        pack_source = PROJECT_ROOT / PACKS_ROOT / pack_id
-        _copy_tree(pack_source, root / PACKS_ROOT / pack_id)
+        if include_baseline_pack:
+            latest = json.loads(latest_source.read_text(encoding="utf-8"))
+            pack_id = _safe_pack_id(latest.get("pack_id"))
+            pack_source = PROJECT_ROOT / PACKS_ROOT / pack_id
+            _copy_tree(pack_source, root / PACKS_ROOT / pack_id)
 
-        # The restore step reads the manifest only to bind the pack receipt.
-        # Keep the current pointer and its selected immutable pack together.
-        manifest_source = PROJECT_ROOT / PACKS_ROOT / "manifest.json"
-        if manifest_source.is_file():
-            shutil.copy2(manifest_source, root / PACKS_ROOT / "manifest.json")
+            # The restore step reads the manifest only to bind the pack receipt.
+            # Keep the current pointer and its selected immutable pack together.
+            manifest_source = PROJECT_ROOT / PACKS_ROOT / "manifest.json"
+            if manifest_source.is_file():
+                shutil.copy2(manifest_source, root / PACKS_ROOT / "manifest.json")
 
         (root / "apps/scryglass/public/v2/tierlists/production").mkdir(
             parents=True, exist_ok=True
@@ -1229,7 +1230,7 @@ def _publish_public_pack(runtime_root: Path, *, run_id: str) -> dict[str, Any]:
 def _run_refresh() -> dict[str, Any]:
     started = time.monotonic()
     print("[tier-refresh] phase=prepare start", flush=True)
-    runtime_root = _prepare_runtime_root()
+    runtime_root = _prepare_runtime_root(include_baseline_pack=False)
     print(f"[tier-refresh] phase=prepare done seconds={time.monotonic() - started:.1f}", flush=True)
     expected = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex}"
@@ -1247,10 +1248,16 @@ def _run_refresh() -> dict[str, Any]:
         lease = _RefreshLease()
         lease.acquire()
         print("[tier-refresh] phase=lease acquired", flush=True)
-        from lol_kills.etl.restore_oe_pack_baseline import restore_baseline
-
-        baseline = restore_baseline(runtime_root)
-        print("[tier-refresh] phase=baseline restored", flush=True)
+        latest = json.loads(
+            (runtime_root / PACK_LATEST).read_text(encoding="utf-8")
+        )
+        baseline = {
+            "pack_id": latest.get("pack_id"),
+            "source_latest": None,
+            "player_rows": None,
+            "team_rows": None,
+        }
+        print("[tier-refresh] phase=baseline pointer read", flush=True)
         source_manifest = _download_source_bundle(runtime_root)
         print(
             "[tier-refresh] phase=source bundle restored "
