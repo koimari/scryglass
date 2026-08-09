@@ -143,15 +143,19 @@ def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[s
 
 
 def _authorized(handler: BaseHTTPRequestHandler) -> bool:
-    expected = (
-        os.environ.get("SCRYGLASS_TIERLIST_INGEST_TOKEN")
-        or os.environ.get("CRON_SECRET")
-        or ""
-    ).strip()
     supplied = handler.headers.get("Authorization", "")
-    if not expected or not supplied.startswith("Bearer "):
+    if not supplied.startswith("Bearer "):
         return False
-    return hmac.compare_digest(supplied[7:].strip(), expected)
+    presented = supplied[7:].strip()
+    expected_values = {
+        value.strip()
+        for value in (
+            os.environ.get("SCRYGLASS_TIERLIST_INGEST_TOKEN", ""),
+            os.environ.get("CRON_SECRET", ""),
+        )
+        if value.strip()
+    }
+    return any(hmac.compare_digest(presented, expected) for expected in expected_values)
 
 
 def _safe_pack_id(value: object) -> str:
