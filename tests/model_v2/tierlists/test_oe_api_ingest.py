@@ -20,14 +20,50 @@ from lol_kills.etl.oe_api_ingest import (
 
 
 def _full_detail() -> dict:
-    return {
-        team_key: {
+    detail = {"metadata": {"gameDuration": 1800}}
+    for side, team_key in (("blue", "blueTeam"), ("red", "redTeam")):
+        detail[team_key] = {
             "players": {
-                role: {"name": f"{side}-{role}"}
-                for role in ("top", "jng", "mid", "bot", "sup")
+                role: {
+                    "name": f"{side}-{role}",
+                    "playerId": f"id-{side}-{role}",
+                    "kills": role_index + 1,
+                    "deaths": 2,
+                    "assists": 8,
+                    "teamKills": 15,
+                    "dpm": 400 + role_index * 50,
+                    "goldEarned": 9000 + role_index * 500,
+                    "cspm": 6 + role_index * 0.25,
+                    "wpm": 0.4 + role_index * 0.05,
+                    "wcpm": 0.2 + role_index * 0.02,
+                    "gxd10": (1 if side == "blue" else -1) * role_index * 40,
+                }
+                for role_index, role in enumerate(("top", "jng", "mid", "bot", "sup"))
             }
         }
-        for side, team_key in (("blue", "blueTeam"), ("red", "redTeam"))
+    return detail
+
+
+def _receipt_stats() -> dict:
+    detail = _full_detail()
+    return {
+        side: {
+            role: {
+                "player_id": player["playerId"],
+                "kills": player["kills"],
+                "deaths": player["deaths"],
+                "assists": player["assists"],
+                "teamkills": player["teamKills"],
+                "dpm": player["dpm"],
+                "totalgold": player["goldEarned"],
+                "cspm": player["cspm"],
+                "wpm": player["wpm"],
+                "wcpm": player["wcpm"],
+                "golddiffat10": player["gxd10"],
+            }
+            for role, player in detail[f"{side}Team"]["players"].items()
+        }
+        for side in ("blue", "red")
     }
 
 
@@ -44,6 +80,8 @@ def test_cached_full_games_rehydrates_complete_player_details(tmp_path: Path) ->
                             side: {role: f"{side}-{role}" for role in ("top", "jng", "mid", "bot", "sup")}
                             for side in ("blue", "red")
                         },
+                        "game_duration": 1800,
+                        "player_stats": _receipt_stats(),
                     },
                     {
                         "oe_game_id": "game-incomplete",
@@ -60,6 +98,8 @@ def test_cached_full_games_rehydrates_complete_player_details(tmp_path: Path) ->
     assert sorted(cached) == ["game-complete"]
     assert cached["game-complete"]["blueTeam"]["players"]["mid"]["name"] == "blue-mid"
     assert cached["game-complete"]["redTeam"]["players"]["sup"]["name"] == "red-sup"
+    assert cached["game-complete"]["blueTeam"]["players"]["mid"]["kills"] == 3
+    assert cached["game-complete"]["metadata"]["gameDuration"] == 1800
 
 
 def test_cached_full_games_ignores_wrong_receipt_schema(tmp_path: Path) -> None:
@@ -186,7 +226,13 @@ def test_rows_from_games_writes_canonical_game_ids_and_source_league() -> None:
     assert set(team["game_uid"]) == {"oe:game:1"}
     assert set(player["gameid"]) == {"oe:game:1"}
     assert set(player["league"]) == {"LCK"}
+    assert player["kills"].notna().all()
+    assert player["deaths"].notna().all()
+    assert player["assists"].notna().all()
+    assert player["damageshare"].notna().all()
+    assert player.groupby("side")["damageshare"].sum().round(6).eq(1).all()
     assert accepted[0]["game_id"] == "oe:game:1"
+    assert accepted[0]["player_stats"]["blue"]["mid"]["kills"] == 3
 
 
 def test_rows_from_games_rejects_a_game_without_named_player_details() -> None:
@@ -216,3 +262,41 @@ def test_rows_from_games_rejects_a_game_without_named_player_details() -> None:
             start=pd.Timestamp("2026-08-01T00:00:00Z"),
             end=pd.Timestamp("2026-08-09T00:00:00Z"),
         )
+
+
+def test_rows_from_games_accepts_missing_optional_gold_difference() -> None:
+    game = {
+        "oeGameId": "oe:game:1",
+        "gameCreation": "2026-08-08T00:00:00Z",
+        "side": "blue",
+        "ownId": "Blue Team",
+        "opponentTeam": "Red Team",
+        "result": 1,
+        "tournament": "LCK 2026",
+        **{
+            f"{side}{role}": f"{side}-{role}"
+            for side in ("blue", "red")
+            for role in ("top", "jng", "mid", "bot", "sup")
+        },
+    }
+    detail = _full_detail()
+    detail["blueTeam"]["players"]["top"]["gxd10"] = None
+    tournaments = [{
+        "tournament_id": "LCK/2026",
+        "tournament_name": "LCK 2026",
+        "league": "LCK",
+        "competition_tier": "tier1",
+        "event_kind": None,
+    }]
+
+    _, players, accepted = _rows_from_games(
+        [game],
+        tournaments=tournaments,
+        full_games={"oe:game:1": detail},
+        start=pd.Timestamp("2026-08-01T00:00:00Z"),
+        end=pd.Timestamp("2026-08-09T00:00:00Z"),
+    )
+
+    assert len(accepted) == 1
+    assert pd.isna(players.loc[(players["side"] == "Blue") & (players["position"] == "top"), "golddiffat10"]).all()
+    assert players[["kills", "deaths", "assists", "dpm", "totalgold"]].notna().all().all()

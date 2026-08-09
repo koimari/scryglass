@@ -24,6 +24,7 @@ from lol_kills.etl.oe_live_source import build_live_source
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.export import pack_spec
 from lol_kills.export.public_pack import export_public_pack, source_identity_sha256
+from lol_kills.ratings.player_map_grades import CORE_INPUTS
 
 
 RAW_RECEIPT = Path("data/lol/warehouse/raw/oe_api/tierlist-live-v1.json")
@@ -137,7 +138,10 @@ def validate_live_source(root: Path, new_game_ids: Sequence[str]) -> dict[str, A
         raise RefreshValidationError("new game identities are empty or duplicated")
     maps = _identity_frame(root / LIVE_MAPS)
     teams = _identity_frame(root / LIVE_TEAMS, ("side", "result", "teamname"))
-    players = _identity_frame(root / LIVE_PLAYERS, ("side", "position", "playername"))
+    players = _identity_frame(
+        root / LIVE_PLAYERS,
+        ("side", "position", "playername", *CORE_INPUTS),
+    )
     roles = {"top", "jng", "mid", "bot", "sup"}
     for game_id in sorted(requested):
         map_rows = maps[maps["_game_id"].eq(game_id)]
@@ -155,10 +159,24 @@ def validate_live_source(root: Path, new_game_ids: Sequence[str]) -> dict[str, A
         names = player_rows["playername"].astype("string").fillna("").str.strip()
         if names.eq("").any() or names.nunique() != 10:
             raise RefreshValidationError(f"game {game_id} has malformed player identities")
+        statistics = player_rows[list(CORE_INPUTS)].apply(pd.to_numeric, errors="coerce")
+        if statistics.isna().any().any():
+            raise RefreshValidationError(f"game {game_id} has incomplete player statistics")
+        nonnegative = (
+            "kills", "deaths", "assists", "teamkills", "dpm", "damageshare",
+            "totalgold", "cspm", "wpm", "wcpm",
+        )
+        if statistics[list(nonnegative)].lt(0).any().any() or statistics["gamelength"].le(0).any():
+            raise RefreshValidationError(f"game {game_id} has invalid player statistics")
+        if statistics["kills"].gt(statistics["teamkills"]).any() or statistics["damageshare"].gt(1).any():
+            raise RefreshValidationError(f"game {game_id} has invalid player statistics")
         for side in ("Blue", "Red"):
             side_rows = player_rows[player_rows["side"].astype(str).str.title().eq(side)]
             if len(side_rows) != 5 or set(side_rows["position"].astype(str).str.casefold()) != roles:
                 raise RefreshValidationError(f"game {game_id} has malformed {side} roles")
+            damage_share = pd.to_numeric(side_rows["damageshare"], errors="coerce").sum()
+            if abs(float(damage_share) - 1) > 1e-6:
+                raise RefreshValidationError(f"game {game_id} has malformed {side} damage share")
     all_ids = _canonical_ids(maps["_game_id"].tolist())
     if len(all_ids) != len(maps):
         raise RefreshValidationError("live maps are not one row per canonical game identity")
@@ -262,7 +280,7 @@ def sync_once(
             _atomic_json(config.state_path, {**state, **result, "published_game_ids": sorted(known | observed)})
             _write_health(config, "ok", checked_at, pack_id=result["pack_id"])
             return result
-        if source_meta.get("player_detail_complete") is not True:
+        if source_meta.get("player_statistics_complete") is not True:
             result = {"status": "waiting_for_details", "new_game_ids": new_ids, "pack_id": state.get("pack_id")}
             _atomic_json(config.state_path, {**state, **result, "published_game_ids": sorted(known), "pending_game_ids": new_ids})
             _write_health(config, "waiting_for_details", checked_at, new_game_ids=new_ids)

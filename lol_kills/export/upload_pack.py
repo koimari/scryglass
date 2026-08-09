@@ -121,6 +121,32 @@ def write_atlas_manifest(
     return out
 
 
+def write_vercel_pack_ignore(
+    pack_id: str,
+    *,
+    public_root: Path = ATLAS_PUBLIC,
+    ignore_path: Path | None = None,
+) -> Path:
+    """Keep old immutable packs out of the next app deployment."""
+
+    target = ignore_path or public_root.parents[1] / ".vercelignore"
+    existing = target.read_text(encoding="utf-8").splitlines() if target.is_file() else []
+    preserved = [
+        line
+        for line in existing
+        if not line.startswith("public/packs/")
+        and not line.startswith("!public/packs/")
+    ]
+    old_packs = sorted(
+        path.name
+        for path in public_root.iterdir()
+        if path.is_dir() and path.name != pack_id and path.name.startswith("v")
+    )
+    lines = [*preserved, *(f"public/packs/{value}/" for value in old_packs)]
+    target.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return target
+
+
 def publish_blob_pointers(
     token: str,
     pack_id: str,
@@ -201,6 +227,8 @@ def main(argv: list[str] | None = None) -> int:
         write_atlas_manifest(pack_id, manifest, base_url=f"/packs/{pack_id}")
         print(f"Copied → {dest}")
         print("Atlas manifest base_url=/packs/" + pack_id)
+
+    write_vercel_pack_ignore(pack_id)
 
     print("Done. Atlas reads public/packs/manifest.json")
     return 0

@@ -665,8 +665,8 @@ def export_public_pack(
             "gameid", "game_uid", "date", "year", "oe_year", "league",
             "league_source", "tournament", "result", "side", "position",
             "teamname", "playername", "champion", "kills", "deaths", "assists",
-            "teamkills", "gamelength", "dpm", "earned gpm", "damageshare",
-            "vspm", "golddiffat15", "xpdiffat15", "csdiffat15",
+            "teamkills", "gamelength", "dpm", "damageshare", "totalgold",
+            "cspm", "wpm", "wcpm", "golddiffat10",
         ),
         player_available,
     )

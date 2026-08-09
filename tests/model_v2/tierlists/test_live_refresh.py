@@ -57,6 +57,18 @@ def test_live_source_excludes_games_with_missing_or_duplicate_player_names() -> 
                         "side": side,
                         "position": role,
                         "playername": name,
+                        "kills": 2,
+                        "deaths": 2,
+                        "assists": 8,
+                        "teamkills": 15,
+                        "gamelength": 1800,
+                        "dpm": 500,
+                        "damageshare": 0.2,
+                        "totalgold": 10000,
+                        "cspm": 7,
+                        "wpm": 0.5,
+                        "wcpm": 0.25,
+                        "golddiffat10": 0,
                     }
                 )
 
@@ -151,7 +163,7 @@ def test_oe_only_skips_grid_and_can_be_ready_from_a_complete_oe_source(tmp_path:
     meta_path = tmp_path / "data/lol/warehouse/parquet/oe_api_meta.json"
     meta_path.parent.mkdir(parents=True)
     meta_path.write_text(
-        json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_detail_complete": True}),
+        json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_statistics_complete": True}),
         encoding="utf-8",
     )
     with patch.object(live_refresh, "_run_step", return_value=oe_step) as run_step, patch.object(
@@ -193,7 +205,7 @@ def test_oe_plus_grid_keeps_the_grid_step_available(tmp_path: Path) -> None:
     meta_path = tmp_path / "data/lol/warehouse/parquet/oe_api_meta.json"
     meta_path.parent.mkdir(parents=True)
     meta_path.write_text(
-        json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_detail_complete": True}),
+        json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_statistics_complete": True}),
         encoding="utf-8",
     )
     with patch.object(live_refresh, "_run_step", side_effect=steps) as run_step, patch.object(
@@ -226,7 +238,7 @@ def test_skip_annual_oe_uses_the_committed_pack_baseline(tmp_path: Path) -> None
     meta_path = tmp_path / "data/lol/warehouse/parquet/oe_api_meta.json"
     meta_path.parent.mkdir(parents=True)
     meta_path.write_text(
-        json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_detail_complete": True}),
+        json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_statistics_complete": True}),
         encoding="utf-8",
     )
     with patch.object(live_refresh, "_run_step", side_effect=steps) as run_step, patch.object(
@@ -258,7 +270,7 @@ def test_promote_runs_evaluation_authority_and_bundle_after_source_refresh(tmp_p
     meta_path = tmp_path / "data/lol/warehouse/parquet/oe_api_meta.json"
     meta_path.parent.mkdir(parents=True)
     meta_path.write_text(
-        json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_detail_complete": True}),
+        json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_statistics_complete": True}),
         encoding="utf-8",
     )
     with patch.object(live_refresh, "_run_step", side_effect=steps) as run_step, patch.object(
@@ -298,7 +310,7 @@ def test_promote_stays_blocked_when_blob_publication_is_not_configured(tmp_path:
     meta_path = tmp_path / "data/lol/warehouse/parquet/oe_api_meta.json"
     meta_path.parent.mkdir(parents=True)
     meta_path.write_text(
-        json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_detail_complete": True}),
+        json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_statistics_complete": True}),
         encoding="utf-8",
     )
     with patch.dict(live_refresh.os.environ, {}, clear=True), patch.object(

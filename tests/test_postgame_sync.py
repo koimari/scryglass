@@ -36,12 +36,17 @@ def _write_receipt(root: Path, game_ids: list[str]) -> None:
 def _ingest(root: Path, game_ids: list[str], complete: bool = True):
     def run(*_args, **_kwargs):
         _write_receipt(root, game_ids)
-        return {"player_detail_complete": complete, "source_latest": "2026-08-09T17:00:00Z"}
+        return {"player_statistics_complete": complete, "source_latest": "2026-08-09T17:00:00Z"}
 
     return run
 
 
-def _write_live(root: Path, game_id: str, missing_player: bool = False) -> None:
+def _write_live(
+    root: Path,
+    game_id: str,
+    missing_player: bool = False,
+    missing_statistics: bool = False,
+) -> None:
     live = root / "data/lol/warehouse/parquet/oe_live"
     live.mkdir(parents=True, exist_ok=True)
     pd.DataFrame([{"game_uid": game_id}]).to_parquet(live / "maps.parquet", index=False)
@@ -53,13 +58,32 @@ def _write_live(root: Path, game_id: str, missing_player: bool = False) -> None:
     ).to_parquet(live / "oe_team_games.parquet", index=False)
     players = pd.DataFrame(
         [
-            {"game_uid": game_id, "side": side, "position": role, "playername": f"{side}-{role}"}
+            {
+                "game_uid": game_id,
+                "side": side,
+                "position": role,
+                "playername": f"{side}-{role}",
+                "kills": role_index + 1,
+                "deaths": 2,
+                "assists": 8,
+                "teamkills": 15,
+                "gamelength": 1800,
+                "dpm": 400 + role_index * 50,
+                "damageshare": (400 + role_index * 50) / 2500,
+                "totalgold": 9000 + role_index * 500,
+                "cspm": 6 + role_index * 0.25,
+                "wpm": 0.4 + role_index * 0.05,
+                "wcpm": 0.2 + role_index * 0.02,
+                "golddiffat10": (1 if side == "Blue" else -1) * role_index * 40,
+            }
             for side in ("Blue", "Red")
-            for role in ("top", "jng", "mid", "bot", "sup")
+            for role_index, role in enumerate(("top", "jng", "mid", "bot", "sup"))
         ]
     )
     if missing_player:
         players = players.iloc[:-1]
+    if missing_statistics:
+        players.loc[players.index[0], "kills"] = pd.NA
     players.to_parquet(live / "oe_player_games.parquet", index=False)
 
 
@@ -134,6 +158,12 @@ def test_complete_new_game_publishes_manifest_last(tmp_path: Path) -> None:
 def test_live_validation_rejects_incomplete_players(tmp_path: Path) -> None:
     _write_live(tmp_path, "game-2", missing_player=True)
     with pytest.raises(RefreshValidationError, match="malformed rows"):
+        validate_live_source(tmp_path, ["game-2"])
+
+
+def test_live_validation_rejects_incomplete_player_statistics(tmp_path: Path) -> None:
+    _write_live(tmp_path, "game-2", missing_statistics=True)
+    with pytest.raises(RefreshValidationError, match="incomplete player statistics"):
         validate_live_source(tmp_path, ["game-2"])
 
 

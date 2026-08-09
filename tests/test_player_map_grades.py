@@ -33,12 +33,12 @@ def _grade_rows() -> pd.DataFrame:
                         "teamkills": 15,
                         "gamelength": 1800,
                         "dpm": 500 + 25 * variation + 120 * lift,
-                        "earned gpm": 300 + 8 * variation + 30 * lift,
                         "damageshare": 0.2 + 0.008 * variation + 0.025 * lift,
-                        "vspm": 1.1 + 0.03 * variation + 0.08 * lift,
-                        "golddiffat15": sign * variation * 80 + 500 * lift,
-                        "xpdiffat15": sign * variation * 70 + 450 * lift,
-                        "csdiffat15": sign * variation + 8 * lift,
+                        "totalgold": 10000 + 240 * variation + 900 * lift,
+                        "cspm": 7 + 0.15 * variation + 0.3 * lift,
+                        "wpm": 0.5 + 0.02 * variation + 0.04 * lift,
+                        "wcpm": 0.25 + 0.01 * variation + 0.03 * lift,
+                        "golddiffat10": sign * variation * 60 + 350 * lift,
                         "result": 1 if side == "Blue" else 0,
                     }
                 )

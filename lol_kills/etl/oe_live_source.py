@@ -13,6 +13,7 @@ import pandas as pd
 from lol_kills.export.pack_records import build_maps_frame_from_team_games
 from lol_kills.etl.paths import PARQUET_DIR
 from lol_kills.etl.source_keys import canonical_source_game_key
+from lol_kills.ratings.player_map_grades import CORE_INPUTS
 
 LIVE_ROOT = PARQUET_DIR / "oe_live"
 LIVE_PLAYER_OUTPUT = LIVE_ROOT / "oe_player_games.parquet"
@@ -74,9 +75,10 @@ def _game_keys(frame: pd.DataFrame) -> pd.Series:
 
 
 def _complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
-    """Return games with ten distinct named players and five roles per side."""
+    """Return games with complete identities, roles, and public statistics."""
 
-    if frame.empty or not {"side", "position", "playername"}.issubset(frame.columns):
+    required = {"side", "position", "playername", *CORE_INPUTS}
+    if frame.empty or not required.issubset(frame.columns):
         return set()
     work = frame.copy()
     work["_source_game_key"] = _game_keys(work)
@@ -92,6 +94,7 @@ def _complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
             or len(names) != 10
             or names.str.casefold().isin(placeholders).any()
             or names.str.casefold().nunique() != 10
+            or group[list(CORE_INPUTS)].apply(pd.to_numeric, errors="coerce").isna().any().any()
         ):
             continue
         complete = True

@@ -10,7 +10,7 @@ import pandas as pd
 from lol_kills.etl.source_keys import canonical_source_game_key
 
 
-GRADE_CONTRACT = "scryglass:player-map-grade:v1"
+GRADE_CONTRACT = "scryglass:player-map-grade:v2"
 ROLE_ALIASES = {
     "top": "top",
     "jng": "jungle",
@@ -28,23 +28,21 @@ CORE_INPUTS = (
     "teamkills",
     "gamelength",
     "dpm",
-    "earned gpm",
     "damageshare",
-    "vspm",
-    "golddiffat15",
-    "xpdiffat15",
-    "csdiffat15",
+    "totalgold",
+    "cspm",
+    "wpm",
+    "wcpm",
 )
 METRICS = (
     "kill_participation",
     "survival",
     "damage_per_minute",
-    "earned_gold_per_minute",
+    "gold_per_minute",
     "damage_share",
-    "vision_per_minute",
-    "gold_diff_15",
-    "xp_diff_15",
-    "cs_diff_15",
+    "creep_score_per_minute",
+    "wards_per_minute",
+    "ward_clears_per_minute",
 )
 
 
@@ -147,12 +145,11 @@ def compute_player_map_grades(players: pd.DataFrame) -> pd.DataFrame:
     frame["kill_participation"] = ((frame["kills"] + frame["assists"]) / team_kills).clip(0, 1.5)
     frame["survival"] = -(frame["deaths"] * 1800 / duration)
     frame["damage_per_minute"] = frame["dpm"]
-    frame["earned_gold_per_minute"] = frame["earned gpm"]
+    frame["gold_per_minute"] = frame["totalgold"] * 60 / duration
     frame["damage_share"] = frame["damageshare"]
-    frame["vision_per_minute"] = frame["vspm"]
-    frame["gold_diff_15"] = frame["golddiffat15"] / 1000
-    frame["xp_diff_15"] = frame["xpdiffat15"] / 1000
-    frame["cs_diff_15"] = frame["csdiffat15"] / 10
+    frame["creep_score_per_minute"] = frame["cspm"]
+    frame["wards_per_minute"] = frame["wpm"]
+    frame["ward_clears_per_minute"] = frame["wcpm"]
 
     metric_z: list[str] = []
     baseline_counts: list[pd.Series] = []

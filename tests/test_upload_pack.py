@@ -1,11 +1,37 @@
 import json
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from lol_kills.export import upload_pack
 
 
 class UploadPackTests(unittest.TestCase):
+    def test_vercel_ignore_keeps_only_older_pack_directories(self) -> None:
+        with TemporaryDirectory() as temporary:
+            app_root = Path(temporary) / "app"
+            public_root = app_root / "public/packs"
+            public_root.mkdir(parents=True)
+            for pack_id in ("v1", "v2"):
+                (public_root / pack_id).mkdir()
+            ignore = app_root / ".vercelignore"
+            ignore.write_text(
+                "custom-private-path/\npublic/packs/*\n!public/packs/manifest.json\n",
+                encoding="utf-8",
+            )
+
+            upload_pack.write_vercel_pack_ignore(
+                "v2",
+                public_root=public_root,
+                ignore_path=ignore,
+            )
+
+            self.assertEqual(
+                ignore.read_text(encoding="utf-8").splitlines(),
+                ["custom-private-path/", "public/packs/v1/"],
+            )
+
     def test_publish_blob_pointers_uses_stable_overwritable_paths(self) -> None:
         manifest = {
             "pack_id": "v2026.07.26.1700",

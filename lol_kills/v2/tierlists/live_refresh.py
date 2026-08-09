@@ -448,13 +448,13 @@ def _api_source_latest(root: Path) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _api_player_detail_complete(root: Path) -> bool:
+def _api_player_statistics_complete(root: Path) -> bool:
     path = root / "data/lol/warehouse/parquet/oe_api_meta.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return False
-    return payload.get("player_detail_complete") is True
+    return payload.get("player_statistics_complete") is True
 
 
 def _previous_week_start(value: str) -> pd.Timestamp:
@@ -590,7 +590,7 @@ def refresh_candidate(
                 ],
                 source="ratings",
             )
-            if live_source_step["completed"] and _api_player_detail_complete(root)
+            if live_source_step["completed"] and _api_player_statistics_complete(root)
             else _skipped_step("ratings", "oe_player_detail_incomplete")
         )
         if source_mode == "oe_plus_grid":
