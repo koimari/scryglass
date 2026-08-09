@@ -681,8 +681,12 @@ def _run_refresh() -> dict[str, Any]:
         print("[tier-refresh] phase=receipt published", flush=True)
         if receipt.get("status") != "production_promoted":
             raise RuntimeError(f"tier refresh did not promote: {receipt.get('status')}")
-        pack_publication = _publish_public_pack(runtime_root, run_id=run_id)
-        print(f"[tier-refresh] phase=pack published seconds={time.monotonic() - started:.1f}", flush=True)
+        pack_publication = {
+            "status": "scheduled",
+            "route": "/api/cron/pack-refresh",
+            "schedule": "15 */6 * * *",
+        }
+        print(f"[tier-refresh] phase=pack deferred seconds={time.monotonic() - started:.1f}", flush=True)
         return {
             "status": "production_promoted",
             "run_id": run_id,
