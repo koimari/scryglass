@@ -68,7 +68,7 @@ def build_maps_frame_from_team_games(team_games: pd.DataFrame) -> pd.DataFrame:
     if blue.empty or red.empty:
         return pd.DataFrame()
 
-    blue_columns = [c for c in ("_game_uid", "date", "league", "tournament", "result", "teamname") if c in blue.columns]
+    blue_columns = [c for c in ("_game_uid", "date", "league", "tournament", "result", "teamname", "grid_series_id") if c in blue.columns]
     red_columns = [c for c in ("_game_uid", "teamname") if c in red.columns]
     maps = blue[blue_columns].rename(
         columns={"_game_uid": "game_uid", "result": "y_blue_win", "teamname": "blue_team"}
@@ -81,6 +81,12 @@ def build_maps_frame_from_team_games(team_games: pd.DataFrame) -> pd.DataFrame:
     maps["date"] = pd.to_datetime(maps.get("date"), errors="coerce")
     maps["y_blue_win"] = pd.to_numeric(maps.get("y_blue_win"), errors="coerce")
     maps = maps.dropna(subset=["date", "y_blue_win", "blue_team", "red_team"])
+    # Carry the authoritative GRID series id through to the rating fit so the
+    # hierarchical ladder can group true series instead of falling back to
+    # derived keys (issue #44).  OE-only rows keep an empty id and remain
+    # game-level observations.
+    if "grid_series_id" in maps.columns:
+        maps["grid_series_id"] = maps["grid_series_id"].fillna("").astype(str).str.strip()
     return canonicalize_competition_frame(maps).sort_values("date").reset_index(drop=True)
 
 
