@@ -550,17 +550,11 @@ def fit_joint_pooled_model(
             raise JointPooledModelError("objective became non-finite during optimization")
         return value, gradient
 
-    def objective(beta: np.ndarray) -> float:
-        return objective_and_gradient(beta)[0]
-
-    def gradient(beta: np.ndarray) -> np.ndarray:
-        return objective_and_gradient(beta)[1]
-
     initial = np.zeros(n_parameters, dtype=float)
     result = minimize(
-        objective,
+        objective_and_gradient,
         initial,
-        jac=gradient,
+        jac=True,
         method="L-BFGS-B",
         options={
             "maxiter": max_iter,
@@ -1390,12 +1384,13 @@ def _pair_posteriors(
     design: sparse.csr_matrix,
 ) -> dict[str, Mapping[str, Any]]:
     posterior: dict[str, Mapping[str, Any]] = {}
+    pair_map_counts = np.diff(design.tocsc().indptr)
     for index, column in enumerate(columns):
         if column.family not in {"global_role_pair_residual", "scope_role_pair_residual"}:
             continue
         sd = math.sqrt(float(covariance_diagonal[index]))
         width = 1.96 * sd
-        count = int(np.count_nonzero(design[:, index].toarray().reshape(-1)))
+        count = int(pair_map_counts[index])
         posterior[column.name] = {
             "parameter": column.name,
             "scope_id": column.scope_id,
