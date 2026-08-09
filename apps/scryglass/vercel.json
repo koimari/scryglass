@@ -10,6 +10,12 @@
       "includeFiles": ".tier-worker/**",
       "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,fixtures/**,__fixtures__/**,testdata/**,sample-data/**}"
     },
+    "api/cron/tierlist-authority-refresh.py": {
+      "memory": 3009,
+      "maxDuration": 800,
+      "includeFiles": "{.tier-worker/**,api/cron/tierlist-refresh.py}",
+      "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,fixtures/**,__fixtures__/**,testdata/**,sample-data/**}"
+    },
     "api/cron/source-refresh.py": {
       "memory": 3009,
       "maxDuration": 800,
@@ -43,8 +49,12 @@
       "schedule": "30 */6 * * *"
     },
     {
-      "path": "/api/cron/pack-refresh",
+      "path": "/api/cron/tierlist-authority-refresh",
       "schedule": "45 */6 * * *"
+    },
+    {
+      "path": "/api/cron/pack-refresh",
+      "schedule": "50 */6 * * *"
     }
   ]
 }

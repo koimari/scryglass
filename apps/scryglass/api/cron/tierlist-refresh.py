@@ -237,6 +237,7 @@ RAW_SOURCE_BUNDLE_PREFIX = "tier-worker/tierlist-source-raw/"
 SOURCE_POINTER_PATH = "tier-worker/tierlist-source-current.json"
 SOURCE_BUNDLE_PREFIX = "tier-worker/tierlist-source/"
 SOURCE_BUNDLE_MANIFEST = "source_bundle_manifest.json"
+CANDIDATE_POINTER_PATH = "tier-worker/tierlist-candidate-current.json"
 SOURCE_BUNDLE_SCHEMA = "scryglass:tierlist-source-bundle:v1"
 SOURCE_BUNDLE_MAX_BYTES = 600_000_000
 SOURCE_RELATIVE_FILES = (
@@ -827,6 +828,32 @@ def _download_source_bundle(
         Path(archive_name).unlink(missing_ok=True)
 
 
+def _download_candidate(runtime_root: Path) -> dict[str, Any]:
+    """Restore the candidate published by the preceding cron stage."""
+
+    raw = _private_blob_read(
+        CANDIDATE_POINTER_PATH,
+        max_bytes=32 * 1024 * 1024,
+        cache_bust=True,
+    )
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("private tier-list candidate JSON is invalid") from error
+    if (
+        not isinstance(payload, dict)
+        or payload.get("artifact_sha256")
+        != _canonical_sha256(
+            {key: value for key, value in payload.items() if key != "artifact_sha256"}
+        )
+    ):
+        raise RuntimeError("private tier-list candidate digest is invalid")
+    destination = runtime_root / "data/lol/v2/tierlists/champion-elo-candidate-v1.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(raw)
+    return payload
+
+
 class _RefreshLease:
     def __init__(self) -> None:
         from lol_kills.v2.tierlists.live_refresh import _publication_credentials
@@ -948,6 +975,47 @@ def _publish_receipt(receipt_path: Path) -> dict[str, Any]:
         "bytes": len(raw),
         "etag": identity.etag,
     }
+
+
+def _publish_candidate(candidate_path: Path) -> dict[str, Any]:
+    """Publish the development candidate for the later authority stage."""
+
+    raw = candidate_path.read_bytes()
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("tier-list candidate is not valid JSON") from error
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("artifact_sha256"), str)
+        or payload["artifact_sha256"] != _canonical_sha256(
+            {key: value for key, value in payload.items() if key != "artifact_sha256"}
+        )
+    ):
+        raise RuntimeError("tier-list candidate digest is invalid")
+    upload = _private_blob_upload(
+        CANDIDATE_POINTER_PATH,
+        raw,
+        allow_overwrite=True,
+    )
+    for _attempt in range(31):
+        readback = _private_blob_read(
+            CANDIDATE_POINTER_PATH,
+            max_bytes=32 * 1024 * 1024,
+            cache_bust=True,
+        )
+        if readback == raw:
+            return {
+                "status": "published",
+                "pathname": CANDIDATE_POINTER_PATH,
+                "bytes": len(raw),
+                "raw_sha256": hashlib.sha256(raw).hexdigest(),
+                "artifact_sha256": payload["artifact_sha256"],
+                "upload": upload,
+                "readback_verified": True,
+            }
+        time.sleep(2)
+    raise RuntimeError("tier-list candidate pointer readback failed")
 
 
 def _production_digest(payload: dict[str, Any]) -> str:
@@ -1265,6 +1333,7 @@ def _run_refresh() -> dict[str, Any]:
             flush=True,
         )
         previous_path = _load_previous_approved(runtime_root, lease)
+        candidate_path = runtime_root / "data/lol/v2/tierlists/champion-elo-candidate-v1.json"
         receipt = refresh_candidate(
             runtime_root,
             expected_live_as_of=expected,
@@ -1272,24 +1341,27 @@ def _run_refresh() -> dict[str, Any]:
             output_path=Path("data/lol/v2/tierlists/champion-elo-candidate-v1.json"),
             receipt_path=receipt_path,
             source_mode="oe_only",
-            promote=True,
+            promote=False,
             skip_annual_oe=True,
             skip_atom_bridge=True,
             prepared_source=source_manifest,
         )
-        print("[tier-refresh] phase=tier-candidate promoted", flush=True)
+        print("[tier-refresh] phase=tier-candidate built", flush=True)
+        candidate_publication = _publish_candidate(candidate_path)
+        print("[tier-refresh] phase=tier-candidate published", flush=True)
         receipt_publication = _publish_receipt(receipt_path)
         print("[tier-refresh] phase=receipt published", flush=True)
-        if receipt.get("status") != "production_promoted":
-            raise RuntimeError(f"tier refresh did not promote: {receipt.get('status')}")
-        pack_publication = {
+        authority_publication = {
             "status": "scheduled",
-            "route": "/api/cron/pack-refresh",
+            "route": "/api/cron/tierlist-authority-refresh",
             "schedule": "45 */6 * * *",
         }
-        print(f"[tier-refresh] phase=pack deferred seconds={time.monotonic() - started:.1f}", flush=True)
+        print(
+            f"[tier-refresh] phase=authority deferred seconds={time.monotonic() - started:.1f}",
+            flush=True,
+        )
         return {
-            "status": "production_promoted",
+            "status": "candidate_published",
             "run_id": run_id,
             "baseline": {
                 "pack_id": baseline.get("pack_id"),
@@ -1303,8 +1375,9 @@ def _run_refresh() -> dict[str, Any]:
                 "source_observed_through": receipt.get("source_observed_through"),
                 "receipt_canonical_sha256": receipt.get("receipt_canonical_sha256"),
             },
+            "candidate_publication": candidate_publication,
             "receipt_publication": receipt_publication,
-            "pack_publication": pack_publication,
+            "authority_publication": authority_publication,
         }
     finally:
         try:

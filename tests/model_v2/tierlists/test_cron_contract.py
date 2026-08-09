@@ -15,7 +15,8 @@ def test_vercel_cron_targets_the_live_refresh_route() -> None:
         {"path": "/api/cron/source-refresh", "schedule": "0 */6 * * *"},
         {"path": "/api/cron/ratings-refresh", "schedule": "15 */6 * * *"},
         {"path": "/api/cron/tierlist-refresh", "schedule": "30 */6 * * *"},
-        {"path": "/api/cron/pack-refresh", "schedule": "45 */6 * * *"},
+        {"path": "/api/cron/tierlist-authority-refresh", "schedule": "45 */6 * * *"},
+        {"path": "/api/cron/pack-refresh", "schedule": "50 */6 * * *"},
     ]
 
 
@@ -32,6 +33,8 @@ def test_cron_worker_is_a_direct_python_function_with_a_distributed_lease() -> N
     assert "LOCK_PATH" in worker
     assert "_download_source_bundle" in worker
     assert "refresh_candidate" in worker
+    assert "_publish_candidate" in worker
+    assert "promote=False" in worker
 
 
 def test_source_refresh_is_a_separate_six_hour_job() -> None:
@@ -64,3 +67,15 @@ def test_pack_refresh_is_a_separate_six_hour_job() -> None:
     assert "_download_source_bundle" in worker
     assert "_publish_public_pack" in worker
     assert "PACK_LOCK_PATH" in worker
+
+
+def test_tier_authority_refresh_is_a_separate_six_hour_job() -> None:
+    worker = (
+        ROOT / "apps/scryglass/api/cron/tierlist-authority-refresh.py"
+    ).read_text(encoding="utf-8")
+    assert "_download_candidate" in worker
+    assert "forward_evaluation" in worker
+    assert "independent_authority" in worker
+    assert "production_bundle" in worker
+    assert "publish_production_bundle" in worker
+    assert "AUTHORITY_LOCK_PATH" in worker
