@@ -52,25 +52,26 @@ def _download_runtime_bundle() -> Path | None:
         return None
     url = _private_blob_url(bundle_path, token)
     root = Path(tempfile.mkdtemp(prefix="scryglass-tier-worker-runtime-", dir="/tmp"))
-    archive_path = root / "worker.tar.gz"
     try:
         request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
         try:
-            with urllib.request.urlopen(request, timeout=120) as response, archive_path.open("wb") as target:
-                shutil.copyfileobj(response, target, length=1024 * 1024)
+            with urllib.request.urlopen(request, timeout=120) as response:
+                base = root.resolve()
+                # Stream the archive directly into the extractor. The
+                # function filesystem is small, so keeping the compressed
+                # archive beside its extracted files can exhaust /tmp.
+                with tarfile.open(fileobj=response, mode="r|gz") as bundle:
+                    for member in bundle:
+                        destination = (root / member.name).resolve()
+                        if os.path.commonpath((str(base), str(destination))) != str(base):
+                            raise RuntimeError(
+                                "tier worker runtime bundle contains an unsafe path"
+                            )
+                        bundle.extract(member, root)
         except urllib.error.HTTPError as error:
             raise RuntimeError(
                 f"tier worker runtime bundle download failed: HTTP {error.code}"
             ) from error
-        base = root.resolve()
-        with tarfile.open(archive_path, "r:gz") as bundle:
-            members = bundle.getmembers()
-            for member in members:
-                destination = (root / member.name).resolve()
-                if os.path.commonpath((str(base), str(destination))) != str(base):
-                    raise RuntimeError("tier worker runtime bundle contains an unsafe path")
-            bundle.extractall(root)
-        archive_path.unlink(missing_ok=True)
         return root
     except Exception:
         shutil.rmtree(root, ignore_errors=True)

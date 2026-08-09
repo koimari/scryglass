@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[3]
 def test_vercel_cron_targets_the_live_refresh_route() -> None:
     config = json.loads((ROOT / "apps/scryglass/vercel.json").read_text(encoding="utf-8"))
     assert config["crons"] == [
-        {"path": "/api/cron/tierlist-refresh", "schedule": "*/5 * * * *"}
+        {"path": "/api/cron/tierlist-refresh", "schedule": "0 */6 * * *"}
     ]
 
 
