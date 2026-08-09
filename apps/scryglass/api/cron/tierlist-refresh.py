@@ -555,25 +555,19 @@ def _source_bundle_archive(
     manifest_raw = (
         json.dumps(manifest, ensure_ascii=True, sort_keys=True, indent=2) + "\n"
     ).encode("utf-8")
-    with tempfile.NamedTemporaryFile(
-        prefix="scryglass-tier-source-", suffix=".tar.gz", dir="/tmp", delete=False
-    ) as temporary:
-        archive_name = temporary.name
-    try:
-        with tarfile.open(archive_name, mode="w:gz") as archive:
-            for relative, path in _source_bundle_files(
-                runtime_root,
-                include_ratings=include_ratings,
-            ):
-                archive.add(path, arcname=relative, recursive=False)
-            info = tarfile.TarInfo(SOURCE_BUNDLE_MANIFEST)
-            info.size = len(manifest_raw)
-            info.mode = 0o600
-            info.mtime = 0
-            archive.addfile(info, fileobj=io.BytesIO(manifest_raw))
-        archive_bytes = Path(archive_name).read_bytes()
-    finally:
-        Path(archive_name).unlink(missing_ok=True)
+    archive_buffer = io.BytesIO()
+    with tarfile.open(fileobj=archive_buffer, mode="w:gz") as archive:
+        for relative, path in _source_bundle_files(
+            runtime_root,
+            include_ratings=include_ratings,
+        ):
+            archive.add(path, arcname=relative, recursive=False)
+        info = tarfile.TarInfo(SOURCE_BUNDLE_MANIFEST)
+        info.size = len(manifest_raw)
+        info.mode = 0o600
+        info.mtime = 0
+        archive.addfile(info, fileobj=io.BytesIO(manifest_raw))
+    archive_bytes = archive_buffer.getvalue()
     if len(archive_bytes) > SOURCE_BUNDLE_MAX_BYTES:
         raise RuntimeError(
             f"source bundle is larger than {SOURCE_BUNDLE_MAX_BYTES} bytes"
