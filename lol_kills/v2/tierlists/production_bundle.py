@@ -412,8 +412,8 @@ def _commit_sha(root: Path) -> str:
         value = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     except (OSError, subprocess.CalledProcessError):
         value = (
-            os.environ.get("VERCEL_GIT_COMMIT_SHA")
-            or os.environ.get("SCRYGLASS_DEPLOY_COMMIT_SHA")
+            os.environ.get("SCRYGLASS_DEPLOY_COMMIT_SHA")
+            or os.environ.get("VERCEL_GIT_COMMIT_SHA")
             or ""
         ).strip()
     if not COMMIT_RE.fullmatch(value):

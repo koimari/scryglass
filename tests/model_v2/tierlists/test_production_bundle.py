@@ -6,11 +6,20 @@ import json
 from pathlib import Path
 
 from lol_kills.v2.tierlists.production_bundle import (
+    _commit_sha,
     verify_production_index,
 )
 
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+def test_commit_sha_prefers_explicit_full_deploy_sha(monkeypatch) -> None:
+    expected = "a" * 40
+    monkeypatch.setenv("SCRYGLASS_DEPLOY_COMMIT_SHA", expected)
+    monkeypatch.setenv("VERCEL_GIT_COMMIT_SHA", "short-sha")
+
+    assert _commit_sha(Path("/tmp/scryglass-no-git-root")) == expected
 
 
 def test_production_bundle_has_all_roles_and_public_mirror() -> None:
