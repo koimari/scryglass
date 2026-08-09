@@ -7,6 +7,7 @@ import { ThemeToggle } from "./ThemeToggle";
 
 const LINKS = [
   { href: "/elo", label: "Ratings" },
+  { href: "/matches", label: "Matches" },
   { href: "/tiers", label: "Tier lists" },
   { href: "/methodology", label: "Method" },
 ];
