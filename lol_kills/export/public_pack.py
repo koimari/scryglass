@@ -91,6 +91,26 @@ def _ensure_year_column(table: pa.Table) -> pa.Table:
     return pa.Table.from_pandas(frame, preserve_index=False)
 
 
+_CANONICAL_COMPETITION_COLUMNS = frozenset(
+    {
+        "league_source",
+        "competition_scope",
+        "event_kind",
+        "is_international",
+        "is_interregional",
+        "competition_tier",
+    }
+)
+
+
+def _canonical_pack_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Keep canonical source frames without copying wide OE columns twice."""
+
+    if _CANONICAL_COMPETITION_COLUMNS.issubset(frame.columns):
+        return frame
+    return canonicalize_competition_frame(frame)
+
+
 def _normalized_game_uid(frame: pd.DataFrame) -> pd.Series:
     """Use the source game UID and fall back to the OE game ID per row."""
     if "game_uid" not in frame.columns and "gameid" not in frame.columns:
@@ -294,7 +314,7 @@ def export_public_pack(
 
     # --- team games (partition by year) ---
     team_path = warehouse / "oe_team_games.parquet"
-    team_source = canonicalize_competition_frame(pq.read_table(team_path).to_pandas())
+    team_source = _canonical_pack_frame(pq.read_table(team_path).to_pandas())
     team_table = pa.Table.from_pandas(team_source, preserve_index=False)
     team_table = _filter_years(team_table, years, ("year", "oe_year"))
     team_rating_frame = team_table.to_pandas()
@@ -312,13 +332,50 @@ def export_public_pack(
         register(_write_parquet(part, dest), f"team_games/year={y}/part.parquet")
     team_for_records = team_rating_frame
     team_maps_for_ratings = build_maps_frame_from_team_games(team_for_records)
+    del team_for_records, team_rating_frame, team_source, team_table, team
 
     # --- player games ---
     player_path = warehouse / "oe_player_games.parquet"
-    player_source = canonicalize_competition_frame(pq.read_table(player_path).to_pandas())
+    player_source = _canonical_pack_frame(pq.read_table(player_path).to_pandas())
     player_table = pa.Table.from_pandas(player_source, preserve_index=False)
     player_table = _filter_years(player_table, years, ("year", "oe_year"))
     player_rating_frame = player_table.to_pandas()
+    player_rating_columns = [
+        column
+        for column in (
+            "gameid",
+            "game_uid",
+            "date",
+            "league",
+            "result",
+            "side",
+            "position",
+            "teamname",
+            "playername",
+        )
+        if column in player_rating_frame.columns
+    ]
+    player_rating_input = player_rating_frame[player_rating_columns].copy()
+    player_record_columns = [
+        column
+        for column in (
+            "league",
+            "league_source",
+            "competition_scope",
+            "event_kind",
+            "is_international",
+            "is_interregional",
+            "competition_tier",
+            "date",
+            "position",
+            "playername",
+            "teamname",
+            "result",
+            "tournament",
+        )
+        if column in player_rating_frame.columns
+    ]
+    player_records_frame = player_rating_frame[player_record_columns].copy()
     player_cols = _present(spec.PLAYER_COLS, player_table.column_names)
     player = player_table.select(player_cols)
     for y in years:
@@ -330,18 +387,21 @@ def export_public_pack(
         if part.num_rows == 0:
             continue
         register(_write_parquet(part, dest), f"player_games/year={y}/part.parquet")
+    del player_source, player_table, player
 
     # --- maps ---
     maps_path = warehouse / "maps.parquet"
     maps = pq.read_table(maps_path)
-    # Re-apply the canonical map contract at export time as a safety net for
-    # packs built from an older local warehouse refresh.
-    maps = pa.Table.from_pandas(canonicalize_competition_frame(maps.to_pandas()), preserve_index=False)
+    # Re-apply the canonical map contract only for older sources. Live maps
+    # already come from the canonical team-game adapter.
+    if not _CANONICAL_COMPETITION_COLUMNS.issubset(maps.column_names):
+        maps = pa.Table.from_pandas(canonicalize_competition_frame(maps.to_pandas()), preserve_index=False)
     maps = _ensure_year_column(maps)
     map_cols = spec.maps_columns(maps.column_names)
     maps = maps.select(map_cols)
     maps = _filter_years(maps, years, ("year", "oe_year"))
     maps_for_records = maps.to_pandas()
+    draft_coverage = _draft_coverage(maps_for_records, player_rating_frame)
     source_as_of = pd.to_datetime(maps_for_records["date"], utc=True, errors="coerce").max()
     if pd.isna(source_as_of):
         raise RuntimeError("public pack source has no usable map dates")
@@ -354,7 +414,7 @@ def export_public_pack(
         if live_source
         else team_maps_for_ratings if not team_maps_for_ratings.empty else maps_for_records
     )
-    player_maps_for_ratings = build_maps_frame_from_players(player_rating_frame)
+    player_maps_for_ratings = build_maps_frame_from_players(player_rating_input)
     if player_maps_for_ratings.empty:
         raise RuntimeError("public pack rating source has no complete player maps")
     if (warehouse / "meta.json").exists():
@@ -366,15 +426,14 @@ def export_public_pack(
                 "OE live public pack inputs do not share the deduplicated map set; "
                 f"maps={len(map_ids)} team={len(team_ids)} player={len(player_ids)}"
             )
-    lineup_frame = player_rating_frame.copy()
-    lineup_frame["game_uid"] = _normalized_game_uid(lineup_frame)
-    if lineup_frame["game_uid"].isna().any():
+    player_rating_input["game_uid"] = _normalized_game_uid(player_rating_input)
+    if player_rating_input["game_uid"].isna().any():
         raise RuntimeError("public pack rating source has rows without a game identity")
     build_dual_ratings(
         rating_input,
-        lineup_by_game=lineup_hashes_from_players(lineup_frame),
+        lineup_by_game=lineup_hashes_from_players(player_rating_input),
     )
-    build_player_ratings(player_maps_for_ratings, player_rating_frame)
+    build_player_ratings(player_maps_for_ratings, player_rating_input)
     public_ratings, public_ratings_meta = fit_hierarchical_bt(rating_input, write=True)
     public_ratings_meta["pack_years"] = list(years)
     public_ratings_meta["rating_window"] = "full canonical OE team-game window as this pack"
@@ -403,7 +462,7 @@ def export_public_pack(
     # snapshot remains the full roster-history artifact) ---
     feat_dir = pack_dir / "features"
     feat_dir.mkdir(parents=True, exist_ok=True)
-    player_records_payload = build_player_records(player_frame)
+    player_records_payload = build_player_records(player_records_frame)
     team_records_payload = build_team_records(rating_input)
 
     team_weekly_ranks = build_team_weekly_ranks(
@@ -426,7 +485,7 @@ def export_public_pack(
 
     weekly_ranks = build_player_weekly_ranks(
         player_maps_for_ratings,
-        player_rating_frame,
+        player_rating_input,
         as_of=pd.to_datetime(maps_for_records["date"], utc=True, errors="coerce").max(),
         min_games=20,
     )
@@ -451,7 +510,7 @@ def export_public_pack(
     )
 
     player_metadata = build_player_metadata(
-        player_frame["playername"].dropna().astype(str).unique(),
+        player_records_frame["playername"].dropna().astype(str).unique(),
         player_context={
             player: record.get("current_team")
             for player, record in player_records_payload.items()
@@ -525,10 +584,7 @@ def export_public_pack(
             )
 
     # --- features history year-filtered via maps game_uid ---
-    maps_all = pq.read_table(maps_path)
-    maps_all = _ensure_year_column(maps_all)
-    maps_all = maps_all.select(spec.maps_columns(maps_all.column_names))
-    maps_all = _filter_years(maps_all, years, ("year", "oe_year"))
+    maps_all = maps
 
     for src_name, cols, out_name in (
         ("ratings.parquet", spec.RATINGS_HISTORY_COLS, "ratings_history.parquet"),

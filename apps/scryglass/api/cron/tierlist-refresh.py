@@ -345,6 +345,25 @@ def _publish_public_pack(runtime_root: Path, *, run_id: str) -> dict[str, Any]:
 
     warehouse_root = runtime_root / "data/lol/warehouse/parquet/oe_live"
     out_root = runtime_root / "output/public_pack"
+    latest = json.loads((runtime_root / PACK_LATEST).read_text(encoding="utf-8"))
+    baseline_id = _safe_pack_id(latest.get("pack_id"))
+    baseline_root = runtime_root / PACKS_ROOT / baseline_id
+    static_model_source = baseline_root / "models"
+    static_study_source = baseline_root / "studies" / "grubs"
+    if not static_model_source.is_dir() or not static_study_source.is_dir():
+        raise RuntimeError(
+            "the committed public pack is missing its static model and study assets"
+        )
+    shutil.copytree(
+        static_model_source,
+        runtime_root / "data/lol/models",
+        dirs_exist_ok=True,
+    )
+    shutil.copytree(
+        static_study_source,
+        runtime_root / "output/pdf",
+        dirs_exist_ok=True,
+    )
     manifest = export_public_pack(
         years=(2025, 2026),
         out_root=out_root,
