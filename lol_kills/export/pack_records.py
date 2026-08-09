@@ -15,6 +15,7 @@ from lol_kills.etl.competition import (
     team_identity_key,
 )
 from lol_kills.etl.source_keys import canonical_source_game_key
+from lol_kills.ratings.player_map_grades import GRADE_CONTRACT, compute_player_map_grades, grade_payload
 
 
 PUBLIC_TEAM_RATING_EXCLUSIONS = frozenset({"los-ratones"})
@@ -451,7 +452,7 @@ def build_profile_records(
 
     required = {"playername", "teamname", "side", "position", "result", "date"}
     if players is None or players.empty or not required.issubset(players.columns):
-        return {"schema_version": "scryglass:profile-records:v1", "window_days": recent_window_days, "champion_images": {}, "games": {}, "players": {}, "teams": {}}
+        return {"schema_version": "scryglass:profile-records:v2", "grade_contract": GRADE_CONTRACT, "window_days": recent_window_days, "champion_images": {}, "games": {}, "players": {}, "teams": {}}
     if recent_limit < 1 or recent_window_days < 1:
         raise ValueError("recent_limit and recent_window_days must be positive")
 
@@ -473,13 +474,23 @@ def build_profile_records(
             "kills",
             "deaths",
             "assists",
+            "competition_tier",
+            "teamkills",
+            "gamelength",
+            "dpm",
+            "earned gpm",
+            "damageshare",
+            "vspm",
+            "golddiffat15",
+            "xpdiffat15",
+            "csdiffat15",
         )
         if column in players.columns
     ]
     frame = canonicalize_competition_frame(players[useful_columns].copy())
     identity_source = frame.get("game_uid", frame.get("gameid"))
     if identity_source is None:
-        return {"schema_version": "scryglass:profile-records:v1", "window_days": recent_window_days, "champion_images": {}, "games": {}, "players": {}, "teams": {}}
+        return {"schema_version": "scryglass:profile-records:v2", "grade_contract": GRADE_CONTRACT, "window_days": recent_window_days, "champion_images": {}, "games": {}, "players": {}, "teams": {}}
     fallback = frame["gameid"] if "gameid" in frame.columns else None
     frame["_game_id"] = [
         canonical_source_game_key(value, fallback.loc[index] if fallback is not None else None)
@@ -500,6 +511,11 @@ def build_profile_records(
         & frame["_team"].notna()
         & frame["_team"].ne("")
     ].copy()
+    grades = compute_player_map_grades(frame)
+    grade_lookup = {
+        (str(row["game_id"]), str(row["player"]).casefold()): row
+        for _, row in grades.iterrows()
+    }
     latest_date = frame["_date"].max()
     if pd.notna(latest_date):
         frame = frame[
@@ -571,6 +587,9 @@ def build_profile_records(
                     "kills": _profile_number(row.get("kills")),
                     "deaths": _profile_number(row.get("deaths")),
                     "assists": _profile_number(row.get("assists")),
+                    "grade": grade_payload(
+                        grade_lookup.get((str(game_id), str(row["_player"]).casefold()))
+                    ),
                 }
             )
         key = str(game_id)
@@ -595,7 +614,8 @@ def build_profile_records(
         if any(game_id in available for game_id in values)
     }
     return {
-        "schema_version": "scryglass:profile-records:v1",
+        "schema_version": "scryglass:profile-records:v2",
+        "grade_contract": GRADE_CONTRACT,
         "window_days": recent_window_days,
         "champion_images": dict(sorted(images.items())),
         "games": {game_id: games[game_id] for game_id in sorted(available)},

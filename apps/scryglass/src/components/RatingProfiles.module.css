@@ -160,7 +160,10 @@
   align-items: center;
   min-height: 3.8rem;
   border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  text-decoration: none;
 }
+.matchRow:hover { background: var(--surface); }
 
 .resultMark {
   display: grid;
@@ -226,10 +229,37 @@
   font-size: 0.9rem;
 }
 
+.matchHero {
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--line-strong);
+}
+.matchHero h1 { margin: 0.25rem 0 0.65rem; font-size: clamp(2.2rem, 4vw, 3.8rem); letter-spacing: -0.05em; line-height: 1; }
+.matchHero > p:last-child { max-width: 48rem; color: var(--ink-muted); line-height: 1.65; }
+.matchTeams { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; }
+.matchTeam { min-width: 0; }
+.matchPlayer {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(8rem, 1fr) minmax(9rem, 1.2fr);
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.8rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.matchPlayer > div:nth-child(2) { display: grid; gap: 0.12rem; min-width: 0; }
+.matchPlayer > div:nth-child(2) > span,
+.matchPlayer > div:nth-child(2) > small,
+.gradeDetails small,
+.gradeUnavailable { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: 0.61rem; }
+.gradeDetails { display: grid; grid-template-columns: auto 1fr; column-gap: 0.55rem; align-items: baseline; }
+.gradeDetails > strong { font-size: 1.5rem; }
+.gradeDetails > span { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: 0.72rem; }
+.gradeDetails > small { grid-column: 1 / -1; line-height: 1.45; }
+
 @media (max-width: 900px) {
   .rosterGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rosterCard { border-bottom: 1px solid var(--line); }
   .statBand { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .matchTeams { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 700px) {
@@ -243,4 +273,7 @@
   .matchRow { grid-template-columns: 1.8rem 2.5rem minmax(0, 1fr); }
   .matchScore,
   .matchSide { grid-column: 3; justify-items: start; padding-bottom: 0.6rem; }
+  .matchPlayer { grid-template-columns: 3.5rem minmax(0, 1fr); }
+  .gradeDetails,
+  .gradeUnavailable { grid-column: 2; }
 }

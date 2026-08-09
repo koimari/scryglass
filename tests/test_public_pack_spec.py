@@ -98,6 +98,8 @@ def test_profile_records_normalize_recent_games_without_raw_tables() -> None:
         champion_image_urls={"Ivern": "https://example.test/ivern.png"},
     )
 
+    assert payload["schema_version"] == "scryglass:profile-records:v2"
+    assert payload["grade_contract"] == "scryglass:player-map-grade:v1"
     assert payload["players"]["Inspired"] == ["game-1"]
     assert payload["teams"]["LYON"] == ["game-1"]
     game = payload["games"]["game-1"]
@@ -105,6 +107,7 @@ def test_profile_records_normalize_recent_games_without_raw_tables() -> None:
     assert game["red_team"] == "Other"
     inspired = next(row for row in game["players"] if row["player"] == "Inspired")
     assert inspired["role"] == "jungle"
+    assert inspired["grade"]["status"] == "unavailable"
     assert payload["champion_images"]["Ivern"] == "https://example.test/ivern.png"
 
 
