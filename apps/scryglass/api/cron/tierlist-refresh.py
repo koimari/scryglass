@@ -391,21 +391,7 @@ def _refresh_source_inputs(
         ],
         source="oe_api",
     )
-    bridge_path = runtime_root / "data/lol/v2/champions/lcc-atom-bridge-v1.json"
-    bridge_seed = PROJECT_ROOT / "data/lol/v2/champions/lcc-atom-bridge-v1.json"
-    if bridge_seed.is_file():
-        temporary_bridge = bridge_path.with_name(f".{bridge_path.name}.seed")
-        shutil.copy2(bridge_seed, temporary_bridge)
-        os.replace(temporary_bridge, bridge_path)
-    atom_step = _run_step(
-        runtime_root,
-        [
-            "lol_kills.v2.champions.atoms.bridge_v1",
-            "--out",
-            str(runtime_root / "data/lol/v2/champions/lcc-atom-bridge-v1.json"),
-        ],
-        source="champion_atomization",
-    )
+    atom_step = _verify_prebuilt_atom_bridge(runtime_root)
     observed_as_of = _api_source_latest(runtime_root) if oe_api_step["completed"] else None
     live_source_step = (
         _run_step(

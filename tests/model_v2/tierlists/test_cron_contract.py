@@ -42,6 +42,12 @@ def test_source_refresh_is_a_separate_six_hour_job() -> None:
     assert "SOURCE_LOCK_PATH" in worker
 
 
+def test_production_source_refresh_uses_the_deployed_atom_bridge() -> None:
+    worker = (ROOT / "apps/scryglass/api/cron/tierlist-refresh.py").read_text(encoding="utf-8")
+    assert "atom_step = _verify_prebuilt_atom_bridge(runtime_root)" in worker
+    assert "lol_kills.v2.champions.atoms.bridge_v1" not in worker
+
+
 def test_ratings_refresh_is_a_separate_six_hour_job() -> None:
     worker = (ROOT / "apps/scryglass/api/cron/ratings-refresh.py").read_text(encoding="utf-8")
     assert "RAW_SOURCE_POINTER_PATH" in worker
