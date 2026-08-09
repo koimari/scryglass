@@ -111,10 +111,24 @@ def _private_blob_upload(
     }
 
 
-def _private_blob_read(pathname: str, *, max_bytes: int) -> bytes:
+def _private_blob_read(
+    pathname: str,
+    *,
+    max_bytes: int,
+    cache_bust: bool = False,
+) -> bytes:
     token = _private_blob_token()
     url = _private_blob_url(pathname, token)
-    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    if cache_bust:
+        url = f"{url}?readback={uuid.uuid4().hex}"
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        },
+    )
     try:
         with urllib.request.urlopen(request, timeout=180) as response:
             body = response.read(max_bytes + 1)
@@ -610,10 +624,20 @@ def _publish_source_bundle(
         pointer_raw,
         allow_overwrite=True,
     )
-    pointer_readback = _private_blob_read(
-        pointer_path,
-        max_bytes=256 * 1024,
-    )
+    pointer_readback = None
+    for attempt in range(5):
+        try:
+            pointer_readback = _private_blob_read(
+                pointer_path,
+                max_bytes=256 * 1024,
+                cache_bust=True,
+            )
+        except FileNotFoundError:
+            pointer_readback = None
+        if pointer_readback == pointer_raw:
+            break
+        if attempt < 4:
+            time.sleep(1)
     if pointer_readback != pointer_raw:
         raise RuntimeError("private source pointer failed exact readback")
     return {
