@@ -382,7 +382,7 @@ def evaluate(
     matchup_method = candidate.get("matchup_shape_method") or {}
     joint_model = candidate.get("joint_model") or {}
     matchup_contract_valid = (
-        str(rating_method.get("name", "")).startswith("joint five-role")
+        str(rating_method.get("name", "")).startswith("patch-wide joint five-role")
         and "full observed-Hessian" in str(rating_method.get("fit", ""))
         and rating_method.get("fit_coordinates") == "sparse reference-coded joint map rows"
         and str(matchup_method.get("name", "")).startswith("atom-informed")
