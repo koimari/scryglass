@@ -154,20 +154,26 @@ def export_public_pack(
     out_root: Path | None = None,
     pack_id: str | None = None,
     warehouse_root: Path | None = None,
+    project_root: Path | None = None,
 ) -> dict[str, Any]:
     years = tuple(years or spec.DEFAULT_YEARS)
+    project = Path(project_root or ROOT).resolve()
+    features_root = project / "data" / "lol" / "features"
+    models_root = project / "data" / "lol" / "models"
+    teams_json_path = project / "web" / "composer" / "teams.json"
+    pdf_root = project / "output" / "pdf"
     warehouse = Path(
         warehouse_root
         if warehouse_root is not None
-        else LIVE_WAREHOUSE
-        if (LIVE_WAREHOUSE / "meta.json").exists()
-        else WAREHOUSE
+        else project / "data" / "lol" / "warehouse" / "parquet" / "oe_live"
+        if (project / "data" / "lol" / "warehouse" / "parquet" / "oe_live" / "meta.json").exists()
+        else project / "data" / "lol" / "warehouse" / "parquet"
     )
     # Include UTC time so the 15-minute freshness workflow can publish more
     # than one immutable pack per day without colliding in Blob storage.
     stamp = datetime.now(timezone.utc).strftime("%Y.%m.%d.%H%M")
     pack_id = pack_id or f"v{stamp}"
-    out_root = Path(out_root or DEFAULT_OUT)
+    out_root = Path(out_root or project / "output" / "public_pack")
     pack_dir = out_root / pack_id
     if pack_dir.exists():
         shutil.rmtree(pack_dir)
@@ -269,11 +275,12 @@ def export_public_pack(
     public_ratings_meta["rating_window"] = "full canonical OE team-game window as this pack"
     public_ratings_meta["source_as_of"] = source_as_of.isoformat().replace("+00:00", "Z")
     public_ratings_meta["source_mode"] = "oe_live" if live_source else "warehouse"
-    (FEATURES / "ratings_meta.json").write_text(
+    features_root.mkdir(parents=True, exist_ok=True)
+    (features_root / "ratings_meta.json").write_text(
         json.dumps(public_ratings_meta, indent=2),
         encoding="utf-8",
     )
-    (FEATURES / "ratings_hierarchical_meta.json").write_text(
+    (features_root / "ratings_hierarchical_meta.json").write_text(
         json.dumps(public_ratings_meta, indent=2),
         encoding="utf-8",
     )
@@ -319,7 +326,7 @@ def export_public_pack(
         as_of=pd.to_datetime(maps_for_records["date"], utc=True, errors="coerce").max(),
         min_games=20,
     )
-    player_meta_path = FEATURES / "player_ratings_meta.json"
+    player_meta_path = features_root / "player_ratings_meta.json"
     if player_meta_path.exists():
         player_meta = json.loads(player_meta_path.read_text(encoding="utf-8"))
         player_meta["source_as_of"] = source_as_of.isoformat().replace("+00:00", "Z")
@@ -387,7 +394,7 @@ def export_public_pack(
             "player_ratings_snapshot.parquet",
         ),
     ):
-        src = FEATURES / src_name
+        src = features_root / src_name
         if src_name == "ratings_snapshot.parquet":
             t = pa.Table.from_pandas(public_ratings, preserve_index=False)
         elif not src.exists():
@@ -427,7 +434,7 @@ def export_public_pack(
             "player_ratings_history.parquet",
         ),
     ):
-        src = FEATURES / src_name
+        src = features_root / src_name
         if not src.exists():
             continue
         t = pq.read_table(src)
@@ -451,7 +458,7 @@ def export_public_pack(
                 f"features/{meta_name}",
             )
             continue
-        src = FEATURES / meta_name
+        src = features_root / meta_name
         if src.exists():
             dest = feat_dir / meta_name
             shutil.copy2(src, dest)
@@ -470,7 +477,7 @@ def export_public_pack(
     models_dir = pack_dir / "models"
     models_dir.mkdir(parents=True, exist_ok=True)
     for name in spec.PINNED_MODEL_FILES:
-        src = MODELS / name
+        src = models_root / name
         if not src.exists():
             continue
         dest = models_dir / name
@@ -486,7 +493,7 @@ def export_public_pack(
             f"models/{name}",
         )
 
-    tier_dir = MODELS / "tierlists_csv"
+    tier_dir = models_root / "tierlists_csv"
     if tier_dir.is_dir():
         out_tier = models_dir / "tierlists_csv"
         out_tier.mkdir(exist_ok=True)
@@ -505,11 +512,10 @@ def export_public_pack(
             )
 
     # --- void grubs study bundle ---
-    pdf_root = ROOT / "output" / "pdf"
     grubs_dir = pack_dir / "studies" / "grubs"
     grubs_dir.mkdir(parents=True, exist_ok=True)
     for name in spec.GRUBS_MODEL_FILES:
-        src = MODELS / name
+        src = models_root / name
         if not src.exists():
             continue
         dest = grubs_dir / name
@@ -576,9 +582,9 @@ def export_public_pack(
     # --- meta ---
     meta_dir = pack_dir / "meta"
     meta_dir.mkdir(parents=True, exist_ok=True)
-    if TEAMS_JSON.exists():
+    if teams_json_path.exists():
         dest = meta_dir / "teams.json"
-        shutil.copy2(TEAMS_JSON, dest)
+        shutil.copy2(teams_json_path, dest)
         register(
             {
                 "rows": None,

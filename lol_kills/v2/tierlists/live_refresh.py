@@ -30,6 +30,7 @@ from lol_kills.export.blob_retention import (
     WriteMode,
 )
 from lol_kills.export.vercel_blob_transport import VercelBlobTransport
+from lol_kills.v2.champions.atoms.consume import AtomBridge
 
 from .champion_elo import (
     DEFAULT_OUTPUT,
@@ -311,6 +312,34 @@ def _skipped_step(source: str, reason: str) -> dict[str, Any]:
     }
 
 
+def _verify_prebuilt_atom_bridge(root: Path) -> dict[str, Any]:
+    """Verify the committed atom bridge when the worker has no LCC checkout."""
+
+    path = root / "data/lol/v2/champions/lcc-atom-bridge-v1.json"
+    try:
+        bridge = AtomBridge.load(path)
+    except Exception as error:  # noqa: BLE001
+        return {
+            "source": "champion_atomization",
+            "command": [],
+            "returncode": 2,
+            "completed": False,
+            "stdout_bytes": 0,
+            "stderr_bytes": len(f"{type(error).__name__}: {error}".encode("utf-8")),
+            "reason": "prebuilt_atom_bridge_invalid",
+        }
+    return {
+        "source": "champion_atomization",
+        "command": [],
+        "returncode": 0,
+        "completed": True,
+        "skipped": True,
+        "reason": "prebuilt_atom_bridge_verified",
+        "artifact_sha256": bridge.artifact_sha256,
+        "generated_at": bridge.generated_at,
+    }
+
+
 def _api_source_latest(root: Path) -> str | None:
     path = root / "data/lol/warehouse/parquet/oe_api_meta.json"
     try:
@@ -352,6 +381,7 @@ def refresh_candidate(
     source_mode: str = DEFAULT_SOURCE_MODE,
     promote: bool = False,
     skip_annual_oe: bool = False,
+    skip_atom_bridge: bool = False,
 ) -> dict[str, Any]:
     if grid_days < 1 or grid_limit < 1:
         raise ValueError("grid_days and grid_limit must be positive")
@@ -379,6 +409,8 @@ def refresh_candidate(
         root,
         [
             "lol_kills.etl.oe_api_ingest",
+            "--root",
+            str(root),
             "--start",
             LIVE_WINDOW_START,
             "--end",
@@ -388,17 +420,21 @@ def refresh_candidate(
         ],
         source="oe_api",
     )
-    atom_step = _run_step(
-        root,
-        ["lol_kills.v2.champions.atoms.bridge_v1"],
-        source="champion_atomization",
+    atom_step = (
+        _verify_prebuilt_atom_bridge(root)
+        if skip_atom_bridge
+        else _run_step(
+            root,
+            ["lol_kills.v2.champions.atoms.bridge_v1"],
+            source="champion_atomization",
+        )
     )
     observed_as_of = _api_source_latest(root) if oe_api_step["completed"] else None
     candidate_expected_live_as_of = observed_as_of or expected_live_as_of
     live_source_step = (
         _run_step(
             root,
-            ["lol_kills.etl.oe_live_source"],
+            ["lol_kills.etl.oe_live_source", "--root", str(root)],
             source="oe_live_source",
         )
         if oe_api_step["completed"]
@@ -409,6 +445,8 @@ def refresh_candidate(
             root,
             [
                 "lol_kills.v2.tierlists.rating_refresh",
+                "--root",
+                str(root),
                 "--as-of",
                 candidate_expected_live_as_of,
             ],
@@ -490,6 +528,8 @@ def refresh_candidate(
             root,
             [
                 "lol_kills.v2.tierlists.forward_evaluation",
+                "--root",
+                str(root),
                 "--output",
                 "data/lol/v2/tierlists/prospective-evaluation-v1.json",
             ],
@@ -501,6 +541,8 @@ def refresh_candidate(
                 root,
                 [
                     "lol_kills.v2.tierlists.independent_authority",
+                    "--root",
+                    str(root),
                     "--output",
                     "data/lol/v2/tierlists/independent-l2-authority-v1.json",
                 ],
@@ -513,7 +555,11 @@ def refresh_candidate(
         if authority_step["completed"]:
             bundle_step = _run_step(
                 root,
-                ["lol_kills.v2.tierlists.production_bundle"],
+                [
+                    "lol_kills.v2.tierlists.production_bundle",
+                    "--root",
+                    str(root),
+                ],
                 source="production_bundle",
             )
             promotion_steps.append(bundle_step)
@@ -639,6 +685,11 @@ def main() -> int:
         action="store_true",
         help="use the restored committed OE pack as the historical baseline and only fetch the API freshness bridge",
     )
+    parser.add_argument(
+        "--skip-atom-bridge",
+        action="store_true",
+        help="verify the committed atom bridge instead of rebuilding it from a private LCC checkout",
+    )
     args = parser.parse_args()
     receipt = refresh_candidate(
         args.root,
@@ -651,6 +702,7 @@ def main() -> int:
         source_mode=args.source_mode,
         promote=args.promote,
         skip_annual_oe=args.skip_annual_oe,
+        skip_atom_bridge=args.skip_atom_bridge,
     )
     print(json.dumps(receipt, ensure_ascii=True, indent=2, sort_keys=True))
     return 0 if receipt["status"] in {"ready_for_authority_review", "production_promoted"} else 2

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -409,8 +410,12 @@ def _source_tree_sha256(root: Path, extra: Mapping[str, bytes]) -> str:
 def _commit_sha(root: Path) -> str:
     try:
         value = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise ProductionBundleError("cannot resolve git commit for production manifest") from exc
+    except (OSError, subprocess.CalledProcessError):
+        value = (
+            os.environ.get("VERCEL_GIT_COMMIT_SHA")
+            or os.environ.get("SCRYGLASS_DEPLOY_COMMIT_SHA")
+            or ""
+        ).strip()
     if not COMMIT_RE.fullmatch(value):
         raise ProductionBundleError("git commit is not a full SHA-1")
     return value
