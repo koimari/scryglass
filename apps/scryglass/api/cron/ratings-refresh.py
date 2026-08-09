@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import sys
@@ -49,10 +50,16 @@ def _run_ratings_refresh() -> dict[str, Any]:
         lease = _WORKER._RefreshLease()
         lease.acquire()
         print("[ratings-refresh] phase=lease acquired", flush=True)
-        from lol_kills.etl.restore_oe_pack_baseline import restore_baseline
-
-        baseline = restore_baseline(runtime_root)
-        print("[ratings-refresh] phase=baseline restored", flush=True)
+        latest = json.loads(
+            (runtime_root / _WORKER.PACK_LATEST).read_text(encoding="utf-8")
+        )
+        baseline = {
+            "pack_id": latest.get("pack_id"),
+            "source_latest": None,
+            "player_rows": None,
+            "team_rows": None,
+        }
+        print("[ratings-refresh] phase=baseline pointer read", flush=True)
         raw_source = _WORKER._download_source_bundle(
             runtime_root,
             pointer_path=_WORKER.RAW_SOURCE_POINTER_PATH,
@@ -86,8 +93,8 @@ def _run_ratings_refresh() -> dict[str, Any]:
             "baseline": {
                 "pack_id": baseline.get("pack_id"),
                 "source_latest": baseline.get("source_latest"),
-                "player_rows": baseline.get("outputs", {}).get("player_games", {}).get("rows"),
-                "team_rows": baseline.get("outputs", {}).get("team_games", {}).get("rows"),
+                "player_rows": baseline.get("player_rows"),
+                "team_rows": baseline.get("team_rows"),
             },
             "source_steps": source_receipt["source_steps"],
             "publication": publication,
