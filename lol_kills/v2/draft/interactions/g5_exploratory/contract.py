@@ -109,7 +109,7 @@ G2 = {
     "runner_locator": "lol_kills/v2/ratings/player/private_development_runner.py",
     "runner_raw_sha256": "800755c6c4b425bb74690cce8ee8aea38db3cddf45016c7bec35a10ed5bfc5c7",
     "model_locator": "lol_kills/v2/ratings/player/model.py",
-    "model_raw_sha256": "122493f55bc9d4c17357948163cbe7599c9db1abd2aaf772934986ea46131e2a",
+    "model_raw_sha256": "426bc9d5b5de9014779fd4d2803421e851040111957a41567de5edc5b55782fa",
     "artifact_locator": "data/lol/v2/models/player/real-v1/private-development-artifact.json",
     "artifact_raw_sha256": "b0d8276fd164735db0abd9b2353c7e10168c599e5607e4db3d15cd12bd9d7b50",
     "artifact_canonical_sha256": "35e8831fb4d39fd60ec7f8f59b934ff5571f788ec8dc1151c78661b67ab6d4fd",
