@@ -14,7 +14,6 @@ import type {
 } from "@/lib/pack";
 import {
   adjustedRating,
-  formatTrustCell,
   formatWr,
   INTL_LEAGUES,
   INTERREGIONAL_LEAGUES,
@@ -29,8 +28,8 @@ import {
   TEAM_SIGMA_MIN,
   teamMatchesQuery,
   teamSlug,
-  trustInfo,
 } from "@/lib/pack";
+import { evidenceFields, evidenceInfo, formatEvidenceCell } from "@/lib/evidence";
 import styles from "./EloLadders.module.css";
 
 type Props = {
@@ -613,7 +612,7 @@ export function EloLadders({
                     active={teamCol === "trust"}
                     dir={teamDir}
                     align="num"
-                    title="Settled means the estimate reached its floor; thin means it is still moving."
+                    title="Evidence state from the validated contract: interval width, precision, stability, freshness, and coverage. Settled requires all gates; anything missing fails closed."
                     onSort={onTeamSort}
                   />
                   <SortTh
@@ -630,7 +629,7 @@ export function EloLadders({
               <tbody>
                 {visibleTeams.map((t, i) => {
                   const rec = teamRecords[t.team];
-                  const trust = trustInfo(t.sigma, TEAM_SIGMA_MIN, rec?.games);
+                  const trust = evidenceInfo(evidenceFields(t as unknown as Record<string, unknown>), t.sigma, rec?.games);
                   const wr = scopedTeamWr(rec, leagues);
                   return (
                     <tr
@@ -654,7 +653,7 @@ export function EloLadders({
                       <td className={styles.numeric}>{t.mu_total.toFixed(1)}</td>
                       <td className={styles.numeric}>{t.mu_meta.toFixed(1)}</td>
                       <td className={`${styles.numeric} ${styles.evidence}`} title={trust.layman}>
-                        <span>{formatTrustCell(trust)}</span>
+                        <span>{formatEvidenceCell(trust)}</span>
                         {rec?.games ? <small>{rec.games} games</small> : null}
                       </td>
                       <td className={styles.numeric} title={wr == null ? "No games in this scope." : undefined}>
@@ -670,7 +669,7 @@ export function EloLadders({
           <ul className={styles.cards}>
             {visibleTeams.map((t, i) => {
               const rec = teamRecords[t.team];
-              const trust = trustInfo(t.sigma, TEAM_SIGMA_MIN, rec?.games);
+              const trust = evidenceInfo(evidenceFields(t as unknown as Record<string, unknown>), t.sigma, rec?.games);
               const wr = scopedTeamWr(rec, leagues);
               return (
                 <li key={t.team}>
@@ -680,7 +679,7 @@ export function EloLadders({
                     <span className={styles.cardMeta}>
                       {formatAffiliation(rec?.current_tier, rec?.current_league ?? rec?.primary)}
                       {" · "}
-                      {formatTrustCell(trust)} evidence
+                      {formatEvidenceCell(trust)} evidence
                       {rec?.games ? `, ${rec.games} games` : ""}
                       {wr != null ? ` · ${formatWr(wr)} scoped win rate` : ""}
                     </span>
@@ -739,7 +738,7 @@ export function EloLadders({
                     active={playerCol === "trust"}
                     dir={playerDir}
                     align="num"
-                    title="Settled is the evidence floor; thin means the estimate is still moving."
+                    title="Evidence state from the validated contract; a low sigma alone never reads as Settled."
                     onSort={onPlayerSort}
                   />
                   <SortTh label="Games" col="games" active={playerCol === "games"} dir={playerDir} align="num" onSort={onPlayerSort} />
@@ -748,7 +747,7 @@ export function EloLadders({
               <tbody>
                 {visiblePlayers.map((p, i) => {
                   const rec = playerRecords[p.player];
-                  const trust = trustInfo(p.sigma, PLAYER_SIGMA_MIN, p.n_maps);
+                  const trust = evidenceInfo(evidenceFields(p as unknown as Record<string, unknown>), p.sigma, p.n_maps);
                   const currentTeam = rec?.current_team ?? p.last_team;
                   const fromTeam = currentTeam ? teamRecords[currentTeam] : undefined;
                   const league = rec?.current_league ?? rec?.primary ?? fromTeam?.current_league ?? fromTeam?.primary;
@@ -796,7 +795,7 @@ export function EloLadders({
                       </td>
                       <td className={styles.numeric}>{p.mu_total.toFixed(1)}</td>
                       <td className={styles.numeric} title={trust.layman}>
-                        {formatTrustCell(trust)}
+                        {formatEvidenceCell(trust)}
                       </td>
                       <td className={styles.numeric}>{p.n_maps}</td>
                     </tr>
@@ -811,7 +810,7 @@ export function EloLadders({
               const rec = playerRecords[p.player];
               const currentTeam = rec?.current_team ?? p.last_team;
               const fromTeam = currentTeam ? teamRecords[currentTeam] : undefined;
-              const trust = trustInfo(p.sigma, PLAYER_SIGMA_MIN, p.n_maps);
+              const trust = evidenceInfo(evidenceFields(p as unknown as Record<string, unknown>), p.sigma, p.n_maps);
               const rankDelta = playerRankDelta(p.player, rec?.current_tier ?? fromTeam?.current_tier);
               const metadata = playerMetadata[p.player];
               return (
@@ -823,7 +822,7 @@ export function EloLadders({
                       {p.player}
                     </span>
                     <span className={styles.cardMeta}>
-                      {currentTeam ?? "—"} · {formatAffiliation(rec?.current_tier ?? fromTeam?.current_tier, rec?.current_league ?? rec?.primary ?? fromTeam?.primary)} · {formatPlayerRole(rec?.primary_role ?? rec?.roles?.[0])} · {formatTrustCell(trust)} evidence · {p.n_maps} games
+                      {currentTeam ?? "—"} · {formatAffiliation(rec?.current_tier ?? fromTeam?.current_tier, rec?.current_league ?? rec?.primary ?? fromTeam?.primary)} · {formatPlayerRole(rec?.primary_role ?? rec?.roles?.[0])} · {formatEvidenceCell(trust)} evidence · {p.n_maps} games
                     </span>
                     <span className={styles.cardRating}>
                       {softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(1)}

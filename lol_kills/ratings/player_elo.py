@@ -182,19 +182,33 @@ def _aggregate(
     return mu, sig, known, details
 
 
-def _snapshot_rows(states: dict[str, PlayerState]) -> list[dict[str, object]]:
-    return [
-        {
-            "player": name,
-            "mu_total": total_mu(st),
-            "mu_regional": st.mu_regional,
-            "mu_meta": st.mu_meta,
-            "sigma": st.sigma,
-            "n_maps": st.n_maps,
-            "last_team": st.last_team,
-        }
-        for name, st in states.items()
-    ]
+def _snapshot_rows(
+    states: dict[str, PlayerState],
+    recent_mus: dict[str, list[float]] | None = None,
+) -> list[dict[str, object]]:
+    recent = recent_mus or {}
+    rows = []
+    for name, st in states.items():
+        history = recent.get(name) or []
+        stability = None
+        if len(history) >= 2:
+            deltas = [abs(history[i] - history[i - 1]) for i in range(1, len(history))]
+            stability = float(sum(deltas) / len(deltas))
+        rows.append(
+            {
+                "player": name,
+                "mu_total": total_mu(st),
+                "mu_regional": st.mu_regional,
+                "mu_meta": st.mu_meta,
+                "sigma": st.sigma,
+                "n_maps": st.n_maps,
+                "last_team": st.last_team,
+                "home_league": st.home_league,
+                "last_game_date": st.last_date.isoformat() if st.last_date is not None else None,
+                "evidence_stability": stability,
+            }
+        )
+    return rows
 
 
 def _run_player_elo(
@@ -223,6 +237,7 @@ def _run_player_elo(
     df = df[df["game_uid"].str.strip().ne("")].copy()
     lineups = _lineups_by_game(players)
     states: dict[str, PlayerState] = {}
+    recent_mus: dict[str, list[float]] = {}
     targets = sorted({pd.Timestamp(value).tz_localize(None) for value in (checkpoint_dates or [])})
     checkpoints: dict[pd.Timestamp, list[dict[str, object]]] = {}
     target_idx = 0
@@ -313,6 +328,9 @@ def _run_player_elo(
             if d is not None:
                 st.last_date = d
             st.last_team = bt
+            league = str(row.get("league") or "")
+            if league:
+                st.home_league = league
             states[name] = st
         for name, role in red_lu[:5]:
             st = states.setdefault(name, PlayerState(sigma=cfg.sigma0))
@@ -326,13 +344,23 @@ def _run_player_elo(
             if d is not None:
                 st.last_date = d
             st.last_team = rt
+            league = str(row.get("league") or "")
+            if league:
+                st.home_league = league
             states[name] = st
+
+        # Stability history: keep the last 10 posterior totals per player so
+        # the snapshot can expose mean displacement per game.
+        for name, role in list(blue_lu[:5]) + list(red_lu[:5]):
+            if name in states:
+                recent_mus.setdefault(name, []).append(total_mu(states[name]))
+                recent_mus[name] = recent_mus[name][-10:]
 
     while target_idx < len(targets):
         target = targets[target_idx]
         checkpoints[target] = _snapshot_rows(states)
         target_idx += 1
-    return pd.DataFrame(rows), states, checkpoints
+    return pd.DataFrame(rows), states, checkpoints, recent_mus
 
 
 def build_player_ratings(
@@ -343,12 +371,12 @@ def build_player_ratings(
     """Sequential player Elo; player ratings travel across org changes."""
 
     cfg = cfg or PlayerEloConfig()
-    out, states, _ = _run_player_elo(maps, players, cfg)
+    out, states, _checkpoints, recent_mus = _run_player_elo(maps, players, cfg)
     FEATURES_DIR.mkdir(parents=True, exist_ok=True)
     path = FEATURES_DIR / "player_ratings.parquet"
     out.to_parquet(path, index=False)
 
-    snap = _snapshot_rows(states)
+    snap = _snapshot_rows(states, recent_mus)
     snap_df = pd.DataFrame(snap).sort_values("mu_total", ascending=False)
     snap_df.to_parquet(FEATURES_DIR / "player_ratings_snapshot.parquet", index=False)
     (FEATURES_DIR / "player_ratings_meta.json").write_text(
@@ -400,7 +428,7 @@ def build_player_weekly_ranks(
     if as_of is not None:
         frame = frame[frame["date"].le(cutoff)]
 
-    _, states, checkpoints = _run_player_elo(
+    _, states, checkpoints, _recent_mus = _run_player_elo(
         frame,
         players,
         cfg,

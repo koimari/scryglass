@@ -13,14 +13,13 @@ import {
 } from "@/lib/duck";
 import { champIconUrl, formatGold } from "@/lib/format";
 import type { PackManifest, PlayerRating, PlayerRecord, TeamRating } from "@/lib/pack";
+import { evidenceFields, evidenceInfo, formatEvidenceCell } from "@/lib/evidence";
 import {
-  formatTrustCell,
   formatWr,
   packUpdatedLabel,
   PLAYER_SIGMA_MIN,
   softMu,
   teamSlug,
-  trustInfo,
 } from "@/lib/pack";
 import profileStyles from "./ProfileHeader.module.css";
 
@@ -71,7 +70,7 @@ export function PlayerEloDetail({
     red: record?.red_wr ?? null,
   };
 
-  const trust = trustInfo(player.sigma, PLAYER_SIGMA_MIN, player.n_maps);
+  const trust = evidenceInfo(evidenceFields(player as unknown as Record<string, unknown>), player.sigma, player.n_maps);
   const leagueAware = softMu(player.mu_total, player.sigma, PLAYER_SIGMA_MIN);
 
   const peerMedian = useMemo(() => {
@@ -228,7 +227,7 @@ export function PlayerEloDetail({
             <strong>Raw rating</strong> {player.mu_total.toFixed(1)}
           </span>
           <span>
-            <strong>Evidence</strong> {formatTrustCell(trust)}
+            <strong>Evidence</strong> {formatEvidenceCell(trust)}
           </span>
           <span>
             <strong>Games</strong> {player.n_maps}
