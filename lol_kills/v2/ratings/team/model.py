@@ -96,6 +96,7 @@ def _parse_time(value: Any, field: str) -> str:
 @dataclass(frozen=True)
 class PlayerPosterior:
     player_id: str
+    display_name: str
     role: str
     league_id: str
     scope: str
@@ -107,6 +108,7 @@ class PlayerPosterior:
     def from_mapping(cls, value: Mapping[str, Any]) -> "PlayerPosterior":
         required = {
             "player_id",
+            "display_name",
             "role",
             "league_id",
             "scope",
@@ -124,6 +126,9 @@ class PlayerPosterior:
         scope = value["scope"]
         if not isinstance(player_id, str) or not player_id:
             raise RosterValidationError("player_id must be non-empty")
+        display_name = value["display_name"]
+        if not isinstance(display_name, str) or not display_name:
+            raise RosterValidationError("display_name must be non-empty")
         if role not in ROLES:
             raise RosterValidationError(f"unknown role: {role!r}")
         if not isinstance(league_id, str) or not league_id:
@@ -134,6 +139,7 @@ class PlayerPosterior:
             raise RosterValidationError(f"inactive player: {player_id}")
         return cls(
             player_id=player_id,
+            display_name=display_name,
             role=role,
             league_id=league_id,
             scope=scope,
@@ -153,10 +159,19 @@ class ExactRoster:
     effective_at: str
     as_of: str
     players: tuple[PlayerPosterior, ...]
+    source_receipt_sha256: str
 
     @property
     def player_ids(self) -> tuple[str, ...]:
         return tuple(player.player_id for player in self.players)
+
+    @property
+    def player_names(self) -> tuple[str, ...]:
+        return tuple(player.display_name for player in self.players)
+
+    @property
+    def player_roles(self) -> tuple[str, ...]:
+        return tuple(player.role for player in self.players)
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "ExactRoster":
@@ -218,6 +233,25 @@ class ExactRoster:
                 for player in players
             ],
         }
+        # The source receipt binds the exact ordered five with roles, names,
+        # source times, and organization/league identity so the published
+        # roster can be replayed against the source that produced it.
+        receipt = {
+            "roster_id": sha256_json(identity),
+            "organization_id": value["organization_id"],
+            "league_id": league_id,
+            "effective_at": effective_at,
+            "as_of": as_of,
+            "players": [
+                {
+                    "player_id": player.player_id,
+                    "display_name": player.display_name,
+                    "role": player.role,
+                    "posterior_mean": player.posterior_mean,
+                }
+                for player in players
+            ],
+        }
         return cls(
             roster_id=sha256_json(identity),
             organization_id=value["organization_id"],
@@ -225,6 +259,7 @@ class ExactRoster:
             effective_at=effective_at,
             as_of=as_of,
             players=players,
+            source_receipt_sha256=sha256_json(receipt),
         )
 
 
@@ -291,6 +326,12 @@ class TeamRating:
     roster_id: str
     scope: str
     player_ids: tuple[str, ...]
+    player_names: tuple[str, ...]
+    player_roles: tuple[str, ...]
+    effective_at: str
+    as_of: str
+    roster_receipt_sha256: str
+    evidence_state: str
     player_posterior_means: tuple[float, ...]
     roster_latent_mean: float
     roster_latent_variance: float
@@ -355,7 +396,14 @@ class TeamRating:
             "status": "development_only",
             "roster_id": self.roster_id,
             "scope": self.scope,
+            "model_scope": self.scope,
             "players": list(self.player_ids),
+            "player_names": list(self.player_names),
+            "player_roles": list(self.player_roles),
+            "roster_effective_at": self.effective_at,
+            "roster_as_of": self.as_of,
+            "roster_receipt_sha256": self.roster_receipt_sha256,
+            "evidence_state": self.evidence_state,
             "player_posterior_means": list(self.player_posterior_means),
             "rating_display": {
                 "anchor": DISPLAY_ANCHOR,
@@ -582,10 +630,29 @@ def aggregate_team_rating(
     posterior_sd = DISPLAY_SCALE * math.sqrt(
         roster_variance + league_variance + gamma_variance
     )
+    # Fail-closed evidence state (issue #47): the exact ordered five is
+    # exact/official/active/fresh by construction, but the v2 Team Rating is
+    # development-only, so the honest public state is never "settled".  Any
+    # scope or interval problem downgrades the state explicitly.
+    interval_width = 2.0 * 1.96 * math.sqrt(max(0.0, roster_variance + league_variance))
+    if not all(player.active for player in roster.players):
+        evidence_state = "inactive"
+    elif interval_width > 200.0 * DISPLAY_SCALE / 400.0:
+        evidence_state = "wide_interval"
+    elif scope == "global" and league_rating is not None and not league_rating.structurally_eligible:
+        evidence_state = "ood"
+    else:
+        evidence_state = "development_only"
     return TeamRating(
         roster_id=roster.roster_id,
         scope=scope,
         player_ids=roster.player_ids,
+        player_names=roster.player_names,
+        player_roles=roster.player_roles,
+        effective_at=roster.effective_at,
+        as_of=roster.as_of,
+        roster_receipt_sha256=roster.source_receipt_sha256,
+        evidence_state=evidence_state,
         player_posterior_means=player_means,
         roster_latent_mean=roster_mean,
         roster_latent_variance=roster_variance,

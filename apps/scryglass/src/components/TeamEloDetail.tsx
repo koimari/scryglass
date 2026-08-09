@@ -318,10 +318,44 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
       </header>
 
       <section className="space-y-4">
-        <h2 className="font-display text-xl">Players by adjusted rating</h2>
+        <h2 className="font-display text-xl">Exact match-ready five</h2>
+        {team.exact_roster ? (
+          <div className="rounded border border-[var(--line)] p-3 text-sm space-y-1">
+            <p className="muted">
+              Published exact ordered five from the Team Rating contract
+              (roster {team.exact_roster.roster_id.slice(0, 12)}… · scope{" "}
+              {team.exact_roster.model_scope} · evidence{" "}
+              {team.exact_roster.evidence_state}).
+            </p>
+            <ol className="list-decimal pl-5">
+              {team.exact_roster.players.map((p) => (
+                <li key={p.player_id}>
+                  <Link href={`/elo/player/${playerSlug(p.player_id)}`} className="row-link">
+                    {p.display_name || p.player_id}
+                  </Link>{" "}
+                  <span className="muted">({p.role})</span>
+                </li>
+              ))}
+            </ol>
+            <p className="muted text-xs">
+              Effective {team.exact_roster.roster_effective_at} · as of{" "}
+              {team.exact_roster.roster_as_of} · receipt{" "}
+              <span className="font-mono">{team.exact_roster.roster_receipt_sha256.slice(0, 16)}…</span>
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm muted">
+            An exact match-ready five is not published for this organization: the v2 Team
+            Rating contract is development-only and no authorized roster receipt exists yet.
+            The list below is a descriptive snapshot of the org&apos;s top-rated players — it is
+            not a starter lineup, and substitutes or bench changes are never labeled as one.
+          </p>
+        )}
+
+        <h3 className="font-display text-lg">Descriptive snapshot by adjusted rating</h3>
         <p className="text-sm muted">
-          The top five current-snapshot players appear first. This order reflects rating evidence;
-          the pack does not encode starter or substitute roles.
+          The top five current-snapshot players appear first. This order reflects rating evidence
+          of the descriptive player ladder only; it never claims starter or substitute roles.
         </p>
         {roster.length === 0 ? (
           <p className="empty-hint">
