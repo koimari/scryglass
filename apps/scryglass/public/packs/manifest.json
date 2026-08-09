@@ -1,7 +1,7 @@
 {
-  "pack_id": "v2026.08.09.1907",
+  "pack_id": "v2026.08.09.1944",
   "schema_version": "2.0.0",
-  "created_utc": "2026-08-09T19:12:47.322846+00:00",
+  "created_utc": "2026-08-09T19:48:12.069525+00:00",
   "filters": {
     "years": [
       2025,
@@ -51,8 +51,8 @@
     },
     "artifacts": {
       "features/team_weekly_ranks.json": {
-        "sha256": "655b253de6cb714af991bb78fe111fc2d150bca054bd3966feae46dc1761d1f9",
-        "bytes": 56162,
+        "sha256": "86db9bd79618c6bf260e8f6cc88b47cff21d868673c9b3660f87ff26253d8c2f",
+        "bytes": 56175,
         "rows": 527
       },
       "features/player_weekly_ranks.json": {
@@ -61,27 +61,27 @@
         "rows": 1931
       },
       "features/ratings_snapshot.json": {
-        "sha256": "0926d963c4c7f458cee71418b6f9b572e0623fe9a4cf3796eaf82c3ef6e63521",
-        "bytes": 175578,
+        "sha256": "a3469cbf6bc840f7c3d4209e3e60188b5674e8fbc28eaaf732b93b7a08edf59d",
+        "bytes": 175606,
         "rows": 612
       },
       "features/player_ratings_snapshot.json": {
-        "sha256": "aa0cf13de29fabad41b0ca376ecb841fbfceee80f8d42d9eeee50defd177e22d",
-        "bytes": 2039220,
-        "rows": 3843
+        "sha256": "f98ddaab24205a3358909b043d2b424193adcc91f67e7f7697812c4d4e5235e8",
+        "bytes": 2040229,
+        "rows": 3845
       }
     },
     "claim_ceiling": "Source-bound descriptive ratings and weekly rank movement only."
   },
   "base_url": null,
-  "total_bytes": 14502759,
+  "total_bytes": 19195247,
   "total_files": 9,
   "files": [
     {
       "rows": 527,
       "cols": null,
-      "bytes": 56162,
-      "sha256": "655b253de6cb714af991bb78fe111fc2d150bca054bd3966feae46dc1761d1f9",
+      "bytes": 56175,
+      "sha256": "86db9bd79618c6bf260e8f6cc88b47cff21d868673c9b3660f87ff26253d8c2f",
       "columns": null,
       "relative": "features/team_weekly_ranks.json",
       "path": "features/team_weekly_ranks.json"
@@ -143,8 +143,8 @@
     {
       "rows": 2961,
       "cols": null,
-      "bytes": 4159857,
-      "sha256": "48a7488d079e2c3f446563adaa88160f20eb621f73b49f9befb492dbd6ddc901",
+      "bytes": 8851295,
+      "sha256": "44ccc25dba0b9595ad0ddf01c77ebb62d95b10239230d4ed612ebea369245663",
       "columns": null,
       "relative": "features/profile_records.json",
       "path": "features/profile_records.json"
@@ -152,8 +152,8 @@
     {
       "rows": 612,
       "cols": 11,
-      "bytes": 175578,
-      "sha256": "0926d963c4c7f458cee71418b6f9b572e0623fe9a4cf3796eaf82c3ef6e63521",
+      "bytes": 175606,
+      "sha256": "a3469cbf6bc840f7c3d4209e3e60188b5674e8fbc28eaaf732b93b7a08edf59d",
       "columns": [
         "team",
         "team_key",
@@ -171,10 +171,10 @@
       "path": "features/ratings_snapshot.json"
     },
     {
-      "rows": 3843,
+      "rows": 3845,
       "cols": 18,
-      "bytes": 2039220,
-      "sha256": "aa0cf13de29fabad41b0ca376ecb841fbfceee80f8d42d9eeee50defd177e22d",
+      "bytes": 2040229,
+      "sha256": "f98ddaab24205a3358909b043d2b424193adcc91f67e7f7697812c4d4e5235e8",
       "columns": [
         "player",
         "mu_total",
