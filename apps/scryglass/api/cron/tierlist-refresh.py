@@ -163,7 +163,17 @@ def _safe_pack_id(value: object) -> str:
 def _copy_tree(source: Path, destination: Path) -> None:
     if not source.is_dir() or source.is_symlink():
         raise WorkerConfigurationError(f"required worker input is missing: {source}")
-    shutil.copytree(source, destination, symlinks=False)
+    # The worker bundle and the writable refresh root both live in /tmp on
+    # Vercel. Hard links keep the static inputs available without doubling
+    # the bundle footprint. Fall back to regular copies for other filesystems.
+    try:
+        shutil.copytree(source, destination, symlinks=False, copy_function=os.link)
+    except OSError as link_error:
+        shutil.rmtree(destination, ignore_errors=True)
+        try:
+            shutil.copytree(source, destination, symlinks=False)
+        except OSError:
+            raise link_error
 
 
 def _prepare_runtime_root() -> Path:
