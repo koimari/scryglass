@@ -9,12 +9,25 @@
       "maxDuration": 800,
       "includeFiles": ".tier-worker/**",
       "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,fixtures/**,__fixtures__/**,testdata/**,sample-data/**}"
+    },
+    "api/cron/pack-refresh.py": {
+      "memory": 3009,
+      "maxDuration": 800,
+      "includeFiles": [
+        ".tier-worker/**",
+        "api/cron/tierlist-refresh.py"
+      ],
+      "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,fixtures/**,__fixtures__/**,testdata/**,sample-data/**}"
     }
   },
   "crons": [
     {
       "path": "/api/cron/tierlist-refresh",
       "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/pack-refresh",
+      "schedule": "15 */6 * * *"
     }
   ]
 }
