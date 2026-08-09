@@ -625,7 +625,7 @@ def _publish_source_bundle(
         allow_overwrite=True,
     )
     pointer_readback = None
-    for attempt in range(5):
+    for attempt in range(31):
         try:
             pointer_readback = _private_blob_read(
                 pointer_path,
@@ -636,8 +636,8 @@ def _publish_source_bundle(
             pointer_readback = None
         if pointer_readback == pointer_raw:
             break
-        if attempt < 4:
-            time.sleep(1)
+        if attempt < 30:
+            time.sleep(2)
     if pointer_readback != pointer_raw:
         raise RuntimeError("private source pointer failed exact readback")
     return {
