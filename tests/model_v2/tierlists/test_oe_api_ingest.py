@@ -7,10 +7,13 @@ from unittest.mock import patch
 import pandas as pd
 
 from lol_kills.etl.oe_api_ingest import (
+    DISCOVERY_CACHE_SCHEMA_VERSION,
     SCHEMA_VERSION,
     _cached_full_games,
     _fetch_games,
+    _read_discovery_cache,
     _rows_from_games,
+    _write_discovery_cache,
 )
 
 
@@ -67,6 +70,50 @@ def test_fetch_games_drops_old_rows_before_deduplication() -> None:
         )
 
     assert [game["oeGameId"] for game in games] == ["new"]
+
+
+def test_discovery_cache_reuses_tournaments_and_teams_within_ttl(tmp_path: Path) -> None:
+    path = tmp_path / "discovery-v1.json"
+    generated_at = pd.Timestamp("2026-08-09T12:00:00Z")
+    tournaments = [{"tournament_id": "LCK/2026", "league": "LCK"}]
+
+    _write_discovery_cache(
+        path,
+        generated_at=generated_at,
+        discovered_through=pd.Timestamp("2026-08-09T12:00:00Z"),
+        tournaments=tournaments,
+        team_ids=["team-2", "team-1", "team-1"],
+    )
+    cached = _read_discovery_cache(
+        path,
+        now=pd.Timestamp("2026-08-09T15:00:00Z"),
+        requested_end=pd.Timestamp("2026-08-09T15:00:00Z"),
+        max_age=pd.Timedelta(hours=6),
+    )
+
+    assert cached == (tournaments, ["team-1", "team-2"])
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == DISCOVERY_CACHE_SCHEMA_VERSION
+
+
+def test_discovery_cache_expires_after_ttl(tmp_path: Path) -> None:
+    path = tmp_path / "discovery-v1.json"
+    _write_discovery_cache(
+        path,
+        generated_at=pd.Timestamp("2026-08-09T08:00:00Z"),
+        discovered_through=pd.Timestamp("2026-08-09T08:00:00Z"),
+        tournaments=[{"tournament_id": "LCK/2026"}],
+        team_ids=["team-1"],
+    )
+
+    cached = _read_discovery_cache(
+        path,
+        now=pd.Timestamp("2026-08-09T15:00:01Z"),
+        requested_end=pd.Timestamp("2026-08-09T15:00:01Z"),
+        max_age=pd.Timedelta(hours=6),
+    )
+
+    assert cached is None
 
 
 def test_rows_from_games_writes_canonical_game_ids_and_source_league() -> None:

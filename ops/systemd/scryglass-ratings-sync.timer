@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Scryglass ratings sync every six hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:00:00
+Persistent=true
+RandomizedDelaySec=60
+Unit=scryglass-ratings-sync.service
+
+[Install]
+WantedBy=timers.target

@@ -82,6 +82,30 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertFalse(_is_intl("LCK", "LCK 2026 Road to MSI"))
         self.assertTrue(_is_intl("MSI", None))
 
+    def test_transport_label_falls_back_to_the_real_league(self) -> None:
+        row = canonicalize_competition_frame(
+            pd.DataFrame(
+                [
+                    {
+                        "league": "LCK",
+                        "league_source": "ORACLE_ELIXIR_API",
+                        "blue_team": "Gen.G",
+                        "red_team": "T1",
+                    }
+                ]
+            )
+        ).iloc[0]
+
+        self.assertEqual(row["league"], "LCK")
+        self.assertEqual(row["league_source"], "LCK")
+        self.assertEqual(row["competition_tier"], "tier1")
+
+    def test_unresolved_transport_label_is_not_tier_three(self) -> None:
+        label = classify_competition("ORACLE_ELIXIR_API")
+        self.assertEqual(label.league, "UNKNOWN")
+        self.assertEqual(label.scope, "other")
+        self.assertEqual(label.tier, "other")
+
     def test_team_records_merge_regional_and_international_appearances(self) -> None:
         maps = pd.DataFrame(
             [
@@ -179,6 +203,25 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertEqual(record["primary"], "LCKC")
         self.assertEqual(record["current_team"], "Kiwoom DRX Challengers")
 
+    def test_player_records_hide_excluded_team_affiliation(self) -> None:
+        players = pd.DataFrame(
+            [
+                {
+                    "date": "2026-08-01",
+                    "league": "LEC",
+                    "playername": "Baus",
+                    "position": "top",
+                    "teamname": "Los Ratones",
+                    "side": "Blue",
+                    "result": 1,
+                }
+            ]
+        )
+
+        record = build_player_records(players)["Baus"]
+
+        self.assertIsNone(record["current_team"])
+
     def test_full_team_feed_adapter_keeps_developmental_games(self) -> None:
         team_games = pd.DataFrame(
             [
@@ -204,6 +247,26 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertEqual(records["A"]["current_tier"], "tier2")
         self.assertEqual(records["A"]["by_tier"]["tier1"]["games"], 1)
         self.assertEqual(records["A"]["by_tier"]["tier2"]["games"], 1)
+
+    def test_team_record_keeps_tier_one_when_cached_source_label_is_transport(self) -> None:
+        maps = pd.DataFrame(
+            [
+                {
+                    "date": "2026-08-01",
+                    "league": "LCK",
+                    "league_source": "ORACLE_ELIXIR_API",
+                    "blue_team": "Gen.G",
+                    "red_team": "T1",
+                    "y_blue_win": 1,
+                }
+            ]
+        )
+
+        records = build_team_records(maps)
+
+        self.assertEqual(records["Gen.G"]["current_league"], "LCK")
+        self.assertEqual(records["Gen.G"]["current_tier"], "tier1")
+        self.assertNotIn("ORACLE_ELIXIR_API", records["Gen.G"]["source_leagues"])
 
     def test_weekly_player_rank_payload_uses_sunday_baseline(self) -> None:
         players = []

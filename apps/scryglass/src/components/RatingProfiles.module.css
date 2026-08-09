@@ -1,0 +1,151 @@
+.page {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.back {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+}
+
+.header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 25rem);
+  gap: 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.scope {
+  margin: 0 0 0.65rem;
+  color: var(--accent-ink);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: clamp(2.25rem, 5vw, 4rem);
+  letter-spacing: -0.055em;
+  line-height: 0.98;
+}
+
+.summary {
+  max-width: 58ch;
+  margin: 1rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.metrics {
+  margin: 0;
+  border-top: 1px solid var(--line-strong);
+}
+
+.metrics div {
+  display: flex;
+  min-height: 2.25rem;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.metrics dt,
+.metrics dd {
+  margin: 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.72rem;
+}
+
+.metrics dt {
+  color: var(--ink-muted);
+}
+
+.metrics dd {
+  color: var(--ink);
+}
+
+.metrics div:first-child {
+  min-height: 3.25rem;
+}
+
+.metrics div:first-child dd {
+  font-size: 1.65rem;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+}
+
+.section {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.sectionHeader h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.sectionHeader span {
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border-top: 1px solid var(--line-strong);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 0.65rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.82rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table th {
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.65rem;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.table th:not(:first-child),
+.table td:not(:first-child) {
+  text-align: right;
+}
+
+.empty {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+}
+
+@media (max-width: 760px) {
+  .header {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+
+  .header h1 {
+    font-size: 2.5rem;
+  }
+}

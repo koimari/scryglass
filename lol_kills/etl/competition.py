@@ -106,6 +106,18 @@ TIER2_LEAGUES = frozenset(
 )
 
 COMPETITION_TIERS = frozenset({"tier1", "tier2", "tier3"})
+TRANSPORT_LEAGUE_LABELS = frozenset(
+    {
+        "OE API",
+        "OE-API",
+        "OE_API",
+        "ORACLE ELIXIR API",
+        "ORACLE-ELIXIR-API",
+        "ORACLE_ELIXIR_API",
+        "PUBLIC DATALISK API",
+        "PUBLIC_DATALISK_API",
+    }
+)
 
 _EVENT_TOKENS: tuple[tuple[str, str], ...] = (
     ("FIRST STAND", "FST"),
@@ -183,6 +195,8 @@ def classify_competition(league: Any, tournament: Any = None) -> CompetitionLabe
     """
 
     source = source_league(league)
+    if source in TRANSPORT_LEAGUE_LABELS:
+        return CompetitionLabel("UNKNOWN", "UNKNOWN", "other", "other", False, False, "other")
     canonical = canonical_league(source)
     if canonical in REGIONAL_LEAGUES:
         return CompetitionLabel(source, canonical, "regional", "domestic", False, False, "tier1")
@@ -226,13 +240,12 @@ def canonicalize_competition_frame(frame: pd.DataFrame) -> pd.DataFrame:
     if "league" in out.columns:
         if "league_source" not in out.columns:
             out["league_source"] = out["league"]
-        labels = [
-            classify_competition(
-                row.get("league_source") if _text(row.get("league_source")) else row.get("league"),
-                row.get("tournament"),
-            )
-            for _, row in out.iterrows()
-        ]
+        labels = []
+        for _, row in out.iterrows():
+            source = source_league(row.get("league_source"))
+            fallback = source_league(row.get("league"))
+            value = fallback if source in TRANSPORT_LEAGUE_LABELS and fallback not in TRANSPORT_LEAGUE_LABELS else source or fallback
+            labels.append(classify_competition(value, row.get("tournament")))
         out["league_source"] = [label.source for label in labels]
         out["league"] = [label.league for label in labels]
         out["competition_scope"] = [label.scope for label in labels]

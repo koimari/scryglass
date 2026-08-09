@@ -1,60 +1,6 @@
 {
   "framework": "nextjs",
   "installCommand": "npm install",
-  "buildCommand": "node scripts/prepare-tier-worker.mjs && npm run build",
-  "outputDirectory": ".next",
-  "functions": {
-    "api/cron/tierlist-refresh.py": {
-      "memory": 3009,
-      "maxDuration": 800,
-      "includeFiles": ".tier-worker/**",
-      "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,fixtures/**,__fixtures__/**,testdata/**,sample-data/**}"
-    },
-    "api/cron/tierlist-authority-refresh.py": {
-      "memory": 3009,
-      "maxDuration": 800,
-      "includeFiles": "{.tier-worker/**,api/cron/tierlist-refresh.py}",
-      "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,fixtures/**,__fixtures__/**,testdata/**,sample-data/**}"
-    },
-    "api/cron/source-refresh.py": {
-      "memory": 3009,
-      "maxDuration": 800,
-      "includeFiles": "{.tier-worker/**,api/cron/tierlist-refresh.py}",
-      "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,fixtures/**,__fixtures__/**,testdata/**,sample-data/**}"
-    },
-    "api/cron/ratings-refresh.py": {
-      "memory": 3009,
-      "maxDuration": 800,
-      "includeFiles": "{.tier-worker/**,api/cron/tierlist-refresh.py}",
-      "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,fixtures/**,__fixtures__/**,testdata/**,sample-data/**}"
-    },
-    "api/cron/pack-refresh.py": {
-      "memory": 3009,
-      "maxDuration": 800,
-      "includeFiles": "{.tier-worker/**,api/cron/tierlist-refresh.py}",
-      "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,fixtures/**,__fixtures__/**,testdata/**,sample-data/**}"
-    }
-  },
-  "crons": [
-    {
-      "path": "/api/cron/source-refresh",
-      "schedule": "0 */6 * * *"
-    },
-    {
-      "path": "/api/cron/ratings-refresh",
-      "schedule": "15 */6 * * *"
-    },
-    {
-      "path": "/api/cron/tierlist-refresh",
-      "schedule": "30 */6 * * *"
-    },
-    {
-      "path": "/api/cron/tierlist-authority-refresh",
-      "schedule": "45 */6 * * *"
-    },
-    {
-      "path": "/api/cron/pack-refresh",
-      "schedule": "50 */6 * * *"
-    }
-  ]
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next"
 }

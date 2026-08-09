@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""
-Player Dual-Elo → team aggregate.
+"""Descriptive player rating and player-aggregated team baseline.
 
 Roster moves travel with the player: team strength is the mean of the five
 pre-match player μs (regional + meta), not a sticky org rating.
+
+This module measures historical results. It does not identify a player's
+causal contribution and does not authorize predictions or betting decisions.
 
   python3 -m lol_kills.ratings.player_elo
 """
@@ -14,6 +16,7 @@ import json
 import math
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 
 import pandas as pd
 
@@ -367,25 +370,31 @@ def build_player_ratings(
     maps: pd.DataFrame,
     players: pd.DataFrame,
     cfg: PlayerEloConfig | None = None,
+    output_dir: Path | None = None,
 ) -> pd.DataFrame:
     """Sequential player Elo; player ratings travel across org changes."""
 
     cfg = cfg or PlayerEloConfig()
     out, states, _checkpoints, recent_mus = _run_player_elo(maps, players, cfg)
-    FEATURES_DIR.mkdir(parents=True, exist_ok=True)
-    path = FEATURES_DIR / "player_ratings.parquet"
+    destination = Path(output_dir or FEATURES_DIR)
+    destination.mkdir(parents=True, exist_ok=True)
+    path = destination / "player_ratings.parquet"
     out.to_parquet(path, index=False)
 
     snap = _snapshot_rows(states, recent_mus)
     snap_df = pd.DataFrame(snap).sort_values("mu_total", ascending=False)
-    snap_df.to_parquet(FEATURES_DIR / "player_ratings_snapshot.parquet", index=False)
-    (FEATURES_DIR / "player_ratings_meta.json").write_text(
+    snap_df.to_parquet(destination / "player_ratings_snapshot.parquet", index=False)
+    (destination / "player_ratings_meta.json").write_text(
         json.dumps(
             {
                 "n_maps": len(out),
                 "n_players": len(snap),
                 "config": cfg.__dict__,
-                "note": "Team μ = role-weighted mean of 5 player μs; ratings travel on roster moves.",
+                "note": (
+                    "DESCRIPTIVE BASELINE: shared team-result updates use fixed role weights. "
+                    "This rating does not identify individual causal contribution. "
+                    "Team μ is the role-weighted mean of five player μ values."
+                ),
             },
             indent=2,
         )

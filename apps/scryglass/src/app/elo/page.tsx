@@ -10,13 +10,13 @@ import type {
   TeamRecord,
   TeamWeeklyRanks,
 } from "@/lib/pack";
-import { packSourceUpdatedLabel, packUpdatedLabel, packUrl, softMu } from "@/lib/pack";
+import { packSourceUpdatedLabel, packUpdatedLabel, softMu } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 import styles from "./EloPage.module.css";
 
 // Ratings are refreshed independently of the app deployment and are served
 // from the current Blob pack at request time.
-export const dynamic = "force-dynamic";
+export const revalidate = 21_600;
 
 function thinPlayers(players: PlayerRating[]): PlayerRating[] {
   return players
@@ -86,8 +86,8 @@ export default async function EloPage() {
         <div>
           <h1>Team and player ratings</h1>
           <p>
-            Current Dual Elo benchmark. Adjusted rating discounts uncertainty; these are
-            descriptive pack estimates, not a validated predictive release.
+            Current team and player strength from completed professional games.
+            Adjusted rating discounts uncertain estimates.
           </p>
         </div>
         <div className={styles.provenance} aria-label="Ratings provenance">
@@ -95,9 +95,7 @@ export default async function EloPage() {
             Updated <time dateTime={man.created_utc}>{packUpdatedLabel(man)}</time>
           </span>
           {sourceUpdated ? <span>Source through {sourceUpdated}</span> : null}
-          <span>Pack {man.pack_id}</span>
           <Link href="/methodology">Method</Link>
-          <a href={packUrl(man, "features/ratings_snapshot.json")}>JSON</a>
         </div>
       </header>
       <Suspense fallback={<div className="skeleton-block" aria-hidden />}>

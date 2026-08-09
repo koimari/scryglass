@@ -1,0 +1,15 @@
+[Unit]
+Description=Scryglass six-hour ratings sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=scryglass
+Group=scryglass
+WorkingDirectory=/srv/scryglass/current
+EnvironmentFile=/etc/scryglass/postgame-sync.env
+ExecStart=/srv/scryglass/venv/bin/python -m lol_kills.postgame_sync --root /srv/scryglass/current --public-root /srv/scryglass-data/public-packs --once
+Nice=10
+PrivateTmp=true
+NoNewPrivileges=true
