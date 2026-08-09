@@ -91,6 +91,10 @@ def _find_project_root() -> Path:
         if (
             (candidate / "lol_kills").is_dir()
             and (candidate / "apps/scryglass/public/packs/latest.json").is_file()
+            and (
+                candidate
+                / "data/lol/v2/models/draft-terminal/terminal-model-neutral-development-v3.json"
+            ).is_file()
         ):
             return candidate
     global _RUNTIME_BUNDLE_ROOT
@@ -100,6 +104,10 @@ def _find_project_root() -> Path:
         if (
             (candidate / "lol_kills").is_dir()
             and (candidate / "apps/scryglass/public/packs/latest.json").is_file()
+            and (
+                candidate
+                / "data/lol/v2/models/draft-terminal/terminal-model-neutral-development-v3.json"
+            ).is_file()
         ):
             return candidate
     raise RuntimeError("tier refresh source tree is not present in the Vercel bundle")
@@ -188,12 +196,19 @@ def _prepare_runtime_root() -> Path:
     try:
         for relative in (
             Path("data/lol/v2/champions"),
+            Path("data/lol/v2/models/draft-terminal"),
+        ):
+            _copy_tree(PROJECT_ROOT / relative, root / relative)
+
+        # These paths are writable outputs for the refresh. They do not need
+        # the historical research files from the main application bundle.
+        for relative in (
             Path("data/lol/v2/tierlists"),
             Path("data/lol/features"),
             Path("data/lol/models"),
             Path("output/pdf"),
         ):
-            _copy_tree(PROJECT_ROOT / relative, root / relative)
+            (root / relative).mkdir(parents=True, exist_ok=True)
 
         latest_source = PROJECT_ROOT / PACK_LATEST
         latest_destination = root / PACK_LATEST

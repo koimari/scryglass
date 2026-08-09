@@ -13,5 +13,8 @@ node_modules/
 !data/lol/v2/
 !data/lol/v2/champions/
 !data/lol/v2/champions/**
+!data/lol/v2/models/
+!data/lol/v2/models/draft-terminal/
+!data/lol/v2/models/draft-terminal/**
 !data/lol/v2/tierlists/
 !data/lol/v2/tierlists/**
