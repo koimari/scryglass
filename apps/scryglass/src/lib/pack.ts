@@ -78,6 +78,16 @@ export type PlayerRating = {
   sigma: number;
   n_maps: number;
   last_team: string | null;
+  evidence_interval_width?: number | null;
+  evidence_precision_ratio?: number | null;
+  evidence_stability?: number | null;
+  evidence_freshness_days?: number | null;
+  evidence_support_coverage?: number | null;
+  evidence_fallback?: number | null;
+  evidence_active?: number | null;
+  evidence_disconnected?: number | null;
+  evidence_ood?: number | null;
+  evidence_state?: string | null;
 };
 
 export type PlayerWeeklyRank = {
@@ -252,6 +262,36 @@ export function packSourceUpdatedLabel(manifest: PackManifest): string | null {
 /** Soft ranking: penalize high-σ so thin ladders don't outrank settled orgs. */
 export function softMu(mu: number, sigma: number, floor = TEAM_SIGMA_MIN): number {
   return mu - Math.max(0, sigma - floor);
+}
+
+/** Keep the public player payload small while preserving its evidence contract. */
+export function compactPlayerRatings(players: PlayerRating[]): PlayerRating[] {
+  return players
+    .filter((player) => (player.n_maps ?? 0) >= 5)
+    .map((player) => ({
+      player: player.player,
+      mu_total: player.mu_total,
+      mu_regional: player.mu_regional,
+      mu_meta: player.mu_meta,
+      sigma: player.sigma,
+      n_maps: player.n_maps,
+      last_team: player.last_team,
+      evidence_interval_width: player.evidence_interval_width,
+      evidence_precision_ratio: player.evidence_precision_ratio,
+      evidence_stability: player.evidence_stability,
+      evidence_freshness_days: player.evidence_freshness_days,
+      evidence_support_coverage: player.evidence_support_coverage,
+      evidence_fallback: player.evidence_fallback,
+      evidence_active: player.evidence_active,
+      evidence_disconnected: player.evidence_disconnected,
+      evidence_ood: player.evidence_ood,
+      evidence_state: player.evidence_state,
+    }))
+    .sort(
+      (a, b) =>
+        softMu(b.mu_total, b.sigma, PLAYER_SIGMA_MIN) -
+        softMu(a.mu_total, a.sigma, PLAYER_SIGMA_MIN),
+    );
 }
 
 /** Conservative posterior display value for the hierarchical public ladder. */
