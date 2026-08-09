@@ -18,9 +18,9 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Scryglass — LoL research by koi",
+  title: "Scryglass — League of Legends ratings",
   description:
-    "Independent League of Legends research publication: essays, Dual Elo ratings, and reproducible Oracle’s Elixir packs (2025–2026).",
+    "Quick team ratings, player ratings, and champion tier lists for professional League of Legends.",
   robots: { index: true, follow: true },
 };
 
@@ -32,13 +32,13 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${ui.variable} ${mono.variable} h-full antialiased`}
+      className={`${ui.variable} ${mono.variable}`}
       suppressHydrationWarning
     >
       <head>
         <ThemeScript />
       </head>
-      <body className="min-h-full flex flex-col">
+      <body>
         <ThemeProvider>
           <SiteHeader />
           <main className="site-main">{children}</main>

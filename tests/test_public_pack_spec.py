@@ -1,31 +1,187 @@
 import pyarrow as pa
+import pandas as pd
+import pytest
 
 from lol_kills.export import pack_spec
-from lol_kills.export.public_pack import _ensure_year_column, _filter_years
+from lol_kills.export.pack_records import (
+    build_player_champion_records,
+    build_profile_records,
+    public_team_affiliation,
+)
+from lol_kills.export.public_pack import (
+    _attach_public_team_evidence,
+    _complete_player_game_ids,
+    _ensure_year_column,
+    _filter_years,
+    _public_player_rating_rows,
+    _validate_public_record_tiers,
+    source_identity_sha256,
+)
 
 
-def test_public_pack_does_not_pin_unreviewed_draft_artifacts() -> None:
-    assert set(pack_spec.PINNED_MODEL_FILES).isdisjoint(pack_spec.WITHHELD_MODEL_FILES)
-    assert "draft_wr_calibration.json" not in pack_spec.PINNED_MODEL_FILES
-    assert "draft_recommendation.json" not in pack_spec.PINNED_MODEL_FILES
-
-
-def test_pack_readme_declares_withheld_draft_artifacts() -> None:
-    assert "Draft Score calibration" in pack_spec.PACK_README
-
-
-def test_public_reproduction_contract_cites_only_available_public_inputs() -> None:
-    required = set(pack_spec.PUBLIC_REPRODUCTION_REQUIRED_FILES)
-    assert "features/major_teams.json" not in required
-    assert "studies/grubs/void_grubs_scrap_value_and_contest_rationality.pdf" in required
-    assert required.isdisjoint(pack_spec.WITHHELD_PUBLIC_FILES)
-
-
-def test_public_pack_withholds_draft_context_as_well_as_draft_models() -> None:
-    assert "features/draft_context.json" in pack_spec.WITHHELD_PUBLIC_FILES
-    assert set(pack_spec.WITHHELD_MODEL_FILES).issubset(
-        {path.rsplit("/", 1)[-1] for path in pack_spec.WITHHELD_PUBLIC_FILES}
+def test_public_team_ratings_receive_evidence_fields() -> None:
+    ratings = pd.DataFrame(
+        [
+            {
+                "team": "Gen.G",
+                "team_key": "gen-g",
+                "sigma": 20.0,
+                "n_series": 18,
+                "last_game_date": "2026-08-08T12:00:00Z",
+                "home_league": "LCK",
+                "international_series": 4,
+            }
+        ]
     )
+
+    output = _attach_public_team_evidence(
+        ratings,
+        source_as_of=pd.Timestamp("2026-08-09T12:00:00Z"),
+        weekly_ranks={"by_team": {"Gen.G": {"mu_delta": -2.5}}},
+    )
+
+    row = output.iloc[0]
+    assert row["evidence_stability"] == 2.5
+    assert row["evidence_active"] == 1
+    assert row["evidence_state"] != "unsupported"
+
+
+def test_incomplete_or_ambiguous_player_maps_wait_for_later_refresh() -> None:
+    rows = []
+    for game_id, blue_bot, blue_support in (
+        ("complete", "Blue Bot", "Blue Support"),
+        ("duplicate", "unknown player", "unknown player"),
+    ):
+        for side, prefix in (("Blue", "Blue"), ("Red", "Red")):
+            for role in ("top", "jng", "mid", "bot", "sup"):
+                player = f"{prefix} {role}"
+                if side == "Blue" and role == "bot":
+                    player = blue_bot
+                if side == "Blue" and role == "sup":
+                    player = blue_support
+                rows.append(
+                    {
+                        "game_uid": game_id,
+                        "side": side,
+                        "position": role,
+                        "playername": player,
+                    }
+                )
+
+    assert _complete_player_game_ids(pd.DataFrame(rows)) == {"complete"}
+
+
+def test_public_pack_contains_only_rating_display_files() -> None:
+    assert set(pack_spec.PUBLIC_RATING_REQUIRED_FILES) == {
+        "features/ratings_snapshot.json",
+        "features/player_ratings_snapshot.json",
+        "features/team_records.json",
+        "features/team_weekly_ranks.json",
+        "features/player_records.json",
+        "features/player_champion_records.json",
+        "features/profile_records.json",
+        "features/player_weekly_ranks.json",
+        "features/player_metadata.json",
+    }
+
+
+def test_player_champion_records_are_compact_and_sorted() -> None:
+    records = build_player_champion_records(
+        pd.DataFrame(
+            [
+                {"playername": "Inspired", "position": "jng", "champion": "Ivern", "result": 1, "kills": 2, "deaths": 1, "assists": 12},
+                {"playername": "Inspired", "position": "jng", "champion": "Ivern", "result": 0, "kills": 1, "deaths": 3, "assists": 8},
+                {"playername": "Inspired", "position": "jng", "champion": "Xin Zhao", "result": 1, "kills": 5, "deaths": 2, "assists": 7},
+            ]
+        )
+    )
+
+    assert records["Inspired"] == [
+        {
+            "champion": "Ivern",
+            "games": 2,
+            "wins": 1,
+            "losses": 1,
+            "wr": 0.5,
+            "kills": 1.5,
+            "deaths": 2.0,
+            "assists": 10.0,
+        },
+        {
+            "champion": "Xin Zhao",
+            "games": 1,
+            "wins": 1,
+            "losses": 0,
+            "wr": 1.0,
+            "kills": 5.0,
+            "deaths": 2.0,
+            "assists": 7.0,
+        },
+    ]
+
+
+def test_profile_records_normalize_recent_games_without_raw_tables() -> None:
+    rows = []
+    for side, team, result in (("Blue", "LYON", 1), ("Red", "Other", 0)):
+        for role, player, champion in (
+            ("top", f"{team} Top", "Gnar"),
+            ("jng", "Inspired" if team == "LYON" else f"{team} Jungle", "Ivern"),
+            ("mid", f"{team} Mid", "Ahri"),
+            ("bot", f"{team} Bot", "Ezreal"),
+            ("sup", f"{team} Support", "Nautilus"),
+        ):
+            rows.append(
+                {
+                    "game_uid": "oe-api:game-1",
+                    "date": "2026-08-09T12:00:00Z",
+                    "league": "LCS",
+                    "side": side,
+                    "teamname": team,
+                    "playername": player,
+                    "position": role,
+                    "champion": champion,
+                    "result": result,
+                    "kills": 2,
+                    "deaths": 1,
+                    "assists": 8,
+                }
+            )
+
+    payload = build_profile_records(
+        pd.DataFrame(rows),
+        champion_image_urls={"Ivern": "https://example.test/ivern.png"},
+    )
+
+    assert payload["schema_version"] == "scryglass:profile-records:v2"
+    assert payload["grade_contract"] == "scryglass:player-map-grade:v1"
+    assert payload["players"]["Inspired"] == ["game-1"]
+    assert payload["teams"]["LYON"] == ["game-1"]
+    game = payload["games"]["game-1"]
+    assert game["blue_team"] == "LYON"
+    assert game["red_team"] == "Other"
+    inspired = next(row for row in game["players"] if row["player"] == "Inspired")
+    assert inspired["role"] == "jungle"
+    assert inspired["grade"]["status"] == "unavailable"
+    assert payload["champion_images"]["Ivern"] == "https://example.test/ivern.png"
+
+
+def test_public_player_ratings_exclude_disconnected_rows() -> None:
+    rows = [
+        {"player": "Inspired", "evidence_disconnected": 0, "evidence_state": "observed"},
+        {"player": "Baus", "evidence_disconnected": 1, "evidence_state": "disconnected"},
+        {"player": "Caedrel", "evidence_disconnected": 0, "evidence_state": "disconnected"},
+    ]
+
+    assert _public_player_rating_rows(rows) == [rows[0]]
+
+
+def test_public_pack_withholds_raw_rows_models_and_studies() -> None:
+    forbidden = set(pack_spec.FORBIDDEN_PUBLIC_MODEL_FILES)
+    assert "models/" in forbidden
+    assert "studies/" in forbidden
+    assert "team_games/" in forbidden
+    assert "player_games/" in forbidden
+    assert "maps/" in forbidden
 
 
 def test_live_map_overlay_gets_partition_year_from_date() -> None:
@@ -55,3 +211,41 @@ def test_live_overlay_prefers_normalized_oe_year_when_columns_disagree() -> None
         "year": [2025, 2025],
         "oe_year": [2025, 2026],
     }
+
+
+def test_source_identity_digest_is_canonical_order_independent() -> None:
+    left = source_identity_sha256(["oe-api:game-2", "game-1", "oe-api:game-1"])
+    right = source_identity_sha256(["game-1", "game-2"])
+    assert left == right
+
+
+def test_excluded_team_has_no_public_affiliation() -> None:
+    assert public_team_affiliation("Los Ratones") is None
+    assert public_team_affiliation("Gen.G") == "Gen.G"
+    assert public_team_affiliation("LYON (2024 American Team)") == "LYON"
+
+
+def test_public_record_tier_must_match_the_canonical_league() -> None:
+    _validate_public_record_tiers(
+        {"Gen.G": {"leagues": ["LCK"], "current_league": "LCK", "current_tier": "tier1"}},
+        label="team",
+    )
+    with pytest.raises(RuntimeError, match="inconsistent league tier"):
+        _validate_public_record_tiers(
+            {"Gen.G": {"leagues": ["LCK"], "current_league": "LCK", "current_tier": "tier3"}},
+            label="team",
+        )
+
+
+def test_public_record_rejects_transport_label_as_a_league() -> None:
+    with pytest.raises(RuntimeError, match="transport label"):
+        _validate_public_record_tiers(
+            {
+                "Gen.G": {
+                    "leagues": ["ORACLE_ELIXIR_API"],
+                    "current_league": "ORACLE_ELIXIR_API",
+                    "current_tier": "tier3",
+                }
+            },
+            label="team",
+        )

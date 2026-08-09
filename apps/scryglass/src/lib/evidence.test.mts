@@ -141,7 +141,7 @@ test("support coverage below the target is observed or thin, never settled", () 
 
 test("evidenceInfo renders the basis and keeps sigma/games as diagnostics", () => {
   const info = evidenceInfo(settledFields(), 25, 40);
-  assert.equal(info.label, "Settled");
+  assert.equal(info.label, "High confidence");
   assert.ok(info.detail.includes("95% interval"));
   assert.ok(info.detail.includes("precision"));
   assert.ok(info.detail.includes("since last game"));
@@ -153,6 +153,26 @@ test("evidenceInfo renders the basis and keeps sigma/games as diagnostics", () =
 
 test("unsupported rows render a fail-closed label and explanation", () => {
   const info = evidenceInfo({}, 25, 40);
-  assert.equal(info.label, "Unsupported");
-  assert.ok(info.layman.includes("predates"));
+  assert.equal(info.label, "Data unavailable");
+  assert.ok(info.layman.includes("does not support"));
+});
+
+test("public confidence labels avoid internal evidence terms", () => {
+  assert.equal(evidenceInfo(settledFields(), 25, 40).label, "High confidence");
+  assert.equal(
+    evidenceInfo(
+      settledFields({ evidence_precision_ratio: EVIDENCE_CONTRACT.settledPrecisionRatio }),
+      30,
+      40,
+    ).label,
+    "Medium confidence",
+  );
+  assert.equal(
+    evidenceInfo(
+      settledFields({ evidence_interval_width: EVIDENCE_CONTRACT.wideIntervalWidth + 1 }),
+      60,
+      10,
+    ).label,
+    "Low confidence",
+  );
 });

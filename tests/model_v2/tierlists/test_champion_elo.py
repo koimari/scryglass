@@ -65,9 +65,9 @@ def _source_rows() -> pd.DataFrame:
                     {
                         "gameid": game_id,
                         "date": date,
-                        "league": "LEC",
-                        "competition_tier": "tier1",
-                        "event_kind": "domestic",
+                        "league": "LEC" if game_id == "g1" else "LCS" if game_id == "g2" else "MSI",
+                        "competition_tier": "international" if game_id == "g3" else "tier1",
+                        "event_kind": "msi" if game_id == "g3" else "domestic",
                         "patch": "15.01",
                         "position": role,
                         "champion": champion,
@@ -93,10 +93,14 @@ def test_replay_covers_all_roles_and_tracks_rank_movement(tmp_path: Path) -> Non
     assert current["development_only"] is True
     assert current["publication_eligible"] is False
     assert current["source_mode"] == "oe_only"
-    assert current["rating_method"]["name"].startswith("joint five-role")
+    assert current["rating_method"]["name"].startswith("patch-wide joint five-role")
     assert "full observed-Hessian" in current["rating_method"]["fit"]
     assert current["options"]["roles"] == ["top", "jungle", "mid", "bot", "support"]
     assert len(current["cells"]) == 5
+    assert {cell["scope_kind"] for cell in current["cells"]} == {"patch"}
+    assert {cell["scope_id"] for cell in current["cells"]} == {"patch:15.01"}
+    assert all(cell["league"] is None for cell in current["cells"])
+    assert "leagues" not in current["options"]
 
     mid = next(cell for cell in current["cells"] if cell["role"] == "mid")
     rows = {row["champion"]: row for row in mid["rows"]}

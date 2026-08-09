@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -29,11 +30,14 @@ API_BASE = "https://oe.datalisk.io"
 SCHEMA_VERSION = "scryglass:oe-api-live-bridge:v1"
 DEFAULT_LOOKBACK_DAYS = 120
 DEFAULT_MAX_WORKERS = 8
+DEFAULT_DISCOVERY_CACHE_HOURS = 6
 ROLES = ("top", "jng", "mid", "bot", "sup")
 PLAYER_OUTPUT = PARQUET_DIR / "oe_api_player_games.parquet"
 TEAM_OUTPUT = PARQUET_DIR / "oe_api_team_games.parquet"
 META_OUTPUT = PARQUET_DIR / "oe_api_meta.json"
 RAW_OUTPUT = WAREHOUSE_DIR / "raw" / "oe_api" / "tierlist-live-v1.json"
+DISCOVERY_CACHE_OUTPUT = WAREHOUSE_DIR / "raw" / "oe_api" / "discovery-v1.json"
+DISCOVERY_CACHE_SCHEMA_VERSION = "scryglass:oe-api-discovery-cache:v1"
 
 
 class OeApiIngestError(RuntimeError):
@@ -54,6 +58,24 @@ def _sha256_path(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _atomic_write_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, ensure_ascii=True, indent=2, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _api_key() -> str:
@@ -228,6 +250,62 @@ def _discover_tournaments(
     return [discovered[key] for key in sorted(discovered)]
 
 
+def _read_discovery_cache(
+    path: Path,
+    *,
+    now: pd.Timestamp,
+    requested_end: pd.Timestamp,
+    max_age: pd.Timedelta,
+) -> tuple[list[dict[str, Any]], list[str]] | None:
+    if not path.is_file() or max_age <= pd.Timedelta(0):
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, Mapping) or payload.get("schema_version") != DISCOVERY_CACHE_SCHEMA_VERSION:
+        return None
+    generated_at = _parse_timestamp(payload.get("generated_at"))
+    if generated_at is None or generated_at > now or now - generated_at > max_age:
+        return None
+    discovered_through = _parse_timestamp(payload.get("discovered_through"))
+    if (
+        discovered_through is None
+        or discovered_through > requested_end
+        or requested_end - discovered_through > max_age
+    ):
+        return None
+    tournaments = payload.get("tournaments")
+    team_ids = payload.get("team_ids")
+    if not isinstance(tournaments, list) or not isinstance(team_ids, list):
+        return None
+    clean_tournaments = [dict(item) for item in tournaments if isinstance(item, Mapping)]
+    clean_team_ids = sorted({str(value).strip() for value in team_ids if str(value).strip()})
+    if not clean_tournaments or not clean_team_ids:
+        return None
+    return clean_tournaments, clean_team_ids
+
+
+def _write_discovery_cache(
+    path: Path,
+    *,
+    generated_at: pd.Timestamp,
+    discovered_through: pd.Timestamp,
+    tournaments: list[dict[str, Any]],
+    team_ids: list[str],
+) -> None:
+    _atomic_write_json(
+        path,
+        {
+            "schema_version": DISCOVERY_CACHE_SCHEMA_VERSION,
+            "generated_at": generated_at.isoformat().replace("+00:00", "Z"),
+            "discovered_through": discovered_through.isoformat().replace("+00:00", "Z"),
+            "tournaments": tournaments,
+            "team_ids": sorted(set(team_ids)),
+        },
+    )
+
+
 def _fetch_team_ids(
     tournaments: list[dict[str, Any]],
     *,
@@ -326,7 +404,8 @@ def _fetch_full_games(
             return game_id, None
         if not isinstance(body, list) or not body or not isinstance(body[0], Mapping):
             return game_id, None
-        return game_id, dict(body[0])
+        detail = dict(body[0])
+        return game_id, detail if _complete_player_detail(detail) else None
 
     details: dict[str, dict[str, Any]] = {}
     missing = 0
@@ -339,6 +418,25 @@ def _fetch_full_games(
                 continue
             details[game_id] = detail
     return details, missing
+
+
+def _complete_player_detail(detail: Mapping[str, Any]) -> bool:
+    """Require ten distinct named players before a game can enter ratings."""
+
+    names: list[str] = []
+    placeholders = {"unknown", "unknown player", "tbd", "none", "nan"}
+    for team_key in ("blueTeam", "redTeam"):
+        team = detail.get(team_key)
+        players = team.get("players") if isinstance(team, Mapping) else None
+        if not isinstance(players, Mapping):
+            return False
+        for role in ROLES:
+            player = players.get(role)
+            name = str(player.get("name") or "").strip() if isinstance(player, Mapping) else ""
+            if not name or name.casefold() in placeholders:
+                return False
+            names.append(name)
+    return len(names) == 10 and len({name.casefold() for name in names}) == 10
 
 
 def _cached_full_games(path: Path) -> dict[str, dict[str, Any]]:
@@ -377,7 +475,7 @@ def _cached_full_games(path: Path) -> dict[str, dict[str, Any]]:
             if not complete:
                 break
             detail[team_key] = {"players": detail_players}
-        if complete:
+        if complete and _complete_player_detail(detail):
             cached[game_id] = detail
     return cached
 
@@ -432,6 +530,8 @@ def _rows_from_games(
         if not game_uid:
             continue
         detail = full_games.get(str(raw_game_uid).strip(), {})
+        if not isinstance(detail, Mapping) or not _complete_player_detail(detail):
+            continue
         game_id = game_uid
         common = {
             "gameid": game_id,
@@ -525,9 +625,14 @@ def ingest_oe_api(
     end: pd.Timestamp,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
     max_workers: int = DEFAULT_MAX_WORKERS,
+    discovery_cache_hours: int = DEFAULT_DISCOVERY_CACHE_HOURS,
+    force_discovery: bool = False,
 ) -> dict[str, Any]:
-    if lookback_days < 0 or max_workers < 1:
-        raise ValueError("lookback_days must be non-negative and max_workers must be positive")
+    if lookback_days < 0 or max_workers < 1 or discovery_cache_hours < 0:
+        raise ValueError(
+            "lookback_days and discovery_cache_hours must be non-negative; "
+            "max_workers must be positive"
+        )
     repo_root = Path(root).resolve()
     api_key = _api_key()
     start = _parse_timestamp(start)
@@ -550,13 +655,31 @@ def ingest_oe_api(
     not_before = start - pd.Timedelta(days=lookback_days)
     if primary_latest is not None:
         not_before = max(not_before, primary_latest - pd.Timedelta(days=7))
-    tournaments = _discover_tournaments(
-        api_key=api_key,
-        start=start,
-        end=end,
-        lookback_days=lookback_days,
+    discovery_cache_path = repo_root / DISCOVERY_CACHE_OUTPUT
+    discovery = None if force_discovery else _read_discovery_cache(
+        discovery_cache_path,
+        now=pd.Timestamp(datetime.now(timezone.utc)),
+        requested_end=end,
+        max_age=pd.Timedelta(hours=discovery_cache_hours),
     )
-    team_ids = _fetch_team_ids(tournaments, api_key=api_key, max_workers=max_workers)
+    discovery_cache_hit = discovery is not None
+    if discovery is None:
+        tournaments = _discover_tournaments(
+            api_key=api_key,
+            start=start,
+            end=end,
+            lookback_days=lookback_days,
+        )
+        team_ids = _fetch_team_ids(tournaments, api_key=api_key, max_workers=max_workers)
+        _write_discovery_cache(
+            discovery_cache_path,
+            generated_at=pd.Timestamp(datetime.now(timezone.utc)),
+            discovered_through=end,
+            tournaments=tournaments,
+            team_ids=team_ids,
+        )
+    else:
+        tournaments, team_ids = discovery
     games = _fetch_games(
         team_ids,
         api_key=api_key,
@@ -611,6 +734,7 @@ def ingest_oe_api(
         },
         "tournaments": tournaments,
         "team_count": len(team_ids),
+        "discovery_cache_hit": discovery_cache_hit,
         "games_discovered": len(games),
         "games_accepted": len(accepted_games),
         "full_detail_games_requested": len(detail_games),
@@ -644,6 +768,8 @@ def ingest_oe_api(
         "window_start": payload["source"]["window_start"],
         "window_end": payload["source"]["window_end"],
         "games": len(accepted_games),
+        "discovery_cache_hit": discovery_cache_hit,
+        "discovery_cache_hours": discovery_cache_hours,
         "source_latest": max(game["date"] for game in accepted_games),
         "full_detail_games_requested": len(detail_games),
         "full_detail_games_fetched": len(detail_games_to_fetch),
@@ -671,6 +797,12 @@ def main() -> int:
     parser.add_argument("--end", required=True)
     parser.add_argument("--lookback-days", type=int, default=DEFAULT_LOOKBACK_DAYS)
     parser.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
+    parser.add_argument(
+        "--discovery-cache-hours",
+        type=int,
+        default=DEFAULT_DISCOVERY_CACHE_HOURS,
+    )
+    parser.add_argument("--force-discovery", action="store_true")
     args = parser.parse_args()
     meta = ingest_oe_api(
         args.root,
@@ -678,6 +810,8 @@ def main() -> int:
         end=pd.Timestamp(args.end),
         lookback_days=args.lookback_days,
         max_workers=args.max_workers,
+        discovery_cache_hours=args.discovery_cache_hours,
+        force_discovery=args.force_discovery,
     )
     print(json.dumps(meta, ensure_ascii=True, indent=2, sort_keys=True))
     return 0

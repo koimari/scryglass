@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from lol_kills.v2.tierlists import live_refresh
-from lol_kills.etl.oe_live_source import _merge
+from lol_kills.etl.oe_live_source import _complete_player_game_ids, _merge
 
 
 def _candidate(*, source_mode: str) -> dict[str, object]:
@@ -40,6 +40,29 @@ def test_live_merge_deduplicates_prefixed_and_canonical_game_ids() -> None:
     assert set(merged["gameid"]) == {"g1"}
 
 
+def test_live_source_excludes_games_with_missing_or_duplicate_player_names() -> None:
+    rows = []
+    for game_id, bad in (("good", False), ("missing", True), ("duplicate", True)):
+        for side in ("Blue", "Red"):
+            for role in ("top", "jng", "mid", "bot", "sup"):
+                name = f"{side}-{role}"
+                if game_id == "missing" and side == "Blue":
+                    name = None
+                if game_id == "duplicate" and side == "Blue" and role in {"bot", "sup"}:
+                    name = "unknown player"
+                rows.append(
+                    {
+                        "game_uid": f"oe-api:{game_id}",
+                        "gameid": f"oe-api:{game_id}",
+                        "side": side,
+                        "position": role,
+                        "playername": name,
+                    }
+                )
+
+    assert _complete_player_game_ids(pd.DataFrame(rows)) == {"good"}
+
+
 def test_blob_publication_payloads_keep_cells_immutable_and_pointer_last() -> None:
     root = Path(__file__).resolve().parents[3]
     payloads = live_refresh._publication_payloads(root)
@@ -53,7 +76,7 @@ def test_blob_publication_payloads_keep_cells_immutable_and_pointer_last() -> No
     assert release_index["base_url"] == "./"
     assert all(cell["locator"].startswith("cells/") for cell in pointer["cells"])
     assert payloads["pointer_raw"] != payloads["release_index_raw"]
-    assert payloads["cell_count"] == 285
+    assert payloads["cell_count"] == 195
 
 
 def test_blob_publication_writes_the_pointer_last() -> None:
@@ -120,7 +143,7 @@ def test_blob_publication_writes_the_pointer_last() -> None:
     assert result["status"] == "published"
     assert result["pointer_mode"] == "NEW_IMMUTABLE"
     assert result["pointer_readback_verified"] is True
-    assert result["cell_count"] == 285
+    assert result["cell_count"] == 195
 
 
 def test_oe_only_skips_grid_and_can_be_ready_from_a_complete_oe_source(tmp_path: Path) -> None:

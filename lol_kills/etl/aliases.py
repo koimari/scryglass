@@ -49,6 +49,8 @@ TEAM_ALIASES: dict[str, str] = {
     "team liquid": "Team Liquid",
     "cloud9": "Cloud9",
     "flyquest": "FlyQuest",
+    "lyon": "LYON",
+    "lyon (2024 american team)": "LYON",
     "bilibili gaming": "Bilibili Gaming",
     "blg": "Bilibili Gaming",
     "top esports": "Top Esports",

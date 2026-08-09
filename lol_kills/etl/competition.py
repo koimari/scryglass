@@ -22,7 +22,7 @@ import pandas as pd
 from lol_kills.etl.aliases import normalize_team
 
 
-TAXONOMY_VERSION = "2026-07-26.4"
+TAXONOMY_VERSION = "2026-08-09.2"
 
 # LTA was the 2025 Americas competition.  North and South were distinct
 # domestic circuits, while an unqualified LTA row is an Americas cross-region
@@ -99,13 +99,40 @@ TIER2_LEAGUES = frozenset(
         "EBL",
         "HLL",
         "HM",
+        "HW",
         "LPLOL",
+        "LES",
+        "RL",
         "ROL",
         "KESPA",
     }
 )
 
 COMPETITION_TIERS = frozenset({"tier1", "tier2", "tier3"})
+# These labels describe cross-league events. They do not describe a team's
+# current league membership. Historical rows keep the event label and tier.
+EVENT_ONLY_LEAGUES = frozenset(
+    {
+        "ASI",
+        "DCUP",
+        "CCWS",
+        "IC",
+        "KESPA",
+        "KESPA CUP",
+    }
+)
+TRANSPORT_LEAGUE_LABELS = frozenset(
+    {
+        "OE API",
+        "OE-API",
+        "OE_API",
+        "ORACLE ELIXIR API",
+        "ORACLE-ELIXIR-API",
+        "ORACLE_ELIXIR_API",
+        "PUBLIC DATALISK API",
+        "PUBLIC_DATALISK_API",
+    }
+)
 
 _EVENT_TOKENS: tuple[tuple[str, str], ...] = (
     ("FIRST STAND", "FST"),
@@ -173,6 +200,19 @@ def competition_tier(league: Any) -> str:
     return "tier3" if canonical else "other"
 
 
+def is_team_affiliation_league(league: Any) -> bool:
+    """Return whether a competition can define current team membership."""
+
+    canonical = canonical_league(league)
+    if not canonical:
+        return False
+    if canonical in INTERNATIONAL_LEAGUES or canonical in INTERREGIONAL_LEAGUES:
+        return False
+    if canonical in EVENT_ONLY_LEAGUES or canonical.endswith("CUP"):
+        return False
+    return competition_tier(canonical) in COMPETITION_TIERS
+
+
 def classify_competition(league: Any, tournament: Any = None) -> CompetitionLabel:
     """Classify a row without substring false positives.
 
@@ -183,6 +223,8 @@ def classify_competition(league: Any, tournament: Any = None) -> CompetitionLabe
     """
 
     source = source_league(league)
+    if source in TRANSPORT_LEAGUE_LABELS:
+        return CompetitionLabel("UNKNOWN", "UNKNOWN", "other", "other", False, False, "other")
     canonical = canonical_league(source)
     if canonical in REGIONAL_LEAGUES:
         return CompetitionLabel(source, canonical, "regional", "domestic", False, False, "tier1")
@@ -226,13 +268,12 @@ def canonicalize_competition_frame(frame: pd.DataFrame) -> pd.DataFrame:
     if "league" in out.columns:
         if "league_source" not in out.columns:
             out["league_source"] = out["league"]
-        labels = [
-            classify_competition(
-                row.get("league_source") if _text(row.get("league_source")) else row.get("league"),
-                row.get("tournament"),
-            )
-            for _, row in out.iterrows()
-        ]
+        labels = []
+        for _, row in out.iterrows():
+            source = source_league(row.get("league_source"))
+            fallback = source_league(row.get("league"))
+            value = fallback if source in TRANSPORT_LEAGUE_LABELS and fallback not in TRANSPORT_LEAGUE_LABELS else source or fallback
+            labels.append(classify_competition(value, row.get("tournament")))
         out["league_source"] = [label.source for label in labels]
         out["league"] = [label.league for label in labels]
         out["competition_scope"] = [label.scope for label in labels]

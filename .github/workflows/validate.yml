@@ -62,6 +62,14 @@ jobs:
         timeout-minutes: 5
         run: npm run lint
 
+      - name: Check public boundary
+        timeout-minutes: 2
+        run: npm run audit:public-boundary
+
+      - name: Type check
+        timeout-minutes: 5
+        run: npx tsc --noEmit --allowImportingTsExtensions
+
       - name: TypeScript tests
         id: tests
         timeout-minutes: 10
@@ -133,3 +141,35 @@ jobs:
           name: validation-record
           path: apps/scryglass/validation-record.txt
           if-no-files-found: error
+
+  rankings-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install focused test dependencies
+        run: python -m pip install -r apps/scryglass/requirements.txt pytest
+
+      - name: Validate ratings and patch-wide tier contracts
+        run: >-
+          python -m pytest -q
+          tests/model_v2/tierlists/test_champion_elo.py
+          tests/model_v2/tierlists/test_joint_pooled_model.py
+          tests/model_v2/tierlists/test_production_bundle.py
+          tests/model_v2/tierlists/test_production_readiness.py
+          tests/model_v2/tierlists/test_oe_api_ingest.py
+          tests/model_v2/tierlists/test_live_refresh.py
+          tests/test_global_player_bt.py
+          tests/test_player_map_grades.py
+          tests/test_postgame_sync.py
+          tests/test_public_pack_spec.py
+          tests/test_competition_and_ratings.py
+          tests/test_manual_leaguepedia.py

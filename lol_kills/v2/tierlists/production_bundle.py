@@ -30,7 +30,7 @@ EVALUATION_LOCATOR = Path("data/lol/v2/tierlists/prospective-evaluation-v1.json"
 AUTHORITY_LOCATOR = Path("data/lol/v2/tierlists/independent-l2-authority-v1.json")
 MANIFEST_LOCATOR = Path("data/lol/v2/tierlists/production-manifest-v1.json")
 PRODUCTION_ROOT = Path("data/lol/v2/tierlists/production")
-PUBLIC_PRODUCTION_ROOT = Path("apps/scryglass/public/v2/tierlists/production")
+PUBLIC_DISPLAY_LOCATOR = Path("apps/scryglass/public/rankings/tierlists.json")
 SCHEMA_VERSION = "scryglass:tierlist-production-bundle:v1"
 INDEX_SCHEMA_VERSION = "scryglass:tierlist-production-index:v1"
 CELL_SCHEMA_VERSION = "scryglass:tierlist-production-cell:v1"
@@ -189,6 +189,15 @@ def _validate_candidate_structure(candidate: Mapping[str, Any]) -> dict[str, Any
         scope_id = cell.get("scope_id")
         if role not in ROLES or not isinstance(scope_id, str) or not scope_id:
             raise ProductionBundleError("candidate scope or role is invalid")
+        patches = cell.get("patches")
+        if (
+            cell.get("scope_kind") != "patch"
+            or not scope_id.startswith("patch:")
+            or not isinstance(patches, list)
+            or len(patches) != 1
+            or scope_id != f"patch:{patches[0]}"
+        ):
+            raise ProductionBundleError("candidate must contain one patch-wide scope per cell")
         scope_roles.setdefault((scope_id, str(cell.get("patches"))), set()).add(role)
         rows = cell.get("rows")
         if not isinstance(rows, list) or not rows:
@@ -349,7 +358,6 @@ def build_production_index(
                 "fail_closed_status": fail_closed_status,
             }
         )
-    leagues = sorted({str(value) for value in candidate["options"].get("leagues", []) if value})
     patches = sorted({meta["patch_id"] for meta in metas}, key=_patch_key)
     index: dict[str, Any] = {
         "schema_version": INDEX_SCHEMA_VERSION,
@@ -367,9 +375,6 @@ def build_production_index(
         "independent_authority_raw_sha256": authority_raw_sha256,
         "cells": metas,
         "options": {
-            "leagues": leagues,
-            "event_kinds": sorted({str(value) for value in candidate["options"].get("event_kinds", []) if value}),
-            "competition_tiers": sorted({str(value) for value in candidate["options"].get("competition_tiers", []) if value}),
             "roles": list(ROLES),
             "patches": patches,
             "tier_buckets": list(TIER_BUCKETS),
@@ -426,7 +431,7 @@ def write_production_bundle(
     *,
     authority_path: Path = AUTHORITY_LOCATOR,
 ) -> dict[str, Any]:
-    """Write the approved production cells, index, and manifest."""
+    """Write approved local artifacts and one sanitized public display file."""
 
     repo_root = Path(root)
     authority_raw, authority = _read_json(repo_root, authority_path)
@@ -437,20 +442,69 @@ def write_production_bundle(
         raise ProductionBundleError("authority record does not authorize tier lists")
     index, cell_bytes, summary = build_production_index(repo_root, authority_raw_sha256=authority_raw_sha256)
     production_dir = repo_root / PRODUCTION_ROOT
-    public_dir = repo_root / PUBLIC_PRODUCTION_ROOT
     (production_dir / "cells").mkdir(parents=True, exist_ok=True)
-    (public_dir / "cells").mkdir(parents=True, exist_ok=True)
     for relative, raw in cell_bytes.items():
         relative_path = Path(relative).relative_to("production")
         canonical_path = production_dir / relative_path
-        public_path = public_dir / relative_path
         canonical_path.parent.mkdir(parents=True, exist_ok=True)
-        public_path.parent.mkdir(parents=True, exist_ok=True)
         canonical_path.write_bytes(raw)
-        public_path.write_bytes(raw)
     index_raw = _canonical(index) + b"\n"
     (production_dir / "index-v1.json").write_bytes(index_raw)
-    (public_dir / "index-v1.json").write_bytes(index_raw)
+    display_scopes: list[dict[str, Any]] = []
+    display_rows: list[dict[str, Any]] = []
+    for meta in index["cells"]:
+        cell_raw = cell_bytes[f"production/cells/{Path(str(meta['locator'])).name}"]
+        cell = json.loads(cell_raw.decode("utf-8"))
+        display_scopes.append(
+            {
+                "scope_id": meta["scope_id"],
+                "scope_kind": "patch",
+                "role": meta["role"],
+                "patch": meta["patch_id"],
+                "as_of": meta["as_of"],
+                "status": "production",
+                "row_count": meta["row_count"],
+            }
+        )
+        for row in cell["rows"]:
+            display_rows.append(
+                {
+                    "scope_id": meta["scope_id"],
+                    "role": meta["role"],
+                    "patch": meta["patch_id"],
+                    "champion": row["champion_name"],
+                    "champion_id": row["champion_id"],
+                    "champion_image_url": row.get("champion_image_url"),
+                    "rank": row["rank"],
+                    "rank_delta": row.get("rank_delta"),
+                    "movement": row.get("movement"),
+                    "tier_bucket": row["tier_bucket"],
+                    "played_maps": row["verified_appearance_count"],
+                    "counterability_status": row["counterability_status"],
+                    "matchup_maps": row.get("matchup_maps") or 0,
+                    "matchup_opponents": row.get("matchup_opponents") or 0,
+                    "expected_counter_breadth": row.get("expected_counter_breadth"),
+                }
+            )
+    display = {
+        "schema_version": "rankings-tierlists-v2",
+        "status": "available",
+        "generated_at": index["generated_at"],
+        "as_of": index["as_of"],
+        "source_freshness": (
+            "oe_daily_export" if index["source_mode"] == "oe_only" else "oe_with_same_day_grid_bridge"
+        ),
+        "options": {
+            "roles": index["options"]["roles"],
+            "patches": index["options"]["patches"],
+            "tier_buckets": index["options"]["tier_buckets"],
+        },
+        "scopes": display_scopes,
+        "rows": display_rows,
+    }
+    display_path = repo_root / PUBLIC_DISPLAY_LOCATOR
+    display_path.parent.mkdir(parents=True, exist_ok=True)
+    display_path.write_text(json.dumps(display, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
     source_tree_sha256 = _source_tree_sha256(repo_root, {relative: _sha256_bytes(raw) for relative, raw in cell_bytes.items()})
     manifest: dict[str, Any] = {
         "schema_version": "scryglass:tierlist-production-manifest:v1",
@@ -510,6 +564,18 @@ def _validate_production_cell(payload: Mapping[str, Any], *, meta: Mapping[str, 
         raise ProductionBundleError("production cell artifact identity does not match index")
     if payload.get("role") != meta.get("role") or payload.get("patch_id") != meta.get("patch_id"):
         raise ProductionBundleError("production cell scope does not match index")
+    patch_id = meta.get("patch_id")
+    scope_id = meta.get("scope_id")
+    scope = payload.get("scope")
+    if (
+        meta.get("scope_kind") != "patch"
+        or not isinstance(patch_id, str)
+        or scope_id != f"patch:{patch_id}"
+        or not isinstance(scope, Mapping)
+        or scope.get("scope_kind") != "patch"
+        or scope.get("scope_id") != scope_id
+    ):
+        raise ProductionBundleError("production cell must use a patch-wide scope")
     if payload.get("artifact_sha256") != _canonical_sha256(payload):
         raise ProductionBundleError("production cell canonical digest is invalid")
     rows = payload.get("rows")
@@ -518,15 +584,11 @@ def _validate_production_cell(payload: Mapping[str, Any], *, meta: Mapping[str, 
 
 
 def verify_production_index(root: Path | str = Path(".")) -> dict[str, Any]:
-    """Verify the exact production index, cells, and public mirror."""
+    """Verify the canonical local production index and cells."""
 
     repo_root = Path(root)
     index_path = repo_root / PRODUCTION_ROOT / "index-v1.json"
-    public_index_path = repo_root / PUBLIC_PRODUCTION_ROOT / "index-v1.json"
     raw = index_path.read_bytes()
-    public_raw = public_index_path.read_bytes()
-    if raw != public_raw:
-        raise ProductionBundleError("public production index differs from canonical index")
     index = json.loads(raw.decode("utf-8"))
     if not isinstance(index, dict) or index.get("artifact_sha256") != _canonical_sha256(index):
         raise ProductionBundleError("production index canonical digest is invalid")
@@ -534,6 +596,11 @@ def verify_production_index(root: Path | str = Path(".")) -> dict[str, Any]:
         raise ProductionBundleError("production index status is invalid")
     if index.get("publication_eligible") is not True or index.get("production_eligible") is not True:
         raise ProductionBundleError("production index eligibility is invalid")
+    options = index.get("options")
+    if not isinstance(options, Mapping):
+        raise ProductionBundleError("production index options are invalid")
+    if any(key in options for key in ("leagues", "regions", "event_kinds", "competition_tiers")):
+        raise ProductionBundleError("production index contains retired competition filters")
     cells = index.get("cells")
     if not isinstance(cells, list) or not cells:
         raise ProductionBundleError("production index has no cells")
@@ -545,10 +612,9 @@ def verify_production_index(root: Path | str = Path(".")) -> dict[str, Any]:
         if not isinstance(locator, str) or not locator.startswith("data/lol/v2/tierlists/production/cells/"):
             raise ProductionBundleError("production cell locator is outside the production root")
         path = repo_root / Path(locator)
-        public_path = repo_root / PUBLIC_PRODUCTION_ROOT / "cells" / path.name
         cell_raw = path.read_bytes()
-        if cell_raw != public_path.read_bytes() or _sha256_bytes(cell_raw) != meta.get("raw_sha256"):
-            raise ProductionBundleError("production cell or mirror digest mismatch")
+        if _sha256_bytes(cell_raw) != meta.get("raw_sha256"):
+            raise ProductionBundleError("production cell digest mismatch")
         payload = json.loads(cell_raw.decode("utf-8"))
         if not isinstance(payload, Mapping):
             raise ProductionBundleError("production cell is not an object")

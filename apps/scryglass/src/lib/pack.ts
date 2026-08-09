@@ -70,6 +70,16 @@ export type TeamRating = {
     roster_receipt_sha256: string;
     evidence_state: string;
   } | null;
+  evidence_interval_width?: number | null;
+  evidence_precision_ratio?: number | null;
+  evidence_stability?: number | null;
+  evidence_freshness_days?: number | null;
+  evidence_support_coverage?: number | null;
+  evidence_fallback?: number | null;
+  evidence_active?: number | null;
+  evidence_disconnected?: number | null;
+  evidence_ood?: number | null;
+  evidence_state?: string | null;
 };
 
 export type TeamWeeklyRank = {
@@ -92,6 +102,16 @@ export type PlayerRating = {
   sigma: number;
   n_maps: number;
   last_team: string | null;
+  evidence_interval_width?: number | null;
+  evidence_precision_ratio?: number | null;
+  evidence_stability?: number | null;
+  evidence_freshness_days?: number | null;
+  evidence_support_coverage?: number | null;
+  evidence_fallback?: number | null;
+  evidence_active?: number | null;
+  evidence_disconnected?: number | null;
+  evidence_ood?: number | null;
+  evidence_state?: string | null;
 };
 
 export type PlayerWeeklyRank = {
@@ -111,6 +131,78 @@ export type PlayerMetadata = {
   country_code?: string | null;
   flag?: string | null;
 };
+
+export type PlayerChampionRecord = {
+  champion: string;
+  champion_image_url?: string | null;
+  games: number;
+  wins: number;
+  losses: number;
+  wr: number | null;
+  kills: number | null;
+  deaths: number | null;
+  assists: number | null;
+};
+
+export type ProfileParticipant = {
+  player: string;
+  side: "Blue" | "Red";
+  role: string;
+  champion: string | null;
+  kills: number | null;
+  deaths: number | null;
+  assists: number | null;
+  grade?: ProfileGrade;
+};
+
+export type ProfileGrade =
+  | {
+      status: "available";
+      grade: string;
+      score: number;
+      baseline_games: number;
+      self_baseline_games: number;
+      components: {
+        self: number;
+        team: number;
+        opponent: number;
+        league_role: number;
+      };
+    }
+  | { status: "unavailable"; reason: string };
+
+export type ProfileGame = {
+  game_id: string;
+  date: string;
+  league: string;
+  blue_team: string;
+  red_team: string;
+  blue_win: 0 | 1;
+  players: ProfileParticipant[];
+};
+
+export type ProfileRecords = {
+  schema_version: "scryglass:profile-records:v1" | "scryglass:profile-records:v2";
+  grade_contract?: "scryglass:player-map-grade:v1";
+  window_days: number;
+  champion_images: Record<string, string>;
+  games: Record<string, ProfileGame>;
+  players: Record<string, string[]>;
+  teams: Record<string, string[]>;
+};
+
+export function recentProfileGames(
+  records: ProfileRecords,
+  limit = 100,
+): ProfileGame[] {
+  if (!Number.isInteger(limit) || limit < 1) return [];
+  return Object.values(records.games)
+    .sort((a, b) => {
+      const byDate = Date.parse(b.date) - Date.parse(a.date);
+      return byDate || a.game_id.localeCompare(b.game_id);
+    })
+    .slice(0, limit);
+}
 
 export type EloCalibration = {
   team: { intercept: number; coef: number; temperature_400?: number };
@@ -268,6 +360,41 @@ export function softMu(mu: number, sigma: number, floor = TEAM_SIGMA_MIN): numbe
   return mu - Math.max(0, sigma - floor);
 }
 
+/** Keep the public player payload small while preserving its evidence contract. */
+export function compactPlayerRatings(players: PlayerRating[]): PlayerRating[] {
+  return players
+    .filter((player) => (player.n_maps ?? 0) >= 5)
+    .filter(
+      (player) =>
+        player.evidence_disconnected !== 1 &&
+        player.evidence_state?.toLowerCase() !== "disconnected",
+    )
+    .map((player) => ({
+      player: player.player,
+      mu_total: player.mu_total,
+      mu_regional: player.mu_regional,
+      mu_meta: player.mu_meta,
+      sigma: player.sigma,
+      n_maps: player.n_maps,
+      last_team: player.last_team,
+      evidence_interval_width: player.evidence_interval_width,
+      evidence_precision_ratio: player.evidence_precision_ratio,
+      evidence_stability: player.evidence_stability,
+      evidence_freshness_days: player.evidence_freshness_days,
+      evidence_support_coverage: player.evidence_support_coverage,
+      evidence_fallback: player.evidence_fallback,
+      evidence_active: player.evidence_active,
+      evidence_disconnected: player.evidence_disconnected,
+      evidence_ood: player.evidence_ood,
+      evidence_state: player.evidence_state,
+    }))
+    .sort(
+      (a, b) =>
+        softMu(b.mu_total, b.sigma, PLAYER_SIGMA_MIN) -
+        softMu(a.mu_total, a.sigma, PLAYER_SIGMA_MIN),
+    );
+}
+
 /** Conservative posterior display value for the hierarchical public ladder. */
 export function adjustedRating(
   rating: Pick<TeamRating, "mu_total" | "sigma" | "rating_p10">,
@@ -409,7 +536,9 @@ export function scopedTeamWr(
 ): number | null {
   if (!rec) return null;
   if (!selected.length) return rec.wr;
-  const tierSelected = selected.filter((scope) => scope.startsWith("TIER")).map((scope) => scope.toLowerCase().replace("tier", ""));
+  const tierSelected = selected
+    .filter((scope) => scope.startsWith("TIER"))
+    .map((scope) => scope.toLowerCase());
   const regionalSelected = selected.filter((scope) => REGION_LEAGUES.includes(scope as (typeof REGION_LEAGUES)[number]));
   const internationalSelected = selected.filter((scope) => scope === "INTL" || isIntlLeague(scope));
   if (regionalSelected.length) {

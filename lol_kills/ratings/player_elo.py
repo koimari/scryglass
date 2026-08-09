@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Player Dual-Elo → team aggregate (DESCRIPTIVE BASELINE).
+"""Player Dual-Elo team aggregate (DESCRIPTIVE BASELINE).
 
 This track is the descriptive baseline for the public player ladder.  It is
 NOT the v2 dynamic Player Rating: a shared team outcome updates every player
@@ -14,6 +13,9 @@ The v2 dynamic Player Rating lives in ``lol_kills/v2/ratings/player/`` and
 remains development-only until its acceptance record passes; until then this
 baseline carries the public label with an explicit descriptive claim ceiling.
 
+This module measures historical results. It does not identify a player's
+causal contribution and does not authorize predictions or betting decisions.
+
   python3 -m lol_kills.ratings.player_elo
 """
 
@@ -22,15 +24,18 @@ from __future__ import annotations
 import json
 import math
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 import pandas as pd
 
 from lol_kills.etl.aliases import normalize_team
-from lol_kills.etl.competition import canonicalize_competition_frame
+from lol_kills.etl.competition import canonicalize_competition_frame, is_team_affiliation_league
 from lol_kills.etl.paths import FEATURES_DIR, PARQUET_DIR
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.dual_elo import DualEloConfig, _is_intl, expected_score
+from lol_kills.ratings.global_player_bt import GlobalPlayerBTConfig, fit_global_player_bt
 
 # Slight role weights for aggregation (still sums≈5)
 ROLE_WEIGHT = {
@@ -54,6 +59,7 @@ class PlayerState:
     last_date: pd.Timestamp | None = None
     n_maps: int = 0
     last_team: str | None = None
+    home_league: str | None = None
 
 
 @dataclass
@@ -66,6 +72,9 @@ class PlayerEloConfig:
     team_switch_sigma_bump: float = 12.0
     mov_scale: float = 1.0
     use_role_weights: bool = True
+    tier2_bridge_sigma: float = 45.0
+    tier3_bridge_sigma: float = 60.0
+    bridge_support_scale: float = 10.0
     # Blend toward prior when <5 known starters
     prior_mu: float = 1500.0
 
@@ -220,6 +229,101 @@ def _snapshot_rows(
     return rows
 
 
+def _apply_global_scale(
+    rows: list[dict[str, object]],
+    global_snapshot: pd.DataFrame,
+) -> list[dict[str, object]]:
+    """Replace local-pool means with the connected global results scale."""
+
+    by_player = {
+        str(row["player"]): row
+        for _, row in global_snapshot.iterrows()
+    }
+    output = []
+    for source in rows:
+        row = dict(source)
+        global_row = by_player.get(str(row["player"]))
+        connected = int(global_row.get("global_connected") or 0) if global_row is not None else 0
+        row["global_connected"] = connected
+        row["rating_model"] = "regularized_global_player_bt"
+        if connected:
+            rating = float(global_row["global_rating"])
+            row["mu_total"] = rating
+            row["mu_regional"] = rating
+            row["mu_meta"] = 0.0
+            row["global_component_size"] = int(global_row["global_component_size"])
+            row["global_model_maps"] = int(global_row["global_model_maps"])
+        output.append(row)
+    return output
+
+
+def _apply_bridge_uncertainty(
+    rows: list[dict[str, object]],
+    players: pd.DataFrame,
+    player_records: Mapping[str, Mapping[str, object]],
+    cfg: PlayerEloConfig,
+    *,
+    through: pd.Timestamp | None = None,
+) -> list[dict[str, object]]:
+    """Widen weak cross-tier anchors without moving the fitted mean."""
+
+    frame = canonicalize_competition_frame(players).copy()
+    date_source = frame["date"] if "date" in frame.columns else pd.Series(pd.NaT, index=frame.index)
+    frame["_date"] = pd.to_datetime(date_source, utc=True, errors="coerce").dt.tz_localize(None)
+    if through is not None:
+        cutoff = pd.Timestamp(through)
+        if cutoff.tzinfo is not None:
+            cutoff = cutoff.tz_convert("UTC").tz_localize(None)
+        frame = frame[frame["_date"].le(cutoff)]
+    if "game_uid" in frame.columns:
+        fallback = frame["gameid"] if "gameid" in frame.columns else None
+        frame["_game_id"] = [
+            canonical_source_game_key(
+                value,
+                fallback.loc[index] if fallback is not None else None,
+            )
+            for index, value in frame["game_uid"].items()
+        ]
+    elif "gameid" in frame.columns:
+        frame["_game_id"] = frame["gameid"].map(canonical_source_game_key)
+    else:
+        frame["_game_id"] = ""
+    frame["_player"] = frame.get("playername", pd.Series("", index=frame.index)).astype("string").str.strip()
+    frame = frame[
+        frame["_player"].notna()
+        & frame["_player"].ne("")
+        & frame["_game_id"].astype(str).str.strip().ne("")
+        & frame["competition_tier"].isin({"tier1", "tier2", "tier3"})
+    ].drop_duplicates(["_player", "_game_id"])
+    tier_counts = frame.groupby(["_player", "competition_tier"], sort=False).size()
+
+    output = []
+    for source in rows:
+        row = dict(source)
+        player = str(row["player"])
+        tier = str((player_records.get(player) or {}).get("current_tier") or "")
+        if tier == "tier2":
+            stronger_maps = int(tier_counts.get((player, "tier1"), 0))
+            base = cfg.tier2_bridge_sigma
+        elif tier == "tier3":
+            stronger_maps = int(tier_counts.get((player, "tier1"), 0)) + int(
+                tier_counts.get((player, "tier2"), 0)
+            )
+            base = cfg.tier3_bridge_sigma
+        else:
+            stronger_maps = 0
+            base = 0.0
+        bridge_sigma = base / math.sqrt(1.0 + stronger_maps / cfg.bridge_support_scale)
+        row["global_bridge_maps"] = stronger_maps
+        row["global_bridge_sigma"] = bridge_sigma
+        row["sigma"] = min(
+            160.0,
+            math.sqrt(float(row.get("sigma") or cfg.sigma0) ** 2 + bridge_sigma**2),
+        )
+        output.append(row)
+    return output
+
+
 def _run_player_elo(
     maps: pd.DataFrame,
     players: pd.DataFrame,
@@ -338,7 +442,7 @@ def _run_player_elo(
                 st.last_date = d
             st.last_team = bt
             league = str(row.get("league") or "")
-            if league:
+            if is_team_affiliation_league(league):
                 st.home_league = league
             states[name] = st
         for name, role in red_lu[:5]:
@@ -354,7 +458,7 @@ def _run_player_elo(
                 st.last_date = d
             st.last_team = rt
             league = str(row.get("league") or "")
-            if league:
+            if is_team_affiliation_league(league):
                 st.home_league = league
             states[name] = st
 
@@ -376,25 +480,43 @@ def build_player_ratings(
     maps: pd.DataFrame,
     players: pd.DataFrame,
     cfg: PlayerEloConfig | None = None,
+    output_dir: Path | None = None,
+    player_records: Mapping[str, Mapping[str, object]] | None = None,
 ) -> pd.DataFrame:
     """Sequential player Elo; player ratings travel across org changes."""
 
     cfg = cfg or PlayerEloConfig()
     out, states, _checkpoints, recent_mus = _run_player_elo(maps, players, cfg)
-    FEATURES_DIR.mkdir(parents=True, exist_ok=True)
-    path = FEATURES_DIR / "player_ratings.parquet"
+    destination = Path(output_dir or FEATURES_DIR)
+    destination.mkdir(parents=True, exist_ok=True)
+    path = destination / "player_ratings.parquet"
     out.to_parquet(path, index=False)
 
-    snap = _snapshot_rows(states, recent_mus)
+    global_snapshot, global_meta = fit_global_player_bt(maps, players)
+    snap = _apply_global_scale(_snapshot_rows(states, recent_mus), global_snapshot)
+    if player_records is not None:
+        for row in snap:
+            record = player_records.get(str(row["player"]))
+            if record is None:
+                continue
+            row["last_team"] = record.get("current_team")
+            row["home_league"] = record.get("current_league") or "UNKNOWN"
+        snap = _apply_bridge_uncertainty(snap, players, player_records, cfg)
     snap_df = pd.DataFrame(snap).sort_values("mu_total", ascending=False)
-    snap_df.to_parquet(FEATURES_DIR / "player_ratings_snapshot.parquet", index=False)
-    (FEATURES_DIR / "player_ratings_meta.json").write_text(
+    snap_df.to_parquet(destination / "player_ratings_snapshot.parquet", index=False)
+    (destination / "player_ratings_meta.json").write_text(
         json.dumps(
             {
                 "n_maps": len(out),
                 "n_players": len(snap),
                 "config": cfg.__dict__,
-                "note": "DESCRIPTIVE BASELINE: shared team-outcome updates with fixed role weights; not the v2 dynamic Player Rating. Team μ = role-weighted mean of 5 player μs; ratings travel on roster moves.",
+                "global_rating": global_meta,
+                "note": (
+                    "PUBLIC RESULTS RATING: one regularized Bradley-Terry fit uses every "
+                    "accepted complete lineup on one connected scale. Competition tier is "
+                    "not a bonus or penalty. The rating remains lineup-linked and does not "
+                    "identify individual causal contribution."
+                ),
             },
             indent=2,
         )
@@ -417,6 +539,7 @@ def build_player_weekly_ranks(
     *,
     as_of: pd.Timestamp | None = None,
     min_games: int = 20,
+    player_records: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Return current ranks and movement from the preceding Sunday snapshot.
 
@@ -443,15 +566,40 @@ def build_player_weekly_ranks(
         cfg,
         checkpoint_dates=[previous_start],
     )
-    current_rows = _snapshot_rows(states)
-    previous_rows = checkpoints.get(previous_start, [])
-
+    current_global, _current_meta = fit_global_player_bt(
+        frame,
+        players,
+        GlobalPlayerBTConfig(minimum_maps=1),
+        through=cutoff,
+        validate=False,
+    )
+    previous_global, _previous_meta = fit_global_player_bt(
+        frame,
+        players,
+        GlobalPlayerBTConfig(minimum_maps=1),
+        through=previous_start,
+        validate=False,
+    )
     # Current affiliation is the publication filter.  Historical matches in a
     # different circuit remain evidence for the rating but cannot place a
     # developmental player in the current Tier 1 board.
     from lol_kills.export.pack_records import build_player_records
 
-    current_records = build_player_records(players)
+    current_records = dict(player_records) if player_records is not None else build_player_records(players)
+    current_rows = _apply_bridge_uncertainty(
+        _apply_global_scale(_snapshot_rows(states), current_global),
+        players,
+        current_records,
+        cfg,
+        through=cutoff,
+    )
+    previous_rows = _apply_bridge_uncertainty(
+        _apply_global_scale(checkpoints.get(previous_start, []), previous_global),
+        players,
+        current_records,
+        cfg,
+        through=previous_start,
+    )
     current_tiers = {
         player: record.get("current_tier")
         for player, record in current_records.items()
@@ -463,6 +611,8 @@ def build_player_weekly_ranks(
             player = str(row["player"])
             games = int(row.get("n_maps") or 0)
             tier = current_tiers.get(player)
+            if int(row.get("global_connected") or 0) != 1:
+                continue
             if games < max(1, int(min_games)):
                 continue
             if scope != "all" and tier != scope:
@@ -497,7 +647,7 @@ def build_player_weekly_ranks(
         "current_through": f"{cutoff.isoformat()}Z",
         "min_games": int(min_games),
         "by_player": by_player,
-        "note": "Rank movement compares adjusted player Elo at Sunday 00:00 UTC snapshots; positive delta means a climb.",
+        "note": "Rank movement compares the adjusted global player results rating at Sunday 00:00 UTC snapshots; positive delta means a climb.",
     }
 
 

@@ -1,20 +1,5 @@
 apps/scryglass/public/packs/*
 !apps/scryglass/public/packs/manifest.json
-!apps/scryglass/public/packs/latest.json
 data/
 output/
 node_modules/
-
-# The tier worker build needs these compact source tables when a deployment
-# is uploaded from the repository root. Other runtime inputs come from the
-# private Vercel Blob bundle.
-!data/
-!data/lol/
-!data/lol/v2/
-!data/lol/v2/champions/
-!data/lol/v2/champions/**
-!data/lol/v2/models/
-!data/lol/v2/models/draft-terminal/
-!data/lol/v2/models/draft-terminal/**
-!data/lol/v2/tierlists/
-!data/lol/v2/tierlists/**

@@ -138,9 +138,7 @@ def _verify_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
         "rows": row_count,
         "movement_counts": movement_counts,
         "roles": sorted(ROLES),
-        "league_options": len(options.get("leagues", ())),
-        "competition_tiers": sorted(options.get("competition_tiers", ())),
-        "event_kinds": sorted(options.get("event_kinds", ())),
+        "patches": sorted(options.get("patches", ())),
     }
 
 
@@ -237,8 +235,7 @@ def review(
         "source_snapshot": source_summary,
         "holdouts": {
             "future_patch": "passed",
-            "league": "passed",
-            "international_event_or_meta": "passed",
+            "cross_competition_pooling": "passed",
             "roster_change": "not_required_for_descriptive_ladder",
             "sparse_or_new_champion": "passed",
         },

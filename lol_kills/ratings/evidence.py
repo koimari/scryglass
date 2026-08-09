@@ -331,8 +331,14 @@ def attach_player_evidence(
             stability[key] = float(row["evidence_stability"])
         n_maps = int(pd.to_numeric(row.get("n_maps", 0), errors="coerce") or 0)
         fallback[key] = int(n_maps == 0)
-        has_team = bool(str(row.get("last_team") or "").strip())
-        disconnected[key] = int(n_maps > 0 and not has_team)
+        team_value = row.get("last_team")
+        has_team = bool(
+            pd.notna(team_value)
+            and str(team_value).strip()
+            and str(team_value).casefold() != "nan"
+        )
+        global_connected = int(pd.to_numeric(row.get("global_connected", 1), errors="coerce") or 0)
+        disconnected[key] = int(n_maps > 0 and (not has_team or global_connected != 1))
         league = str(row.get("home_league") or "").strip()
         ood[key] = int(n_maps > 0 and league == "UNKNOWN")
     return _attach(

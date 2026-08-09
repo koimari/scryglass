@@ -5,34 +5,16 @@ import styles from "./TierListExplorer.module.css";
 
 const ROLE_ORDER = ["top", "jungle", "mid", "bot", "support"] as const;
 const TIER_ORDER = ["Z Blind", "Z Counter", "S Blind", "S Counter", "A", "B", "C", "D"] as const;
-const LEVEL_ORDER = ["tier1", "tier2", "tier3", "international", "interregional"] as const;
-const LEAGUE_ORDER = ["LCS", "LEC", "LCK", "LPL", "LCP", "CBLOL", "PCS"] as const;
-const LEVEL_LABELS: Record<string, string> = {
-  tier1: "Tier 1",
-  tier2: "Tier 2",
-  tier3: "Tier 3",
-  international: "International",
-  interregional: "Interregional",
-};
 type TierBucket = (typeof TIER_ORDER)[number];
 
 type TierRow = {
   scope_id: string;
-  region: string | null;
-  league: string | null;
-  event_kind: string | null;
-  competition_tier: string | null;
   role: string;
   patch: string;
-  as_of: string;
   champion: string;
   champion_id: string;
   champion_image_url: string | null;
-  tier_value_pp: number;
-  rating: number;
-  rating_delta: number | null;
   rank: number;
-  previous_rank: number | null;
   rank_delta: number | null;
   movement: "up" | "down" | "flat" | "new";
   tier_bucket: TierBucket;
@@ -40,25 +22,17 @@ type TierRow = {
   counterability_status: string;
   matchup_maps: number;
   matchup_opponents: number;
-  blind_score_pp: number | null;
-  countered_opponent_count: number | null;
-  countered_opponent_share: number | null;
   expected_counter_breadth: number | null;
 };
 
 type Scope = {
   scope_id: string;
-  scope_kind: string;
-  region: string | null;
-  league: string | null;
-  event_kind: string | null;
-  competition_tier: string | null;
+  scope_kind: "patch";
   role: string;
   patch: string;
   as_of: string;
   status: "production" | "unavailable";
   row_count: number;
-  fail_closed_status: string;
 };
 
 type Response = {
@@ -66,30 +40,17 @@ type Response = {
   reason?: string;
   generated_at?: string;
   as_of?: string;
-  provenance?: {
-    source_mode?: "oe_only" | "oe_plus_grid";
-    freshness?: "oe_daily_export" | "oe_with_same_day_grid_bridge";
-  };
-  cells_available?: number;
-  cells_total?: number;
-  options?: {
-    leagues: string[];
-    event_kinds: string[];
-    competition_tiers: string[];
-    roles: string[];
-    patches: string[];
-    tier_buckets: TierBucket[];
-  };
+  source_freshness?: "oe_daily_export" | "oe_with_same_day_grid_bridge";
+  options?: { roles: string[]; patches: string[]; tier_buckets?: TierBucket[] };
   scopes?: Scope[];
   rows?: TierRow[];
 };
 
 const EMPTY: Response = { status: "unavailable" };
 
-function labelScope(scope: Scope | undefined, fallback: string): string {
-  if (!scope) return fallback;
-  if (scope.league) return `${scope.league} · ${scope.competition_tier ?? "league"}`;
-  return `${scope.event_kind?.toUpperCase() ?? scope.scope_id} · ${scope.competition_tier ?? "international"}`;
+function patchOrder(value: string): number {
+  const [major, minor] = value.split(".").map(Number);
+  return (Number.isFinite(major) ? major : 0) * 1000 + (Number.isFinite(minor) ? minor : 0);
 }
 
 function movementText(row: TierRow): string {
@@ -107,9 +68,9 @@ function movementClass(row: TierRow): string {
 }
 
 function freshnessLabel(data: Response): string {
-  if (data.provenance?.source_mode === "oe_plus_grid") return "OE + GRID bridge";
-  if (data.provenance?.source_mode === "oe_only") return "OE daily source";
-  return "source watermark";
+  if (data.source_freshness === "oe_with_same_day_grid_bridge") return "OE + same-day source";
+  if (data.source_freshness === "oe_daily_export") return "OE daily source";
+  return "accepted source snapshot";
 }
 
 function Select({
@@ -117,28 +78,20 @@ function Select({
   value,
   options,
   onChange,
-  emptyLabel = "all",
-  allowEmpty = true,
-  formatOption = (option: string) => option,
+  emptyLabel,
 }: {
   label: string;
   value: string;
   options: string[];
   onChange: (value: string) => void;
-  emptyLabel?: string;
-  allowEmpty?: boolean;
-  formatOption?: (option: string) => string;
+  emptyLabel: string;
 }) {
   return (
     <label className={styles.field}>
       <span>{label}</span>
       <select value={value} onChange={(event) => onChange(event.target.value)}>
-        {allowEmpty ? <option value="">{emptyLabel}</option> : null}
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {formatOption(option)}
-          </option>
-        ))}
+        <option value="">{emptyLabel}</option>
+        {options.map((option) => <option key={option} value={option}>{option}</option>)}
       </select>
     </label>
   );
@@ -148,29 +101,22 @@ function ChampionTile({ row }: { row: TierRow }) {
   const [imageFailed, setImageFailed] = useState(false);
   const matchupNote = row.counterability_status === "available"
     ? `${row.matchup_opponents} supported opponents across ${row.matchup_maps.toFixed(1)} effective maps; expected counter breadth ${row.expected_counter_breadth?.toFixed(1) ?? "—"}`
-    : "matchup sample below the Blind/Counter threshold";
+    : "matchup sample below the Blind or Counter threshold";
+
   return (
     <article className={styles.championCard} title={`${row.champion}, rank ${row.rank}. ${matchupNote}.`}>
       <div className={styles.imageFrame}>
         {row.champion_image_url && !imageFailed ? (
-          <img
-            src={row.champion_image_url}
-            alt=""
-            loading="lazy"
-            onError={() => setImageFailed(true)}
-          />
-        ) : (
-          <span className={styles.imageFallback} aria-hidden>
-            {row.champion.slice(0, 1)}
-          </span>
-        )}
+          // The source is already a small square asset. Direct loading keeps
+          // this page independent of an image-optimization service.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={row.champion_image_url} alt="" loading="lazy" onError={() => setImageFailed(true)} />
+        ) : <span className={styles.imageFallback} aria-hidden>{row.champion.slice(0, 1)}</span>}
       </div>
       <div className={styles.cardCopy}>
         <strong>{row.champion}</strong>
         <span className={styles.cardMeta}>
-          <span className={movementClass(row)} aria-label={`rank movement ${movementText(row)}`}>
-            {movementText(row)}
-          </span>
+          <span className={movementClass(row)} aria-label={`rank movement ${movementText(row)}`}>{movementText(row)}</span>
           <span>#{row.rank}</span>
         </span>
       </div>
@@ -178,15 +124,7 @@ function ChampionTile({ row }: { row: TierRow }) {
   );
 }
 
-function TierBoard({
-  scope,
-  role,
-  rows,
-}: {
-  scope: Scope | undefined;
-  role: string;
-  rows: TierRow[];
-}) {
+function TierBoard({ scope, role, rows }: { scope?: Scope; role: string; rows: TierRow[] }) {
   const byTier = useMemo(() => {
     const grouped = new Map<TierBucket, TierRow[]>();
     for (const tier of TIER_ORDER) grouped.set(tier, []);
@@ -195,15 +133,12 @@ function TierBoard({
   }, [rows]);
 
   return (
-    <section className={styles.board} aria-label={`${labelScope(scope, "tier list")} ${role} tier list`}>
+    <section className={styles.board} aria-label={`Patch ${scope?.patch ?? rows[0]?.patch} ${role} tier list`}>
       <header className={styles.boardHeader}>
-        <div>
-          <p className={styles.eyebrow}>{role}</p>
-          <h2>{labelScope(scope, "Tier list")}</h2>
-        </div>
+        <div><p className={styles.eyebrow}>{role}</p><h2>Patch {scope?.patch ?? rows[0]?.patch}</h2></div>
         <div className={styles.boardMeta}>
           <span>{rows.length} champions</span>
-          <span>through patch {scope?.patch ?? rows[0]?.patch ?? "—"}</span>
+          <span>all eligible competitions</span>
           <span>{scope?.status ?? "production"}</span>
         </div>
       </header>
@@ -213,15 +148,12 @@ function TierBoard({
           return (
             <div className={styles.tierRow} key={tier}>
               <div className={`${styles.tierLabel} ${styles[`tier${tier.replace(" ", "")}`]}`}>
-                <strong>{tier.split(" ")[0]}</strong>
-                <span>{tier.split(" ")[1] ?? "rating"}</span>
+                <strong>{tier.split(" ")[0]}</strong><span>{tier.split(" ")[1] ?? "rating"}</span>
               </div>
               <div className={styles.championGrid}>
-                {tierRows.length ? (
-                  tierRows.map((row) => <ChampionTile key={`${row.scope_id}|${row.role}|${row.champion_id}`} row={row} />)
-                ) : (
-                  <span className={styles.emptyTier}>no eligible champions in this cell</span>
-                )}
+                {tierRows.length
+                  ? tierRows.map((row) => <ChampionTile key={`${row.role}|${row.champion_id}`} row={row} />)
+                  : <span className={styles.emptyTier}>no eligible champions in this tier</span>}
               </div>
             </div>
           );
@@ -232,130 +164,75 @@ function TierBoard({
 }
 
 export function TierListExplorer() {
-  const [level, setLevel] = useState("tier1");
-  const [leagueOrEvent, setLeagueOrEvent] = useState("");
   const [role, setRole] = useState("");
   const [patch, setPatch] = useState("");
   const [data, setData] = useState<Response>(EMPTY);
   const [loading, setLoading] = useState(true);
 
-  const query = useMemo(() => {
-    const params = new URLSearchParams();
-    if (level) params.set("competition_tier", level);
-    if (leagueOrEvent) {
-      if (level === "international") params.set("international", leagueOrEvent);
-      else params.set("league", leagueOrEvent);
-    }
-    if (role) params.set("role", role);
-    if (patch) params.set("patch", patch);
-    return params.toString();
-  }, [level, leagueOrEvent, role, patch]);
-
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
+  const refresh = useCallback(async (signal?: AbortSignal, showLoading = false) => {
+    if (showLoading) setLoading(true);
     try {
-      const response = await fetch(`/api/v2/tierlist${query ? `?${query}` : ""}`, { signal });
-      const payload = (await response.json()) as Response;
-      setData(payload);
+      const response = await fetch("/rankings/tierlists.json", { signal });
+      if (!response.ok) throw new Error("tier-list file is unavailable");
+      setData((await response.json()) as Response);
     } catch {
-      if (signal?.aborted) return;
-      setData(EMPTY);
+      if (!signal?.aborted) setData(EMPTY);
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [query]);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
-    const timer = window.setTimeout(() => void refresh(controller.signal), 0);
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [refresh]);
+    fetch("/rankings/tierlists.json", { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error("tier-list file is unavailable");
+        return response.json() as Promise<Response>;
+      })
+      .then((payload) => setData(payload))
+      .catch(() => {
+        if (!controller.signal.aborted) setData(EMPTY);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, []);
 
   if (data.status !== "available") {
     return (
       <div className={styles.unavailable}>
-        <p>Tier lists are waiting for the approved production artifact.</p>
-        <span>{data.reason ?? "The source is unavailable or failed its integrity checks."}</span>
+        <p>Patch-wide tier lists are waiting for an accepted local rebuild.</p>
+        <span>{data.reason ?? "The previous league-specific boards are retired."}</span>
       </div>
     );
   }
 
-  const rows = data.rows ?? [];
   const scopes = data.scopes ?? [];
-  const levels = LEVEL_ORDER.filter((candidate) => scopes.some((scope) => scope.competition_tier === candidate));
-  const scopeCandidates = scopes.filter((scope) => {
-    if (scope.competition_tier !== level) return false;
-    if (role && scope.role !== role) return false;
-    if (!leagueOrEvent) return true;
-    return level === "international" ? scope.event_kind === leagueOrEvent : scope.league === leagueOrEvent;
-  });
-  const validLeagueOptions = [...new Set(
-    scopes
-      .filter((scope) => scope.competition_tier === level && (!role || scope.role === role))
-      .map((scope) => level === "international" ? scope.event_kind : scope.league)
-      .filter((value): value is string => Boolean(value)),
-  )].sort((a, b) => {
-    const aIndex = LEAGUE_ORDER.indexOf(a as (typeof LEAGUE_ORDER)[number]);
-    const bIndex = LEAGUE_ORDER.indexOf(b as (typeof LEAGUE_ORDER)[number]);
-    if (aIndex >= 0 || bIndex >= 0) return (aIndex < 0 ? 999 : aIndex) - (bIndex < 0 ? 999 : bIndex);
-    return a.localeCompare(b);
-  });
+  const patchOptions = [...new Set(data.options?.patches ?? scopes.map((scope) => scope.patch))]
+    .sort((a, b) => patchOrder(b) - patchOrder(a));
+  const activePatch = patch || patchOptions[0] || "";
   const roleOptions = data.options?.roles ?? [...ROLE_ORDER];
-  const patchOptions = [...new Set(scopeCandidates.map((scope) => scope.patch))].sort();
-  const boardGroups = new Map<string, TierRow[]>();
-  for (const row of rows) {
-    const key = `${row.scope_id}|${row.role}`;
-    const group = boardGroups.get(key) ?? [];
-    group.push(row);
-    boardGroups.set(key, group);
-  }
-  const orderedGroups = [...boardGroups.entries()].sort(([, aRows], [, bRows]) => {
-    const aScope = aRows[0];
-    const bScope = bRows[0];
-    const aLabel = aScope?.league ?? aScope?.event_kind ?? "";
-    const bLabel = bScope?.league ?? bScope?.event_kind ?? "";
-    const aLeague = LEAGUE_ORDER.indexOf(aLabel as (typeof LEAGUE_ORDER)[number]);
-    const bLeague = LEAGUE_ORDER.indexOf(bLabel as (typeof LEAGUE_ORDER)[number]);
-    if (aLeague !== bLeague && (aLeague >= 0 || bLeague >= 0)) return (aLeague < 0 ? 999 : aLeague) - (bLeague < 0 ? 999 : bLeague);
-    const labelOrder = aLabel.localeCompare(bLabel);
-    if (labelOrder) return labelOrder;
-    return ROLE_ORDER.indexOf(aScope?.role as (typeof ROLE_ORDER)[number]) - ROLE_ORDER.indexOf(bScope?.role as (typeof ROLE_ORDER)[number]);
-  });
-  const selectedGroups = role
-    ? orderedGroups.filter(([, group]) => group[0]?.role === role)
-    : orderedGroups;
-  const scopeById = new Map(scopes.map((scope) => [scope.scope_id, scope]));
+  const rows = (data.rows ?? []).filter((row) => row.patch === activePatch && (!role || row.role === role));
+  const selectedRoles = role ? [role] : ROLE_ORDER.filter((candidate) => rows.some((row) => row.role === candidate));
+  const scopeByRole = new Map(scopes.filter((scope) => scope.patch === activePatch).map((scope) => [scope.role, scope]));
 
   return (
     <section className={styles.section}>
       <div className={styles.filters}>
-        <Select label="League tier" value={level} options={levels} formatOption={(value) => LEVEL_LABELS[value] ?? value} onChange={(value) => { setLevel(value); setLeagueOrEvent(""); setPatch(""); }} allowEmpty={false} />
-        <Select label={level === "international" ? "Event" : "League"} value={leagueOrEvent} options={validLeagueOptions} onChange={(value) => { setLeagueOrEvent(value); setPatch(""); }} emptyLabel={level === "international" ? "all events" : "all leagues"} />
-        <Select label="Role" value={role} options={roleOptions} onChange={(value) => { setRole(value); setPatch(""); }} emptyLabel="all roles" />
-        <Select label="Patch" value={patch} options={patchOptions} onChange={setPatch} emptyLabel="latest available" />
-        <button className={styles.button} onClick={() => void refresh()} disabled={loading}>
-          {loading ? "loading…" : "refresh"}
-        </button>
+        <Select label="Patch" value={patch} options={patchOptions} onChange={setPatch} emptyLabel={`latest (${activePatch})`} />
+        <Select label="Role" value={role} options={roleOptions} onChange={setRole} emptyLabel="all roles" />
+        <button className={styles.button} onClick={() => void refresh(undefined, true)} disabled={loading}>{loading ? "loading…" : "refresh"}</button>
       </div>
-      <div className={styles.meta}>
-        {data.cells_available ?? 0}/{data.cells_total ?? 0} scope cells · {rows.length} champions · {freshnessLabel(data)} · updated {data.as_of ?? data.generated_at}
-      </div>
-      {selectedGroups.length ? (
+      <div className={styles.meta}>{rows.length} champion rows · {freshnessLabel(data)} · updated {data.as_of ?? data.generated_at}</div>
+      {selectedRoles.length ? (
         <div className={styles.boards}>
-          {selectedGroups.map(([key, group]) => {
-            const scopeId = key.split("|")[0];
-            return <TierBoard key={key} scope={scopeById.get(scopeId)} role={group[0]?.role ?? ""} rows={group} />;
-          })}
+          {selectedRoles.map((selectedRole) => (
+            <TierBoard key={`${activePatch}|${selectedRole}`} scope={scopeByRole.get(selectedRole)} role={selectedRole} rows={rows.filter((row) => row.role === selectedRole)} />
+          ))}
         </div>
       ) : (
-        <div className={styles.unavailable}>
-          <p>No published tier list matches these filters.</p>
-          <span>{LEVEL_LABELS[level] ?? level} · {leagueOrEvent || "all leagues"} · {role || "all roles"} · {patch || "latest available patch"}</span>
-          <button className={styles.button} onClick={() => { setLeagueOrEvent(""); setRole(""); setPatch(""); }}>clear filters</button>
-        </div>
+        <div className={styles.unavailable}><p>No accepted tier list matches this patch and role.</p></div>
       )}
     </section>
   );
