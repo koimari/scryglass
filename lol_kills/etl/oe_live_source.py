@@ -12,6 +12,7 @@ import pandas as pd
 
 from lol_kills.export.pack_records import build_maps_frame_from_team_games
 from lol_kills.etl.paths import PARQUET_DIR
+from lol_kills.etl.source_keys import canonical_source_game_key
 
 LIVE_ROOT = PARQUET_DIR / "oe_live"
 LIVE_PLAYER_OUTPUT = LIVE_ROOT / "oe_player_games.parquet"
@@ -98,28 +99,32 @@ def _signature(group: pd.DataFrame, *, with_players: bool) -> tuple[Any, ...] | 
 
 
 def _merge(primary: pd.DataFrame, supplement: pd.DataFrame, *, with_players: bool) -> pd.DataFrame:
-    if primary.empty:
-        return supplement.copy()
-    if supplement.empty:
-        return primary.copy()
-    primary = primary.copy()
-    supplement = supplement.copy()
     def add_game_key(frame: pd.DataFrame) -> pd.DataFrame:
         frame = frame.copy()
         if "date" in frame.columns:
             frame["date"] = pd.to_datetime(frame["date"], errors="coerce", utc=True)
         if "game_uid" in frame.columns:
-            game_uid = frame["game_uid"].astype("string")
-            fallback = frame["gameid"].astype("string") if "gameid" in frame.columns else pd.Series("", index=frame.index, dtype="string")
-            frame["_source_game_key"] = game_uid.where(game_uid.notna() & game_uid.str.strip().ne(""), fallback)
+            fallback = frame["gameid"] if "gameid" in frame.columns else None
+            frame["_source_game_key"] = [
+                canonical_source_game_key(value, fallback.loc[index] if fallback is not None else None)
+                for index, value in frame["game_uid"].items()
+            ]
         elif "gameid" in frame.columns:
-            frame["_source_game_key"] = frame["gameid"].astype("string")
+            frame["_source_game_key"] = frame["gameid"].map(canonical_source_game_key)
         else:
             raise OeLiveSourceError("OE rows have no game identifier")
-        return frame[frame["_source_game_key"].notna() & frame["_source_game_key"].str.strip().ne("")]
+        frame = frame[frame["_source_game_key"].str.strip().ne("")].copy()
+        frame["game_uid"] = frame["_source_game_key"]
+        if "gameid" in frame.columns:
+            frame["gameid"] = frame["_source_game_key"]
+        return frame
 
-    primary = add_game_key(primary)
-    supplement = add_game_key(supplement)
+    primary = add_game_key(primary) if not primary.empty else primary.copy()
+    supplement = add_game_key(supplement) if not supplement.empty else supplement.copy()
+    if primary.empty:
+        return supplement.drop(columns=["_source_game_key"], errors="ignore")
+    if supplement.empty:
+        return primary.drop(columns=["_source_game_key"], errors="ignore")
     seen: set[tuple[Any, ...]] = set()
     for _, group in primary.groupby("_source_game_key", sort=False):
         signature = _signature(group, with_players=with_players)

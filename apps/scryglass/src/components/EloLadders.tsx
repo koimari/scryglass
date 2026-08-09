@@ -45,10 +45,17 @@ type Props = {
 };
 
 type TeamCol = "team" | "league" | "soft" | "mu" | "meta" | "trust" | "wr";
-type PlayerCol = "player" | "last_team" | "league" | "soft" | "mu" | "trust" | "games";
+type PlayerCol = "player" | "last_team" | "league" | "role" | "soft" | "mu" | "trust" | "games";
 type Dir = "asc" | "desc";
 
 const CHIP_ORDER = [...REGION_LEAGUES, ...INTERREGIONAL_LEAGUES, "INTL", ...INTL_LEAGUES];
+const PLAYER_ROLES = [
+  ["top", "Top"],
+  ["jungle", "Jungle"],
+  ["mid", "Mid"],
+  ["bot", "Bot"],
+  ["support", "Support"],
+] as const;
 
 function formatTier(tier: string | null | undefined): string {
   if (tier === "tier1") return "Tier 1";
@@ -65,6 +72,10 @@ function formatAffiliation(tier: string | null | undefined, league: string | nul
 
 function formatScope(scope: string): string {
   return TIER_FILTERS.find((tier) => tier.value === scope)?.label ?? scope;
+}
+
+function formatPlayerRole(role: string | null | undefined): string {
+  return PLAYER_ROLES.find(([value]) => value === role)?.[1] ?? "—";
 }
 
 function rankDeltaLabel(delta: number | null | undefined): string {
@@ -146,6 +157,7 @@ export function EloLadders({
     return parsed.length ? parsed : ["TIER1"];
   });
   const [minGames, setMinGames] = useState(Math.max(5, Number(searchParams.get("min") || 20)));
+  const [playerRole, setPlayerRole] = useState(searchParams.get("role") || "");
   const [expanded, setExpanded] = useState(false);
   const [teamCol, setTeamCol] = useState<TeamCol>("soft");
   const [teamDir, setTeamDir] = useState<Dir>("desc");
@@ -171,9 +183,10 @@ export function EloLadders({
     if (q.trim()) params.set("q", q.trim());
     if (leagues.length) params.set("leagues", leagues.join(","));
     if (tab === "players" && minGames !== 20) params.set("min", String(minGames));
+    if (tab === "players" && playerRole) params.set("role", playerRole);
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [tab, q, leagues, minGames, pathname, router]);
+  }, [tab, q, leagues, minGames, playerRole, pathname, router]);
 
   const toggleLeague = (lg: string) => {
     setLeagues((prev) => (prev.includes(lg) ? prev.filter((x) => x !== lg) : [...prev, lg]));
@@ -207,7 +220,7 @@ export function EloLadders({
       else {
         setPlayerCol(c);
         setPlayerDir(
-          c === "player" || c === "last_team" || c === "league" ? "asc" : "desc",
+          c === "player" || c === "last_team" || c === "league" || c === "role" ? "asc" : "desc",
         );
       }
     },
@@ -261,6 +274,11 @@ export function EloLadders({
     let list = players
       .filter((p) => (p.n_maps ?? 0) >= minGames)
       .filter((p) => {
+        if (!playerRole) return true;
+        const role = playerRecords[p.player]?.primary_role ?? playerRecords[p.player]?.roles?.[0];
+        return role === playerRole;
+      })
+      .filter((p) => {
         const currentTeam = playerRecords[p.player]?.current_team ?? p.last_team;
         return playerMatchesQuery(p.player, currentTeam, q);
       })
@@ -296,6 +314,11 @@ export function EloLadders({
         case "league":
           cmp = (ra?.primary || "").localeCompare(rb?.primary || "");
           break;
+        case "role":
+          cmp = formatPlayerRole(ra?.primary_role ?? ra?.roles?.[0]).localeCompare(
+            formatPlayerRole(rb?.primary_role ?? rb?.roles?.[0]),
+          );
+          break;
         case "soft":
           cmp =
             softMu(a.mu_total, a.sigma, PLAYER_SIGMA_MIN) -
@@ -316,7 +339,7 @@ export function EloLadders({
       return sign * cmp;
     });
     return list;
-  }, [players, q, minGames, leagues, playerRecords, teamRecords, playerCol, playerDir]);
+  }, [players, q, minGames, playerRole, leagues, playerRecords, teamRecords, playerCol, playerDir]);
 
   const visibleTeams = expanded ? sortedTeams : sortedTeams.slice(0, 20);
   const visiblePlayers = expanded ? sortedPlayers : sortedPlayers.slice(0, 20);
@@ -395,15 +418,28 @@ export function EloLadders({
           />
         </label>
         {tab === "players" && (
-          <label className={styles.minGames}>
-            <span>Min games</span>
-            <input
-              type="number"
-              min={5}
-              value={minGames}
-              onChange={(e) => setMinGames(Math.max(5, Number(e.target.value) || 5))}
-            />
-          </label>
+          <div className={styles.playerFilters}>
+            <label className={styles.minGames}>
+              <span>Min games</span>
+              <input
+                type="number"
+                min={5}
+                value={minGames}
+                onChange={(e) => setMinGames(Math.max(5, Number(e.target.value) || 5))}
+              />
+            </label>
+            <label className={styles.minGames}>
+              <span>Role</span>
+              <select value={playerRole} onChange={(e) => setPlayerRole(e.target.value)}>
+                <option value="">All roles</option>
+                {PLAYER_ROLES.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         )}
         </div>
 
@@ -686,6 +722,7 @@ export function EloLadders({
                   <SortTh label="Player" col="player" active={playerCol === "player"} dir={playerDir} onSort={onPlayerSort} />
                   <SortTh label="Team" col="last_team" active={playerCol === "last_team"} dir={playerDir} onSort={onPlayerSort} />
                   <SortTh label="League" col="league" active={playerCol === "league"} dir={playerDir} onSort={onPlayerSort} />
+                  <SortTh label="Role" col="role" active={playerCol === "role"} dir={playerDir} onSort={onPlayerSort} />
                   <SortTh
                     label="Adjusted rating"
                     col="soft"
@@ -712,9 +749,9 @@ export function EloLadders({
                 {visiblePlayers.map((p, i) => {
                   const rec = playerRecords[p.player];
                   const trust = trustInfo(p.sigma, PLAYER_SIGMA_MIN, p.n_maps);
-                  const fromTeam = p.last_team ? teamRecords[p.last_team] : undefined;
-                  const league = rec?.current_league ?? rec?.primary ?? fromTeam?.current_league ?? fromTeam?.primary;
                   const currentTeam = rec?.current_team ?? p.last_team;
+                  const fromTeam = currentTeam ? teamRecords[currentTeam] : undefined;
+                  const league = rec?.current_league ?? rec?.primary ?? fromTeam?.current_league ?? fromTeam?.primary;
                   const rankDelta = playerRankDelta(p.player, rec?.current_tier ?? fromTeam?.current_tier);
                   const metadata = playerMetadata[p.player];
                   return (
@@ -753,6 +790,7 @@ export function EloLadders({
                         )}
                       </td>
                       <td>{formatAffiliation(rec?.current_tier ?? fromTeam?.current_tier, league)}</td>
+                      <td>{formatPlayerRole(rec?.primary_role ?? rec?.roles?.[0])}</td>
                       <td className={styles.numeric}>
                         {softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(1)}
                       </td>
@@ -771,9 +809,9 @@ export function EloLadders({
           <ul className={styles.cards}>
             {visiblePlayers.map((p, i) => {
               const rec = playerRecords[p.player];
-              const fromTeam = p.last_team ? teamRecords[p.last_team] : undefined;
-              const trust = trustInfo(p.sigma, PLAYER_SIGMA_MIN, p.n_maps);
               const currentTeam = rec?.current_team ?? p.last_team;
+              const fromTeam = currentTeam ? teamRecords[currentTeam] : undefined;
+              const trust = trustInfo(p.sigma, PLAYER_SIGMA_MIN, p.n_maps);
               const rankDelta = playerRankDelta(p.player, rec?.current_tier ?? fromTeam?.current_tier);
               const metadata = playerMetadata[p.player];
               return (
@@ -785,7 +823,7 @@ export function EloLadders({
                       {p.player}
                     </span>
                     <span className={styles.cardMeta}>
-                      {currentTeam ?? "—"} · {formatAffiliation(rec?.current_tier ?? fromTeam?.current_tier, rec?.current_league ?? rec?.primary ?? fromTeam?.primary)} · {formatTrustCell(trust)} evidence · {p.n_maps} games
+                      {currentTeam ?? "—"} · {formatAffiliation(rec?.current_tier ?? fromTeam?.current_tier, rec?.current_league ?? rec?.primary ?? fromTeam?.primary)} · {formatPlayerRole(rec?.primary_role ?? rec?.roles?.[0])} · {formatTrustCell(trust)} evidence · {p.n_maps} games
                     </span>
                     <span className={styles.cardRating}>
                       {softMu(p.mu_total, p.sigma, PLAYER_SIGMA_MIN).toFixed(1)}

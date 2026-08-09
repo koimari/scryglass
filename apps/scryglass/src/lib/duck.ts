@@ -38,6 +38,12 @@ function esc(s: string): string {
   return s.replace(/'/g, "''");
 }
 
+const SOURCE_GAME_PREFIX_RE = /^(?:oe-api:|oracle-elixir-api:)+/i;
+
+export function normalizeGameId(value: string): string {
+  return String(value ?? "").trim().replace(SOURCE_GAME_PREFIX_RE, "").trim();
+}
+
 export type QueryRow = Record<string, unknown>;
 export { formatGameDate, groupMapsIntoSeries } from "./series";
 export type { SeriesCard } from "./series";
@@ -92,9 +98,9 @@ function teamGamesUrl(baseUrl: string, year: number): string {
   return `${baseUrl.replace(/\/$/, "")}/team_games/year=${year}/part.parquet`;
 }
 
-const MAP_SELECT = `
-  oe_gameid,
-  game_uid,
+const TEAM_MAP_SELECT = `
+  regexp_replace(CAST(gameid AS VARCHAR), '^(oe-api:|oracle-elixir-api:)+', '', 'i') AS oe_gameid,
+  regexp_replace(CAST(gameid AS VARCHAR), '^(oe-api:|oracle-elixir-api:)+', '', 'i') AS game_uid,
   date,
   league,
   patch,
@@ -147,24 +153,79 @@ export type MapFilters = {
   limit?: number;
 };
 
-async function mapSelectForPack(parquetUrl: string): Promise<string> {
-  // Older public packs contain source_oe but predate source_grid. Keep the
-  // browser query compatible with both schemas while newer packs roll out.
-  const optionalColumns: string[] = [];
-  try {
-    const columns = await queryPackParquet(
-      parquetUrl,
-      "DESCRIBE SELECT * FROM read_parquet($PARQUET)",
-    );
-    const available = new Set(columns.map((row) => String(row.column_name ?? "")));
-    for (const column of ["source_grid", "grid_series_id", "grid_game_index"]) {
-      if (available.has(column)) optionalColumns.push(column);
-    }
-  } catch {
-    // The main map query will report the actual pack failure if its stable
-    // columns are unavailable; optional provenance must not cause one.
-  }
-  return optionalColumns.length ? `${MAP_SELECT.trimEnd()}\n  ,${optionalColumns.join(",\n  ")}` : MAP_SELECT;
+function teamMapQuery(clauses: string[], limit: number, idClause?: string): string {
+  const filters = idClause ? [...clauses, idClause] : clauses;
+  return `
+    WITH team_rows AS (
+      SELECT *
+      FROM read_parquet($PARQUET)
+      WHERE lower(CAST(position AS VARCHAR)) = 'team'
+    ), map_rows AS (
+      SELECT
+        gameid,
+        MAX(date) AS date,
+        MAX(league) AS league,
+        MAX(patch) AS patch,
+        MAX(split) AS split,
+        MAX(playoffs) AS playoffs,
+        CAST(NULL AS VARCHAR) AS tournament,
+        MAX(game) AS game,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN teamname END) AS blue_teamname,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN teamname END) AS red_teamname,
+        SUM(COALESCE(teamkills, 0)) AS total_kills,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN result END) AS y_blue_win,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN result END) AS blue_result,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN result END) AS red_result,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN teamkills END) AS blue_teamkills,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN teamkills END) AS red_teamkills,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN totalgold END) AS blue_totalgold,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN totalgold END) AS red_totalgold,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN dragons END) AS blue_dragons,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN dragons END) AS red_dragons,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN void_grubs END) AS blue_void_grubs,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN void_grubs END) AS red_void_grubs,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN towers END) AS blue_towers,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN towers END) AS red_towers,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN heralds END) AS blue_heralds,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN heralds END) AS red_heralds,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN barons END) AS blue_barons,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN barons END) AS red_barons,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN inhibitors END) AS blue_inhibitors,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN inhibitors END) AS red_inhibitors,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN golddiffat15 END) AS blue_golddiffat15,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN golddiffat15 END) AS red_golddiffat15,
+        TRUE AS source_oe,
+        MAX(CAST(gamelength AS DOUBLE)) / 60.0 AS length_min,
+        MAX(gamelength) AS gamelength,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN ban1 END) AS blue_ban1,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN ban2 END) AS blue_ban2,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN ban3 END) AS blue_ban3,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN ban4 END) AS blue_ban4,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN ban5 END) AS blue_ban5,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN ban1 END) AS red_ban1,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN ban2 END) AS red_ban2,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN ban3 END) AS red_ban3,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN ban4 END) AS red_ban4,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN ban5 END) AS red_ban5,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN pick1 END) AS blue_pick1,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN pick2 END) AS blue_pick2,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN pick3 END) AS blue_pick3,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN pick4 END) AS blue_pick4,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'blue' THEN pick5 END) AS blue_pick5,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN pick1 END) AS red_pick1,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN pick2 END) AS red_pick2,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN pick3 END) AS red_pick3,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN pick4 END) AS red_pick4,
+        MAX(CASE WHEN lower(CAST(side AS VARCHAR)) = 'red' THEN pick5 END) AS red_pick5
+      FROM team_rows
+      GROUP BY gameid
+    )
+    SELECT ${TEAM_MAP_SELECT}
+    FROM map_rows
+    WHERE ${filters.join(" AND ")}
+    ORDER BY date DESC
+    LIMIT ${limit}
+  `;
 }
 
 function mapFilterClauses(opts: MapFilters): string[] {
@@ -208,18 +269,10 @@ export async function queryMaps(
   year: number,
   opts: MapFilters = {},
 ): Promise<QueryRow[]> {
-  const url = mapsUrl(baseUrl, year);
+  const url = teamGamesUrl(baseUrl, year);
   const lim = opts.limit ?? 80;
   const clauses = mapFilterClauses(opts);
-  const select = await mapSelectForPack(url);
-  const sql = `
-    SELECT ${select}
-    FROM read_parquet($PARQUET)
-    WHERE ${clauses.join(" AND ")}
-    ORDER BY date DESC
-    LIMIT ${lim}
-  `;
-  return queryPackParquet(url, sql);
+  return queryPackParquet(url, teamMapQuery(clauses, lim));
 }
 
 export async function queryMapsYears(
@@ -228,13 +281,14 @@ export async function queryMapsYears(
   opts: MapFilters = {},
 ): Promise<QueryRow[]> {
   const lim = opts.limit ?? 200;
-  const out: QueryRow[] = [];
-  for (const year of [...years].sort((a, b) => b - a)) {
-    const rows = await queryMaps(baseUrl, year, { ...opts, limit: lim });
-    for (const r of rows) out.push({ ...r, _year: year });
-    if (out.length >= lim) break;
-  }
-  return out.slice(0, lim);
+  const orderedYears = [...years].sort((a, b) => b - a);
+  const chunks = await Promise.all(
+    orderedYears.map(async (year) => {
+      const rows = await queryMaps(baseUrl, year, { ...opts, limit: lim });
+      return rows.map((row) => ({ ...row, _year: year }));
+    }),
+  );
+  return chunks.flat().slice(0, lim);
 }
 
 export type ModelAccuracySummary = {
@@ -282,14 +336,15 @@ export async function queryMapByGameId(
   year: number,
   gameId: string,
 ): Promise<QueryRow | null> {
-  const url = mapsUrl(baseUrl, year);
-  const select = await mapSelectForPack(url);
+  const url = teamGamesUrl(baseUrl, year);
+  const normalized = normalizeGameId(gameId);
   const rows = await queryPackParquet(
     url,
-    `SELECT ${select}
-     FROM read_parquet($PARQUET)
-     WHERE oe_gameid = '${esc(gameId)}' OR game_uid = '${esc(gameId)}'
-     LIMIT 1`,
+    teamMapQuery(
+      ["1=1"],
+      1,
+      `regexp_replace(CAST(gameid AS VARCHAR), '^(oe-api:|oracle-elixir-api:)+', '', 'i') = '${esc(normalized)}'`,
+    ),
   );
   return rows[0] ?? null;
 }
@@ -300,6 +355,7 @@ export async function queryPlayersForGame(
   gameId: string,
 ): Promise<QueryRow[]> {
   const url = playersUrl(baseUrl, year);
+  const normalized = normalizeGameId(gameId);
   const sql = `
     SELECT
       gameid, side, position, playername, teamname, champion,
@@ -308,7 +364,7 @@ export async function queryPlayersForGame(
       ban1, ban2, ban3, ban4, ban5,
       damageshare, earnedgoldshare, visionscore
     FROM read_parquet($PARQUET)
-    WHERE gameid = '${esc(gameId)}'
+    WHERE regexp_replace(CAST(gameid AS VARCHAR), '^(oe-api:|oracle-elixir-api:)+', '', 'i') = '${esc(normalized)}'
   `;
   return queryPackParquet(url, sql);
 }
@@ -322,7 +378,11 @@ export async function loadMatchBundle(
   for (const year of [...years].sort((a, b) => b - a)) {
     const map = await queryMapByGameId(baseUrl, year, gameId);
     if (!map) continue;
-    const players = await queryPlayersForGame(baseUrl, year, String(map.oe_gameid));
+    const players = await queryPlayersForGame(
+      baseUrl,
+      year,
+      normalizeGameId(String(map.oe_gameid ?? map.game_uid ?? gameId)),
+    );
     return { year, map, players };
   }
   return null;
@@ -492,26 +552,28 @@ export async function listMajorTeams(
   ]);
   const out = new Set<string>();
   for (const year of years) {
-    const url = mapsUrl(baseUrl, year);
+    const url = teamGamesUrl(baseUrl, year);
     const rows = await queryPackParquet(
       url,
-      `SELECT DISTINCT league, blue_teamname, red_teamname FROM read_parquet($PARQUET)`,
+      `SELECT DISTINCT league, teamname FROM read_parquet($PARQUET)
+       WHERE lower(CAST(position AS VARCHAR)) = 'team'`,
     );
     for (const r of rows) {
       const L = String(r.league ?? "");
       if (![...majors].some((m) => L.toUpperCase().includes(m.toUpperCase()))) continue;
-      if (r.blue_teamname) out.add(String(r.blue_teamname));
-      if (r.red_teamname) out.add(String(r.red_teamname));
+      if (r.teamname) out.add(String(r.teamname));
     }
   }
   return out;
 }
 
 export async function listLeagues(baseUrl: string, year: number): Promise<string[]> {
-  const url = mapsUrl(baseUrl, year);
+  const url = teamGamesUrl(baseUrl, year);
   const rows = await queryPackParquet(
     url,
-    `SELECT DISTINCT league FROM read_parquet($PARQUET) ORDER BY 1`,
+    `SELECT DISTINCT league FROM read_parquet($PARQUET)
+     WHERE lower(CAST(position AS VARCHAR)) = 'team'
+     ORDER BY 1`,
   );
   return rows.map((r) => String(r.league)).filter(Boolean);
 }
@@ -520,12 +582,12 @@ export async function listTeams(baseUrl: string, years: number[]): Promise<strin
   const names = new Set<string>();
   for (const year of years) {
     const rows = await queryPackParquet(
-      mapsUrl(baseUrl, year),
-      `SELECT DISTINCT blue_teamname, red_teamname FROM read_parquet($PARQUET)`,
+      teamGamesUrl(baseUrl, year),
+      `SELECT DISTINCT teamname FROM read_parquet($PARQUET)
+       WHERE lower(CAST(position AS VARCHAR)) = 'team'`,
     );
     for (const row of rows) {
-      if (row.blue_teamname) names.add(String(row.blue_teamname));
-      if (row.red_teamname) names.add(String(row.red_teamname));
+      if (row.teamname) names.add(String(row.teamname));
     }
   }
   return [...names].sort((a, b) => a.localeCompare(b));
@@ -545,7 +607,7 @@ export async function queryTeamGames(
   const sql = `
     SELECT date, league, patch, teamname, side, result, teamkills, dragons, void_grubs, golddiffat15, gamelength
     FROM read_parquet($PARQUET)
-    WHERE ${clauses.join(" AND ")}
+    WHERE lower(CAST(position AS VARCHAR)) = 'team' AND ${clauses.join(" AND ")}
     ORDER BY date DESC
     LIMIT ${lim}
   `;

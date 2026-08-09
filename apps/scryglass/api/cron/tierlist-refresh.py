@@ -336,6 +336,19 @@ def _prepare_runtime_root(
             ):
                 _copy_tree(PROJECT_ROOT / relative, root / relative)
 
+        # Production lineage hashes these files. Keep them beside the
+        # writable artifacts when the slim runtime omits the source tree.
+        for relative in (
+            Path("lol_kills/v2/tierlists/forward_evaluation.py"),
+            Path("lol_kills/v2/tierlists/production_bundle.py"),
+        ):
+            source = PROJECT_ROOT / relative
+            if not source.is_file():
+                raise WorkerConfigurationError(f"required worker source is missing: {source}")
+            destination = root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+
         # These paths are writable outputs for the refresh. They do not need
         # the historical research files from the main application bundle.
         for relative in (

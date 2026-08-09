@@ -9,7 +9,9 @@ from lol_kills.export.pack_records import (
     build_maps_frame_from_team_games,
     build_player_records,
     build_team_records,
+    filter_public_team_rating_maps,
 )
+from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.dual_elo import _is_intl
 from lol_kills.ratings.hierarchical_bt import fit_hierarchical_bt
 from lol_kills.ratings.player_elo import build_maps_frame_from_players, build_player_weekly_ranks
@@ -145,6 +147,38 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertEqual(records["Guigs"]["current_tier"], "tier2")
         self.assertEqual(records["Guigs"]["current_team"], "KaBuM! Ilha das Lendas")
 
+    def test_player_records_use_latest_observed_team_and_precompute_side_and_role_stats(self) -> None:
+        players = pd.DataFrame(
+            [
+                {"date": "2026-01-01", "league": "LEC", "playername": "Mover", "position": "top", "teamname": "Los Ratones", "side": "Blue", "result": 1},
+                {"date": "2026-02-01", "league": "LEC", "playername": "Mover", "position": "top", "teamname": "Los Ratones", "side": "Red", "result": 0},
+                {"date": "2026-03-01", "league": "EM", "playername": "Mover", "position": "mid", "teamname": "Witchcraft", "side": "Blue", "result": 1},
+            ]
+        )
+        record = build_player_records(players)["Mover"]
+        self.assertEqual(record["current_league"], "LEC")
+        self.assertEqual(record["current_team"], "Witchcraft")
+        self.assertEqual(record["blue_games"], 2)
+        self.assertEqual(record["blue_wins"], 2)
+        self.assertEqual(record["blue_wr"], 1.0)
+        self.assertEqual(record["red_games"], 1)
+        self.assertEqual(record["red_wins"], 0)
+        self.assertEqual(record["red_wr"], 0.0)
+        self.assertEqual(record["roles"], ["top", "mid"])
+        self.assertEqual(record["primary_role"], "top")
+
+    def test_player_records_drop_transport_label_from_league_affiliation(self) -> None:
+        players = pd.DataFrame(
+            [
+                {"date": "2026-07-20", "league": "LCKC", "playername": "Jiwoo", "position": "bot", "teamname": "Kiwoom DRX", "side": "Blue", "result": 1},
+                {"date": "2026-07-29", "league": "ORACLE_ELIXIR_API", "playername": "Jiwoo", "position": "bot", "teamname": "Kiwoom DRX Challengers", "side": "Red", "result": 1},
+            ]
+        )
+        record = build_player_records(players)["Jiwoo"]
+        self.assertEqual(record["leagues"], ["LCKC"])
+        self.assertEqual(record["primary"], "LCKC")
+        self.assertEqual(record["current_team"], "Kiwoom DRX Challengers")
+
     def test_full_team_feed_adapter_keeps_developmental_games(self) -> None:
         team_games = pd.DataFrame(
             [
@@ -228,6 +262,21 @@ class CompetitionIdentityTests(unittest.TestCase):
 
         self.assertEqual(len(maps), 1)
         self.assertEqual(maps.iloc[0]["game_uid"], "g1")
+
+    def test_source_game_keys_remove_repeated_transport_prefixes(self) -> None:
+        self.assertEqual(canonical_source_game_key("oe-api:oracle-elixir-api:game-1"), "game-1")
+        self.assertEqual(canonical_source_game_key(None, "oracle-elixir-api:game-2"), "game-2")
+
+    def test_public_team_rating_filter_excludes_los_ratones(self) -> None:
+        maps = pd.DataFrame(
+            [
+                {"blue_team": "Los Ratones", "red_team": "Other", "y_blue_win": 1},
+                {"blue_team": "Other", "red_team": "Another", "y_blue_win": 0},
+            ]
+        )
+        filtered = filter_public_team_rating_maps(maps)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered.iloc[0]["blue_team"], "Other")
 
 
 class HierarchicalRatingTests(unittest.TestCase):

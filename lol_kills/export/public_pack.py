@@ -25,9 +25,11 @@ from lol_kills.export.pack_records import (
     build_maps_frame_from_team_games,
     build_player_records,
     build_team_records,
+    filter_public_team_rating_maps,
 )
 from lol_kills.export.player_metadata import build_player_metadata
 from lol_kills.etl.competition import TAXONOMY_VERSION, canonicalize_competition_frame
+from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.dual_elo import build_dual_ratings, lineup_hashes_from_players
 from lol_kills.ratings.hierarchical_bt import build_team_weekly_ranks, fit_hierarchical_bt
 from lol_kills.ratings.player_elo import (
@@ -113,19 +115,32 @@ def _canonical_pack_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
 def _normalized_game_uid(frame: pd.DataFrame) -> pd.Series:
     """Use the source game UID and fall back to the OE game ID per row."""
-    if "game_uid" not in frame.columns and "gameid" not in frame.columns:
+    if not {"game_uid", "gameid", "oe_gameid"}.intersection(frame.columns):
         raise ValueError("rating source has no game identity column")
+    fallback = frame["gameid"] if "gameid" in frame.columns else None
+    values: list[str] = []
     if "game_uid" in frame.columns:
-        game_uid = frame["game_uid"].astype("string")
-        fallback = (
-            frame["gameid"].astype("string")
-            if "gameid" in frame.columns
-            else pd.Series("", index=frame.index, dtype="string")
-        )
-        value = game_uid.where(game_uid.notna() & game_uid.str.strip().ne(""), fallback)
+        source = frame["game_uid"]
+    elif "gameid" in frame.columns:
+        source = frame["gameid"]
     else:
-        value = frame["gameid"].astype("string")
-    return value.where(value.notna() & value.str.strip().ne(""), pd.NA)
+        source = frame["oe_gameid"]
+    for index, value in source.items():
+        fallback_value = fallback.loc[index] if fallback is not None else None
+        values.append(canonical_source_game_key(value, fallback_value))
+    return pd.Series(values, index=frame.index, dtype="string").replace("", pd.NA)
+
+
+def _canonicalize_game_ids(frame: pd.DataFrame) -> pd.DataFrame:
+    """Apply one canonical source key to every game identity column."""
+
+    if not {"game_uid", "gameid", "oe_gameid"}.intersection(frame.columns):
+        return frame
+    normalized = _normalized_game_uid(frame)
+    for column in ("game_uid", "gameid", "oe_gameid"):
+        if column in frame.columns:
+            frame[column] = normalized
+    return frame
 
 
 def _source_file_meta(path: Path) -> dict[str, Any]:
@@ -217,10 +232,15 @@ def _draft_coverage(maps: pd.DataFrame, players: pd.DataFrame) -> dict[str, Any]
         map_pick_complete = maps[pick_columns].map(known).sum(axis=1).eq(10)
 
     player_key = "gameid" if "gameid" in players.columns else "game_uid"
-    map_keys = (
-        maps.get("oe_gameid", pd.Series(index=maps.index, dtype=object))
-        .where(lambda values: values.map(known), maps.get("game_uid"))
-        .astype(str)
+    map_id = maps.get("oe_gameid", pd.Series(index=maps.index, dtype=object))
+    map_fallback = maps.get("game_uid", pd.Series(index=maps.index, dtype=object))
+    map_keys = pd.Series(
+        [
+            canonical_source_game_key(value, map_fallback.loc[index])
+            for index, value in map_id.items()
+        ],
+        index=maps.index,
+        dtype="string",
     )
     complete_participant_games: set[str] = set()
     required_player_columns = {player_key, "side", "position", "champion"}
@@ -250,7 +270,9 @@ def _draft_coverage(maps: pd.DataFrame, players: pd.DataFrame) -> dict[str, Any]
             lambda sides: set(sides) == {"Blue", "Red"}
         )
         complete_participant_games = {
-            str(game_id) for game_id, valid in complete_games.items() if valid
+            canonical_source_game_key(game_id)
+            for game_id, valid in complete_games.items()
+            if valid and canonical_source_game_key(game_id)
         }
 
     participant_complete = map_keys.isin(complete_participant_games)
@@ -314,7 +336,7 @@ def export_public_pack(
 
     # --- team games (partition by year) ---
     team_path = warehouse / "oe_team_games.parquet"
-    team_source = _canonical_pack_frame(pq.read_table(team_path).to_pandas())
+    team_source = _canonicalize_game_ids(_canonical_pack_frame(pq.read_table(team_path).to_pandas()))
     team_table = pa.Table.from_pandas(team_source, preserve_index=False)
     team_table = _filter_years(team_table, years, ("year", "oe_year"))
     team_rating_frame = team_table.to_pandas()
@@ -336,7 +358,7 @@ def export_public_pack(
 
     # --- player games ---
     player_path = warehouse / "oe_player_games.parquet"
-    player_source = _canonical_pack_frame(pq.read_table(player_path).to_pandas())
+    player_source = _canonicalize_game_ids(_canonical_pack_frame(pq.read_table(player_path).to_pandas()))
     player_table = pa.Table.from_pandas(player_source, preserve_index=False)
     player_table = _filter_years(player_table, years, ("year", "oe_year"))
     player_rating_frame = player_table.to_pandas()
@@ -368,6 +390,7 @@ def export_public_pack(
             "competition_tier",
             "date",
             "position",
+            "side",
             "playername",
             "teamname",
             "result",
@@ -400,7 +423,8 @@ def export_public_pack(
     map_cols = spec.maps_columns(maps.column_names)
     maps = maps.select(map_cols)
     maps = _filter_years(maps, years, ("year", "oe_year"))
-    maps_for_records = maps.to_pandas()
+    maps_for_records = _canonicalize_game_ids(maps.to_pandas())
+    maps = pa.Table.from_pandas(maps_for_records, preserve_index=False)
     draft_coverage = _draft_coverage(maps_for_records, player_rating_frame)
     source_as_of = pd.to_datetime(maps_for_records["date"], utc=True, errors="coerce").max()
     if pd.isna(source_as_of):
@@ -414,13 +438,16 @@ def export_public_pack(
         if live_source
         else team_maps_for_ratings if not team_maps_for_ratings.empty else maps_for_records
     )
+    rating_input = filter_public_team_rating_maps(rating_input)
+    if rating_input.empty:
+        raise RuntimeError("public pack team rating source has no eligible team maps")
     player_maps_for_ratings = build_maps_frame_from_players(player_rating_input)
     if player_maps_for_ratings.empty:
         raise RuntimeError("public pack rating source has no complete player maps")
     if (warehouse / "meta.json").exists():
-        map_ids = set(maps_for_records["game_uid"].dropna().astype(str))
-        team_ids = set(team_maps_for_ratings["game_uid"].dropna().astype(str))
-        player_ids = set(player_maps_for_ratings["game_uid"].dropna().astype(str))
+        map_ids = set(_normalized_game_uid(maps_for_records).dropna().astype(str))
+        team_ids = set(_normalized_game_uid(team_maps_for_ratings).dropna().astype(str))
+        player_ids = set(_normalized_game_uid(player_maps_for_ratings).dropna().astype(str))
         if team_ids != map_ids or player_ids != map_ids:
             raise RuntimeError(
                 "OE live public pack inputs do not share the deduplicated map set; "

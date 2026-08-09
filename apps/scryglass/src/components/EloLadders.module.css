@@ -45,7 +45,8 @@
 }
 
 .search input,
-.minGames input {
+.minGames input,
+.minGames select {
   width: 100%;
   min-height: 2.5rem;
   padding: 0 0.75rem;
@@ -69,6 +70,12 @@
   font-size: 0.72rem;
 }
 
+.playerFilters {
+  display: flex;
+  gap: 0.5rem;
+  align-items: end;
+}
+
 .minGames input {
   font-variant-numeric: tabular-nums;
 }
@@ -79,6 +86,7 @@
 .more button:focus-visible,
 .search input:focus-visible,
 .minGames input:focus-visible,
+.minGames select:focus-visible,
 .refine summary:focus-visible,
 .entityLink:focus-visible,
 .card:focus-visible {
@@ -438,6 +446,10 @@
     width: max-content;
   }
 
+  .playerFilters {
+    grid-column: 1 / -1;
+  }
+
   .scopeBar {
     min-height: 0;
     padding: 0.55rem 0;
@@ -505,6 +517,10 @@
   }
 
   .minGames {
+    margin-top: 0.55rem;
+  }
+
+  .playerFilters {
     margin-top: 0.55rem;
   }
 

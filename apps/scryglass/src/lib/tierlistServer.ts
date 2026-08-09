@@ -5,6 +5,15 @@ import path from "node:path";
 const TIERLIST_ROOT = path.join(process.cwd(), "public", "v2", "tierlists");
 const PRODUCTION_INDEX_LOCATOR = "production/index-v1.json";
 const SHA256_RE = /^[0-9a-f]{64}$/;
+const TIERLIST_CACHE_TTL_MS = 60_000;
+
+let tierlistCache: {
+  key: string;
+  expiresAt: number;
+  view: TierlistView;
+} | null = null;
+let tierlistLoadPromise: Promise<TierlistView | null> | null = null;
+let tierlistLoadKey = "";
 
 const ROLES = ["top", "jungle", "mid", "bot", "support"] as const;
 const SOURCE_MODES = ["oe_only", "oe_plus_grid"] as const;
@@ -400,9 +409,7 @@ function scopeFromMeta(meta: CellMeta): TierlistScope {
   };
 }
 
-/** Load only the approved production artifact. Development cells never enter this API. */
-export async function loadTierlistView(): Promise<TierlistView | null> {
-  const configuredIndexUrl = process.env.SCRYGLASS_TIERLIST_INDEX_URL?.trim();
+async function loadTierlistViewUncached(configuredIndexUrl: string): Promise<TierlistView | null> {
   let index: TierlistIndex | null = null;
   let indexUrl: string | null = null;
   if (configuredIndexUrl) {
@@ -416,13 +423,15 @@ export async function loadTierlistView(): Promise<TierlistView | null> {
   const rows: TierRow[] = [];
   const scopes = index.cells.map(scopeFromMeta);
   let cellsAvailable = 0;
-  for (const cell of index.cells) {
-    const raw = indexUrl
-      ? await fetchText(resolveRemoteLocator(cell.locator, indexUrl, index.base_url))
-      : (() => {
-          const local = safeLocalCellPath(cell.locator);
-          return local && existsSync(local) ? readFileSync(local, "utf-8") : null;
-        })();
+  const rawCells = await Promise.all(
+    index.cells.map(async (cell) => {
+      if (indexUrl) return fetchText(resolveRemoteLocator(cell.locator, indexUrl, index.base_url));
+      const local = safeLocalCellPath(cell.locator);
+      return local && existsSync(local) ? readFileSync(local, "utf-8") : null;
+    }),
+  );
+  for (const [cellIndex, cell] of index.cells.entries()) {
+    const raw = rawCells[cellIndex];
     if (raw === null) return null;
     const payload = parseCell(raw, cell);
     if (!payload) return null;
@@ -495,6 +504,34 @@ export async function loadTierlistView(): Promise<TierlistView | null> {
       claim_ceiling: index.claim_ceiling ?? {},
     },
   };
+}
+
+/** Load only the approved production artifact. Development cells never enter this API. */
+export async function loadTierlistView(): Promise<TierlistView | null> {
+  const configuredIndexUrl = process.env.SCRYGLASS_TIERLIST_INDEX_URL?.trim() ?? "";
+  const cacheKey = configuredIndexUrl || localIndexPath();
+  const now = Date.now();
+  if (tierlistCache && tierlistCache.key === cacheKey && tierlistCache.expiresAt > now) {
+    return tierlistCache.view;
+  }
+  if (tierlistLoadPromise && tierlistLoadKey === cacheKey) return tierlistLoadPromise;
+
+  tierlistLoadKey = cacheKey;
+  const promise = loadTierlistViewUncached(configuredIndexUrl)
+    .then((view) => {
+      if (view) {
+        tierlistCache = { key: cacheKey, expiresAt: Date.now() + TIERLIST_CACHE_TTL_MS, view };
+      }
+      return view;
+    })
+    .finally(() => {
+      if (tierlistLoadPromise === promise) {
+        tierlistLoadPromise = null;
+        tierlistLoadKey = "";
+      }
+    });
+  tierlistLoadPromise = promise;
+  return promise;
 }
 
 const INTERNATIONAL_KINDS: Record<string, string[]> = {

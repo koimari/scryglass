@@ -124,6 +124,14 @@ export type PlayerRecord = {
   wins: number;
   games: number;
   wr: number | null;
+  blue_games?: number;
+  blue_wins?: number;
+  blue_wr?: number | null;
+  red_games?: number;
+  red_wins?: number;
+  red_wr?: number | null;
+  roles?: string[];
+  primary_role?: string | null;
   leagues?: string[];
   primary?: string | null;
   intl?: boolean;

@@ -23,6 +23,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 from lol_kills.etl.paths import PARQUET_DIR, WAREHOUSE_DIR
+from lol_kills.etl.source_keys import canonical_source_game_key
 
 API_BASE = "https://oe.datalisk.io"
 SCHEMA_VERSION = "scryglass:oe-api-live-bridge:v1"
@@ -426,15 +427,20 @@ def _rows_from_games(
         blue_team = own if side == "blue" else opponent
         red_team = opponent if side == "blue" else own
         blue_result = int(result) if side == "blue" else 1 - int(result)
-        game_uid = str(game.get("oeGameId") or game.get("gameId"))
-        game_id = f"oe-api:{game_uid}"
-        detail = full_games.get(game_uid, {})
+        raw_game_uid = game.get("oeGameId") or game.get("gameId")
+        game_uid = canonical_source_game_key(raw_game_uid)
+        if not game_uid:
+            continue
+        detail = full_games.get(str(raw_game_uid).strip(), {})
+        game_id = game_uid
         common = {
             "gameid": game_id,
             "game_uid": game_uid,
             "date": created,
             "league": metadata["league"],
-            "league_source": "oracle_elixir_api",
+            # Keep the OE league code as source provenance. Transport is
+            # already explicit in source_transport.
+            "league_source": metadata["league"],
             "competition_tier": metadata["competition_tier"],
             "event_kind": metadata["event_kind"],
             "is_international": metadata["event_kind"] is not None,
