@@ -5,6 +5,7 @@
   "outputDirectory": ".next",
   "functions": {
     "api/cron/tierlist-refresh.py": {
+      "memory": 3009,
       "maxDuration": 800,
       "includeFiles": ".tier-worker/**",
       "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,fixtures/**,__fixtures__/**,testdata/**,sample-data/**}"
