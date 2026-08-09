@@ -105,6 +105,16 @@ class handler(BaseHTTPRequestHandler):
             result = _run_pack_refresh()
         except _WORKER.WorkerBusy as error:
             _WORKER._json_response(self, 202, {"status": "busy", "reason": str(error)})
+        except FileNotFoundError as error:
+            _WORKER._json_response(
+                self,
+                503,
+                {
+                    "status": "unavailable",
+                    "code": "source_bundle_unavailable",
+                    "reason": str(error),
+                },
+            )
         except _WORKER.WorkerConfigurationError as error:
             _WORKER._json_response(
                 self,

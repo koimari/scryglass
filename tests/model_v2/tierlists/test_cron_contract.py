@@ -13,8 +13,9 @@ def test_vercel_cron_targets_the_live_refresh_route() -> None:
     config = json.loads((ROOT / "apps/scryglass/vercel.json").read_text(encoding="utf-8"))
     assert config["crons"] == [
         {"path": "/api/cron/source-refresh", "schedule": "0 */6 * * *"},
-        {"path": "/api/cron/tierlist-refresh", "schedule": "15 */6 * * *"},
-        {"path": "/api/cron/pack-refresh", "schedule": "30 */6 * * *"},
+        {"path": "/api/cron/ratings-refresh", "schedule": "15 */6 * * *"},
+        {"path": "/api/cron/tierlist-refresh", "schedule": "30 */6 * * *"},
+        {"path": "/api/cron/pack-refresh", "schedule": "45 */6 * * *"},
     ]
 
 
@@ -39,6 +40,14 @@ def test_source_refresh_is_a_separate_six_hour_job() -> None:
     assert "_refresh_source_inputs" in worker
     assert "_publish_source_bundle" in worker
     assert "SOURCE_LOCK_PATH" in worker
+
+
+def test_ratings_refresh_is_a_separate_six_hour_job() -> None:
+    worker = (ROOT / "apps/scryglass/api/cron/ratings-refresh.py").read_text(encoding="utf-8")
+    assert "RAW_SOURCE_POINTER_PATH" in worker
+    assert "_refresh_rating_inputs" in worker
+    assert "_publish_source_bundle" in worker
+    assert "RATINGS_LOCK_PATH" in worker
 
 
 def test_pack_refresh_is_a_separate_six_hour_job() -> None:

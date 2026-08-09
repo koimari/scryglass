@@ -217,6 +217,9 @@ LOCK_TTL_SECONDS = 20 * 60
 RECEIPT_PREFIX = "tierlists/refresh-receipts/"
 MOVEMENT_PATH = "tierlists/movement-v1.json"
 SOURCE_LOCK_PATH = "_scryglass_retention/source-refresh-lock.json"
+RATINGS_LOCK_PATH = "_scryglass_retention/ratings-refresh-lock.json"
+RAW_SOURCE_POINTER_PATH = "tier-worker/tierlist-source-raw-current.json"
+RAW_SOURCE_BUNDLE_PREFIX = "tier-worker/tierlist-source-raw/"
 SOURCE_POINTER_PATH = "tier-worker/tierlist-source-current.json"
 SOURCE_BUNDLE_PREFIX = "tier-worker/tierlist-source/"
 SOURCE_BUNDLE_MANIFEST = "source_bundle_manifest.json"
@@ -239,6 +242,7 @@ SOURCE_RELATIVE_FILES = (
     "data/lol/features/player_weekly_ranks.json",
     "data/lol/v2/tierlists/rating-refresh/rating-refresh-v1.json",
 )
+RAW_SOURCE_RELATIVE_FILES = SOURCE_RELATIVE_FILES[:10]
 PACKS_ROOT = Path("apps/scryglass/public/packs")
 PACK_LATEST = PACKS_ROOT / "latest.json"
 LIVE_PACK_ID = os.environ.get("SCRYGLASS_LIVE_PACK_ID", "v2026.live")
@@ -355,7 +359,12 @@ def _source_file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _refresh_source_inputs(runtime_root: Path, *, expected_live_as_of: str) -> dict[str, Any]:
+def _refresh_source_inputs(
+    runtime_root: Path,
+    *,
+    expected_live_as_of: str,
+    include_ratings: bool = True,
+) -> dict[str, Any]:
     """Build the private source bundle inputs used by later cron stages."""
 
     from lol_kills.v2.tierlists.live_refresh import (
@@ -419,12 +428,17 @@ def _refresh_source_inputs(runtime_root: Path, *, expected_live_as_of: str) -> d
             ],
             source="ratings",
         )
-        if live_source_step["completed"] and _api_player_detail_complete(runtime_root)
-        else _skipped_step("ratings", "oe_player_detail_incomplete")
+        if include_ratings and live_source_step["completed"] and _api_player_detail_complete(runtime_root)
+        else _skipped_step(
+            "ratings",
+            "oe_player_detail_incomplete" if include_ratings else "deferred_to_ratings_refresh",
+        )
     )
     grid_step = _skipped_step("grid", "source_mode_oe_only")
     source_steps = [oe_step, oe_api_step, atom_step, live_source_step, rating_step, grid_step]
-    required = [oe_api_step, atom_step, live_source_step, rating_step]
+    required = [oe_api_step, atom_step, live_source_step]
+    if include_ratings:
+        required.append(rating_step)
     if not all(step["completed"] for step in required):
         raise RuntimeError(
             "tier refresh source preparation failed: "
@@ -435,6 +449,7 @@ def _refresh_source_inputs(runtime_root: Path, *, expected_live_as_of: str) -> d
     return {
         "schema_version": SOURCE_BUNDLE_SCHEMA,
         "artifact_kind": "tier_list_source_bundle",
+        "bundle_stage": "complete" if include_ratings else "raw_source",
         "source_mode": "oe_only",
         "expected_live_as_of": expected_live_as_of,
         "source_observed_through": observed_as_of,
@@ -442,9 +457,65 @@ def _refresh_source_inputs(runtime_root: Path, *, expected_live_as_of: str) -> d
     }
 
 
-def _source_bundle_files(runtime_root: Path) -> list[tuple[str, Path]]:
+def _refresh_rating_inputs(
+    runtime_root: Path,
+    *,
+    source_manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Fit live team and player ratings from a completed raw source bundle."""
+
+    from lol_kills.v2.tierlists.live_refresh import (
+        _api_player_detail_complete,
+        _run_step,
+        _source_step_failure,
+    )
+
+    observed_as_of = source_manifest.get("source_observed_through")
+    expected_as_of = source_manifest.get("expected_live_as_of")
+    if not isinstance(observed_as_of, str) or not observed_as_of:
+        raise RuntimeError("raw source bundle has no source_latest value")
+    if not isinstance(expected_as_of, str) or not expected_as_of:
+        expected_as_of = observed_as_of
+    if not _api_player_detail_complete(runtime_root):
+        raise RuntimeError("OE player detail is incomplete for ratings refresh")
+    rating_step = _run_step(
+        runtime_root,
+        [
+            "lol_kills.v2.tierlists.rating_refresh",
+            "--root",
+            str(runtime_root),
+            "--as-of",
+            observed_as_of,
+        ],
+        source="ratings",
+    )
+    if not rating_step["completed"]:
+        raise RuntimeError("ratings refresh failed: " + _source_step_failure([rating_step]))
+    source_steps = [
+        dict(step)
+        for step in source_manifest.get("source_steps", [])
+        if isinstance(step, dict) and step.get("source") != "ratings"
+    ]
+    source_steps.append(rating_step)
+    return {
+        "schema_version": SOURCE_BUNDLE_SCHEMA,
+        "artifact_kind": "tier_list_source_bundle",
+        "bundle_stage": "complete",
+        "source_mode": "oe_only",
+        "expected_live_as_of": expected_as_of,
+        "source_observed_through": observed_as_of,
+        "source_steps": source_steps,
+    }
+
+
+def _source_bundle_files(
+    runtime_root: Path,
+    *,
+    include_ratings: bool,
+) -> list[tuple[str, Path]]:
+    relatives = SOURCE_RELATIVE_FILES if include_ratings else RAW_SOURCE_RELATIVE_FILES
     files: list[tuple[str, Path]] = []
-    for relative in SOURCE_RELATIVE_FILES:
+    for relative in relatives:
         path = runtime_root / relative
         if not path.is_file() or path.is_symlink():
             raise RuntimeError(f"source bundle input is missing: {relative}")
@@ -457,9 +528,10 @@ def _source_bundle_archive(
     *,
     source_receipt: dict[str, Any],
     run_id: str,
+    include_ratings: bool,
 ) -> tuple[bytes, dict[str, Any], str]:
     file_records: list[dict[str, Any]] = []
-    for relative, path in _source_bundle_files(runtime_root):
+    for relative, path in _source_bundle_files(runtime_root, include_ratings=include_ratings):
         file_records.append(
             {
                 "path": relative,
@@ -470,6 +542,7 @@ def _source_bundle_archive(
     manifest = {
         "schema_version": SOURCE_BUNDLE_SCHEMA,
         "artifact_kind": "tier_list_source_bundle",
+        "bundle_stage": source_receipt.get("bundle_stage", "complete"),
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "run_id": run_id,
         "source_mode": source_receipt["source_mode"],
@@ -487,7 +560,10 @@ def _source_bundle_archive(
         archive_name = temporary.name
     try:
         with tarfile.open(archive_name, mode="w:gz") as archive:
-            for relative, path in _source_bundle_files(runtime_root):
+            for relative, path in _source_bundle_files(
+                runtime_root,
+                include_ratings=include_ratings,
+            ):
                 archive.add(path, arcname=relative, recursive=False)
             info = tarfile.TarInfo(SOURCE_BUNDLE_MANIFEST)
             info.size = len(manifest_raw)
@@ -509,14 +585,18 @@ def _publish_source_bundle(
     *,
     source_receipt: dict[str, Any],
     run_id: str,
+    include_ratings: bool = True,
+    pointer_path: str = SOURCE_POINTER_PATH,
+    bundle_prefix: str = SOURCE_BUNDLE_PREFIX,
 ) -> dict[str, Any]:
     archive_bytes, manifest, manifest_sha256 = _source_bundle_archive(
         runtime_root,
         source_receipt=source_receipt,
         run_id=run_id,
+        include_ratings=include_ratings,
     )
     archive_sha256 = hashlib.sha256(archive_bytes).hexdigest()
-    archive_path = f"{SOURCE_BUNDLE_PREFIX}{archive_sha256}.tar.gz"
+    archive_path = f"{bundle_prefix}{archive_sha256}.tar.gz"
     archive_upload = _private_blob_upload(
         archive_path,
         archive_bytes,
@@ -539,19 +619,19 @@ def _publish_source_bundle(
         json.dumps(pointer, ensure_ascii=True, sort_keys=True, indent=2) + "\n"
     ).encode("utf-8")
     pointer_upload = _private_blob_upload(
-        SOURCE_POINTER_PATH,
+        pointer_path,
         pointer_raw,
         allow_overwrite=True,
     )
     pointer_readback = _private_blob_read(
-        SOURCE_POINTER_PATH,
+        pointer_path,
         max_bytes=256 * 1024,
     )
     if pointer_readback != pointer_raw:
         raise RuntimeError("private source pointer failed exact readback")
     return {
         "status": "published",
-        "pointer_path": SOURCE_POINTER_PATH,
+        "pointer_path": pointer_path,
         "archive_path": archive_path,
         "archive_bytes": len(archive_bytes),
         "archive_sha256": archive_sha256,
@@ -572,7 +652,11 @@ def _publish_source_bundle(
     }
 
 
-def _validate_source_pointer(payload: object) -> dict[str, Any]:
+def _validate_source_pointer(
+    payload: object,
+    *,
+    bundle_prefix: str,
+) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RuntimeError("private source pointer is not an object")
     submitted = payload.get("pointer_sha256")
@@ -587,7 +671,7 @@ def _validate_source_pointer(payload: object) -> dict[str, Any]:
         raise RuntimeError("private source pointer is not an approved artifact")
     archive_path = payload.get("archive_path")
     if not isinstance(archive_path, str) or not re.fullmatch(
-        rf"{re.escape(SOURCE_BUNDLE_PREFIX)}[0-9a-f]{{64}}\.tar\.gz",
+        rf"{re.escape(bundle_prefix)}[0-9a-f]{{64}}\.tar\.gz",
         archive_path,
     ):
         raise RuntimeError("private source pointer archive path is invalid")
@@ -604,10 +688,25 @@ def _validate_source_pointer(payload: object) -> dict[str, Any]:
     return payload
 
 
-def _download_source_bundle(runtime_root: Path) -> dict[str, Any]:
-    pointer_raw = _private_blob_read(SOURCE_POINTER_PATH, max_bytes=256 * 1024)
+def _download_source_bundle(
+    runtime_root: Path,
+    *,
+    pointer_path: str = SOURCE_POINTER_PATH,
+    bundle_prefix: str = SOURCE_BUNDLE_PREFIX,
+    required_steps: tuple[str, ...] = (
+        "oe_api",
+        "champion_atomization",
+        "oe_live_source",
+        "ratings",
+    ),
+    include_ratings: bool = True,
+) -> dict[str, Any]:
+    pointer_raw = _private_blob_read(pointer_path, max_bytes=256 * 1024)
     try:
-        pointer = _validate_source_pointer(json.loads(pointer_raw.decode("utf-8")))
+        pointer = _validate_source_pointer(
+            json.loads(pointer_raw.decode("utf-8")),
+            bundle_prefix=bundle_prefix,
+        )
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise RuntimeError("private source pointer JSON is invalid") from error
     archive_path = str(pointer["archive_path"])
@@ -643,7 +742,9 @@ def _download_source_bundle(runtime_root: Path) -> dict[str, Any]:
             raise RuntimeError("private source bundle digest does not match its pointer")
         stage = Path(tempfile.mkdtemp(prefix="scryglass-tier-source-stage-", dir="/tmp"))
         try:
-            allowed = set(SOURCE_RELATIVE_FILES) | {SOURCE_BUNDLE_MANIFEST}
+            allowed = set(
+                SOURCE_RELATIVE_FILES if include_ratings else RAW_SOURCE_RELATIVE_FILES
+            ) | {SOURCE_BUNDLE_MANIFEST}
             seen: set[str] = set()
             with tarfile.open(archive_name, mode="r:gz") as archive:
                 for member in archive.getmembers():
@@ -676,12 +777,13 @@ def _download_source_bundle(runtime_root: Path) -> dict[str, Any]:
             records = manifest.get("files")
             if not isinstance(records, list):
                 raise RuntimeError("private source bundle has no file manifest")
+            expected_files = SOURCE_RELATIVE_FILES if include_ratings else RAW_SOURCE_RELATIVE_FILES
             record_paths: set[str] = set()
             for record in records:
                 if not isinstance(record, dict):
                     raise RuntimeError("private source bundle file record is invalid")
                 relative = record.get("path")
-                if relative not in SOURCE_RELATIVE_FILES or relative in record_paths:
+                if relative not in expected_files or relative in record_paths:
                     raise RuntimeError("private source bundle file locator is invalid")
                 record_paths.add(relative)
                 source = stage / relative
@@ -691,19 +793,19 @@ def _download_source_bundle(runtime_root: Path) -> dict[str, Any]:
                     or _source_file_sha256(source) != record.get("sha256")
                 ):
                     raise RuntimeError(f"private source bundle checksum failed: {relative}")
-            if record_paths != set(SOURCE_RELATIVE_FILES):
+            if record_paths != set(expected_files):
                 raise RuntimeError("private source bundle file set is incomplete")
             source_steps = manifest.get("source_steps")
             if not isinstance(source_steps, list):
                 raise RuntimeError("private source bundle has no source steps")
-            for required in ("oe_api", "champion_atomization", "oe_live_source", "ratings"):
+            for required in required_steps:
                 step = next(
                     (item for item in source_steps if isinstance(item, dict) and item.get("source") == required),
                     None,
                 )
                 if not isinstance(step, dict) or step.get("completed") is not True:
                     raise RuntimeError(f"private source bundle source step is incomplete: {required}")
-            for relative in SOURCE_RELATIVE_FILES:
+            for relative in expected_files:
                 destination = runtime_root / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(stage / relative, destination)
@@ -1166,7 +1268,7 @@ def _run_refresh() -> dict[str, Any]:
         pack_publication = {
             "status": "scheduled",
             "route": "/api/cron/pack-refresh",
-            "schedule": "30 */6 * * *",
+            "schedule": "45 */6 * * *",
         }
         print(f"[tier-refresh] phase=pack deferred seconds={time.monotonic() - started:.1f}", flush=True)
         return {
@@ -1220,6 +1322,16 @@ class handler(BaseHTTPRequestHandler):
             result = _run_refresh()
         except WorkerBusy as error:
             _json_response(self, 202, {"status": "busy", "reason": str(error)})
+        except FileNotFoundError as error:
+            _json_response(
+                self,
+                503,
+                {
+                    "status": "unavailable",
+                    "code": "source_bundle_unavailable",
+                    "reason": str(error),
+                },
+            )
         except WorkerConfigurationError as error:
             _json_response(self, 503, {"status": "unavailable", "code": "worker_not_configured", "reason": str(error)})
         except Exception as error:  # noqa: BLE001
