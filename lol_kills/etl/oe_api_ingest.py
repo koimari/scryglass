@@ -264,8 +264,11 @@ def _fetch_games(
     *,
     api_key: str,
     end: pd.Timestamp,
+    not_before: pd.Timestamp | None,
     max_workers: int,
 ) -> list[dict[str, Any]]:
+    boundary = _parse_timestamp(not_before) if not_before is not None else None
+
     def fetch(team_id: str) -> list[dict[str, Any]]:
         body = _request_json(
             f"/teams/gameDetails/{urllib.parse.quote(team_id, safe='')}",
@@ -274,7 +277,15 @@ def _fetch_games(
         )
         if not isinstance(body, list):
             raise OeApiIngestError("OE game discovery returned an invalid shape")
-        return [dict(row) for row in body if isinstance(row, Mapping)]
+        selected: list[dict[str, Any]] = []
+        for row in body:
+            if not isinstance(row, Mapping):
+                continue
+            created = _parse_timestamp(row.get("gameCreation"))
+            if boundary is not None and (created is None or created < boundary):
+                continue
+            selected.append(dict(row))
+        return selected
 
     games: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
@@ -517,14 +528,6 @@ def ingest_oe_api(
     end = _parse_timestamp(end)
     if start is None or end is None or start > end:
         raise ValueError("start and end must be valid ordered timestamps")
-    tournaments = _discover_tournaments(
-        api_key=api_key,
-        start=start,
-        end=end,
-        lookback_days=lookback_days,
-    )
-    team_ids = _fetch_team_ids(tournaments, api_key=api_key, max_workers=max_workers)
-    games = _fetch_games(team_ids, api_key=api_key, end=end, max_workers=max_workers)
     primary_latest = None
     primary_path = repo_root / PARQUET_DIR / "oe_player_games.parquet"
     if primary_path.is_file():
@@ -538,6 +541,23 @@ def ingest_oe_api(
                 primary_latest = pd.Timestamp(primary_dates.max())
         except (OSError, KeyError, ValueError):
             primary_latest = None
+    not_before = start - pd.Timedelta(days=lookback_days)
+    if primary_latest is not None:
+        not_before = max(not_before, primary_latest - pd.Timedelta(days=7))
+    tournaments = _discover_tournaments(
+        api_key=api_key,
+        start=start,
+        end=end,
+        lookback_days=lookback_days,
+    )
+    team_ids = _fetch_team_ids(tournaments, api_key=api_key, max_workers=max_workers)
+    games = _fetch_games(
+        team_ids,
+        api_key=api_key,
+        end=end,
+        not_before=not_before,
+        max_workers=max_workers,
+    )
     detail_games = [
         game
         for game in games
