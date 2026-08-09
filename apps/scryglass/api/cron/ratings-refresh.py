@@ -1,4 +1,4 @@
-"""Refresh and publish the private source bundle for later cron stages."""
+"""Fit live team and player ratings from the private OE source bundle."""
 
 from __future__ import annotations
 
@@ -23,17 +23,17 @@ sys.modules[_SPEC.name] = _WORKER
 _SPEC.loader.exec_module(_WORKER)
 
 
-def _run_source_refresh() -> dict[str, Any]:
-    if not os.environ.get("ORACLES_ELIXIR_API_KEY", "").strip():
-        raise _WORKER.WorkerConfigurationError("ORACLES_ELIXIR_API_KEY is not configured")
+RATINGS_LOCK_PATH = _WORKER.RATINGS_LOCK_PATH
+
+
+def _run_ratings_refresh() -> dict[str, Any]:
     started = time.monotonic()
-    print("[source-refresh] phase=prepare start", flush=True)
+    print("[ratings-refresh] phase=prepare start", flush=True)
     runtime_root = _WORKER._prepare_runtime_root()
     print(
-        f"[source-refresh] phase=prepare done seconds={time.monotonic() - started:.1f}",
+        f"[ratings-refresh] phase=prepare done seconds={time.monotonic() - started:.1f}",
         flush=True,
     )
-    expected = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex}"
     prior_runtime_root = os.environ.get("SCRYGLASS_RUNTIME_ROOT")
     prior_pythonpath = os.environ.get("PYTHONPATH")
@@ -45,34 +45,38 @@ def _run_source_refresh() -> dict[str, Any]:
         if prior_pythonpath:
             pythonpath.append(prior_pythonpath)
         os.environ["PYTHONPATH"] = os.pathsep.join(pythonpath)
-        _WORKER.LOCK_PATH = _WORKER.SOURCE_LOCK_PATH
+        _WORKER.LOCK_PATH = RATINGS_LOCK_PATH
         lease = _WORKER._RefreshLease()
         lease.acquire()
-        print("[source-refresh] phase=lease acquired", flush=True)
+        print("[ratings-refresh] phase=lease acquired", flush=True)
         from lol_kills.etl.restore_oe_pack_baseline import restore_baseline
 
         baseline = restore_baseline(runtime_root)
-        print("[source-refresh] phase=baseline restored", flush=True)
-        source_receipt = _WORKER._refresh_source_inputs(
+        print("[ratings-refresh] phase=baseline restored", flush=True)
+        raw_source = _WORKER._download_source_bundle(
             runtime_root,
-            expected_live_as_of=expected,
+            pointer_path=_WORKER.RAW_SOURCE_POINTER_PATH,
+            bundle_prefix=_WORKER.RAW_SOURCE_BUNDLE_PREFIX,
+            required_steps=("oe_api", "champion_atomization", "oe_live_source"),
             include_ratings=False,
         )
         print(
-            "[source-refresh] phase=source inputs refreshed "
-            f"source_as_of={source_receipt['source_observed_through']}",
+            "[ratings-refresh] phase=raw source restored "
+            f"source_as_of={raw_source.get('source_observed_through')}",
             flush=True,
         )
+        source_receipt = _WORKER._refresh_rating_inputs(
+            runtime_root,
+            source_manifest=raw_source,
+        )
+        print("[ratings-refresh] phase=ratings refreshed", flush=True)
         publication = _WORKER._publish_source_bundle(
             runtime_root,
             source_receipt=source_receipt,
             run_id=run_id,
-            include_ratings=False,
-            pointer_path=_WORKER.RAW_SOURCE_POINTER_PATH,
-            bundle_prefix=_WORKER.RAW_SOURCE_BUNDLE_PREFIX,
         )
         print(
-            f"[source-refresh] phase=source bundle published seconds={time.monotonic() - started:.1f}",
+            f"[ratings-refresh] phase=source bundle published seconds={time.monotonic() - started:.1f}",
             flush=True,
         )
         return {
@@ -119,9 +123,19 @@ class handler(BaseHTTPRequestHandler):
             _WORKER._json_response(self, 401, {"status": "unauthorized"})
             return
         try:
-            result = _run_source_refresh()
+            result = _run_ratings_refresh()
         except _WORKER.WorkerBusy as error:
             _WORKER._json_response(self, 202, {"status": "busy", "reason": str(error)})
+        except FileNotFoundError as error:
+            _WORKER._json_response(
+                self,
+                503,
+                {
+                    "status": "unavailable",
+                    "code": "source_bundle_unavailable",
+                    "reason": str(error),
+                },
+            )
         except _WORKER.WorkerConfigurationError as error:
             _WORKER._json_response(
                 self,
@@ -138,7 +152,7 @@ class handler(BaseHTTPRequestHandler):
                 500,
                 {
                     "status": "failed",
-                    "code": "source_refresh_failed",
+                    "code": "ratings_refresh_failed",
                     "reason": f"{type(error).__name__}: {error}",
                 },
             )

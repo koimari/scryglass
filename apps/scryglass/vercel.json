@@ -16,6 +16,12 @@
       "includeFiles": "{.tier-worker/**,api/cron/tierlist-refresh.py}",
       "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,fixtures/**,__fixtures__/**,testdata/**,sample-data/**}"
     },
+    "api/cron/ratings-refresh.py": {
+      "memory": 3009,
+      "maxDuration": 800,
+      "includeFiles": "{.tier-worker/**,api/cron/tierlist-refresh.py}",
+      "excludeFiles": "{tests/**,__tests__/**,**/*.test.py,fixtures/**,__fixtures__/**,testdata/**,sample-data/**}"
+    },
     "api/cron/pack-refresh.py": {
       "memory": 3009,
       "maxDuration": 800,
@@ -29,12 +35,16 @@
       "schedule": "0 */6 * * *"
     },
     {
-      "path": "/api/cron/tierlist-refresh",
+      "path": "/api/cron/ratings-refresh",
       "schedule": "15 */6 * * *"
     },
     {
-      "path": "/api/cron/pack-refresh",
+      "path": "/api/cron/tierlist-refresh",
       "schedule": "30 */6 * * *"
+    },
+    {
+      "path": "/api/cron/pack-refresh",
+      "schedule": "45 */6 * * *"
     }
   ]
 }
