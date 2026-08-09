@@ -53,7 +53,7 @@ def test_blob_publication_payloads_keep_cells_immutable_and_pointer_last() -> No
     assert release_index["base_url"] == "./"
     assert all(cell["locator"].startswith("cells/") for cell in pointer["cells"])
     assert payloads["pointer_raw"] != payloads["release_index_raw"]
-    assert payloads["cell_count"] == 285
+    assert payloads["cell_count"] == 195
 
 
 def test_blob_publication_writes_the_pointer_last() -> None:
@@ -120,7 +120,7 @@ def test_blob_publication_writes_the_pointer_last() -> None:
     assert result["status"] == "published"
     assert result["pointer_mode"] == "NEW_IMMUTABLE"
     assert result["pointer_readback_verified"] is True
-    assert result["cell_count"] == 285
+    assert result["cell_count"] == 195
 
 
 def test_oe_only_skips_grid_and_can_be_ready_from_a_complete_oe_source(tmp_path: Path) -> None:

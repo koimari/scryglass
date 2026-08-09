@@ -566,12 +566,14 @@ def _validate_production_cell(payload: Mapping[str, Any], *, meta: Mapping[str, 
         raise ProductionBundleError("production cell scope does not match index")
     patch_id = meta.get("patch_id")
     scope_id = meta.get("scope_id")
+    scope = payload.get("scope")
     if (
         meta.get("scope_kind") != "patch"
         or not isinstance(patch_id, str)
         or scope_id != f"patch:{patch_id}"
-        or payload.get("scope_kind") != "patch"
-        or payload.get("scope_id") != scope_id
+        or not isinstance(scope, Mapping)
+        or scope.get("scope_kind") != "patch"
+        or scope.get("scope_id") != scope_id
     ):
         raise ProductionBundleError("production cell must use a patch-wide scope")
     if payload.get("artifact_sha256") != _canonical_sha256(payload):

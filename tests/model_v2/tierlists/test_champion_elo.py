@@ -93,7 +93,7 @@ def test_replay_covers_all_roles_and_tracks_rank_movement(tmp_path: Path) -> Non
     assert current["development_only"] is True
     assert current["publication_eligible"] is False
     assert current["source_mode"] == "oe_only"
-    assert "joint five-role" in current["rating_method"]["name"]
+    assert current["rating_method"]["name"].startswith("patch-wide joint five-role")
     assert "full observed-Hessian" in current["rating_method"]["fit"]
     assert current["options"]["roles"] == ["top", "jungle", "mid", "bot", "support"]
     assert len(current["cells"]) == 5
