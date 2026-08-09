@@ -373,6 +373,7 @@ def _refresh_source_inputs(
         _run_step,
         _skipped_step,
         _source_step_failure,
+        _verify_prebuilt_atom_bridge,
     )
 
     oe_step = _skipped_step("oe_annual", "committed_public_pack_baseline")
