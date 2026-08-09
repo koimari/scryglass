@@ -14,8 +14,8 @@ import { packSourceUpdatedLabel, packUpdatedLabel, softMu } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 import styles from "./EloPage.module.css";
 
-// Ratings are refreshed independently of the app deployment and are served
-// from the current Blob pack at request time.
+// Ratings use the current validated local pack. A local sync can replace this
+// pack without rebuilding the application.
 export const revalidate = 21_600;
 
 function thinPlayers(players: PlayerRating[]): PlayerRating[] {
