@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
-"""Descriptive player rating and player-aggregated team baseline.
+"""Player Dual-Elo team aggregate (DESCRIPTIVE BASELINE).
 
-Roster moves travel with the player: team strength is the mean of the five
-pre-match player μs (regional + meta), not a sticky org rating.
+This track is the descriptive baseline for the public player ladder.  It is
+NOT the v2 dynamic Player Rating: a shared team outcome updates every player
+on a side with the same residual scaled only by fixed role weights, so the
+baseline cannot identify individual contribution, posterior displacement,
+precision, or source/context coverage.  Roster moves travel with the player:
+team strength is the mean of the five pre-match player μs (regional + meta),
+not a sticky org rating.
+
+The v2 dynamic Player Rating lives in ``lol_kills/v2/ratings/player/`` and
+remains development-only until its acceptance record passes; until then this
+baseline carries the public label with an explicit descriptive claim ceiling.
 
 This module measures historical results. It does not identify a player's
 causal contribution and does not authorize predictions or betting decisions.

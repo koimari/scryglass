@@ -1,0 +1,56 @@
+{
+  "calibration": {
+    "intercept": 39.183102417968,
+    "n": 4,
+    "slope": 42108.23840365563
+  },
+  "candidate_id": "random_walk_no_reset+no_resource",
+  "chronological": {
+    "brier": 0.20086740306527187,
+    "log_loss": 0.5937074089098867,
+    "n_forecasts": 4,
+    "n_labeled": 4
+  },
+  "claim_ceiling": {
+    "c2": false,
+    "calibrated_public_probability_authorized": false,
+    "development_only": true,
+    "empirical_95_coverage_authorized": false,
+    "pass_b2": false,
+    "predictive_performance_authorized": false,
+    "probability_wording_authorized": false,
+    "production_eligible": false,
+    "promotion_authorized": false,
+    "publication_authorized": false,
+    "real_data_fit_authorized": false,
+    "reliability_authorized": false,
+    "sota_authorized": false,
+    "synthetic_only": true
+  },
+  "evaluation_cutoff": "2026-03-01T14:00:00Z",
+  "first_roster": {
+    "brier": 0.24014799975554899,
+    "log_loss": 0.673432655921008,
+    "n": 2
+  },
+  "note": "Development evidence only; not production, probability, promotion, or publication authority.",
+  "rank_movement": {
+    "max_absolute_posterior_displacement": 0.425758316247,
+    "mean_absolute_posterior_displacement": 0.244586019988,
+    "n_players_with_movement": 21
+  },
+  "report_sha256": "740cc2fc523d0def22853992a4d0771f20f9e2b201fad53959426d170c981644",
+  "role_brier": {
+    "bot": 0.20086740306527187,
+    "jungle": 0.20086740306527187,
+    "mid": 0.20086740306527187,
+    "support": 0.20086740306527187,
+    "top": 0.20086740306527187
+  },
+  "schema_version": "scryglass:player-identifiability-evaluation:v1",
+  "transfer": {
+    "brier": 0.18448987075369583,
+    "log_loss": 0.5605608183598672,
+    "n": 3
+  }
+}
