@@ -294,7 +294,13 @@ def _live_source_binding(
         raise
 
     try:
-        frame = pd.read_parquet(player_path, columns=["gameid", "date", "patch"])
+        try:
+            frame = pd.read_parquet(
+                player_path,
+                columns=["gameid", "game_uid", "date", "patch"],
+            )
+        except (ValueError, KeyError):
+            frame = pd.read_parquet(player_path, columns=["gameid", "date", "patch"])
     except (OSError, ValueError, ImportError) as exc:
         raise PatchMappingError("OE live player parquet cannot be read") from exc
     required = {"gameid", "date", "patch"}
@@ -302,21 +308,31 @@ def _live_source_binding(
         raise PatchMappingError("OE live player parquet lacks patch interval columns")
     frame = frame.copy()
     frame["gameid"] = frame["gameid"].astype("string").str.strip()
+    if "game_uid" in frame.columns:
+        game_uid = frame["game_uid"].astype("string").str.strip()
+        frame["source_game_key"] = game_uid.where(
+            game_uid.notna() & game_uid.ne(""),
+            frame["gameid"],
+        )
+    else:
+        frame["source_game_key"] = frame["gameid"]
     frame["date"] = pd.to_datetime(frame["date"], errors="coerce", utc=True)
-    frame = frame[frame["gameid"].notna() & frame["gameid"].ne("")]
+    frame = frame[
+        frame["source_game_key"].notna() & frame["source_game_key"].ne("")
+    ]
     frame = frame[frame["date"].notna()]
     frame = frame[frame["date"] >= pd.Timestamp(source_start)]
     if frame.empty:
         raise PatchMappingError("OE live player parquet has no rows in the audited source window")
 
-    unique_games = frame[["gameid", "date", "patch"]].drop_duplicates()
-    conflicts = unique_games.groupby("gameid", sort=False).agg(
+    unique_games = frame[["source_game_key", "date", "patch"]].drop_duplicates()
+    conflicts = unique_games.groupby("source_game_key", sort=False).agg(
         date_count=("date", "nunique"),
         patch_count=("patch", "nunique"),
     )
     if (conflicts["date_count"] > 1).any() or (conflicts["patch_count"] > 1).any():
         raise PatchMappingError("OE live source has a game with conflicting date or patch tokens")
-    games = unique_games.drop_duplicates("gameid").copy()
+    games = unique_games.drop_duplicates("source_game_key").copy()
     normalized_tokens: list[str] = []
     for value in games["patch"].tolist():
         try:
@@ -335,7 +351,7 @@ def _live_source_binding(
     intervals: dict[str, dict[str, Any]] = {}
     for token, group in games.groupby("oe_token", sort=True):
         intervals[token] = {
-            "observed_game_count": int(group["gameid"].nunique()),
+            "observed_game_count": int(group["source_game_key"].nunique()),
             "oe_observed_interval": {
                 "start": _rfc3339(pd.Timestamp(group["date"].min()).to_pydatetime()),
                 "end": _rfc3339(pd.Timestamp(group["date"].max()).to_pydatetime()),
@@ -346,13 +362,13 @@ def _live_source_binding(
     if observed_latest_utc != source_latest:
         raise PatchMappingError("OE live metadata watermark does not match the player parquet")
     expected_maps = meta.get("maps")
-    if isinstance(expected_maps, int) and expected_maps != int(games["gameid"].nunique()):
+    if isinstance(expected_maps, int) and expected_maps != int(games["source_game_key"].nunique()):
         raise PatchMappingError("OE live metadata map count does not match the player parquet")
     return intervals, {
         "status": "bound",
         "source_mode": "oe_only",
         "source_latest": _rfc3339(source_latest),
-        "source_game_count": int(games["gameid"].nunique()),
+        "source_game_count": int(games["source_game_key"].nunique()),
         "source_token_count": len(intervals),
         "player_locator": player_locator,
         "player_raw_sha256": _sha256_path(player_path),
