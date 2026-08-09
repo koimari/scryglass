@@ -381,11 +381,18 @@ def _load_previous_approved(runtime_root: Path, lease: _RefreshLease) -> Path | 
 
     movement_path = runtime_root / "data/lol/v2/tierlists/previous-approved-movement-v1.json"
     movement_path.parent.mkdir(parents=True, exist_ok=True)
-    remote = lease.transport.get_blob(
-        lease.store_id,
-        MOVEMENT_PATH,
-        deadline_epoch=int(time.time()) + 30,
-    )
+    try:
+        remote = lease.transport.get_blob(
+            lease.store_id,
+            MOVEMENT_PATH,
+            deadline_epoch=int(time.time()) + 30,
+        )
+    except Exception as error:  # noqa: BLE001
+        print(
+            f"[tier-refresh] movement snapshot lookup fallback error={type(error).__name__}",
+            flush=True,
+        )
+        remote = None
     if remote is not None:
         payload = _validate_movement_snapshot(json.loads(remote[0].decode("utf-8")))
         movement_path.write_text(
