@@ -1,1 +1,163 @@
-{"artifact_id":"player-rating-candidate-identity-l4-v3","artifacts":[{"artifact_id":"player-rating-config-l4-development-v2","canonical_sha256":"d3fe420d7caa74a102668a0e629e20fc403bfdd43ef2c10d6077e8c02276fd3b","locator":"data/lol/v2/models/player/player-rating-config.json","media_type":"application/json","raw_sha256":"c5fdf3f246950bfd4a3240bd8a21f9b20040045e9776a09753732572a7717757","role":"config"},{"artifact_id":"player-rating-synthetic-fixtures-l4-v2","canonical_sha256":"313d1dd2abe80962301f5c3b8d35a3ab6a80b315831ac057fcb7c825a217fb91","locator":"data/lol/v2/models/player/player-rating-fixtures.json","media_type":"application/json","raw_sha256":"f21cce8c4aab62a656e984efb78be2cc419e68e852b96e399a2325a803d62249","role":"fixtures"},{"artifact_id":"player-rating-development-report-l4-v3","canonical_sha256":"152f30fdf985835ba26c850a293fe9ad5bb625a8a8be4c72263a5be88c0e4f8e","locator":"data/lol/v2/models/player/player-rating-development-report.json","media_type":"application/json","raw_sha256":"b0f38dd607b53543b6482fe35ec2e107d393dd8c8879b4dfbb8defb0707958de","role":"report"},{"artifact_id":"player-rating-development-manifest-l4-v2","canonical_sha256":"ecfaf4a6e22a22a8d728ac09d5ab69fd754d795601d43f92c318ea41d626974f","locator":"data/lol/v2/models/player/player-rating-manifest.json","media_type":"application/json","raw_sha256":"bca34c43f25e9838613512509a508d28ed64a7168388b0d470cef51e1384f2ed","role":"manifest"},{"artifact_id":"l4-player-package-source-v3","canonical_sha256":"56fa5a92a1abcfb2449b995ca3d7db88a57d29acc6592cba4f112bb34c43231d","locator":"lol_kills/v2/ratings/player/__init__.py","media_type":"text/x-python","raw_sha256":"56fa5a92a1abcfb2449b995ca3d7db88a57d29acc6592cba4f112bb34c43231d","role":"package_source"},{"artifact_id":"l4-player-model-source-v3","canonical_sha256":"cca0b0b45efe88d3cd1a312421bb8c6472a4f218bc63b24839991644d625d9cf","locator":"lol_kills/v2/ratings/player/model.py","media_type":"text/x-python","raw_sha256":"cca0b0b45efe88d3cd1a312421bb8c6472a4f218bc63b24839991644d625d9cf","role":"model_source"},{"artifact_id":"l4-player-generator-source-v3","canonical_sha256":"aea84956b284600d064c61e42a64faba3a6e3362cd78f8456c13bb238f5a1bcf","locator":"lol_kills/v2/ratings/player/generate_artifacts.py","media_type":"text/x-python","raw_sha256":"aea84956b284600d064c61e42a64faba3a6e3362cd78f8456c13bb238f5a1bcf","role":"generator_source"},{"artifact_id":"l4-player-tests-v3","canonical_sha256":"85d1af67ee7dc3783cec3eb1f2daf7e1fe50f5e20d07afba1f925d3102285385","locator":"tests/model_v2/ratings/player/test_player_rating.py","media_type":"text/x-python","raw_sha256":"85d1af67ee7dc3783cec3eb1f2daf7e1fe50f5e20d07afba1f925d3102285385","role":"tests"},{"artifact_id":"frozen-player-rating-schema","canonical_sha256":"637d27182c84dba33770418944971e2202ef9d8568757a1812e0d300f9e3dc09","locator":"docs/model-v2/contracts/player-rating.schema.json","media_type":"application/json","raw_sha256":"af93fc0e143c47636641c071c7c1dd25e1438b86777ee0cb72c6f3b2aa78d25a","role":"player_schema"},{"artifact_id":"frozen-common-schema","canonical_sha256":"b8fddd3b2ce3ef8717d8745a55ba89ce2b44d92e7225568ce775607a318d2ae0","locator":"docs/model-v2/contracts/common.schema.json","media_type":"application/json","raw_sha256":"1cc34d27a45bb2feb207c57ce0cad6ef75e954e1d67c1eb18702a0f4bd444e6a","role":"common_schema"},{"artifact_id":"frozen-prediction-provenance-schema","canonical_sha256":"7169b18c435962d58886bb80fdebcfcc7b3f9c633fb4abf2b541e6c457987804","locator":"docs/model-v2/contracts/prediction-provenance.schema.json","media_type":"application/json","raw_sha256":"4f33fc9d3f39167aa7469d982926125f24337cd98a6fbb91084256756c0fcc2e","role":"provenance_schema"},{"artifact_id":"frozen-model-manifest-schema","canonical_sha256":"3b2f9713bf9d344ea0626024d36d3651aa3aae5d7ea46bd9a5106935ccf9bb3f","locator":"docs/model-v2/contracts/model-manifest.schema.json","media_type":"application/json","raw_sha256":"3205e59d6430fb0c4819f4c1c268256795095c4fddf107761423b76614c2e319","role":"model_manifest_schema"},{"artifact_id":"scryglass:c1:foundation-freeze-authority:v1","canonical_sha256":"918d9d67ba4fc0b7567cdc05c4da6b84d1224b13195cbc3679a6a330f7cdd0a2","locator":"data/lol/v2/evaluation/b2/checkpoint-c1-authority.json","media_type":"application/json","raw_sha256":"918d9d67ba4fc0b7567cdc05c4da6b84d1224b13195cbc3679a6a330f7cdd0a2","role":"c1_authority"}],"authorization_status":"absent","c1_expected_identity":{"artifact_id":"scryglass:c1:foundation-freeze-authority:v1","authority_scope":"wave_1_foundation_freeze_only","decision_kind":"foundation_freeze","input_closure_sha256":"eee7b48ec055daf52da3c52a8ff4cd7a694f84134630e2e93de095cc505e3333","locator":"data/lol/v2/evaluation/b2/checkpoint-c1-authority.json","raw_sha256":"918d9d67ba4fc0b7567cdc05c4da6b84d1224b13195cbc3679a6a330f7cdd0a2","schema_version":"checkpoint-c1-foundation-freeze-authority-v1"},"claim_ceiling":{"c2":false,"calibrated_public_probability_authorized":false,"development_only":true,"empirical_95_coverage_authorized":false,"pass_b2":false,"predictive_performance_authorized":false,"probability_wording_authorized":false,"production_eligible":false,"promotion_authorized":false,"publication_authorized":false,"real_data_fit_authorized":false,"reliability_authorized":false,"sota_authorized":false,"synthetic_only":true},"expected_decay_candidates":["random_walk_no_reset","mean_reversion","patch_roster_shock","season_shock","calendar_boundary_shock","full_reset"],"expected_resource_candidates":["joint_resource_to_performance","no_resource","lagged_pre_map_policy","player_policy_double_count_sensitivity"],"external_authority_expected_sha256":null,"identity_kind":"l4_player_candidate_content_identity","independent_l4_authority_present":false,"required_blockers":["authoritative_observed_player_rows_unavailable","production_player_rating_authority_unavailable","independent_l6_l2_and_root_c2_review_required"],"schema_version":"2.0.0","threat_model":{"authorization_requirement":"later independent C2/L2 registrar pins expected digest","fresh_import_of_attacker_modified_code":"outside local identity record","honest_interpreter":"executing bytes must match this candidate identity"}}
+{
+  "artifact_id": "player-rating-candidate-identity-l4-v3",
+  "artifacts": [
+    {
+      "artifact_id": "player-rating-config-l4-development-v2",
+      "canonical_sha256": "d3fe420d7caa74a102668a0e629e20fc403bfdd43ef2c10d6077e8c02276fd3b",
+      "locator": "data/lol/v2/models/player/player-rating-config.json",
+      "media_type": "application/json",
+      "raw_sha256": "c5fdf3f246950bfd4a3240bd8a21f9b20040045e9776a09753732572a7717757",
+      "role": "config"
+    },
+    {
+      "artifact_id": "player-rating-synthetic-fixtures-l4-v2",
+      "canonical_sha256": "313d1dd2abe80962301f5c3b8d35a3ab6a80b315831ac057fcb7c825a217fb91",
+      "locator": "data/lol/v2/models/player/player-rating-fixtures.json",
+      "media_type": "application/json",
+      "raw_sha256": "f21cce8c4aab62a656e984efb78be2cc419e68e852b96e399a2325a803d62249",
+      "role": "fixtures"
+    },
+    {
+      "artifact_id": "player-rating-development-report-l4-v3",
+      "canonical_sha256": "152f30fdf985835ba26c850a293fe9ad5bb625a8a8be4c72263a5be88c0e4f8e",
+      "locator": "data/lol/v2/models/player/player-rating-development-report.json",
+      "media_type": "application/json",
+      "raw_sha256": "b0f38dd607b53543b6482fe35ec2e107d393dd8c8879b4dfbb8defb0707958de",
+      "role": "report"
+    },
+    {
+      "artifact_id": "player-rating-development-manifest-l4-v2",
+      "canonical_sha256": "ecfaf4a6e22a22a8d728ac09d5ab69fd754d795601d43f92c318ea41d626974f",
+      "locator": "data/lol/v2/models/player/player-rating-manifest.json",
+      "media_type": "application/json",
+      "raw_sha256": "bca34c43f25e9838613512509a508d28ed64a7168388b0d470cef51e1384f2ed",
+      "role": "manifest"
+    },
+    {
+      "artifact_id": "l4-player-package-source-v3",
+      "canonical_sha256": "56fa5a92a1abcfb2449b995ca3d7db88a57d29acc6592cba4f112bb34c43231d",
+      "locator": "lol_kills/v2/ratings/player/__init__.py",
+      "media_type": "text/x-python",
+      "raw_sha256": "56fa5a92a1abcfb2449b995ca3d7db88a57d29acc6592cba4f112bb34c43231d",
+      "role": "package_source"
+    },
+    {
+      "artifact_id": "l4-player-model-source-v3",
+      "canonical_sha256": "426bc9d5b5de9014779fd4d2803421e851040111957a41567de5edc5b55782fa",
+      "locator": "lol_kills/v2/ratings/player/model.py",
+      "media_type": "text/x-python",
+      "raw_sha256": "426bc9d5b5de9014779fd4d2803421e851040111957a41567de5edc5b55782fa",
+      "role": "model_source"
+    },
+    {
+      "artifact_id": "l4-player-generator-source-v3",
+      "canonical_sha256": "4b4dde32857337b237695d1041104ff56a9bf7c1de29520c4639f009586c8ddb",
+      "locator": "lol_kills/v2/ratings/player/generate_artifacts.py",
+      "media_type": "text/x-python",
+      "raw_sha256": "4b4dde32857337b237695d1041104ff56a9bf7c1de29520c4639f009586c8ddb",
+      "role": "generator_source"
+    },
+    {
+      "artifact_id": "l4-player-tests-v3",
+      "canonical_sha256": "85d1af67ee7dc3783cec3eb1f2daf7e1fe50f5e20d07afba1f925d3102285385",
+      "locator": "tests/model_v2/ratings/player/test_player_rating.py",
+      "media_type": "text/x-python",
+      "raw_sha256": "85d1af67ee7dc3783cec3eb1f2daf7e1fe50f5e20d07afba1f925d3102285385",
+      "role": "tests"
+    },
+    {
+      "artifact_id": "frozen-player-rating-schema",
+      "canonical_sha256": "637d27182c84dba33770418944971e2202ef9d8568757a1812e0d300f9e3dc09",
+      "locator": "docs/model-v2/contracts/player-rating.schema.json",
+      "media_type": "application/json",
+      "raw_sha256": "af93fc0e143c47636641c071c7c1dd25e1438b86777ee0cb72c6f3b2aa78d25a",
+      "role": "player_schema"
+    },
+    {
+      "artifact_id": "frozen-common-schema",
+      "canonical_sha256": "b8fddd3b2ce3ef8717d8745a55ba89ce2b44d92e7225568ce775607a318d2ae0",
+      "locator": "docs/model-v2/contracts/common.schema.json",
+      "media_type": "application/json",
+      "raw_sha256": "1cc34d27a45bb2feb207c57ce0cad6ef75e954e1d67c1eb18702a0f4bd444e6a",
+      "role": "common_schema"
+    },
+    {
+      "artifact_id": "frozen-prediction-provenance-schema",
+      "canonical_sha256": "7169b18c435962d58886bb80fdebcfcc7b3f9c633fb4abf2b541e6c457987804",
+      "locator": "docs/model-v2/contracts/prediction-provenance.schema.json",
+      "media_type": "application/json",
+      "raw_sha256": "4f33fc9d3f39167aa7469d982926125f24337cd98a6fbb91084256756c0fcc2e",
+      "role": "provenance_schema"
+    },
+    {
+      "artifact_id": "frozen-model-manifest-schema",
+      "canonical_sha256": "3b2f9713bf9d344ea0626024d36d3651aa3aae5d7ea46bd9a5106935ccf9bb3f",
+      "locator": "docs/model-v2/contracts/model-manifest.schema.json",
+      "media_type": "application/json",
+      "raw_sha256": "3205e59d6430fb0c4819f4c1c268256795095c4fddf107761423b76614c2e319",
+      "role": "model_manifest_schema"
+    },
+    {
+      "artifact_id": "scryglass:c1:foundation-freeze-authority:v1",
+      "canonical_sha256": "53e97a5cf8b95c72d005fc08ef0dbe7a8288fe22f251df24e32697c0d5584945",
+      "locator": "data/lol/v2/evaluation/b2/checkpoint-c1-authority.json",
+      "media_type": "application/json",
+      "raw_sha256": "53e97a5cf8b95c72d005fc08ef0dbe7a8288fe22f251df24e32697c0d5584945",
+      "role": "c1_authority"
+    }
+  ],
+  "authorization_status": "absent",
+  "c1_expected_identity": {
+    "artifact_id": "scryglass:c1:foundation-freeze-authority:v1",
+    "authority_scope": "wave_1_foundation_freeze_only",
+    "decision_kind": "foundation_freeze",
+    "input_closure_sha256": "cfcb451a487aa2eb75865b422d56b1a5a630fcd1adcee5a7fb028241bc05475f",
+    "locator": "data/lol/v2/evaluation/b2/checkpoint-c1-authority.json",
+    "raw_sha256": "53e97a5cf8b95c72d005fc08ef0dbe7a8288fe22f251df24e32697c0d5584945",
+    "schema_version": "checkpoint-c1-foundation-freeze-authority-v1"
+  },
+  "claim_ceiling": {
+    "c2": false,
+    "calibrated_public_probability_authorized": false,
+    "development_only": true,
+    "empirical_95_coverage_authorized": false,
+    "pass_b2": false,
+    "predictive_performance_authorized": false,
+    "probability_wording_authorized": false,
+    "production_eligible": false,
+    "promotion_authorized": false,
+    "publication_authorized": false,
+    "real_data_fit_authorized": false,
+    "reliability_authorized": false,
+    "sota_authorized": false,
+    "synthetic_only": true
+  },
+  "expected_decay_candidates": [
+    "random_walk_no_reset",
+    "mean_reversion",
+    "patch_roster_shock",
+    "season_shock",
+    "calendar_boundary_shock",
+    "full_reset"
+  ],
+  "expected_resource_candidates": [
+    "joint_resource_to_performance",
+    "no_resource",
+    "lagged_pre_map_policy",
+    "player_policy_double_count_sensitivity"
+  ],
+  "external_authority_expected_sha256": null,
+  "identity_kind": "l4_player_candidate_content_identity",
+  "independent_l4_authority_present": false,
+  "required_blockers": [
+    "authoritative_observed_player_rows_unavailable",
+    "production_player_rating_authority_unavailable",
+    "independent_l6_l2_and_root_c2_review_required"
+  ],
+  "schema_version": "2.0.0",
+  "threat_model": {
+    "authorization_requirement": "later independent C2/L2 registrar pins expected digest",
+    "fresh_import_of_attacker_modified_code": "outside local identity record",
+    "honest_interpreter": "executing bytes must match this candidate identity"
+  }
+}
