@@ -1439,8 +1439,8 @@ def test_phase_one_collection_joins_exact_receipts_and_rebuilds_both_ledgers(
     repo_root = Path(".").resolve()
     completed = subprocess.run(
         [
-            str(repo_root / "apps/lol-atlas/node_modules/.bin/tsx"),
-            str(repo_root / "apps/lol-atlas/scripts/phaseOneDraftParity.mts"),
+            str(repo_root / "apps/scryglass/node_modules/.bin/tsx"),
+            str(repo_root / "apps/scryglass/scripts/phaseOneDraftParity.mts"),
             str(evaluation_root),
             snapshot_locator,
         ],

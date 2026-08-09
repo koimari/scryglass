@@ -648,7 +648,7 @@ def score_frozen(
     if run.get("phase") != PREGAME_PHASE:
         raise ManualLeaguepediaError("score_frozen requires a pregame_frozen run")
     pregame = run["pregame"]
-    app = repo / "apps" / "lol-atlas"
+    app = repo / "apps" / "scryglass"
     tsx = app / "node_modules" / ".bin" / "tsx"
     runner = Path("/Users/river/.codex/skills/who-wins-this-game/scripts/who_wins_game.ts")
     runtime_path = app / "data" / "draft" / "runtime.json"

@@ -12,7 +12,7 @@ on:
       grid_limit:
         description: "Maximum recent GRID series to inspect"
         required: false
-        default: "8"
+        default: "40"
         type: string
       grid_tournament:
         description: "Optional tournament substring for a targeted manual catch-up"
@@ -75,7 +75,7 @@ jobs:
             --skip-oe \
             --download-grid \
             --grid-days "${{ inputs.grid_days || '3' }}" \
-            --grid-limit "${{ inputs.grid_limit || '8' }}" \
+            --grid-limit "${{ inputs.grid_limit || '40' }}" \
             ${{ inputs.grid_tournament && format('--grid-tournament "{0}"', inputs.grid_tournament) || '' }} \
             --allow-missing-lp \
             --publish

@@ -440,7 +440,8 @@ export function TeamEloDetail({ team, roster, record, baseUrl, years, manifest }
           <ul className="space-y-2">
             {series.map((s) => (
               <li key={s.key} className="text-sm">
-                <span className="font-mono muted">{s.date}</span> · {s.league} · Bo{s.bestOf}{" "}
+                <span className="font-mono muted">{s.date}</span> · {s.league} ·{" "}
+                {s.bestOf ? `Bo${s.bestOf}` : "Incomplete series"}{" "}
                 <Link href={`/elo/team/${teamSlug(s.teamA)}`} className="row-link">
                   {s.teamA}
                 </Link>{" "}

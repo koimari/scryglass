@@ -33,8 +33,8 @@ from . import phase_one_collection_v1 as collection
 
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE_LOCATOR = "lol_kills/v2/market/phase_one_evaluation_v1.py"
-TYPESCRIPT_PARITY_LOCATOR = "apps/lol-atlas/scripts/phaseOneDraftParity.mts"
-TYPESCRIPT_SCORER_LOCATOR = "apps/lol-atlas/src/lib/draftTerminalScore.ts"
+TYPESCRIPT_PARITY_LOCATOR = "apps/scryglass/scripts/phaseOneDraftParity.mts"
+TYPESCRIPT_SCORER_LOCATOR = "apps/scryglass/src/lib/draftTerminalScore.ts"
 PARITY_SCHEMA_VERSION = "scryglass:phase-one-draft-replay-parity-registry:v1"
 PARITY_REPLAY_SCHEMA_VERSION = "scryglass:phase-one-draft-typescript-replay:v1"
 OUTCOME_SCHEMA_VERSION = "scryglass:phase-one-sealed-outcome-cohort:v1"

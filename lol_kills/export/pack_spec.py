@@ -231,6 +231,7 @@ MAPS_IDENTITY: tuple[str, ...] = (
     "grid_series_id",
     "grid_game_id",
     "grid_game_index",
+    "grid_completion_source",
     "oe_year",
     "tournament",
     "lp_matched",

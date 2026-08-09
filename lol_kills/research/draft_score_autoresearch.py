@@ -327,8 +327,8 @@ def load_records(path: Path, prior_path: Path | None = None, online_k: float = 0
             raise FileNotFoundError(f"prior rows file does not exist: {prior_path}")
         prior_rows = [json.loads(line) for line in prior_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     online = _online_features(rows, prior_rows, update_k=online_k)
-    context_path = Path("apps/lol-atlas/data/draft/context.json")
-    runtime_path = Path("apps/lol-atlas/data/draft/runtime.json")
+    context_path = Path("apps/scryglass/data/draft/context.json")
+    runtime_path = Path("apps/scryglass/data/draft/runtime.json")
     static_context = json.loads(context_path.read_text(encoding="utf-8"))
     runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
     records: list[Record] = []

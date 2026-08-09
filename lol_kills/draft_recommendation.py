@@ -36,8 +36,8 @@ from lol_kills.export.pack_records import build_player_records, build_team_recor
 from lol_kills.draft_archetypes import ARCHETYPE_NAMES, champ_tags
 
 ROOT = Path(__file__).resolve().parents[1]
-ATLAS_DRAFT_DIR = ROOT / "apps" / "lol-atlas" / "data" / "draft"
-PUBLIC_PACK = ROOT / "apps" / "lol-atlas" / "public" / "packs" / "v2026.07.26"
+SCRYGLASS_DRAFT_DIR = ROOT / "apps" / "scryglass" / "data" / "draft"
+PUBLIC_PACK = ROOT / "apps" / "scryglass" / "public" / "packs" / "v2026.07.26"
 MODEL_OUT = MODELS_DIR / "draft_recommendation.json"
 CONTEXT_OUT = FEATURES_DIR / "draft_context.json"
 
@@ -823,9 +823,9 @@ def write_local_context(players: pd.DataFrame | None = None) -> dict[str, Any]:
         player_records,
     )
     FEATURES_DIR.mkdir(parents=True, exist_ok=True)
-    ATLAS_DRAFT_DIR.mkdir(parents=True, exist_ok=True)
+    SCRYGLASS_DRAFT_DIR.mkdir(parents=True, exist_ok=True)
     CONTEXT_OUT.write_text(json.dumps(context, separators=(",", ":")))
-    (ATLAS_DRAFT_DIR / "context.json").write_text(json.dumps(context, separators=(",", ":")))
+    (SCRYGLASS_DRAFT_DIR / "context.json").write_text(json.dumps(context, separators=(",", ":")))
     return context
 
 
@@ -833,8 +833,8 @@ def build_local_artifacts() -> tuple[dict[str, Any], dict[str, Any]]:
     players = pd.read_parquet(PARQUET_DIR / "players.parquet")
     model = write_recommendation_model(players)
     context = write_local_context(players)
-    ATLAS_DRAFT_DIR.mkdir(parents=True, exist_ok=True)
-    (ATLAS_DRAFT_DIR / "runtime.json").write_text(json.dumps(model, separators=(",", ":")))
+    SCRYGLASS_DRAFT_DIR.mkdir(parents=True, exist_ok=True)
+    (SCRYGLASS_DRAFT_DIR / "runtime.json").write_text(json.dumps(model, separators=(",", ":")))
     return model, context
 
 

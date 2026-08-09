@@ -35,7 +35,7 @@ async function main(): Promise<void> {
     "..",
     "..",
   );
-  const appPath = path.join(repoRoot, "apps", "lol-atlas");
+  const appPath = path.join(repoRoot, "apps", "scryglass");
   process.chdir(appPath);
   const terminalModulePath = path.join(appPath, "src", "lib", "draftTerminalScore.ts");
   const terminalModelPath = path.join(

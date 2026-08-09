@@ -118,7 +118,8 @@ function SeriesTile({
         <div className="series-card-main">
           <p className="series-kicker">
             {s.date} · {s.league}
-            {s.patch ? ` · ${s.patch}` : ""} · Bo{s.bestOf}
+            {s.patch ? ` · ${s.patch}` : ""} ·{" "}
+            {s.bestOf ? `Bo${s.bestOf}` : "Incomplete series"}
             {sourceLabel ? ` · ${sourceLabel}` : ""}
           </p>
           <h3 className="series-title">

@@ -54,14 +54,14 @@ from lol_kills.private_rating_authority import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
-CONTEXT_PATH = ROOT / "apps" / "lol-atlas" / "data" / "draft" / "context.json"
-RUNTIME_PATH = ROOT / "apps" / "lol-atlas" / "data" / "draft" / "runtime.json"
+CONTEXT_PATH = ROOT / "apps" / "scryglass" / "data" / "draft" / "context.json"
+RUNTIME_PATH = ROOT / "apps" / "scryglass" / "data" / "draft" / "runtime.json"
 DRAFT_MODEL_PATH = ROOT / "data" / "lol" / "draft_model.json"
 LIVE_COEFS_PATH = ROOT / "data" / "lol" / "models" / "draft_live_coefs.json"
 LIVE_TOTALS_PATH = development_candidate_path(ROOT)
-TSX_PATH = ROOT / "apps" / "lol-atlas" / "node_modules" / ".bin" / "tsx"
+TSX_PATH = ROOT / "apps" / "scryglass" / "node_modules" / ".bin" / "tsx"
 PREGAME_BRIDGE_PATH = Path(__file__).with_name("pregame_bridge.ts")
-APP_PATH = ROOT / "apps" / "lol-atlas"
+APP_PATH = ROOT / "apps" / "scryglass"
 PRIVATE_AUTHORITY_DIR = ROOT / "data" / "lol" / "private_market_authority"
 QUOTE_REGISTRY_LOCATOR = "data/lol/private_market_quotes/registry.json"
 QUOTE_REGISTRY_SHA_ENV = "SCRYGLASS_PRIVATE_QUOTE_REGISTRY_SHA256"

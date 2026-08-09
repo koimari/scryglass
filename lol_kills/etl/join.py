@@ -72,6 +72,7 @@ def _oe_wide(oe_team: pd.DataFrame) -> pd.DataFrame:
         "grid_series_id",
         "grid_game_id",
         "grid_game_index",
+        "grid_completion_source",
     ]
     rename_b = {c: f"blue_{c}" for c in blue.columns if c not in meta}
     rename_r = {c: f"red_{c}" for c in red.columns if c not in meta}

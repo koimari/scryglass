@@ -34,8 +34,8 @@ MODEL_PREFIX = PurePosixPath("data/lol/v2/models/draft-terminal")
 PRODUCTION_SOURCE_LOCATORS = (
     "lol_kills/v2/draft/terminal/model.py",
     "lol_kills/v2/draft/terminal/promotion.py",
-    "apps/lol-atlas/src/lib/draftTerminalScore.ts",
-    "apps/lol-atlas/src/lib/draftTerminalServer.ts",
+    "apps/scryglass/src/lib/draftTerminalScore.ts",
+    "apps/scryglass/src/lib/draftTerminalServer.ts",
 )
 REVIEW_SCOPES = {
     "TERMINAL_DRAFT_MODEL_DEPLOYMENT": {

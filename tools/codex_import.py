@@ -270,7 +270,7 @@ SKILLS_TO_IMPORT = [
     "league-wiki-query",      # Scryglass wiki vault SQLite queries (repo-aware defaults)
     "query-grid-research",    # private Scryglass GRID integration research + capability catalog
     "who-wins-this-game",     # Scryglass Draft Score / lineup strength prediction script
-    "frontend-skill",         # visually strong web UI work (lol-atlas surfaces)
+    "frontend-skill",         # visually strong web UI work (Scryglass surfaces)
     "frontend-design",        # distinctive visual design guidance
     "write-website-copy",     # Koi house voice for public copy
     "pdf",                    # PDF generation/inspection (articles, reports)

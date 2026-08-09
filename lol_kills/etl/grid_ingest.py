@@ -530,6 +530,7 @@ def _parse_events(
     *,
     series: Mapping[str, Any],
     game_index: int,
+    summary_path: Path | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
     game_info: dict[str, Any] | None = None
     game_end: dict[str, Any] | None = None
@@ -547,6 +548,11 @@ def _parse_events(
                 team_id = 0
             if team_id in kills:
                 kills[team_id] += 1
+    completion_source = "events_game_end"
+    if game_info and game_end is None and summary_path is not None:
+        game_end = _verified_summary_game_end(summary_path, game_info=game_info, kills=kills)
+        if game_end is not None:
+            completion_source = "end_state_summary"
     if not game_info or not game_end or not game_info.get("participants"):
         return None
 
@@ -586,6 +592,7 @@ def _parse_events(
         "grid_series_id": str(series.get("id") or ""),
         "grid_game_id": str(game_info.get("gameName") or game_id),
         "grid_game_index": game_index,
+        "grid_completion_source": completion_source,
     }
     team_rows = []
     for team_id, side in ((100, "Blue"), (200, "Red")):
@@ -636,6 +643,55 @@ def _parse_events(
     return {"team_rows": team_rows, "player_rows": player_rows}, team_rows
 
 
+def _verified_summary_game_end(
+    path: Path,
+    *,
+    game_info: Mapping[str, Any],
+    kills: Mapping[int, int],
+) -> dict[str, Any] | None:
+    """Return a synthetic RFC461 game_end only from a matching complete summary."""
+    try:
+        summary = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(summary, Mapping) or summary.get("endOfGameResult") != "GameComplete":
+            return None
+        if int(summary.get("gameId")) != int(game_info.get("gameID")):
+            return None
+        duration_seconds = float(summary.get("gameDuration") or 0)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if duration_seconds <= 0:
+        return None
+
+    teams = summary.get("teams")
+    if not isinstance(teams, list) or len(teams) != 2:
+        return None
+    winning_teams: list[int] = []
+    summary_kills: dict[int, int] = {}
+    for team in teams:
+        if not isinstance(team, Mapping) or not isinstance(team.get("win"), bool):
+            return None
+        try:
+            team_id = int(team.get("teamId"))
+            champion_kills = int(((team.get("objectives") or {}).get("champion") or {}).get("kills"))
+        except (AttributeError, TypeError, ValueError):
+            return None
+        if team_id not in (100, 200) or champion_kills < 0:
+            return None
+        summary_kills[team_id] = champion_kills
+        if team["win"]:
+            winning_teams.append(team_id)
+    if set(summary_kills) != {100, 200} or len(winning_teams) != 1:
+        return None
+    if any(int(kills.get(team_id, -1)) != summary_kills[team_id] for team_id in (100, 200)):
+        return None
+
+    return {
+        "winningTeam": winning_teams[0],
+        # RFC461 gameTime is canonical integer milliseconds.
+        "gameTime": int(round(duration_seconds * 1000)),
+    }
+
+
 def _game_index_from_name(name: str, fallback: int) -> int:
     match = re.search(r"_(\d+)_riot", name)
     return int(match.group(1)) if match else fallback
@@ -658,7 +714,13 @@ def _parse_local_grid() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
             continue
         series = json.loads(meta_path.read_text(encoding="utf-8"))
         game_index = _game_index_from_name(path.name, 1)
-        parsed = _parse_events(path, series=series, game_index=game_index)
+        summary_path = RAW_GRID_DIR / f"end_state_summary_riot_{series_id}_{game_index}.json"
+        parsed = _parse_events(
+            path,
+            series=series,
+            game_index=game_index,
+            summary_path=summary_path if summary_path.is_file() else None,
+        )
         if parsed is None:
             skipped_files += 1
             continue
@@ -759,7 +821,7 @@ def _download_recent(
         riot_files = [
             file
             for file in files
-            if str(file.get("id") or "").startswith("events-riot")
+            if str(file.get("id") or "").startswith(("events-riot", "state-summary-riot"))
         ]
         for file in riot_files:
             status = str(file.get("status") or "")

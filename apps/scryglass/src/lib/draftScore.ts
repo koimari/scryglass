@@ -459,11 +459,9 @@ function roleMap(
   roles: string[] | null | undefined,
 ): Map<DraftRole, string> {
   const output = new Map<DraftRole, string>();
-  if (!roles?.length) {
-    if (champs.length !== 5) return output;
-    champs.forEach((champion, index) => output.set(DRAFT_ROLES[index], champion));
-    return output;
-  }
+  // Map-level pick arrays are draft-order, not role-order. Only calculate
+  // matchup terms when the caller supplies an explicit role for each champion.
+  if (!roles?.length || roles.length !== champs.length) return output;
   champs.forEach((champion, index) => {
     const role = normRole(roles[index] || "");
     if (isDraftRole(role) && !output.has(role)) output.set(role, champion);
