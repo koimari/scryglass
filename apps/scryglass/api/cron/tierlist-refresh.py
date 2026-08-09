@@ -20,7 +20,13 @@ from typing import Any
 
 def _find_project_root() -> Path:
     here = Path(__file__).resolve()
-    candidates = [Path.cwd() / ".tier-worker", Path.cwd(), here.parent, *here.parents]
+    candidates = [
+        Path.cwd() / ".tier-worker",
+        Path.cwd() / "apps/scryglass/.tier-worker",
+        Path.cwd(),
+        here.parent,
+        *here.parents,
+    ]
     for candidate in candidates:
         if (
             (candidate / "lol_kills").is_dir()
