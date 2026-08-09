@@ -241,19 +241,44 @@ class _RefreshLease:
     def __init__(self) -> None:
         from lol_kills.v2.tierlists.live_refresh import _publication_credentials
 
-        _base, token, store_id = _publication_credentials()
+        base, token, store_id = _publication_credentials()
         self.transport = VercelBlobTransport(token, store_id)
+        self.public_base = base
         self.store_id = store_id
         self.identity = None
+
+    def _read_lock(self, *, deadline_epoch: int) -> tuple[bytes, Any] | None:
+        try:
+            return self.transport.get_blob(
+                self.store_id,
+                LOCK_PATH,
+                deadline_epoch=deadline_epoch,
+            )
+        except Exception as error:  # noqa: BLE001
+            print(
+                f"[tier-refresh] lock authenticated read fallback error={type(error).__name__}",
+                flush=True,
+            )
+            identity = self.transport._lookup(LOCK_PATH, deadline_epoch)
+            if identity is None:
+                return None
+            url = f"{self.public_base}/{urllib.parse.quote(LOCK_PATH, safe='/')}"
+            request = urllib.request.Request(url, headers={"Accept": "application/json"})
+            try:
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    body = response.read(64 * 1024 + 1)
+            except urllib.error.HTTPError as http_error:
+                if http_error.code == 404:
+                    return None
+                raise
+            if len(body) > 64 * 1024 or len(body) != identity.size:
+                raise RuntimeError("tier refresh lock body does not match its Blob identity")
+            return body, identity
 
     def acquire(self) -> None:
         now = int(time.time())
         deadline = now + 30
-        current = self.transport.get_blob(
-            self.store_id,
-            LOCK_PATH,
-            deadline_epoch=deadline,
-        )
+        current = self._read_lock(deadline_epoch=deadline)
         run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex}"
         body = (
             json.dumps(
