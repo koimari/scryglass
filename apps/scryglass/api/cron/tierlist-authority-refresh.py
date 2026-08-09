@@ -57,6 +57,8 @@ def _run_authority_refresh() -> dict[str, Any]:
         lease.acquire()
         print("[tier-authority] phase=lease acquired", flush=True)
 
+        from lol_kills.v2.tierlists.live_refresh import _run_step
+
         source_manifest = _WORKER._download_source_bundle(runtime_root)
         print(
             "[tier-authority] phase=source bundle restored "
@@ -76,7 +78,7 @@ def _run_authority_refresh() -> dict[str, Any]:
             flush=True,
         )
 
-        forward_step = _WORKER._run_step(
+        forward_step = _run_step(
             runtime_root,
             [
                 "lol_kills.v2.tierlists.forward_evaluation",
@@ -91,7 +93,7 @@ def _run_authority_refresh() -> dict[str, Any]:
             raise RuntimeError("forward evaluation failed")
         print("[tier-authority] phase=forward evaluation complete", flush=True)
 
-        authority_step = _WORKER._run_step(
+        authority_step = _run_step(
             runtime_root,
             [
                 "lol_kills.v2.tierlists.independent_authority",
@@ -106,7 +108,7 @@ def _run_authority_refresh() -> dict[str, Any]:
             raise RuntimeError("independent authority failed")
         print("[tier-authority] phase=independent authority complete", flush=True)
 
-        bundle_step = _WORKER._run_step(
+        bundle_step = _run_step(
             runtime_root,
             [
                 "lol_kills.v2.tierlists.production_bundle",
