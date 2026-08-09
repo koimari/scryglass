@@ -291,6 +291,7 @@ def _authorized(handler: BaseHTTPRequestHandler) -> bool:
         value.strip()
         for value in (
             os.environ.get("SCRYGLASS_TIERLIST_INGEST_TOKEN", ""),
+            os.environ.get("SCRYGLASS_MANUAL_REFRESH_TOKEN", ""),
             os.environ.get("CRON_SECRET", ""),
         )
         if value.strip()
