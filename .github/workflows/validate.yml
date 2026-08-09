@@ -1,6 +1,10 @@
 name: Validate Scryglass
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,7 +17,7 @@ concurrency:
 jobs:
   app:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: apps/scryglass
@@ -31,17 +35,93 @@ jobs:
       - name: Install app dependencies
         run: npm ci
 
+      - name: Assert deterministic test command (listen EPERM regression)
+        run: |
+          node -e '
+            const pkg = require("./package.json");
+            const script = (pkg.scripts && pkg.scripts.test) || "";
+            const nodeForm = /^node --import tsx --test /.test(script);
+            const ipcForm = /(^|\s)tsx(\s|$)/.test(script);
+            if (!nodeForm || ipcForm) {
+              console.error("test script regressed to the tsx CLI IPC-listener form (listen EPERM failure mode):");
+              console.error("  script = " + JSON.stringify(script));
+              process.exit(1);
+            }
+            console.log("test_command=" + script);
+          '
+
       - name: Lint
+        timeout-minutes: 5
         run: npm run lint
 
       - name: TypeScript tests
-        run: npm test
+        id: tests
+        timeout-minutes: 10
+        run: |
+          set +e
+          npm test > test-output.log 2>&1
+          status=$?
+          set -e
+          echo "test_status=$status" >> "$GITHUB_OUTPUT"
+          exit $status
 
       - name: Production build
+        id: build
+        timeout-minutes: 12
         run: npm run build
 
-      - name: Record build identity
+      - name: Record validation identity
+        if: always()
         run: |
-          test -f .next/BUILD_ID
-          printf 'node=%s\n' "$(node --version)"
-          printf 'build_id=%s\n' "$(cat .next/BUILD_ID)"
+          node_version="$(node --version)"
+          build_id="missing"
+          if [ -f .next/BUILD_ID ]; then build_id="$(cat .next/BUILD_ID)"; fi
+          test_status="${{ steps.tests.outputs.test_status }}"
+          if [ -z "$test_status" ]; then test_status="not_run"; fi
+          if [ "$test_status" = "0" ]; then
+            tests_total="$(node -e 'const s=require("fs").readFileSync("test-output.log","utf8"); const m=s.match(/\u2139 tests (\d+)/); process.stdout.write(m?m[1]:"unknown")' 2>/dev/null || echo unknown)"
+            tests_pass="$(node -e 'const s=require("fs").readFileSync("test-output.log","utf8"); const m=s.match(/\u2139 pass (\d+)/); process.stdout.write(m?m[1]:"unknown")' 2>/dev/null || echo unknown)"
+            tests_fail="$(node -e 'const s=require("fs").readFileSync("test-output.log","utf8"); const m=s.match(/\u2139 fail (\d+)/); process.stdout.write(m?m[1]:"unknown")' 2>/dev/null || echo unknown)"
+            failure_class="none"
+          else
+            tests_total="unknown"
+            tests_pass="unknown"
+            tests_fail="unknown"
+            if grep -qE "listen EPERM|EACCES|ERR_STREAM|spawn .* EPERM" test-output.log 2>/dev/null; then
+              failure_class="infra:test_runner_spawn"
+            elif [ "$test_status" = "not_run" ]; then
+              failure_class="not_run"
+            else
+              failure_class="test_failure"
+            fi
+          fi
+          {
+            echo "node_version=$node_version"
+            echo "test_status=$test_status"
+            echo "tests_total=$tests_total"
+            echo "tests_pass=$tests_pass"
+            echo "tests_fail=$tests_fail"
+            echo "failure_class=$failure_class"
+            echo "build_id=$build_id"
+          } | tee validation-record.txt
+          {
+            echo "## Validation record"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| node_version | $node_version |"
+            echo "| test_status | $test_status |"
+            echo "| tests_total | $tests_total |"
+            echo "| tests_pass | $tests_pass |"
+            echo "| tests_fail | $tests_fail |"
+            echo "| failure_class | $failure_class |"
+            echo "| build_id | $build_id |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload validation record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-record
+          path: apps/scryglass/validation-record.txt
+          if-no-files-found: error
