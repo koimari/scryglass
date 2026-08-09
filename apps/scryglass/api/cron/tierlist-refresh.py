@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import io
 import json
 import os
 import re
@@ -28,7 +29,7 @@ _RUNTIME_BUNDLE_ROOT: Path | None = None
 
 def _private_blob_url(bundle_path: str, token: str) -> str:
     if not re.fullmatch(r"[-A-Za-z0-9._/]+", bundle_path) or bundle_path.startswith("/"):
-        raise RuntimeError("SCRYGLASS_TIER_WORKER_RUNTIME_BUNDLE_PATH is invalid")
+        raise RuntimeError("private Blob pathname is invalid")
     prefix = "vercel_blob_rw_"
     if not token.startswith(prefix):
         raise RuntimeError("TIER_WORKER_READ_WRITE_TOKEN is invalid")
@@ -39,6 +40,91 @@ def _private_blob_url(bundle_path: str, token: str) -> str:
         urllib.parse.quote(part, safe="") for part in bundle_path.split("/")
     )
     return f"https://{store_id}.private.blob.vercel-storage.com/{encoded_path}"
+
+
+def _canonical_sha256(value: object) -> str:
+    raw = json.dumps(
+        value,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _private_blob_token() -> str:
+    token = (
+        os.environ.get("TIER_WORKER_READ_WRITE_TOKEN")
+        or os.environ.get("BLOB_READ_WRITE_TOKEN")
+        or os.environ.get("VERCEL_BLOB_READ_WRITE_TOKEN")
+        or ""
+    ).strip()
+    if not token:
+        raise WorkerConfigurationError("private Blob token is not configured")
+    return token
+
+
+def _private_blob_upload(
+    pathname: str,
+    content: bytes,
+    *,
+    allow_overwrite: bool,
+) -> dict[str, Any]:
+    token = _private_blob_token()
+    private_url = _private_blob_url(pathname, token)
+    store_id = token[len("vercel_blob_rw_") :].split("_", 1)[0].lower()
+    encoded_path = "/".join(
+        urllib.parse.quote(part, safe="") for part in pathname.split("/")
+    )
+    upload_url = f"https://blob.vercel-storage.com/{encoded_path}"
+    content_type = "application/gzip" if pathname.endswith(".gz") else "application/json"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-API-Version": "7",
+        "x-vercel-blob-store-id": store_id,
+        "x-vercel-blob-access": "private",
+        "x-add-random-suffix": "0",
+        "Content-Type": content_type,
+        "x-content-type": content_type,
+    }
+    if allow_overwrite:
+        headers["x-allow-overwrite"] = "1"
+    request = urllib.request.Request(
+        upload_url,
+        data=content,
+        headers=headers,
+        method="PUT",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            response.read(64 * 1024)
+            status = int(getattr(response, "status", 200))
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(f"private Blob upload failed: HTTP {error.code}") from error
+    if status < 200 or status >= 300:
+        raise RuntimeError(f"private Blob upload failed: HTTP {status}")
+    return {
+        "pathname": pathname,
+        "url": private_url,
+        "bytes": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+    }
+
+
+def _private_blob_read(pathname: str, *, max_bytes: int) -> bytes:
+    token = _private_blob_token()
+    url = _private_blob_url(pathname, token)
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            body = response.read(max_bytes + 1)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            raise FileNotFoundError(pathname) from error
+        raise RuntimeError(f"private Blob read failed: HTTP {error.code}") from error
+    if len(body) > max_bytes:
+        raise RuntimeError(f"private Blob object is larger than {max_bytes} bytes")
+    return body
 
 
 def _download_runtime_bundle() -> Path | None:
@@ -130,9 +216,33 @@ LOCK_PATH = "_scryglass_retention/tierlist-refresh-lock.json"
 LOCK_TTL_SECONDS = 20 * 60
 RECEIPT_PREFIX = "tierlists/refresh-receipts/"
 MOVEMENT_PATH = "tierlists/movement-v1.json"
+SOURCE_LOCK_PATH = "_scryglass_retention/source-refresh-lock.json"
+SOURCE_POINTER_PATH = "tier-worker/tierlist-source-current.json"
+SOURCE_BUNDLE_PREFIX = "tier-worker/tierlist-source/"
+SOURCE_BUNDLE_MANIFEST = "source_bundle_manifest.json"
+SOURCE_BUNDLE_SCHEMA = "scryglass:tierlist-source-bundle:v1"
+SOURCE_BUNDLE_MAX_BYTES = 600_000_000
+SOURCE_RELATIVE_FILES = (
+    "data/lol/warehouse/parquet/oe_player_games.parquet",
+    "data/lol/warehouse/parquet/oe_team_games.parquet",
+    "data/lol/warehouse/parquet/oe_api_player_games.parquet",
+    "data/lol/warehouse/parquet/oe_api_team_games.parquet",
+    "data/lol/warehouse/parquet/oe_api_meta.json",
+    "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+    "data/lol/warehouse/parquet/oe_live/oe_team_games.parquet",
+    "data/lol/warehouse/parquet/oe_live/maps.parquet",
+    "data/lol/warehouse/parquet/oe_live/meta.json",
+    "data/lol/v2/champions/lcc-atom-bridge-v1.json",
+    "data/lol/features/ratings_snapshot.parquet",
+    "data/lol/features/player_ratings_snapshot.parquet",
+    "data/lol/features/team_weekly_ranks.json",
+    "data/lol/features/player_weekly_ranks.json",
+    "data/lol/v2/tierlists/rating-refresh/rating-refresh-v1.json",
+)
 PACKS_ROOT = Path("apps/scryglass/public/packs")
 PACK_LATEST = PACKS_ROOT / "latest.json"
 LIVE_PACK_ID = os.environ.get("SCRYGLASS_LIVE_PACK_ID", "v2026.live")
+LIVE_WINDOW_START = "2026-07-18T00:00:00Z"
 
 
 class WorkerBusy(RuntimeError):
@@ -235,6 +345,373 @@ def _prepare_runtime_root() -> Path:
     except Exception:
         shutil.rmtree(root, ignore_errors=True)
         raise
+
+
+def _source_file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _refresh_source_inputs(runtime_root: Path, *, expected_live_as_of: str) -> dict[str, Any]:
+    """Build the private source bundle inputs used by later cron stages."""
+
+    from lol_kills.v2.tierlists.live_refresh import (
+        _api_player_detail_complete,
+        _api_source_latest,
+        _run_step,
+        _skipped_step,
+        _source_step_failure,
+    )
+
+    oe_step = _skipped_step("oe_annual", "committed_public_pack_baseline")
+    oe_api_step = _run_step(
+        runtime_root,
+        [
+            "lol_kills.etl.oe_api_ingest",
+            "--root",
+            str(runtime_root),
+            "--start",
+            LIVE_WINDOW_START,
+            "--end",
+            expected_live_as_of,
+            "--lookback-days",
+            "120",
+        ],
+        source="oe_api",
+    )
+    bridge_path = runtime_root / "data/lol/v2/champions/lcc-atom-bridge-v1.json"
+    bridge_seed = PROJECT_ROOT / "data/lol/v2/champions/lcc-atom-bridge-v1.json"
+    if bridge_seed.is_file():
+        temporary_bridge = bridge_path.with_name(f".{bridge_path.name}.seed")
+        shutil.copy2(bridge_seed, temporary_bridge)
+        os.replace(temporary_bridge, bridge_path)
+    atom_step = _run_step(
+        runtime_root,
+        [
+            "lol_kills.v2.champions.atoms.bridge_v1",
+            "--out",
+            str(runtime_root / "data/lol/v2/champions/lcc-atom-bridge-v1.json"),
+        ],
+        source="champion_atomization",
+    )
+    observed_as_of = _api_source_latest(runtime_root) if oe_api_step["completed"] else None
+    live_source_step = (
+        _run_step(
+            runtime_root,
+            ["lol_kills.etl.oe_live_source", "--root", str(runtime_root)],
+            source="oe_live_source",
+        )
+        if oe_api_step["completed"]
+        else _skipped_step("oe_live_source", "oe_api_incomplete")
+    )
+    rating_step = (
+        _run_step(
+            runtime_root,
+            [
+                "lol_kills.v2.tierlists.rating_refresh",
+                "--root",
+                str(runtime_root),
+                "--as-of",
+                observed_as_of or expected_live_as_of,
+            ],
+            source="ratings",
+        )
+        if live_source_step["completed"] and _api_player_detail_complete(runtime_root)
+        else _skipped_step("ratings", "oe_player_detail_incomplete")
+    )
+    grid_step = _skipped_step("grid", "source_mode_oe_only")
+    source_steps = [oe_step, oe_api_step, atom_step, live_source_step, rating_step, grid_step]
+    required = [oe_api_step, atom_step, live_source_step, rating_step]
+    if not all(step["completed"] for step in required):
+        raise RuntimeError(
+            "tier refresh source preparation failed: "
+            + _source_step_failure(source_steps)
+        )
+    if not isinstance(observed_as_of, str) or not observed_as_of:
+        raise RuntimeError("OE API source receipt has no source_latest value")
+    return {
+        "schema_version": SOURCE_BUNDLE_SCHEMA,
+        "artifact_kind": "tier_list_source_bundle",
+        "source_mode": "oe_only",
+        "expected_live_as_of": expected_live_as_of,
+        "source_observed_through": observed_as_of,
+        "source_steps": source_steps,
+    }
+
+
+def _source_bundle_files(runtime_root: Path) -> list[tuple[str, Path]]:
+    files: list[tuple[str, Path]] = []
+    for relative in SOURCE_RELATIVE_FILES:
+        path = runtime_root / relative
+        if not path.is_file() or path.is_symlink():
+            raise RuntimeError(f"source bundle input is missing: {relative}")
+        files.append((relative, path))
+    return files
+
+
+def _source_bundle_archive(
+    runtime_root: Path,
+    *,
+    source_receipt: dict[str, Any],
+    run_id: str,
+) -> tuple[bytes, dict[str, Any], str]:
+    file_records: list[dict[str, Any]] = []
+    for relative, path in _source_bundle_files(runtime_root):
+        file_records.append(
+            {
+                "path": relative,
+                "bytes": path.stat().st_size,
+                "sha256": _source_file_sha256(path),
+            }
+        )
+    manifest = {
+        "schema_version": SOURCE_BUNDLE_SCHEMA,
+        "artifact_kind": "tier_list_source_bundle",
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "run_id": run_id,
+        "source_mode": source_receipt["source_mode"],
+        "expected_live_as_of": source_receipt["expected_live_as_of"],
+        "source_observed_through": source_receipt["source_observed_through"],
+        "source_steps": source_receipt["source_steps"],
+        "files": file_records,
+    }
+    manifest_raw = (
+        json.dumps(manifest, ensure_ascii=True, sort_keys=True, indent=2) + "\n"
+    ).encode("utf-8")
+    with tempfile.NamedTemporaryFile(
+        prefix="scryglass-tier-source-", suffix=".tar.gz", dir="/tmp", delete=False
+    ) as temporary:
+        archive_name = temporary.name
+    try:
+        with tarfile.open(archive_name, mode="w:gz") as archive:
+            for relative, path in _source_bundle_files(runtime_root):
+                archive.add(path, arcname=relative, recursive=False)
+            info = tarfile.TarInfo(SOURCE_BUNDLE_MANIFEST)
+            info.size = len(manifest_raw)
+            info.mode = 0o600
+            info.mtime = 0
+            archive.addfile(info, fileobj=io.BytesIO(manifest_raw))
+        archive_bytes = Path(archive_name).read_bytes()
+    finally:
+        Path(archive_name).unlink(missing_ok=True)
+    if len(archive_bytes) > SOURCE_BUNDLE_MAX_BYTES:
+        raise RuntimeError(
+            f"source bundle is larger than {SOURCE_BUNDLE_MAX_BYTES} bytes"
+        )
+    return archive_bytes, manifest, hashlib.sha256(manifest_raw).hexdigest()
+
+
+def _publish_source_bundle(
+    runtime_root: Path,
+    *,
+    source_receipt: dict[str, Any],
+    run_id: str,
+) -> dict[str, Any]:
+    archive_bytes, manifest, manifest_sha256 = _source_bundle_archive(
+        runtime_root,
+        source_receipt=source_receipt,
+        run_id=run_id,
+    )
+    archive_sha256 = hashlib.sha256(archive_bytes).hexdigest()
+    archive_path = f"{SOURCE_BUNDLE_PREFIX}{archive_sha256}.tar.gz"
+    archive_upload = _private_blob_upload(
+        archive_path,
+        archive_bytes,
+        allow_overwrite=False,
+    )
+    pointer_unsigned = {
+        "schema_version": SOURCE_BUNDLE_SCHEMA,
+        "artifact_kind": "tier_list_source_pointer",
+        "generated_at": manifest["generated_at"],
+        "source_mode": manifest["source_mode"],
+        "source_observed_through": manifest["source_observed_through"],
+        "archive_path": archive_path,
+        "archive_bytes": len(archive_bytes),
+        "archive_sha256": archive_sha256,
+        "manifest_sha256": manifest_sha256,
+    }
+    pointer = dict(pointer_unsigned)
+    pointer["pointer_sha256"] = _canonical_sha256(pointer_unsigned)
+    pointer_raw = (
+        json.dumps(pointer, ensure_ascii=True, sort_keys=True, indent=2) + "\n"
+    ).encode("utf-8")
+    pointer_upload = _private_blob_upload(
+        SOURCE_POINTER_PATH,
+        pointer_raw,
+        allow_overwrite=True,
+    )
+    pointer_readback = _private_blob_read(
+        SOURCE_POINTER_PATH,
+        max_bytes=256 * 1024,
+    )
+    if pointer_readback != pointer_raw:
+        raise RuntimeError("private source pointer failed exact readback")
+    return {
+        "status": "published",
+        "pointer_path": SOURCE_POINTER_PATH,
+        "archive_path": archive_path,
+        "archive_bytes": len(archive_bytes),
+        "archive_sha256": archive_sha256,
+        "manifest_sha256": manifest_sha256,
+        "source_observed_through": manifest["source_observed_through"],
+        "pointer_sha256": pointer["pointer_sha256"],
+        "pointer_readback_verified": True,
+        "archive_upload": {
+            "pathname": archive_upload["pathname"],
+            "bytes": archive_upload["bytes"],
+            "sha256": archive_upload["sha256"],
+        },
+        "pointer_upload": {
+            "pathname": pointer_upload["pathname"],
+            "bytes": pointer_upload["bytes"],
+            "sha256": pointer_upload["sha256"],
+        },
+    }
+
+
+def _validate_source_pointer(payload: object) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise RuntimeError("private source pointer is not an object")
+    submitted = payload.get("pointer_sha256")
+    unsigned = dict(payload)
+    unsigned.pop("pointer_sha256", None)
+    if (
+        payload.get("schema_version") != SOURCE_BUNDLE_SCHEMA
+        or payload.get("artifact_kind") != "tier_list_source_pointer"
+        or not isinstance(submitted, str)
+        or not hmac.compare_digest(submitted, _canonical_sha256(unsigned))
+    ):
+        raise RuntimeError("private source pointer is not an approved artifact")
+    archive_path = payload.get("archive_path")
+    if not isinstance(archive_path, str) or not re.fullmatch(
+        rf"{re.escape(SOURCE_BUNDLE_PREFIX)}[0-9a-f]{{64}}\.tar\.gz",
+        archive_path,
+    ):
+        raise RuntimeError("private source pointer archive path is invalid")
+    if not isinstance(payload.get("archive_bytes"), int) or payload["archive_bytes"] < 1:
+        raise RuntimeError("private source pointer archive size is invalid")
+    if not isinstance(payload.get("archive_sha256"), str) or not re.fullmatch(
+        r"[0-9a-f]{64}", payload["archive_sha256"]
+    ):
+        raise RuntimeError("private source pointer archive digest is invalid")
+    if not isinstance(payload.get("manifest_sha256"), str) or not re.fullmatch(
+        r"[0-9a-f]{64}", payload["manifest_sha256"]
+    ):
+        raise RuntimeError("private source pointer manifest digest is invalid")
+    return payload
+
+
+def _download_source_bundle(runtime_root: Path) -> dict[str, Any]:
+    pointer_raw = _private_blob_read(SOURCE_POINTER_PATH, max_bytes=256 * 1024)
+    try:
+        pointer = _validate_source_pointer(json.loads(pointer_raw.decode("utf-8")))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("private source pointer JSON is invalid") from error
+    archive_path = str(pointer["archive_path"])
+    token = _private_blob_token()
+    url = _private_blob_url(archive_path, token)
+    with tempfile.NamedTemporaryFile(
+        prefix="scryglass-tier-source-", suffix=".tar.gz", dir="/tmp", delete=False
+    ) as temporary:
+        archive_name = temporary.name
+        digest = hashlib.sha256()
+        total = 0
+        try:
+            request = urllib.request.Request(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            with urllib.request.urlopen(request, timeout=180) as response:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > SOURCE_BUNDLE_MAX_BYTES:
+                        raise RuntimeError("private source bundle exceeds the size limit")
+                    digest.update(chunk)
+                    temporary.write(chunk)
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                raise FileNotFoundError(archive_path) from error
+            raise RuntimeError(f"private source bundle read failed: HTTP {error.code}") from error
+    try:
+        if total != pointer["archive_bytes"] or digest.hexdigest() != pointer["archive_sha256"]:
+            raise RuntimeError("private source bundle digest does not match its pointer")
+        stage = Path(tempfile.mkdtemp(prefix="scryglass-tier-source-stage-", dir="/tmp"))
+        try:
+            allowed = set(SOURCE_RELATIVE_FILES) | {SOURCE_BUNDLE_MANIFEST}
+            seen: set[str] = set()
+            with tarfile.open(archive_name, mode="r:gz") as archive:
+                for member in archive.getmembers():
+                    if member.name not in allowed or member.name in seen:
+                        raise RuntimeError("private source bundle contains an unexpected member")
+                    if not member.isfile() or member.issym() or member.islnk():
+                        raise RuntimeError("private source bundle contains a non-file member")
+                    destination = (stage / member.name).resolve()
+                    base = stage.resolve()
+                    if os.path.commonpath((str(base), str(destination))) != str(base):
+                        raise RuntimeError("private source bundle contains an unsafe path")
+                    archive.extract(member, stage)
+                    seen.add(member.name)
+            manifest_path = stage / SOURCE_BUNDLE_MANIFEST
+            if not manifest_path.is_file():
+                raise RuntimeError("private source bundle has no manifest")
+            manifest_raw = manifest_path.read_bytes()
+            if hashlib.sha256(manifest_raw).hexdigest() != pointer["manifest_sha256"]:
+                raise RuntimeError("private source bundle manifest digest mismatch")
+            try:
+                manifest = json.loads(manifest_raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise RuntimeError("private source bundle manifest is invalid") from error
+            if not isinstance(manifest, dict) or manifest.get("schema_version") != SOURCE_BUNDLE_SCHEMA:
+                raise RuntimeError("private source bundle schema is invalid")
+            if manifest.get("artifact_kind") != "tier_list_source_bundle":
+                raise RuntimeError("private source bundle kind is invalid")
+            if manifest.get("source_mode") != "oe_only":
+                raise RuntimeError("private source bundle source mode is invalid")
+            records = manifest.get("files")
+            if not isinstance(records, list):
+                raise RuntimeError("private source bundle has no file manifest")
+            record_paths: set[str] = set()
+            for record in records:
+                if not isinstance(record, dict):
+                    raise RuntimeError("private source bundle file record is invalid")
+                relative = record.get("path")
+                if relative not in SOURCE_RELATIVE_FILES or relative in record_paths:
+                    raise RuntimeError("private source bundle file locator is invalid")
+                record_paths.add(relative)
+                source = stage / relative
+                if (
+                    not source.is_file()
+                    or source.stat().st_size != record.get("bytes")
+                    or _source_file_sha256(source) != record.get("sha256")
+                ):
+                    raise RuntimeError(f"private source bundle checksum failed: {relative}")
+            if record_paths != set(SOURCE_RELATIVE_FILES):
+                raise RuntimeError("private source bundle file set is incomplete")
+            source_steps = manifest.get("source_steps")
+            if not isinstance(source_steps, list):
+                raise RuntimeError("private source bundle has no source steps")
+            for required in ("oe_api", "champion_atomization", "oe_live_source", "ratings"):
+                step = next(
+                    (item for item in source_steps if isinstance(item, dict) and item.get("source") == required),
+                    None,
+                )
+                if not isinstance(step, dict) or step.get("completed") is not True:
+                    raise RuntimeError(f"private source bundle source step is incomplete: {required}")
+            for relative in SOURCE_RELATIVE_FILES:
+                destination = runtime_root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(stage / relative, destination)
+            return manifest
+        finally:
+            shutil.rmtree(stage, ignore_errors=True)
+    finally:
+        Path(archive_name).unlink(missing_ok=True)
 
 
 class _RefreshLease:
@@ -638,8 +1115,6 @@ def _publish_public_pack(runtime_root: Path, *, run_id: str) -> dict[str, Any]:
 
 
 def _run_refresh() -> dict[str, Any]:
-    if not os.environ.get("ORACLES_ELIXIR_API_KEY", "").strip():
-        raise WorkerConfigurationError("ORACLES_ELIXIR_API_KEY is not configured")
     started = time.monotonic()
     print("[tier-refresh] phase=prepare start", flush=True)
     runtime_root = _prepare_runtime_root()
@@ -664,6 +1139,12 @@ def _run_refresh() -> dict[str, Any]:
 
         baseline = restore_baseline(runtime_root)
         print("[tier-refresh] phase=baseline restored", flush=True)
+        source_manifest = _download_source_bundle(runtime_root)
+        print(
+            "[tier-refresh] phase=source bundle restored "
+            f"source_as_of={source_manifest.get('source_observed_through')}",
+            flush=True,
+        )
         previous_path = _load_previous_approved(runtime_root, lease)
         receipt = refresh_candidate(
             runtime_root,
@@ -675,6 +1156,7 @@ def _run_refresh() -> dict[str, Any]:
             promote=True,
             skip_annual_oe=True,
             skip_atom_bridge=True,
+            prepared_source=source_manifest,
         )
         print("[tier-refresh] phase=tier-candidate promoted", flush=True)
         receipt_publication = _publish_receipt(receipt_path)
@@ -684,7 +1166,7 @@ def _run_refresh() -> dict[str, Any]:
         pack_publication = {
             "status": "scheduled",
             "route": "/api/cron/pack-refresh",
-            "schedule": "15 */6 * * *",
+            "schedule": "30 */6 * * *",
         }
         print(f"[tier-refresh] phase=pack deferred seconds={time.monotonic() - started:.1f}", flush=True)
         return {

@@ -480,98 +480,139 @@ def refresh_candidate(
     promote: bool = False,
     skip_annual_oe: bool = False,
     skip_atom_bridge: bool = False,
+    prepared_source: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if grid_days < 1 or grid_limit < 1:
         raise ValueError("grid_days and grid_limit must be positive")
     if source_mode not in SOURCE_MODES:
         raise ValueError(f"source_mode must be one of {', '.join(SOURCE_MODES)}")
 
-    oe_step = (
-        _skipped_step("oe_annual", "committed_public_pack_baseline")
-        if skip_annual_oe
-        else _run_step(
+    if prepared_source is not None:
+        prepared_mode = prepared_source.get("source_mode")
+        if prepared_mode != source_mode:
+            raise RuntimeError(
+                "prepared source mode does not match the requested tier source mode"
+            )
+        raw_steps = prepared_source.get("source_steps")
+        if not isinstance(raw_steps, list):
+            raise RuntimeError("prepared source bundle has no source step receipt")
+        source_steps = [step for step in raw_steps if isinstance(step, dict)]
+        by_source = {
+            str(step.get("source")): step
+            for step in source_steps
+            if isinstance(step.get("source"), str)
+        }
+        oe_step = by_source.get(
+            "oe_annual", _skipped_step("oe_annual", "prepared_source_bundle")
+        )
+        oe_api_step = by_source.get(
+            "oe_api", _skipped_step("oe_api", "prepared_source_bundle")
+        )
+        atom_step = by_source.get(
+            "champion_atomization",
+            _skipped_step("champion_atomization", "prepared_source_bundle"),
+        )
+        live_source_step = by_source.get(
+            "oe_live_source", _skipped_step("oe_live_source", "prepared_source_bundle")
+        )
+        rating_step = by_source.get(
+            "ratings", _skipped_step("ratings", "prepared_source_bundle")
+        )
+        grid_step = by_source.get(
+            "grid", _skipped_step("grid", "prepared_source_bundle")
+        )
+        observed_as_of = prepared_source.get("source_observed_through")
+        if not isinstance(observed_as_of, str) or not observed_as_of:
+            observed_as_of = _api_source_latest(root)
+        candidate_expected_live_as_of = observed_as_of or expected_live_as_of
+    else:
+        oe_step = (
+            _skipped_step("oe_annual", "committed_public_pack_baseline")
+            if skip_annual_oe
+            else _run_step(
+                root,
+                [
+                    "lol_kills.refresh_warehouse",
+                    "--oe-years",
+                    "2025",
+                    "2026",
+                    "--refresh-oe",
+                    "--skip-lp",
+                    "--skip-grid",
+                ],
+                source="oe_annual",
+            )
+        )
+        oe_api_step = _run_step(
             root,
             [
-                "lol_kills.refresh_warehouse",
-                "--oe-years",
-                "2025",
-                "2026",
-                "--refresh-oe",
-                "--skip-lp",
-                "--skip-grid",
-            ],
-            source="oe_annual",
-        )
-    )
-    oe_api_step = _run_step(
-        root,
-        [
-            "lol_kills.etl.oe_api_ingest",
-            "--root",
-            str(root),
-            "--start",
-            LIVE_WINDOW_START,
-            "--end",
-            expected_live_as_of,
-            "--lookback-days",
-            "120",
-        ],
-        source="oe_api",
-    )
-    atom_step = (
-        _verify_prebuilt_atom_bridge(root)
-        if skip_atom_bridge
-        else _run_step(
-            root,
-            ["lol_kills.v2.champions.atoms.bridge_v1"],
-            source="champion_atomization",
-        )
-    )
-    observed_as_of = _api_source_latest(root) if oe_api_step["completed"] else None
-    candidate_expected_live_as_of = observed_as_of or expected_live_as_of
-    live_source_step = (
-        _run_step(
-            root,
-            ["lol_kills.etl.oe_live_source", "--root", str(root)],
-            source="oe_live_source",
-        )
-        if oe_api_step["completed"]
-        else _skipped_step("oe_live_source", "oe_api_incomplete")
-    )
-    rating_step = (
-        _run_step(
-            root,
-            [
-                "lol_kills.v2.tierlists.rating_refresh",
+                "lol_kills.etl.oe_api_ingest",
                 "--root",
                 str(root),
-                "--as-of",
-                candidate_expected_live_as_of,
+                "--start",
+                LIVE_WINDOW_START,
+                "--end",
+                expected_live_as_of,
+                "--lookback-days",
+                "120",
             ],
-            source="ratings",
+            source="oe_api",
         )
-        if live_source_step["completed"] and _api_player_detail_complete(root)
-        else _skipped_step("ratings", "oe_player_detail_incomplete")
-    )
-    if source_mode == "oe_plus_grid":
-        grid_step = _run_step(
-            root,
-            [
-                "lol_kills.refresh_warehouse",
-                "--skip-oe",
-                "--skip-lp",
-                "--download-grid",
-                "--grid-days",
-                str(grid_days),
-                "--grid-limit",
-                str(grid_limit),
-            ],
-            source="grid",
+        atom_step = (
+            _verify_prebuilt_atom_bridge(root)
+            if skip_atom_bridge
+            else _run_step(
+                root,
+                ["lol_kills.v2.champions.atoms.bridge_v1"],
+                source="champion_atomization",
+            )
         )
-    else:
-        grid_step = _skipped_step("grid", "source_mode_oe_only")
+        observed_as_of = _api_source_latest(root) if oe_api_step["completed"] else None
+        candidate_expected_live_as_of = observed_as_of or expected_live_as_of
+        live_source_step = (
+            _run_step(
+                root,
+                ["lol_kills.etl.oe_live_source", "--root", str(root)],
+                source="oe_live_source",
+            )
+            if oe_api_step["completed"]
+            else _skipped_step("oe_live_source", "oe_api_incomplete")
+        )
+        rating_step = (
+            _run_step(
+                root,
+                [
+                    "lol_kills.v2.tierlists.rating_refresh",
+                    "--root",
+                    str(root),
+                    "--as-of",
+                    candidate_expected_live_as_of,
+                ],
+                source="ratings",
+            )
+            if live_source_step["completed"] and _api_player_detail_complete(root)
+            else _skipped_step("ratings", "oe_player_detail_incomplete")
+        )
+        if source_mode == "oe_plus_grid":
+            grid_step = _run_step(
+                root,
+                [
+                    "lol_kills.refresh_warehouse",
+                    "--skip-oe",
+                    "--skip-lp",
+                    "--download-grid",
+                    "--grid-days",
+                    str(grid_days),
+                    "--grid-limit",
+                    str(grid_limit),
+                ],
+                source="grid",
+            )
+        else:
+            grid_step = _skipped_step("grid", "source_mode_oe_only")
 
-    source_steps = [oe_step, oe_api_step, atom_step, live_source_step, rating_step, grid_step]
+    if prepared_source is None:
+        source_steps = [oe_step, oe_api_step, atom_step, live_source_step, rating_step, grid_step]
     required_source_steps = [oe_api_step, atom_step, live_source_step]
     if not all(step["completed"] for step in required_source_steps):
         raise RuntimeError(
