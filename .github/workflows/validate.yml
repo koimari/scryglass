@@ -166,6 +166,10 @@ jobs:
           tests/model_v2/tierlists/test_production_bundle.py
           tests/model_v2/tierlists/test_production_readiness.py
           tests/model_v2/tierlists/test_oe_api_ingest.py
+          tests/model_v2/tierlists/test_live_refresh.py
+          tests/test_global_player_bt.py
+          tests/test_player_map_grades.py
           tests/test_postgame_sync.py
           tests/test_public_pack_spec.py
           tests/test_competition_and_ratings.py
+          tests/test_manual_leaguepedia.py

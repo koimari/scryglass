@@ -22,7 +22,7 @@ import pandas as pd
 from lol_kills.etl.aliases import normalize_team
 
 
-TAXONOMY_VERSION = "2026-08-09.1"
+TAXONOMY_VERSION = "2026-08-09.2"
 
 # LTA was the 2025 Americas competition.  North and South were distinct
 # domestic circuits, while an unqualified LTA row is an Americas cross-region
@@ -99,7 +99,10 @@ TIER2_LEAGUES = frozenset(
         "EBL",
         "HLL",
         "HM",
+        "HW",
         "LPLOL",
+        "LES",
+        "RL",
         "ROL",
         "KESPA",
     }
@@ -112,6 +115,8 @@ EVENT_ONLY_LEAGUES = frozenset(
     {
         "ASI",
         "DCUP",
+        "CCWS",
+        "IC",
         "KESPA",
         "KESPA CUP",
     }

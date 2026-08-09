@@ -79,7 +79,14 @@ class CompetitionIdentityTests(unittest.TestCase):
     def test_national_leagues_do_not_enter_tier_one(self) -> None:
         self.assertEqual(classify_competition("TCL").tier, "tier2")
         self.assertEqual(classify_competition("LJL").tier, "tier2")
+        self.assertEqual(classify_competition("LES").tier, "tier2")
+        self.assertEqual(classify_competition("RL").tier, "tier2")
+        self.assertEqual(classify_competition("HW").tier, "tier2")
         self.assertEqual(classify_competition("EM").tier, "international")
+
+    def test_cross_league_cups_do_not_replace_domestic_affiliations(self) -> None:
+        self.assertFalse(is_team_affiliation_league("CCWS"))
+        self.assertFalse(is_team_affiliation_league("IC"))
 
     def test_worlds_abbreviation_is_not_a_domestic_tier(self) -> None:
         label = classify_competition("WLDs", None)
