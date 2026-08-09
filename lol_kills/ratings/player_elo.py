@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 """
-Player Dual-Elo → team aggregate.
+Player Dual-Elo → team aggregate (DESCRIPTIVE BASELINE).
 
-Roster moves travel with the player: team strength is the mean of the five
-pre-match player μs (regional + meta), not a sticky org rating.
+This track is the descriptive baseline for the public player ladder.  It is
+NOT the v2 dynamic Player Rating: a shared team outcome updates every player
+on a side with the same residual scaled only by fixed role weights, so the
+baseline cannot identify individual contribution, posterior displacement,
+precision, or source/context coverage.  Roster moves travel with the player:
+team strength is the mean of the five pre-match player μs (regional + meta),
+not a sticky org rating.
+
+The v2 dynamic Player Rating lives in ``lol_kills/v2/ratings/player/`` and
+remains development-only until its acceptance record passes; until then this
+baseline carries the public label with an explicit descriptive claim ceiling.
 
   python3 -m lol_kills.ratings.player_elo
 """
@@ -385,7 +394,7 @@ def build_player_ratings(
                 "n_maps": len(out),
                 "n_players": len(snap),
                 "config": cfg.__dict__,
-                "note": "Team μ = role-weighted mean of 5 player μs; ratings travel on roster moves.",
+                "note": "DESCRIPTIVE BASELINE: shared team-outcome updates with fixed role weights; not the v2 dynamic Player Rating. Team μ = role-weighted mean of 5 player μs; ratings travel on roster moves.",
             },
             indent=2,
         )
