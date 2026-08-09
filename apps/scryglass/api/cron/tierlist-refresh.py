@@ -816,10 +816,15 @@ def _download_source_bundle(
                 )
                 if not isinstance(step, dict) or step.get("completed") is not True:
                     raise RuntimeError(f"private source bundle source step is incomplete: {required}")
+            Path(archive_name).unlink(missing_ok=True)
             for relative in expected_files:
                 destination = runtime_root / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(stage / relative, destination)
+                source = stage / relative
+                try:
+                    os.replace(source, destination)
+                except OSError:
+                    shutil.copy2(source, destination)
             return manifest
         finally:
             shutil.rmtree(stage, ignore_errors=True)
