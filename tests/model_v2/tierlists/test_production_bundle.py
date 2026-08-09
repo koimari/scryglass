@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from lol_kills.v2.tierlists.production_bundle import (
-    ProductionBundleError,
     verify_production_index,
 )
 
@@ -15,6 +12,8 @@ from lol_kills.v2.tierlists.production_bundle import (
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_retired_league_specific_bundle_fails_closed() -> None:
-    with pytest.raises(ProductionBundleError, match="retired competition filters"):
-        verify_production_index(ROOT)
+def test_patch_wide_bundle_verifies() -> None:
+    report = verify_production_index(ROOT)
+    assert report["scope_count"] == 39
+    assert report["cell_count"] == 195
+    assert report["production_cell_count"] == 195
