@@ -3,3 +3,4 @@ public/packs/*
 !public/packs/latest.json
 !public/packs/v2026.08.08.2350/
 !public/packs/v2026.08.08.2350/**
+.tier-worker
