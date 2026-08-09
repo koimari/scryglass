@@ -1,4 +1,4 @@
-"""Refresh and publish the live team and player ratings pack."""
+"""Refresh and publish the private source bundle for later cron stages."""
 
 from __future__ import annotations
 
@@ -23,14 +23,17 @@ sys.modules[_SPEC.name] = _WORKER
 _SPEC.loader.exec_module(_WORKER)
 
 
-PACK_LOCK_PATH = "_scryglass_retention/pack-refresh-lock.json"
-
-
-def _run_pack_refresh() -> dict[str, Any]:
+def _run_source_refresh() -> dict[str, Any]:
+    if not os.environ.get("ORACLES_ELIXIR_API_KEY", "").strip():
+        raise _WORKER.WorkerConfigurationError("ORACLES_ELIXIR_API_KEY is not configured")
     started = time.monotonic()
-    print("[pack-refresh] phase=prepare start", flush=True)
+    print("[source-refresh] phase=prepare start", flush=True)
     runtime_root = _WORKER._prepare_runtime_root()
-    print(f"[pack-refresh] phase=prepare done seconds={time.monotonic() - started:.1f}", flush=True)
+    print(
+        f"[source-refresh] phase=prepare done seconds={time.monotonic() - started:.1f}",
+        flush=True,
+    )
+    expected = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex}"
     prior_runtime_root = os.environ.get("SCRYGLASS_RUNTIME_ROOT")
     prior_pythonpath = os.environ.get("PYTHONPATH")
@@ -42,33 +45,43 @@ def _run_pack_refresh() -> dict[str, Any]:
         if prior_pythonpath:
             pythonpath.append(prior_pythonpath)
         os.environ["PYTHONPATH"] = os.pathsep.join(pythonpath)
-        _WORKER.LOCK_PATH = PACK_LOCK_PATH
+        _WORKER.LOCK_PATH = _WORKER.SOURCE_LOCK_PATH
         lease = _WORKER._RefreshLease()
         lease.acquire()
-        print("[pack-refresh] phase=lease acquired", flush=True)
+        print("[source-refresh] phase=lease acquired", flush=True)
         from lol_kills.etl.restore_oe_pack_baseline import restore_baseline
 
         baseline = restore_baseline(runtime_root)
-        print("[pack-refresh] phase=baseline restored", flush=True)
-        source_manifest = _WORKER._download_source_bundle(runtime_root)
-        observed_as_of = source_manifest.get("source_observed_through")
+        print("[source-refresh] phase=baseline restored", flush=True)
+        source_receipt = _WORKER._refresh_source_inputs(
+            runtime_root,
+            expected_live_as_of=expected,
+        )
         print(
-            "[pack-refresh] phase=source bundle restored "
-            f"source_as_of={observed_as_of}",
+            "[source-refresh] phase=source inputs refreshed "
+            f"source_as_of={source_receipt['source_observed_through']}",
             flush=True,
         )
-        publication = _WORKER._publish_public_pack(runtime_root, run_id=run_id)
-        print(f"[pack-refresh] phase=pack published seconds={time.monotonic() - started:.1f}", flush=True)
+        publication = _WORKER._publish_source_bundle(
+            runtime_root,
+            source_receipt=source_receipt,
+            run_id=run_id,
+        )
+        print(
+            f"[source-refresh] phase=source bundle published seconds={time.monotonic() - started:.1f}",
+            flush=True,
+        )
         return {
             "status": "published",
             "run_id": run_id,
+            "source_observed_through": source_receipt["source_observed_through"],
             "baseline": {
                 "pack_id": baseline.get("pack_id"),
                 "source_latest": baseline.get("source_latest"),
                 "player_rows": baseline.get("outputs", {}).get("player_games", {}).get("rows"),
                 "team_rows": baseline.get("outputs", {}).get("team_games", {}).get("rows"),
             },
-            "source_observed_through": observed_as_of,
+            "source_steps": source_receipt["source_steps"],
             "publication": publication,
         }
     finally:
@@ -102,14 +115,18 @@ class handler(BaseHTTPRequestHandler):
             _WORKER._json_response(self, 401, {"status": "unauthorized"})
             return
         try:
-            result = _run_pack_refresh()
+            result = _run_source_refresh()
         except _WORKER.WorkerBusy as error:
             _WORKER._json_response(self, 202, {"status": "busy", "reason": str(error)})
         except _WORKER.WorkerConfigurationError as error:
             _WORKER._json_response(
                 self,
                 503,
-                {"status": "unavailable", "code": "worker_not_configured", "reason": str(error)},
+                {
+                    "status": "unavailable",
+                    "code": "worker_not_configured",
+                    "reason": str(error),
+                },
             )
         except Exception as error:  # noqa: BLE001
             _WORKER._json_response(
@@ -117,7 +134,7 @@ class handler(BaseHTTPRequestHandler):
                 500,
                 {
                     "status": "failed",
-                    "code": "pack_refresh_failed",
+                    "code": "source_refresh_failed",
                     "reason": f"{type(error).__name__}: {error}",
                 },
             )

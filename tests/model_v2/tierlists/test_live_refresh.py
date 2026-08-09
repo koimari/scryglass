@@ -281,3 +281,49 @@ def test_promote_stays_blocked_when_blob_publication_is_not_configured(tmp_path:
     assert receipt["authority"]["publication"] is False
     assert receipt["promotion_steps"][-1]["source"] == "blob_publication"
     assert "BLOB_READ_WRITE_TOKEN" in receipt["promotion_steps"][-1]["reason"]
+
+
+def test_prepared_source_bundle_skips_source_ingestion(tmp_path: Path) -> None:
+    steps = [
+        {
+            "source": source,
+            "returncode": 0,
+            "completed": True,
+            "stdout_bytes": 0,
+            "stderr_bytes": 0,
+        }
+        for source in ("oe_annual", "oe_api", "champion_atomization", "oe_live_source", "ratings")
+    ]
+    steps.append(
+        {
+            "source": "grid",
+            "returncode": None,
+            "completed": False,
+            "skipped": True,
+            "reason": "source_mode_oe_only",
+        }
+    )
+    prepared = {
+        "schema_version": "scryglass:tierlist-source-bundle:v1",
+        "artifact_kind": "tier_list_source_bundle",
+        "source_mode": "oe_only",
+        "source_observed_through": "2026-08-08T12:00:00Z",
+        "source_steps": steps,
+    }
+    with patch.object(live_refresh, "_run_step") as run_step, patch.object(
+        live_refresh,
+        "build_candidate",
+        return_value=_candidate(source_mode="oe_only"),
+    ), patch.object(live_refresh, "write_candidate", return_value="b" * 64):
+        receipt = live_refresh.refresh_candidate(
+            tmp_path,
+            expected_live_as_of="2026-08-09T00:00:00Z",
+            output_path=tmp_path / "candidate.json",
+            receipt_path=tmp_path / "receipt.json",
+            source_mode="oe_only",
+            prepared_source=prepared,
+        )
+
+    run_step.assert_not_called()
+    assert receipt["source_observed_through"] == "2026-08-08T12:00:00Z"
+    assert receipt["source_steps"] == steps
