@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 import pandas as pd
 
+from lol_kills.etl.aliases import normalize_team
 from lol_kills.etl.competition import (
     TRANSPORT_LEAGUE_LABELS,
     canonicalize_competition_frame,
@@ -51,7 +52,7 @@ def public_team_affiliation(value: Any) -> str | None:
 
     if value is None or pd.isna(value):
         return None
-    display = str(value).strip()
+    display = normalize_team(str(value).strip())
     if not display or team_identity_key(display) in PUBLIC_TEAM_RATING_EXCLUSIONS:
         return None
     return display
@@ -262,15 +263,21 @@ def build_player_records(
     players: pd.DataFrame,
     *,
     team_records: dict[str, dict[str, Any]] | None = None,
+    canonicalized: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Aggregate player results and align current affiliation to current team."""
 
     if players is None or players.empty or "playername" not in players.columns:
         return {}
-    frame = canonicalize_competition_frame(players)
-    frame = frame[frame["playername"].notna()].copy()
+    source = players if canonicalized else canonicalize_competition_frame(players)
+    frame = source
+    named = frame["playername"].notna()
+    if not named.all():
+        frame = frame[named].copy()
     if "position" in frame.columns:
-        frame = frame[frame["position"].astype(str).str.lower().ne("team")]
+        player_rows = frame["position"].astype(str).str.lower().ne("team")
+        if not player_rows.all():
+            frame = frame[player_rows].copy()
     if frame.empty:
         return {}
     frame["result"] = pd.to_numeric(frame.get("result"), errors="coerce")
@@ -376,7 +383,9 @@ def build_player_records(
     return records
 
 
-def build_player_champion_records(players: pd.DataFrame) -> dict[str, list[dict[str, Any]]]:
+def build_player_champion_records(
+    players: pd.DataFrame,
+) -> dict[str, list[dict[str, Any]]]:
     """Precompute compact champion records for each public player profile."""
 
     required = {"playername", "champion", "result"}
@@ -421,6 +430,178 @@ def build_player_champion_records(players: pd.DataFrame) -> dict[str, list[dict[
             key=lambda row: (-row["games"], -row["wins"], row["champion"].casefold()),
         )
     return records
+
+
+def _profile_number(value: Any) -> float | int | None:
+    number = pd.to_numeric(value, errors="coerce")
+    if pd.isna(number):
+        return None
+    result = float(number)
+    return int(result) if result.is_integer() else round(result, 2)
+
+
+def build_profile_records(
+    players: pd.DataFrame,
+    *,
+    champion_image_urls: Mapping[str, str] | None = None,
+    recent_limit: int = 10,
+    recent_window_days: int = 120,
+) -> dict[str, Any]:
+    """Build one compact, normalized recent-game index for profile pages."""
+
+    required = {"playername", "teamname", "side", "position", "result", "date"}
+    if players is None or players.empty or not required.issubset(players.columns):
+        return {"schema_version": "scryglass:profile-records:v1", "window_days": recent_window_days, "champion_images": {}, "games": {}, "players": {}, "teams": {}}
+    if recent_limit < 1 or recent_window_days < 1:
+        raise ValueError("recent_limit and recent_window_days must be positive")
+
+    useful_columns = [
+        column
+        for column in (
+            "game_uid",
+            "gameid",
+            "league",
+            "league_source",
+            "tournament",
+            "playername",
+            "teamname",
+            "side",
+            "position",
+            "result",
+            "date",
+            "champion",
+            "kills",
+            "deaths",
+            "assists",
+        )
+        if column in players.columns
+    ]
+    frame = canonicalize_competition_frame(players[useful_columns].copy())
+    identity_source = frame.get("game_uid", frame.get("gameid"))
+    if identity_source is None:
+        return {"schema_version": "scryglass:profile-records:v1", "window_days": recent_window_days, "champion_images": {}, "games": {}, "players": {}, "teams": {}}
+    fallback = frame["gameid"] if "gameid" in frame.columns else None
+    frame["_game_id"] = [
+        canonical_source_game_key(value, fallback.loc[index] if fallback is not None else None)
+        for index, value in identity_source.items()
+    ]
+    frame["_date"] = pd.to_datetime(frame["date"], utc=True, errors="coerce")
+    frame["_side"] = frame["side"].astype(str).str.title()
+    frame["_role"] = frame["position"].astype(str).str.casefold().map(PUBLIC_ROLE_ALIASES)
+    frame["_player"] = frame["playername"].astype("string").str.strip()
+    frame["_team"] = frame["teamname"].astype("string").str.strip()
+    frame = frame[
+        frame["_game_id"].astype(str).str.strip().ne("")
+        & frame["_date"].notna()
+        & frame["_side"].isin({"Blue", "Red"})
+        & frame["_role"].notna()
+        & frame["_player"].notna()
+        & frame["_player"].ne("")
+        & frame["_team"].notna()
+        & frame["_team"].ne("")
+    ].copy()
+    latest_date = frame["_date"].max()
+    if pd.notna(latest_date):
+        frame = frame[
+            frame["_date"].ge(latest_date - pd.Timedelta(days=recent_window_days))
+        ].copy()
+
+    player_recent = (
+        frame[["_player", "_game_id", "_date"]]
+        .drop_duplicates(["_player", "_game_id"])
+        .sort_values(["_player", "_date"], ascending=[True, False])
+        .groupby("_player", sort=True)
+        .head(recent_limit)
+    )
+    team_recent = (
+        frame[["_team", "_game_id", "_date"]]
+        .drop_duplicates(["_team", "_game_id"])
+        .sort_values(["_team", "_date"], ascending=[True, False])
+        .groupby("_team", sort=True)
+        .head(recent_limit)
+    )
+    player_index = {
+        str(player): group["_game_id"].astype(str).tolist()
+        for player, group in player_recent.groupby("_player", sort=True)
+    }
+    team_index = {
+        str(team): group["_game_id"].astype(str).tolist()
+        for team, group in team_recent.groupby("_team", sort=True)
+        if public_team_affiliation(team)
+    }
+    selected = {
+        game_id
+        for values in (*player_index.values(), *team_index.values())
+        for game_id in values
+    }
+    frame = frame[frame["_game_id"].astype(str).isin(selected)].copy()
+
+    games: dict[str, dict[str, Any]] = {}
+    images = champion_image_urls or {}
+    role_order = {role: index for index, role in enumerate(PUBLIC_ROLE_ORDER)}
+    for game_id, group in frame.groupby("_game_id", sort=False):
+        blue = group[group["_side"].eq("Blue")]
+        red = group[group["_side"].eq("Red")]
+        if len(group) != 10 or len(blue) != 5 or len(red) != 5 or group["_player"].nunique() != 10:
+            continue
+        if set(blue["_role"]) != set(PUBLIC_ROLE_ORDER) or set(red["_role"]) != set(PUBLIC_ROLE_ORDER):
+            continue
+        blue_teams = blue["_team"].dropna().unique()
+        red_teams = red["_team"].dropna().unique()
+        if len(blue_teams) != 1 or len(red_teams) != 1:
+            continue
+        blue_team = public_team_affiliation(blue_teams[0])
+        red_team = public_team_affiliation(red_teams[0])
+        if not blue_team or not red_team or blue_team == red_team:
+            continue
+        blue_result = _profile_number(blue["result"].iloc[0])
+        if blue_result not in (0, 1):
+            continue
+        date = group["_date"].max()
+        league = str(group["league"].iloc[0]) if "league" in group.columns else "UNKNOWN"
+        participants: list[dict[str, Any]] = []
+        for _, row in group.sort_values(["_side", "_role"], key=lambda values: values.map(role_order) if values.name == "_role" else values).iterrows():
+            champion = str(row.get("champion") or "").strip()
+            participants.append(
+                {
+                    "player": str(row["_player"]),
+                    "side": str(row["_side"]),
+                    "role": str(row["_role"]),
+                    "champion": champion or None,
+                    "kills": _profile_number(row.get("kills")),
+                    "deaths": _profile_number(row.get("deaths")),
+                    "assists": _profile_number(row.get("assists")),
+                }
+            )
+        key = str(game_id)
+        games[key] = {
+            "game_id": key,
+            "date": date.isoformat().replace("+00:00", "Z"),
+            "league": league,
+            "blue_team": blue_team,
+            "red_team": red_team,
+            "blue_win": int(blue_result),
+            "players": participants,
+        }
+    available = set(games)
+    player_index = {
+        identity: [game_id for game_id in values if game_id in available]
+        for identity, values in player_index.items()
+        if any(game_id in available for game_id in values)
+    }
+    team_index = {
+        identity: [game_id for game_id in values if game_id in available]
+        for identity, values in team_index.items()
+        if any(game_id in available for game_id in values)
+    }
+    return {
+        "schema_version": "scryglass:profile-records:v1",
+        "window_days": recent_window_days,
+        "champion_images": dict(sorted(images.items())),
+        "games": {game_id: games[game_id] for game_id in sorted(available)},
+        "players": player_index,
+        "teams": team_index,
+    }
 
 
 def summarize_player_affiliations(

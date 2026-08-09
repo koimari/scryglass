@@ -58,6 +58,53 @@ def _role(value: object) -> str:
     }.get(token, token)
 
 
+def _game_keys(frame: pd.DataFrame) -> pd.Series:
+    fallback = frame["gameid"] if "gameid" in frame.columns else None
+    source = frame["game_uid"] if "game_uid" in frame.columns else fallback
+    if source is None:
+        raise OeLiveSourceError("OE rows have no game identifier")
+    return pd.Series(
+        [
+            canonical_source_game_key(value, fallback.loc[index] if fallback is not None else None)
+            for index, value in source.items()
+        ],
+        index=frame.index,
+        dtype="string",
+    )
+
+
+def _complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
+    """Return games with ten distinct named players and five roles per side."""
+
+    if frame.empty or not {"side", "position", "playername"}.issubset(frame.columns):
+        return set()
+    work = frame.copy()
+    work["_source_game_key"] = _game_keys(work)
+    work["_side"] = work["side"].astype(str).str.title()
+    work["_role"] = work["position"].map(_role)
+    work["_name"] = work["playername"].astype("string").str.strip()
+    placeholders = {"unknown", "unknown player", "tbd", "none", "nan"}
+    valid: set[str] = set()
+    for game_id, group in work.groupby("_source_game_key", sort=False):
+        names = group["_name"].dropna().astype(str)
+        if (
+            len(group) != 10
+            or len(names) != 10
+            or names.str.casefold().isin(placeholders).any()
+            or names.str.casefold().nunique() != 10
+        ):
+            continue
+        complete = True
+        for side in ("Blue", "Red"):
+            rows = group[group["_side"].eq(side)]
+            if len(rows) != 5 or set(rows["_role"]) != {"top", "jng", "mid", "bot", "sup"}:
+                complete = False
+                break
+        if complete:
+            valid.add(str(game_id))
+    return valid
+
+
 def _signature(group: pd.DataFrame, *, with_players: bool) -> tuple[Any, ...] | None:
     if group.empty or "side" not in group or "date" not in group:
         return None
@@ -158,6 +205,12 @@ def build_live_source(root: Path | str = Path(".")) -> dict[str, Any]:
     primary_team = pd.read_parquet(primary_team_path)
     api_player = pd.read_parquet(api_player_path)
     api_team = pd.read_parquet(api_team_path)
+    complete_api_ids = _complete_player_game_ids(api_player)
+    api_player_keys = _game_keys(api_player)
+    api_team_keys = _game_keys(api_team)
+    api_games_seen = len(set(api_player_keys.dropna().astype(str)))
+    api_player = api_player[api_player_keys.isin(complete_api_ids)].copy()
+    api_team = api_team[api_team_keys.isin(complete_api_ids)].copy()
     player = _merge(primary_player, api_player, with_players=True)
     team = _merge(primary_team, api_team, with_players=False)
     maps = build_maps_frame_from_team_games(team)
@@ -181,6 +234,8 @@ def build_live_source(root: Path | str = Path(".")) -> dict[str, Any]:
             {"locator": str(api_meta_path.relative_to(repo_root)), "raw_sha256": _sha256(api_meta_path)},
         ],
         "source_latest": api_meta.get("source_latest"),
+        "api_games_seen": api_games_seen,
+        "api_games_excluded_incomplete": api_games_seen - len(complete_api_ids),
         "player_rows": len(player),
         "player_rows_with_names": int(player["playername"].notna().sum()) if "playername" in player else 0,
         "team_rows": len(team),

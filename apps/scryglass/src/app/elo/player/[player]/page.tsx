@@ -4,9 +4,11 @@ import type {
   PlayerChampionRecord,
   PlayerRating,
   PlayerRecord,
+  ProfileGame,
+  ProfileRecords,
   TeamRating,
 } from "@/lib/pack";
-import { compactPlayerRatings } from "@/lib/pack";
+import { compactPlayerRatings, PLAYER_SIGMA_MIN, softMu } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 export const revalidate = 21_600;
@@ -22,6 +24,7 @@ export default async function PlayerEloPage({ params }: Props) {
   const teams = await readPackJson<TeamRating[]>(man, "features/ratings_snapshot.json");
   let playerRecords: Record<string, PlayerRecord> = {};
   let playerChampions: Record<string, PlayerChampionRecord[]> = {};
+  let profileRecords: ProfileRecords | null = null;
   try {
     playerRecords = await readPackJson(man, "features/player_records.json");
   } catch {
@@ -32,6 +35,11 @@ export default async function PlayerEloPage({ params }: Props) {
   } catch {
     playerChampions = {};
   }
+  try {
+    profileRecords = await readPackJson(man, "features/profile_records.json");
+  } catch {
+    profileRecords = null;
+  }
 
   const player = players.find((p) => p.player.toLowerCase() === name.toLowerCase());
   if (!player) notFound();
@@ -41,6 +49,23 @@ export default async function PlayerEloPage({ params }: Props) {
   const team = currentTeam
     ? teams.find((t) => t.team.toLowerCase() === currentTeam.toLowerCase())
     : null;
+  const tier = rec?.current_tier;
+  const role = rec?.primary_role;
+  const eligible = players
+    .filter((candidate) => candidate.n_maps >= 20 && candidate.evidence_active !== 0)
+    .filter((candidate) => playerRecords[candidate.player]?.current_tier === tier)
+    .sort(
+      (a, b) =>
+        softMu(b.mu_total, b.sigma, PLAYER_SIGMA_MIN) -
+        softMu(a.mu_total, a.sigma, PLAYER_SIGMA_MIN),
+    );
+  const roleEligible = eligible.filter(
+    (candidate) => playerRecords[candidate.player]?.primary_role === role,
+  );
+  const gameIds = profileRecords?.players[player.player] ?? [];
+  const recentGames = gameIds
+    .map((gameId) => profileRecords?.games[gameId])
+    .filter((game): game is ProfileGame => Boolean(game));
 
   return (
     <PlayerRatingProfile
@@ -48,6 +73,14 @@ export default async function PlayerEloPage({ params }: Props) {
       champions={playerChampions[player.player] ?? []}
       record={rec}
       team={team}
+      standing={{
+        tierRank: eligible.findIndex((candidate) => candidate.player === player.player) + 1,
+        tierTotal: eligible.length,
+        roleRank: roleEligible.findIndex((candidate) => candidate.player === player.player) + 1,
+        roleTotal: roleEligible.length,
+      }}
+      recentGames={recentGames}
+      championImages={profileRecords?.champion_images ?? {}}
       manifest={man}
     />
   );

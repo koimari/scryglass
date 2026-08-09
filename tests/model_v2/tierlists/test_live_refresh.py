@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from lol_kills.v2.tierlists import live_refresh
-from lol_kills.etl.oe_live_source import _merge
+from lol_kills.etl.oe_live_source import _complete_player_game_ids, _merge
 
 
 def _candidate(*, source_mode: str) -> dict[str, object]:
@@ -38,6 +38,29 @@ def test_live_merge_deduplicates_prefixed_and_canonical_game_ids() -> None:
     assert len(merged) == 2
     assert set(merged["game_uid"]) == {"g1"}
     assert set(merged["gameid"]) == {"g1"}
+
+
+def test_live_source_excludes_games_with_missing_or_duplicate_player_names() -> None:
+    rows = []
+    for game_id, bad in (("good", False), ("missing", True), ("duplicate", True)):
+        for side in ("Blue", "Red"):
+            for role in ("top", "jng", "mid", "bot", "sup"):
+                name = f"{side}-{role}"
+                if game_id == "missing" and side == "Blue":
+                    name = None
+                if game_id == "duplicate" and side == "Blue" and role in {"bot", "sup"}:
+                    name = "unknown player"
+                rows.append(
+                    {
+                        "game_uid": f"oe-api:{game_id}",
+                        "gameid": f"oe-api:{game_id}",
+                        "side": side,
+                        "position": role,
+                        "playername": name,
+                    }
+                )
+
+    assert _complete_player_game_ids(pd.DataFrame(rows)) == {"good"}
 
 
 def test_blob_publication_payloads_keep_cells_immutable_and_pointer_last() -> None:
