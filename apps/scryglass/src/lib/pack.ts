@@ -110,6 +110,7 @@ export type PlayerMetadata = {
 
 export type PlayerChampionRecord = {
   champion: string;
+  champion_image_url?: string | null;
   games: number;
   wins: number;
   losses: number;
@@ -117,6 +118,35 @@ export type PlayerChampionRecord = {
   kills: number | null;
   deaths: number | null;
   assists: number | null;
+};
+
+export type ProfileParticipant = {
+  player: string;
+  side: "Blue" | "Red";
+  role: string;
+  champion: string | null;
+  kills: number | null;
+  deaths: number | null;
+  assists: number | null;
+};
+
+export type ProfileGame = {
+  game_id: string;
+  date: string;
+  league: string;
+  blue_team: string;
+  red_team: string;
+  blue_win: 0 | 1;
+  players: ProfileParticipant[];
+};
+
+export type ProfileRecords = {
+  schema_version: "scryglass:profile-records:v1";
+  window_days: number;
+  champion_images: Record<string, string>;
+  games: Record<string, ProfileGame>;
+  players: Record<string, string[]>;
+  teams: Record<string, string[]>;
 };
 
 export type EloCalibration = {

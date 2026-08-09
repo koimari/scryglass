@@ -3,7 +3,11 @@ import pandas as pd
 import pytest
 
 from lol_kills.export import pack_spec
-from lol_kills.export.pack_records import build_player_champion_records, public_team_affiliation
+from lol_kills.export.pack_records import (
+    build_player_champion_records,
+    build_profile_records,
+    public_team_affiliation,
+)
 from lol_kills.export.public_pack import (
     _ensure_year_column,
     _filter_years,
@@ -21,6 +25,7 @@ def test_public_pack_contains_only_rating_display_files() -> None:
         "features/team_weekly_ranks.json",
         "features/player_records.json",
         "features/player_champion_records.json",
+        "features/profile_records.json",
         "features/player_weekly_ranks.json",
         "features/player_metadata.json",
     }
@@ -59,6 +64,48 @@ def test_player_champion_records_are_compact_and_sorted() -> None:
             "assists": 7.0,
         },
     ]
+
+
+def test_profile_records_normalize_recent_games_without_raw_tables() -> None:
+    rows = []
+    for side, team, result in (("Blue", "LYON", 1), ("Red", "Other", 0)):
+        for role, player, champion in (
+            ("top", f"{team} Top", "Gnar"),
+            ("jng", "Inspired" if team == "LYON" else f"{team} Jungle", "Ivern"),
+            ("mid", f"{team} Mid", "Ahri"),
+            ("bot", f"{team} Bot", "Ezreal"),
+            ("sup", f"{team} Support", "Nautilus"),
+        ):
+            rows.append(
+                {
+                    "game_uid": "oe-api:game-1",
+                    "date": "2026-08-09T12:00:00Z",
+                    "league": "LCS",
+                    "side": side,
+                    "teamname": team,
+                    "playername": player,
+                    "position": role,
+                    "champion": champion,
+                    "result": result,
+                    "kills": 2,
+                    "deaths": 1,
+                    "assists": 8,
+                }
+            )
+
+    payload = build_profile_records(
+        pd.DataFrame(rows),
+        champion_image_urls={"Ivern": "https://example.test/ivern.png"},
+    )
+
+    assert payload["players"]["Inspired"] == ["game-1"]
+    assert payload["teams"]["LYON"] == ["game-1"]
+    game = payload["games"]["game-1"]
+    assert game["blue_team"] == "LYON"
+    assert game["red_team"] == "Other"
+    inspired = next(row for row in game["players"] if row["player"] == "Inspired")
+    assert inspired["role"] == "jungle"
+    assert payload["champion_images"]["Ivern"] == "https://example.test/ivern.png"
 
 
 def test_public_player_ratings_exclude_disconnected_rows() -> None:
@@ -118,6 +165,7 @@ def test_source_identity_digest_is_canonical_order_independent() -> None:
 def test_excluded_team_has_no_public_affiliation() -> None:
     assert public_team_affiliation("Los Ratones") is None
     assert public_team_affiliation("Gen.G") == "Gen.G"
+    assert public_team_affiliation("LYON (2024 American Team)") == "LYON"
 
 
 def test_public_record_tier_must_match_the_canonical_league() -> None:

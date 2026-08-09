@@ -47,7 +47,7 @@ const forbiddenTierText = [
   "raw_sha256",
   "training",
 ];
-const allowedPackFile = /^public\/packs\/(?:manifest\.json|[^/]+\/features\/(?:ratings_snapshot|player_ratings_snapshot|team_records|team_weekly_ranks|player_records|player_champion_records|player_weekly_ranks|player_metadata)\.json)$/;
+const allowedPackFile = /^public\/packs\/(?:manifest\.json|[^/]+\/features\/(?:ratings_snapshot|player_ratings_snapshot|team_records|team_weekly_ranks|player_records|player_champion_records|profile_records|player_weekly_ranks|player_metadata)\.json)$/;
 const textExtensions = new Set([
   ".css",
   ".html",

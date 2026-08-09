@@ -404,7 +404,8 @@ def _fetch_full_games(
             return game_id, None
         if not isinstance(body, list) or not body or not isinstance(body[0], Mapping):
             return game_id, None
-        return game_id, dict(body[0])
+        detail = dict(body[0])
+        return game_id, detail if _complete_player_detail(detail) else None
 
     details: dict[str, dict[str, Any]] = {}
     missing = 0
@@ -417,6 +418,25 @@ def _fetch_full_games(
                 continue
             details[game_id] = detail
     return details, missing
+
+
+def _complete_player_detail(detail: Mapping[str, Any]) -> bool:
+    """Require ten distinct named players before a game can enter ratings."""
+
+    names: list[str] = []
+    placeholders = {"unknown", "unknown player", "tbd", "none", "nan"}
+    for team_key in ("blueTeam", "redTeam"):
+        team = detail.get(team_key)
+        players = team.get("players") if isinstance(team, Mapping) else None
+        if not isinstance(players, Mapping):
+            return False
+        for role in ROLES:
+            player = players.get(role)
+            name = str(player.get("name") or "").strip() if isinstance(player, Mapping) else ""
+            if not name or name.casefold() in placeholders:
+                return False
+            names.append(name)
+    return len(names) == 10 and len({name.casefold() for name in names}) == 10
 
 
 def _cached_full_games(path: Path) -> dict[str, dict[str, Any]]:
@@ -455,7 +475,7 @@ def _cached_full_games(path: Path) -> dict[str, dict[str, Any]]:
             if not complete:
                 break
             detail[team_key] = {"players": detail_players}
-        if complete:
+        if complete and _complete_player_detail(detail):
             cached[game_id] = detail
     return cached
 
@@ -510,6 +530,8 @@ def _rows_from_games(
         if not game_uid:
             continue
         detail = full_games.get(str(raw_game_uid).strip(), {})
+        if not isinstance(detail, Mapping) or not _complete_player_detail(detail):
+            continue
         game_id = game_uid
         common = {
             "gameid": game_id,
