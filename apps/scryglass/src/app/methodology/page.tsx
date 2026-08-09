@@ -38,10 +38,23 @@ export default function MethodologyPage() {
         <section id="player-ratings">
           <h2>Player ratings</h2>
           <p>
-            Player ratings update from each completed map. Regional performance
-            and international performance contribute to one shared rating. The
-            current team, role, and league come from the latest accepted
-            non-international appearance.
+            Player ratings use one connected results scale across every
+            accepted competition tier. Complete ten-player maps enter one
+            regularized fit. Cross-league events and player transfers connect
+            domestic pools. Competition tier is not a fixed bonus or penalty.
+          </p>
+          <p>
+            The displayed adjustment is more cautious when a player&apos;s current
+            tier has little direct evidence against a stronger tier. Earlier
+            maps in stronger competitions reduce that extra uncertainty. This
+            changes the evidence width, not the fitted rating.
+          </p>
+          <p>
+            This rating tracks team results with the player in the lineup. It
+            does not isolate the player&apos;s individual contribution. The map
+            grades below provide that separate performance view. The current
+            team, role, and league come from the latest accepted domestic
+            appearance.
           </p>
           <p>
             The evidence label checks precision, stability, freshness, sample

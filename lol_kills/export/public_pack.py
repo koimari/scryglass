@@ -486,6 +486,7 @@ def export_public_pack(
         player_records=player_records_payload,
     )
     player_meta_path = features_root / "player_ratings_meta.json"
+    player_model_manifest: dict[str, Any] = {}
     if player_meta_path.exists():
         player_meta = json.loads(player_meta_path.read_text(encoding="utf-8"))
         player_meta["source_as_of"] = source_as_of.isoformat().replace("+00:00", "Z")
@@ -493,6 +494,21 @@ def export_public_pack(
         player_meta["window_years"] = list(years)
         player_meta["evidence_contract"] = "2026-08-09.1"
         player_meta_path.write_text(json.dumps(player_meta, indent=2), encoding="utf-8")
+        global_rating = player_meta.get("global_rating") or {}
+        player_model_manifest = {
+            key: global_rating.get(key)
+            for key in (
+                "model",
+                "n_maps",
+                "n_players",
+                "n_components",
+                "largest_component_players",
+                "connected_share",
+                "holdout",
+                "tier_adjustments",
+                "player_statistics_used",
+            )
+        }
     weekly_dest = feat_dir / "player_weekly_ranks.json"
     weekly_dest.write_text(json.dumps(weekly_ranks, indent=2), encoding="utf-8")
     register(
@@ -721,6 +737,7 @@ def export_public_pack(
             "source_identity_sha256": source_identity_sha256(source_game_ids),
             "team_rating_rows": int(len(rating_input)),
             "player_rating_rows": int(player_rating_row_count),
+            "player_model": player_model_manifest,
             "affiliation_audit": affiliation_audit,
             "artifacts": rating_artifact_paths,
             "claim_ceiling": "Source-bound descriptive ratings and weekly rank movement only.",
