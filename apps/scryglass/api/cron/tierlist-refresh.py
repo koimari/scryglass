@@ -16,6 +16,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -128,6 +129,7 @@ from lol_kills.export.vercel_blob_transport import VercelBlobTransport  # noqa: 
 LOCK_PATH = "_scryglass_retention/tierlist-refresh-lock.json"
 LOCK_TTL_SECONDS = 20 * 60
 RECEIPT_PREFIX = "tierlists/refresh-receipts/"
+MOVEMENT_PATH = "tierlists/movement-v1.json"
 PACKS_ROOT = Path("apps/scryglass/public/packs")
 PACK_LATEST = PACKS_ROOT / "latest.json"
 LIVE_PACK_ID = os.environ.get("SCRYGLASS_LIVE_PACK_ID", "v2026.live")
@@ -333,6 +335,144 @@ def _publish_receipt(receipt_path: Path) -> dict[str, Any]:
     }
 
 
+def _production_digest(payload: dict[str, Any]) -> str:
+    from lol_kills.v2.tierlists.production_bundle import _canonical_sha256
+
+    return _canonical_sha256(payload)
+
+
+def _validate_movement_snapshot(payload: object) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise RuntimeError("tier-list movement snapshot is not an object")
+    if (
+        payload.get("schema_version") != "scryglass:tier-list-movement-snapshot:v1"
+        or payload.get("artifact_kind") != "tier_list_movement_snapshot"
+        or payload.get("status") != "production"
+        or payload.get("production_eligible") is not True
+        or payload.get("artifact_sha256") != _production_digest(payload)
+    ):
+        raise RuntimeError("tier-list movement snapshot is not an approved artifact")
+    cells = payload.get("cells")
+    if not isinstance(cells, list) or not cells:
+        raise RuntimeError("tier-list movement snapshot has no cells")
+    return payload
+
+
+def _json_url(url: str, *, timeout: float = 20.0) -> tuple[bytes, dict[str, Any]]:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise RuntimeError("tier-list source URL is invalid")
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        raw = response.read(8 * 1024 * 1024 + 1)
+    if len(raw) > 8 * 1024 * 1024:
+        raise RuntimeError("tier-list source JSON is too large")
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("tier-list source JSON is invalid") from error
+    if not isinstance(payload, dict):
+        raise RuntimeError("tier-list source JSON is not an object")
+    return raw, payload
+
+
+def _load_previous_approved(runtime_root: Path, lease: _RefreshLease) -> Path | None:
+    """Load the last approved movement rows into the candidate schema."""
+
+    movement_path = runtime_root / "data/lol/v2/tierlists/previous-approved-movement-v1.json"
+    movement_path.parent.mkdir(parents=True, exist_ok=True)
+    remote = lease.transport.get_blob(
+        lease.store_id,
+        MOVEMENT_PATH,
+        deadline_epoch=int(time.time()) + 30,
+    )
+    if remote is not None:
+        payload = _validate_movement_snapshot(json.loads(remote[0].decode("utf-8")))
+        movement_path.write_text(
+            json.dumps(
+                {
+                    "artifact_sha256": payload["artifact_sha256"],
+                    "as_of": payload.get("as_of"),
+                    "artifact_kind": payload["artifact_kind"],
+                    "cells": payload["cells"],
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        print("[tier-refresh] movement baseline=approved-snapshot", flush=True)
+        return movement_path
+
+    index_url = os.environ.get("SCRYGLASS_TIERLIST_INDEX_URL", "").strip()
+    if not index_url:
+        print("[tier-refresh] movement baseline=unavailable", flush=True)
+        return None
+    _, pointer = _json_url(index_url)
+    if pointer.get("artifact_kind") != "tier_list_index_production" or pointer.get("production_eligible") is not True:
+        raise RuntimeError("configured tier-list pointer is not an approved production index")
+    if pointer.get("artifact_sha256") != _production_digest(pointer):
+        raise RuntimeError("configured tier-list pointer digest is invalid")
+    base_url = pointer.get("base_url")
+    if not isinstance(base_url, str) or not re.fullmatch(r"\./releases/[0-9a-f]{64}/", base_url):
+        raise RuntimeError("configured tier-list pointer base URL is invalid")
+    release_url = urllib.parse.urljoin(index_url, base_url)
+    cells = pointer.get("cells")
+    if not isinstance(cells, list) or not cells:
+        raise RuntimeError("configured tier-list pointer has no cells")
+
+    def fetch_cell(meta: object) -> dict[str, Any]:
+        if not isinstance(meta, dict):
+            raise RuntimeError("tier-list pointer cell metadata is malformed")
+        locator = meta.get("locator")
+        if not isinstance(locator, str) or not re.fullmatch(r"cells/[A-Za-z0-9._-]+\.json", locator):
+            raise RuntimeError("tier-list pointer cell locator is invalid")
+        raw, payload = _json_url(urllib.parse.urljoin(release_url, locator))
+        if hashlib.sha256(raw).hexdigest() != meta.get("raw_sha256"):
+            raise RuntimeError("tier-list pointer cell digest does not match")
+        scope = payload.get("scope")
+        if not isinstance(scope, dict) or scope.get("scope_id") != meta.get("scope_id") or payload.get("role") != meta.get("role"):
+            raise RuntimeError("tier-list pointer cell identity does not match")
+        rows = payload.get("rows")
+        if not isinstance(rows, list):
+            raise RuntimeError("tier-list pointer cell rows are malformed")
+        return {
+            "scope_id": meta["scope_id"],
+            "role": meta["role"],
+            "as_of": meta.get("as_of"),
+            "rows": [
+                {
+                    "champion_id": row.get("champion_id"),
+                    "champion_name": row.get("champion_name"),
+                    "rank": row.get("rank"),
+                    "rating": row.get("rating"),
+                }
+                for row in rows
+                if isinstance(row, dict)
+            ],
+        }
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        movement_cells = list(executor.map(fetch_cell, cells))
+    movement_path.write_text(
+        json.dumps(
+            {
+                "artifact_sha256": pointer["artifact_sha256"],
+                "as_of": pointer.get("as_of"),
+                "artifact_kind": "tier_list_movement_snapshot",
+                "cells": movement_cells,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"[tier-refresh] movement baseline=approved-cells cells={len(movement_cells)}", flush=True)
+    return movement_path
+
+
 def _pack_write_mode(pathname: str, existing: dict[str, Any]) -> WriteMode:
     return WriteMode.OVERWRITE if pathname in existing else WriteMode.NEW_IMMUTABLE
 
@@ -468,7 +608,10 @@ def _publish_public_pack(runtime_root: Path, *, run_id: str) -> dict[str, Any]:
 def _run_refresh() -> dict[str, Any]:
     if not os.environ.get("ORACLES_ELIXIR_API_KEY", "").strip():
         raise WorkerConfigurationError("ORACLES_ELIXIR_API_KEY is not configured")
+    started = time.monotonic()
+    print("[tier-refresh] phase=prepare start", flush=True)
     runtime_root = _prepare_runtime_root()
+    print(f"[tier-refresh] phase=prepare done seconds={time.monotonic() - started:.1f}", flush=True)
     expected = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex}"
     receipt_path = runtime_root / "data/lol/v2/tierlists/refresh-receipts" / f"tierlist-live-refresh-{run_id}.json"
@@ -484,12 +627,16 @@ def _run_refresh() -> dict[str, Any]:
 
         lease = _RefreshLease()
         lease.acquire()
+        print("[tier-refresh] phase=lease acquired", flush=True)
         from lol_kills.etl.restore_oe_pack_baseline import restore_baseline
 
         baseline = restore_baseline(runtime_root)
+        print("[tier-refresh] phase=baseline restored", flush=True)
+        previous_path = _load_previous_approved(runtime_root, lease)
         receipt = refresh_candidate(
             runtime_root,
             expected_live_as_of=expected,
+            previous_path=previous_path,
             output_path=Path("data/lol/v2/tierlists/champion-elo-candidate-v1.json"),
             receipt_path=receipt_path,
             source_mode="oe_only",
@@ -497,10 +644,13 @@ def _run_refresh() -> dict[str, Any]:
             skip_annual_oe=True,
             skip_atom_bridge=True,
         )
+        print("[tier-refresh] phase=tier-candidate promoted", flush=True)
         receipt_publication = _publish_receipt(receipt_path)
+        print("[tier-refresh] phase=receipt published", flush=True)
         if receipt.get("status") != "production_promoted":
             raise RuntimeError(f"tier refresh did not promote: {receipt.get('status')}")
         pack_publication = _publish_public_pack(runtime_root, run_id=run_id)
+        print(f"[tier-refresh] phase=pack published seconds={time.monotonic() - started:.1f}", flush=True)
         return {
             "status": "production_promoted",
             "run_id": run_id,
