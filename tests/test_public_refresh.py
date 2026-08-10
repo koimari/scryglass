@@ -360,6 +360,58 @@ def test_supabase_bootstrap_uses_a_checksum_verified_full_local_cache(tmp_path: 
     assert json.loads(config.sync.state_path.read_text())["published_game_ids"] == game_ids
 
 
+def test_supabase_no_change_reuses_the_active_tier(tmp_path: Path) -> None:
+    config = replace(
+        _config(tmp_path),
+        publication_backend="supabase",
+        supabase_url="https://example.supabase.co",
+        supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    config.public_root.mkdir(parents=True)
+    (config.public_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "v2026.08.10.001500",
+                "tier": {"status": "available", "as_of": "2026-08-08T21:50:46Z"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    ratings = {
+        "status": "no_change",
+        "pack_id": "v2026.08.10.001500",
+        "source_observed_through": "2026-08-08T21:50:46Z",
+    }
+
+    with patch.object(public_refresh, "_preflight"), patch.object(
+        public_refresh,
+        "seed_supabase_continuity",
+        return_value={"status": "current"},
+    ), patch.object(
+        public_refresh,
+        "_run_with_source_retries",
+        return_value=ratings,
+    ), patch.object(
+        public_refresh,
+        "_run_tier_refresh",
+        side_effect=AssertionError("unchanged source must reuse the active tier"),
+    ), patch.object(
+        public_refresh,
+        "verify_public_release",
+        return_value={
+            "pack_id": "v2026.08.10.001500",
+            "files": 9,
+            "tier_status": "available",
+        },
+    ):
+        result = public_refresh.run_once(config, now=NOW)
+
+    assert result["status"] == "no_change"
+    assert result["tier"] is None
+    assert result["database_publication"] is None
+    assert result["cache_invalidation"] is None
+
+
 def test_http_read_retries_transient_statuses(monkeypatch: pytest.MonkeyPatch) -> None:
     class Response:
         def __enter__(self):

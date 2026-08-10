@@ -646,14 +646,26 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
         ratings = _run_with_source_retries(config, checked_at, force=force)
         publication = ratings.get("publication") if isinstance(ratings.get("publication"), dict) else None
         tier_error: str | None = None
+        active_manifest = _load_json(config.public_root / "manifest.json")
+        active_tier = active_manifest.get("tier")
+        supabase_tier_available = bool(
+            config.publication_backend == "supabase"
+            and isinstance(active_tier, dict)
+            and active_tier.get("status") == "available"
+        )
         should_run_tier = bool(
             ratings.get("status") == "published"
             or force
-            or not previous_public_state.get("tier")
-            or previous_public_state.get("tier_error")
             or (
                 config.publication_backend == "supabase"
-                and not previous_public_state.get("database_publication")
+                and not supabase_tier_available
+            )
+            or (
+                config.publication_backend != "supabase"
+                and (
+                    not previous_public_state.get("tier")
+                    or previous_public_state.get("tier_error")
+                )
             )
         )
         if should_run_tier:
