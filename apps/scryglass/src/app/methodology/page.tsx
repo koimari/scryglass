@@ -91,7 +91,8 @@ export default function MethodologyPage() {
             Each patch and role has its own board. Eligible professional games
             from all regions, leagues, and tournaments enter the same patch
             pool. The calculation controls for team strength and side. A
-            champion needs verified appearances in the selected patch and role.
+            champion needs verified appearances in the selected patch and role
+            to enter a performance board.
           </p>
           <p>
             Blind tiers show the expected edge in a champion&apos;s weakest common
@@ -104,6 +105,19 @@ export default function MethodologyPage() {
             The region filter changes which observed champions appear. The model
             remains patch-wide. These views describe matchup shape after general
             champion strength is accounted for. They do not describe draft order.
+          </p>
+          <p>
+            Unpicked, but viable starts from champions with zero accepted maps in
+            the selected patch and role. It compares their role, function, and
+            mechanic profiles with champions that teams did play. The region
+            filter changes the played comparison pool. An unpicked champion must
+            still have zero patch-wide appearances in that role.
+          </p>
+          <p>
+            Structural matches are leads for preparation and testing. They do not
+            give an unpicked champion a tier, predicted WR, or draft recommendation.
+            Family profile marks the broad ontology basis. Detailed atom profile
+            marks champions with deeper mechanic coverage.
           </p>
           <p>
             Rank movement compares the current accepted board with its prior

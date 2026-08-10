@@ -7,6 +7,8 @@ import {
   regionalOptions,
   regionalViewForRole,
   rowsForMode,
+  viableCandidates,
+  type StructuralSimilarity,
   type TierRow,
   type TierScope,
 } from "./tierBoard.ts";
@@ -108,4 +110,34 @@ test("matchup grades use the published edge bands", () => {
   assert.equal(matchupGrade(0), "B");
   assert.equal(matchupGrade(-3.1), "C");
   assert.equal(matchupGrade(-8), "D");
+});
+
+test("unpicked candidates use patch-wide absence and visible played references", () => {
+  const library: StructuralSimilarity = {
+    schema_version: "scryglass:champion-structural-similarity:v1",
+    source_atom_bridge_sha256: "a".repeat(64),
+    minimum_similarity: 0.72,
+    weights: {},
+    champions: [
+      { champion_id: "picked", champion: "Ziggs", champion_image_url: null, positions: ["mid"], roles: ["Mage"], profile_status: "family_only", traits: [{ dimension: "damage_profile", label: "artillery" }] },
+      { champion_id: "regional", champion: "Syndra", champion_image_url: null, positions: ["mid"], roles: ["Mage"], profile_status: "family_only", traits: [{ dimension: "damage_profile", label: "burst" }] },
+      { champion_id: "candidate", champion: "Xerath", champion_image_url: null, positions: ["mid", "support"], roles: ["Mage"], profile_status: "family_only", traits: [{ dimension: "damage_profile", label: "artillery" }] },
+      { champion_id: "wrong-role", champion: "Sion", champion_image_url: null, positions: ["top"], roles: ["Tank"], profile_status: "family_only", traits: [] },
+    ],
+    similarity: [
+      [1, 0.4, 0.91, 0.2],
+      [0.4, 1, 0.76, 0.2],
+      [0.91, 0.76, 1, 0.2],
+      [0.2, 0.2, 0.2, 1],
+    ],
+  };
+  const patchWide = [row({ role: "mid", champion_id: "picked" }), row({ role: "mid", champion_id: "regional" })];
+  const visible = [row({ role: "mid", champion_id: "picked" })];
+
+  const candidates = viableCandidates(library, patchWide, visible, "mid");
+  assert.deepEqual(candidates.map((item) => item.candidate.champion), ["Xerath"]);
+  assert.equal(candidates[0].reference.champion, "Ziggs");
+  assert.deepEqual(candidates[0].sharedTraits, [{ dimension: "damage_profile", label: "artillery" }]);
+  assert.equal(viableCandidates(library, patchWide, visible, "top").length, 0);
+  assert.equal(viableCandidates(library, patchWide, visible, "mid", "regional").length, 0);
 });

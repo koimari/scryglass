@@ -76,7 +76,7 @@
 
 .questionNav {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   border: 1px solid var(--line-strong);
   background: var(--surface);
 }
@@ -868,6 +868,163 @@
   justify-items: end;
 }
 
+.viablePanel {
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+
+.viableHeading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.viableHeading > div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.viableHeading h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.viableHeading > span {
+  color: var(--ink-muted);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.66rem;
+}
+
+.viableList {
+  display: grid;
+}
+
+.viableCard {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) minmax(8rem, 0.65fr) minmax(10rem, 1fr);
+  gap: 0.65rem 1rem;
+  align-items: center;
+  padding: 0.72rem 1rem;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.viableCard:last-child {
+  border-bottom: 0;
+}
+
+.viableChampion,
+.viableReference {
+  display: flex;
+  min-width: 0;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.viableReference {
+  justify-content: end;
+  text-align: right;
+}
+
+.viableChampion > span,
+.viableReference > span {
+  display: grid;
+  min-width: 0;
+  gap: 0.12rem;
+}
+
+.viableChampion strong,
+.viableReference strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.86rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viableChampion small,
+.viableReference small {
+  color: var(--ink-muted);
+  font-size: 0.65rem;
+}
+
+.similarityBridge {
+  display: grid;
+  grid-template-columns: auto minmax(2rem, 1fr);
+  gap: 0.1rem 0.45rem;
+  align-items: center;
+}
+
+.similarityBridge strong {
+  color: var(--accent-ink);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.76rem;
+}
+
+.similarityBridge i {
+  position: relative;
+  height: 1px;
+  background: var(--line-strong);
+}
+
+.similarityBridge i::after {
+  position: absolute;
+  top: -3px;
+  right: 0;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: var(--surface);
+  content: "";
+}
+
+.similarityBridge span {
+  grid-column: 1 / -1;
+  color: var(--ink-muted);
+  font-size: 0.61rem;
+  text-align: center;
+}
+
+.viableTraits {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding-left: 3.05rem;
+}
+
+.viableTraits span,
+.viableTraits em {
+  padding: 0.18rem 0.38rem;
+  border: 1px solid var(--line);
+  color: var(--ink-muted);
+  font-size: 0.59rem;
+  font-style: normal;
+  line-height: 1.2;
+}
+
+.viableTraits span {
+  border-color: color-mix(in oklch, var(--accent) 45%, var(--line));
+  color: var(--ink);
+}
+
+.viableCaveat {
+  margin: 0;
+  padding: 0.72rem 1rem;
+  border-top: 1px solid var(--line-strong);
+  background: color-mix(in oklch, var(--surface-subtle) 32%, var(--surface));
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
 .methodNote {
   display: grid;
   gap: 0.2rem;
@@ -938,6 +1095,18 @@
     border-bottom: 1px solid var(--line-strong);
   }
 
+  .questionTab:nth-child(3),
+  .questionTabActive:nth-child(3),
+  .questionTab:nth-child(4),
+  .questionTabActive:nth-child(4) {
+    border-bottom: 1px solid var(--line-strong);
+  }
+
+  .questionTab:last-child,
+  .questionTabActive:last-child {
+    grid-column: 1 / -1;
+  }
+
   .summaryGrid {
     grid-template-columns: 1fr;
   }
@@ -959,6 +1128,11 @@
 
   .regionalRoleGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .viableCard {
+    grid-template-columns: minmax(8rem, 1fr) minmax(6rem, 0.65fr) minmax(8rem, 1fr);
+    padding-inline: 0.72rem;
   }
 }
 
@@ -1000,6 +1174,27 @@
   .panelHeading {
     display: grid;
     align-items: start;
+  }
+
+  .viableHeading {
+    display: grid;
+    align-items: start;
+  }
+
+  .viableCard {
+    grid-template-columns: minmax(0, 1fr) minmax(5.5rem, 0.65fr) minmax(0, 1fr);
+    gap: 0.55rem;
+  }
+
+  .viableChampion .championThumb,
+  .viableReference .championThumb {
+    width: 2rem;
+    height: 2rem;
+    flex-basis: 2rem;
+  }
+
+  .viableTraits {
+    padding-left: 0;
   }
 }
 
