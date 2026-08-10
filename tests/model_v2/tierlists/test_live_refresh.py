@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -172,6 +173,30 @@ def test_blob_publication_writes_the_pointer_last() -> None:
     assert result["pointer_readback_verified"] is True
     assert result["display_readback_verified"] is True
     assert result["cell_count"] == 195
+    assert set(result["previous_pointers"]) == {
+        live_refresh.BLOB_POINTER_PATH,
+        live_refresh.BLOB_MOVEMENT_PATH,
+        live_refresh.BLOB_DISPLAY_PATH,
+    }
+
+
+def test_tier_step_timeout_is_recorded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def timed_out(*_args, **kwargs):
+        assert kwargs["timeout"] == 2
+        raise subprocess.TimeoutExpired(kwargs.get("args", "step"), 2)
+
+    monkeypatch.setattr(live_refresh.subprocess, "run", timed_out)
+
+    result = live_refresh._run_step(
+        tmp_path,
+        ["example.step"],
+        source="example",
+        step_timeout_seconds=2,
+    )
+
+    assert result["completed"] is False
+    assert result["timed_out"] is True
+    assert result["returncode"] == 124
 
 
 def test_blob_publication_removes_new_stable_pointers_after_a_failed_write() -> None:

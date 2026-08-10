@@ -96,7 +96,45 @@ def test_failed_public_smoke_restores_the_previous_pack(tmp_path: Path) -> None:
     rollback.assert_called_once_with(ratings["publication"], config.public_root)
     assert json.loads(config.sync.state_path.read_text(encoding="utf-8")) == previous
     health = json.loads(config.health_path.read_text(encoding="utf-8"))
-    assert health["rollback"] == {"status": "restored"}
+    assert health["rollback"]["status"] == "restored"
+    assert health["rollback"]["ratings"] == {"status": "restored"}
+    assert health["rollback"]["cache_invalidation"] == {"revalidated": True}
+
+
+def test_cache_failure_restores_the_new_pack_and_retries_cache_clear(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.sync.state_path.parent.mkdir(parents=True, exist_ok=True)
+    previous = {"pack_id": "old", "published_game_ids": ["game-1"]}
+    config.sync.state_path.write_text(json.dumps(previous), encoding="utf-8")
+    config.state_path.write_text(
+        json.dumps({"tier": {"status": "available"}}), encoding="utf-8"
+    )
+    ratings = {
+        "status": "published",
+        "pack_id": "new",
+        "publication": {"runtime": "blob", "pack_id": "new"},
+    }
+
+    with patch.object(public_refresh, "_preflight"), patch.object(
+        public_refresh, "_run_with_source_retries", return_value=ratings
+    ), patch.object(
+        public_refresh,
+        "invalidate_public_cache",
+        side_effect=[public_refresh.PublicRefreshError("cache is unavailable"), {"revalidated": True}],
+    ) as invalidate, patch.object(
+        public_refresh,
+        "rollback_public_pack",
+        return_value={"status": "restored"},
+    ) as rollback:
+        with pytest.raises(public_refresh.PublicRefreshError, match="cache is unavailable"):
+            public_refresh.run_once(config, now=NOW)
+
+    rollback.assert_called_once_with(ratings["publication"], config.public_root)
+    assert invalidate.call_count == 2
+    assert json.loads(config.sync.state_path.read_text(encoding="utf-8")) == previous
+    health = json.loads(config.health_path.read_text(encoding="utf-8"))
+    assert health["rollback"]["status"] == "restored"
+    assert health["rollback"]["cache_invalidation"] == {"revalidated": True}
 
 
 def test_identity_gate_allows_exact_case_route_collisions(tmp_path: Path) -> None:
@@ -274,9 +312,11 @@ def test_systemd_worker_cannot_start_without_production_environment() -> None:
     service = (root / "ops/systemd/scryglass-ratings-sync.service").read_text(encoding="utf-8")
     alert = (root / "ops/systemd/scryglass-public-refresh-alert@.service").read_text(encoding="utf-8")
     watchdog = (root / "ops/systemd/scryglass-public-refresh-watchdog.service").read_text(encoding="utf-8")
+    oe_env = (root / "ops/systemd/postgame-sync.env.example").read_text(encoding="utf-8")
 
     assert "EnvironmentFile=/etc/scryglass/public-refresh.env" in service
     assert "Environment=SCRYGLASS_PUBLIC_RELEASE=1" in service
     assert "EnvironmentFile=-/etc/scryglass/public-refresh.env" not in service
     assert "EnvironmentFile=/etc/scryglass/public-refresh.env" in alert
     assert "EnvironmentFile=/etc/scryglass/public-refresh.env" in watchdog
+    assert "ORACLES_ELIXIR_API_KEY=" in oe_env

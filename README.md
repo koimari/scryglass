@@ -42,9 +42,13 @@ SCRYGLASS_PUBLIC_RELEASE=1 python3 -m lol_kills.public_refresh \
   --force
 ```
 
-Set `ORACLES_ELIXIR_API_KEY`, `BLOB_READ_WRITE_TOKEN`, `LIVE_BLOB_BASE_URL`,
-`SCRYGLASS_DATA_PUBLISH_TOKEN`, and `SCRYGLASS_ALERT_WEBHOOK_URL` in the worker
-environment. The runner performs OE discovery, ratings, tier authority,
+Copy `ops/systemd/postgame-sync.env.example` to
+`/etc/scryglass/postgame-sync.env` and set `ORACLES_ELIXIR_API_KEY`. Copy
+`ops/systemd/public-refresh.env.example` to
+`/etc/scryglass/public-refresh.env` and set `BLOB_READ_WRITE_TOKEN`,
+`LIVE_BLOB_BASE_URL`, `SCRYGLASS_DATA_PUBLISH_TOKEN`, and
+`SCRYGLASS_ALERT_WEBHOOK_URL` in the worker environment. The runner performs
+OE discovery, ratings, tier authority,
 publication, cache invalidation, and live smoke checks in one locked cycle.
 
 The refresh accepts a map after it has canonical identities, two teams, ten

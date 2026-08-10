@@ -8,6 +8,7 @@ independent authority check, and production bundle after the source gates pass.
 from __future__ import annotations
 
 import argparse
+import base64
 from copy import deepcopy
 import hashlib
 import json
@@ -46,6 +47,7 @@ HISTORY_START = "2025-01-01T00:00:00Z"
 LIVE_WINDOW_START = "2026-07-18T00:00:00Z"
 RECEIPT_SCHEMA = "scryglass:tierlist-live-refresh:v1"
 DEFAULT_RECEIPT = Path("data/lol/v2/tierlists/refresh-receipts")
+DEFAULT_STEP_TIMEOUT_SECONDS = 15 * 60
 BLOB_BASE_ENV = "SCRYGLASS_TIERLIST_BLOB_BASE_URL"
 BLOB_BASE_FALLBACK_ENV = "LIVE_BLOB_BASE_URL"
 BLOB_TOKEN_ENV = "BLOB_READ_WRITE_TOKEN"
@@ -321,6 +323,58 @@ def _restore_stable_pointers(
         raise PublicationError("tier-list rollback was not fully proven: " + " | ".join(errors))
 
 
+def _serialize_previous_pointers(
+    previous: dict[str, tuple[bytes, BlobIdentity] | None],
+) -> dict[str, dict[str, str] | None]:
+    serialized: dict[str, dict[str, str] | None] = {}
+    for pathname, value in previous.items():
+        if value is None:
+            serialized[pathname] = None
+            continue
+        raw, identity = value
+        if identity is None:
+            raise PublicationError(f"tier-list pointer identity is missing: {pathname}")
+        serialized[pathname] = {
+            "content_b64": base64.b64encode(raw).decode("ascii"),
+            "etag": identity.etag,
+        }
+    return serialized
+
+
+def restore_production_bundle(publication: dict[str, Any]) -> dict[str, Any]:
+    """Restore stable tier-list pointers captured by a successful publication."""
+
+    raw_previous = publication.get("previous_pointers")
+    if not isinstance(raw_previous, dict):
+        raise PublicationError("tier-list publication has no rollback pointers")
+    previous: dict[str, tuple[bytes, BlobIdentity] | None] = {}
+    for pathname in (BLOB_POINTER_PATH, BLOB_MOVEMENT_PATH, BLOB_DISPLAY_PATH):
+        value = raw_previous.get(pathname)
+        if value is None:
+            previous[pathname] = None
+            continue
+        if not isinstance(value, dict):
+            raise PublicationError(f"tier-list rollback pointer is malformed: {pathname}")
+        encoded = value.get("content_b64")
+        etag = value.get("etag")
+        if not isinstance(encoded, str) or not isinstance(etag, str) or not etag:
+            raise PublicationError(f"tier-list rollback pointer is incomplete: {pathname}")
+        try:
+            raw = base64.b64decode(encoded.encode("ascii"), validate=True)
+        except (ValueError, UnicodeEncodeError) as error:
+            raise PublicationError(f"tier-list rollback pointer is not base64: {pathname}") from error
+        previous[pathname] = (raw, BlobIdentity(pathname, len(raw), etag))
+
+    _blob_base, token, store_id = _publication_credentials()
+    _restore_stable_pointers(VercelBlobTransport(token, store_id), store_id, previous)
+    return {
+        "status": "restored",
+        "pointer_path": BLOB_POINTER_PATH,
+        "movement_path": BLOB_MOVEMENT_PATH,
+        "display_path": BLOB_DISPLAY_PATH,
+    }
+
+
 def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
     """Publish immutable tier-list files, then replace the stable pointer."""
 
@@ -463,6 +517,7 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
         "display_mode": display_mode.value,
         "display_readback_verified": True,
         "pointer_readback_verified": True,
+        "previous_pointers": _serialize_previous_pointers(previous_pointers),
         "retention": {
             "state": result.state.value,
             "current_retained_bytes": result.current_retained_bytes,
@@ -474,7 +529,23 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
     }
 
 
-def _run_step(root: Path, args: list[str], *, source: str) -> dict[str, Any]:
+def _step_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _run_step(
+    root: Path,
+    args: list[str],
+    *,
+    source: str,
+    step_timeout_seconds: float = DEFAULT_STEP_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    if step_timeout_seconds <= 0:
+        raise ValueError("step timeout must be positive")
     started = time.monotonic()
     print(f"[tier-refresh] step={source} start", flush=True)
     environment = os.environ.copy()
@@ -483,14 +554,36 @@ def _run_step(root: Path, args: list[str], *, source: str) -> dict[str, Any]:
     environment["PYTHONPATH"] = os.pathsep.join(
         dict.fromkeys([*inherited_paths, *configured_paths])
     )
-    result = subprocess.run(
-        [sys.executable, "-m", *args],
-        cwd=root,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", *args],
+            cwd=root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=step_timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as error:
+        stdout = _step_text(error.stdout)
+        stderr = _step_text(error.stderr)
+        print(
+            f"[tier-refresh] step={source} timed_out seconds={time.monotonic() - started:.1f}",
+            flush=True,
+        )
+        return {
+            "source": source,
+            "command": args,
+            "returncode": 124,
+            "completed": False,
+            "timed_out": True,
+            "timeout_seconds": step_timeout_seconds,
+            "stdout_bytes": len(stdout.encode("utf-8")),
+            "stderr_bytes": len(stderr.encode("utf-8")),
+            "stdout_tail": stdout[-4000:],
+            "stderr_tail": stderr[-4000:],
+            "reason": f"step exceeded {step_timeout_seconds:g} seconds",
+        }
     print(
         f"[tier-refresh] step={source} done returncode={result.returncode} seconds={time.monotonic() - started:.1f}",
         flush=True,
@@ -500,6 +593,7 @@ def _run_step(root: Path, args: list[str], *, source: str) -> dict[str, Any]:
         "command": args,
         "returncode": result.returncode,
         "completed": result.returncode == 0,
+        "timeout_seconds": step_timeout_seconds,
         "stdout_bytes": len(result.stdout.encode("utf-8")),
         "stderr_bytes": len(result.stderr.encode("utf-8")),
         "stdout_tail": result.stdout[-4000:],
@@ -603,9 +697,20 @@ def refresh_candidate(
     skip_annual_oe: bool = False,
     skip_atom_bridge: bool = False,
     prepared_source: dict[str, Any] | None = None,
+    step_timeout_seconds: float = DEFAULT_STEP_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     if source_mode != "oe_only":
         raise ValueError("public tier refresh source_mode must be oe_only")
+    if step_timeout_seconds <= 0:
+        raise ValueError("step timeout must be positive")
+
+    def run_step(args: list[str], *, source: str) -> dict[str, Any]:
+        return _run_step(
+            root,
+            args,
+            source=source,
+            step_timeout_seconds=step_timeout_seconds,
+        )
 
     if prepared_source is not None:
         prepared_mode = prepared_source.get("source_mode")
@@ -647,8 +752,7 @@ def refresh_candidate(
         oe_step = (
             _skipped_step("oe_annual", "committed_public_pack_baseline")
             if skip_annual_oe
-            else _run_step(
-                root,
+            else run_step(
                 [
                     "lol_kills.refresh_warehouse",
                     "--oe-years",
@@ -661,8 +765,7 @@ def refresh_candidate(
                 source="oe_annual",
             )
         )
-        oe_api_step = _run_step(
-            root,
+        oe_api_step = run_step(
             [
                 "lol_kills.etl.oe_api_ingest",
                 "--root",
@@ -679,8 +782,7 @@ def refresh_candidate(
         atom_step = (
             _verify_prebuilt_atom_bridge(root)
             if skip_atom_bridge
-            else _run_step(
-                root,
+            else run_step(
                 ["lol_kills.v2.champions.atoms.bridge_v1"],
                 source="champion_atomization",
             )
@@ -688,8 +790,7 @@ def refresh_candidate(
         observed_as_of = _api_source_latest(root) if oe_api_step["completed"] else None
         candidate_expected_live_as_of = observed_as_of or expected_live_as_of
         live_source_step = (
-            _run_step(
-                root,
+            run_step(
                 ["lol_kills.etl.oe_live_source", "--root", str(root)],
                 source="oe_live_source",
             )
@@ -697,8 +798,7 @@ def refresh_candidate(
             else _skipped_step("oe_live_source", "oe_api_incomplete")
         )
         rating_step = (
-            _run_step(
-                root,
+            run_step(
                 [
                     "lol_kills.v2.tierlists.rating_refresh",
                     "--root",
@@ -775,8 +875,7 @@ def refresh_candidate(
         promotion_steps.append(_skipped_step("production_promotion", "source_or_rating_incomplete"))
         promotion_status = "blocked_source_incomplete"
     elif promote:
-        forward_step = _run_step(
-            root,
+        forward_step = run_step(
             [
                 "lol_kills.v2.tierlists.forward_evaluation",
                 "--root",
@@ -788,8 +887,7 @@ def refresh_candidate(
         )
         promotion_steps.append(forward_step)
         if forward_step["completed"]:
-            authority_step = _run_step(
-                root,
+            authority_step = run_step(
                 [
                     "lol_kills.v2.tierlists.independent_authority",
                     "--root",
@@ -804,8 +902,7 @@ def refresh_candidate(
             authority_step = _skipped_step("independent_authority", "forward_evaluation_incomplete")
             promotion_steps.append(authority_step)
         if authority_step["completed"]:
-            bundle_step = _run_step(
-                root,
+            bundle_step = run_step(
                 [
                     "lol_kills.v2.tierlists.production_bundle",
                     "--root",
