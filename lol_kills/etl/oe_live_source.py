@@ -86,6 +86,19 @@ def _game_keys(frame: pd.DataFrame) -> pd.Series:
     return keys.fillna("").astype("string")
 
 
+def _patch_tokens(frame: pd.DataFrame) -> pd.DataFrame:
+    """Keep OE patch tokens as source text instead of inferred floats."""
+
+    if "patch" not in frame.columns:
+        return frame
+    result = frame.copy()
+    tokens = result["patch"].astype("string").str.strip()
+    result["patch"] = tokens.mask(
+        tokens.isna() | tokens.str.casefold().isin({"", "nan", "nat", "none", "<na>"})
+    )
+    return result
+
+
 def _identity_complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
     """Return games with complete player identities and canonical roles."""
 
@@ -253,8 +266,8 @@ def build_live_source(root: Path | str = Path(".")) -> dict[str, Any]:
         if not path.is_file():
             raise OeLiveSourceError(f"required OE source is missing: {path}")
 
-    primary_player = pd.read_parquet(primary_player_path)
-    primary_team = pd.read_parquet(primary_team_path)
+    primary_player = _patch_tokens(pd.read_parquet(primary_player_path))
+    primary_team = _patch_tokens(pd.read_parquet(primary_team_path))
     player = primary_player.copy()
     team = primary_team.copy()
     bridge_game_count = 0
@@ -263,8 +276,8 @@ def build_live_source(root: Path | str = Path(".")) -> dict[str, Any]:
     bridge_used = False
     if api_player_path.is_file() and api_team_path.is_file():
         try:
-            api_player = pd.read_parquet(api_player_path)
-            api_team = pd.read_parquet(api_team_path)
+            api_player = _patch_tokens(pd.read_parquet(api_player_path))
+            api_team = _patch_tokens(pd.read_parquet(api_team_path))
             bridge_game_count = len(set(_game_keys(api_player).dropna().astype(str)))
             identity_complete_api_ids = _identity_complete_player_game_ids(api_player)
             statistics_complete_api_ids = _complete_player_game_ids(api_player)

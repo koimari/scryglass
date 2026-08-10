@@ -50,21 +50,21 @@ def test_live_merge_deduplicates_prefixed_and_canonical_game_ids() -> None:
 def test_live_merge_aligns_bridge_numbers_to_the_annual_schema() -> None:
     primary = pd.DataFrame(
         [
-            {"gameid": "annual", "date": "2026-08-01", "side": "Blue", "patch": 16.14},
-            {"gameid": "annual", "date": "2026-08-01", "side": "Red", "patch": 16.14},
+            {"gameid": "annual", "date": "2026-08-01", "side": "Blue", "game": 1.0},
+            {"gameid": "annual", "date": "2026-08-01", "side": "Red", "game": 1.0},
         ]
     )
     supplement = pd.DataFrame(
         [
-            {"gameid": "bridge", "date": "2026-08-08", "side": "Blue", "patch": "16.15"},
-            {"gameid": "bridge", "date": "2026-08-08", "side": "Red", "patch": "16.15"},
+            {"gameid": "bridge", "date": "2026-08-08", "side": "Blue", "game": "2"},
+            {"gameid": "bridge", "date": "2026-08-08", "side": "Red", "game": "2"},
         ]
     )
 
     merged = _merge(primary, supplement, with_players=False)
 
-    assert merged["patch"].dtype.kind == "f"
-    assert merged["patch"].tolist() == [16.14, 16.14, 16.15, 16.15]
+    assert merged["game"].dtype.kind == "f"
+    assert merged["game"].tolist() == [1.0, 1.0, 2.0, 2.0]
 
 
 def test_live_source_excludes_games_with_missing_or_duplicate_player_names() -> None:
