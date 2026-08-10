@@ -325,6 +325,37 @@ def test_incomplete_discovered_map_waits_while_complete_map_publishes(tmp_path: 
     assert result["pending_game_ids"] == ["game-3"]
 
 
+def test_replaced_raw_identity_is_not_counted_as_a_new_or_pending_map(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    config.state_path.parent.mkdir(parents=True)
+    config.state_path.write_text(
+        json.dumps({"published_game_ids": ["bridge-id"], "pack_id": "old"}),
+        encoding="utf-8",
+    )
+
+    def build(root: Path):
+        _write_live(root, ["bridge-id", "new-game"])
+        return {}
+
+    def export(*, out_root: Path, pack_id: str, **kwargs):
+        assert kwargs["allowed_game_ids"] == ["bridge-id", "new-game"]
+        return _manifest(out_root / pack_id, kwargs["allowed_game_ids"])
+
+    result = sync_once(
+        config,
+        now=NOW,
+        ingest_fn=_ingest(tmp_path, ["annual-replacement-id", "bridge-id", "new-game"]),
+        build_live_fn=build,
+        export_pack_fn=export,
+    )
+
+    assert result["status"] == "published"
+    assert result["new_game_ids"] == ["new-game"]
+    assert result["pending_game_ids"] == []
+
+
 def test_pack_validation_rejects_a_changed_file(tmp_path: Path) -> None:
     pack_dir = tmp_path / "pack"
     manifest = _manifest(pack_dir, ["game-2"])

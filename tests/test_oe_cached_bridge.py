@@ -138,3 +138,35 @@ def test_cached_bridge_excludes_incomplete_player_identity(tmp_path: Path) -> No
 
     assert meta["cached_bridge_used"] is False
     assert meta["source_game_count"] == 1
+
+
+def test_cached_bridge_identity_survives_when_the_annual_map_arrives(
+    tmp_path: Path,
+) -> None:
+    parquet = tmp_path / "data/lol/warehouse/parquet"
+    parquet.mkdir(parents=True)
+    annual_teams = _team_rows("published-bridge-id", "2026-08-08").assign(
+        game_uid="annual-riot-id",
+        gameid="annual-riot-id",
+    )
+    annual_players = _player_rows("published-bridge-id", "2026-08-08").assign(
+        game_uid="annual-riot-id",
+        gameid="annual-riot-id",
+    )
+    annual_teams.to_parquet(parquet / "oe_team_games.parquet", index=False)
+    annual_players.to_parquet(parquet / "oe_player_games.parquet", index=False)
+    _team_rows("published-bridge-id", "2026-08-08").to_parquet(
+        parquet / "oe_api_team_games.parquet", index=False
+    )
+    _player_rows("published-bridge-id", "2026-08-08").to_parquet(
+        parquet / "oe_api_player_games.parquet", index=False
+    )
+
+    meta = build_live_source(tmp_path)
+    live_maps = pd.read_parquet(parquet / "oe_live/maps.parquet")
+    live_players = pd.read_parquet(parquet / "oe_live/oe_player_games.parquet")
+
+    assert meta["source_game_count"] == 1
+    assert set(live_maps["game_uid"]) == {"published-bridge-id"}
+    assert set(live_players["game_uid"]) == {"published-bridge-id"}
+    assert live_players["kills"].notna().all()

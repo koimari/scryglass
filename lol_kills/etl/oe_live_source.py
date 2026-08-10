@@ -196,6 +196,14 @@ def _signature(group: pd.DataFrame, *, with_players: bool) -> tuple[Any, ...] | 
 
 
 def _merge(primary: pd.DataFrame, supplement: pd.DataFrame, *, with_players: bool) -> pd.DataFrame:
+    """Merge the cached bridge while keeping its published game identities stable.
+
+    A bridge map can later arrive in the annual OE file under Riot's official
+    game ID.  The exact map signature proves that both IDs describe one map.
+    Keep the older bridge ID in that case so an annual refresh does not make a
+    previously published map appear to disappear.
+    """
+
     def add_game_key(frame: pd.DataFrame) -> pd.DataFrame:
         frame = frame.copy()
         if "date" in frame.columns:
@@ -231,23 +239,33 @@ def _merge(primary: pd.DataFrame, supplement: pd.DataFrame, *, with_players: boo
                 supplement[column], errors="coerce", utc=True
             )
     seen_ids: set[str] = set()
-    seen: set[tuple[Any, ...]] = set()
+    signature_ids: dict[tuple[Any, ...], set[str]] = {}
     for game_id, group in primary.groupby("_source_game_key", sort=False):
         seen_ids.add(str(game_id))
         signature = _signature(group, with_players=with_players)
         if signature is not None:
-            seen.add(signature)
+            signature_ids.setdefault(signature, set()).add(str(game_id))
     accepted: list[pd.DataFrame] = []
+    preserved_ids: dict[str, str] = {}
     for game_id, group in supplement.groupby("_source_game_key", sort=False):
         if str(game_id) in seen_ids:
             continue
         signature = _signature(group, with_players=with_players)
-        if signature is not None and signature in seen:
-            continue
+        if signature is not None:
+            matching_primary_ids = signature_ids.get(signature, set())
+            if len(matching_primary_ids) == 1:
+                preserved_ids[next(iter(matching_primary_ids))] = str(game_id)
+                continue
         seen_ids.add(str(game_id))
         if signature is not None:
-            seen.add(signature)
+            signature_ids.setdefault(signature, set()).add(str(game_id))
         accepted.append(group)
+    for annual_id, published_id in preserved_ids.items():
+        mask = primary["_source_game_key"].eq(annual_id)
+        primary.loc[mask, "_source_game_key"] = published_id
+        primary.loc[mask, "game_uid"] = published_id
+        if "gameid" in primary.columns:
+            primary.loc[mask, "gameid"] = published_id
     if not accepted:
         return primary.drop(columns=["_source_game_key"], errors="ignore")
     return pd.concat([primary, *accepted], ignore_index=True, sort=False).drop(columns=["_source_game_key"], errors="ignore")
