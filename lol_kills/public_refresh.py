@@ -17,6 +17,7 @@ from typing import Any, Sequence
 
 from lol_kills.etl.oe_ingest import OeDownloadError
 from lol_kills.export import supabase_publication
+from lol_kills.export.public_pack import source_identity_sha256
 from lol_kills.postgame_sync import (
     SyncConfig,
     _load_json,
@@ -191,6 +192,88 @@ def _preflight(config: RefreshConfig) -> None:
             )
         except ValueError as error:
             raise PublicRefreshError(str(error)) from error
+
+
+def _supabase_asset_json(
+    client: supabase_publication.SupabasePublicData,
+    release_id: str,
+    path: str,
+) -> dict[str, Any]:
+    asset = client.asset(release_id, path)
+    if not asset:
+        raise PublicRefreshError(f"Supabase bootstrap asset is missing: {path}")
+    body = asset.get("body")
+    if isinstance(body, dict):
+        return body
+    storage_path = asset.get("storage_path")
+    if not isinstance(storage_path, str) or not storage_path:
+        raise PublicRefreshError(f"Supabase bootstrap asset has no payload: {path}")
+    try:
+        payload = json.loads(client.storage_object(storage_path).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PublicRefreshError(f"Supabase bootstrap asset is invalid JSON: {path}") from error
+    if not isinstance(payload, dict):
+        raise PublicRefreshError(f"Supabase bootstrap asset is not an object: {path}")
+    return payload
+
+
+def seed_supabase_continuity(config: RefreshConfig) -> dict[str, Any] | None:
+    """Seed a fresh worker with the exact source IDs behind the active release."""
+
+    if config.publication_backend != "supabase":
+        return None
+    client = supabase_publication.SupabasePublicData(
+        config.supabase_url or "",
+        config.supabase_secret_key or "",
+    )
+    active = client.active_release()
+    manifest = active.get("manifest") if isinstance(active, dict) else None
+    if not isinstance(manifest, dict):
+        raise PublicRefreshError("Supabase continuity bootstrap has no active manifest")
+    release_id = str(manifest.get("pack_id") or "")
+    ratings = manifest.get("ratings")
+    if not release_id or not isinstance(ratings, dict):
+        raise PublicRefreshError("Supabase continuity bootstrap manifest is malformed")
+    try:
+        expected_count = int(ratings["source_game_count"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise PublicRefreshError("Supabase continuity bootstrap has no game count") from error
+    expected_digest = str(ratings.get("source_identity_sha256") or "")
+
+    state = _load_json(config.sync.state_path)
+    local_manifest = _load_json(config.public_root / "manifest.json")
+    state_ids = state.get("published_game_ids")
+    if (
+        local_manifest.get("pack_id") == release_id
+        and isinstance(state_ids, list)
+        and len(state_ids) == expected_count
+        and source_identity_sha256(state_ids) == expected_digest
+    ):
+        return {"status": "current", "pack_id": release_id, "game_count": expected_count}
+
+    profiles = _supabase_asset_json(
+        client,
+        release_id,
+        "features/profile_records.json",
+    )
+    games = profiles.get("games")
+    if not isinstance(games, dict):
+        raise PublicRefreshError("Supabase continuity bootstrap has no game index")
+    game_ids = sorted(str(game_id) for game_id in games)
+    if len(game_ids) != expected_count or source_identity_sha256(game_ids) != expected_digest:
+        raise PublicRefreshError("Supabase continuity bootstrap does not match the active release")
+
+    _atomic_json(config.public_root / "manifest.json", manifest)
+    _atomic_json(
+        config.sync.state_path,
+        {
+            **state,
+            "pack_id": release_id,
+            "published_game_ids": game_ids,
+            "status": "bootstrapped",
+        },
+    )
+    return {"status": "seeded", "pack_id": release_id, "game_count": expected_count}
 
 
 def _sleep_before_retry(attempt: int) -> None:
@@ -543,6 +626,8 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
     _write_health(config, "checking", checked_at)
     try:
         _preflight(config)
+        failure_stage = "continuity_bootstrap"
+        continuity_bootstrap = seed_supabase_continuity(config)
         failure_stage = "ratings"
         ratings = _run_with_source_retries(config, checked_at, force=force)
         publication = ratings.get("publication") if isinstance(ratings.get("publication"), dict) else None
@@ -597,6 +682,7 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             "schema_version": SCHEMA_VERSION,
             "status": "partial" if tier_error else str(ratings.get("status") or "ok"),
             "checked_at": _iso(checked_at),
+            "continuity_bootstrap": continuity_bootstrap,
             "ratings": ratings,
             "tier": tier,
             "tier_error": tier_error,
