@@ -114,6 +114,7 @@ def test_cached_bridge_preserves_complete_maps_without_an_api_key(
     assert meta["cached_bridge_used"] is True
     assert meta["cached_bridge_game_count"] == 1
     assert meta["source_game_count"] == 2
+    assert meta["statistics_complete_source_latest"].startswith("2026-08-08")
     assert set(maps["game_uid"]) == {"annual", "bridge"}
     live_players = pd.read_parquet(
         tmp_path / "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet"
