@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Scryglass public refresh health every hour
+
+[Timer]
+OnCalendar=*-*-* *:10:00
+Persistent=true
+RandomizedDelaySec=60
+Unit=scryglass-public-refresh-watchdog.service
+
+[Install]
+WantedBy=timers.target

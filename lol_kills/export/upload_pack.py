@@ -28,6 +28,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PACK_ROOT = ROOT / "output" / "public_pack"
 ATLAS_PUBLIC = ROOT / "apps" / "scryglass" / "public" / "packs"
+BLOB_TIMEOUT_SECONDS = 45.0
 
 
 def _load_manifest(pack_dir: Path) -> dict[str, Any]:
@@ -71,7 +72,7 @@ def _blob_put(
         },
     )
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=BLOB_TIMEOUT_SECONDS) as resp:
             body = json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         err = e.read().decode() if e.fp else str(e)
@@ -80,6 +81,27 @@ def _blob_put(
     if not url:
         raise RuntimeError(f"No URL in Blob response: {body}")
     return url
+
+
+def _blob_get(url: str, *, timeout: float = 45.0) -> bytes | None:
+    """Read a public Blob object; return None when the object does not exist."""
+
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return response.read()
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise RuntimeError(f"Blob read failed with HTTP {error.code}: {url}") from error
+    except (urllib.error.URLError, TimeoutError) as error:
+        raise RuntimeError(f"Blob read failed: {url}") from error
+
+
+def _blob_root(base_url: str) -> str:
+    marker = "/packs/"
+    if marker not in base_url:
+        raise RuntimeError("Blob pack URL does not contain the packs path")
+    return base_url.split(marker, 1)[0].rstrip("/")
 
 
 def upload_to_blob(pack_dir: Path, pack_id: str, token: str) -> dict[str, str]:
@@ -167,17 +189,57 @@ def publish_blob_pointers(
         "packs/latest.json": latest,
     }
     urls: dict[str, str] = {}
-    for pathname, payload in payloads.items():
-        urls[pathname] = _blob_put(
+    root = _blob_root(base_url)
+    previous: dict[str, bytes | None] = {
+        pathname: _blob_get(f"{root}/{pathname}") for pathname in payloads
+    }
+    try:
+        for pathname, payload in payloads.items():
+            raw = (json.dumps(payload, indent=2) + "\n").encode("utf-8")
+            urls[pathname] = _blob_put(
+                token,
+                pathname,
+                raw,
+                "application/json",
+                cache_control="public, max-age=60, must-revalidate",
+                allow_overwrite=True,
+            )
+            readback = _blob_get(f"{root}/{pathname}")
+            if readback != raw:
+                raise RuntimeError(f"Blob pointer readback failed for {pathname}")
+            print(f"  published {pathname}")
+    except Exception:
+        for pathname, raw in previous.items():
+            if raw is not None:
+                _blob_put(
+                    token,
+                    pathname,
+                    raw,
+                    "application/json",
+                    cache_control="public, max-age=60, must-revalidate",
+                    allow_overwrite=True,
+                )
+        raise
+    return urls
+
+
+def restore_blob_pointers(
+    token: str,
+    previous: dict[str, str | None],
+) -> None:
+    """Restore previously captured JSON pointers after a failed smoke check."""
+
+    for pathname, raw in previous.items():
+        if raw is None:
+            continue
+        _blob_put(
             token,
             pathname,
-            (json.dumps(payload, indent=2) + "\n").encode("utf-8"),
+            raw.encode("utf-8"),
             "application/json",
             cache_control="public, max-age=60, must-revalidate",
             allow_overwrite=True,
         )
-        print(f"  published {pathname}")
-    return urls
 
 
 def main(argv: list[str] | None = None) -> int:

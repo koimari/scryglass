@@ -260,6 +260,67 @@ def _publication_payloads(root: Path) -> dict[str, Any]:
     }
 
 
+def _restore_pointer(
+    transport: VercelBlobTransport,
+    store_id: str,
+    pathname: str,
+    previous: tuple[bytes, BlobIdentity] | None,
+) -> None:
+    """Restore one stable object with an exact conditional mutation."""
+
+    current = transport.get_blob(
+        store_id,
+        pathname,
+        deadline_epoch=int(time.time()) + 30,
+    )
+    if previous is None:
+        if current is not None:
+            deleted = transport.delete_if_match(
+                store_id,
+                pathname,
+                etag=current[1].etag,
+                deadline_epoch=int(time.time()) + 30,
+            )
+            if deleted is None:
+                raise PublicationError(f"could not remove new tier-list pointer: {pathname}")
+        return
+    if current is None:
+        raise PublicationError(f"previous tier-list pointer disappeared: {pathname}")
+    if current[0] == previous[0]:
+        return
+    restored = transport.put_if_match(
+        store_id,
+        pathname,
+        previous[0],
+        etag=current[1].etag,
+        deadline_epoch=int(time.time()) + 30,
+    )
+    if restored is None:
+        raise PublicationError(f"tier-list pointer changed during rollback: {pathname}")
+    readback = transport.get_blob(
+        store_id,
+        pathname,
+        deadline_epoch=int(time.time()) + 30,
+    )
+    if readback is None or readback[0] != previous[0]:
+        raise PublicationError(f"tier-list pointer rollback failed exact readback: {pathname}")
+
+
+def _restore_stable_pointers(
+    transport: VercelBlobTransport,
+    store_id: str,
+    previous: dict[str, tuple[bytes, BlobIdentity] | None],
+) -> None:
+    errors: list[str] = []
+    for pathname, prior in previous.items():
+        try:
+            _restore_pointer(transport, store_id, pathname, prior)
+        except Exception as error:  # noqa: BLE001
+            errors.append(f"{pathname}: {type(error).__name__}: {error}")
+    if errors:
+        raise PublicationError("tier-list rollback was not fully proven: " + " | ".join(errors))
+
+
 def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
     """Publish immutable tier-list files, then replace the stable pointer."""
 
@@ -271,6 +332,11 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
     pointer_identity = inventory.get(BLOB_POINTER_PATH)
     movement_identity = inventory.get(BLOB_MOVEMENT_PATH)
     display_identity = inventory.get(BLOB_DISPLAY_PATH)
+    previous_pointers: dict[str, tuple[bytes, BlobIdentity] | None] = {
+        BLOB_POINTER_PATH: None,
+        BLOB_MOVEMENT_PATH: None,
+        BLOB_DISPLAY_PATH: None,
+    }
     pointer_mode = WriteMode.NEW_IMMUTABLE
     if pointer_identity is not None:
         current = transport.get_blob(
@@ -281,6 +347,7 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
         if current is None or current[1] != pointer_identity:
             raise PublicationError("existing tier-list pointer changed during inventory")
         _validate_existing_pointer(current[0])
+        previous_pointers[BLOB_POINTER_PATH] = current
         pointer_mode = WriteMode.OVERWRITE
     movement_mode = WriteMode.NEW_IMMUTABLE
     if movement_identity is not None:
@@ -291,6 +358,7 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
         )
         if current_movement is None or current_movement[1] != movement_identity:
             raise PublicationError("existing tier-list movement snapshot changed during inventory")
+        previous_pointers[BLOB_MOVEMENT_PATH] = current_movement
         movement_mode = WriteMode.OVERWRITE
     display_mode = WriteMode.NEW_IMMUTABLE
     if display_identity is not None:
@@ -301,6 +369,7 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
         )
         if current_display is None or current_display[1] != display_identity:
             raise PublicationError("existing tier-list display changed during inventory")
+        previous_pointers[BLOB_DISPLAY_PATH] = current_display
         display_mode = WriteMode.OVERWRITE
 
     writes = [
@@ -335,34 +404,44 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
         run_id=payloads["release_id"],
         writes=tuple(writes),
     )
-    result = RetentionExecutor(transport).execute(plan)
-    if not result.success:
-        failed = [operation.pathname for operation in result.operations if not operation.success]
-        raise PublicationError(
-            "Blob publication failed before the stable pointer was proven: "
-            f"state={result.state.value}, failed={failed}"
+    try:
+        result = RetentionExecutor(transport).execute(plan)
+        if not result.success:
+            failed = [operation.pathname for operation in result.operations if not operation.success]
+            raise PublicationError(
+                "Blob publication failed before the stable pointer was proven: "
+                f"state={result.state.value}, failed={failed}"
+            )
+        readback = transport.get_blob(
+            store_id,
+            BLOB_POINTER_PATH,
+            deadline_epoch=int(time.time()) + 30,
         )
-    readback = transport.get_blob(
-        store_id,
-        BLOB_POINTER_PATH,
-        deadline_epoch=int(time.time()) + 30,
-    )
-    if readback is None or readback[0] != payloads["pointer_raw"]:
-        raise PublicationError("published tier-list pointer failed exact readback")
-    movement_readback = transport.get_blob(
-        store_id,
-        BLOB_MOVEMENT_PATH,
-        deadline_epoch=int(time.time()) + 30,
-    )
-    if movement_readback is None or movement_readback[0] != payloads["movement_raw"]:
-        raise PublicationError("published tier-list movement snapshot failed exact readback")
-    display_readback = transport.get_blob(
-        store_id,
-        BLOB_DISPLAY_PATH,
-        deadline_epoch=int(time.time()) + 30,
-    )
-    if display_readback is None or display_readback[0] != payloads["display_raw"]:
-        raise PublicationError("published tier-list display failed exact readback")
+        if readback is None or readback[0] != payloads["pointer_raw"]:
+            raise PublicationError("published tier-list pointer failed exact readback")
+        movement_readback = transport.get_blob(
+            store_id,
+            BLOB_MOVEMENT_PATH,
+            deadline_epoch=int(time.time()) + 30,
+        )
+        if movement_readback is None or movement_readback[0] != payloads["movement_raw"]:
+            raise PublicationError("published tier-list movement snapshot failed exact readback")
+        display_readback = transport.get_blob(
+            store_id,
+            BLOB_DISPLAY_PATH,
+            deadline_epoch=int(time.time()) + 30,
+        )
+        if display_readback is None or display_readback[0] != payloads["display_raw"]:
+            raise PublicationError("published tier-list display failed exact readback")
+    except Exception as error:  # noqa: BLE001
+        try:
+            _restore_stable_pointers(transport, store_id, previous_pointers)
+        except Exception as rollback_error:  # noqa: BLE001
+            raise PublicationError(
+                f"{type(error).__name__}: {error}; "
+                f"{type(rollback_error).__name__}: {rollback_error}"
+            ) from error
+        raise
     return {
         "status": "published",
         "blob_store_id": store_id,

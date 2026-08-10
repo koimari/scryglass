@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import unittest
 from pathlib import Path
@@ -39,10 +41,19 @@ class UploadPackTests(unittest.TestCase):
             "base_url": None,
         }
 
-        with patch.object(
+        objects: dict[str, bytes] = {}
+
+        def fake_get(url: str) -> bytes | None:
+            return objects.get(url)
+
+        def fake_put(_token, pathname, data, *_args, **_kwargs):
+            objects[f"https://blob/{pathname}"] = data
+            return f"https://blob/{pathname}"
+
+        with patch.object(upload_pack, "_blob_get", side_effect=fake_get), patch.object(
             upload_pack,
             "_blob_put",
-            side_effect=lambda _token, pathname, *_args, **_kwargs: f"https://blob/{pathname}",
+            side_effect=fake_put,
         ) as put:
             urls = upload_pack.publish_blob_pointers(
                 "token",

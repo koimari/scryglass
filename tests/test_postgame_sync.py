@@ -207,6 +207,7 @@ def test_pack_publication_updates_blob_pointer_without_a_site_build(tmp_path: Pa
 
     monkeypatch.setattr("lol_kills.postgame_sync.upload_to_blob", upload)
     monkeypatch.setattr("lol_kills.postgame_sync.publish_blob_pointers", pointers)
+    monkeypatch.setattr("lol_kills.postgame_sync._blob_get", lambda _url: None)
     result = publish_pack(pack_dir, manifest, tmp_path / "served/packs")
 
     assert calls == ["files", "pointer"]
