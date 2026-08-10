@@ -8,7 +8,7 @@ import type {
   ProfileRecords,
   TeamRating,
 } from "@/lib/pack";
-import { compactPlayerRatings, PLAYER_SIGMA_MIN, softMu } from "@/lib/pack";
+import { compactPlayerRatings, findPlayerByRouteName, PLAYER_SIGMA_MIN, softMu } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 export const revalidate = 21_600;
@@ -41,7 +41,7 @@ export default async function PlayerEloPage({ params }: Props) {
     profileRecords = null;
   }
 
-  const player = players.find((p) => p.player.toLowerCase() === name.toLowerCase());
+  const player = findPlayerByRouteName(players, name);
   if (!player) notFound();
 
   const rec = playerRecords[player.player];
