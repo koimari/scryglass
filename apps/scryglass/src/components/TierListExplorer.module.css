@@ -729,6 +729,29 @@
   text-align: left;
 }
 
+.matchupCorner {
+  align-content: end;
+}
+
+.matchupCorner span,
+.matchupCorner strong {
+  display: block;
+  white-space: nowrap;
+}
+
+.matchupCorner span {
+  margin-bottom: 0.25rem;
+  color: var(--ink-faint);
+  font-size: 0.53rem;
+  font-weight: 500;
+}
+
+.matchupCorner strong {
+  color: var(--ink);
+  font-size: 0.62rem;
+  font-weight: 650;
+}
+
 .matchupMatrix thead th .championThumb {
   width: var(--matrix-header-thumb);
   height: var(--matrix-header-thumb);
@@ -736,7 +759,7 @@
   font-size: 0.75rem;
 }
 
-.matchupMatrix thead th > span:last-child {
+.enemyChampionName {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -854,7 +877,7 @@
   --grade-ink: #fff3f2;
 }
 
-.matchupMatrix[data-matrix-size="overview"] thead th > span:last-child,
+.matchupMatrix[data-matrix-size="overview"] .enemyChampionName,
 .matchupMatrix[data-matrix-size="overview"] .matchupCell small,
 .matchupMatrix[data-matrix-size="overview"] tbody th small {
   display: none;
