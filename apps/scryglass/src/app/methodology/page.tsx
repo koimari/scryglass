@@ -96,7 +96,7 @@ export default function MethodologyPage() {
           </p>
           <p>
             Blind tiers show the expected edge in a champion&apos;s weakest common
-            same-role matchup. Counter reach counts favorable model comparisons
+            same-role matchup. Good Into counts favorable model comparisons
             against five common role opponents. The matchup matrix compares every
             eligible same-role pair. It gives each response an S-to-D grade and
             keeps the evidence interval available in the cell details.

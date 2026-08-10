@@ -40,7 +40,7 @@ const ROLE_LABELS: Record<string, string> = {
 const BOARD_MODES = [
   { value: "first_pick", label: "First pick", note: "overall strength" },
   { value: "blind", label: "Blind", note: "stability across matchups" },
-  { value: "counter", label: "Counter reach", note: "positive responses" },
+  { value: "counter", label: "Good into", note: "positive matchups" },
   { value: "responses", label: "Matchup matrix", note: "every role matchup" },
   { value: "unpicked", label: "Unpicked, but viable", note: "structural alternatives" },
 ] as const;
@@ -292,12 +292,13 @@ function listMetric(row: TierRow, mode: RankedBoardMode): { value: string; detai
     };
   }
   if (mode === "counter") {
-    const counterScore = numericMetric(row.counter_score);
     return {
       value: row.countered_opponent_count === null || row.countered_opponent_count === undefined
         ? "Pending"
         : `${row.countered_opponent_count} / 5`,
-      detail: counterScore === null ? evidenceLabel(row) : `${counterScore.toFixed(1)} expected responses`,
+      detail: row.countered_opponent_count === null || row.countered_opponent_count === undefined
+        ? evidenceLabel(row)
+        : "common opponents with a positive edge",
     };
   }
   return {
@@ -366,7 +367,7 @@ function RoleBoardGrid({
   const title = mode === "blind"
     ? "Safest blind picks by role"
     : mode === "counter"
-      ? "Widest counter reach by role"
+      ? "Most positive matchups by role"
       : "Five-role draft sheet";
   return (
     <section className={styles.roleSnapshot}>
@@ -606,7 +607,7 @@ function ResponseBoard({
             ))}
           </select>
         </label>
-        <p>Rows are your response pick. Columns are the enemy pick. Hover a cell for 1.5 seconds to see both modeled win shares and the grade basis.</p>
+        <p>Read across your champion&apos;s row. Each column is the enemy pick. Hover a cell for 1.5 seconds to see both modeled win shares and the grade basis.</p>
       </div>
       {matrix && champions.length ? (
         <>
@@ -643,11 +644,14 @@ function ResponseBoard({
             <table className={styles.matchupMatrix} data-matrix-size={matrixSize}>
               <thead>
                 <tr>
-                  <th scope="col">Response pick</th>
+                  <th scope="col" className={styles.matchupCorner}>
+                    <span>Enemy pick →</span>
+                    <strong>Your pick ↓</strong>
+                  </th>
                   {columns.map((champion) => (
-                    <th scope="col" key={champion.champion_id} title={champion.champion}>
+                    <th scope="col" key={champion.champion_id} title={`Enemy pick: ${champion.champion}`}>
                       <ChampionThumb name={champion.champion} imageUrl={imageById.get(champion.champion_id)} />
-                      <span>{champion.champion}</span>
+                      <span className={styles.enemyChampionName}>{champion.champion}</span>
                     </th>
                   ))}
                 </tr>
@@ -658,7 +662,7 @@ function ResponseBoard({
                   const responseRow = rowById.get(response.champion_id);
                   return (
                     <tr key={response.champion_id}>
-                      <th scope="row">
+                      <th scope="row" title={`Your pick: ${response.champion}`}>
                         <ChampionThumb name={response.champion} imageUrl={imageById.get(response.champion_id)} />
                         <span><strong>{response.champion}</strong><small>#{responseRow?.rank ?? "—"}</small></span>
                       </th>
@@ -715,13 +719,13 @@ function ResponseBoard({
               role="tooltip"
             >
               <header>
-                <strong>{tooltip.response}</strong>
-                <span>into {tooltip.enemy}</span>
+                <strong>Your {tooltip.response}</strong>
+                <span>into enemy {tooltip.enemy}</span>
                 <em className={gradeClass[tooltip.grade]}>{tooltip.grade}</em>
               </header>
               <div className={styles.tooltipShares}>
-                <span><small>{tooltip.response}</small><strong>{tooltip.responseShare.toFixed(1)}%</strong></span>
-                <span><small>{tooltip.enemy}</small><strong>{tooltip.enemyShare.toFixed(1)}%</strong></span>
+                <span><small>Your pick · {tooltip.response}</small><strong>{tooltip.responseShare.toFixed(1)}%</strong></span>
+                <span><small>Enemy pick · {tooltip.enemy}</small><strong>{tooltip.enemyShare.toFixed(1)}%</strong></span>
               </div>
               <p>{gradeReason(tooltip.grade, tooltip.edge)}</p>
               <dl>
@@ -892,18 +896,18 @@ export function TierListExplorer() {
               description="Expected edge in the weakest common matchup."
             />
             <SummaryCard
-              label="Widest counter reach"
+              label="Most positive matchups"
               row={counterPick}
               value={counterPick?.countered_opponent_count === null || counterPick?.countered_opponent_count === undefined ? "Matchup refresh pending" : `${counterPick.countered_opponent_count} / 5`}
               mode="counter"
-              description="Positive modeled edges against five common role opponents."
+              description={counterPick ? `${counterPick.champion} has a positive modeled edge into ${counterPick.countered_opponent_count} of 5 common ${roleLabel(counterPick.role)} opponents.` : "Matchup refresh pending."}
             />
           </>
         ) : (
           <article className={styles.matchupNotice}>
             <p className={styles.cardLabel}>Matchup views</p>
             <strong>Refresh pending</strong>
-            <span>Blind stability, counter reach, and direct responses will appear after the next accepted matchup artifact.</span>
+            <span>Blind stability, positive matchups, and direct responses will appear after the next accepted matchup artifact.</span>
           </article>
         )}
       </div> : null}
@@ -949,7 +953,7 @@ export function TierListExplorer() {
             <header className={styles.panelHeading}>
               <div>
                 <p className={styles.cardLabel}>{roleLabel(role)} · Patch {activePatch}</p>
-                <h2>{mode === "blind" ? "Blind stability" : mode === "counter" ? "Counter reach" : "First-pick board"}</h2>
+                <h2>{mode === "blind" ? "Blind stability" : mode === "counter" ? "Positive matchups" : "First-pick board"}</h2>
               </div>
               <span>{selectedRows.length} champions</span>
             </header>
@@ -960,7 +964,7 @@ export function TierListExplorer() {
               }} />
             ) : (
               <div className={styles.unavailable}>
-                <p>{mode === "blind" ? "Blind stability" : "Counter reach"} is waiting for the matchup refresh.</p>
+                <p>{mode === "blind" ? "Blind stability" : "Positive matchups"} is waiting for the matchup refresh.</p>
                 <span>The first-pick A–D board remains available for this role and patch.</span>
               </div>
             )}
@@ -975,7 +979,7 @@ export function TierListExplorer() {
 
       <div className={styles.methodNote}>
         <strong>How to read this board</strong>
-        <span>First pick uses the patch-wide model. Blind shows the expected weakest common matchup. Counter reach counts positive modeled edges against five common role opponents. Unpicked alternatives use structural similarity and carry no performance claim. Region filters observed appearances and keeps the patch-wide fit fixed.</span>
+        <span>First pick uses the patch-wide model. Blind shows the expected weakest common matchup. Good into counts positive modeled edges against five common role opponents. Unpicked alternatives use structural similarity and carry no performance claim. Region filters observed appearances and keeps the patch-wide fit fixed.</span>
       </div>
     </section>
   );
