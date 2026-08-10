@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from lol_kills.etl.oe_ingest import OeDownloadError
+from lol_kills.export import supabase_publication
 from lol_kills.postgame_sync import (
     SyncConfig,
     _load_json,
@@ -63,6 +64,9 @@ class RefreshConfig:
     state_path: Path
     lock_path: Path
     production: bool
+    publication_backend: str
+    supabase_url: str | None
+    supabase_secret_key: str | None
     attempts: int = DEFAULT_ATTEMPTS
     step_timeout_seconds: float = DEFAULT_STEP_TIMEOUT_MINUTES * 60
 
@@ -90,6 +94,9 @@ def config_from_environment(root: Path, public_root: Path) -> RefreshConfig:
     if manifest_url is None and blob_root:
         manifest_url = f"{blob_root.rstrip('/')}/packs/manifest.json"
     runtime = root / "data/lol/runtime"
+    publication_backend = (_read_env("SCRYGLASS_PUBLICATION_BACKEND") or "blob").lower()
+    if publication_backend not in {"blob", "supabase"}:
+        raise PublicRefreshError("SCRYGLASS_PUBLICATION_BACKEND must be blob or supabase")
     try:
         attempts = int(_read_env("SCRYGLASS_REFRESH_ATTEMPTS") or DEFAULT_ATTEMPTS)
     except ValueError as error:
@@ -116,6 +123,12 @@ def config_from_environment(root: Path, public_root: Path) -> RefreshConfig:
         state_path=runtime / STATE_FILE,
         lock_path=runtime / LOCK_FILE,
         production=_read_env("SCRYGLASS_PUBLIC_RELEASE") == "1",
+        publication_backend=publication_backend,
+        supabase_url=_read_env("SCRYGLASS_SUPABASE_URL") or _read_env("SUPABASE_URL"),
+        supabase_secret_key=(
+            _read_env("SCRYGLASS_SUPABASE_SECRET_KEY")
+            or _read_env("SUPABASE_SECRET_KEY")
+        ),
         attempts=attempts,
         step_timeout_seconds=step_timeout_minutes * 60,
     )
@@ -142,18 +155,42 @@ def _write_health(config: RefreshConfig, status: str, checked_at: datetime, **fi
 def _preflight(config: RefreshConfig) -> None:
     if not config.production:
         return
-    required = {
-        "BLOB_READ_WRITE_TOKEN": _read_env("BLOB_READ_WRITE_TOKEN") or _read_env("VERCEL_BLOB_READ_WRITE_TOKEN"),
-        "SCRYGLASS_DATA_PUBLISH_TOKEN": _read_env("SCRYGLASS_DATA_PUBLISH_TOKEN"),
-        "LIVE_BLOB_BASE_URL": config.blob_root,
-    }
+    required = {"SCRYGLASS_DATA_PUBLISH_TOKEN": _read_env("SCRYGLASS_DATA_PUBLISH_TOKEN")}
+    if config.publication_backend == "supabase":
+        required.update(
+            {
+                "SCRYGLASS_SUPABASE_URL": config.supabase_url,
+                "SCRYGLASS_SUPABASE_SECRET_KEY": config.supabase_secret_key,
+            }
+        )
+    else:
+        required.update(
+            {
+                "BLOB_READ_WRITE_TOKEN": (
+                    _read_env("BLOB_READ_WRITE_TOKEN")
+                    or _read_env("VERCEL_BLOB_READ_WRITE_TOKEN")
+                ),
+                "LIVE_BLOB_BASE_URL": config.blob_root,
+            }
+        )
     missing = sorted(name for name, value in required.items() if not value)
     if missing:
         raise PublicRefreshError("public refresh credentials are incomplete: " + ", ".join(missing))
     if not config.site.startswith("https://"):
         raise PublicRefreshError("SCRYGLASS_PUBLISH_ORIGIN must use HTTPS")
-    if not config.blob_root or ".public.blob.vercel-storage.com" not in config.blob_root:
+    if (
+        config.publication_backend == "blob"
+        and (not config.blob_root or ".public.blob.vercel-storage.com" not in config.blob_root)
+    ):
         raise PublicRefreshError("LIVE_BLOB_BASE_URL must be a public Blob root")
+    if config.publication_backend == "supabase":
+        try:
+            supabase_publication.SupabasePublicData(
+                config.supabase_url or "",
+                config.supabase_secret_key or "",
+            )
+        except ValueError as error:
+            raise PublicRefreshError(str(error)) from error
 
 
 def _sleep_before_retry(attempt: int) -> None:
@@ -185,8 +222,14 @@ def _run_tier_refresh(config: RefreshConfig, expected_live_as_of: str) -> dict[s
         skip_annual_oe=True,
         skip_atom_bridge=True,
         step_timeout_seconds=config.step_timeout_seconds,
+        publish=config.publication_backend == "blob",
     )
-    if receipt.get("status") != "production_promoted":
+    expected_status = (
+        "production_built"
+        if config.publication_backend == "supabase"
+        else "production_promoted"
+    )
+    if receipt.get("status") != expected_status:
         raise PublicRefreshError(
             "tier-list refresh did not promote: " + str(receipt.get("status") or "unknown")
         )
@@ -225,6 +268,16 @@ def _sha256(raw: bytes) -> str:
 
 
 def _load_remote_manifest(config: RefreshConfig) -> tuple[dict[str, Any], str]:
+    if config.publication_backend == "supabase":
+        client = supabase_publication.SupabasePublicData(
+            config.supabase_url or "",
+            config.supabase_secret_key or "",
+        )
+        release = client.active_release()
+        manifest = release.get("manifest") if isinstance(release, dict) else None
+        if not isinstance(manifest, dict):
+            raise PublicRefreshError("Supabase has no active public release")
+        return manifest, str(manifest.get("base_url") or "").rstrip("/")
     if config.manifest_url:
         raw = _http_bytes(
             config.manifest_url,
@@ -249,11 +302,12 @@ def verify_public_release(config: RefreshConfig, *, expected_pack_id: str | None
     pack_id = str(manifest.get("pack_id") or "")
     if not pack_id or not base_url:
         raise PublicRefreshError("public pack manifest has no active pack and base URL")
-    if config.production and (
-        not base_url.startswith("https://")
-        or ".public.blob.vercel-storage.com" not in base_url
-    ):
-        raise PublicRefreshError("public pack base URL is not a public HTTPS Blob URL")
+    if config.production:
+        if config.publication_backend == "supabase":
+            if manifest.get("data_backend") != "supabase" or base_url != config.supabase_url:
+                raise PublicRefreshError("public pack is not bound to the configured Supabase project")
+        elif not base_url.startswith("https://") or ".public.blob.vercel-storage.com" not in base_url:
+            raise PublicRefreshError("public pack base URL is not a public HTTPS Blob URL")
     if expected_pack_id and pack_id != expected_pack_id:
         raise PublicRefreshError(f"public pack pointer is {pack_id}, expected {expected_pack_id}")
     files = manifest.get("files")
@@ -263,7 +317,15 @@ def verify_public_release(config: RefreshConfig, *, expected_pack_id: str | None
         raise PublicRefreshError("public pack manifest file total is invalid")
     checked_files = 0
     total_bytes = 0
-    local = not config.manifest_url
+    local = not config.manifest_url and config.publication_backend != "supabase"
+    supabase_client = (
+        supabase_publication.SupabasePublicData(
+            config.supabase_url or "",
+            config.supabase_secret_key or "",
+        )
+        if config.publication_backend == "supabase"
+        else None
+    )
     for item in files:
         if not isinstance(item, dict):
             raise PublicRefreshError("public pack manifest contains a malformed file entry")
@@ -275,6 +337,17 @@ def verify_public_release(config: RefreshConfig, *, expected_pack_id: str | None
             or any(part in {"", ".", ".."} for part in relative_path.parts)
         ):
             raise PublicRefreshError("public pack manifest contains an unsafe file path")
+        if supabase_client is not None:
+            asset = supabase_client.asset(pack_id, relative)
+            if (
+                not asset
+                or asset.get("bytes") != item.get("bytes")
+                or asset.get("sha256") != item.get("sha256")
+            ):
+                raise PublicRefreshError(f"Supabase public asset failed verification: {relative}")
+            checked_files += 1
+            total_bytes += int(item.get("bytes", 0))
+            continue
         if local:
             path = (config.public_root / pack_id / relative_path).resolve()
             try:
@@ -317,7 +390,15 @@ def verify_public_release(config: RefreshConfig, *, expected_pack_id: str | None
                 raise PublicRefreshError("public health response has no available tier list")
 
     tier_status = None
-    if config.production and config.blob_root:
+    if config.production and config.publication_backend == "supabase":
+        if supabase_client is None:
+            raise PublicRefreshError("Supabase verification client is unavailable")
+        tier_asset = supabase_client.asset(pack_id, supabase_publication.TIER_ASSET_PATH)
+        tier_body = tier_asset.get("body") if isinstance(tier_asset, dict) else None
+        tier_status = tier_body.get("status") if isinstance(tier_body, dict) else None
+        if tier_expected and tier_status != "available":
+            raise PublicRefreshError("Supabase tier-list display is not available")
+    elif config.production and config.blob_root:
         tier_raw = _http_bytes(
             f"{config.blob_root}/rankings/tierlists.json",
             attempts=config.attempts,
@@ -447,6 +528,7 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
     publication: dict[str, Any] | None = None
     tier: dict[str, Any] | None = None
     tier_publication: dict[str, Any] | None = None
+    database_publication: dict[str, Any] | None = None
     post_publication_verified = False
     failure_stage = "preflight"
     _write_health(config, "checking", checked_at)
@@ -461,6 +543,10 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             or force
             or not previous_public_state.get("tier")
             or previous_public_state.get("tier_error")
+            or (
+                config.publication_backend == "supabase"
+                and not previous_public_state.get("database_publication")
+            )
         )
         if should_run_tier:
             failure_stage = "tier"
@@ -470,7 +556,25 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
                 tier_publication = _tier_publication(tier)
             except Exception as error:  # noqa: BLE001
                 tier_error = f"{type(error).__name__}: {str(error)[:500]}"
-        changed = ratings.get("status") == "published" or tier is not None
+        if tier is not None and config.publication_backend == "supabase":
+            failure_stage = "publication"
+            pack_id = str(ratings.get("pack_id") or "")
+            pack_dir = config.public_root / pack_id
+            manifest = _load_json(pack_dir / "manifest.json")
+            if not manifest:
+                raise PublicRefreshError("local release manifest is missing before Supabase publication")
+            database_publication = supabase_publication.publish_release(
+                pack_dir,
+                manifest,
+                config.root / "apps/scryglass/public/rankings/tierlists.json",
+                project_url=config.supabase_url or "",
+                secret_key=config.supabase_secret_key or "",
+            )
+        changed = (
+            ratings.get("status") == "published"
+            or tier is not None
+            or database_publication is not None
+        )
         failure_stage = "cache"
         cache = invalidate_public_cache(config) if changed else None
         failure_stage = "smoke"
@@ -487,6 +591,7 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             "ratings": ratings,
             "tier": tier,
             "tier_error": tier_error,
+            "database_publication": database_publication,
             "cache_invalidation": cache,
             "smoke": smoke,
         }
@@ -499,7 +604,11 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
         should_rollback = (
             not post_publication_verified
             and failure_stage in {"cache", "smoke"}
-            and (publication is not None or tier_publication is not None)
+            and (
+                publication is not None
+                or tier_publication is not None
+                or database_publication is not None
+            )
         )
         if should_rollback:
             rollback = {"status": "restoring"}
@@ -519,6 +628,19 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
                     rollback_errors.append(
                         f"tier: {type(rollback_error).__name__}: {rollback_error}"
                     )
+            if database_publication is not None:
+                previous_release_id = database_publication.get("previous_release_id")
+                if isinstance(previous_release_id, str) and previous_release_id:
+                    try:
+                        rollback["supabase"] = supabase_publication.restore_release(
+                            previous_release_id,
+                            project_url=config.supabase_url or "",
+                            secret_key=config.supabase_secret_key or "",
+                        )
+                    except Exception as rollback_error:  # noqa: BLE001
+                        rollback_errors.append(
+                            f"supabase: {type(rollback_error).__name__}: {rollback_error}"
+                        )
             try:
                 rollback["cache_invalidation"] = invalidate_public_cache(config)
             except Exception as cache_error:  # noqa: BLE001

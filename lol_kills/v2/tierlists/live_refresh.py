@@ -713,6 +713,7 @@ def refresh_candidate(
     skip_atom_bridge: bool = False,
     prepared_source: dict[str, Any] | None = None,
     step_timeout_seconds: float = DEFAULT_STEP_TIMEOUT_SECONDS,
+    publish: bool = True,
 ) -> dict[str, Any]:
     if source_mode != "oe_only":
         raise ValueError("public tier refresh source_mode must be oe_only")
@@ -908,7 +909,7 @@ def refresh_candidate(
         else:
             bundle_step = _skipped_step("production_bundle", "independent_authority_incomplete")
             promotion_steps.append(bundle_step)
-        if bundle_step["completed"]:
+        if bundle_step["completed"] and publish:
             try:
                 publication = publish_production_bundle(root)
                 publication_step = {
@@ -926,6 +927,17 @@ def refresh_candidate(
                 publication_step["returncode"] = 2
             promotion_steps.append(publication_step)
             promotion_status = "promoted" if publication_step["completed"] else "blocked_publication"
+        elif bundle_step["completed"]:
+            promotion_steps.append(
+                {
+                    "source": "deferred_publication",
+                    "command": [],
+                    "returncode": 0,
+                    "completed": True,
+                    "reason": "the release coordinator will publish the complete ratings and tier snapshot",
+                }
+            )
+            promotion_status = "built"
         else:
             promotion_status = "blocked_promotion"
 
@@ -937,6 +949,8 @@ def refresh_candidate(
     )
     if promotion_status == "promoted":
         receipt_status = "production_promoted"
+    elif promotion_status == "built":
+        receipt_status = "production_built"
     elif promote and promotion_status == "blocked_publication":
         receipt_status = "blocked_publication"
     elif promote and promotion_status in {"blocked_promotion", "blocked_promotion_locator"}:
@@ -977,13 +991,13 @@ def refresh_candidate(
             "source_freshness": True,
             "model_validation": False,
             "publication": promotion_status == "promoted",
-            "rank_eligibility": promotion_status == "promoted",
+            "rank_eligibility": promotion_status in {"promoted", "built"},
             "recommendation": False,
             "betting": False,
         },
         "claim_ceiling": (
             "This receipt records a source-bound descriptive production bundle. It does not authorize outcome-calibrated probability, causal, recommendation, or betting claims."
-            if promotion_status == "promoted"
+            if promotion_status in {"promoted", "built"}
             else "This receipt records source refresh and a development replay only."
         ),
     }
@@ -1015,6 +1029,11 @@ def main() -> int:
         help="run the descriptive evaluation, independent authority, and production bundle after refresh",
     )
     parser.add_argument(
+        "--defer-publication",
+        action="store_true",
+        help="build the approved production bundle and let the release coordinator publish it",
+    )
+    parser.add_argument(
         "--source-mode",
         choices=("oe_only",),
         default=DEFAULT_SOURCE_MODE,
@@ -1041,9 +1060,14 @@ def main() -> int:
         promote=args.promote,
         skip_annual_oe=args.skip_annual_oe,
         skip_atom_bridge=args.skip_atom_bridge,
+        publish=not args.defer_publication,
     )
     print(json.dumps(receipt, ensure_ascii=True, indent=2, sort_keys=True))
-    return 0 if receipt["status"] in {"ready_for_authority_review", "production_promoted"} else 2
+    return 0 if receipt["status"] in {
+        "ready_for_authority_review",
+        "production_built",
+        "production_promoted",
+    } else 2
 
 
 if __name__ == "__main__":

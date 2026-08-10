@@ -28,9 +28,11 @@ the small remote file signature first. It downloads a file only when its size
 or modification time changes. A validated local copy remains active when the
 source is unchanged or temporarily unavailable.
 
-Accepted packs go to immutable object storage. The site reads the current pack
-pointer there and caches it for six hours. A data refresh does not run a site
-build or create a deployment.
+Accepted page data goes to Supabase. Postgres holds ratings, profiles, match
+records, and the active release. Supabase Storage holds the larger tier-list
+matrix. The worker makes the complete release visible in one database
+transaction. The site caches it for six hours. A data refresh does not run a
+site build or create a deployment.
 
 Run the complete local control loop with:
 
@@ -43,11 +45,14 @@ SCRYGLASS_PUBLIC_RELEASE=1 python3 -m lol_kills.public_refresh \
 ```
 
 Copy `ops/systemd/public-refresh.env.example` to
-`/etc/scryglass/public-refresh.env` and set `BLOB_READ_WRITE_TOKEN`,
-`LIVE_BLOB_BASE_URL`, and `SCRYGLASS_DATA_PUBLISH_TOKEN` in the worker
-environment. The alert URL is optional. The runner performs OE CSV refresh,
-ratings, tier authority, publication, cache invalidation, and live smoke checks
-in one locked cycle.
+`/etc/scryglass/public-refresh.env`. Set the Supabase project URL, the dedicated
+worker secret key, and `SCRYGLASS_DATA_PUBLISH_TOKEN`. The alert URL is
+optional. The runner performs OE CSV refresh, ratings, tier authority,
+publication, cache invalidation, and live smoke checks in one locked cycle.
+
+The website needs `SCRYGLASS_SUPABASE_URL` and
+`SCRYGLASS_SUPABASE_PUBLISHABLE_KEY` in Vercel. The publishable key can read
+only the active public release. It cannot upload or activate a release.
 
 The refresh accepts a map after it has canonical identities, two teams, ten
 players, five roles per side, and complete public statistics. The current pack

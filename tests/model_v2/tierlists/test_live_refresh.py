@@ -477,6 +477,42 @@ def test_promote_runs_evaluation_authority_and_bundle_after_source_refresh(tmp_p
     assert receipt["authority"]["publication"] is True
 
 
+def test_promote_can_defer_publication_to_the_release_coordinator(tmp_path: Path) -> None:
+    steps = [
+        {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0}
+        for _ in range(7)
+    ]
+    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_live/meta.json"
+    meta_path.parent.mkdir(parents=True)
+    meta_path.write_text(
+        json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_statistics_complete": True}),
+        encoding="utf-8",
+    )
+    with patch.object(live_refresh, "_run_step", side_effect=steps), patch.object(
+        live_refresh,
+        "build_candidate",
+        return_value=_candidate(source_mode="oe_only"),
+    ), patch.object(live_refresh, "write_candidate", return_value="b" * 64), patch.object(
+        live_refresh,
+        "publish_production_bundle",
+    ) as publish:
+        receipt = live_refresh.refresh_candidate(
+            tmp_path,
+            expected_live_as_of="2026-08-08T12:00:00Z",
+            receipt_path=tmp_path / "receipt.json",
+            source_mode="oe_only",
+            promote=True,
+            publish=False,
+        )
+
+    publish.assert_not_called()
+    assert receipt["status"] == "production_built"
+    assert receipt["promotion_status"] == "built"
+    assert receipt["promotion_steps"][-1]["source"] == "deferred_publication"
+    assert receipt["authority"]["publication"] is False
+    assert receipt["authority"]["rank_eligibility"] is True
+
+
 def test_promote_stays_blocked_when_blob_publication_is_not_configured(tmp_path: Path) -> None:
     steps = [
         {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0}

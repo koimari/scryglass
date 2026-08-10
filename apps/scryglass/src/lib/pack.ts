@@ -28,6 +28,7 @@ export type PackManifest = {
   attribution: string;
   excluded: string[];
   base_url: string | null;
+  data_backend?: "supabase" | "blob" | "local";
   ratings?: {
     source_mode?: string;
     source_as_of?: string;

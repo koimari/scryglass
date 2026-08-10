@@ -7,9 +7,9 @@ The public payload contains nine rating and profile files plus one accepted tier
 1. Install the systemd refresh service, alert service, refresh timer, watchdog
    service, and watchdog timer from `ops/systemd`.
 2. Copy `ops/systemd/public-refresh.env.example` to
-   `/etc/scryglass/public-refresh.env` and set the Blob write key, Blob root,
-   and data-publish secret. Keep all secrets outside the repository. Alerts are
-   optional.
+   `/etc/scryglass/public-refresh.env` and set the Supabase project URL, worker
+   secret key, and data-publish secret. Keep all secrets outside the
+   repository. Alerts are optional.
 3. Start one controlled run:
 
    ```bash
@@ -20,8 +20,8 @@ The public payload contains nine rating and profile files plus one accepted tier
    ```
 
 4. The runner performs source discovery, ratings, patch-wide tier authority,
-   Blob publication, cache invalidation, and checks for `/elo`, `/matches`,
-   and `/tiers`.
+   atomic Supabase publication, cache invalidation, and checks for `/elo`,
+   `/matches`, and `/tiers`.
 5. Read `data/lol/runtime/public-refresh-health.json`. A failed map stays
    pending. A failed release keeps the previous pointer.
 6. The watchdog records stale state after the configured twelve-hour freshness
@@ -36,9 +36,9 @@ modules.
 GitHub checks validate code changes. They are not part of the data refresh
 path. No production workflow or deployment requires `GRID_API_KEY`.
 
-The worker uses `BLOB_READ_WRITE_TOKEN` for immutable packs and tier releases.
-It uses `SCRYGLASS_DATA_PUBLISH_TOKEN` only for cache invalidation. The
-short-lived upload token limits each write to the public data paths.
+The worker uses `SCRYGLASS_SUPABASE_SECRET_KEY` to stage and activate releases.
+The website uses a separate publishable key with read-only policies.
+`SCRYGLASS_DATA_PUBLISH_TOKEN` clears the website cache after activation.
 
 ## Build budget
 
