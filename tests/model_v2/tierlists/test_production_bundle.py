@@ -98,6 +98,7 @@ def test_response_matrix_requires_complete_square_matchups() -> None:
             "interval_high_pp": [[None, 10.0], [2.0, None]],
             "evidence": [[None, "supported"], ["supported", None]],
             "effective_maps": [[None, 12.5], [12.5, None]],
+            "basis": [[None, "observed_pair_plus_model"], ["observed_pair_plus_model", None]],
         }
     }
     _validate_response_matrix(matrix)
@@ -105,3 +106,12 @@ def test_response_matrix_requires_complete_square_matchups() -> None:
     invalid = {"response_matrix": {**matrix["response_matrix"], "edge_pp": [[None, 4.2]]}}
     with pytest.raises(ProductionBundleError, match="edge_pp is malformed"):
         _validate_response_matrix(invalid)
+
+    invalid_basis = {
+        "response_matrix": {
+            **matrix["response_matrix"],
+            "basis": [[None, "unknown"], ["observed_pair_plus_model", None]],
+        }
+    }
+    with pytest.raises(ProductionBundleError, match="basis is invalid"):
+        _validate_response_matrix(invalid_basis)

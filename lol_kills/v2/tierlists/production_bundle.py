@@ -267,7 +267,7 @@ def _validate_response_matrix(cell: Mapping[str, Any]) -> None:
     size = len(champion_ids)
     numeric_fields = ("edge_pp", "interval_low_pp", "interval_high_pp", "effective_maps")
     matrices: dict[str, list[Any]] = {}
-    for field in (*numeric_fields, "evidence"):
+    for field in (*numeric_fields, "evidence", "basis"):
         value = matrix.get(field)
         if not isinstance(value, list) or len(value) != size or any(not isinstance(row, list) or len(row) != size for row in value):
             raise ProductionBundleError(f"candidate response matrix {field} is malformed")
@@ -292,6 +292,12 @@ def _validate_response_matrix(cell: Mapping[str, Any]) -> None:
                 raise ProductionBundleError("candidate response matrix map count is invalid")
             if values["evidence"] not in {"supported", "limited"}:
                 raise ProductionBundleError("candidate response matrix evidence is invalid")
+            if values["basis"] not in {
+                "observed_pair_plus_model",
+                "atom_and_strength_inferred",
+                "strength_only_inferred",
+            }:
+                raise ProductionBundleError("candidate response matrix basis is invalid")
 
 
 def _validate_regional_views(cell: Mapping[str, Any]) -> None:

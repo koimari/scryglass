@@ -10,6 +10,7 @@ from lol_kills.v2.tierlists.pooled_candidate import (
     _counter_count_point_estimate,
     _matchup_metrics_available,
     _regional_contexts,
+    _response_basis,
 )
 
 
@@ -102,3 +103,9 @@ def test_counter_count_uses_positive_model_contrasts() -> None:
         ]
     )
     assert _counter_count_point_estimate(theta) == 3
+
+
+def test_response_basis_names_observed_atom_and_strength_only_estimates() -> None:
+    assert _response_basis(effective_maps=4.5, atom_supported=True) == "observed_pair_plus_model"
+    assert _response_basis(effective_maps=0.0, atom_supported=True) == "atom_and_strength_inferred"
+    assert _response_basis(effective_maps=0.0, atom_supported=False) == "strength_only_inferred"

@@ -53,6 +53,7 @@ export type ResponseMatrix = {
   interval_high_pp: Array<Array<number | null>>;
   evidence: Array<Array<"supported" | "limited" | null>>;
   effective_maps: Array<Array<number | null>>;
+  basis?: Array<Array<"observed_pair_plus_model" | "atom_and_strength_inferred" | "strength_only_inferred" | null>>;
   grade_thresholds_pp?: { S: number; A: number; B: number; C: number };
 };
 
