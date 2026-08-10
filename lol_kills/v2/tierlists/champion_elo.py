@@ -40,9 +40,8 @@ LIVE_WINDOW_START = pd.Timestamp("2026-07-18T00:00:00Z")
 ROLES = ("top", "jungle", "mid", "bot", "support")
 INTERNATIONAL_EVENTS = {"msi", "ewc", "worlds", "fst", "first stand"}
 TIER_BUCKETS = ("Z Blind", "Z Counter", "S Blind", "S Counter", "A", "B", "C", "D")
-SOURCE_LOCATOR = "data/lol/warehouse/parquet/oe_player_games.parquet"
-SUPPLEMENTAL_SOURCE_LOCATOR = "data/lol/warehouse/parquet/oe_api_player_games.parquet"
-SUPPLEMENTAL_META_LOCATOR = "data/lol/warehouse/parquet/oe_api_meta.json"
+SOURCE_LOCATOR = "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet"
+ANNUAL_SOURCE_LOCATOR = "data/lol/warehouse/parquet/oe_player_games.parquet"
 IDENTITY_CROSSWALK_LOCATOR = "data/lol/v2/champions/champion-id-crosswalk-v1.json"
 IDENTITY_METADATA_LOCATOR = "data/lol/v2/champions/sources/riot-champion-metadata-16.14.1.json"
 ATOM_BRIDGE_LOCATOR = "data/lol/v2/champions/lcc-atom-bridge-v1.json"
@@ -217,10 +216,21 @@ def _load_crosswalk(root: Path) -> tuple[dict[str, str], dict[str, Any]]:
     return out, identity_sources
 
 
-def _load_source(root: Path, *, as_of: pd.Timestamp | None = None) -> tuple[pd.DataFrame, str]:
-    primary_path = root / SOURCE_LOCATOR
-    if not primary_path.is_file() or primary_path.is_symlink():
-        raise ChampionEloError(f"source is missing or not a regular file: {primary_path}")
+def _load_source(
+    root: Path,
+    *,
+    as_of: pd.Timestamp | None = None,
+) -> tuple[pd.DataFrame, str, str]:
+    source_paths = [root / SOURCE_LOCATOR, root / ANNUAL_SOURCE_LOCATOR]
+    primary_path = next(
+        (path for path in source_paths if path.is_file() and not path.is_symlink()),
+        None,
+    )
+    if primary_path is None:
+        raise ChampionEloError(
+            "source is missing or not a regular file: "
+            f"{root / SOURCE_LOCATOR}"
+        )
     needed = [
         "gameid",
         "date",
@@ -237,19 +247,6 @@ def _load_source(root: Path, *, as_of: pd.Timestamp | None = None) -> tuple[pd.D
         *CORE_INPUTS,
     ]
     source_paths = [primary_path]
-    supplemental_path = root / SUPPLEMENTAL_SOURCE_LOCATOR
-    if supplemental_path.is_file() and not supplemental_path.is_symlink():
-        meta_path = root / SUPPLEMENTAL_META_LOCATOR
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            claimed_sha = meta["player_output"]["raw_sha256"]
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
-            raise ChampionEloError(
-                f"OE API supplement receipt cannot be read: {meta_path}"
-            ) from exc
-        if claimed_sha != _sha256_path(supplemental_path):
-            raise ChampionEloError("OE API supplement digest does not match its receipt")
-        source_paths.append(supplemental_path)
     frames: list[pd.DataFrame] = []
     source_bindings: list[dict[str, str]] = []
     for path in source_paths:
@@ -293,7 +290,11 @@ def _load_source(root: Path, *, as_of: pd.Timestamp | None = None) -> tuple[pd.D
     frame = frame[frame["game_id"].isin(complete_game_ids)].copy()
     if frame.empty:
         raise ChampionEloError("source has no identity and statistics-complete maps")
-    return frame, _sha256_bytes(_canonical_json(source_bindings))
+    return (
+        frame,
+        _sha256_bytes(_canonical_json(source_bindings)),
+        str(primary_path.relative_to(root)),
+    )
 
 
 def _build_maps(frame: pd.DataFrame) -> tuple[list[dict[str, Any]], int]:
@@ -1100,7 +1101,7 @@ def build_candidate(
         min_appearances=min_appearances,
         source_mode=source_mode,
     )
-    frame, source_sha256 = _load_source(root, as_of=as_of)
+    frame, source_sha256, source_locator = _load_source(root, as_of=as_of)
     maps, rejected_maps = _build_maps(frame)
     if not maps:
         raise ChampionEloError("no complete five-role maps remain after identity checks")
@@ -1258,10 +1259,9 @@ def build_candidate(
         "expected_live_as_of": _utc_stamp(expected) if expected is not None else None,
         "source_complete_through_expected_live_as_of": source_complete,
         "source": {
-            "locator": SOURCE_LOCATOR,
+            "locator": source_locator,
             "raw_sha256": source_sha256,
-            "source_files": [SOURCE_LOCATOR]
-            + ([SUPPLEMENTAL_SOURCE_LOCATOR] if (root / SUPPLEMENTAL_SOURCE_LOCATOR).is_file() else []),
+            "source_files": [source_locator],
             "maps_replayed": len(maps),
             "maps_rejected_incomplete_roles": rejected_maps,
             "maps_in_live_window": len(live_rows),

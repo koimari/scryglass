@@ -225,7 +225,7 @@ def test_watchdog_stays_quiet_when_the_last_success_is_fresh(tmp_path: Path) -> 
     send.assert_not_called()
 
 
-def test_production_preflight_uses_oe_and_public_release_credentials_only(tmp_path: Path) -> None:
+def test_production_preflight_uses_public_release_credentials_only(tmp_path: Path) -> None:
     base = "https://store-test.public.blob.vercel-storage.com"
     config = replace(
         _config(tmp_path),
@@ -234,10 +234,8 @@ def test_production_preflight_uses_oe_and_public_release_credentials_only(tmp_pa
         manifest_url=f"{base}/packs/manifest.json",
     )
     values = {
-        "ORACLES_ELIXIR_API_KEY": "oe-key",
         "BLOB_READ_WRITE_TOKEN": "blob-key",
         "SCRYGLASS_DATA_PUBLISH_TOKEN": "publish-key",
-        "SCRYGLASS_ALERT_WEBHOOK_URL": "https://alerts.test",
     }
     with patch.dict("os.environ", values, clear=True):
         public_refresh._preflight(config)
@@ -312,11 +310,13 @@ def test_systemd_worker_cannot_start_without_production_environment() -> None:
     service = (root / "ops/systemd/scryglass-ratings-sync.service").read_text(encoding="utf-8")
     alert = (root / "ops/systemd/scryglass-public-refresh-alert@.service").read_text(encoding="utf-8")
     watchdog = (root / "ops/systemd/scryglass-public-refresh-watchdog.service").read_text(encoding="utf-8")
-    oe_env = (root / "ops/systemd/postgame-sync.env.example").read_text(encoding="utf-8")
+    public_env = (root / "ops/systemd/public-refresh.env.example").read_text(encoding="utf-8")
 
     assert "EnvironmentFile=/etc/scryglass/public-refresh.env" in service
     assert "Environment=SCRYGLASS_PUBLIC_RELEASE=1" in service
     assert "EnvironmentFile=-/etc/scryglass/public-refresh.env" not in service
     assert "EnvironmentFile=/etc/scryglass/public-refresh.env" in alert
     assert "EnvironmentFile=/etc/scryglass/public-refresh.env" in watchdog
-    assert "ORACLES_ELIXIR_API_KEY=" in oe_env
+    assert "ORACLES_ELIXIR_API_KEY=" not in public_env
+    assert "SCRYGLASS_ALERT_WEBHOOK_URL=" not in public_env
+    assert not (root / "ops/systemd/postgame-sync.env.example").exists()

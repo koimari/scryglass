@@ -8,7 +8,6 @@ Type=oneshot
 User=scryglass
 Group=scryglass
 WorkingDirectory=/srv/scryglass/current
-EnvironmentFile=/etc/scryglass/postgame-sync.env
 EnvironmentFile=/etc/scryglass/public-refresh.env
 ExecStart=/srv/scryglass/venv/bin/python -m lol_kills.public_refresh --root /srv/scryglass/current --public-root /srv/scryglass-data/public-packs --watchdog
 PrivateTmp=true

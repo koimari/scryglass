@@ -20,7 +20,7 @@ from typing import Any, Callable, Iterator, Sequence
 import pandas as pd
 import pyarrow.parquet as pq
 
-from lol_kills.etl.oe_api_ingest import ingest_oe_api
+from lol_kills.etl.oe_ingest import ingest_oe
 from lol_kills.etl.oe_live_source import (
     _complete_player_game_ids,
     _identity_complete_player_game_ids,
@@ -42,7 +42,8 @@ from lol_kills.export.upload_pack import (
 from lol_kills.ratings.player_map_grades import CORE_INPUTS
 
 
-RAW_RECEIPT = Path("data/lol/warehouse/raw/oe_api/tierlist-live-v1.json")
+OE_TEAM_CACHE = Path("data/lol/warehouse/parquet/oe_team_games.parquet")
+OE_META = Path("data/lol/warehouse/parquet/oe_meta.json")
 LIVE_ROOT = Path("data/lol/warehouse/parquet/oe_live")
 LIVE_MAPS = LIVE_ROOT / "maps.parquet"
 LIVE_TEAMS = LIVE_ROOT / "oe_team_games.parquet"
@@ -114,12 +115,49 @@ def _canonical_ids(values: Sequence[Any]) -> list[str]:
     return sorted({key for value in values if (key := canonical_source_game_key(value))})
 
 
-def _receipt_game_ids(root: Path) -> list[str]:
-    values = []
-    for game in _load_json(root / RAW_RECEIPT).get("games", []):
-        if isinstance(game, dict):
-            values.append(game.get("game_uid") or game.get("oe_game_id") or game.get("gameid"))
+def _source_game_ids(root: Path) -> list[str]:
+    path = root / OE_TEAM_CACHE
+    if not path.is_file():
+        return []
+    try:
+        columns = pq.ParquetFile(path).schema_arrow.names
+        identity_column = next(
+            (name for name in ("game_uid", "gameid", "oe_gameid") if name in columns),
+            None,
+        )
+        if identity_column is None:
+            return []
+        values = pq.read_table(path, columns=[identity_column]).column(identity_column).to_pylist()
+    except (OSError, ValueError, RuntimeError):
+        return []
     return _canonical_ids(values)
+
+
+def _annual_source_latest(root: Path) -> str | None:
+    payload = _load_json(root / OE_META)
+    source_files = payload.get("source_files")
+    if not isinstance(source_files, list):
+        return None
+    values = [
+        str(item.get("date_max_utc"))
+        for item in source_files
+        if isinstance(item, dict) and item.get("date_max_utc")
+    ]
+    return max(values) if values else None
+
+
+def ingest_oe_csv(root: Path, *, years: Sequence[int] = (2025, 2026), **_: Any) -> dict[str, Any]:
+    """Refresh the public annual OE cache and return its source receipt."""
+
+    ingest_oe(years=[str(year) for year in years], download=True, force_download=False)
+    game_ids = _source_game_ids(root)
+    return {
+        "source_mode": "oe_only",
+        "source_transport": "public_google_drive_file",
+        "source_latest": _annual_source_latest(root),
+        "source_game_count": len(game_ids),
+        "cached": True,
+    }
 
 
 def _sha256(path: Path) -> str:
@@ -558,7 +596,7 @@ def sync_once(
     config: SyncConfig,
     *,
     now: datetime | None = None,
-    ingest_fn: Callable[..., dict[str, Any]] = ingest_oe_api,
+    ingest_fn: Callable[..., dict[str, Any]] = ingest_oe_csv,
     build_live_fn: Callable[..., dict[str, Any]] = build_live_source,
     export_pack_fn: Callable[..., dict[str, Any]] = export_public_pack,
     validate_live_fn: Callable[..., dict[str, Any]] = validate_live_source,
@@ -574,6 +612,7 @@ def sync_once(
     try:
         ingest_result = ingest_fn(
             config.root,
+            years=config.years,
             start=pd.Timestamp(checked_at - timedelta(hours=config.window_hours)),
             end=pd.Timestamp(checked_at),
             lookback_days=config.lookback_days,
@@ -585,7 +624,16 @@ def sync_once(
             if isinstance(ingest_result, dict) and ingest_result.get("source_latest")
             else None
         )
-        observed = set(_receipt_game_ids(config.root))
+        observed = set(_source_game_ids(config.root))
+        validate_source_continuity(
+            baseline_ids,
+            {
+                "game_ids": sorted(observed),
+                "game_count": len(observed),
+                "identity_sha256": source_identity_sha256(sorted(observed)),
+            },
+            published_source,
+        )
         discovered_ids = sorted(observed - known)
         if not discovered_ids and not force:
             result = {

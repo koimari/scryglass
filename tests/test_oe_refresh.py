@@ -52,6 +52,55 @@ def test_download_mode_keeps_valid_existing_bytes(monkeypatch: pytest.MonkeyPatc
     assert not receipts.exists()
 
 
+def test_download_mode_uses_cached_remote_signature(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    raw, _receipts = _configure_paths(monkeypatch, tmp_path)
+    destination = raw / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+    original = _csv_bytes(date="2026-06-14T22:24:48Z")
+    destination.write_bytes(original)
+    signature = {"bytes": len(original), "last_modified": "Mon, 10 Aug 2026 07:04:22 GMT"}
+    oe_ingest._write_remote_state({"2026": signature})
+    monkeypatch.setattr(oe_ingest, "_remote_file_signature", lambda _url: signature)
+
+    def unexpected_download(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("unchanged remote file must use the validated cache")
+
+    _install_fake_gdown(monkeypatch, unexpected_download)
+    assert oe_ingest.download_oe_years(["2026"]) == [destination]
+    assert destination.read_bytes() == original
+    state = json.loads((tmp_path / "receipts/remote-state.json").read_text())
+    assert state["2026"]["bytes"] == len(original)
+    assert state["2026"]["checked_at_utc"]
+
+
+def test_download_mode_refreshes_when_remote_signature_changes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    raw, _receipts = _configure_paths(monkeypatch, tmp_path)
+    destination = raw / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+    original = _csv_bytes(date="2026-06-14T22:24:48Z")
+    replacement = _csv_bytes(date="2026-07-26T22:00:00Z", gameid="g2")
+    destination.write_bytes(original)
+    oe_ingest._write_remote_state(
+        {"2026": {"bytes": len(original), "last_modified": "old"}}
+    )
+    monkeypatch.setattr(
+        oe_ingest,
+        "_remote_file_signature",
+        lambda _url: {"bytes": len(replacement), "last_modified": "new"},
+    )
+
+    def fake_download(_url: str, output: str, quiet: bool) -> str:
+        assert quiet is False
+        Path(output).write_bytes(replacement)
+        return output
+
+    _install_fake_gdown(monkeypatch, fake_download)
+    assert oe_ingest.download_oe_years(["2026"]) == [destination]
+    assert destination.read_bytes() == replacement
+    state = json.loads((tmp_path / "receipts/remote-state.json").read_text())
+    assert state["2026"]["bytes"] == len(replacement)
+
+
 def test_refresh_stages_archives_and_receipts_replacement(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

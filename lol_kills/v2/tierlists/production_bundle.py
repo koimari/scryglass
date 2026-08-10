@@ -180,6 +180,102 @@ def _require_public_source_mode(candidate: Mapping[str, Any]) -> None:
         raise ProductionBundleError("public tier-list production requires an OE-only candidate")
 
 
+def _validate_matchup_profile(row: Mapping[str, Any]) -> None:
+    profile = row.get("matchup_profile")
+    if profile is None:
+        return
+    if not isinstance(profile, list):
+        raise ProductionBundleError("candidate matchup profile is malformed")
+    seen: set[str] = set()
+    for matchup in profile:
+        if not isinstance(matchup, Mapping):
+            raise ProductionBundleError("candidate matchup entry is malformed")
+        champion_id = matchup.get("champion_id")
+        if (
+            not isinstance(champion_id, str)
+            or not re.fullmatch(r"riot:champion:\d+", champion_id)
+            or champion_id in seen
+            or champion_id == row.get("champion_id")
+        ):
+            raise ProductionBundleError("candidate matchup identity is invalid")
+        seen.add(champion_id)
+        edge = matchup.get("model_edge_pp")
+        if isinstance(edge, bool) or not isinstance(edge, (int, float)) or not math.isfinite(float(edge)):
+            raise ProductionBundleError("candidate matchup edge is invalid")
+        interval = matchup.get("posterior_interval_pp")
+        if not isinstance(interval, Mapping):
+            raise ProductionBundleError("candidate matchup interval is invalid")
+        for bound in ("low", "high"):
+            value = interval.get(bound)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                raise ProductionBundleError("candidate matchup interval is invalid")
+        if float(interval["low"]) > float(interval["high"]):
+            raise ProductionBundleError("candidate matchup interval is inverted")
+        positive_probability = matchup.get("posterior_positive_probability")
+        if positive_probability is not None and (
+            isinstance(positive_probability, bool)
+            or not isinstance(positive_probability, (int, float))
+            or not math.isfinite(float(positive_probability))
+            or not 0.0 <= float(positive_probability) <= 1.0
+        ):
+            raise ProductionBundleError("candidate matchup posterior probability is invalid")
+        if matchup.get("evidence_status") not in {"supported", "limited"}:
+            raise ProductionBundleError("candidate matchup evidence status is invalid")
+        maps = matchup.get("effective_maps")
+        if isinstance(maps, bool) or not isinstance(maps, (int, float)) or not math.isfinite(float(maps)) or float(maps) < 0:
+            raise ProductionBundleError("candidate matchup map count is invalid")
+        series = matchup.get("series_count")
+        if not isinstance(series, int) or series < 0:
+            raise ProductionBundleError("candidate matchup series count is invalid")
+
+
+def _validate_regional_views(cell: Mapping[str, Any]) -> None:
+    views = cell.get("regional_views")
+    if views is None:
+        return
+    if not isinstance(views, list):
+        raise ProductionBundleError("candidate regional views are malformed")
+    seen: set[str] = set()
+    for view in views:
+        if not isinstance(view, Mapping):
+            raise ProductionBundleError("candidate regional view is malformed")
+        view_id = view.get("id")
+        if not isinstance(view_id, str) or not view_id or view_id in seen:
+            raise ProductionBundleError("candidate regional view identity is invalid")
+        seen.add(view_id)
+        maps = view.get("maps")
+        if not isinstance(maps, int) or maps < 1:
+            raise ProductionBundleError("candidate regional view map count is invalid")
+        rows = view.get("rows")
+        if not isinstance(rows, list):
+            raise ProductionBundleError("candidate regional view rows are malformed")
+        ranks: list[int] = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                raise ProductionBundleError("candidate regional row is malformed")
+            rank = row.get("regional_rank")
+            champion_id = row.get("champion_id")
+            global_rank = row.get("global_rank")
+            strength = row.get("strength_score_pp")
+            if (
+                not isinstance(rank, int)
+                or rank < 1
+                or not isinstance(global_rank, int)
+                or global_rank < 1
+                or not isinstance(champion_id, str)
+                or not isinstance(strength, (int, float))
+                or isinstance(strength, bool)
+                or not math.isfinite(float(strength))
+            ):
+                raise ProductionBundleError("candidate regional row is invalid")
+            ranks.append(rank)
+            appearances = row.get("played_maps")
+            if not isinstance(appearances, int) or appearances < 1:
+                raise ProductionBundleError("candidate regional appearance count is invalid")
+        if sorted(ranks) != list(range(1, len(ranks) + 1)):
+            raise ProductionBundleError("candidate regional ranks are not contiguous")
+
+
 def _validate_candidate_structure(candidate: Mapping[str, Any]) -> dict[str, Any]:
     if candidate.get("unresolved_champion_identities") != []:
         raise ProductionBundleError("candidate contains unresolved champion identities")
@@ -234,7 +330,9 @@ def _validate_candidate_structure(candidate: Mapping[str, Any]) -> dict[str, Any
                     raise ProductionBundleError("candidate rank movement is inconsistent")
             if row.get("counterability_status") not in {"available", "unavailable"}:
                 raise ProductionBundleError("candidate counterability status is invalid")
+            _validate_matchup_profile(row)
             row_count += 1
+        _validate_regional_views(cell)
         if sorted(ranks) != list(range(1, len(ranks) + 1)):
             raise ProductionBundleError(f"candidate ranks are not contiguous: {scope_id} {role}")
     if any(len(roles) != len(ROLES) for roles in scope_roles.values()):
@@ -278,6 +376,7 @@ def build_production_index(
                     "expected_counter_breadth": source_row.get("expected_counter_breadth"),
                     "countered_opponent_count": source_row.get("countered_opponent_count"),
                     "countered_opponent_share": source_row.get("countered_opponent_share"),
+                    "matchup_profile": source_row.get("matchup_profile", []),
                     "tier_bucket": source_row["tier_bucket"],
                     "rating": source_row["rating"],
                     "rating_delta": source_row.get("rating_delta"),
@@ -327,6 +426,7 @@ def build_production_index(
             "legal_opponents": source_cell.get("legal_opponents"),
             "legal_opponent_distribution_sha256": source_cell.get("legal_opponent_distribution_sha256"),
             "strength_design": source_cell.get("strength_design"),
+            "regional_views": source_cell.get("regional_views", []),
             "patch_ingestion": candidate.get("patch_ingestion"),
             "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "rows": production_rows,
@@ -470,6 +570,7 @@ def write_production_bundle(
                 "as_of": meta["as_of"],
                 "status": "production",
                 "row_count": meta["row_count"],
+                "regional_views": cell.get("regional_views", []),
             }
         )
         for row in cell["rows"]:
@@ -486,10 +587,16 @@ def write_production_bundle(
                     "movement": row.get("movement"),
                     "tier_bucket": row["tier_bucket"],
                     "played_maps": row["verified_appearance_count"],
+                    "tier_value_pp": row.get("tier_value"),
                     "counterability_status": row["counterability_status"],
                     "matchup_maps": row.get("matchup_maps") or 0,
                     "matchup_opponents": row.get("matchup_opponents") or 0,
                     "expected_counter_breadth": row.get("expected_counter_breadth"),
+                    "blind_score_pp": row.get("blind_score_pp"),
+                    "counter_score": row.get("counter_score"),
+                    "countered_opponent_count": row.get("countered_opponent_count"),
+                    "countered_opponent_share": row.get("countered_opponent_share"),
+                    "matchup_profile": row.get("matchup_profile", []),
                 }
             )
     display = {

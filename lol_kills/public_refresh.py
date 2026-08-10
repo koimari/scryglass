@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from lol_kills.etl.oe_api_ingest import OeApiIngestError
+from lol_kills.etl.oe_ingest import OeDownloadError
 from lol_kills.postgame_sync import (
     SyncConfig,
     _load_json,
@@ -36,7 +36,7 @@ DEFAULT_SITE = "https://scryglass.xyz"
 DEFAULT_ATTEMPTS = 3
 DEFAULT_STALE_AFTER_HOURS = 12
 DEFAULT_STEP_TIMEOUT_MINUTES = 15
-RETRYABLE_ERRORS = (OeApiIngestError, TimeoutError, urllib.error.URLError)
+RETRYABLE_ERRORS = (OeDownloadError, TimeoutError, urllib.error.URLError)
 RETRYABLE_HTTP_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 
 
@@ -143,10 +143,8 @@ def _preflight(config: RefreshConfig) -> None:
     if not config.production:
         return
     required = {
-        "ORACLES_ELIXIR_API_KEY": _read_env("ORACLES_ELIXIR_API_KEY") or _read_env("OE_API_KEY"),
         "BLOB_READ_WRITE_TOKEN": _read_env("BLOB_READ_WRITE_TOKEN") or _read_env("VERCEL_BLOB_READ_WRITE_TOKEN"),
         "SCRYGLASS_DATA_PUBLISH_TOKEN": _read_env("SCRYGLASS_DATA_PUBLISH_TOKEN"),
-        "SCRYGLASS_ALERT_WEBHOOK_URL": _read_env("SCRYGLASS_ALERT_WEBHOOK_URL"),
         "LIVE_BLOB_BASE_URL": config.blob_root,
     }
     missing = sorted(name for name, value in required.items() if not value)

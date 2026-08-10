@@ -5,9 +5,9 @@ part of the data path. The current deployment reads accepted files from public
 object storage.
 
 ```text
-Oracle's Elixir API
+Oracle's Elixir annual CSV files
         ↓
-six-hour discovery cache
+six-hour source cache check
         ↓
 new canonical game IDs
         ↓
@@ -25,9 +25,9 @@ atomic pointers, cache invalidation, and smoke checks
 The site continues to read the previous pack during a refresh. A malformed game or failed checksum stops publication.
 
 The worker binds the current pack to its exact canonical game-ID set before it
-requests new OE details. Every ID in that set must remain in the next accepted
-source. This prevents an incomplete annual file or API response from removing
-completed maps, ratings history, or profile history.
+accepts a changed annual file. Every ID in that set must remain in the next
+accepted source. This prevents an incomplete file from removing completed maps,
+ratings history, or profile history.
 
 ## Host paths
 
@@ -41,15 +41,8 @@ store. The deployed server reads the stable manifest and the selected
 immutable pack from that store. It caches the pointer for six hours. Local
 files remain an outage and development fallback.
 
-Copy `ops/systemd/postgame-sync.env.example` to
-`/etc/scryglass/postgame-sync.env` and set `ORACLES_ELIXIR_API_KEY`. Give the
-service account read access only.
-The service does not use `GRID_API_KEY` or local GRID rows.
-
 Copy `ops/systemd/public-refresh.env.example` to
-`/etc/scryglass/public-refresh.env` and fill in the Blob, cache, and alert
-values. The two environment files are loaded by the service. Keep both files
-outside the code checkout.
+values. Alerts are optional. Keep the file outside the code checkout.
 
 ## Publication checks
 
@@ -59,15 +52,16 @@ The manifest also stores a count and SHA-256 digest for the sorted canonical gam
 
 Tier lists use a separate authority gate inside the same public refresh run. A
 ratings result can remain active while a tier authority check waits for a later
-cycle. The run records that partial state and alerts the owner.
+cycle. The run records that partial state. An optional webhook can notify the
+owner.
 
 ## Service setup
 
-Install the service, alert service, refresh timer, watchdog service, and
-watchdog timer from `ops/systemd`. The refresh timer runs at minute 0 every six
-hours and catches a missed run after reboot. The watchdog checks the health file
-every hour and sends one stale-refresh alert after twelve hours without a
-successful cycle.
+Install the service, refresh timer, watchdog service, and watchdog timer from
+`ops/systemd`. The alert service is optional. The refresh timer runs at minute 0
+every six hours and catches a missed run after reboot. The watchdog checks the
+health file every hour and records stale state after twelve hours without a
+successful cycle. It sends a webhook only when one is configured.
 
 Run a manual check with:
 
@@ -79,8 +73,8 @@ Run a manual check with:
 ```
 
 Read `data/lol/runtime/public-refresh-health.json` for the last local result.
-It stays outside the public website. The failed-run unit sends this payload to
-`SCRYGLASS_ALERT_WEBHOOK_URL`.
+It stays outside the public website. An optional failed-run unit can send the
+health payload to a configured webhook.
 
 The six-hour timer must not call a deployment command. One merged code release
 can run one production build. The daily Scryglass build CPU budget is 60

@@ -11,29 +11,21 @@ claims.
 
 ## Data window
 
-The current bundle covers 2025-01-01T00:00:00Z through the latest completed
-game in the OE bridge, 2026-08-08T12:13:56Z. The live review window starts at
-2026-07-18T00:00:00Z.
+Each refresh reads the validated 2025 and 2026 OE annual files. The published
+as-of value comes from the latest completed map in those files. The live review
+window starts at 2026-07-18T00:00:00Z.
 
-The current source records:
-
-- 38,510 complete maps across the available source years;
-- 17,209 complete maps from 2025 onward;
-- 888 maps after the July 18 review start;
-- 836 accepted games from the current OE API bridge;
-- 525 full-detail games after the annual OE file watermark.
-
-The annual OE file ends at 2026-07-28T23:45:16Z. The API bridge supplies the
-completed games after that watermark. The source receipt records the OE
-watermark and the requested wall-clock end separately.
+The source receipt records the file sizes, hashes, date ranges, and accepted
+map count. A refresh keeps the previous validated cache when the public file
+check is unavailable. A changed file must pass CSV validation before it can
+replace the cache.
 
 Oracle’s Elixir publishes downloadable files once per day. The official
 source page is [Oracle’s Elixir downloads](https://master.d36liwrx5rvjnc.amplifyapp.com/tools/downloads).
 
-The source mode is oe_only. It uses the annual OE file and the current OE API.
-It skips GRID. The tier ladder uses the final map result, both sides, role,
-champion, team, league, patch, and game date. The full-detail API rows also
-supply player names for the team and player rating refresh.
+The source mode is oe_only. It uses the annual OE files and skips GRID. The
+tier ladder uses the final map result, both sides, role, champion, team,
+league, patch, player names, and game date.
 
 ## Elo ladder
 
@@ -192,14 +184,14 @@ python3 -m lol_kills.v2.tierlists.live_refresh \
   --promote
 ~~~
 
-The command refreshes OE, fetches full game detail, builds one deduplicated
-source, replays the champion, team, and player ladders, writes weekly rank
-snapshots, runs the forward evaluation, runs the independent authority check,
-and writes the production bundle. It then publishes immutable production cells
-and an immutable release index to Vercel Blob. It replaces the stable pointer
-only after those writes pass the retention guard. The pointer passes an exact
-readback check before the receipt reports production promotion. A failed step
-leaves the prior published artifact in place.
+The command checks the public OE file metadata, downloads changed files, builds
+one validated source, replays the champion, team, and player ladders, writes
+weekly rank snapshots, runs the forward evaluation, runs the independent
+authority check, and writes the production bundle. It then publishes immutable
+production cells and an immutable release index to Vercel Blob. It replaces the
+stable pointer only after those writes pass the retention guard. The pointer
+passes an exact readback check before the receipt reports production
+promotion. A failed step leaves the prior published artifact in place.
 
 The weekly baseline is Sunday 00:00 UTC. Team, player, and champion movement
 use the same rank convention. One run can process several completed games.
@@ -209,10 +201,8 @@ Vercel functions do not write the deployed repository. The worker needs
 durable storage for source receipts, immutable cells, the index, and the
 serving pointer. The cron route only starts the refresh request.
 
-The poll schedule can run more often than OE publishes its annual file. The
-OE API bridge adds a completed game after OE exposes it. The worker needs
-ORACLES_ELIXIR_API_KEY as an environment value. The poll does not invent game
-rows.
+The public worker runs every six hours. It checks the OE file metadata before a
+download. Most cycles use the validated local cache.
 
 ### External worker contract
 
@@ -223,7 +213,6 @@ It must run from a checkout that contains the Scryglass repository and keep
 the following values in its private environment:
 
 ~~~text
-ORACLES_ELIXIR_API_KEY=...
 BLOB_READ_WRITE_TOKEN=...
 SCRYGLASS_TIERLIST_BLOB_BASE_URL=https://<store>.public.blob.vercel-storage.com
 ~~~
@@ -279,8 +268,7 @@ secret.
 
 The public scryglass.xyz deployment has not changed in this task. A deploy is a
 separate release action. It needs explicit authorization and a production
-environment check for the cron secret, OE API key, worker URL, and artifact
-storage.
+environment check for the cron secret, worker URL, and artifact storage.
 
 The live Vercel logs show the five-minute cron invoking the route. Each observed
 invocation returned 401 because `CRON_SECRET` is absent. No worker refresh has

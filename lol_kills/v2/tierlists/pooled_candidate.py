@@ -60,7 +60,6 @@ from .champion_elo import (
     ROLES,
     SOURCE_LOCATOR,
     SOURCE_MODES,
-    SUPPLEMENTAL_SOURCE_LOCATOR,
     TEAM_K,
     TIER_BUCKETS,
     TIER_MEMBERSHIP_PROBABILITY,
@@ -87,6 +86,32 @@ BLIND_TAIL_SHARE = 0.20
 BLIND_CREDIBLE_QUANTILE = 0.10
 STRENGTH_MAX_CONTRAST_SD = 0.90
 POSTERIOR_DRAWS = 2000
+REGIONAL_CONTEXT_ORDER = (
+    "LCK",
+    "LPL",
+    "LEC",
+    "LCS",
+    "CBLOL",
+    "LCP",
+    "PCS",
+    "VCS",
+    "LJL",
+    "TCL",
+    "INTERNATIONAL",
+)
+REGIONAL_CONTEXT_LEAGUES: dict[str, frozenset[str]] = {
+    "LCK": frozenset({"LCK"}),
+    "LPL": frozenset({"LPL"}),
+    "LEC": frozenset({"LEC"}),
+    "LCS": frozenset({"LCS"}),
+    "CBLOL": frozenset({"CBLOL"}),
+    "LCP": frozenset({"LCP"}),
+    "PCS": frozenset({"PCS"}),
+    "VCS": frozenset({"VCS"}),
+    "LJL": frozenset({"LJL"}),
+    "TCL": frozenset({"TCL"}),
+    "INTERNATIONAL": frozenset({"MSI", "EWC", "WORLDS", "FST"}),
+}
 
 
 class PooledCandidateError(ValueError):
@@ -310,6 +335,93 @@ def _pool_pair_stats(
     return pooled
 
 
+def _regional_contexts(game: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return exact public league contexts for one completed map.
+
+    These contexts are a secondary view over the patch-wide fit. They do not
+    create separate league-specific tier ladders.
+    """
+
+    league = str(game.get("league") or "").strip().upper()
+    event = str(game.get("event_kind") or "").strip().upper()
+    contexts = [
+        context
+        for context in REGIONAL_CONTEXT_ORDER
+        if league in REGIONAL_CONTEXT_LEAGUES[context]
+        or (context == "INTERNATIONAL" and event in REGIONAL_CONTEXT_LEAGUES[context])
+    ]
+    return tuple(contexts)
+
+
+def _build_regional_views(
+    *,
+    rows: Sequence[Mapping[str, Any]],
+    scope_id: str,
+    role: str,
+    regional_counts: Mapping[tuple[str, str, str], Mapping[str, int]],
+    regional_game_ids: Mapping[tuple[str, str], set[str]],
+) -> list[dict[str, Any]]:
+    """Build regional context rows from the fixed patch-wide model.
+
+    A regional view answers which globally fitted champions were observed in a
+    selected league. It reports the patch-wide strength value and the local
+    appearance count. It does not fit a second league-specific model.
+    """
+
+    by_champion = {str(row["champion_id"]): row for row in rows}
+    views: list[dict[str, Any]] = []
+    for context in REGIONAL_CONTEXT_ORDER:
+        counts = regional_counts.get((scope_id, context, role), {})
+        if not counts:
+            continue
+        regional_rows: list[dict[str, Any]] = []
+        for champion_id, appearances in counts.items():
+            source = by_champion.get(str(champion_id))
+            if source is None:
+                continue
+            regional_rows.append(
+                {
+                    "champion": source["champion"],
+                    "champion_id": source["champion_id"],
+                    "global_rank": source["rank"],
+                    "strength_score_pp": source["tier_value_pp"],
+                    "played_maps": int(appearances),
+                    "sample_status": "thin" if int(appearances) < 3 else "observed",
+                }
+            )
+        regional_rows.sort(
+            key=lambda row: (
+                -float(row["strength_score_pp"]),
+                -int(row["played_maps"]),
+                _normalize_name(row["champion"]),
+            )
+        )
+        for rank, row in enumerate(regional_rows, start=1):
+            row["regional_rank"] = rank
+        regional_rows = [
+            {
+                "champion": row["champion"],
+                "champion_id": row["champion_id"],
+                "regional_rank": row["regional_rank"],
+                "global_rank": row["global_rank"],
+                "strength_score_pp": row["strength_score_pp"],
+                "played_maps": row["played_maps"],
+                "sample_status": row["sample_status"],
+            }
+            for row in regional_rows
+        ]
+        views.append(
+            {
+                "id": context,
+                "label": context.replace("_", " "),
+                "maps": len(regional_game_ids.get((scope_id, context), set())),
+                "basis": "patch_wide_model_with_regional_appearance_filter",
+                "rows": regional_rows,
+            }
+        )
+    return views
+
+
 def _legal_pool(
     counts: Mapping[str, int],
     display_names: Mapping[str, str],
@@ -498,6 +610,7 @@ def _build_cell_metrics(
     for focal in champions:
         indices = by_focal.get(focal, [])
         opponents = [pair_keys[index][1] for index in indices]
+        matchup_profile: list[dict[str, Any]] = []
         support_sources: list[str] = []
         if not indices:
             mean_probability = 0.5
@@ -526,6 +639,7 @@ def _build_cell_metrics(
             )
             supported = []
             effective_maps = 0.0
+            pair_support: list[dict[str, Any]] = []
             for local_index, opponent in enumerate(opponents):
                 left, right = sorted((focal, opponent))
                 stat = pair_stats.get((scope_id, role, left, right), {})
@@ -543,17 +657,50 @@ def _build_cell_metrics(
                     pair_series = len(stat.get("series", ()))
                     variation = len(stat.get("outcomes", ())) == 2
                     support_source = "pooled_scopes"
-                if (
+                pair_is_supported = (
                     pair_maps >= MATCHUP_MIN_EFFECTIVE_MAPS
                     and pair_series >= MATCHUP_MIN_SERIES
                     and variation
                     and float(theta_sd[local_index]) <= MATCHUP_MAX_POSTERIOR_SD
-                ):
+                )
+                if pair_is_supported:
                     supported.append(opponent)
                     support_sources.append(support_source)
                     effective_maps += pair_maps
+                pair_support.append(
+                    {
+                        "supported": bool(pair_is_supported),
+                        "effective_maps": pair_maps,
+                        "series_count": pair_series,
+                        "evidence_source": support_source,
+                    }
+                )
             contrast_sd = float(np.max(theta_sd)) if theta_sd.size else math.inf
             row_weight = opponent_weights
+
+            for local_index, opponent in enumerate(opponents):
+                pair_probabilities = expit(theta[indices[local_index]])
+                support = pair_support[local_index]
+                matchup_profile.append(
+                    {
+                        "champion": display_names.get(opponent, opponent),
+                        "champion_id": opponent,
+                        "model_edge_pp": round(100.0 * (float(np.mean(pair_probabilities)) - 0.5), 4),
+                        "posterior_interval_pp": {
+                            "low": round(100.0 * (float(np.quantile(pair_probabilities, 0.10)) - 0.5), 4),
+                            "high": round(100.0 * (float(np.quantile(pair_probabilities, 0.90)) - 0.5), 4),
+                        },
+                        "posterior_positive_probability": round(float(counter_probabilities[local_index]), 6),
+                        "effective_maps": round(float(support["effective_maps"]), 4),
+                        "series_count": int(support["series_count"]),
+                        "evidence_status": (
+                            "supported"
+                            if support["supported"] and exact_atom_patch is not None
+                            else "limited"
+                        ),
+                        "evidence_source": support["evidence_source"],
+                    }
+                )
 
         legal_opponents = [
             {
@@ -598,6 +745,7 @@ def _build_cell_metrics(
             "countered_opponent_share": round(counter_count / LEGAL_OPPONENT_COUNT, 4) if available else None,
             "legal_opponent_distribution_sha256": legal_hash,
             "legal_opponents": legal_opponents,
+            "matchup_profile": matchup_profile,
             "legal_opponent_coverage": round(len(supported) / max(1, len(opponents)), 4),
             "counterability_evidence_scope": (
                 "scope" if support_sources and all(source == "scope" for source in support_sources)
@@ -764,7 +912,7 @@ def build_pooled_candidate(
 ) -> dict[str, Any]:
     if source_mode not in SOURCE_MODES:
         raise PooledCandidateError(f"source_mode must be one of {', '.join(SOURCE_MODES)}")
-    frame, source_sha256 = _load_source(root, as_of=as_of)
+    frame, source_sha256, source_locator = _load_source(root, as_of=as_of)
     raw_maps, rejected_maps = _build_maps(frame)
     if not raw_maps:
         raise PooledCandidateError("no complete five-role maps remain after identity checks")
@@ -783,6 +931,8 @@ def build_pooled_candidate(
     unresolved: set[str] = set()
     display_names: dict[str, str] = {}
     appearance_counts: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
+    regional_counts: dict[tuple[str, str, str], Counter[str]] = defaultdict(Counter)
+    regional_game_ids: dict[tuple[str, str], set[str]] = defaultdict(set)
     patch_meta_counts: Counter[str] = Counter()
     resolution_counts: Counter[str] = Counter()
     atom_pair_cache: dict[tuple[str, str, str | None], AtomFeatureVector] = {}
@@ -835,6 +985,11 @@ def build_pooled_candidate(
         for role in ROLES:
             for side in ("blue", "red"):
                 appearance_counts[(patch_scope_id, role)][stable_roles[role][side]] += 1
+        for context in _regional_contexts(prepared_game):
+            regional_game_ids[(patch_scope_id, context)].add(str(game["game_id"]))
+            for role in ROLES:
+                for side in ("blue", "red"):
+                    regional_counts[(patch_scope_id, context, role)][stable_roles[role][side]] += 1
         observations.append(
             JointMapObservation(
                 map_id=str(game["game_id"]),
@@ -941,6 +1096,13 @@ def build_pooled_candidate(
             competition_tier = None
             event_kind = None
             region = None
+            regional_views = _build_regional_views(
+                rows=rows,
+                scope_id=scope_id,
+                role=role,
+                regional_counts=regional_counts,
+                regional_game_ids=regional_game_ids,
+            )
             cell = {
                 "scope_id": scope_id,
                 "scope_kind": scope_kind,
@@ -965,6 +1127,7 @@ def build_pooled_candidate(
                 "legal_opponent_selection_rule": pool_meta["selection_rule"],
                 "strength_design": design_meta["summary"],
                 "atom_snapshot_status": "exact" if exact_atom_patch else "unavailable",
+                "regional_views": regional_views,
                 "rows": rows,
             }
             cells.append(cell)
@@ -1008,10 +1171,9 @@ def build_pooled_candidate(
         "expected_live_as_of": _utc_stamp(expected) if expected is not None else None,
         "source_complete_through_expected_live_as_of": source_complete,
         "source": {
-            "locator": SOURCE_LOCATOR,
+            "locator": source_locator,
             "raw_sha256": source_sha256,
-            "source_files": [SOURCE_LOCATOR]
-            + ([SUPPLEMENTAL_SOURCE_LOCATOR] if (root / SUPPLEMENTAL_SOURCE_LOCATOR).is_file() else []),
+            "source_files": [source_locator],
             "maps_replayed": len(raw_maps),
             "maps_used_in_joint_likelihood": len(observations),
             "maps_rejected_incomplete_roles": rejected_maps,

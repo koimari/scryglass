@@ -11,6 +11,8 @@ import os
 import re
 import shutil
 import tempfile
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -233,6 +235,87 @@ def list_local_oe_csvs() -> list[Path]:
     return sorted(RAW_OE_DIR.glob("*_LoL_esports_match_data_from_OraclesElixir.csv"))
 
 
+def _remote_state_path() -> Path:
+    return OE_RECEIPT_DIR / "remote-state.json"
+
+
+def _load_remote_state() -> dict[str, dict[str, Any]]:
+    path = _remote_state_path()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        str(year): value
+        for year, value in payload.items()
+        if isinstance(value, dict)
+    }
+
+
+def _write_remote_state(state: dict[str, dict[str, Any]]) -> None:
+    path = _remote_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".partial", dir=path.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(state, stream, ensure_ascii=True, indent=2, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _remote_file_signature(url: str) -> dict[str, Any]:
+    """Read public Drive metadata without downloading the annual CSV."""
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "text/csv",
+            "Range": "bytes=0-0",
+            "User-Agent": "scryglass/oe-csv-refresh/1",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            headers = response.headers
+            content_range = str(headers.get("Content-Range") or "")
+            match = re.search(r"bytes\s+\d+-\d+/(\d+)", content_range)
+            total_bytes = int(match.group(1)) if match else int(headers.get("Content-Length") or 0)
+            if total_bytes <= 0:
+                raise OeDownloadError(f"OE remote metadata has no file size: {url}")
+            return {
+                "bytes": total_bytes,
+                "last_modified": str(headers.get("Last-Modified") or "").strip(),
+            }
+    except urllib.error.HTTPError as exc:
+        raise OeDownloadError(f"OE remote metadata returned HTTP {exc.code}: {url}") from exc
+    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        raise OeDownloadError(f"OE remote metadata request failed: {url}") from exc
+
+
+def _remote_signature_matches(cached: dict[str, Any], current: dict[str, Any]) -> bool:
+    try:
+        cached_bytes = int(cached.get("bytes", -1))
+        current_bytes = int(current.get("bytes", -2))
+    except (TypeError, ValueError):
+        return False
+    if cached_bytes != current_bytes:
+        return False
+    cached_modified = str(cached.get("last_modified") or "")
+    current_modified = str(current.get("last_modified") or "")
+    return bool(cached_modified and current_modified and cached_modified == current_modified) or (
+        not cached_modified and not current_modified
+    )
+
+
 def load_cached_oe(
     years: Iterable[str | int] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -275,25 +358,19 @@ def load_cached_oe(
 
 def download_oe_years(years: Iterable[str | int], force: bool = False) -> list[Path]:
     """
-    Download missing annual files, or safely refresh them when ``force`` is true.
+    Download missing or changed annual files, or safely refresh them when ``force`` is true.
 
-    Every download is staged and structurally validated. A refresh additionally
-    refuses a temporal regression, archives the prior exact bytes, atomically
-    replaces the annual file, and emits a hash-bound source receipt. A forced
-    refresh is strict: any requested year that cannot be validated aborts before
-    downstream ingest can mistake stale bytes for a successful refresh.
+    A one-byte range request checks the public Drive file size and modification
+    time before a full download. Every downloaded candidate is staged and
+    structurally validated. A refresh refuses a temporal regression, archives
+    the prior exact bytes, atomically replaces the annual file, and emits a
+    hash-bound source receipt.
     """
     RAW_OE_DIR.mkdir(parents=True, exist_ok=True)
-    try:
-        import gdown
-    except ImportError as e:
-        raise SystemExit(
-            "gdown required for OE download: pip install gdown\n"
-            f"Or manually download from {OE_FOLDER} into {RAW_OE_DIR}"
-        ) from e
-
     out_paths: list[Path] = []
     prepared: list[dict[str, Any]] = []
+    remote_state = _load_remote_state()
+    downloader: Any | None = None
     for year in years:
         y = str(year)
         dest = oe_csv_path(y)
@@ -304,10 +381,6 @@ def download_oe_years(years: Iterable[str | int], force: bool = False) -> list[P
                 previous = _validate_oe_csv(dest, y)
             except OeDownloadError as exc:
                 previous_error = str(exc)
-            if previous is not None and not force:
-                print(f"[oe] skip validated existing {dest.name}")
-                out_paths.append(dest)
-                continue
         fid = OE_DRIVE_IDS.get(y)
         if not fid:
             message = f"no known Drive id for {y}"
@@ -320,6 +393,35 @@ def download_oe_years(years: Iterable[str | int], force: bool = False) -> list[P
                 out_paths.append(dest)
             continue
         url = f"https://drive.google.com/uc?id={fid}"
+        remote_signature: dict[str, Any] | None = None
+        if previous is not None and not force:
+            try:
+                remote_signature = _remote_file_signature(url)
+            except OeDownloadError as exc:
+                print(f"[oe] remote check failed for {y}: {exc}")
+                print(f"     Keeping validated cache {dest.name}")
+                out_paths.append(dest)
+                continue
+            cached_signature = remote_state.get(y)
+            if isinstance(cached_signature, dict) and _remote_signature_matches(
+                cached_signature, remote_signature
+            ):
+                remote_state[y] = {
+                    **cached_signature,
+                    "checked_at_utc": datetime.now(timezone.utc).isoformat(),
+                }
+                print(f"[oe] remote file unchanged; using cache {dest.name}")
+                out_paths.append(dest)
+                continue
+        if downloader is None:
+            try:
+                import gdown
+            except ImportError as exc:
+                raise SystemExit(
+                    "gdown required for OE download: pip install gdown\n"
+                    f"Or manually download from {OE_FOLDER} into {RAW_OE_DIR}"
+                ) from exc
+            downloader = gdown
         action = "refreshing" if dest.exists() else "downloading"
         print(f"[oe] {action} {y} → staged candidate for {dest.name}")
         descriptor, temporary_name = tempfile.mkstemp(
@@ -328,8 +430,13 @@ def download_oe_years(years: Iterable[str | int], force: bool = False) -> list[P
         os.close(descriptor)
         temporary = Path(temporary_name)
         try:
-            gdown.download(url, str(temporary), quiet=False)
+            downloader.download(url, str(temporary), quiet=False)
             candidate = _validate_oe_csv(temporary, y)
+            if remote_signature is not None and int(candidate["bytes"]) != int(remote_signature["bytes"]):
+                raise OeDownloadError(
+                    f"OE remote file changed during download for {y}: "
+                    f"expected {remote_signature['bytes']} bytes, got {candidate['bytes']}"
+                )
             if (
                 previous is not None
                 and str(candidate["date_max_utc"]) < str(previous["date_max_utc"])
@@ -362,6 +469,7 @@ def download_oe_years(years: Iterable[str | int], force: bool = False) -> list[P
                 "candidate": candidate,
                 "previous": previous,
                 "previous_validation_error": previous_error,
+                "remote_signature": remote_signature,
             }
         )
 
@@ -412,6 +520,7 @@ def download_oe_years(years: Iterable[str | int], force: bool = False) -> list[P
                     "locator": item["source_url"],
                     "drive_file_id": item["drive_file_id"],
                     "folder_locator": OE_FOLDER,
+                    "remote_signature": item["remote_signature"],
                 },
                 "destination_locator": _display_path(dest),
                 "candidate": candidate,
@@ -435,9 +544,17 @@ def download_oe_years(years: Iterable[str | int], force: bool = False) -> list[P
                 f"sha256={candidate['raw_sha256']} receipt={receipt_path.name}"
             )
             out_paths.append(dest)
+            remote_signature = item["remote_signature"]
+            if isinstance(remote_signature, dict):
+                remote_state[y] = {
+                    **remote_signature,
+                    "checked_at_utc": item["retrieved_at_utc"],
+                }
     finally:
         for item in prepared:
             Path(item["temporary"]).unlink(missing_ok=True)
+        if remote_state:
+            _write_remote_state(remote_state)
     return out_paths
 
 

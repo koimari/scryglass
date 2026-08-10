@@ -6,11 +6,10 @@ The public payload contains nine rating and profile files plus one accepted tier
 
 1. Install the systemd refresh service, alert service, refresh timer, watchdog
    service, and watchdog timer from `ops/systemd`.
-2. Copy `ops/systemd/postgame-sync.env.example` to
-   `/etc/scryglass/postgame-sync.env` and set the OE key. Copy
-   `ops/systemd/public-refresh.env.example` to
+2. Copy `ops/systemd/public-refresh.env.example` to
    `/etc/scryglass/public-refresh.env` and set the Blob write key, Blob root,
-   data-publish secret, and alert webhook. Keep all secrets outside the repository.
+   and data-publish secret. Keep all secrets outside the repository. Alerts are
+   optional.
 3. Start one controlled run:
 
    ```bash
@@ -24,16 +23,15 @@ The public payload contains nine rating and profile files plus one accepted tier
    Blob publication, cache invalidation, and checks for `/elo`, `/matches`,
    and `/tiers`.
 5. Read `data/lol/runtime/public-refresh-health.json`. A failed map stays
-   pending. A failed release keeps the previous pointer. A failed service
-   sends the health payload to `SCRYGLASS_ALERT_WEBHOOK_URL`.
-6. The watchdog sends one stale-refresh alert after the configured twelve-hour
-   freshness window. It does not publish data.
+   pending. A failed release keeps the previous pointer.
+6. The watchdog records stale state after the configured twelve-hour freshness
+   window. It does not publish data.
 
 ## Manual refresh
 
-Oracle's Elixir annual files and the OE API bridge are the only public match
-sources. Incomplete maps stay pending for the next cycle. GRID remains
-available only to private research modules.
+Oracle's Elixir annual files are the public match source. Incomplete maps stay
+pending for the next cycle. GRID remains available only to private research
+modules.
 
 GitHub checks validate code changes. They are not part of the data refresh
 path. No production workflow or deployment requires `GRID_API_KEY`.

@@ -165,7 +165,6 @@ jobs:
           tests/model_v2/tierlists/test_joint_pooled_model.py
           tests/model_v2/tierlists/test_production_bundle.py
           tests/model_v2/tierlists/test_production_readiness.py
-          tests/model_v2/tierlists/test_oe_api_ingest.py
           tests/model_v2/tierlists/test_live_refresh.py
           tests/test_global_player_bt.py
           tests/test_player_map_grades.py
