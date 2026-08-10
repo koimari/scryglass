@@ -1,20 +1,8 @@
 export const TIER_ROLE_ORDER = ["top", "jungle", "mid", "bot", "support"] as const;
 
-export type TierBoardMode = "first_pick" | "blind" | "counter" | "responses" | "regions";
+export type TierBoardMode = "first_pick" | "blind" | "counter" | "responses";
 
 export type TierBucket = "Z Blind" | "Z Counter" | "S Blind" | "S Counter" | "A" | "B" | "C" | "D";
-
-export type MatchupProfile = {
-  champion: string;
-  champion_id: string;
-  model_edge_pp: number;
-  posterior_interval_pp: { low: number; high: number };
-  posterior_positive_probability?: number;
-  effective_maps: number;
-  series_count: number;
-  evidence_status: "supported" | "limited";
-  evidence_source?: string;
-};
 
 export type TierRow = {
   scope_id: string;
@@ -37,7 +25,6 @@ export type TierRow = {
   countered_opponent_count?: number | null;
   countered_opponent_share?: number | null;
   expected_counter_breadth: number | null;
-  matchup_profile?: MatchupProfile[];
 };
 
 export type RegionalRow = {
@@ -58,6 +45,16 @@ export type RegionalView = {
   rows: RegionalRow[];
 };
 
+export type ResponseMatrix = {
+  champions: Array<{ champion: string; champion_id: string }>;
+  edge_pp: Array<Array<number | null>>;
+  interval_low_pp: Array<Array<number | null>>;
+  interval_high_pp: Array<Array<number | null>>;
+  evidence: Array<Array<"supported" | "limited" | null>>;
+  effective_maps: Array<Array<number | null>>;
+  grade_thresholds_pp?: { S: number; A: number; B: number; C: number };
+};
+
 export type TierScope = {
   scope_id: string;
   scope_kind: "patch";
@@ -67,6 +64,7 @@ export type TierScope = {
   status: "production" | "unavailable";
   row_count: number;
   regional_views?: RegionalView[];
+  response_matrix?: ResponseMatrix;
 };
 
 export function signedPp(value: number | null | undefined): string | null {
@@ -111,4 +109,29 @@ export function regionalViewForRole(
   return scopes
     .find((scope) => scope.patch === patch && scope.role === role)
     ?.regional_views?.find((view) => view.id === regionId);
+}
+
+export function filterRowsByRegion(
+  rows: TierRow[],
+  scopes: TierScope[],
+  patch: string,
+  regionId: string,
+): TierRow[] {
+  if (!regionId) return rows;
+  const allowedByRole = new Map<string, Set<string>>();
+  for (const role of TIER_ROLE_ORDER) {
+    const view = regionalViewForRole(scopes, patch, role, regionId);
+    allowedByRole.set(role, new Set((view?.rows ?? []).map((row) => row.champion_id)));
+  }
+  return rows.filter((row) => allowedByRole.get(row.role)?.has(row.champion_id));
+}
+
+export type MatchupGrade = "S" | "A" | "B" | "C" | "D";
+
+export function matchupGrade(edgePp: number): MatchupGrade {
+  if (edgePp >= 7.5) return "S";
+  if (edgePp >= 3.0) return "A";
+  if (edgePp >= -3.0) return "B";
+  if (edgePp >= -7.5) return "C";
+  return "D";
 }

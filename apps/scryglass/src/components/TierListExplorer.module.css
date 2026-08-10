@@ -76,7 +76,7 @@
 
 .questionNav {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border: 1px solid var(--line-strong);
   background: var(--surface);
 }
@@ -470,6 +470,189 @@
   line-height: 1.4;
 }
 
+.matchupMatrixPanel {
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+
+.matchupLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.65rem 0.8rem;
+  border-bottom: 1px solid var(--line-strong);
+  background: color-mix(in oklch, var(--surface-subtle) 28%, var(--surface));
+}
+
+.matchupLegend > span {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: baseline;
+  padding: 0.28rem 0.42rem;
+  border: 1px solid color-mix(in oklch, currentColor 42%, var(--line));
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.matchupLegend small {
+  font-size: 0.58rem;
+  font-weight: 500;
+  opacity: 0.78;
+}
+
+.matchupMatrixScroll {
+  max-height: 68vh;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.matchupMatrix {
+  width: max-content;
+  min-width: 100%;
+  border-spacing: 0;
+  border-collapse: separate;
+  color: var(--ink);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  table-layout: fixed;
+}
+
+.matchupMatrix th,
+.matchupMatrix td {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.matchupMatrix thead th {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  width: 4.35rem;
+  min-width: 4.35rem;
+  height: 5.4rem;
+  padding: 0.38rem 0.25rem;
+  background: color-mix(in oklch, var(--surface-subtle) 55%, var(--surface));
+  color: var(--ink-muted);
+  font-size: 0.56rem;
+  font-weight: 600;
+  text-align: center;
+  vertical-align: bottom;
+}
+
+.matchupMatrix thead th:first-child {
+  z-index: 4;
+  left: 0;
+  width: 11rem;
+  min-width: 11rem;
+  padding-left: 0.7rem;
+  text-align: left;
+}
+
+.matchupMatrix thead th .championThumb {
+  width: 2rem;
+  height: 2rem;
+  margin: 0 auto 0.3rem;
+  font-size: 0.75rem;
+}
+
+.matchupMatrix thead th > span:last-child {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matchupMatrix tbody th {
+  position: sticky;
+  z-index: 1;
+  left: 0;
+  display: flex;
+  width: 11rem;
+  min-width: 11rem;
+  height: 3.7rem;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.45rem 0.65rem;
+  background: var(--surface);
+  text-align: left;
+}
+
+.matchupMatrix tbody th .championThumb {
+  width: 2.35rem;
+  height: 2.35rem;
+  flex-basis: 2.35rem;
+  font-size: 0.8rem;
+}
+
+.matchupMatrix tbody th > span {
+  display: grid;
+  min-width: 0;
+  gap: 0.1rem;
+}
+
+.matchupMatrix tbody th strong {
+  overflow: hidden;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matchupMatrix tbody th small {
+  color: var(--ink-faint);
+  font-size: 0.58rem;
+}
+
+.matchupCell,
+.matchupDiagonal {
+  width: 4.35rem;
+  min-width: 4.35rem;
+  height: 3.7rem;
+  padding: 0.3rem 0.2rem;
+  text-align: center;
+}
+
+.matchupCell {
+  background: color-mix(in oklch, currentColor 13%, var(--surface));
+}
+
+.matchupCell strong,
+.matchupCell small {
+  display: block;
+}
+
+.matchupCell strong {
+  font-size: 0.9rem;
+}
+
+.matchupCell small {
+  margin-top: 0.15rem;
+  color: var(--ink-muted);
+  font-size: 0.55rem;
+}
+
+.matchupCellLimited {
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0,
+    transparent 4px,
+    color-mix(in oklch, currentColor 9%, transparent) 4px,
+    color-mix(in oklch, currentColor 9%, transparent) 7px
+  );
+}
+
+.matchupDiagonal {
+  background: color-mix(in oklch, var(--surface-subtle) 45%, var(--surface));
+  color: var(--ink-faint);
+}
+
+.matchupGradeS { color: #35a96d; }
+.matchupGradeA { color: #79a94f; }
+.matchupGradeB { color: #b49a43; }
+.matchupGradeC { color: #ca704f; }
+.matchupGradeD { color: #c64755; }
+
 .roleSnapshot {
   overflow: hidden;
   border: 1px solid var(--line-strong);
@@ -745,12 +928,13 @@
 
   .questionTab:nth-child(2),
   .questionTabActive:nth-child(2),
-  .questionTab:nth-child(4) {
+  .questionTab:nth-child(4),
+  .questionTabActive:nth-child(4) {
     border-right: 0;
   }
 
-  .questionTab:nth-child(-n + 3),
-  .questionTabActive:nth-child(-n + 3) {
+  .questionTab:nth-child(-n + 2),
+  .questionTabActive:nth-child(-n + 2) {
     border-bottom: 1px solid var(--line-strong);
   }
 

@@ -83,7 +83,7 @@ MAX_LOO_SERIES = 8
 COUNTER_EFFECT_THRESHOLD_LOGIT = 0.05
 COUNTER_POSTERIOR_THRESHOLD = 0.80
 BLIND_TAIL_SHARE = 0.20
-BLIND_CREDIBLE_QUANTILE = 0.10
+RESPONSE_INTERVAL_Z = 1.2815515655446004
 STRENGTH_MAX_CONTRAST_SD = 0.90
 POSTERIOR_DRAWS = 2000
 REGIONAL_CONTEXT_ORDER = (
@@ -145,6 +145,23 @@ def _weighted_lower_tail(values: np.ndarray, weights: np.ndarray, share: float) 
     prior_weight = np.cumsum(sorted_weights, axis=1) - sorted_weights
     portions = np.minimum(sorted_weights, np.clip(share - prior_weight, 0.0, None))
     return np.sum(portions * sorted_values, axis=1) / share
+
+
+def _blind_point_estimate(probability_matrix: np.ndarray, weights: np.ndarray) -> float:
+    """Return the expected weakest common matchup without an uncertainty penalty."""
+
+    if probability_matrix.ndim != 2 or probability_matrix.shape[0] != weights.size:
+        raise PooledCandidateError("blind point-estimate inputs have incompatible shapes")
+    posterior_means = probability_matrix.mean(axis=1)
+    return float(_weighted_lower_tail(posterior_means[None, :], weights, BLIND_TAIL_SHARE)[0])
+
+
+def _counter_count_point_estimate(theta_matrix: np.ndarray) -> int:
+    """Count common opponents with a positive posterior-mean model contrast."""
+
+    if theta_matrix.ndim != 2:
+        raise PooledCandidateError("counter point-estimate input must be a matrix")
+    return int(np.count_nonzero(theta_matrix.mean(axis=1) > COUNTER_EFFECT_THRESHOLD_LOGIT))
 
 
 def _safe_normalized_patch(value: object) -> str:
@@ -542,6 +559,169 @@ def _matchup_metrics_available(
     )
 
 
+def _pair_support_details(
+    *,
+    scope_id: str,
+    role: str,
+    focal: str,
+    opponent: str,
+    posterior_sd: float,
+    pair_stats: Mapping[tuple[str, str, str, str], Mapping[str, Any]],
+    pooled_pair_stats: Mapping[tuple[str, str, str], Mapping[str, Any]],
+) -> dict[str, Any]:
+    left, right = sorted((focal, opponent))
+    stat = pair_stats.get((scope_id, role, left, right), {})
+    pair_maps = float(stat.get("effective_maps", 0.0))
+    pair_series = len(stat.get("series", ()))
+    variation = len(stat.get("outcomes", ())) == 2
+    support_source = "scope"
+    if not (
+        pair_maps >= MATCHUP_MIN_EFFECTIVE_MAPS
+        and pair_series >= MATCHUP_MIN_SERIES
+        and variation
+    ):
+        stat = pooled_pair_stats.get((role, left, right), {})
+        pair_maps = float(stat.get("effective_maps", 0.0))
+        pair_series = len(stat.get("series", ()))
+        variation = len(stat.get("outcomes", ())) == 2
+        support_source = "pooled_scopes"
+    supported = (
+        pair_maps >= MATCHUP_MIN_EFFECTIVE_MAPS
+        and pair_series >= MATCHUP_MIN_SERIES
+        and variation
+        and math.isfinite(posterior_sd)
+        and posterior_sd <= MATCHUP_MAX_POSTERIOR_SD
+    )
+    return {
+        "supported": bool(supported),
+        "effective_maps": pair_maps,
+        "series_count": pair_series,
+        "evidence_source": support_source,
+    }
+
+
+def _response_matrix(
+    *,
+    fit: JointPooledFit,
+    scope_id: str,
+    role: str,
+    patch_id: str,
+    champion_order: Sequence[str],
+    display_names: Mapping[str, str],
+    reference_champions: Mapping[str, str],
+    pair_stats: Mapping[tuple[str, str, str, str], Mapping[str, Any]],
+    pooled_pair_stats: Mapping[tuple[str, str, str], Mapping[str, Any]],
+    resolver: AtomMatchupFeatureResolver,
+    target_mapping: ExactAtomSnapshotMapping | None,
+    exact_atom_patch: str | None,
+    empty_vector: AtomFeatureVector,
+    atom_vector_cache: dict[tuple[str, str, str | None], AtomFeatureVector],
+) -> dict[str, Any]:
+    pair_keys: list[tuple[str, str]] = []
+    hypotheses: list[JointMapObservation] = []
+    for focal in champion_order:
+        for opponent in champion_order:
+            if focal == opponent:
+                continue
+            vector = empty_vector
+            if exact_atom_patch is not None and target_mapping is not None:
+                cache_key = (focal, opponent, exact_atom_patch)
+                vector = atom_vector_cache.get(cache_key, empty_vector)
+                if cache_key not in atom_vector_cache:
+                    try:
+                        pair = resolver.resolve_pair(
+                            focal,
+                            opponent,
+                            requested_patch=exact_atom_patch,
+                            snapshot_mapping=target_mapping,
+                        )
+                    except (AtomMatchupFeatureError, KeyError):
+                        vector = empty_vector
+                    else:
+                        vector = AtomFeatureVector.from_values(
+                            tuple(pair["features"][name] for name in FEATURE_ORDER),
+                            available=tuple(pair["availability"][name] for name in FEATURE_ORDER),
+                        )
+                    atom_vector_cache[cache_key] = vector
+            hypotheses.append(
+                _hypothetical_observation(
+                    scope_id=scope_id,
+                    patch_id=patch_id,
+                    role=role,
+                    focal=focal,
+                    opponent=opponent,
+                    reference_champions=reference_champions,
+                    atom_vector=vector,
+                    empty_vector=empty_vector,
+                )
+            )
+            pair_keys.append((focal, opponent))
+
+    if not hypotheses:
+        return {"champions": [], "edge_pp": [], "interval_low_pp": [], "interval_high_pp": [], "evidence": [], "effective_maps": []}
+
+    design = sparse.vstack(
+        [
+            design_vector_for_observation(
+                fit,
+                observation,
+                allow_unseen_pairs=True,
+                validate=False,
+            )
+            for observation in hypotheses
+        ],
+        format="csr",
+    )
+    mean_logit = np.asarray(design @ fit.coefficients, dtype=float).reshape(-1)
+    variance = np.asarray(design.power(2) @ fit.covariance_diagonal, dtype=float).reshape(-1)
+    posterior_sd = np.sqrt(np.maximum(variance, 0.0))
+    if not (
+        np.all(np.isfinite(mean_logit))
+        and np.all(np.isfinite(posterior_sd))
+    ):
+        raise PooledCandidateError("response matrix contains a non-finite posterior contrast")
+
+    lookup: dict[tuple[str, str], dict[str, Any]] = {}
+    for index, (focal, opponent) in enumerate(pair_keys):
+        support = _pair_support_details(
+            scope_id=scope_id,
+            role=role,
+            focal=focal,
+            opponent=opponent,
+            posterior_sd=float(posterior_sd[index]),
+            pair_stats=pair_stats,
+            pooled_pair_stats=pooled_pair_stats,
+        )
+        center = float(mean_logit[index])
+        spread = float(posterior_sd[index])
+        lookup[(focal, opponent)] = {
+            "edge": round(100.0 * (float(expit(center)) - 0.5), 2),
+            "low": round(100.0 * (float(expit(center - RESPONSE_INTERVAL_Z * spread)) - 0.5), 2),
+            "high": round(100.0 * (float(expit(center + RESPONSE_INTERVAL_Z * spread)) - 0.5), 2),
+            "evidence": "supported" if support["supported"] else "limited",
+            "effective_maps": round(float(support["effective_maps"]), 1),
+        }
+
+    def matrix(field: str) -> list[list[Any]]:
+        return [
+            [None if focal == opponent else lookup[(focal, opponent)][field] for opponent in champion_order]
+            for focal in champion_order
+        ]
+
+    return {
+        "champions": [
+            {"champion_id": champion, "champion": display_names.get(champion, champion)}
+            for champion in champion_order
+        ],
+        "edge_pp": matrix("edge"),
+        "interval_low_pp": matrix("low"),
+        "interval_high_pp": matrix("high"),
+        "evidence": matrix("evidence"),
+        "effective_maps": matrix("effective_maps"),
+        "grade_thresholds_pp": {"S": 7.5, "A": 3.0, "B": -3.0, "C": -7.5},
+    }
+
+
 def _build_cell_metrics(
     *,
     fit: JointPooledFit,
@@ -662,40 +842,20 @@ def _build_cell_metrics(
             effective_maps = 0.0
             pair_support: list[dict[str, Any]] = []
             for local_index, opponent in enumerate(opponents):
-                left, right = sorted((focal, opponent))
-                stat = pair_stats.get((scope_id, role, left, right), {})
-                pair_maps = float(stat.get("effective_maps", 0.0))
-                pair_series = len(stat.get("series", ()))
-                variation = len(stat.get("outcomes", ())) == 2
-                support_source = "scope"
-                if not (
-                    pair_maps >= MATCHUP_MIN_EFFECTIVE_MAPS
-                    and pair_series >= MATCHUP_MIN_SERIES
-                    and variation
-                ):
-                    stat = pooled_pair_stats.get((role, left, right), {})
-                    pair_maps = float(stat.get("effective_maps", 0.0))
-                    pair_series = len(stat.get("series", ()))
-                    variation = len(stat.get("outcomes", ())) == 2
-                    support_source = "pooled_scopes"
-                pair_is_supported = (
-                    pair_maps >= MATCHUP_MIN_EFFECTIVE_MAPS
-                    and pair_series >= MATCHUP_MIN_SERIES
-                    and variation
-                    and float(theta_sd[local_index]) <= MATCHUP_MAX_POSTERIOR_SD
+                support = _pair_support_details(
+                    scope_id=scope_id,
+                    role=role,
+                    focal=focal,
+                    opponent=opponent,
+                    posterior_sd=float(theta_sd[local_index]),
+                    pair_stats=pair_stats,
+                    pooled_pair_stats=pooled_pair_stats,
                 )
-                if pair_is_supported:
+                if support["supported"]:
                     supported.append(opponent)
-                    support_sources.append(support_source)
-                    effective_maps += pair_maps
-                pair_support.append(
-                    {
-                        "supported": bool(pair_is_supported),
-                        "effective_maps": pair_maps,
-                        "series_count": pair_series,
-                        "evidence_source": support_source,
-                    }
-                )
+                    support_sources.append(str(support["evidence_source"]))
+                    effective_maps += float(support["effective_maps"])
+                pair_support.append(support)
             contrast_sd = float(np.max(theta_sd)) if theta_sd.size else math.inf
             row_weight = opponent_weights
 
@@ -737,8 +897,16 @@ def _build_cell_metrics(
             supported_opponent_count=len(supported),
             contrast_sd=contrast_sd,
         )
-        blind_score = float(np.quantile(blind_draws, BLIND_CREDIBLE_QUANTILE))
-        counter_count = int(np.count_nonzero(counter_probabilities >= COUNTER_POSTERIOR_THRESHOLD))
+        blind_score = (
+            _blind_point_estimate(focal_probability_matrix, row_weight)
+            if indices
+            else 0.5
+        )
+        counter_count = (
+            _counter_count_point_estimate(theta[indices])
+            if indices
+            else 0
+        )
         expected_breadth = float(np.dot(row_weight, counter_probabilities)) if indices else 0.0
         row = {
             "champion": display_names.get(focal, focal),
@@ -782,6 +950,22 @@ def _build_cell_metrics(
     for rank, row in enumerate(rows, start=1):
         row["rank"] = rank
     _assign_tier_buckets(rows)
+    response_matrix = _response_matrix(
+        fit=fit,
+        scope_id=scope_id,
+        role=role,
+        patch_id=patch_id,
+        champion_order=[str(row["champion_id"]) for row in rows],
+        display_names=display_names,
+        reference_champions=reference_champions,
+        pair_stats=pair_stats,
+        pooled_pair_stats=pooled_pair_stats,
+        resolver=resolver,
+        target_mapping=target_mapping,
+        exact_atom_patch=exact_atom_patch,
+        empty_vector=empty_vector,
+        atom_vector_cache=atom_vector_cache,
+    )
     design_summary = {
         "model_schema": fit.metadata["schema_version"],
         "fit_coordinates": "sparse reference-coded joint map likelihood",
@@ -809,6 +993,7 @@ def _build_cell_metrics(
         "design": design,
         "pair_keys": pair_keys,
         "rows": rows,
+        "response_matrix": response_matrix,
         "summary": design_summary,
     }
 
@@ -1148,6 +1333,7 @@ def build_pooled_candidate(
                 "strength_design": design_meta["summary"],
                 "atom_snapshot_status": "exact" if exact_atom_patch else "unavailable",
                 "regional_views": regional_views,
+                "response_matrix": design_meta["response_matrix"],
                 "rows": rows,
             }
             cells.append(cell)
@@ -1251,11 +1437,13 @@ def build_pooled_candidate(
         },
         "matchup_shape_method": {
             "name": "OE-supported blind tail risk and counter breadth from the same joint map likelihood",
-            "blind_definition": "posterior 10th percentile of the weighted lower-tail matchup probability across five focal-legal opponents",
+            "blind_definition": "posterior-mean lower-tail matchup edge across five common role opponents",
             "blind_tail_share": BLIND_TAIL_SHARE,
-            "counter_definition": "posterior breadth over five focal-legal opponents with logit effect threshold",
+            "counter_definition": "count of five common role opponents with a positive model contrast above the logit effect threshold",
             "counter_posterior_probability_threshold": COUNTER_POSTERIOR_THRESHOLD,
             "counter_effect_threshold_logit": COUNTER_EFFECT_THRESHOLD_LOGIT,
+            "response_matrix_definition": "complete same-role MAP contrast matrix with diagonal-Laplace 80 percent intervals",
+            "response_matrix_interval_z": RESPONSE_INTERVAL_Z,
             "minimum_effective_maps": MATCHUP_MIN_EFFECTIVE_MAPS,
             "minimum_effective_series": MATCHUP_MIN_SERIES,
             "outcome_variation_required": True,

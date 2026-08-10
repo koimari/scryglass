@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from lol_kills.v2.tierlists.pooled_candidate import (
+    _blind_point_estimate,
     _build_regional_views,
+    _counter_count_point_estimate,
     _matchup_metrics_available,
     _regional_contexts,
 )
@@ -71,3 +75,30 @@ def test_oe_matchup_support_remains_fail_closed_for_thin_or_uncertain_rows() -> 
         supported_opponent_count=5,
         contrast_sd=1.2,
     )
+
+
+def test_blind_point_estimate_uses_expected_weakest_matchup() -> None:
+    probabilities = np.asarray(
+        [
+            [0.56, 0.54, 0.55],
+            [0.61, 0.59, 0.60],
+            [0.67, 0.65, 0.66],
+            [0.58, 0.56, 0.57],
+            [0.63, 0.61, 0.62],
+        ]
+    )
+    score = _blind_point_estimate(probabilities, np.full(5, 0.2))
+    assert score == 0.55
+
+
+def test_counter_count_uses_positive_model_contrasts() -> None:
+    theta = np.asarray(
+        [
+            [0.10, 0.08, 0.09],
+            [0.06, 0.05, 0.07],
+            [0.01, 0.02, 0.03],
+            [-0.02, -0.01, 0.00],
+            [0.20, 0.18, 0.19],
+        ]
+    )
+    assert _counter_count_point_estimate(theta) == 3

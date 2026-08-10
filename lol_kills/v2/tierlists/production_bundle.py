@@ -229,6 +229,59 @@ def _validate_matchup_profile(row: Mapping[str, Any]) -> None:
             raise ProductionBundleError("candidate matchup series count is invalid")
 
 
+def _validate_response_matrix(cell: Mapping[str, Any]) -> None:
+    matrix = cell.get("response_matrix")
+    if not isinstance(matrix, Mapping):
+        raise ProductionBundleError("candidate response matrix is missing")
+    champions = matrix.get("champions")
+    if not isinstance(champions, list) or not champions:
+        raise ProductionBundleError("candidate response matrix champions are malformed")
+    champion_ids: list[str] = []
+    for champion in champions:
+        if not isinstance(champion, Mapping):
+            raise ProductionBundleError("candidate response matrix champion is malformed")
+        champion_id = champion.get("champion_id")
+        champion_name = champion.get("champion")
+        if (
+            not isinstance(champion_id, str)
+            or not re.fullmatch(r"riot:champion:\d+", champion_id)
+            or not isinstance(champion_name, str)
+            or not champion_name
+            or champion_id in champion_ids
+        ):
+            raise ProductionBundleError("candidate response matrix champion identity is invalid")
+        champion_ids.append(champion_id)
+
+    size = len(champion_ids)
+    numeric_fields = ("edge_pp", "interval_low_pp", "interval_high_pp", "effective_maps")
+    matrices: dict[str, list[Any]] = {}
+    for field in (*numeric_fields, "evidence"):
+        value = matrix.get(field)
+        if not isinstance(value, list) or len(value) != size or any(not isinstance(row, list) or len(row) != size for row in value):
+            raise ProductionBundleError(f"candidate response matrix {field} is malformed")
+        matrices[field] = value
+
+    for row_index in range(size):
+        for column_index in range(size):
+            values = {field: matrices[field][row_index][column_index] for field in matrices}
+            if row_index == column_index:
+                if any(value is not None for value in values.values()):
+                    raise ProductionBundleError("candidate response matrix diagonal must be empty")
+                continue
+            for field in numeric_fields:
+                value = values[field]
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    raise ProductionBundleError(f"candidate response matrix {field} value is invalid")
+            if not -50.0 <= float(values["edge_pp"]) <= 50.0:
+                raise ProductionBundleError("candidate response matrix edge is outside probability bounds")
+            if float(values["interval_low_pp"]) > float(values["interval_high_pp"]):
+                raise ProductionBundleError("candidate response matrix interval is inverted")
+            if float(values["effective_maps"]) < 0.0:
+                raise ProductionBundleError("candidate response matrix map count is invalid")
+            if values["evidence"] not in {"supported", "limited"}:
+                raise ProductionBundleError("candidate response matrix evidence is invalid")
+
+
 def _validate_regional_views(cell: Mapping[str, Any]) -> None:
     views = cell.get("regional_views")
     if views is None:
@@ -305,12 +358,14 @@ def _validate_candidate_structure(candidate: Mapping[str, Any]) -> dict[str, Any
         if not isinstance(rows, list) or not rows:
             raise ProductionBundleError(f"candidate cell has no rows: {scope_id} {role}")
         ranks: list[int] = []
+        row_champion_ids: set[str] = set()
         for row in rows:
             if not isinstance(row, Mapping):
                 raise ProductionBundleError("candidate champion row is malformed")
             champion_id = row.get("champion_id")
             if not isinstance(champion_id, str) or not re.fullmatch(r"riot:champion:\d+", champion_id):
                 raise ProductionBundleError("candidate champion identity is invalid")
+            row_champion_ids.add(champion_id)
             rank = row.get("rank")
             if not isinstance(rank, int) or rank < 1:
                 raise ProductionBundleError("candidate rank is invalid")
@@ -333,6 +388,13 @@ def _validate_candidate_structure(candidate: Mapping[str, Any]) -> dict[str, Any
             _validate_matchup_profile(row)
             row_count += 1
         _validate_regional_views(cell)
+        _validate_response_matrix(cell)
+        matrix_champion_ids = {
+            str(champion["champion_id"])
+            for champion in cell["response_matrix"]["champions"]
+        }
+        if matrix_champion_ids != row_champion_ids:
+            raise ProductionBundleError("candidate response matrix does not match ranked champions")
         if sorted(ranks) != list(range(1, len(ranks) + 1)):
             raise ProductionBundleError(f"candidate ranks are not contiguous: {scope_id} {role}")
     if any(len(roles) != len(ROLES) for roles in scope_roles.values()):
@@ -427,6 +489,7 @@ def build_production_index(
             "legal_opponent_distribution_sha256": source_cell.get("legal_opponent_distribution_sha256"),
             "strength_design": source_cell.get("strength_design"),
             "regional_views": source_cell.get("regional_views", []),
+            "response_matrix": source_cell.get("response_matrix"),
             "patch_ingestion": candidate.get("patch_ingestion"),
             "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "rows": production_rows,
@@ -571,6 +634,7 @@ def write_production_bundle(
                 "status": "production",
                 "row_count": meta["row_count"],
                 "regional_views": cell.get("regional_views", []),
+                "response_matrix": cell.get("response_matrix"),
             }
         )
         for row in cell["rows"]:
@@ -596,7 +660,6 @@ def write_production_bundle(
                     "counter_score": row.get("counter_score"),
                     "countered_opponent_count": row.get("countered_opponent_count"),
                     "countered_opponent_share": row.get("countered_opponent_share"),
-                    "matchup_profile": row.get("matchup_profile", []),
                 }
             )
     display = {
