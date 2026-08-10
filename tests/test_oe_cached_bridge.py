@@ -20,6 +20,7 @@ def _team_rows(game_id: str, date: str) -> pd.DataFrame:
                 "date": date,
                 "league": "LCK",
                 "tournament": "LCK 2026",
+                "patch": 16.15,
                 "side": side,
                 "teamname": f"{game_id}-{side}",
                 "result": int(side == "Blue"),
@@ -41,6 +42,7 @@ def _player_rows(game_id: str, date: str, *, complete: bool = True) -> pd.DataFr
                     "date": date,
                     "league": "LCK",
                     "tournament": "LCK 2026",
+                    "patch": 16.15,
                     "side": side,
                     "teamname": f"{game_id}-{side}",
                     "result": int(side == "Blue"),
@@ -113,6 +115,11 @@ def test_cached_bridge_preserves_complete_maps_without_an_api_key(
     assert meta["cached_bridge_game_count"] == 1
     assert meta["source_game_count"] == 2
     assert set(maps["game_uid"]) == {"annual", "bridge"}
+    live_players = pd.read_parquet(
+        tmp_path / "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet"
+    )
+    assert str(live_players["patch"].dtype) == "string"
+    assert set(live_players["patch"]) == {"16.15"}
 
 
 def test_cached_bridge_excludes_incomplete_player_identity(tmp_path: Path) -> None:
