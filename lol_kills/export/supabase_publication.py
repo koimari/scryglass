@@ -341,6 +341,10 @@ def prepare_release(
     published_manifest = dict(manifest)
     published_manifest["base_url"] = _project_url(project_url)
     published_manifest["data_backend"] = "supabase"
+    published_manifest["tier"] = {
+        "status": "available",
+        "as_of": tier_body.get("as_of"),
+    }
     release = {
         "release_id": release_id,
         "status": "staging",

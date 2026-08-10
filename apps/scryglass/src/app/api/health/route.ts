@@ -4,7 +4,13 @@ import { readPublicTierList, readRemotePackManifest } from "@/lib/serverPack";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function readTierState() {
+async function readTierState(manifest: Awaited<ReturnType<typeof readRemotePackManifest>>) {
+  if (manifest.tier?.status === "available") {
+    return {
+      status: "available",
+      as_of: manifest.tier.as_of ?? null,
+    };
+  }
   const payload = await readPublicTierList<Record<string, unknown>>();
   return {
     status: payload.status === "available" ? "available" : "unavailable",
@@ -17,7 +23,7 @@ export async function GET() {
     const manifest = await readRemotePackManifest();
     let tier = { status: "unavailable", as_of: null as string | null };
     try {
-      tier = await readTierState();
+      tier = await readTierState(manifest);
     } catch {
       // Ratings remain useful while a later tier authority cycle is pending.
     }

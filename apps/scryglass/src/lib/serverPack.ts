@@ -211,3 +211,21 @@ export async function readPublicTierList<T>(): Promise<T> {
   if (!response.ok) throw new Error(`tier list ${response.status}`);
   return response.json() as Promise<T>;
 }
+
+/** Send the large tier artifact from storage instead of proxying it through Vercel. */
+export async function publicTierListDownloadUrl(): Promise<string> {
+  const config = supabaseConfig();
+  if (config) {
+    const manifest = await readSupabaseManifest("no-store");
+    const storagePath = `${manifest.pack_id}/rankings/tierlists.json`
+      .split("/")
+      .map((part) => encodeURIComponent(part))
+      .join("/");
+    return `${config.url}/storage/v1/object/public/scryglass-public/${storagePath}`;
+  }
+  const configured = process.env.SCRYGLASS_TIERLIST_DISPLAY_URL?.trim();
+  const blobRoot = process.env.LIVE_BLOB_BASE_URL?.trim() || DEFAULT_BLOB_ROOT;
+  const url = configured || `${blobRoot.replace(/\/$/, "")}/rankings/tierlists.json`;
+  if (!/^https:\/\//.test(url)) throw new Error("tier-list download URL is invalid");
+  return url;
+}
