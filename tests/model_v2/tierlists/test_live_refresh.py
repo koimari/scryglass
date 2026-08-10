@@ -47,6 +47,26 @@ def test_live_merge_deduplicates_prefixed_and_canonical_game_ids() -> None:
     assert set(merged["gameid"]) == {"g1"}
 
 
+def test_live_merge_aligns_bridge_numbers_to_the_annual_schema() -> None:
+    primary = pd.DataFrame(
+        [
+            {"gameid": "annual", "date": "2026-08-01", "side": "Blue", "patch": 16.14},
+            {"gameid": "annual", "date": "2026-08-01", "side": "Red", "patch": 16.14},
+        ]
+    )
+    supplement = pd.DataFrame(
+        [
+            {"gameid": "bridge", "date": "2026-08-08", "side": "Blue", "patch": "16.15"},
+            {"gameid": "bridge", "date": "2026-08-08", "side": "Red", "patch": "16.15"},
+        ]
+    )
+
+    merged = _merge(primary, supplement, with_players=False)
+
+    assert merged["patch"].dtype.kind == "f"
+    assert merged["patch"].tolist() == [16.14, 16.14, 16.15, 16.15]
+
+
 def test_live_source_excludes_games_with_missing_or_duplicate_player_names() -> None:
     rows = []
     for game_id, bad in (("good", False), ("missing", True), ("duplicate", True)):

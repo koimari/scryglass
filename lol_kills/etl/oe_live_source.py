@@ -19,6 +19,9 @@ LIVE_PLAYER_OUTPUT = LIVE_ROOT / "oe_player_games.parquet"
 LIVE_TEAM_OUTPUT = LIVE_ROOT / "oe_team_games.parquet"
 LIVE_MAP_OUTPUT = LIVE_ROOT / "maps.parquet"
 LIVE_META_OUTPUT = LIVE_ROOT / "meta.json"
+API_PLAYER_INPUT = Path("data/lol/warehouse/parquet/oe_api_player_games.parquet")
+API_TEAM_INPUT = Path("data/lol/warehouse/parquet/oe_api_team_games.parquet")
+API_META_INPUT = Path("data/lol/warehouse/parquet/oe_api_meta.json")
 
 
 class OeLiveSourceError(RuntimeError):
@@ -63,14 +66,24 @@ def _game_keys(frame: pd.DataFrame) -> pd.Series:
     source = frame["game_uid"] if "game_uid" in frame.columns else fallback
     if source is None:
         raise OeLiveSourceError("OE rows have no game identifier")
-    return pd.Series(
-        [
-            canonical_source_game_key(value, fallback.loc[index] if fallback is not None else None)
-            for index, value in source.items()
-        ],
-        index=frame.index,
-        dtype="string",
-    )
+
+    def clean(values: pd.Series) -> pd.Series:
+        text = values.astype("string").str.strip()
+        text = text.mask(
+            text.isna()
+            | text.str.casefold().isin({"", "nan", "nat", "none", "<na>"})
+        )
+        return text.str.replace(
+            r"^(?:(?:oe-api|oracle-elixir-api):\s*)+",
+            "",
+            regex=True,
+            case=False,
+        ).str.strip()
+
+    keys = clean(source)
+    if fallback is not None and source is not fallback:
+        keys = keys.fillna(clean(fallback))
+    return keys.fillna("").astype("string")
 
 
 def _identity_complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
@@ -79,31 +92,35 @@ def _identity_complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
     required = {"side", "position", "playername"}
     if frame.empty or not required.issubset(frame.columns):
         return set()
-    work = frame.copy()
-    work["_source_game_key"] = _game_keys(work)
-    work["_side"] = work["side"].astype(str).str.title()
-    work["_role"] = work["position"].map(_role)
-    work["_name"] = work["playername"].astype("string").str.strip()
+    work = pd.DataFrame(index=frame.index)
+    work["_source_game_key"] = _game_keys(frame)
+    work["_side"] = frame["side"].astype(str).str.title()
+    work["_role"] = frame["position"].map(_role)
+    work["_name"] = frame["playername"].astype("string").str.strip()
+    work["_name"] = work["_name"].mask(work["_name"].eq(""))
     placeholders = {"unknown", "unknown player", "tbd", "none", "nan"}
-    valid: set[str] = set()
-    for game_id, group in work.groupby("_source_game_key", sort=False):
-        names = group["_name"].dropna().astype(str)
-        if (
-            len(group) != 10
-            or len(names) != 10
-            or names.str.casefold().isin(placeholders).any()
-            or names.str.casefold().nunique() != 10
-        ):
-            continue
-        complete = True
-        for side in ("Blue", "Red"):
-            rows = group[group["_side"].eq(side)]
-            if len(rows) != 5 or set(rows["_role"]) != {"top", "jng", "mid", "bot", "sup"}:
-                complete = False
-                break
-        if complete:
-            valid.add(str(game_id))
-    return valid
+    valid_sides = {"Blue", "Red"}
+    valid_roles = {"top", "jng", "mid", "bot", "sup"}
+    work["_valid_slot"] = work["_side"].isin(valid_sides) & work["_role"].isin(valid_roles)
+    work["_slot"] = work["_side"].astype(str) + ":" + work["_role"].astype(str)
+    work["_bad_name"] = work["_name"].str.casefold().isin(placeholders).fillna(True)
+    summary = work.groupby("_source_game_key", sort=False).agg(
+        rows=("_source_game_key", "size"),
+        names=("_name", "count"),
+        unique_names=("_name", lambda values: values.str.casefold().nunique()),
+        valid_slots=("_valid_slot", "sum"),
+        unique_slots=("_slot", "nunique"),
+        bad_names=("_bad_name", "sum"),
+    )
+    valid = summary[
+        summary["rows"].eq(10)
+        & summary["names"].eq(10)
+        & summary["unique_names"].eq(10)
+        & summary["valid_slots"].eq(10)
+        & summary["unique_slots"].eq(10)
+        & summary["bad_names"].eq(0)
+    ]
+    return set(valid.index.astype(str))
 
 
 def _complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
@@ -115,14 +132,14 @@ def _complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
     if not identity_complete:
         return set()
     keys = _game_keys(frame)
-    valid: set[str] = set()
-    for game_id, group in frame.assign(_source_game_key=keys).groupby("_source_game_key", sort=False):
-        if game_id not in identity_complete:
-            continue
-        statistics = group[list(CORE_INPUTS)].apply(pd.to_numeric, errors="coerce")
-        if not statistics.isna().any().any():
-            valid.add(str(game_id))
-    return valid
+    statistics = frame[list(CORE_INPUTS)].apply(pd.to_numeric, errors="coerce")
+    complete_rows = statistics.notna().all(axis=1)
+    complete_games = complete_rows.groupby(keys, sort=False).all()
+    return {
+        str(game_id)
+        for game_id, complete in complete_games.items()
+        if bool(complete) and str(game_id) in identity_complete
+    }
 
 
 def _signature(group: pd.DataFrame, *, with_players: bool) -> tuple[Any, ...] | None:
@@ -192,16 +209,29 @@ def _merge(primary: pd.DataFrame, supplement: pd.DataFrame, *, with_players: boo
         return supplement.drop(columns=["_source_game_key"], errors="ignore")
     if supplement.empty:
         return primary.drop(columns=["_source_game_key"], errors="ignore")
+    for column in primary.columns.intersection(supplement.columns):
+        dtype = primary[column].dtype
+        if pd.api.types.is_numeric_dtype(dtype):
+            supplement[column] = pd.to_numeric(supplement[column], errors="coerce")
+        elif pd.api.types.is_datetime64_any_dtype(dtype):
+            supplement[column] = pd.to_datetime(
+                supplement[column], errors="coerce", utc=True
+            )
+    seen_ids: set[str] = set()
     seen: set[tuple[Any, ...]] = set()
-    for _, group in primary.groupby("_source_game_key", sort=False):
+    for game_id, group in primary.groupby("_source_game_key", sort=False):
+        seen_ids.add(str(game_id))
         signature = _signature(group, with_players=with_players)
         if signature is not None:
             seen.add(signature)
     accepted: list[pd.DataFrame] = []
-    for _, group in supplement.groupby("_source_game_key", sort=False):
+    for game_id, group in supplement.groupby("_source_game_key", sort=False):
+        if str(game_id) in seen_ids:
+            continue
         signature = _signature(group, with_players=with_players)
         if signature is not None and signature in seen:
             continue
+        seen_ids.add(str(game_id))
         if signature is not None:
             seen.add(signature)
         accepted.append(group)
@@ -216,6 +246,9 @@ def build_live_source(root: Path | str = Path(".")) -> dict[str, Any]:
     primary_player_path = parquet_root / "oe_player_games.parquet"
     primary_team_path = parquet_root / "oe_team_games.parquet"
     annual_meta_path = parquet_root / "oe_meta.json"
+    api_player_path = repo_root / API_PLAYER_INPUT
+    api_team_path = repo_root / API_TEAM_INPUT
+    api_meta_path = repo_root / API_META_INPUT
     for path in (primary_player_path, primary_team_path):
         if not path.is_file():
             raise OeLiveSourceError(f"required OE source is missing: {path}")
@@ -224,6 +257,31 @@ def build_live_source(root: Path | str = Path(".")) -> dict[str, Any]:
     primary_team = pd.read_parquet(primary_team_path)
     player = primary_player.copy()
     team = primary_team.copy()
+    bridge_game_count = 0
+    bridge_identity_complete_count = 0
+    bridge_statistics_complete_count = 0
+    bridge_used = False
+    if api_player_path.is_file() and api_team_path.is_file():
+        try:
+            api_player = pd.read_parquet(api_player_path)
+            api_team = pd.read_parquet(api_team_path)
+            bridge_game_count = len(set(_game_keys(api_player).dropna().astype(str)))
+            identity_complete_api_ids = _identity_complete_player_game_ids(api_player)
+            statistics_complete_api_ids = _complete_player_game_ids(api_player)
+            api_player_keys = _game_keys(api_player)
+            api_team_keys = _game_keys(api_team)
+            api_player = api_player[api_player_keys.isin(identity_complete_api_ids)].copy()
+            api_team = api_team[api_team_keys.isin(identity_complete_api_ids)].copy()
+            bridge_identity_complete_count = len(identity_complete_api_ids)
+            bridge_statistics_complete_count = len(statistics_complete_api_ids)
+            player = _merge(player, api_player, with_players=True)
+            team = _merge(team, api_team, with_players=False)
+            bridge_used = bool(identity_complete_api_ids)
+        except (OSError, ValueError, TypeError, KeyError, OeLiveSourceError):
+            bridge_game_count = 0
+            bridge_identity_complete_count = 0
+            bridge_statistics_complete_count = 0
+            bridge_used = False
     maps = build_maps_frame_from_team_games(team)
     if player.empty or team.empty or maps.empty:
         raise OeLiveSourceError("OE live source has no complete player, team, and map frames")
@@ -232,25 +290,36 @@ def build_live_source(root: Path | str = Path(".")) -> dict[str, Any]:
     statistics_complete_ids = _complete_player_game_ids(player)
     player_keys = _game_keys(player)
     source_game_ids = sorted(set(player_keys.dropna().astype(str)))
-    source_latest: str | None = None
+    source_latest_candidates: list[pd.Timestamp] = []
     try:
         annual_meta = json.loads(annual_meta_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         annual_meta = {}
     source_files = annual_meta.get("source_files") if isinstance(annual_meta, dict) else None
     if isinstance(source_files, list):
-        source_latest = max(
-            (
-                str(item.get("date_max_utc"))
-                for item in source_files
-                if isinstance(item, dict) and item.get("date_max_utc")
-            ),
-            default=None,
+        source_latest_candidates.extend(
+            timestamp
+            for item in source_files
+            if isinstance(item, dict) and item.get("date_max_utc")
+            if not pd.isna(timestamp := pd.to_datetime(item.get("date_max_utc"), errors="coerce", utc=True))
         )
-    if source_latest is None and "date" in team.columns:
+    if bridge_used and api_meta_path.is_file():
+        try:
+            api_meta = json.loads(api_meta_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            api_meta = {}
+        api_latest = pd.to_datetime(api_meta.get("source_latest"), errors="coerce", utc=True)
+        if not pd.isna(api_latest):
+            source_latest_candidates.append(api_latest)
+    if "date" in team.columns:
         dates = pd.to_datetime(team["date"], errors="coerce", utc=True).dropna()
         if not dates.empty:
-            source_latest = pd.Timestamp(dates.max()).isoformat()
+            source_latest_candidates.append(pd.Timestamp(dates.max()))
+    source_latest = (
+        pd.Timestamp(max(source_latest_candidates)).isoformat()
+        if source_latest_candidates
+        else None
+    )
 
     live_root = repo_root / "data/lol/warehouse/parquet/oe_live"
     live_root.mkdir(parents=True, exist_ok=True)
@@ -272,9 +341,26 @@ def build_live_source(root: Path | str = Path(".")) -> dict[str, Any]:
                 if annual_meta_path.is_file()
                 else []
             ),
+            *(
+                [
+                    {"locator": str(api_player_path.relative_to(repo_root)), "raw_sha256": _sha256(api_player_path)},
+                    {"locator": str(api_team_path.relative_to(repo_root)), "raw_sha256": _sha256(api_team_path)},
+                ]
+                if bridge_used
+                else []
+            ),
+            *(
+                [{"locator": str(api_meta_path.relative_to(repo_root)), "raw_sha256": _sha256(api_meta_path)}]
+                if bridge_used and api_meta_path.is_file()
+                else []
+            ),
         ],
         "source_latest": source_latest,
         "source_transport": "public_google_drive_file",
+        "cached_bridge_used": bridge_used,
+        "cached_bridge_game_count": bridge_game_count,
+        "cached_bridge_identity_complete_count": bridge_identity_complete_count,
+        "cached_bridge_statistics_complete_count": bridge_statistics_complete_count,
         "source_game_count": len(source_game_ids),
         "identity_complete_game_count": len(identity_complete_ids),
         "statistics_complete_game_count": len(statistics_complete_ids),
