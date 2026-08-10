@@ -37,7 +37,7 @@ Canonical machine-readable allowlists and defaults live in
 ## Build
 
 ```bash
-python3 -m lol_kills.update_public_pack --years 2025,2026 --refresh-oe --download-grid --grid-required --publish
+python3 -m lol_kills.update_public_pack --years 2025,2026 --refresh-oe --publish
 # Or, when the warehouse is already current:
 python3 -m lol_kills.export.public_pack --years 2025,2026
 python3 -m lol_kills.export.upload_pack --local-only   # or Blob with token

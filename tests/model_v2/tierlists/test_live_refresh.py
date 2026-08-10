@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 from lol_kills.v2.tierlists import live_refresh
 from lol_kills.etl.oe_live_source import _complete_player_game_ids, _merge
@@ -89,6 +90,7 @@ def test_blob_publication_payloads_keep_cells_immutable_and_pointer_last() -> No
     assert all(cell["locator"].startswith("cells/") for cell in pointer["cells"])
     assert payloads["pointer_raw"] != payloads["release_index_raw"]
     assert payloads["cell_count"] == 195
+    assert json.loads(payloads["display_raw"])["schema_version"] == "rankings-tierlists-v2"
 
 
 def test_blob_publication_writes_the_pointer_last() -> None:
@@ -97,6 +99,7 @@ def test_blob_publication_writes_the_pointer_last() -> None:
     class FakeTransport:
         pointer_raw = b""
         movement_raw = b""
+        display_raw = b""
 
         def get_blob(self, _store_id: str, pathname: str, *, deadline_epoch: int):
             if pathname == live_refresh.BLOB_MOVEMENT_PATH:
@@ -105,6 +108,13 @@ def test_blob_publication_writes_the_pointer_last() -> None:
                 return (
                     self.movement_raw,
                     live_refresh.BlobIdentity(pathname, len(self.movement_raw), "movement-etag"),
+                )
+            if pathname == live_refresh.BLOB_DISPLAY_PATH:
+                if not self.display_raw:
+                    return None
+                return (
+                    self.display_raw,
+                    live_refresh.BlobIdentity(pathname, len(self.display_raw), "display-etag"),
                 )
             if pathname != live_refresh.BLOB_POINTER_PATH:
                 return None
@@ -125,12 +135,17 @@ def test_blob_publication_writes_the_pointer_last() -> None:
             assert all(
                 write.pathname.startswith("tierlists/releases/")
                 or write.pathname == live_refresh.BLOB_MOVEMENT_PATH
+                or write.pathname == live_refresh.BLOB_DISPLAY_PATH
                 for write in plan.writes[:-1]
             )
             movement_write = next(
                 write for write in plan.writes if write.pathname == live_refresh.BLOB_MOVEMENT_PATH
             )
             transport.movement_raw = movement_write.content
+            display_write = next(
+                write for write in plan.writes if write.pathname == live_refresh.BLOB_DISPLAY_PATH
+            )
+            transport.display_raw = display_write.content
             transport.pointer_raw = plan.writes[-1].content
             return SimpleNamespace(
                 success=True,
@@ -155,6 +170,7 @@ def test_blob_publication_writes_the_pointer_last() -> None:
     assert result["status"] == "published"
     assert result["pointer_mode"] == "NEW_IMMUTABLE"
     assert result["pointer_readback_verified"] is True
+    assert result["display_readback_verified"] is True
     assert result["cell_count"] == 195
 
 
@@ -188,46 +204,20 @@ def test_oe_only_skips_grid_and_can_be_ready_from_a_complete_oe_source(tmp_path:
     assert receipt["source_mode"] == "oe_only"
     assert receipt["status"] == "ready_for_authority_review"
     assert receipt["source_steps"][5]["skipped"] is True
-    assert receipt["source_steps"][5]["reason"] == "source_mode_oe_only"
+    assert receipt["source_steps"][5]["reason"] == "public_refresh_oe_only"
     saved = json.loads((tmp_path / "receipt.json").read_text(encoding="utf-8"))
     assert saved["source_mode"] == "oe_only"
 
 
-def test_oe_plus_grid_keeps_the_grid_step_available(tmp_path: Path) -> None:
-    steps = [
-        {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0},
-        {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0},
-        {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0},
-        {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0},
-        {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0},
-        {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0},
-    ]
-    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_api_meta.json"
-    meta_path.parent.mkdir(parents=True)
-    meta_path.write_text(
-        json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_statistics_complete": True}),
-        encoding="utf-8",
-    )
-    with patch.object(live_refresh, "_run_step", side_effect=steps) as run_step, patch.object(
-        live_refresh,
-        "build_candidate",
-        return_value=_candidate(source_mode="oe_plus_grid"),
-    ), patch.object(live_refresh, "write_candidate", return_value="b" * 64):
-        receipt = live_refresh.refresh_candidate(
+def test_public_tier_refresh_rejects_grid_source_mode(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="must be oe_only"):
+        live_refresh.refresh_candidate(
             tmp_path,
             expected_live_as_of="2026-08-08T12:00:00Z",
             output_path=tmp_path / "candidate.json",
             receipt_path=tmp_path / "receipt.json",
             source_mode="oe_plus_grid",
         )
-
-    assert run_step.call_count == 6
-    assert receipt["source_mode"] == "oe_plus_grid"
-    assert run_step.call_args_list[1].kwargs["source"] == "oe_api"
-    assert run_step.call_args_list[2].kwargs["source"] == "champion_atomization"
-    assert run_step.call_args_list[3].kwargs["source"] == "oe_live_source"
-    assert run_step.call_args_list[4].kwargs["source"] == "ratings"
-    assert receipt["source_steps"][5]["completed"] is True
 
 
 def test_skip_annual_oe_uses_the_committed_pack_baseline(tmp_path: Path) -> None:

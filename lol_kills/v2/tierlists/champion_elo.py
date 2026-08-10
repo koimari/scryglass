@@ -22,11 +22,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 from scipy.optimize import minimize
 from scipy.special import expit, ndtr
 
+from lol_kills.etl.oe_live_source import _complete_player_game_ids, _game_keys
+from lol_kills.ratings.player_map_grades import CORE_INPUTS
 from lol_kills.v2.champions.atoms.consume import AtomBridge
 
 SCHEMA_VERSION = "scryglass:champion-role-elo-candidate:v1"
@@ -230,7 +232,9 @@ def _load_source(root: Path, *, as_of: pd.Timestamp | None = None) -> tuple[pd.D
         "champion",
         "side",
         "teamname",
+        "playername",
         "result",
+        *CORE_INPUTS,
     ]
     source_paths = [primary_path]
     supplemental_path = root / SUPPLEMENTAL_SOURCE_LOCATOR
@@ -284,7 +288,11 @@ def _load_source(root: Path, *, as_of: pd.Timestamp | None = None) -> tuple[pd.D
         frame = frame[frame["date"].le(cutoff)].copy()
     if frame.empty:
         raise ChampionEloError("source has no completed maps in the requested window")
-    frame["game_id"] = frame["gameid"].astype(str)
+    frame["game_id"] = _game_keys(frame)
+    complete_game_ids = _complete_player_game_ids(frame.assign(game_uid=frame["game_id"]))
+    frame = frame[frame["game_id"].isin(complete_game_ids)].copy()
+    if frame.empty:
+        raise ChampionEloError("source has no identity and statistics-complete maps")
     return frame, _sha256_bytes(_canonical_json(source_bindings))
 
 

@@ -154,6 +154,7 @@ def _candidate_and_evaluation(root: Path) -> tuple[bytes, dict[str, Any], bytes,
         raise ProductionBundleError("forward evaluation canonical digest is invalid")
     if candidate.get("status") != "development_only" or candidate.get("production_eligible") is not False:
         raise ProductionBundleError("promotion input must remain a development candidate")
+    _require_public_source_mode(candidate)
     if evaluation.get("status") != "complete" or evaluation.get("decision") != "descriptive_pass":
         raise ProductionBundleError("forward evaluation is not a complete descriptive pass")
     if evaluation.get("production_eligible") is not True:
@@ -172,6 +173,11 @@ def _candidate_and_evaluation(root: Path) -> tuple[bytes, dict[str, Any], bytes,
         if evaluation.get(field) is not True:
             raise ProductionBundleError(f"forward evaluation gate failed: {field}")
     return candidate_raw, candidate, evaluation_raw, evaluation
+
+
+def _require_public_source_mode(candidate: Mapping[str, Any]) -> None:
+    if candidate.get("source_mode") != "oe_only":
+        raise ProductionBundleError("public tier-list production requires an OE-only candidate")
 
 
 def _validate_candidate_structure(candidate: Mapping[str, Any]) -> dict[str, Any]:
@@ -491,9 +497,7 @@ def write_production_bundle(
         "status": "available",
         "generated_at": index["generated_at"],
         "as_of": index["as_of"],
-        "source_freshness": (
-            "oe_daily_export" if index["source_mode"] == "oe_only" else "oe_with_same_day_grid_bridge"
-        ),
+        "source_freshness": "oe_daily_export",
         "options": {
             "roles": index["options"]["roles"],
             "patches": index["options"]["patches"],

@@ -74,10 +74,10 @@ def _game_keys(frame: pd.DataFrame) -> pd.Series:
     )
 
 
-def _complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
-    """Return games with complete identities, roles, and public statistics."""
+def _identity_complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
+    """Return games with complete player identities and canonical roles."""
 
-    required = {"side", "position", "playername", *CORE_INPUTS}
+    required = {"side", "position", "playername"}
     if frame.empty or not required.issubset(frame.columns):
         return set()
     work = frame.copy()
@@ -94,7 +94,6 @@ def _complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
             or len(names) != 10
             or names.str.casefold().isin(placeholders).any()
             or names.str.casefold().nunique() != 10
-            or group[list(CORE_INPUTS)].apply(pd.to_numeric, errors="coerce").isna().any().any()
         ):
             continue
         complete = True
@@ -104,6 +103,25 @@ def _complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
                 complete = False
                 break
         if complete:
+            valid.add(str(game_id))
+    return valid
+
+
+def _complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
+    """Return identity-complete games with complete public statistics."""
+
+    if frame.empty or any(column not in frame.columns for column in CORE_INPUTS):
+        return set()
+    identity_complete = _identity_complete_player_game_ids(frame)
+    if not identity_complete:
+        return set()
+    keys = _game_keys(frame)
+    valid: set[str] = set()
+    for game_id, group in frame.assign(_source_game_key=keys).groupby("_source_game_key", sort=False):
+        if game_id not in identity_complete:
+            continue
+        statistics = group[list(CORE_INPUTS)].apply(pd.to_numeric, errors="coerce")
+        if not statistics.isna().any().any():
             valid.add(str(game_id))
     return valid
 
@@ -208,12 +226,13 @@ def build_live_source(root: Path | str = Path(".")) -> dict[str, Any]:
     primary_team = pd.read_parquet(primary_team_path)
     api_player = pd.read_parquet(api_player_path)
     api_team = pd.read_parquet(api_team_path)
-    complete_api_ids = _complete_player_game_ids(api_player)
+    identity_complete_api_ids = _identity_complete_player_game_ids(api_player)
+    statistics_complete_api_ids = _complete_player_game_ids(api_player)
     api_player_keys = _game_keys(api_player)
     api_team_keys = _game_keys(api_team)
     api_games_seen = len(set(api_player_keys.dropna().astype(str)))
-    api_player = api_player[api_player_keys.isin(complete_api_ids)].copy()
-    api_team = api_team[api_team_keys.isin(complete_api_ids)].copy()
+    api_player = api_player[api_player_keys.isin(identity_complete_api_ids)].copy()
+    api_team = api_team[api_team_keys.isin(identity_complete_api_ids)].copy()
     player = _merge(primary_player, api_player, with_players=True)
     team = _merge(primary_team, api_team, with_players=False)
     maps = build_maps_frame_from_team_games(team)
@@ -238,7 +257,8 @@ def build_live_source(root: Path | str = Path(".")) -> dict[str, Any]:
         ],
         "source_latest": api_meta.get("source_latest"),
         "api_games_seen": api_games_seen,
-        "api_games_excluded_incomplete": api_games_seen - len(complete_api_ids),
+        "api_games_excluded_incomplete_identity": api_games_seen - len(identity_complete_api_ids),
+        "api_games_pending_statistics": len(identity_complete_api_ids.difference(statistics_complete_api_ids)),
         "player_rows": len(player),
         "player_rows_with_names": int(player["playername"].notna().sum()) if "playername" in player else 0,
         "team_rows": len(team),

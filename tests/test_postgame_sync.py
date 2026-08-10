@@ -10,7 +10,16 @@ import pytest
 
 from lol_kills.export import pack_spec
 from lol_kills.export.public_pack import source_identity_sha256
-from lol_kills.postgame_sync import RefreshValidationError, SyncConfig, sync_once, validate_live_source, validate_pack
+from lol_kills.postgame_sync import (
+    REVIEWED_QUARANTINED_GAME_IDS,
+    RefreshValidationError,
+    SyncConfig,
+    publish_pack,
+    sync_once,
+    validate_live_source,
+    validate_pack,
+    validate_source_continuity,
+)
 
 
 NOW = datetime(2026, 8, 9, 18, tzinfo=timezone.utc)
@@ -43,23 +52,32 @@ def _ingest(root: Path, game_ids: list[str], complete: bool = True):
 
 def _write_live(
     root: Path,
-    game_id: str,
+    game_id: str | list[str],
     missing_player: bool = False,
     missing_statistics: bool = False,
 ) -> None:
+    game_ids = [game_id] if isinstance(game_id, str) else game_id
     live = root / "data/lol/warehouse/parquet/oe_live"
     live.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([{"game_uid": game_id}]).to_parquet(live / "maps.parquet", index=False)
+    pd.DataFrame([{"game_uid": value} for value in game_ids]).to_parquet(
+        live / "maps.parquet", index=False
+    )
     pd.DataFrame(
         [
-            {"game_uid": game_id, "side": "Blue", "result": 1, "teamname": "Blue Team"},
-            {"game_uid": game_id, "side": "Red", "result": 0, "teamname": "Red Team"},
+            {
+                "game_uid": value,
+                "side": side,
+                "result": 1 if side == "Blue" else 0,
+                "teamname": f"{side} Team",
+            }
+            for value in game_ids
+            for side in ("Blue", "Red")
         ]
     ).to_parquet(live / "oe_team_games.parquet", index=False)
     players = pd.DataFrame(
         [
             {
-                "game_uid": game_id,
+                "game_uid": value,
                 "side": side,
                 "position": role,
                 "playername": f"{side}-{role}",
@@ -76,6 +94,7 @@ def _write_live(
                 "wcpm": 0.2 + role_index * 0.02,
                 "golddiffat10": (1 if side == "Blue" else -1) * role_index * 40,
             }
+            for value in game_ids
             for side in ("Blue", "Red")
             for role_index, role in enumerate(("top", "jng", "mid", "bot", "sup"))
         ]
@@ -123,8 +142,22 @@ def test_incomplete_details_keep_the_previous_pack(tmp_path: Path) -> None:
     _write_receipt(tmp_path, ["game-1"])
     config.state_path.parent.mkdir(parents=True)
     config.state_path.write_text(json.dumps({"published_game_ids": ["game-1"], "pack_id": "old"}), encoding="utf-8")
-    result = sync_once(config, now=NOW, ingest_fn=_ingest(tmp_path, ["game-1", "game-2"], False))
+    def build(root: Path):
+        _write_live(root, ["game-1", "game-2"])
+        live = root / "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet"
+        players = pd.read_parquet(live)
+        players.loc[players["game_uid"].eq("game-2"), "kills"] = pd.NA
+        players.to_parquet(live, index=False)
+        return {}
+
+    result = sync_once(
+        config,
+        now=NOW,
+        ingest_fn=_ingest(tmp_path, ["game-1", "game-2"], False),
+        build_live_fn=build,
+    )
     assert result["status"] == "waiting_for_details"
+    assert result["pending_game_ids"] == ["game-2"]
     assert json.loads(config.state_path.read_text())["published_game_ids"] == ["game-1"]
 
 
@@ -135,12 +168,12 @@ def test_complete_new_game_publishes_manifest_last(tmp_path: Path) -> None:
     config.state_path.write_text(json.dumps({"published_game_ids": ["game-1"]}), encoding="utf-8")
 
     def build(root: Path):
-        _write_live(root, "game-2")
+        _write_live(root, ["game-1", "game-2"])
         return {}
 
     def export(*, out_root: Path, pack_id: str, **_kwargs):
         pack_dir = out_root / pack_id
-        return _manifest(pack_dir, ["game-2"])
+        return _manifest(pack_dir, ["game-1", "game-2"])
 
     result = sync_once(
         config,
@@ -155,16 +188,79 @@ def test_complete_new_game_publishes_manifest_last(tmp_path: Path) -> None:
     assert not (config.public_root / "latest.json").exists()
 
 
+def test_pack_publication_updates_blob_pointer_without_a_site_build(tmp_path: Path, monkeypatch) -> None:
+    pack_dir = tmp_path / "output/v1"
+    manifest = _manifest(pack_dir, ["game-1"])
+    monkeypatch.setenv("BLOB_READ_WRITE_TOKEN", "test-token")
+    calls: list[str] = []
+
+    def upload(_pack_dir: Path, pack_id: str, token: str) -> dict[str, str]:
+        calls.append("files")
+        assert token == "test-token"
+        return {"features/ratings_snapshot.json": f"https://store.example/packs/{pack_id}/features/ratings_snapshot.json"}
+
+    def pointers(token: str, pack_id: str, _manifest: dict, *, base_url: str) -> dict[str, str]:
+        calls.append("pointer")
+        assert token == "test-token"
+        assert base_url == f"https://store.example/packs/{pack_id}"
+        return {"packs/manifest.json": "https://store.example/packs/manifest.json"}
+
+    monkeypatch.setattr("lol_kills.postgame_sync.upload_to_blob", upload)
+    monkeypatch.setattr("lol_kills.postgame_sync.publish_blob_pointers", pointers)
+    result = publish_pack(pack_dir, manifest, tmp_path / "served/packs")
+
+    assert calls == ["files", "pointer"]
+    assert result["runtime"] == "blob"
+    pointer = json.loads((tmp_path / "served/packs/manifest.json").read_text())
+    assert pointer["base_url"] == "https://store.example/packs/v1"
+
+
 def test_live_validation_rejects_incomplete_players(tmp_path: Path) -> None:
     _write_live(tmp_path, "game-2", missing_player=True)
-    with pytest.raises(RefreshValidationError, match="malformed rows"):
+    with pytest.raises(RefreshValidationError, match="complete OE source set"):
         validate_live_source(tmp_path, ["game-2"])
 
 
 def test_live_validation_rejects_incomplete_player_statistics(tmp_path: Path) -> None:
     _write_live(tmp_path, "game-2", missing_statistics=True)
-    with pytest.raises(RefreshValidationError, match="incomplete player statistics"):
+    with pytest.raises(RefreshValidationError, match="complete OE source set"):
         validate_live_source(tmp_path, ["game-2"])
+
+
+def test_source_continuity_rejects_a_disappearing_published_game(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    _write_receipt(tmp_path, ["game-1"])
+    config.state_path.parent.mkdir(parents=True)
+    config.state_path.write_text(
+        json.dumps({"published_game_ids": ["game-1"], "pack_id": "old"}),
+        encoding="utf-8",
+    )
+
+    def build(root: Path):
+        _write_live(root, "game-2")
+        return {}
+
+    with pytest.raises(RefreshValidationError, match="published completed maps disappeared"):
+        sync_once(
+            config,
+            now=NOW,
+            ingest_fn=_ingest(tmp_path, ["game-1", "game-2"]),
+            build_live_fn=build,
+        )
+
+
+def test_source_continuity_allows_only_reviewed_unknown_player_maps() -> None:
+    quarantined = sorted(REVIEWED_QUARANTINED_GAME_IDS)
+    source = {
+        "game_ids": ["game-1"],
+        "game_count": 1,
+        "identity_sha256": source_identity_sha256(["game-1"]),
+    }
+
+    result = validate_source_continuity(["game-1", *quarantined], source, None)
+
+    assert result["missing_game_count"] == 5
+    assert result["quarantined_game_ids"] == quarantined
 
 
 def test_live_validation_uses_fallback_game_identity_columns(tmp_path: Path) -> None:
@@ -180,6 +276,37 @@ def test_live_validation_uses_fallback_game_identity_columns(tmp_path: Path) -> 
     result = validate_live_source(tmp_path, ["game-2"])
 
     assert result["game_ids"] == ["game-2"]
+
+
+def test_incomplete_discovered_map_waits_while_complete_map_publishes(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    config.state_path.parent.mkdir(parents=True)
+    config.state_path.write_text(json.dumps({"published_game_ids": ["game-1"]}), encoding="utf-8")
+
+    def build(root: Path):
+        _write_live(root, ["game-1", "game-2", "game-3"])
+        live = root / "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet"
+        players = pd.read_parquet(live)
+        players.loc[players["game_uid"].eq("game-3"), "kills"] = pd.NA
+        players.to_parquet(live, index=False)
+        return {}
+
+    def export(*, out_root: Path, pack_id: str, **_kwargs):
+        pack_dir = out_root / pack_id
+        assert _kwargs["allowed_game_ids"] == ["game-1", "game-2"]
+        return _manifest(pack_dir, ["game-1", "game-2"])
+
+    result = sync_once(
+        config,
+        now=NOW,
+        ingest_fn=_ingest(tmp_path, ["game-1", "game-2", "game-3"]),
+        build_live_fn=build,
+        export_pack_fn=export,
+    )
+
+    assert result["status"] == "published"
+    assert result["new_game_ids"] == ["game-2"]
+    assert result["pending_game_ids"] == ["game-3"]
 
 
 def test_pack_validation_rejects_a_changed_file(tmp_path: Path) -> None:

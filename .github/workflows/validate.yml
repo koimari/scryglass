@@ -170,6 +170,7 @@ jobs:
           tests/test_global_player_bt.py
           tests/test_player_map_grades.py
           tests/test_postgame_sync.py
+          tests/test_public_grid_isolation.py
           tests/test_public_pack_spec.py
           tests/test_competition_and_ratings.py
           tests/test_manual_leaguepedia.py
