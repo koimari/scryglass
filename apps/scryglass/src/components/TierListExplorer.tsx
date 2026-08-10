@@ -15,8 +15,7 @@ import {
 } from "@/lib/tierBoard";
 import styles from "./TierListExplorer.module.css";
 
-const TIER_LIST_URL = process.env.NEXT_PUBLIC_TIER_LIST_URL?.trim()
-  || "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/rankings/tierlists.json";
+const TIER_LIST_URL = "/data/tierlists.json";
 const ROLE_ORDER = TIER_ROLE_ORDER;
 const ROLE_LABELS: Record<string, string> = {
   top: "Top",
