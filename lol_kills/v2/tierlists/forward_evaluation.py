@@ -20,6 +20,9 @@ from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
+
+from lol_kills.etl.source_keys import canonical_source_game_key
 
 
 SCHEMA_VERSION = "scryglass:tierlist-forward-evaluation:v1"
@@ -134,6 +137,44 @@ def _scope(row: pd.Series) -> tuple[str, str | None, str | None, str | None]:
     return f"league:{league.casefold()}:{tier}", league, None, tier
 
 
+def _source_columns(source: Path) -> list[str]:
+    required = [
+        "gameid",
+        "date",
+        "league",
+        "competition_tier",
+        "event_kind",
+        "patch",
+        "position",
+        "champion",
+        "side",
+        "teamname",
+        "result",
+    ]
+    available = set(pq.read_schema(source).names)
+    missing = sorted(set(required).difference(available))
+    if missing:
+        raise ForwardEvaluationError(
+            f"live OE source is missing required columns: {missing}"
+        )
+    return [*required, *(["game_uid"] if "game_uid" in available else [])]
+
+
+def _map_keys(frame: pd.DataFrame) -> pd.Series:
+    game_uid = frame["game_uid"] if "game_uid" in frame.columns else None
+    return pd.Series(
+        [
+            canonical_source_game_key(
+                game_uid.loc[index] if game_uid is not None else None,
+                frame.loc[index, "gameid"],
+            )
+            for index in frame.index
+        ],
+        index=frame.index,
+        dtype="string",
+    )
+
+
 def _load_maps(root: Path) -> tuple[list[MapRecord], dict[str, Any]]:
     source = root / SOURCE_LOCATOR
     meta = root / SOURCE_META_LOCATOR
@@ -144,20 +185,7 @@ def _load_maps(root: Path) -> tuple[list[MapRecord], dict[str, Any]]:
     try:
         frame = pd.read_parquet(
             source,
-            columns=[
-                "gameid",
-                "game_uid",
-                "date",
-                "league",
-                "competition_tier",
-                "event_kind",
-                "patch",
-                "position",
-                "champion",
-                "side",
-                "teamname",
-                "result",
-            ],
+            columns=_source_columns(source),
         )
     except (OSError, KeyError, ValueError) as exc:
         raise ForwardEvaluationError("live OE source cannot be read") from exc
@@ -165,7 +193,7 @@ def _load_maps(root: Path) -> tuple[list[MapRecord], dict[str, Any]]:
     frame["role"] = frame["position"].map(lambda value: ROLE_ALIASES.get(str(value).strip().casefold()))
     frame["side_norm"] = frame["side"].map(_normalize_side)
     frame["result_num"] = pd.to_numeric(frame["result"], errors="coerce")
-    frame["map_key"] = frame["game_uid"].where(frame["game_uid"].notna(), frame["gameid"]).astype(str)
+    frame["map_key"] = _map_keys(frame)
     frame = frame[
         frame["date"].notna()
         & frame["date"].ge(HISTORY_START)
@@ -385,7 +413,14 @@ def evaluate(
         str(rating_method.get("name", "")).startswith("patch-wide joint five-role")
         and "full observed-Hessian" in str(rating_method.get("fit", ""))
         and rating_method.get("fit_coordinates") == "sparse reference-coded joint map rows"
-        and str(matchup_method.get("name", "")).startswith("atom-informed")
+        and str(matchup_method.get("name", "")).startswith(
+            ("atom-informed", "OE-supported")
+        )
+        and (
+            str(matchup_method.get("name", "")).startswith("atom-informed")
+            or "not required for OE-supported matchup publication"
+            in str(matchup_method.get("atom_adjustment", ""))
+        )
         and matchup_method.get("outcome_variation_required") is True
         and isinstance(matchup_method.get("posterior_draws"), int)
         and matchup_method.get("posterior_draws", 0) >= 2000

@@ -521,6 +521,27 @@ def _posterior_pair_matrix(
     return design, values
 
 
+def _matchup_metrics_available(
+    *,
+    opponent_count: int,
+    supported_opponent_count: int,
+    contrast_sd: float,
+) -> bool:
+    """Expose OE matchup metrics when the full legal pool is supported.
+
+    Exact atom snapshots can refine the joint fit. They are not required for
+    the public OE matchup view because the support and uncertainty gates are
+    evaluated from completed OE maps and series.
+    """
+
+    return (
+        opponent_count == LEGAL_OPPONENT_COUNT
+        and supported_opponent_count == LEGAL_OPPONENT_COUNT
+        and math.isfinite(contrast_sd)
+        and contrast_sd <= STRENGTH_MAX_CONTRAST_SD
+    )
+
+
 def _build_cell_metrics(
     *,
     fit: JointPooledFit,
@@ -695,7 +716,7 @@ def _build_cell_metrics(
                         "series_count": int(support["series_count"]),
                         "evidence_status": (
                             "supported"
-                            if support["supported"] and exact_atom_patch is not None
+                            if support["supported"]
                             else "limited"
                         ),
                         "evidence_source": support["evidence_source"],
@@ -711,11 +732,10 @@ def _build_cell_metrics(
             for opponent, weight in zip(opponents, row_weight if indices else ())
         ]
         legal_hash = _sha256_bytes(_canonical_json(legal_opponents))
-        available = (
-            len(opponents) == LEGAL_OPPONENT_COUNT
-            and len(supported) == LEGAL_OPPONENT_COUNT
-            and exact_atom_patch is not None
-            and contrast_sd <= STRENGTH_MAX_CONTRAST_SD
+        available = _matchup_metrics_available(
+            opponent_count=len(opponents),
+            supported_opponent_count=len(supported),
+            contrast_sd=contrast_sd,
         )
         blind_score = float(np.quantile(blind_draws, BLIND_CREDIBLE_QUANTILE))
         counter_count = int(np.count_nonzero(counter_probabilities >= COUNTER_POSTERIOR_THRESHOLD))
@@ -1230,7 +1250,7 @@ def build_pooled_candidate(
             "rating_claim": "standardized descriptive paired-comparison strength; not an outcome-calibrated probability",
         },
         "matchup_shape_method": {
-            "name": "atom-informed blind tail risk and counter breadth from the same joint map likelihood",
+            "name": "OE-supported blind tail risk and counter breadth from the same joint map likelihood",
             "blind_definition": "posterior 10th percentile of the weighted lower-tail matchup probability across five focal-legal opponents",
             "blind_tail_share": BLIND_TAIL_SHARE,
             "counter_definition": "posterior breadth over five focal-legal opponents with logit effect threshold",
@@ -1243,6 +1263,7 @@ def build_pooled_candidate(
             "legal_opponent_count": LEGAL_OPPONENT_COUNT,
             "legal_opponent_selection": "top six role picks in the exact scope; exclude the focal champion; take five and renormalize",
             "maximum_pair_posterior_sd": MATCHUP_MAX_POSTERIOR_SD,
+            "atom_adjustment": "used when an exact time-safe atom snapshot is available; not required for OE-supported matchup publication",
             "posterior_draws": POSTERIOR_DRAWS,
             "minimum_special_tier_membership_probability": TIER_MEMBERSHIP_PROBABILITY,
             "pick_order_claim": False,

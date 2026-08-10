@@ -13,6 +13,11 @@ import pytest
 
 from lol_kills.v2.tierlists import live_refresh
 from lol_kills.etl.oe_live_source import _complete_player_game_ids, _merge
+from lol_kills.v2.tierlists.forward_evaluation import _map_keys, _source_columns
+from lol_kills.v2.tierlists.independent_authority import (
+    _map_keys as _authority_map_keys,
+    _source_columns as _authority_source_columns,
+)
 
 
 def _candidate(*, source_mode: str) -> dict[str, object]:
@@ -75,6 +80,33 @@ def test_live_source_excludes_games_with_missing_or_duplicate_player_names() -> 
                 )
 
     assert _complete_player_game_ids(pd.DataFrame(rows)) == {"good"}
+
+
+def test_forward_evaluation_accepts_annual_oe_rows_without_game_uid(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "players.parquet"
+    frame = pd.DataFrame(
+        {
+            "gameid": ["oe-api:game-1"],
+            "date": ["2026-08-07"],
+            "league": ["LCK"],
+            "competition_tier": ["tier1"],
+            "event_kind": [None],
+            "patch": ["16.15"],
+            "position": ["top"],
+            "champion": ["Aatrox"],
+            "side": ["Blue"],
+            "teamname": ["T1"],
+            "result": [1],
+        }
+    )
+    frame.to_parquet(path, index=False)
+
+    assert "game_uid" not in _source_columns(path)
+    assert _map_keys(frame).tolist() == ["game-1"]
+    assert "game_uid" not in _authority_source_columns(path)
+    assert _authority_map_keys(frame).tolist() == ["game-1"]
 
 
 def test_blob_publication_payloads_keep_cells_immutable_and_pointer_last() -> None:
