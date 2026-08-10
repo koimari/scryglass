@@ -1,7 +1,14 @@
 import { notFound } from "next/navigation";
 import { TeamRatingProfile, type TeamRosterEntry } from "@/components/RatingProfiles";
 import type { PlayerRating, PlayerRecord, ProfileGame, ProfileRecords, TeamRating, TeamRecord } from "@/lib/pack";
-import { adjustedRating, compactPlayerRatings, PLAYER_SIGMA_MIN, softMu, TEAM_SIGMA_MIN } from "@/lib/pack";
+import {
+  adjustedRating,
+  compactPlayerRatings,
+  findPlayerByRouteName,
+  PLAYER_SIGMA_MIN,
+  softMu,
+  TEAM_SIGMA_MIN,
+} from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 export const revalidate = 21_600;
@@ -47,19 +54,19 @@ export default async function TeamEloPage({ params }: Props) {
     : latestGame?.red_team.toLowerCase() === team.team.toLowerCase()
       ? "Red"
       : null;
-  const ratingByPlayer = new Map(players.map((player) => [player.player.toLowerCase(), player]));
-  const rawRatingByPlayer = new Map(playerRows.map((player) => [player.player.toLowerCase(), player]));
+  const ratingFor = (name: string) => findPlayerByRouteName(players, name);
+  const rawRatingFor = (name: string) => findPlayerByRouteName(playerRows, name);
   const publishedRoster = team.exact_roster?.players.length === 5
     ? team.exact_roster.players
     : null;
   const roster: TeamRosterEntry[] = publishedRoster
     ? publishedRoster.map((publishedPlayer) => {
       const displayName = publishedPlayer.display_name || publishedPlayer.player_id;
-      const rating = ratingByPlayer.get(displayName.toLowerCase())
-        ?? ratingByPlayer.get(publishedPlayer.player_id.toLowerCase())
+      const rating = ratingFor(displayName)
+        ?? ratingFor(publishedPlayer.player_id)
         ?? null;
-      const rawRating = rawRatingByPlayer.get(displayName.toLowerCase())
-        ?? rawRatingByPlayer.get(publishedPlayer.player_id.toLowerCase());
+      const rawRating = rawRatingFor(displayName)
+        ?? rawRatingFor(publishedPlayer.player_id);
       return {
         player: displayName,
         role: publishedPlayer.role,
@@ -75,8 +82,8 @@ export default async function TeamEloPage({ params }: Props) {
       .map((participant) => ({
         player: participant.player,
         role: participant.role,
-        rating: ratingByPlayer.get(participant.player.toLowerCase()) ?? null,
-        ratingNote: (rawRatingByPlayer.get(participant.player.toLowerCase())?.n_maps ?? 0) < 5
+        rating: ratingFor(participant.player) ?? null,
+        ratingNote: (rawRatingFor(participant.player)?.n_maps ?? 0) < 5
           ? "Rating needs 5 maps"
           : "Rating unavailable",
       }))
