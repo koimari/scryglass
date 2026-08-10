@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function readTierState() {
-  const configured = process.env.SCRYGLASS_TIERLIST_INDEX_URL?.trim();
+  const configured = process.env.SCRYGLASS_TIERLIST_DISPLAY_URL?.trim();
   const blobRoot = process.env.LIVE_BLOB_BASE_URL?.trim() || DEFAULT_BLOB_ROOT;
   const url = configured || `${blobRoot.replace(/\/$/, "")}/rankings/tierlists.json`;
   const response = await fetch(url, { cache: "no-store" });
