@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   compactPlayerRatings,
+  findPlayerByRouteName,
   recentProfileGames,
   scopedTeamWr,
   type PlayerRating,
@@ -10,6 +11,15 @@ import {
   type ProfileRecords,
   type TeamRecord,
 } from "./pack";
+
+test("player route lookup preserves exact source casing for duplicate handles", () => {
+  const players: PlayerRating[] = [
+    { player: "Random", mu_total: 1600, mu_regional: 1600, mu_meta: 0, sigma: 40, n_maps: 20, last_team: "Disruptors" },
+    { player: "random", mu_total: 1500, mu_regional: 1500, mu_meta: 0, sigma: 40, n_maps: 20, last_team: "Team Solid" },
+  ];
+  assert.equal(findPlayerByRouteName(players, "random")?.last_team, "Team Solid");
+  assert.equal(findPlayerByRouteName(players, "Random")?.last_team, "Disruptors");
+});
 
 function profileGame(game_id: string, date: string): ProfileGame {
   return {

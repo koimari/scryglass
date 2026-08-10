@@ -227,3 +227,4 @@ def test_leaguepedia_cutoff_url_and_team_aliases_are_stable() -> None:
     assert normalize_team("MIBR.LOS") == "LØS"
     assert normalize_team("Los Grandes") == "LØS"
     assert normalize_team("LYON (2024 American Team)") == "LYON"
+    assert normalize_team("Team Solid (Brazilian Team)") == "Team Solid"

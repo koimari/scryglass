@@ -325,6 +325,15 @@ export function playerSlug(name: string): string {
   return encodeURIComponent(name.trim());
 }
 
+/** Prefer the source's exact casing when route names collide case-insensitively. */
+export function findPlayerByRouteName(
+  players: PlayerRating[],
+  routeName: string,
+): PlayerRating | undefined {
+  const exact = players.find((player) => player.player === routeName);
+  return exact ?? players.find((player) => player.player.toLowerCase() === routeName.toLowerCase());
+}
+
 export function packUpdatedLabel(manifest: PackManifest): string {
   const raw = manifest.created_utc || "";
   const d = raw.slice(0, 10);

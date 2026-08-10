@@ -99,6 +99,9 @@ TEAM_ALIASES: dict[str, str] = {
     "shg": "Fukuoka SoftBank HAWKS gaming",
     "team secret whales": "Team Secret Whales",
     "tsw": "Team Secret Whales",
+    # OE uses this parenthetical qualifier on one historical Brazilian row.
+    # It is the same organization as the unqualified Team Solid rows.
+    "team solid (brazilian team)": "Team Solid",
     "relove deep cross gaming": "Relove Deep Cross Gaming",
     "rdcg": "Relove Deep Cross Gaming",
     "vit": "Team Vitality",
