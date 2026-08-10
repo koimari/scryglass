@@ -10,6 +10,7 @@ import os
 import shutil
 import tempfile
 import uuid
+from collections import Counter
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -32,7 +33,12 @@ from lol_kills.export.public_pack import (
     export_public_pack,
     source_identity_sha256,
 )
-from lol_kills.export.upload_pack import publish_blob_pointers, upload_to_blob
+from lol_kills.export.upload_pack import (
+    _blob_get,
+    publish_blob_pointers,
+    restore_blob_pointers,
+    upload_to_blob,
+)
 from lol_kills.ratings.player_map_grades import CORE_INPUTS
 
 
@@ -322,6 +328,101 @@ def validate_source_continuity(
     }
 
 
+def _read_pack_json(pack_dir: Path, relative: str) -> Any:
+    path = pack_dir / relative
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RefreshValidationError(f"public pack JSON is unreadable: {relative}") from error
+
+
+def validate_public_identity(pack_dir: Path) -> dict[str, Any]:
+    """Reject duplicate canonical identities before a pack becomes active."""
+
+    teams = _read_pack_json(pack_dir, "features/ratings_snapshot.json")
+    players = _read_pack_json(pack_dir, "features/player_ratings_snapshot.json")
+    team_records = _read_pack_json(pack_dir, "features/team_records.json")
+    profile_records = _read_pack_json(pack_dir, "features/profile_records.json")
+
+    team_keys: set[str] = set()
+    if isinstance(teams, list) and teams:
+        keys: list[str] = []
+        for row in teams:
+            if not isinstance(row, dict):
+                raise RefreshValidationError("team ratings contain a non-object row")
+            key = str(row.get("team_key") or "").strip()
+            name = str(row.get("team") or "").strip()
+            if not key or not name:
+                raise RefreshValidationError("team ratings contain an empty canonical identity")
+            if row.get("evidence_disconnected") is True:
+                raise RefreshValidationError(f"disconnected team is present in public ratings: {name}")
+            keys.append(key)
+        duplicate_keys = sorted(key for key, count in Counter(keys).items() if count > 1)
+        if duplicate_keys:
+            raise RefreshValidationError(
+                "team ratings contain duplicate canonical keys: " + ", ".join(duplicate_keys[:3])
+            )
+        team_keys = set(keys)
+
+    player_name_count = 0
+    player_case_collision_count = 0
+    if isinstance(players, list) and players:
+        names: list[str] = []
+        for row in players:
+            if not isinstance(row, dict):
+                raise RefreshValidationError("player ratings contain a non-object row")
+            name = str(row.get("player") or "").strip()
+            if not name:
+                raise RefreshValidationError("player ratings contain an empty player identity")
+            if row.get("evidence_disconnected") is True or str(row.get("evidence_state") or "").casefold() == "disconnected":
+                raise RefreshValidationError(f"disconnected player is present in public ratings: {name}")
+            names.append(name)
+        duplicate_names = sorted(name for name, count in Counter(names).items() if count > 1)
+        if duplicate_names:
+            raise RefreshValidationError(
+                "player ratings contain duplicate exact names: " + ", ".join(duplicate_names[:3])
+            )
+        folded = Counter(name.casefold() for name in names)
+        player_case_collision_count = sum(1 for count in folded.values() if count > 1)
+        player_name_count = len(names)
+
+    record_keys: set[str] = set()
+    if isinstance(team_records, dict) and team_records:
+        record_values: list[str] = []
+        for display_name, record in team_records.items():
+            if not isinstance(record, dict):
+                raise RefreshValidationError("team records contain a non-object record")
+            key = str(record.get("team_key") or "").strip()
+            if not key or not str(display_name).strip():
+                raise RefreshValidationError("team records contain an empty canonical identity")
+            record_values.append(key)
+        if len(record_values) != len(set(record_values)):
+            raise RefreshValidationError("team records contain duplicate canonical team keys")
+        record_keys = set(record_values)
+    if team_keys and record_keys and team_keys != record_keys:
+        raise RefreshValidationError("team ratings and team records use different canonical teams")
+
+    if isinstance(profile_records, dict) and profile_records.get("games"):
+        games = profile_records["games"]
+        if not isinstance(games, dict):
+            raise RefreshValidationError("profile records have an invalid games index")
+        for key, game in games.items():
+            if not isinstance(game, dict) or str(game.get("game_id") or "") != str(key):
+                raise RefreshValidationError("profile records contain a malformed game identity")
+            rows = game.get("players")
+            if not isinstance(rows, list) or len(rows) != 10:
+                raise RefreshValidationError(f"profile game {key} does not contain ten players")
+            names = [str(row.get("player") or "").strip() for row in rows if isinstance(row, dict)]
+            if len(names) != 10 or any(not name for name in names) or len(set(names)) != 10:
+                raise RefreshValidationError(f"profile game {key} contains malformed player identities")
+
+    return {
+        "team_key_count": len(team_keys),
+        "player_name_count": player_name_count,
+        "player_case_collision_count": player_case_collision_count,
+    }
+
+
 def validate_pack(pack_dir: Path, manifest: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     """Verify the compact ratings pack and its source identity binding."""
 
@@ -357,7 +458,37 @@ def validate_pack(pack_dir: Path, manifest: dict[str, Any], source: dict[str, An
         raise RefreshValidationError("pack source identity digest does not match the live source")
     if manifest.get("total_files") != len(files) or manifest.get("total_bytes") != total_bytes:
         raise RefreshValidationError("pack inventory totals are invalid")
-    return {"files": len(files), "bytes": total_bytes, **source}
+    identity = validate_public_identity(pack_dir)
+    return {"files": len(files), "bytes": total_bytes, "identity": identity, **source}
+
+
+def _capture_blob_pointers(base_url: str) -> dict[str, str | None]:
+    root = base_url.split("/packs/", 1)[0].rstrip("/")
+    captured: dict[str, str | None] = {}
+    for pathname in ("packs/manifest.json", "packs/latest.json"):
+        raw = _blob_get(f"{root}/{pathname}")
+        captured[pathname] = raw.decode("utf-8") if raw is not None else None
+    return captured
+
+
+def rollback_public_pack(publication: dict[str, Any], public_root: Path) -> dict[str, Any]:
+    """Restore the last known-good pointers after a post-publication smoke failure."""
+
+    restored = {"runtime": publication.get("runtime"), "pack_id": publication.get("pack_id")}
+    previous = publication.get("previous_blob_pointers")
+    token = (
+        os.environ.get("BLOB_READ_WRITE_TOKEN")
+        or os.environ.get("VERCEL_BLOB_READ_WRITE_TOKEN")
+        or ""
+    ).strip()
+    if token and isinstance(previous, dict):
+        restore_blob_pointers(token, previous)
+        restored["blob"] = True
+    old_local = publication.get("previous_local_manifest")
+    if isinstance(old_local, dict):
+        _atomic_json(public_root / "manifest.json", old_local)
+        restored["local"] = True
+    return restored
 
 
 def publish_pack(pack_dir: Path, manifest: dict[str, Any], public_root: Path) -> dict[str, Any]:
@@ -371,12 +502,14 @@ def publish_pack(pack_dir: Path, manifest: dict[str, Any], public_root: Path) ->
     if destination.exists():
         raise FileExistsError(f"immutable pack already exists: {destination}")
     staging = public_root / f".{pack_id}.{uuid.uuid4().hex}.incoming"
+    old_local_manifest = _load_json(public_root / "manifest.json")
     token = (
         os.environ.get("BLOB_READ_WRITE_TOKEN")
         or os.environ.get("VERCEL_BLOB_READ_WRITE_TOKEN")
         or ""
     ).strip()
     blob_base = ""
+    previous_blob_pointers: dict[str, str | None] = {}
     if token:
         urls = upload_to_blob(pack_dir, pack_id, token)
         if not urls:
@@ -386,6 +519,7 @@ def publish_pack(pack_dir: Path, manifest: dict[str, Any], public_root: Path) ->
         if marker not in sample:
             raise RefreshValidationError("pack Blob publication returned an invalid URL")
         blob_base = sample.rsplit(marker, 1)[0] + f"/packs/{pack_id}"
+        previous_blob_pointers = _capture_blob_pointers(blob_base)
     published = dict(manifest)
     published["base_url"] = blob_base or f"/packs/{pack_id}"
     try:
@@ -400,6 +534,10 @@ def publish_pack(pack_dir: Path, manifest: dict[str, Any], public_root: Path) ->
         )
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
+        if old_local_manifest:
+            _atomic_json(public_root / "manifest.json", old_local_manifest)
+        else:
+            (public_root / "manifest.json").unlink(missing_ok=True)
         raise
     return {
         "pack_id": pack_id,
@@ -407,6 +545,8 @@ def publish_pack(pack_dir: Path, manifest: dict[str, Any], public_root: Path) ->
         "runtime": "blob" if token else "local_only",
         "base_url": published["base_url"],
         "blob_pointers": blob_pointers,
+        "previous_blob_pointers": previous_blob_pointers,
+        "previous_local_manifest": old_local_manifest,
     }
 
 
@@ -432,7 +572,7 @@ def sync_once(
     known = set(baseline_ids)
     _write_health(config, "checking", checked_at)
     try:
-        ingest_fn(
+        ingest_result = ingest_fn(
             config.root,
             start=pd.Timestamp(checked_at - timedelta(hours=config.window_hours)),
             end=pd.Timestamp(checked_at),
@@ -440,10 +580,20 @@ def sync_once(
             discovery_cache_hours=config.discovery_cache_hours,
             max_workers=config.max_workers,
         )
+        source_observed_through = (
+            str(ingest_result.get("source_latest"))
+            if isinstance(ingest_result, dict) and ingest_result.get("source_latest")
+            else None
+        )
         observed = set(_receipt_game_ids(config.root))
         discovered_ids = sorted(observed - known)
         if not discovered_ids and not force:
-            result = {"status": "no_change", "new_game_ids": [], "pack_id": state.get("pack_id")}
+            result = {
+                "status": "no_change",
+                "new_game_ids": [],
+                "pack_id": state.get("pack_id"),
+                "source_observed_through": source_observed_through,
+            }
             _atomic_json(config.state_path, {**state, **result, "published_game_ids": sorted(known)})
             _write_health(config, "ok", checked_at, pack_id=result["pack_id"])
             return result
@@ -462,6 +612,7 @@ def sync_once(
                 "new_game_ids": [],
                 "pending_game_ids": pending_ids,
                 "pack_id": state.get("pack_id"),
+                "source_observed_through": source_observed_through,
             }
             _atomic_json(config.state_path, {**state, **result, "published_game_ids": sorted(known)})
             _write_health(config, status if status != "no_change" else "ok", checked_at, pending_game_ids=pending_ids)
@@ -498,6 +649,7 @@ def sync_once(
             "new_game_ids": new_ids,
             "pending_game_ids": pending_ids,
             "pack_id": pack_id,
+            "source_observed_through": source_observed_through,
             "validation": validation,
             "publication": publication,
         }

@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,6 +32,9 @@ SCHEMA_VERSION = "scryglass:oe-api-live-bridge:v2"
 DEFAULT_LOOKBACK_DAYS = 120
 DEFAULT_MAX_WORKERS = 8
 DEFAULT_DISCOVERY_CACHE_HOURS = 6
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 45.0
+DEFAULT_REQUEST_ATTEMPTS = 3
+RETRYABLE_HTTP_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 ROLES = ("top", "jng", "mid", "bot", "sup")
 PLAYER_STAT_FIELDS = {
     "kills": "kills",
@@ -109,8 +113,11 @@ def _request_json(
     *,
     api_key: str,
     params: Mapping[str, object] | None = None,
-    timeout: float = 45,
+    timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    attempts: int = DEFAULT_REQUEST_ATTEMPTS,
 ) -> Any:
+    if timeout <= 0 or attempts < 1:
+        raise ValueError("timeout must be positive and attempts must be at least one")
     query = urllib.parse.urlencode({key: str(value) for key, value in (params or {}).items()})
     url = f"{API_BASE}{path}"
     if query:
@@ -123,13 +130,21 @@ def _request_json(
             "X-Api-Key": api_key,
         },
     )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        raise OeApiIngestError(f"OE API returned HTTP {exc.code} for {path}") from exc
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-        raise OeApiIngestError(f"OE API request failed for {path}") from exc
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if exc.code not in RETRYABLE_HTTP_STATUS or attempt + 1 >= attempts:
+                raise OeApiIngestError(f"OE API returned HTTP {exc.code} for {path}") from exc
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            last_error = exc
+            if attempt + 1 >= attempts:
+                raise OeApiIngestError(f"OE API request failed for {path}") from exc
+        time.sleep(min(30.0, 0.5 * (2**attempt)))
+    raise OeApiIngestError(f"OE API request failed for {path}") from last_error
 
 
 def _parse_timestamp(value: object) -> pd.Timestamp | None:

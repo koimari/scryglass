@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,6 +14,7 @@ from lol_kills.etl.oe_api_ingest import (
     OeApiIngestError,
     _cached_full_games,
     _fetch_games,
+    _request_json,
     _read_discovery_cache,
     _rows_from_games,
     _write_discovery_cache,
@@ -147,6 +149,53 @@ def test_fetch_games_drops_old_rows_before_deduplication() -> None:
         )
 
     assert [game["oeGameId"] for game in games] == ["new"]
+
+
+def test_request_json_retries_transient_transport_errors(monkeypatch) -> None:
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"ok": true}'
+
+    calls = iter([urllib.error.URLError("temporary"), Response()])
+
+    def open_request(*_args, **_kwargs):
+        value = next(calls)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    monkeypatch.setattr(
+        "lol_kills.etl.oe_api_ingest.urllib.request.urlopen",
+        open_request,
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr("lol_kills.etl.oe_api_ingest.time.sleep", sleeps.append)
+
+    result = _request_json("/temporary", api_key="test", attempts=2, timeout=1)
+
+    assert result == {"ok": True}
+    assert sleeps == [0.5]
+
+
+def test_request_json_does_not_retry_authentication_errors(monkeypatch) -> None:
+    error = urllib.error.HTTPError("https://oe.test", 401, "unauthorized", {}, None)
+    calls: list[int] = []
+    def open_request(*_args, **_kwargs):
+        calls.append(1)
+        raise error
+
+    monkeypatch.setattr("lol_kills.etl.oe_api_ingest.urllib.request.urlopen", open_request)
+    monkeypatch.setattr("lol_kills.etl.oe_api_ingest.time.sleep", lambda *_args: (_ for _ in ()).throw(AssertionError()))
+
+    with pytest.raises(OeApiIngestError, match="HTTP 401"):
+        _request_json("/auth", api_key="test", attempts=3, timeout=1)
+    assert calls == [1]
 
 
 def test_discovery_cache_reuses_tournaments_and_teams_within_ttl(tmp_path: Path) -> None:

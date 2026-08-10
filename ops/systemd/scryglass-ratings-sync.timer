@@ -1,5 +1,5 @@
 [Unit]
-Description=Run the Scryglass ratings sync every six hours
+Description=Run the Scryglass public refresh every six hours
 
 [Timer]
 OnCalendar=*-*-* 00/6:00:00

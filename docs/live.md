@@ -1,4 +1,4 @@
-# Six-hour completed-match refresh
+# Six-hour completed-match and tier refresh
 
 Public Scryglass updates from Oracle's Elixir only.
 
@@ -11,9 +11,9 @@ new canonical game IDs
               ↓
 identity, role, and statistic checks
               ↓
-ratings, player grades, profiles, match pages, and tier lists
+ratings, player grades, profiles, match pages, and tier authority
               ↓
-immutable object upload and atomic pointer update
+immutable object upload, cache invalidation, and smoke checks
 ```
 
 The API bridge discovers completed maps that are waiting for the next annual
@@ -38,32 +38,19 @@ start a Vercel build.
 
 ## Schedule
 
-The systemd timer in `ops/systemd` runs at minute 0 every six hours. Run the
-same path manually with:
+The systemd timer in `ops/systemd` runs the complete sequence at minute 0 every
+six hours. Run the same path manually with:
 
 ```bash
-python3 -m lol_kills.postgame_sync \
-  --root . \
-  --public-root apps/scryglass/public/packs \
+/srv/scryglass/venv/bin/python -m lol_kills.public_refresh \
+  --root /srv/scryglass/current \
+  --public-root /srv/scryglass-data/public-packs \
   --once
 ```
 
-The worker needs `ORACLES_ELIXIR_API_KEY`. It does not read `GRID_API_KEY`.
-
-After the pack and tier display pass their checks, publish them without a site
-build:
-
-```bash
-cd apps/scryglass
-SCRYGLASS_DATA_PUBLISH_TOKEN=<secret> npm run publish:data -- \
-  --pack-dir ../../output/public_pack/<pack-id> \
-  --tierlists public/rankings/tierlists.json
-```
-
-Use the generated public display path when it differs from the example. The
-maintenance endpoint issues a short-lived Blob token for approved JSON paths.
-The publisher verifies immutable pack files before it replaces the current
-manifest. It then clears the cached ratings and match pages.
+The runner verifies immutable pack files before it replaces the current
+manifest. It then clears the cached ratings, matches, and tier pages. A smoke
+failure restores the previous ratings pointer.
 
 ## Private GRID modules
 

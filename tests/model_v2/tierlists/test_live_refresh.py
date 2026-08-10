@@ -174,6 +174,66 @@ def test_blob_publication_writes_the_pointer_last() -> None:
     assert result["cell_count"] == 195
 
 
+def test_blob_publication_removes_new_stable_pointers_after_a_failed_write() -> None:
+    root = Path(__file__).resolve().parents[3]
+
+    class FakeTransport:
+        def __init__(self) -> None:
+            self.storage: dict[str, bytes] = {}
+
+        def _identity(self, pathname: str) -> live_refresh.BlobIdentity:
+            raw = self.storage[pathname]
+            return live_refresh.BlobIdentity(pathname, len(raw), f"etag-{len(raw)}")
+
+        def get_blob(self, _store_id: str, pathname: str, *, deadline_epoch: int):
+            if pathname not in self.storage:
+                return None
+            return self.storage[pathname], self._identity(pathname)
+
+        def delete_if_match(
+            self,
+            _store_id: str,
+            pathname: str,
+            *,
+            etag: str,
+            deadline_epoch: int,
+        ):
+            if pathname not in self.storage or self._identity(pathname).etag != etag:
+                return None
+            prior = self._identity(pathname)
+            del self.storage[pathname]
+            return prior
+
+    transport = FakeTransport()
+
+    class FailedExecutor:
+        def __init__(self, _transport: FakeTransport):
+            pass
+
+        def execute(self, plan):
+            for write in plan.writes:
+                transport.storage[write.pathname] = write.content
+            return SimpleNamespace(
+                success=False,
+                state=SimpleNamespace(value="failed"),
+                operations=(SimpleNamespace(pathname=live_refresh.BLOB_POINTER_PATH, success=False),),
+            )
+
+    with patch.object(
+        live_refresh,
+        "_publication_credentials",
+        return_value=("https://store-test.public.blob.vercel-storage.com", "token", "store-test"),
+    ), patch.object(live_refresh, "VercelBlobTransport", return_value=transport), patch.object(
+        live_refresh, "_blob_inventory", return_value={}
+    ), patch.object(live_refresh, "RetentionExecutor", FailedExecutor):
+        with pytest.raises(live_refresh.PublicationError, match="publication failed"):
+            live_refresh.publish_production_bundle(root)
+
+    assert live_refresh.BLOB_POINTER_PATH not in transport.storage
+    assert live_refresh.BLOB_MOVEMENT_PATH not in transport.storage
+    assert live_refresh.BLOB_DISPLAY_PATH not in transport.storage
+
+
 def test_oe_only_skips_grid_and_can_be_ready_from_a_complete_oe_source(tmp_path: Path) -> None:
     oe_step = {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0}
     meta_path = tmp_path / "data/lol/warehouse/parquet/oe_api_meta.json"

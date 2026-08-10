@@ -32,25 +32,32 @@ Accepted packs go to immutable object storage. The site reads the current pack
 pointer there and caches it for six hours. A data refresh does not run a site
 build or create a deployment.
 
-Run a complete OE-only ratings refresh with:
+Run the complete local control loop with:
 
 ```bash
-python3 -m lol_kills.postgame_sync \
+SCRYGLASS_PUBLIC_RELEASE=1 python3 -m lol_kills.public_refresh \
   --root . \
   --public-root apps/scryglass/public/packs \
   --once \
   --force
 ```
 
-Set `ORACLES_ELIXIR_API_KEY` in the worker environment. The refresh accepts a
-map after it has canonical identities, two teams, ten players, five roles per
-side, and complete public statistics. The current pack remains active when a
-map is incomplete or when a completed map disappears from the source set.
+Set `ORACLES_ELIXIR_API_KEY`, `BLOB_READ_WRITE_TOKEN`, `LIVE_BLOB_BASE_URL`,
+`SCRYGLASS_DATA_PUBLISH_TOKEN`, and `SCRYGLASS_ALERT_WEBHOOK_URL` in the worker
+environment. The runner performs OE discovery, ratings, tier authority,
+publication, cache invalidation, and live smoke checks in one locked cycle.
 
-Publish the accepted pack and tier display with `npm run publish:data` from
-`apps/scryglass`. Set `SCRYGLASS_DATA_PUBLISH_TOKEN` in the local worker and
-the production project. The publisher verifies Blob readback before it moves
-the stable pack pointer.
+The refresh accepts a map after it has canonical identities, two teams, ten
+players, five roles per side, and complete public statistics. The current pack
+and tier pointer remain active when a map is incomplete or a stage fails. A
+successful ratings publication rolls back when its public smoke check fails.
+
+Install `ops/systemd/scryglass-ratings-sync.service` and
+`ops/systemd/scryglass-ratings-sync.timer` on the worker host. Install the
+matching `scryglass-public-refresh-alert@.service`,
+`scryglass-public-refresh-watchdog.service`, and watchdog timer. The refresh
+timer runs every six hours. The watchdog checks the health file every hour. The
+worker does not run a site build or a deployment.
 
 ## Private GRID research
 
