@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import urllib.error
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -234,3 +235,35 @@ def test_http_read_retries_transient_statuses(monkeypatch: pytest.MonkeyPatch) -
 
     assert public_refresh._http_bytes("https://example.test", attempts=2) == b"ok"
     assert sleeps == [1.0]
+
+
+def test_production_smoke_requires_the_deployed_app_to_serve_the_new_pack(tmp_path: Path) -> None:
+    raw = b"data"
+    config = replace(
+        _config(tmp_path),
+        production=True,
+        manifest_url="https://store-test.public.blob.vercel-storage.com/packs/manifest.json",
+        blob_root="https://store-test.public.blob.vercel-storage.com",
+    )
+    manifest = {
+        "pack_id": "new",
+        "base_url": "https://store-test.public.blob.vercel-storage.com/packs/new",
+        "total_files": 1,
+        "total_bytes": len(raw),
+        "files": [{"path": "features/a.json", "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}],
+    }
+
+    def http(url: str, **_kwargs):
+        if url.endswith("/api/health"):
+            return json.dumps({"status": "ok", "pack_id": "old", "tier": {"status": "available"}}).encode()
+        if url.endswith("/rankings/tierlists.json"):
+            return b'{"status":"available"}'
+        if "/features/" in url:
+            return raw
+        return b"page"
+
+    with patch.object(public_refresh, "_load_remote_manifest", return_value=(manifest, manifest["base_url"])), patch.object(
+        public_refresh, "_http_bytes", side_effect=http
+    ):
+        with pytest.raises(public_refresh.PublicRefreshError, match="serves old"):
+            public_refresh.verify_public_release(config, expected_pack_id="new", tier_expected=True)

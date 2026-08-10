@@ -284,6 +284,24 @@ def verify_public_release(config: RefreshConfig, *, expected_pack_id: str | None
     if config.production:
         for route in ("/elo", "/matches", "/tiers"):
             _http_bytes(f"{config.site}{route}", attempts=config.attempts)
+        health_raw = _http_bytes(f"{config.site}/api/health", attempts=config.attempts)
+        try:
+            health_payload = json.loads(health_raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise PublicRefreshError("public health response is invalid JSON") from error
+        if not isinstance(health_payload, dict) or health_payload.get("status") not in {"ok", "partial"}:
+            raise PublicRefreshError("public health response is not ready")
+        served_pack_id = str(health_payload.get("pack_id") or "")
+        if not served_pack_id:
+            raise PublicRefreshError("public health response has no pack ID")
+        if expected_pack_id and served_pack_id != expected_pack_id:
+            raise PublicRefreshError(
+                f"public app serves {served_pack_id}, expected {expected_pack_id}"
+            )
+        if tier_expected:
+            served_tier = health_payload.get("tier")
+            if not isinstance(served_tier, dict) or served_tier.get("status") != "available":
+                raise PublicRefreshError("public health response has no available tier list")
 
     tier_status = None
     if config.production and config.blob_root:
