@@ -261,7 +261,7 @@ def test_blob_publication_removes_new_stable_pointers_after_a_failed_write() -> 
 
 def test_oe_only_skips_grid_and_can_be_ready_from_a_complete_oe_source(tmp_path: Path) -> None:
     oe_step = {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0}
-    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_api_meta.json"
+    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_live/meta.json"
     meta_path.parent.mkdir(parents=True)
     meta_path.write_text(
         json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_statistics_complete": True}),
@@ -280,16 +280,15 @@ def test_oe_only_skips_grid_and_can_be_ready_from_a_complete_oe_source(tmp_path:
             source_mode="oe_only",
         )
 
-    assert run_step.call_count == 5
+    assert run_step.call_count == 4
     assert "--skip-grid" in run_step.call_args_list[0].args[1]
-    assert run_step.call_args_list[1].kwargs["source"] == "oe_api"
-    assert run_step.call_args_list[2].kwargs["source"] == "champion_atomization"
-    assert run_step.call_args_list[3].kwargs["source"] == "oe_live_source"
-    assert run_step.call_args_list[4].kwargs["source"] == "ratings"
+    assert run_step.call_args_list[1].kwargs["source"] == "champion_atomization"
+    assert run_step.call_args_list[2].kwargs["source"] == "oe_live_source"
+    assert run_step.call_args_list[3].kwargs["source"] == "ratings"
     assert receipt["source_mode"] == "oe_only"
     assert receipt["status"] == "ready_for_authority_review"
-    assert receipt["source_steps"][5]["skipped"] is True
-    assert receipt["source_steps"][5]["reason"] == "public_refresh_oe_only"
+    assert receipt["source_steps"][4]["skipped"] is True
+    assert receipt["source_steps"][4]["reason"] == "public_refresh_oe_only"
     saved = json.loads((tmp_path / "receipt.json").read_text(encoding="utf-8"))
     assert saved["source_mode"] == "oe_only"
 
@@ -305,12 +304,12 @@ def test_public_tier_refresh_rejects_grid_source_mode(tmp_path: Path) -> None:
         )
 
 
-def test_skip_annual_oe_uses_the_committed_pack_baseline(tmp_path: Path) -> None:
+def test_skip_annual_oe_uses_the_cached_oe_source(tmp_path: Path) -> None:
     steps = [
         {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0}
-        for _ in range(4)
+        for _ in range(3)
     ]
-    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_api_meta.json"
+    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_live/meta.json"
     meta_path.parent.mkdir(parents=True)
     meta_path.write_text(
         json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_statistics_complete": True}),
@@ -330,19 +329,19 @@ def test_skip_annual_oe_uses_the_committed_pack_baseline(tmp_path: Path) -> None
             skip_annual_oe=True,
         )
 
-    assert run_step.call_count == 4
+    assert run_step.call_count == 3
     assert receipt["source_steps"][0]["source"] == "oe_annual"
     assert receipt["source_steps"][0]["skipped"] is True
-    assert receipt["source_steps"][0]["reason"] == "committed_public_pack_baseline"
-    assert run_step.call_args_list[0].kwargs["source"] == "oe_api"
+    assert receipt["source_steps"][0]["reason"] == "cached_oe_source"
+    assert run_step.call_args_list[0].kwargs["source"] == "champion_atomization"
 
 
 def test_promote_runs_evaluation_authority_and_bundle_after_source_refresh(tmp_path: Path) -> None:
     steps = [
         {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0}
-        for _ in range(8)
+        for _ in range(7)
     ]
-    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_api_meta.json"
+    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_live/meta.json"
     meta_path.parent.mkdir(parents=True)
     meta_path.write_text(
         json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_statistics_complete": True}),
@@ -365,10 +364,10 @@ def test_promote_runs_evaluation_authority_and_bundle_after_source_refresh(tmp_p
             promote=True,
         )
 
-    assert run_step.call_count == 8
+    assert run_step.call_count == 7
     assert receipt["status"] == "production_promoted"
     assert receipt["promotion_status"] == "promoted"
-    assert [call.kwargs["source"] for call in run_step.call_args_list[5:]] == [
+    assert [call.kwargs["source"] for call in run_step.call_args_list[4:]] == [
         "forward_evaluation",
         "independent_authority",
         "production_bundle",
@@ -380,9 +379,9 @@ def test_promote_runs_evaluation_authority_and_bundle_after_source_refresh(tmp_p
 def test_promote_stays_blocked_when_blob_publication_is_not_configured(tmp_path: Path) -> None:
     steps = [
         {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0}
-        for _ in range(8)
+        for _ in range(7)
     ]
-    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_api_meta.json"
+    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_live/meta.json"
     meta_path.parent.mkdir(parents=True)
     meta_path.write_text(
         json.dumps({"source_latest": "2026-08-08T12:00:00Z", "player_statistics_complete": True}),
@@ -419,7 +418,7 @@ def test_prepared_source_bundle_skips_source_ingestion(tmp_path: Path) -> None:
             "stdout_bytes": 0,
             "stderr_bytes": 0,
         }
-        for source in ("oe_annual", "oe_api", "champion_atomization", "oe_live_source", "ratings")
+        for source in ("oe_annual", "champion_atomization", "oe_live_source", "ratings")
     ]
     steps.append(
         {

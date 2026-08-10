@@ -37,9 +37,14 @@ def _config(root: Path) -> SyncConfig:
 
 
 def _write_receipt(root: Path, game_ids: list[str]) -> None:
-    path = root / "data/lol/warehouse/raw/oe_api/tierlist-live-v1.json"
+    path = root / "data/lol/warehouse/parquet/oe_team_games.parquet"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"games": [{"oe_game_id": value} for value in game_ids]}), encoding="utf-8")
+    pd.DataFrame(
+        [
+            {"gameid": value, "game_uid": value}
+            for value in game_ids
+        ]
+    ).to_parquet(path, index=False)
 
 
 def _ingest(root: Path, game_ids: list[str], complete: bool = True):
@@ -135,6 +140,16 @@ def test_no_new_game_skips_all_rebuild_work(tmp_path: Path) -> None:
 
     result = sync_once(config, now=NOW, ingest_fn=_ingest(tmp_path, ["game-1"]), build_live_fn=unexpected)
     assert result["status"] == "no_change"
+
+
+def test_no_new_game_still_rejects_a_disappearing_published_game(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    _write_receipt(tmp_path, ["game-2"])
+    config.state_path.parent.mkdir(parents=True)
+    config.state_path.write_text(json.dumps({"published_game_ids": ["game-1"]}), encoding="utf-8")
+
+    with pytest.raises(RefreshValidationError, match="published completed maps disappeared"):
+        sync_once(config, now=NOW, ingest_fn=_ingest(tmp_path, ["game-2"]))
 
 
 def test_incomplete_details_keep_the_previous_pack(tmp_path: Path) -> None:

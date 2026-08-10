@@ -1,4 +1,4 @@
-"""Build one deduplicated OE source from the annual file and the API bridge."""
+"""Build the public OE source from the validated annual CSV cache."""
 
 from __future__ import annotations
 
@@ -11,11 +11,10 @@ from typing import Any
 import pandas as pd
 
 from lol_kills.export.pack_records import build_maps_frame_from_team_games
-from lol_kills.etl.paths import PARQUET_DIR
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.player_map_grades import CORE_INPUTS
 
-LIVE_ROOT = PARQUET_DIR / "oe_live"
+LIVE_ROOT = Path("data/lol/warehouse/parquet/oe_live")
 LIVE_PLAYER_OUTPUT = LIVE_ROOT / "oe_player_games.parquet"
 LIVE_TEAM_OUTPUT = LIVE_ROOT / "oe_team_games.parquet"
 LIVE_MAP_OUTPUT = LIVE_ROOT / "maps.parquet"
@@ -23,7 +22,7 @@ LIVE_META_OUTPUT = LIVE_ROOT / "meta.json"
 
 
 class OeLiveSourceError(RuntimeError):
-    """Raised when the annual and API sources cannot form a complete source."""
+    """Raised when the annual OE source cannot form a complete source."""
 
 
 def _sha256(path: Path) -> str:
@@ -213,63 +212,87 @@ def _merge(primary: pd.DataFrame, supplement: pd.DataFrame, *, with_players: boo
 
 def build_live_source(root: Path | str = Path(".")) -> dict[str, Any]:
     repo_root = Path(root).resolve()
-    primary_player_path = repo_root / PARQUET_DIR / "oe_player_games.parquet"
-    primary_team_path = repo_root / PARQUET_DIR / "oe_team_games.parquet"
-    api_player_path = repo_root / PARQUET_DIR / "oe_api_player_games.parquet"
-    api_team_path = repo_root / PARQUET_DIR / "oe_api_team_games.parquet"
-    api_meta_path = repo_root / PARQUET_DIR / "oe_api_meta.json"
-    for path in (primary_player_path, primary_team_path, api_player_path, api_team_path, api_meta_path):
+    parquet_root = repo_root / "data/lol/warehouse/parquet"
+    primary_player_path = parquet_root / "oe_player_games.parquet"
+    primary_team_path = parquet_root / "oe_team_games.parquet"
+    annual_meta_path = parquet_root / "oe_meta.json"
+    for path in (primary_player_path, primary_team_path):
         if not path.is_file():
             raise OeLiveSourceError(f"required OE source is missing: {path}")
 
     primary_player = pd.read_parquet(primary_player_path)
     primary_team = pd.read_parquet(primary_team_path)
-    api_player = pd.read_parquet(api_player_path)
-    api_team = pd.read_parquet(api_team_path)
-    identity_complete_api_ids = _identity_complete_player_game_ids(api_player)
-    statistics_complete_api_ids = _complete_player_game_ids(api_player)
-    api_player_keys = _game_keys(api_player)
-    api_team_keys = _game_keys(api_team)
-    api_games_seen = len(set(api_player_keys.dropna().astype(str)))
-    api_player = api_player[api_player_keys.isin(identity_complete_api_ids)].copy()
-    api_team = api_team[api_team_keys.isin(identity_complete_api_ids)].copy()
-    player = _merge(primary_player, api_player, with_players=True)
-    team = _merge(primary_team, api_team, with_players=False)
+    player = primary_player.copy()
+    team = primary_team.copy()
     maps = build_maps_frame_from_team_games(team)
     if player.empty or team.empty or maps.empty:
         raise OeLiveSourceError("OE live source has no complete player, team, and map frames")
 
-    live_root = repo_root / LIVE_ROOT
+    identity_complete_ids = _identity_complete_player_game_ids(player)
+    statistics_complete_ids = _complete_player_game_ids(player)
+    player_keys = _game_keys(player)
+    source_game_ids = sorted(set(player_keys.dropna().astype(str)))
+    source_latest: str | None = None
+    try:
+        annual_meta = json.loads(annual_meta_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        annual_meta = {}
+    source_files = annual_meta.get("source_files") if isinstance(annual_meta, dict) else None
+    if isinstance(source_files, list):
+        source_latest = max(
+            (
+                str(item.get("date_max_utc"))
+                for item in source_files
+                if isinstance(item, dict) and item.get("date_max_utc")
+            ),
+            default=None,
+        )
+    if source_latest is None and "date" in team.columns:
+        dates = pd.to_datetime(team["date"], errors="coerce", utc=True).dropna()
+        if not dates.empty:
+            source_latest = pd.Timestamp(dates.max()).isoformat()
+
+    live_root = repo_root / "data/lol/warehouse/parquet/oe_live"
     live_root.mkdir(parents=True, exist_ok=True)
-    player.to_parquet(repo_root / LIVE_PLAYER_OUTPUT, index=False)
-    team.to_parquet(repo_root / LIVE_TEAM_OUTPUT, index=False)
-    maps.to_parquet(repo_root / LIVE_MAP_OUTPUT, index=False)
-    api_meta = json.loads(api_meta_path.read_text(encoding="utf-8"))
+    live_player_output = live_root / "oe_player_games.parquet"
+    live_team_output = live_root / "oe_team_games.parquet"
+    live_map_output = live_root / "maps.parquet"
+    live_meta_output = live_root / "meta.json"
+    player.to_parquet(live_player_output, index=False)
+    team.to_parquet(live_team_output, index=False)
+    maps.to_parquet(live_map_output, index=False)
     meta = {
         "schema_version": "scryglass:oe-live-source:v1",
         "source_mode": "oe_only",
         "sources": [
             {"locator": str(primary_player_path.relative_to(repo_root)), "raw_sha256": _sha256(primary_player_path)},
             {"locator": str(primary_team_path.relative_to(repo_root)), "raw_sha256": _sha256(primary_team_path)},
-            {"locator": str(api_player_path.relative_to(repo_root)), "raw_sha256": _sha256(api_player_path)},
-            {"locator": str(api_team_path.relative_to(repo_root)), "raw_sha256": _sha256(api_team_path)},
-            {"locator": str(api_meta_path.relative_to(repo_root)), "raw_sha256": _sha256(api_meta_path)},
+            *(
+                [{"locator": str(annual_meta_path.relative_to(repo_root)), "raw_sha256": _sha256(annual_meta_path)}]
+                if annual_meta_path.is_file()
+                else []
+            ),
         ],
-        "source_latest": api_meta.get("source_latest"),
-        "api_games_seen": api_games_seen,
-        "api_games_excluded_incomplete_identity": api_games_seen - len(identity_complete_api_ids),
-        "api_games_pending_statistics": len(identity_complete_api_ids.difference(statistics_complete_api_ids)),
+        "source_latest": source_latest,
+        "source_transport": "public_google_drive_file",
+        "source_game_count": len(source_game_ids),
+        "identity_complete_game_count": len(identity_complete_ids),
+        "statistics_complete_game_count": len(statistics_complete_ids),
+        "statistics_incomplete_game_count": len(
+            identity_complete_ids.difference(statistics_complete_ids)
+        ),
+        "player_statistics_complete": identity_complete_ids.issubset(statistics_complete_ids),
         "player_rows": len(player),
         "player_rows_with_names": int(player["playername"].notna().sum()) if "playername" in player else 0,
         "team_rows": len(team),
         "maps": len(maps),
         "outputs": {
-            "player": str((repo_root / LIVE_PLAYER_OUTPUT).relative_to(repo_root)),
-            "team": str((repo_root / LIVE_TEAM_OUTPUT).relative_to(repo_root)),
-            "maps": str((repo_root / LIVE_MAP_OUTPUT).relative_to(repo_root)),
+            "player": str(live_player_output.relative_to(repo_root)),
+            "team": str(live_team_output.relative_to(repo_root)),
+            "maps": str(live_map_output.relative_to(repo_root)),
         },
     }
-    (repo_root / LIVE_META_OUTPUT).write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    live_meta_output.write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return meta
 
 

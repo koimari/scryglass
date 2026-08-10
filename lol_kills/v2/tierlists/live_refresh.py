@@ -656,8 +656,8 @@ def _verify_prebuilt_atom_bridge(root: Path) -> dict[str, Any]:
     }
 
 
-def _api_source_latest(root: Path) -> str | None:
-    path = root / "data/lol/warehouse/parquet/oe_api_meta.json"
+def _oe_source_latest(root: Path) -> str | None:
+    path = root / "data/lol/warehouse/parquet/oe_live/meta.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
@@ -666,8 +666,8 @@ def _api_source_latest(root: Path) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _api_player_statistics_complete(root: Path) -> bool:
-    path = root / "data/lol/warehouse/parquet/oe_api_meta.json"
+def _oe_player_statistics_complete(root: Path) -> bool:
+    path = root / "data/lol/warehouse/parquet/oe_live/meta.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
@@ -730,9 +730,6 @@ def refresh_candidate(
         oe_step = by_source.get(
             "oe_annual", _skipped_step("oe_annual", "prepared_source_bundle")
         )
-        oe_api_step = by_source.get(
-            "oe_api", _skipped_step("oe_api", "prepared_source_bundle")
-        )
         atom_step = by_source.get(
             "champion_atomization",
             _skipped_step("champion_atomization", "prepared_source_bundle"),
@@ -746,11 +743,11 @@ def refresh_candidate(
         grid_step = _skipped_step("grid", "public_refresh_oe_only")
         observed_as_of = prepared_source.get("source_observed_through")
         if not isinstance(observed_as_of, str) or not observed_as_of:
-            observed_as_of = _api_source_latest(root)
+            observed_as_of = _oe_source_latest(root)
         candidate_expected_live_as_of = observed_as_of or expected_live_as_of
     else:
         oe_step = (
-            _skipped_step("oe_annual", "committed_public_pack_baseline")
+            _skipped_step("oe_annual", "cached_oe_source")
             if skip_annual_oe
             else run_step(
                 [
@@ -758,26 +755,12 @@ def refresh_candidate(
                     "--oe-years",
                     "2025",
                     "2026",
-                    "--refresh-oe",
+                    "--download-oe",
                     "--skip-lp",
                     "--skip-grid",
                 ],
                 source="oe_annual",
             )
-        )
-        oe_api_step = run_step(
-            [
-                "lol_kills.etl.oe_api_ingest",
-                "--root",
-                str(root),
-                "--start",
-                LIVE_WINDOW_START,
-                "--end",
-                expected_live_as_of,
-                "--lookback-days",
-                "120",
-            ],
-            source="oe_api",
         )
         atom_step = (
             _verify_prebuilt_atom_bridge(root)
@@ -787,16 +770,12 @@ def refresh_candidate(
                 source="champion_atomization",
             )
         )
-        observed_as_of = _api_source_latest(root) if oe_api_step["completed"] else None
-        candidate_expected_live_as_of = observed_as_of or expected_live_as_of
-        live_source_step = (
-            run_step(
-                ["lol_kills.etl.oe_live_source", "--root", str(root)],
-                source="oe_live_source",
-            )
-            if oe_api_step["completed"]
-            else _skipped_step("oe_live_source", "oe_api_incomplete")
+        live_source_step = run_step(
+            ["lol_kills.etl.oe_live_source", "--root", str(root)],
+            source="oe_live_source",
         )
+        observed_as_of = _oe_source_latest(root) if live_source_step["completed"] else None
+        candidate_expected_live_as_of = observed_as_of or expected_live_as_of
         rating_step = (
             run_step(
                 [
@@ -808,14 +787,14 @@ def refresh_candidate(
                 ],
                 source="ratings",
             )
-            if live_source_step["completed"] and _api_player_statistics_complete(root)
-            else _skipped_step("ratings", "oe_player_detail_incomplete")
+            if live_source_step["completed"] and _oe_player_statistics_complete(root)
+            else _skipped_step("ratings", "oe_player_statistics_incomplete")
         )
         grid_step = _skipped_step("grid", "public_refresh_oe_only")
 
     if prepared_source is None:
-        source_steps = [oe_step, oe_api_step, atom_step, live_source_step, rating_step, grid_step]
-    required_source_steps = [oe_api_step, atom_step, live_source_step]
+        source_steps = [oe_step, atom_step, live_source_step, rating_step, grid_step]
+    required_source_steps = [atom_step, live_source_step]
     if not all(step["completed"] for step in required_source_steps):
         raise RuntimeError(
             "tier refresh source preparation failed: "
@@ -1024,12 +1003,12 @@ def main() -> int:
         "--source-mode",
         choices=("oe_only",),
         default=DEFAULT_SOURCE_MODE,
-        help="public tier lists use the OE annual source and OE API bridge",
+        help="public tier lists use the OE annual CSV source",
     )
     parser.add_argument(
         "--skip-annual-oe",
         action="store_true",
-        help="use the restored committed OE pack as the historical baseline and only fetch the API freshness bridge",
+        help="use the already refreshed OE annual cache",
     )
     parser.add_argument(
         "--skip-atom-bridge",

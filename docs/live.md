@@ -3,9 +3,9 @@
 Public Scryglass updates from Oracle's Elixir only.
 
 ```text
-OE annual files + OE API bridge
+OE annual CSV files
               ↓
-cached six-hour discovery
+cached six-hour remote-file check
               ↓
 new canonical game IDs
               ↓
@@ -16,9 +16,9 @@ ratings, player grades, profiles, match pages, and tier authority
 immutable object upload, cache invalidation, and smoke checks
 ```
 
-The API bridge discovers completed maps that are waiting for the next annual
-file. It keeps discovery receipts and completed game details in the local
-warehouse. A later cycle requests details again when a map is incomplete.
+The worker keeps validated annual files and normalized parquet in its local
+warehouse. A later cycle checks the public file signature again. A changed file
+passes the same structural and continuity gates before publication.
 
 ## Acceptance gate
 
