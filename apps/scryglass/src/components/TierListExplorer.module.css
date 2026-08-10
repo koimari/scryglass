@@ -128,6 +128,10 @@
   gap: 0.7rem;
 }
 
+.summaryGridPartial {
+  grid-template-columns: minmax(16rem, 0.8fr) minmax(20rem, 2.2fr);
+}
+
 .summaryCard {
   display: grid;
   gap: 0.55rem;
@@ -135,6 +139,33 @@
   padding: 0.9rem;
   border: 1px solid var(--line-strong);
   background: var(--surface);
+}
+
+.summaryCardPending {
+  border-color: var(--line);
+  background: color-mix(in oklch, var(--surface-subtle) 28%, var(--surface));
+}
+
+.matchupNotice {
+  display: grid;
+  align-content: center;
+  gap: 0.35rem;
+  min-height: 9.4rem;
+  padding: 1rem 1.2rem;
+  border: 1px dashed var(--line-strong);
+  background: color-mix(in oklch, var(--surface-subtle) 22%, var(--surface));
+}
+
+.matchupNotice strong {
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.matchupNotice > span {
+  max-width: 68ch;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
 
 .cardLabel {
@@ -152,6 +183,12 @@
   min-width: 0;
   align-items: center;
   gap: 0.55rem;
+}
+
+.summaryChampion .championThumb {
+  width: 3rem;
+  height: 3rem;
+  flex-basis: 3rem;
 }
 
 .summaryChampion div {
@@ -329,6 +366,92 @@
   font-weight: 650;
 }
 
+.tierRail,
+.tierRailCompact,
+.countRail,
+.countRailCompact,
+.signedRail,
+.signedRailCompact {
+  position: relative;
+  display: flex;
+  width: min(100%, 9rem);
+  height: 0.34rem;
+  overflow: hidden;
+  background: color-mix(in oklch, var(--line) 65%, transparent);
+}
+
+.tierRail,
+.tierRailCompact {
+  gap: 2px;
+  background: transparent;
+}
+
+.tierRailCompact,
+.countRailCompact,
+.signedRailCompact {
+  width: 100%;
+  height: 0.22rem;
+}
+
+.tierStep,
+.tierStepActive {
+  flex: 1;
+  background: color-mix(in oklch, var(--line) 72%, transparent);
+}
+
+.tierStepActive:nth-child(1) {
+  background: #a26d50;
+}
+
+.tierStepActive:nth-child(2) {
+  background: #b29b47;
+}
+
+.tierStepActive:nth-child(3) {
+  background: #78a858;
+}
+
+.tierStepActive:nth-child(4) {
+  background: var(--accent);
+}
+
+.countRail i,
+.countRailCompact i {
+  width: var(--metric-width);
+  background: linear-gradient(90deg, color-mix(in oklch, var(--accent) 58%, var(--surface)), var(--accent));
+}
+
+.signedRail::after,
+.signedRailCompact::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--line-strong);
+  content: "";
+}
+
+.signedRail i,
+.signedRailCompact i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--metric-width);
+}
+
+.signedRail[data-direction="positive"] i,
+.signedRailCompact[data-direction="positive"] i {
+  left: 50%;
+  background: var(--accent);
+}
+
+.signedRail[data-direction="negative"] i,
+.signedRailCompact[data-direction="negative"] i {
+  right: 50%;
+  background: var(--danger);
+}
+
 .questionControls {
   display: flex;
   flex-wrap: wrap;
@@ -347,17 +470,94 @@
   line-height: 1.4;
 }
 
-.roleGrid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.7rem;
-}
-
-.roleCard {
+.roleSnapshot {
   overflow: hidden;
   border: 1px solid var(--line-strong);
   background: var(--surface);
 }
+
+.roleSnapshotHeader {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border-bottom: 1px solid var(--line-strong);
+  background: color-mix(in oklch, var(--surface-subtle) 38%, var(--surface));
+}
+
+.roleSnapshotHeader > div:first-child {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.roleSnapshotHeader h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.15rem;
+  letter-spacing: -0.025em;
+}
+
+.tierLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  color: var(--ink-muted);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.63rem;
+}
+
+.tierLegend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.tierLegend i {
+  width: 0.55rem;
+  height: 0.55rem;
+}
+
+.legendA { background: var(--accent); }
+.legendB { background: #78a858; }
+.legendC { background: #b29b47; }
+.legendD { background: #a26d50; }
+
+.roleGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+}
+
+.regionalRoleGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.7rem;
+  padding: 0.7rem;
+}
+
+.roleCard {
+  --role-accent: var(--accent);
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-top: 3px solid var(--role-accent);
+  background: var(--surface);
+}
+
+.roleSnapshot .roleCard {
+  border-width: 3px 1px 0 0;
+  border-color: var(--role-accent) var(--line-strong) transparent transparent;
+}
+
+.roleSnapshot .roleCard:last-child {
+  border-right: 0;
+}
+
+.roleCard[data-role="top"] { --role-accent: #d78657; }
+.roleCard[data-role="jungle"] { --role-accent: #78a858; }
+.roleCard[data-role="mid"] { --role-accent: #8b83cf; }
+.roleCard[data-role="bot"] { --role-accent: #d3b44f; }
+.roleCard[data-role="support"] { --role-accent: #59aba7; }
 
 .roleCard header {
   display: flex;
@@ -394,6 +594,55 @@
   cursor: pointer;
 }
 
+.regionalRoleRow {
+  display: grid;
+  grid-template-columns: 1.7rem 1.9rem minmax(0, 1fr) auto;
+  gap: 0.35rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0.48rem 0.65rem;
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--ink);
+}
+
+.regionalRoleRow:last-child {
+  border-bottom: 0;
+}
+
+.regionalRoleRow > span:first-child {
+  color: var(--ink-faint);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.64rem;
+}
+
+.regionalRoleRow .championThumb {
+  width: 1.9rem;
+  height: 1.9rem;
+  flex-basis: 1.9rem;
+  font-size: 0.78rem;
+}
+
+.regionalRoleRow strong {
+  overflow: hidden;
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.regionalRoleRow em {
+  color: var(--ink-muted);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.62rem;
+  font-style: normal;
+}
+
+.rolePending {
+  padding: 0.7rem;
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
 .roleRow:last-child {
   border-bottom: 0;
 }
@@ -427,6 +676,13 @@
   font-family: var(--font-mono), ui-monospace, monospace;
   font-size: 0.62rem;
   font-style: normal;
+}
+
+.roleMetric {
+  display: grid;
+  width: 3.9rem;
+  gap: 0.22rem;
+  justify-items: end;
 }
 
 .methodNote {
@@ -466,7 +722,19 @@
 
 @media (max-width: 980px) {
   .roleGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .regionalRoleGrid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .roleSnapshot .roleCard:nth-child(even) {
+    border-right: 0;
+  }
+
+  .roleSnapshot .roleCard:last-child {
+    grid-column: 1 / -1;
   }
 }
 
@@ -505,7 +773,7 @@
     text-align: left;
   }
 
-  .roleGrid {
+  .regionalRoleGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -526,8 +794,23 @@
     min-height: 2.25rem;
   }
 
-  .roleGrid {
+  .roleGrid,
+  .regionalRoleGrid {
     grid-template-columns: 1fr;
+  }
+
+  .roleSnapshotHeader {
+    display: grid;
+    align-items: start;
+  }
+
+  .roleSnapshot .roleCard,
+  .roleSnapshot .roleCard:nth-child(even) {
+    border-right: 0;
+  }
+
+  .roleSnapshot .roleCard:last-child {
+    grid-column: auto;
   }
 
   .panelHeading {

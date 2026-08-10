@@ -1,11 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import {
+  firstPickMetric,
+  regionalOptions,
+  regionalViewForRole,
+  rowsForMode,
+  signedPp,
+  TIER_ROLE_ORDER,
+  type TierBoardMode,
+  type TierBucket,
+  type TierRow,
+  type TierScope,
+} from "@/lib/tierBoard";
 import styles from "./TierListExplorer.module.css";
 
-const TIER_LIST_URL =
-  "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/rankings/tierlists.json";
-const ROLE_ORDER = ["top", "jungle", "mid", "bot", "support"] as const;
+const TIER_LIST_URL = process.env.NEXT_PUBLIC_TIER_LIST_URL?.trim()
+  || "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/rankings/tierlists.json";
+const ROLE_ORDER = TIER_ROLE_ORDER;
 const ROLE_LABELS: Record<string, string> = {
   top: "Top",
   jungle: "Jungle",
@@ -20,74 +32,7 @@ const BOARD_MODES = [
   { value: "responses", label: "Responses", note: "answer a champion" },
   { value: "regions", label: "Regions", note: "regional context" },
 ] as const;
-type BoardMode = (typeof BOARD_MODES)[number]["value"];
-
-type TierBucket = "Z Blind" | "Z Counter" | "S Blind" | "S Counter" | "A" | "B" | "C" | "D";
-
-type MatchupProfile = {
-  champion: string;
-  champion_id: string;
-  model_edge_pp: number;
-  posterior_interval_pp: { low: number; high: number };
-  posterior_positive_probability?: number;
-  effective_maps: number;
-  series_count: number;
-  evidence_status: "supported" | "limited";
-  evidence_source?: string;
-};
-
-type TierRow = {
-  scope_id: string;
-  role: string;
-  patch: string;
-  champion: string;
-  champion_id: string;
-  champion_image_url: string | null;
-  rank: number;
-  rank_delta: number | null;
-  movement: "up" | "down" | "flat" | "new";
-  tier_bucket: TierBucket;
-  played_maps: number;
-  tier_value_pp?: number;
-  counterability_status: "available" | "unavailable" | string;
-  matchup_maps: number;
-  matchup_opponents: number;
-  blind_score_pp: number | null;
-  counter_score: number | null;
-  countered_opponent_count: number | null;
-  countered_opponent_share?: number | null;
-  expected_counter_breadth: number | null;
-  matchup_profile?: MatchupProfile[];
-};
-
-type RegionalRow = {
-  champion: string;
-  champion_id: string;
-  regional_rank: number;
-  global_rank: number;
-  strength_score_pp: number;
-  played_maps: number;
-  sample_status: "thin" | "observed" | string;
-};
-
-type RegionalView = {
-  id: string;
-  label: string;
-  maps: number;
-  basis: string;
-  rows: RegionalRow[];
-};
-
-type Scope = {
-  scope_id: string;
-  scope_kind: "patch";
-  role: string;
-  patch: string;
-  as_of: string;
-  status: "production" | "unavailable";
-  row_count: number;
-  regional_views?: RegionalView[];
-};
+type BoardMode = TierBoardMode;
 
 type TierResponse = {
   status: string;
@@ -96,7 +41,7 @@ type TierResponse = {
   as_of?: string;
   source_freshness?: "oe_daily_export" | "oe_with_same_day_grid_bridge";
   options?: { roles: string[]; patches: string[]; tier_buckets?: TierBucket[] };
-  scopes?: Scope[];
+  scopes?: TierScope[];
   rows?: TierRow[];
 };
 
@@ -112,8 +57,64 @@ function roleLabel(role: string): string {
 }
 
 function signedScore(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "Unavailable";
-  return `${value >= 0 ? "+" : ""}${value.toFixed(1)} pp`;
+  return signedPp(value) ?? "Pending";
+}
+
+function numericMetric(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function tierLevel(tier: TierBucket): number {
+  if (tier.startsWith("Z") || tier.startsWith("S") || tier === "A") return 4;
+  if (tier === "B") return 3;
+  if (tier === "C") return 2;
+  return 1;
+}
+
+function TierRail({ tier, compact = false }: { tier: TierBucket; compact?: boolean }) {
+  const level = tierLevel(tier);
+  return (
+    <span className={compact ? styles.tierRailCompact : styles.tierRail} aria-hidden="true">
+      {[1, 2, 3, 4].map((step) => (
+        <i className={step <= level ? styles.tierStepActive : styles.tierStep} key={step} />
+      ))}
+    </span>
+  );
+}
+
+function SignedRail({ value, compact = false }: { value: number | null | undefined; compact?: boolean }) {
+  const metric = numericMetric(value);
+  if (metric === null) return null;
+  const width = Math.max(3, Math.min(50, Math.abs(metric) / 8 * 50));
+  const style = { "--metric-width": `${width}%` } as CSSProperties;
+  return (
+    <span
+      className={compact ? styles.signedRailCompact : styles.signedRail}
+      data-direction={metric >= 0 ? "positive" : "negative"}
+      style={style}
+      aria-hidden="true"
+    >
+      <i />
+    </span>
+  );
+}
+
+function CountRail({ value, compact = false }: { value: number | null | undefined; compact?: boolean }) {
+  const metric = numericMetric(value);
+  if (metric === null) return null;
+  const width = Math.max(3, Math.min(100, metric / 5 * 100));
+  const style = { "--metric-width": `${width}%` } as CSSProperties;
+  return (
+    <span className={compact ? styles.countRailCompact : styles.countRail} style={style} aria-hidden="true">
+      <i />
+    </span>
+  );
+}
+
+function MetricRail({ row, mode, compact = false }: { row: TierRow; mode: BoardMode; compact?: boolean }) {
+  if (mode === "blind") return <SignedRail value={row.blind_score_pp} compact={compact} />;
+  if (mode === "counter") return <CountRail value={row.countered_opponent_count} compact={compact} />;
+  return <TierRail tier={row.tier_bucket} compact={compact} />;
 }
 
 function movementText(row: TierRow): string {
@@ -192,14 +193,16 @@ function SummaryCard({
   description,
   row,
   value,
+  mode,
 }: {
   label: string;
   description: string;
   row?: TierRow;
   value: string;
+  mode: BoardMode;
 }) {
   return (
-    <article className={styles.summaryCard}>
+    <article className={`${styles.summaryCard} ${row ? "" : styles.summaryCardPending}`}>
       <p className={styles.cardLabel}>{label}</p>
       {row ? (
         <div className={styles.summaryChampion}>
@@ -210,9 +213,10 @@ function SummaryCard({
           </div>
         </div>
       ) : (
-        <strong className={styles.summaryUnavailable}>Unavailable</strong>
+        <strong className={styles.summaryUnavailable}>{value}</strong>
       )}
-      <strong className={styles.summaryValue}>{value}</strong>
+      {row ? <strong className={styles.summaryValue}>{value}</strong> : null}
+      {row ? <MetricRail row={row} mode={mode} /> : null}
       <p className={styles.summaryDescription}>{description}</p>
     </article>
   );
@@ -221,20 +225,20 @@ function SummaryCard({
 function sortRows(rows: TierRow[], mode: BoardMode): TierRow[] {
   return [...rows].sort((left, right) => {
     if (mode === "blind") {
-      const leftValue = left.blind_score_pp;
-      const rightValue = right.blind_score_pp;
+      const leftValue = numericMetric(left.blind_score_pp);
+      const rightValue = numericMetric(right.blind_score_pp);
       if (leftValue === null && rightValue !== null) return 1;
       if (rightValue === null && leftValue !== null) return -1;
       if (leftValue !== null && rightValue !== null && rightValue !== leftValue) return rightValue - leftValue;
     }
     if (mode === "counter") {
-      const leftCount = left.countered_opponent_count;
-      const rightCount = right.countered_opponent_count;
+      const leftCount = numericMetric(left.countered_opponent_count);
+      const rightCount = numericMetric(right.countered_opponent_count);
       if (leftCount === null && rightCount !== null) return 1;
       if (rightCount === null && leftCount !== null) return -1;
       if (leftCount !== null && rightCount !== null && rightCount !== leftCount) return rightCount - leftCount;
-      const leftScore = left.counter_score;
-      const rightScore = right.counter_score;
+      const leftScore = numericMetric(left.counter_score);
+      const rightScore = numericMetric(right.counter_score);
       if (leftScore === null && rightScore !== null) return 1;
       if (rightScore === null && leftScore !== null) return -1;
       if (leftScore !== null && rightScore !== null && rightScore !== leftScore) return rightScore - leftScore;
@@ -251,14 +255,17 @@ function listMetric(row: TierRow, mode: BoardMode): { value: string; detail: str
     };
   }
   if (mode === "counter") {
+    const counterScore = numericMetric(row.counter_score);
     return {
-      value: row.countered_opponent_count === null ? "Unavailable" : `${row.countered_opponent_count} / 5`,
-      detail: row.counter_score === null ? evidenceLabel(row) : `${row.counter_score.toFixed(1)} expected responses`,
+      value: row.countered_opponent_count === null || row.countered_opponent_count === undefined
+        ? "Pending"
+        : `${row.countered_opponent_count} / 5`,
+      detail: counterScore === null ? evidenceLabel(row) : `${counterScore.toFixed(1)} expected responses`,
     };
   }
   return {
-    value: signedScore(row.tier_value_pp),
-    detail: `${row.played_maps} observed maps · ${evidenceLabel(row)}`,
+    value: firstPickMetric(row),
+    detail: `${row.played_maps} observed maps · patch-wide tier`,
   };
 }
 
@@ -284,6 +291,7 @@ function DraftRow({
       </span>
       <span className={styles.rowMetric}>
         <strong>{metric.value}</strong>
+        <MetricRail row={row} mode={mode} />
         <span>{metric.detail}</span>
       </span>
     </button>
@@ -311,29 +319,46 @@ function BoardList({
 
 function RoleSnapshotGrid({ rows, onSelect }: { rows: TierRow[]; onSelect: (row: TierRow) => void }) {
   return (
-    <div className={styles.roleGrid}>
-      {ROLE_ORDER.map((role) => {
-        const roleRows = rows.filter((row) => row.role === role).slice(0, 5);
-        return (
-          <article className={styles.roleCard} key={role}>
-            <header>
-              <p className={styles.cardLabel}>{roleLabel(role)}</p>
-              <span>top overall strength</span>
-            </header>
-            <div className={styles.roleRows}>
-              {roleRows.map((row) => (
-                <button type="button" className={styles.roleRow} key={row.champion_id} onClick={() => onSelect(row)}>
-                  <span>#{row.rank}</span>
-                  <ChampionThumb name={row.champion} imageUrl={row.champion_image_url} />
-                  <strong>{row.champion}</strong>
-                  <em>{signedScore(row.tier_value_pp)}</em>
-                </button>
-              ))}
-            </div>
-          </article>
-        );
-      })}
-    </div>
+    <section className={styles.roleSnapshot}>
+      <header className={styles.roleSnapshotHeader}>
+        <div>
+          <p className={styles.cardLabel}>Patch-wide first picks</p>
+          <h2>Five-role draft sheet</h2>
+        </div>
+        <div className={styles.tierLegend} aria-label="Tier scale from strongest to developing">
+          <span><i className={styles.legendA} />A</span>
+          <span><i className={styles.legendB} />B</span>
+          <span><i className={styles.legendC} />C</span>
+          <span><i className={styles.legendD} />D</span>
+        </div>
+      </header>
+      <div className={styles.roleGrid}>
+        {ROLE_ORDER.map((role) => {
+          const roleRows = rows.filter((row) => row.role === role).slice(0, 5);
+          return (
+            <article className={styles.roleCard} data-role={role} key={role}>
+              <header>
+                <p className={styles.cardLabel}>{roleLabel(role)}</p>
+                <span>top five</span>
+              </header>
+              <div className={styles.roleRows}>
+                {roleRows.map((row) => (
+                  <button type="button" className={styles.roleRow} key={row.champion_id} onClick={() => onSelect(row)}>
+                    <span>#{row.rank}</span>
+                    <ChampionThumb name={row.champion} imageUrl={row.champion_image_url} />
+                    <strong>{row.champion}</strong>
+                    <span className={styles.roleMetric}>
+                      <em>{firstPickMetric(row)}</em>
+                      <TierRail tier={row.tier_bucket} compact />
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -395,6 +420,7 @@ function ResponseBoard({
               </span>
               <span className={styles.rowMetric}>
                 <strong>{signedScore(matchup.model_edge_pp)}</strong>
+                <SignedRail value={matchup.model_edge_pp} />
                 <span>{matchup.posterior_interval_pp.low.toFixed(1)} to {matchup.posterior_interval_pp.high.toFixed(1)} pp interval</span>
               </span>
             </div>
@@ -414,29 +440,17 @@ function RegionalBoard({
   scope,
   rows,
   regionId,
-  onRegionChange,
 }: {
-  scope?: Scope;
+  scope?: TierScope;
   rows: TierRow[];
   regionId: string;
-  onRegionChange: (value: string) => void;
 }) {
   const views = scope?.regional_views ?? [];
-  const selectedRegion = views.some((candidate) => candidate.id === regionId) ? regionId : views[0]?.id || "";
-  const view = views.find((candidate) => candidate.id === selectedRegion);
+  const view = views.find((candidate) => candidate.id === regionId);
   const imageById = new Map(rows.map((row) => [row.champion_id, row.champion_image_url]));
   return (
     <section className={styles.questionPanel}>
       <div className={styles.questionControls}>
-        <label className={styles.field}>
-          <span>Region or league</span>
-          <select value={selectedRegion} onChange={(event) => onRegionChange(event.target.value)}>
-            {!views.length ? <option value="">No regional view</option> : null}
-            {views.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>{candidate.label}</option>
-            ))}
-          </select>
-        </label>
         <p>The patch-wide fit stays fixed. This view changes the observed league pool and shows its sample size.</p>
       </div>
       {view ? (
@@ -458,6 +472,7 @@ function RegionalBoard({
               </span>
               <span className={styles.rowMetric}>
                 <strong>{signedScore(regionalRow.strength_score_pp)}</strong>
+                <SignedRail value={regionalRow.strength_score_pp} />
                 <span>{regionalRow.sample_status === "thin" ? "Thin regional sample" : "Observed regional sample"}</span>
               </span>
             </div>
@@ -467,6 +482,78 @@ function RegionalBoard({
         <div className={styles.unavailable}>
           <p>No regional context is available for this patch and role.</p>
           <span>The canonical board remains patch-wide.</span>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RegionalOverviewBoard({
+  scopes,
+  rows,
+  patch,
+  regionId,
+}: {
+  scopes: TierScope[];
+  rows: TierRow[];
+  patch: string;
+  regionId: string;
+}) {
+  const options = regionalOptions(scopes, patch);
+  const regionLabel = options.find((candidate) => candidate.id === regionId)?.label;
+  const imageById = new Map(rows.map((row) => [row.champion_id, row.champion_image_url]));
+
+  return (
+    <section className={styles.questionPanel}>
+      <div className={styles.questionControls}>
+        <p>Compare the same regional context across Top, Jungle, Mid, Bot, and Support.</p>
+      </div>
+      {regionId ? (
+        <div className={styles.responseList}>
+          <div className={styles.panelHeading}>
+            <div>
+              <p className={styles.cardLabel}>{regionLabel}</p>
+              <h2>Regional view across all roles</h2>
+            </div>
+            <span>Patch {patch}</span>
+          </div>
+          <div className={styles.regionalRoleGrid}>
+            {ROLE_ORDER.map((roleName) => {
+              const view = regionalViewForRole(scopes, patch, roleName, regionId);
+              return (
+                <article className={styles.roleCard} data-role={roleName} key={roleName}>
+                  <header>
+                    <p className={styles.cardLabel}>{roleLabel(roleName)}</p>
+                    <span>{view ? `${view.maps} regional maps` : "data pending"}</span>
+                  </header>
+                  <div className={styles.roleRows}>
+                    {view?.rows.slice(0, 5).map((regionalRow) => (
+                      <div className={styles.regionalRoleRow} key={regionalRow.champion_id}>
+                        <span>#{regionalRow.regional_rank}</span>
+                        <ChampionThumb
+                          name={regionalRow.champion}
+                          imageUrl={imageById.get(regionalRow.champion_id)}
+                        />
+                        <strong>{regionalRow.champion}</strong>
+                        <span className={styles.roleMetric}>
+                          <em>{signedScore(regionalRow.strength_score_pp)}</em>
+                          <SignedRail value={regionalRow.strength_score_pp} compact />
+                        </span>
+                      </div>
+                    ))}
+                    {!view?.rows.length ? (
+                      <span className={styles.rolePending}>Waiting for accepted regional maps.</span>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className={styles.unavailable}>
+          <p>Regional context is waiting for the next accepted tier artifact.</p>
+          <span>The patch-wide A–D board remains available.</span>
         </div>
       )}
     </section>
@@ -485,7 +572,7 @@ export function TierListExplorer() {
   const refresh = useCallback(async (signal?: AbortSignal, showLoading = false) => {
     if (showLoading) setLoading(true);
     try {
-      const response = await fetch(TIER_LIST_URL, { signal });
+      const response = await fetch(TIER_LIST_URL, { signal, cache: "no-store" });
       if (!response.ok) throw new Error("tier-list file is unavailable");
       setData((await response.json()) as TierResponse);
     } catch {
@@ -497,7 +584,7 @@ export function TierListExplorer() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch(TIER_LIST_URL, { signal: controller.signal })
+    fetch(TIER_LIST_URL, { signal: controller.signal, cache: "no-store" })
       .then((response) => {
         if (!response.ok) throw new Error("tier-list file is unavailable");
         return response.json() as Promise<TierResponse>;
@@ -531,14 +618,19 @@ export function TierListExplorer() {
   const selectedScope = role
     ? scopes.find((scope) => scope.patch === activePatch && scope.role === role)
     : undefined;
+  const regionOptions = regionalOptions(scopes, activePatch);
+  const activeRegion = regionOptions.some((candidate) => candidate.id === region)
+    ? region
+    : mode === "regions"
+      ? regionOptions[0]?.id || ""
+      : "";
   const topRows = role ? selectedRows : rows;
   const firstPick = [...topRows].sort((left, right) => left.rank - right.rank)[0];
-  const blindPick = [...topRows]
-    .filter((row) => row.blind_score_pp !== null)
+  const blindPick = rowsForMode(topRows, "blind")
     .sort((left, right) => (right.blind_score_pp ?? -Infinity) - (left.blind_score_pp ?? -Infinity))[0];
-  const counterPick = [...topRows]
-    .filter((row) => row.countered_opponent_count !== null)
+  const counterPick = rowsForMode(topRows, "counter")
     .sort((left, right) => (right.countered_opponent_count ?? -Infinity) - (left.countered_opponent_count ?? -Infinity))[0];
+  const boardRows = rowsForMode(selectedRows, mode);
 
   return (
     <section className={styles.section}>
@@ -547,7 +639,11 @@ export function TierListExplorer() {
           label="Patch"
           value={patch}
           options={patchOptions.map((value) => ({ value, label: value }))}
-          onChange={setPatch}
+          onChange={(value) => {
+            setPatch(value);
+            setResponseChampion("");
+            setRegion("");
+          }}
           emptyLabel={`latest (${activePatch})`}
         />
         <Select
@@ -560,6 +656,16 @@ export function TierListExplorer() {
             setRegion("");
           }}
           emptyLabel="all roles"
+        />
+        <Select
+          label="Region"
+          value={activeRegion}
+          options={regionOptions.map((candidate) => ({ value: candidate.id, label: candidate.label }))}
+          onChange={(value) => {
+            setRegion(value);
+            setMode(value ? "regions" : "first_pick");
+          }}
+          emptyLabel={regionOptions.length ? "all regions" : "regional refresh pending"}
         />
         <button className={styles.button} onClick={() => void refresh(undefined, true)} disabled={loading}>
           {loading ? "Loading…" : "Refresh"}
@@ -577,7 +683,10 @@ export function TierListExplorer() {
             type="button"
             className={mode === item.value ? styles.questionTabActive : styles.questionTab}
             aria-pressed={mode === item.value}
-            onClick={() => setMode(item.value)}
+            onClick={() => {
+              setMode(item.value);
+              if (item.value !== "regions") setRegion("");
+            }}
           >
             <strong>{item.label}</strong>
             <span>{item.note}</span>
@@ -585,25 +694,38 @@ export function TierListExplorer() {
         ))}
       </nav>
 
-      <div className={styles.summaryGrid}>
+      <div className={`${styles.summaryGrid} ${!blindPick && !counterPick ? styles.summaryGridPartial : ""}`}>
         <SummaryCard
           label="Top first-pick strength"
           row={firstPick}
-          value={signedScore(firstPick?.tier_value_pp)}
+          value={firstPickMetric(firstPick)}
+          mode="first_pick"
           description="Overall patch-wide strength in the selected role."
         />
-        <SummaryCard
-          label="Safest blind"
-          row={blindPick}
-          value={signedScore(blindPick?.blind_score_pp)}
-          description="Lower-tail matchup stability across the accepted opponent pool."
-        />
-        <SummaryCard
-          label="Widest counter reach"
-          row={counterPick}
-          value={counterPick?.countered_opponent_count === null || counterPick?.countered_opponent_count === undefined ? "Unavailable" : `${counterPick.countered_opponent_count} / 5`}
-          description="Modeled positive responses across five legal opponents."
-        />
+        {blindPick || counterPick ? (
+          <>
+            <SummaryCard
+              label="Safest blind"
+              row={blindPick}
+              value={blindPick ? signedScore(blindPick.blind_score_pp) : "Matchup refresh pending"}
+              mode="blind"
+              description="Lower-tail matchup stability across the accepted opponent pool."
+            />
+            <SummaryCard
+              label="Widest counter reach"
+              row={counterPick}
+              value={counterPick?.countered_opponent_count === null || counterPick?.countered_opponent_count === undefined ? "Matchup refresh pending" : `${counterPick.countered_opponent_count} / 5`}
+              mode="counter"
+              description="Modeled positive responses across five legal opponents."
+            />
+          </>
+        ) : (
+          <article className={styles.matchupNotice}>
+            <p className={styles.cardLabel}>Matchup views</p>
+            <strong>Refresh pending</strong>
+            <span>Blind stability, counter reach, and direct responses will appear after the next accepted matchup artifact.</span>
+          </article>
+        )}
       </div>
 
       {mode === "responses" && !role ? (
@@ -613,19 +735,21 @@ export function TierListExplorer() {
         </div>
       ) : null}
 
-      {mode === "regions" && !role ? (
-        <div className={styles.unavailable}>
-          <p>Choose a role to inspect regional context.</p>
-          <span>The regional view keeps one role and one patch together.</span>
-        </div>
-      ) : null}
-
       {mode === "responses" && role ? (
         <ResponseBoard rows={selectedRows} targetId={responseChampion} onTargetChange={setResponseChampion} />
       ) : null}
 
       {mode === "regions" && role ? (
-        <RegionalBoard scope={selectedScope} rows={selectedRows} regionId={region} onRegionChange={setRegion} />
+        <RegionalBoard scope={selectedScope} rows={selectedRows} regionId={activeRegion} />
+      ) : null}
+
+      {mode === "regions" && !role ? (
+        <RegionalOverviewBoard
+          scopes={scopes}
+          rows={rows}
+          patch={activePatch}
+          regionId={activeRegion}
+        />
       ) : null}
 
       {mode !== "responses" && mode !== "regions" ? (
@@ -638,10 +762,18 @@ export function TierListExplorer() {
               </div>
               <span>{selectedRows.length} champions</span>
             </header>
-            <BoardList rows={selectedRows} mode={mode} onSelect={() => {
-              setResponseChampion("");
-              setMode("responses");
-            }} />
+            {boardRows.length ? (
+              <BoardList rows={boardRows} mode={mode} onSelect={(row) => {
+                setResponseChampion(row.champion_id);
+                setRegion("");
+                setMode("responses");
+              }} />
+            ) : (
+              <div className={styles.unavailable}>
+                <p>{mode === "blind" ? "Blind stability" : "Counter reach"} is waiting for the matchup refresh.</p>
+                <span>The first-pick A–D board remains available for this role and patch.</span>
+              </div>
+            )}
           </section>
         ) : mode === "first_pick" ? (
           <RoleSnapshotGrid rows={rows} onSelect={(row) => {
