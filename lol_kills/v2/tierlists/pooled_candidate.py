@@ -172,6 +172,15 @@ def _response_basis(*, effective_maps: float, atom_supported: bool) -> str:
     return "strength_only_inferred"
 
 
+def _scope_atom_patch(scope_games: Sequence[Mapping[str, Any]]) -> str | None:
+    patches = {
+        str(game.get("atom_snapshot_patch") or "").strip()
+        for game in scope_games
+        if str(game.get("atom_snapshot_patch") or "").strip()
+    }
+    return next(iter(patches)) if len(patches) == 1 else None
+
+
 def _safe_normalized_patch(value: object) -> str:
     try:
         return normalize_oe_token(value)
@@ -1256,12 +1265,7 @@ def build_pooled_candidate(
         patch_id = str(latest_game["oe_patch_id"])
         # Each board pools every eligible competition in one patch. Exact atom
         # features remain available only when that patch has an audited mapping.
-        exact_atom_patch = (
-            patch_id
-            if mapping is not None
-            and any(game.get("atom_snapshot_patch") == patch_id for game in scope_games)
-            else None
-        )
+        exact_atom_patch = _scope_atom_patch(scope_games) if mapping is not None else None
         for role in ROLES:
             counts = appearance_counts[(scope_id, role)]
             champions = sorted(

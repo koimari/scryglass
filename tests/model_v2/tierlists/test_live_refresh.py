@@ -212,6 +212,75 @@ def test_blob_publication_writes_the_pointer_last() -> None:
     }
 
 
+def test_blob_publication_reuses_an_exact_partial_immutable_release() -> None:
+    root = Path(__file__).resolve().parents[3]
+    payloads = live_refresh._publication_payloads(root)
+    reused_path, reused_raw = next(iter(sorted(payloads["cell_bytes"].items())))
+    reused_identity = live_refresh.BlobIdentity(reused_path, len(reused_raw), "reused-etag")
+
+    class FakeTransport:
+        pointer_raw = b""
+        movement_raw = b""
+        display_raw = b""
+
+        def get_blob(self, _store_id: str, pathname: str, *, deadline_epoch: int):
+            if pathname == reused_path:
+                return reused_raw, reused_identity
+            if pathname == live_refresh.BLOB_MOVEMENT_PATH and self.movement_raw:
+                return self.movement_raw, live_refresh.BlobIdentity(
+                    pathname, len(self.movement_raw), "movement-etag"
+                )
+            if pathname == live_refresh.BLOB_DISPLAY_PATH and self.display_raw:
+                return self.display_raw, live_refresh.BlobIdentity(
+                    pathname, len(self.display_raw), "display-etag"
+                )
+            if pathname == live_refresh.BLOB_POINTER_PATH and self.pointer_raw:
+                return self.pointer_raw, live_refresh.BlobIdentity(
+                    pathname, len(self.pointer_raw), "pointer-etag"
+                )
+            return None
+
+    transport = FakeTransport()
+
+    class FakeExecutor:
+        def __init__(self, _transport: FakeTransport):
+            pass
+
+        def execute(self, plan):
+            assert reused_path not in {write.pathname for write in plan.writes}
+            movement = next(
+                write for write in plan.writes if write.pathname == live_refresh.BLOB_MOVEMENT_PATH
+            )
+            display = next(
+                write for write in plan.writes if write.pathname == live_refresh.BLOB_DISPLAY_PATH
+            )
+            transport.movement_raw = movement.content
+            transport.display_raw = display.content
+            transport.pointer_raw = plan.writes[-1].content
+            return SimpleNamespace(
+                success=True,
+                state=SimpleNamespace(value="normal"),
+                current_retained_bytes=1,
+                peak_retained_bytes=2,
+                projected_final_bytes=2,
+                actual_final_bytes=2,
+                policy_sha256="p" * 64,
+                operations=(),
+            )
+
+    with patch.object(
+        live_refresh,
+        "_publication_credentials",
+        return_value=("https://store-test.public.blob.vercel-storage.com", "token", "store-test"),
+    ), patch.object(live_refresh, "VercelBlobTransport", return_value=transport), patch.object(
+        live_refresh, "_blob_inventory", return_value={reused_path: reused_identity}
+    ), patch.object(live_refresh, "RetentionExecutor", FakeExecutor):
+        result = live_refresh.publish_production_bundle(root)
+
+    assert result["status"] == "published"
+    assert result["reused_immutable_files"] == 1
+
+
 def test_tier_step_timeout_is_recorded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     def timed_out(*_args, **kwargs):
         assert kwargs["timeout"] == 2

@@ -426,17 +426,31 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
         previous_pointers[BLOB_DISPLAY_PATH] = current_display
         display_mode = WriteMode.OVERWRITE
 
-    writes = [
-        PlannedWrite(pathname, raw, WriteMode.NEW_IMMUTABLE)
-        for pathname, raw in sorted(payloads["cell_bytes"].items())
-    ]
-    writes.append(
-        PlannedWrite(
-            payloads["release_index_path"],
-            payloads["release_index_raw"],
-            WriteMode.NEW_IMMUTABLE,
+    immutable_payloads = {
+        **payloads["cell_bytes"],
+        payloads["release_index_path"]: payloads["release_index_raw"],
+    }
+    writes: list[PlannedWrite] = []
+    reused_immutable_paths: list[str] = []
+    for pathname, raw in sorted(immutable_payloads.items()):
+        existing = inventory.get(pathname)
+        if existing is None:
+            writes.append(PlannedWrite(pathname, raw, WriteMode.NEW_IMMUTABLE))
+            continue
+        current = transport.get_blob(
+            store_id,
+            pathname,
+            deadline_epoch=int(time.time()) + 30,
         )
-    )
+        if current is None or current[1] != existing:
+            raise PublicationError(
+                f"existing immutable tier-list file changed during verification: {pathname}"
+            )
+        if current[0] != raw:
+            raise PublicationError(
+                f"existing immutable tier-list file has different content: {pathname}"
+            )
+        reused_immutable_paths.append(pathname)
     writes.append(
         PlannedWrite(
             BLOB_MOVEMENT_PATH,
@@ -507,6 +521,7 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
         "pointer_artifact_sha256": payloads["pointer_artifact_sha256"],
         "release_index_artifact_sha256": payloads["release_index_artifact_sha256"],
         "cell_count": payloads["cell_count"],
+        "reused_immutable_files": len(reused_immutable_paths),
         "pointer_mode": pointer_mode.value,
         "movement_path": BLOB_MOVEMENT_PATH,
         "movement_artifact_sha256": payloads["movement_artifact_sha256"],
