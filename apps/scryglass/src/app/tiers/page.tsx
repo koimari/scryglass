@@ -5,7 +5,7 @@ import styles from "./TiersPage.module.css";
 export const metadata = {
   title: "Champion draft board — Scryglass",
   description:
-    "Patch-wide champion strength, blind stability, counter reach, and regional context.",
+    "Patch-wide champion strength, matchup shape, and unpicked structural alternatives.",
 };
 
 export default function TiersPage() {
@@ -15,9 +15,9 @@ export default function TiersPage() {
         <div>
           <h1>Champion draft board</h1>
           <p>
-            Start with the strongest first picks. Check blind stability, counter
-            reach, and responses to a specific champion. The main board pools
-            every accepted professional map in the patch.
+            Check what the patch rewards, how matchups change, and which unused
+            champions can fill a similar job. Every performance board pools the
+            accepted professional maps in that patch.
           </p>
         </div>
         <div className={styles.provenance}>
@@ -30,11 +30,10 @@ export default function TiersPage() {
       <footer className={styles.footer}>
         <p>
           Method:{" "}
-          <Link href="/methodology">Read the method</Link>. A champion must have
-          verified appearances in the selected patch and role. Regional context
-          keeps the patch-wide fit fixed and changes the observed league pool.
-          Matchup edges are descriptive model comparisons, not raw win rates or
-          draft recommendations.
+          <Link href="/methodology">Read the method</Link>. Performance boards
+          require verified appearances. Unpicked alternatives compare role and
+          function profiles with played champions. They do not estimate hidden
+          strength or recommend a draft pick.
         </p>
       </footer>
     </main>

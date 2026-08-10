@@ -9,10 +9,13 @@ import {
   rowsForMode,
   signedPp,
   TIER_ROLE_ORDER,
+  viableCandidates,
   type TierBoardMode,
   type TierBucket,
   type ResponseMatrix,
+  type StructuralSimilarity,
   type TierRow,
+  type TierRankedMode,
   type TierScope,
 } from "@/lib/tierBoard";
 import styles from "./TierListExplorer.module.css";
@@ -31,8 +34,10 @@ const BOARD_MODES = [
   { value: "blind", label: "Blind", note: "stability across matchups" },
   { value: "counter", label: "Counter reach", note: "positive responses" },
   { value: "responses", label: "Matchup matrix", note: "every role matchup" },
+  { value: "unpicked", label: "Unpicked, but viable", note: "structural alternatives" },
 ] as const;
 type BoardMode = TierBoardMode;
+type RankedBoardMode = TierRankedMode;
 
 type TierResponse = {
   status: string;
@@ -43,6 +48,7 @@ type TierResponse = {
   options?: { roles: string[]; patches: string[]; tier_buckets?: TierBucket[] };
   scopes?: TierScope[];
   rows?: TierRow[];
+  structural_similarity?: StructuralSimilarity;
 };
 
 const EMPTY: TierResponse = { status: "unavailable" };
@@ -111,7 +117,7 @@ function CountRail({ value, compact = false }: { value: number | null | undefine
   );
 }
 
-function MetricRail({ row, mode, compact = false }: { row: TierRow; mode: BoardMode; compact?: boolean }) {
+function MetricRail({ row, mode, compact = false }: { row: TierRow; mode: RankedBoardMode; compact?: boolean }) {
   if (mode === "blind") return <SignedRail value={row.blind_score_pp} compact={compact} />;
   if (mode === "counter") return <CountRail value={row.countered_opponent_count} compact={compact} />;
   return <TierRail tier={row.tier_bucket} compact={compact} />;
@@ -197,7 +203,7 @@ function SummaryCard({
   description: string;
   row?: TierRow;
   value: string;
-  mode: BoardMode;
+  mode: RankedBoardMode;
 }) {
   return (
     <article className={`${styles.summaryCard} ${row ? "" : styles.summaryCardPending}`}>
@@ -220,7 +226,7 @@ function SummaryCard({
   );
 }
 
-function sortRows(rows: TierRow[], mode: BoardMode): TierRow[] {
+function sortRows(rows: TierRow[], mode: RankedBoardMode): TierRow[] {
   return [...rows].sort((left, right) => {
     if (mode === "blind") {
       const leftValue = numericMetric(left.blind_score_pp);
@@ -245,7 +251,7 @@ function sortRows(rows: TierRow[], mode: BoardMode): TierRow[] {
   });
 }
 
-function listMetric(row: TierRow, mode: BoardMode): { value: string; detail: string } {
+function listMetric(row: TierRow, mode: RankedBoardMode): { value: string; detail: string } {
   if (mode === "blind") {
     return {
       value: signedScore(row.blind_score_pp),
@@ -273,7 +279,7 @@ function DraftRow({
   onSelect,
 }: {
   row: TierRow;
-  mode: BoardMode;
+  mode: RankedBoardMode;
   onSelect: (row: TierRow) => void;
 }) {
   const metric = listMetric(row, mode);
@@ -302,7 +308,7 @@ function BoardList({
   onSelect,
 }: {
   rows: TierRow[];
-  mode: BoardMode;
+  mode: RankedBoardMode;
   onSelect: (row: TierRow) => void;
 }) {
   const sorted = useMemo(() => sortRows(rows, mode), [mode, rows]);
@@ -321,7 +327,7 @@ function RoleBoardGrid({
   onSelect,
 }: {
   rows: TierRow[];
-  mode: Exclude<BoardMode, "responses">;
+  mode: RankedBoardMode;
   onSelect: (row: TierRow) => void;
 }) {
   const title = mode === "blind"
@@ -374,6 +380,119 @@ function RoleBoardGrid({
           );
         })}
       </div>
+    </section>
+  );
+}
+
+function traitLabel(value: string): string {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function similarityLabel(value: number): string {
+  if (value >= 0.9) return "Very close";
+  if (value >= 0.84) return "Close";
+  return "Related";
+}
+
+function UnpickedBoard({
+  library,
+  patchRoleRows,
+  referenceRows,
+  role,
+  patch,
+  targetId,
+  onTargetChange,
+}: {
+  library?: StructuralSimilarity;
+  patchRoleRows: TierRow[];
+  referenceRows: TierRow[];
+  role: string;
+  patch: string;
+  targetId: string;
+  onTargetChange: (value: string) => void;
+}) {
+  const references = useMemo(
+    () => [...referenceRows].sort((left, right) => left.champion.localeCompare(right.champion)),
+    [referenceRows],
+  );
+  const selectedTarget = references.some((row) => row.champion_id === targetId) ? targetId : "";
+  const candidates = useMemo(
+    () => viableCandidates(library, patchRoleRows, referenceRows, role, selectedTarget),
+    [library, patchRoleRows, referenceRows, role, selectedTarget],
+  );
+
+  if (!library) {
+    return (
+      <section className={styles.viablePanel}>
+        <div className={styles.unavailable}>
+          <p>Structural alternatives are waiting for the next accepted tier artifact.</p>
+          <span>The performance boards remain available.</span>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className={styles.viablePanel}>
+      <div className={styles.questionControls}>
+        <label className={styles.field}>
+          <span>Played reference</span>
+          <select value={selectedTarget} onChange={(event) => onTargetChange(event.target.value)}>
+            <option value="">all played champions</option>
+            {references.map((reference) => (
+              <option key={reference.champion_id} value={reference.champion_id}>{reference.champion}</option>
+            ))}
+          </select>
+        </label>
+        <p>These champions have zero accepted {roleLabel(role)} picks in patch {patch}. Similarity covers role, function, and mechanic structure.</p>
+      </div>
+      <header className={styles.viableHeading}>
+        <div>
+          <p className={styles.cardLabel}>{roleLabel(role)} · Patch {patch}</p>
+          <h2>Unpicked structural alternatives</h2>
+        </div>
+        <span>{candidates.length} candidates</span>
+      </header>
+      {candidates.length ? (
+        <div className={styles.viableList}>
+          {candidates.slice(0, 40).map((item) => (
+            <article className={styles.viableCard} key={item.candidate.champion_id}>
+              <div className={styles.viableChampion}>
+                <ChampionThumb name={item.candidate.champion} imageUrl={item.candidate.champion_image_url} />
+                <span>
+                  <strong>{item.candidate.champion}</strong>
+                  <small>0 accepted maps</small>
+                </span>
+              </div>
+              <div className={styles.similarityBridge}>
+                <strong>{similarityLabel(item.similarity)}</strong>
+                <i aria-hidden="true" />
+                <span>structural match</span>
+              </div>
+              <div className={styles.viableReference}>
+                <span>
+                  <small>Closest played</small>
+                  <strong>{item.reference.champion}</strong>
+                </span>
+                <ChampionThumb name={item.reference.champion} imageUrl={item.reference.champion_image_url} />
+              </div>
+              <div className={styles.viableTraits}>
+                {item.sharedRoles.slice(0, 2).map((value) => <span key={`role-${value}`}>{value}</span>)}
+                {item.sharedTraits.slice(0, 3).map((trait) => (
+                  <span key={`${trait.dimension}-${trait.label}`}>{traitLabel(trait.label)}</span>
+                ))}
+                <em>{item.candidate.profile_status === "atom_detail" ? "detailed atom profile" : "family profile"}</em>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className={styles.unavailable}>
+          <p>{references.length ? "No unpicked champion is structurally close enough for this view." : "No played reference is available for this region and role."}</p>
+          <span>Try all played champions, another role, or another region.</span>
+        </div>
+      )}
+      <p className={styles.viableCaveat}>This view identifies plausible functional substitutes. It does not estimate their strength, win rate, or draft value.</p>
     </section>
   );
 }
@@ -570,7 +689,9 @@ export function TierListExplorer() {
     .sort((left, right) => (right.blind_score_pp ?? -Infinity) - (left.blind_score_pp ?? -Infinity))[0];
   const counterPick = rowsForMode(topRows, "counter")
     .sort((left, right) => (right.countered_opponent_count ?? -Infinity) - (left.countered_opponent_count ?? -Infinity))[0];
-  const boardRows = rowsForMode(selectedRows, mode);
+  const rankedMode: RankedBoardMode = mode === "blind" || mode === "counter" ? mode : "first_pick";
+  const boardRows = rowsForMode(selectedRows, rankedMode);
+  const patchRoleRows = role ? rows.filter((row) => row.role === role) : [];
 
   return (
     <section className={styles.section}>
@@ -631,7 +752,7 @@ export function TierListExplorer() {
         ))}
       </nav>
 
-      <div className={`${styles.summaryGrid} ${!blindPick && !counterPick ? styles.summaryGridPartial : ""}`}>
+      {mode !== "unpicked" ? <div className={`${styles.summaryGrid} ${!blindPick && !counterPick ? styles.summaryGridPartial : ""}`}>
         <SummaryCard
           label="Top first-pick strength"
           row={firstPick}
@@ -663,7 +784,7 @@ export function TierListExplorer() {
             <span>Blind stability, counter reach, and direct responses will appear after the next accepted matchup artifact.</span>
           </article>
         )}
-      </div>
+      </div> : null}
 
       {mode === "responses" && !role ? (
         <div className={styles.unavailable}>
@@ -681,7 +802,26 @@ export function TierListExplorer() {
         />
       ) : null}
 
-      {mode !== "responses" ? (
+      {mode === "unpicked" && !role ? (
+        <div className={styles.unavailable}>
+          <p>Choose a role to find unpicked structural alternatives.</p>
+          <span>Role compatibility is required for every candidate.</span>
+        </div>
+      ) : null}
+
+      {mode === "unpicked" && role ? (
+        <UnpickedBoard
+          library={data.structural_similarity}
+          patchRoleRows={patchRoleRows}
+          referenceRows={selectedRows}
+          role={role}
+          patch={activePatch}
+          targetId={responseChampion}
+          onTargetChange={setResponseChampion}
+        />
+      ) : null}
+
+      {mode !== "responses" && mode !== "unpicked" ? (
         role ? (
           <section className={styles.boardPanel}>
             <header className={styles.panelHeading}>
@@ -692,7 +832,7 @@ export function TierListExplorer() {
               <span>{selectedRows.length} champions</span>
             </header>
             {boardRows.length ? (
-              <BoardList rows={boardRows} mode={mode} onSelect={(row) => {
+            <BoardList rows={boardRows} mode={rankedMode} onSelect={(row) => {
                 setResponseChampion(row.champion_id);
                 setMode("responses");
               }} />
@@ -704,7 +844,7 @@ export function TierListExplorer() {
             )}
           </section>
         ) : (
-          <RoleBoardGrid rows={visibleRows} mode={mode} onSelect={(row) => {
+          <RoleBoardGrid rows={visibleRows} mode={rankedMode} onSelect={(row) => {
             setRole(row.role);
             setResponseChampion("");
           }} />
@@ -713,7 +853,7 @@ export function TierListExplorer() {
 
       <div className={styles.methodNote}>
         <strong>How to read this board</strong>
-        <span>First pick uses the patch-wide model. Blind shows the expected weakest common matchup. Counter reach counts positive modeled edges against five common role opponents. Region filters observed appearances and keeps the patch-wide fit fixed.</span>
+        <span>First pick uses the patch-wide model. Blind shows the expected weakest common matchup. Counter reach counts positive modeled edges against five common role opponents. Unpicked alternatives use structural similarity and carry no performance claim. Region filters observed appearances and keeps the patch-wide fit fixed.</span>
       </div>
     </section>
   );

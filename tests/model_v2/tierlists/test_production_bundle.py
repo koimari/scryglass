@@ -8,6 +8,7 @@ import pytest
 
 from lol_kills.v2.tierlists.production_bundle import (
     ProductionBundleError,
+    _public_structural_similarity,
     _require_public_source_mode,
     _validate_matchup_profile,
     _validate_regional_views,
@@ -29,6 +30,13 @@ def test_patch_wide_bundle_verifies() -> None:
 def test_public_bundle_rejects_a_grid_backed_candidate() -> None:
     with pytest.raises(ProductionBundleError, match="OE-only candidate"):
         _require_public_source_mode({"source_mode": "oe_plus_grid"})
+
+
+def test_public_similarity_library_uses_the_validated_atom_bridge() -> None:
+    library = _public_structural_similarity(ROOT)
+    assert library["schema_version"] == "scryglass:champion-structural-similarity:v1"
+    assert len(library["champions"]) == 173
+    assert all(profile["champion_image_url"] for profile in library["champions"])
 
 
 def test_coach_board_matchups_and_regional_views_are_validated() -> None:

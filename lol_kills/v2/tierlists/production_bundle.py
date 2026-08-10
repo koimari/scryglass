@@ -19,11 +19,14 @@ import re
 import subprocess
 from typing import Any, Mapping
 
+from lol_kills.v2.champions.atoms.consume import AtomBridge
+
 from .forward_evaluation import (
     CANDIDATE_LOCATOR,
     SOURCE_LOCATOR,
     SOURCE_META_LOCATOR,
 )
+from .structural_similarity import build_structural_similarity
 
 
 EVALUATION_LOCATOR = Path("data/lol/v2/tierlists/prospective-evaluation-v1.json")
@@ -130,6 +133,15 @@ def _image_url(champion_id: str) -> str | None:
     if match is None:
         return None
     return f"https://cdn.communitydragon.org/latest/champion/{match.group(1)}/square"
+
+
+def _public_structural_similarity(root: Path) -> dict[str, Any]:
+    library = build_structural_similarity(
+        AtomBridge.load(root / "data/lol/v2/champions/lcc-atom-bridge-v1.json")
+    )
+    for profile in library["champions"]:
+        profile["champion_image_url"] = _image_url(profile["champion_id"])
+    return library
 
 
 def _claim_ceiling() -> dict[str, Any]:
@@ -576,6 +588,8 @@ def _source_tree_sha256(root: Path, extra: Mapping[str, bytes]) -> str:
         SOURCE_META_LOCATOR.as_posix(): _sha256_path(root / SOURCE_META_LOCATOR),
         "lol_kills/v2/tierlists/forward_evaluation.py": _sha256_path(root / "lol_kills/v2/tierlists/forward_evaluation.py"),
         "lol_kills/v2/tierlists/production_bundle.py": _sha256_path(root / "lol_kills/v2/tierlists/production_bundle.py"),
+        "lol_kills/v2/tierlists/structural_similarity.py": _sha256_path(root / "lol_kills/v2/tierlists/structural_similarity.py"),
+        "data/lol/v2/champions/lcc-atom-bridge-v1.json": _sha256_path(root / "data/lol/v2/champions/lcc-atom-bridge-v1.json"),
     }
     paths.update(extra)
     return _sha256_bytes(_canonical([{"locator": key, "raw_sha256": paths[key]} for key in sorted(paths)]))
@@ -621,6 +635,7 @@ def write_production_bundle(
     (production_dir / "index-v1.json").write_bytes(index_raw)
     display_scopes: list[dict[str, Any]] = []
     display_rows: list[dict[str, Any]] = []
+    structural_similarity = _public_structural_similarity(repo_root)
     for meta in index["cells"]:
         cell_raw = cell_bytes[f"production/cells/{Path(str(meta['locator'])).name}"]
         cell = json.loads(cell_raw.decode("utf-8"))
@@ -675,6 +690,7 @@ def write_production_bundle(
         },
         "scopes": display_scopes,
         "rows": display_rows,
+        "structural_similarity": structural_similarity,
     }
     display_path = repo_root / PUBLIC_DISPLAY_LOCATOR
     display_path.parent.mkdir(parents=True, exist_ok=True)
