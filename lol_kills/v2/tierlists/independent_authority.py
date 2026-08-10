@@ -16,6 +16,9 @@ import re
 from typing import Any, Mapping
 
 import pandas as pd
+import pyarrow.parquet as pq
+
+from lol_kills.etl.source_keys import canonical_source_game_key
 
 
 SCHEMA_VERSION = "scryglass:tierlist-independent-l2-authority:v1"
@@ -29,6 +32,32 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 class IndependentAuthorityError(ValueError):
     """Raised when the independent descriptive review fails."""
+
+
+def _source_columns(source: Path) -> list[str]:
+    required = ["gameid", "date", "position", "side", "result"]
+    available = set(pq.read_schema(source).names)
+    missing = sorted(set(required).difference(available))
+    if missing:
+        raise IndependentAuthorityError(
+            f"live source is missing required columns: {missing}"
+        )
+    return [*required, *(["game_uid"] if "game_uid" in available else [])]
+
+
+def _map_keys(frame: pd.DataFrame) -> pd.Series:
+    game_uid = frame["game_uid"] if "game_uid" in frame.columns else None
+    return pd.Series(
+        [
+            canonical_source_game_key(
+                game_uid.loc[index] if game_uid is not None else None,
+                frame.loc[index, "gameid"],
+            )
+            for index in frame.index
+        ],
+        index=frame.index,
+        dtype="string",
+    )
 
 
 def _canonical(value: object) -> bytes:
@@ -151,12 +180,12 @@ def _verify_source(root: Path, candidate: Mapping[str, Any], evaluation: Mapping
     if not isinstance(meta_payload, Mapping):
         raise IndependentAuthorityError("live source receipt is malformed")
     try:
-        frame = pd.read_parquet(source, columns=["game_uid", "gameid", "date", "position", "side", "result"])
+        frame = pd.read_parquet(source, columns=_source_columns(source))
     except (OSError, KeyError, ValueError) as exc:
         raise IndependentAuthorityError("live source cannot be read") from exc
     frame["date"] = pd.to_datetime(frame["date"], errors="coerce", utc=True)
     frame = frame[frame["date"].notna() & frame["date"].ge("2025-01-01T00:00:00Z")].copy()
-    frame["map_key"] = frame["game_uid"].where(frame["game_uid"].notna(), frame["gameid"]).astype(str)
+    frame["map_key"] = _map_keys(frame)
     group_sizes = frame.groupby("map_key", sort=False).size()
     complete_maps = int((group_sizes == 10).sum())
     candidate_maps = int(candidate["source"]["maps_replayed"])

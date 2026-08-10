@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from lol_kills.v2.tierlists.pooled_candidate import (
     _build_regional_views,
+    _matchup_metrics_available,
     _regional_contexts,
 )
 
@@ -49,3 +50,24 @@ def test_regional_view_keeps_patch_wide_strength_order() -> None:
         "riot:champion:1",
         "riot:champion:2",
     ]
+
+
+def test_complete_oe_matchup_support_does_not_require_an_atom_snapshot() -> None:
+    assert _matchup_metrics_available(
+        opponent_count=5,
+        supported_opponent_count=5,
+        contrast_sd=0.4,
+    )
+
+
+def test_oe_matchup_support_remains_fail_closed_for_thin_or_uncertain_rows() -> None:
+    assert not _matchup_metrics_available(
+        opponent_count=5,
+        supported_opponent_count=4,
+        contrast_sd=0.4,
+    )
+    assert not _matchup_metrics_available(
+        opponent_count=5,
+        supported_opponent_count=5,
+        contrast_sd=1.2,
+    )
