@@ -94,10 +94,16 @@ export default function MethodologyPage() {
             champion needs verified appearances in the selected patch and role.
           </p>
           <p>
-            Blind tiers describe performance across weak matchups. Counter tiers
-            describe the breadth of favorable same-role matchups after general
-            champion strength is accounted for. These labels describe observed
-            matchup shape. Pick order is outside their scope.
+            Blind tiers show the expected edge in a champion&apos;s weakest common
+            same-role matchup. Counter reach counts favorable model comparisons
+            against five common role opponents. The matchup matrix compares every
+            eligible same-role pair. It gives each response an S-to-D grade and
+            keeps the evidence interval available in the cell details.
+          </p>
+          <p>
+            The region filter changes which observed champions appear. The model
+            remains patch-wide. These views describe matchup shape after general
+            champion strength is accounted for. They do not describe draft order.
           </p>
           <p>
             Rank movement compares the current accepted board with its prior

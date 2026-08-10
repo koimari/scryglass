@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  filterRowsByRegion,
   firstPickMetric,
+  matchupGrade,
   regionalOptions,
   regionalViewForRole,
   rowsForMode,
@@ -74,4 +76,36 @@ test("regional choices combine every role for the selected patch", () => {
     { id: "LEC", label: "LEC" },
   ]);
   assert.equal(regionalViewForRole(scopes, "16.15", "support", "LEC")?.maps, 9);
+});
+
+test("region acts as a row filter across roles", () => {
+  const scopes: TierScope[] = [
+    {
+      scope_id: "patch:16.15",
+      scope_kind: "patch",
+      role: "top",
+      patch: "16.15",
+      as_of: "2026-08-08T00:00:00Z",
+      status: "production",
+      row_count: 2,
+      regional_views: [{
+        id: "LCK",
+        label: "LCK",
+        maps: 12,
+        basis: "observed",
+        rows: [{ champion: "Riven", champion_id: "riot:champion:92", regional_rank: 1, global_rank: 1, strength_score_pp: 4, played_maps: 3, sample_status: "observed" }],
+      }],
+    },
+  ];
+  const rows = [row(), row({ champion: "Kennen", champion_id: "riot:champion:85" })];
+  assert.deepEqual(filterRowsByRegion(rows, scopes, "16.15", "LCK").map((item) => item.champion), ["Riven"]);
+  assert.equal(filterRowsByRegion(rows, scopes, "16.15", "").length, 2);
+});
+
+test("matchup grades use the published edge bands", () => {
+  assert.equal(matchupGrade(8), "S");
+  assert.equal(matchupGrade(3), "A");
+  assert.equal(matchupGrade(0), "B");
+  assert.equal(matchupGrade(-3.1), "C");
+  assert.equal(matchupGrade(-8), "D");
 });

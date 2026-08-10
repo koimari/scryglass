@@ -11,6 +11,7 @@ from lol_kills.v2.tierlists.production_bundle import (
     _require_public_source_mode,
     _validate_matchup_profile,
     _validate_regional_views,
+    _validate_response_matrix,
     verify_production_index,
 )
 
@@ -75,3 +76,24 @@ def test_coach_board_matchups_and_regional_views_are_validated() -> None:
     ]
     with pytest.raises(ProductionBundleError, match="interval is inverted"):
         _validate_matchup_profile(invalid)
+
+
+def test_response_matrix_requires_complete_square_matchups() -> None:
+    matrix = {
+        "response_matrix": {
+            "champions": [
+                {"champion_id": "riot:champion:1", "champion": "Annie"},
+                {"champion_id": "riot:champion:2", "champion": "Olaf"},
+            ],
+            "edge_pp": [[None, 4.2], [-4.2, None]],
+            "interval_low_pp": [[None, -2.0], [-10.0, None]],
+            "interval_high_pp": [[None, 10.0], [2.0, None]],
+            "evidence": [[None, "supported"], ["supported", None]],
+            "effective_maps": [[None, 12.5], [12.5, None]],
+        }
+    }
+    _validate_response_matrix(matrix)
+
+    invalid = {"response_matrix": {**matrix["response_matrix"], "edge_pp": [[None, 4.2]]}}
+    with pytest.raises(ProductionBundleError, match="edge_pp is malformed"):
+        _validate_response_matrix(invalid)

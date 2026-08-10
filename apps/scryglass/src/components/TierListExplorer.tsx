@@ -2,14 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
+  filterRowsByRegion,
   firstPickMetric,
+  matchupGrade,
   regionalOptions,
-  regionalViewForRole,
   rowsForMode,
   signedPp,
   TIER_ROLE_ORDER,
   type TierBoardMode,
   type TierBucket,
+  type ResponseMatrix,
   type TierRow,
   type TierScope,
 } from "@/lib/tierBoard";
@@ -28,8 +30,7 @@ const BOARD_MODES = [
   { value: "first_pick", label: "First pick", note: "overall strength" },
   { value: "blind", label: "Blind", note: "stability across matchups" },
   { value: "counter", label: "Counter reach", note: "positive responses" },
-  { value: "responses", label: "Responses", note: "answer a champion" },
-  { value: "regions", label: "Regions", note: "regional context" },
+  { value: "responses", label: "Matchup matrix", note: "every role matchup" },
 ] as const;
 type BoardMode = TierBoardMode;
 
@@ -181,9 +182,7 @@ function ChampionThumb({ name, imageUrl }: { name: string; imageUrl?: string | n
 
 function evidenceLabel(row: TierRow): string {
   if (row.counterability_status === "available") return "Supported matchup sample";
-  if (row.matchup_profile?.some((matchup) => matchup.evidence_status === "supported")) {
-    return "Some supported matchups";
-  }
+  if (row.matchup_opponents > 0) return "Some matchup evidence";
   return "Thin matchup sample";
 }
 
@@ -316,24 +315,42 @@ function BoardList({
   );
 }
 
-function RoleSnapshotGrid({ rows, onSelect }: { rows: TierRow[]; onSelect: (row: TierRow) => void }) {
+function RoleBoardGrid({
+  rows,
+  mode,
+  onSelect,
+}: {
+  rows: TierRow[];
+  mode: Exclude<BoardMode, "responses">;
+  onSelect: (row: TierRow) => void;
+}) {
+  const title = mode === "blind"
+    ? "Safest blind picks by role"
+    : mode === "counter"
+      ? "Widest counter reach by role"
+      : "Five-role draft sheet";
   return (
     <section className={styles.roleSnapshot}>
       <header className={styles.roleSnapshotHeader}>
         <div>
-          <p className={styles.cardLabel}>Patch-wide first picks</p>
-          <h2>Five-role draft sheet</h2>
+          <p className={styles.cardLabel}>Patch-wide role comparison</p>
+          <h2>{title}</h2>
         </div>
-        <div className={styles.tierLegend} aria-label="Tier scale from strongest to developing">
-          <span><i className={styles.legendA} />A</span>
-          <span><i className={styles.legendB} />B</span>
-          <span><i className={styles.legendC} />C</span>
-          <span><i className={styles.legendD} />D</span>
-        </div>
+        {mode === "first_pick" ? (
+          <div className={styles.tierLegend} aria-label="Tier scale from strongest to developing">
+            <span><i className={styles.legendA} />A</span>
+            <span><i className={styles.legendB} />B</span>
+            <span><i className={styles.legendC} />C</span>
+            <span><i className={styles.legendD} />D</span>
+          </div>
+        ) : null}
       </header>
       <div className={styles.roleGrid}>
         {ROLE_ORDER.map((role) => {
-          const roleRows = rows.filter((row) => row.role === role).slice(0, 5);
+          const roleRows = sortRows(
+            rowsForMode(rows.filter((row) => row.role === role), mode),
+            mode,
+          ).slice(0, 5);
           return (
             <article className={styles.roleCard} data-role={role} key={role}>
               <header>
@@ -347,8 +364,8 @@ function RoleSnapshotGrid({ rows, onSelect }: { rows: TierRow[]; onSelect: (row:
                     <ChampionThumb name={row.champion} imageUrl={row.champion_image_url} />
                     <strong>{row.champion}</strong>
                     <span className={styles.roleMetric}>
-                      <em>{firstPickMetric(row)}</em>
-                      <TierRail tier={row.tier_bucket} compact />
+                      <em>{listMetric(row, mode).value}</em>
+                      <MetricRail row={row} mode={mode} compact />
                     </span>
                   </button>
                 ))}
@@ -362,197 +379,121 @@ function RoleSnapshotGrid({ rows, onSelect }: { rows: TierRow[]; onSelect: (row:
 }
 
 function ResponseBoard({
+  matrix,
   rows,
   targetId,
   onTargetChange,
 }: {
+  matrix?: ResponseMatrix;
   rows: TierRow[];
   targetId: string;
   onTargetChange: (value: string) => void;
 }) {
-  const targets = useMemo(() => {
-    const byId = new Map<string, string>();
-    for (const row of rows) {
-      for (const matchup of row.matchup_profile ?? []) byId.set(matchup.champion_id, matchup.champion);
-    }
-    return [...byId.entries()].sort((left, right) => left[1].localeCompare(right[1]));
-  }, [rows]);
-  const selectedTarget = targets.some(([id]) => id === targetId) ? targetId : targets[0]?.[0] || "";
-  const targetName = targets.find(([id]) => id === selectedTarget)?.[1] ?? "the selected champion";
-  const responses = rows
-    .flatMap((row) => {
-      const matchup = row.matchup_profile?.find((candidate) => candidate.champion_id === selectedTarget);
-      return matchup ? [{ row, matchup }] : [];
-    })
-    .sort((left, right) => right.matchup.model_edge_pp - left.matchup.model_edge_pp);
+  const allowedIds = useMemo(() => new Set(rows.map((row) => row.champion_id)), [rows]);
+  const champions = useMemo(
+    () => (matrix?.champions ?? []).filter((champion) => allowedIds.has(champion.champion_id)),
+    [allowedIds, matrix],
+  );
+  const selectedTarget = champions.some((champion) => champion.champion_id === targetId) ? targetId : "";
+  const columns = selectedTarget
+    ? champions.filter((champion) => champion.champion_id === selectedTarget)
+    : champions;
+  const matrixIndex = new Map((matrix?.champions ?? []).map((champion, index) => [champion.champion_id, index]));
+  const imageById = new Map(rows.map((row) => [row.champion_id, row.champion_image_url]));
+  const rowById = new Map(rows.map((row) => [row.champion_id, row]));
+
+  const gradeClass = {
+    S: styles.matchupGradeS,
+    A: styles.matchupGradeA,
+    B: styles.matchupGradeB,
+    C: styles.matchupGradeC,
+    D: styles.matchupGradeD,
+  } as const;
 
   return (
-    <section className={styles.questionPanel}>
+    <section className={styles.matchupMatrixPanel}>
       <div className={styles.questionControls}>
         <label className={styles.field}>
           <span>Enemy champion</span>
           <select value={selectedTarget} onChange={(event) => onTargetChange(event.target.value)}>
-            {!targets.length ? <option value="">No response data</option> : null}
-            {targets.map(([id, name]) => (
-              <option key={id} value={id}>{name}</option>
+            <option value="">all enemy champions</option>
+            {champions.map((champion) => (
+              <option key={champion.champion_id} value={champion.champion_id}>{champion.champion}</option>
             ))}
           </select>
         </label>
-        <p>Responses use the same patch-wide model. The edge is a model comparison, not a raw win rate.</p>
+        <p>Rows are your response pick. Columns are the enemy pick. Grades summarize the modeled same-role edge.</p>
       </div>
-      {responses.length ? (
-        <div className={styles.responseList}>
-          <div className={styles.panelHeading}>
-            <div>
-              <p className={styles.cardLabel}>Best responses to</p>
-              <h2>{targetName}</h2>
-            </div>
-            <span>{responses.length} modeled responses</span>
+      {matrix && champions.length ? (
+        <>
+          <div className={styles.matchupLegend} aria-label="Matchup grade scale">
+            <span className={styles.matchupGradeS}>S <small>strong counter</small></span>
+            <span className={styles.matchupGradeA}>A <small>good response</small></span>
+            <span className={styles.matchupGradeB}>B <small>close</small></span>
+            <span className={styles.matchupGradeC}>C <small>unfavorable</small></span>
+            <span className={styles.matchupGradeD}>D <small>heavily countered</small></span>
           </div>
-          {responses.map(({ row, matchup }) => (
-            <div className={styles.responseRow} key={`${row.role}|${row.champion_id}`}>
-              <span className={styles.rowRank}>#{row.rank}</span>
-              <ChampionThumb name={row.champion} imageUrl={row.champion_image_url} />
-              <span className={styles.rowName}>
-                <strong>{row.champion}</strong>
-                <span>{matchup.evidence_status === "supported" ? "Supported pair" : "Limited pair"} · {matchup.effective_maps.toFixed(1)} effective maps</span>
-              </span>
-              <span className={styles.rowMetric}>
-                <strong>{signedScore(matchup.model_edge_pp)}</strong>
-                <SignedRail value={matchup.model_edge_pp} />
-                <span>{matchup.posterior_interval_pp.low.toFixed(1)} to {matchup.posterior_interval_pp.high.toFixed(1)} pp interval</span>
-              </span>
-            </div>
-          ))}
-        </div>
+          <div className={styles.matchupMatrixScroll}>
+            <table className={styles.matchupMatrix}>
+              <thead>
+                <tr>
+                  <th scope="col">Response pick</th>
+                  {columns.map((champion) => (
+                    <th scope="col" key={champion.champion_id} title={champion.champion}>
+                      <ChampionThumb name={champion.champion} imageUrl={imageById.get(champion.champion_id)} />
+                      <span>{champion.champion}</span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {champions.map((response) => {
+                  const responseIndex = matrixIndex.get(response.champion_id);
+                  const responseRow = rowById.get(response.champion_id);
+                  return (
+                    <tr key={response.champion_id}>
+                      <th scope="row">
+                        <ChampionThumb name={response.champion} imageUrl={imageById.get(response.champion_id)} />
+                        <span><strong>{response.champion}</strong><small>#{responseRow?.rank ?? "—"}</small></span>
+                      </th>
+                      {columns.map((enemy) => {
+                        const enemyIndex = matrixIndex.get(enemy.champion_id);
+                        if (responseIndex === undefined || enemyIndex === undefined || responseIndex === enemyIndex) {
+                          return <td className={styles.matchupDiagonal} key={enemy.champion_id}>—</td>;
+                        }
+                        const edge = matrix.edge_pp[responseIndex]?.[enemyIndex];
+                        const low = matrix.interval_low_pp[responseIndex]?.[enemyIndex];
+                        const high = matrix.interval_high_pp[responseIndex]?.[enemyIndex];
+                        const evidence = matrix.evidence[responseIndex]?.[enemyIndex];
+                        const maps = matrix.effective_maps[responseIndex]?.[enemyIndex];
+                        if (edge === null || edge === undefined) {
+                          return <td className={styles.matchupDiagonal} key={enemy.champion_id}>—</td>;
+                        }
+                        const grade = matchupGrade(edge);
+                        const detail = `${response.champion} into ${enemy.champion}: ${grade}, ${signedScore(edge)}. ${evidence === "supported" ? "Supported" : "Limited"} evidence, ${maps?.toFixed(1) ?? "0.0"} effective maps, ${low?.toFixed(1) ?? "—"} to ${high?.toFixed(1) ?? "—"} pp interval.`;
+                        return (
+                          <td
+                            className={`${styles.matchupCell} ${gradeClass[grade]} ${evidence === "limited" ? styles.matchupCellLimited : ""}`}
+                            key={enemy.champion_id}
+                            title={detail}
+                            aria-label={detail}
+                          >
+                            <strong>{grade}</strong>
+                            <small>{signedScore(edge)}</small>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       ) : (
         <div className={styles.unavailable}>
-          <p>No accepted response evidence is available for this role and patch.</p>
-          <span>The page keeps the result unavailable until the pair sample passes its evidence checks.</span>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function RegionalBoard({
-  scope,
-  rows,
-  regionId,
-}: {
-  scope?: TierScope;
-  rows: TierRow[];
-  regionId: string;
-}) {
-  const views = scope?.regional_views ?? [];
-  const view = views.find((candidate) => candidate.id === regionId);
-  const imageById = new Map(rows.map((row) => [row.champion_id, row.champion_image_url]));
-  return (
-    <section className={styles.questionPanel}>
-      <div className={styles.questionControls}>
-        <p>The patch-wide fit stays fixed. This view changes the observed league pool and shows its sample size.</p>
-      </div>
-      {view ? (
-        <div className={styles.responseList}>
-          <div className={styles.panelHeading}>
-            <div>
-              <p className={styles.cardLabel}>{view.label}</p>
-              <h2>Strongest observed picks</h2>
-            </div>
-            <span>{view.maps} maps in this patch</span>
-          </div>
-          {view.rows.map((regionalRow) => (
-            <div className={styles.responseRow} key={regionalRow.champion_id}>
-              <span className={styles.rowRank}>#{regionalRow.regional_rank}</span>
-              <ChampionThumb name={regionalRow.champion} imageUrl={imageById.get(regionalRow.champion_id)} />
-              <span className={styles.rowName}>
-                <strong>{regionalRow.champion}</strong>
-                <span>Patch-wide rank #{regionalRow.global_rank} · {regionalRow.played_maps} maps in {view.label}</span>
-              </span>
-              <span className={styles.rowMetric}>
-                <strong>{signedScore(regionalRow.strength_score_pp)}</strong>
-                <SignedRail value={regionalRow.strength_score_pp} />
-                <span>{regionalRow.sample_status === "thin" ? "Thin regional sample" : "Observed regional sample"}</span>
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className={styles.unavailable}>
-          <p>No regional context is available for this patch and role.</p>
-          <span>The canonical board remains patch-wide.</span>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function RegionalOverviewBoard({
-  scopes,
-  rows,
-  patch,
-  regionId,
-}: {
-  scopes: TierScope[];
-  rows: TierRow[];
-  patch: string;
-  regionId: string;
-}) {
-  const options = regionalOptions(scopes, patch);
-  const regionLabel = options.find((candidate) => candidate.id === regionId)?.label;
-  const imageById = new Map(rows.map((row) => [row.champion_id, row.champion_image_url]));
-
-  return (
-    <section className={styles.questionPanel}>
-      <div className={styles.questionControls}>
-        <p>Compare the same regional context across Top, Jungle, Mid, Bot, and Support.</p>
-      </div>
-      {regionId ? (
-        <div className={styles.responseList}>
-          <div className={styles.panelHeading}>
-            <div>
-              <p className={styles.cardLabel}>{regionLabel}</p>
-              <h2>Regional view across all roles</h2>
-            </div>
-            <span>Patch {patch}</span>
-          </div>
-          <div className={styles.regionalRoleGrid}>
-            {ROLE_ORDER.map((roleName) => {
-              const view = regionalViewForRole(scopes, patch, roleName, regionId);
-              return (
-                <article className={styles.roleCard} data-role={roleName} key={roleName}>
-                  <header>
-                    <p className={styles.cardLabel}>{roleLabel(roleName)}</p>
-                    <span>{view ? `${view.maps} regional maps` : "data pending"}</span>
-                  </header>
-                  <div className={styles.roleRows}>
-                    {view?.rows.slice(0, 5).map((regionalRow) => (
-                      <div className={styles.regionalRoleRow} key={regionalRow.champion_id}>
-                        <span>#{regionalRow.regional_rank}</span>
-                        <ChampionThumb
-                          name={regionalRow.champion}
-                          imageUrl={imageById.get(regionalRow.champion_id)}
-                        />
-                        <strong>{regionalRow.champion}</strong>
-                        <span className={styles.roleMetric}>
-                          <em>{signedScore(regionalRow.strength_score_pp)}</em>
-                          <SignedRail value={regionalRow.strength_score_pp} compact />
-                        </span>
-                      </div>
-                    ))}
-                    {!view?.rows.length ? (
-                      <span className={styles.rolePending}>Waiting for accepted regional maps.</span>
-                    ) : null}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </div>
-      ) : (
-        <div className={styles.unavailable}>
-          <p>Regional context is waiting for the next accepted tier artifact.</p>
-          <span>The patch-wide A–D board remains available.</span>
+          <p>The matchup matrix is waiting for the next accepted tier artifact.</p>
+          <span>First-pick, blind, and counter boards remain available.</span>
         </div>
       )}
     </section>
@@ -613,18 +554,18 @@ export function TierListExplorer() {
   const activePatch = patch || patchOptions[0] || "";
   const roleOptions = (data.options?.roles ?? [...ROLE_ORDER]).map((value) => ({ value, label: roleLabel(value) }));
   const rows = (data.rows ?? []).filter((row) => row.patch === activePatch);
-  const selectedRows = role ? rows.filter((row) => row.role === role) : [];
+  const regionOptions = regionalOptions(scopes, activePatch);
+  const activeRegion = regionOptions.some((candidate) => candidate.id === region) ? region : "";
+  const visibleRows = filterRowsByRegion(rows, scopes, activePatch, activeRegion);
+  const selectedRows = role ? visibleRows.filter((row) => row.role === role) : [];
   const selectedScope = role
     ? scopes.find((scope) => scope.patch === activePatch && scope.role === role)
     : undefined;
-  const regionOptions = regionalOptions(scopes, activePatch);
-  const activeRegion = regionOptions.some((candidate) => candidate.id === region)
-    ? region
-    : mode === "regions"
-      ? regionOptions[0]?.id || ""
-      : "";
-  const topRows = role ? selectedRows : rows;
-  const firstPick = [...topRows].sort((left, right) => left.rank - right.rank)[0];
+  const activeRegionLabel = regionOptions.find((candidate) => candidate.id === activeRegion)?.label;
+  const topRows = role ? selectedRows : visibleRows;
+  const firstPick = [...topRows].sort((left, right) => (
+    (right.tier_value_pp ?? -Infinity) - (left.tier_value_pp ?? -Infinity)
+  ))[0];
   const blindPick = rowsForMode(topRows, "blind")
     .sort((left, right) => (right.blind_score_pp ?? -Infinity) - (left.blind_score_pp ?? -Infinity))[0];
   const counterPick = rowsForMode(topRows, "counter")
@@ -652,7 +593,6 @@ export function TierListExplorer() {
           onChange={(value) => {
             setRole(value);
             setResponseChampion("");
-            setRegion("");
           }}
           emptyLabel="all roles"
         />
@@ -662,7 +602,7 @@ export function TierListExplorer() {
           options={regionOptions.map((candidate) => ({ value: candidate.id, label: candidate.label }))}
           onChange={(value) => {
             setRegion(value);
-            setMode(value ? "regions" : "first_pick");
+            setResponseChampion("");
           }}
           emptyLabel={regionOptions.length ? "all regions" : "regional refresh pending"}
         />
@@ -672,7 +612,8 @@ export function TierListExplorer() {
       </div>
 
       <div className={styles.meta}>
-        {role ? `${selectedRows.length} champions · ${roleLabel(role)}` : `${rows.length} champions across all roles`} · {freshnessLabel(data)} · updated {data.as_of ?? data.generated_at}
+        {role ? `${selectedRows.length} champions · ${roleLabel(role)}` : `${visibleRows.length} champions across all roles`}
+        {activeRegionLabel ? ` · ${activeRegionLabel}` : " · all regions"} · {freshnessLabel(data)} · updated {data.as_of ?? data.generated_at}
       </div>
 
       <nav className={styles.questionNav} aria-label="Draft questions">
@@ -682,10 +623,7 @@ export function TierListExplorer() {
             type="button"
             className={mode === item.value ? styles.questionTabActive : styles.questionTab}
             aria-pressed={mode === item.value}
-            onClick={() => {
-              setMode(item.value);
-              if (item.value !== "regions") setRegion("");
-            }}
+            onClick={() => setMode(item.value)}
           >
             <strong>{item.label}</strong>
             <span>{item.note}</span>
@@ -708,14 +646,14 @@ export function TierListExplorer() {
               row={blindPick}
               value={blindPick ? signedScore(blindPick.blind_score_pp) : "Matchup refresh pending"}
               mode="blind"
-              description="Lower-tail matchup stability across the accepted opponent pool."
+              description="Expected edge in the weakest common matchup."
             />
             <SummaryCard
               label="Widest counter reach"
               row={counterPick}
               value={counterPick?.countered_opponent_count === null || counterPick?.countered_opponent_count === undefined ? "Matchup refresh pending" : `${counterPick.countered_opponent_count} / 5`}
               mode="counter"
-              description="Modeled positive responses across five legal opponents."
+              description="Positive modeled edges against five common role opponents."
             />
           </>
         ) : (
@@ -735,23 +673,15 @@ export function TierListExplorer() {
       ) : null}
 
       {mode === "responses" && role ? (
-        <ResponseBoard rows={selectedRows} targetId={responseChampion} onTargetChange={setResponseChampion} />
-      ) : null}
-
-      {mode === "regions" && role ? (
-        <RegionalBoard scope={selectedScope} rows={selectedRows} regionId={activeRegion} />
-      ) : null}
-
-      {mode === "regions" && !role ? (
-        <RegionalOverviewBoard
-          scopes={scopes}
-          rows={rows}
-          patch={activePatch}
-          regionId={activeRegion}
+        <ResponseBoard
+          matrix={selectedScope?.response_matrix}
+          rows={selectedRows}
+          targetId={responseChampion}
+          onTargetChange={setResponseChampion}
         />
       ) : null}
 
-      {mode !== "responses" && mode !== "regions" ? (
+      {mode !== "responses" ? (
         role ? (
           <section className={styles.boardPanel}>
             <header className={styles.panelHeading}>
@@ -764,7 +694,6 @@ export function TierListExplorer() {
             {boardRows.length ? (
               <BoardList rows={boardRows} mode={mode} onSelect={(row) => {
                 setResponseChampion(row.champion_id);
-                setRegion("");
                 setMode("responses");
               }} />
             ) : (
@@ -774,22 +703,17 @@ export function TierListExplorer() {
               </div>
             )}
           </section>
-        ) : mode === "first_pick" ? (
-          <RoleSnapshotGrid rows={rows} onSelect={(row) => {
+        ) : (
+          <RoleBoardGrid rows={visibleRows} mode={mode} onSelect={(row) => {
             setRole(row.role);
             setResponseChampion("");
           }} />
-        ) : (
-          <div className={styles.unavailable}>
-            <p>Choose a role to inspect this question.</p>
-            <span>Blind stability and counter reach compare champions within one role.</span>
-          </div>
         )
       ) : null}
 
       <div className={styles.methodNote}>
         <strong>How to read this board</strong>
-        <span>First pick uses the overall patch-wide model. Blind and counter views use matchup-shape fields only when their evidence checks pass. Regional context filters observed appearances while keeping the same patch-wide fit.</span>
+        <span>First pick uses the patch-wide model. Blind shows the expected weakest common matchup. Counter reach counts positive modeled edges against five common role opponents. Region filters observed appearances and keeps the patch-wide fit fixed.</span>
       </div>
     </section>
   );
