@@ -267,3 +267,16 @@ def test_production_smoke_requires_the_deployed_app_to_serve_the_new_pack(tmp_pa
     ):
         with pytest.raises(public_refresh.PublicRefreshError, match="serves old"):
             public_refresh.verify_public_release(config, expected_pack_id="new", tier_expected=True)
+
+
+def test_systemd_worker_cannot_start_without_production_environment() -> None:
+    root = Path(__file__).parents[1]
+    service = (root / "ops/systemd/scryglass-ratings-sync.service").read_text(encoding="utf-8")
+    alert = (root / "ops/systemd/scryglass-public-refresh-alert@.service").read_text(encoding="utf-8")
+    watchdog = (root / "ops/systemd/scryglass-public-refresh-watchdog.service").read_text(encoding="utf-8")
+
+    assert "EnvironmentFile=/etc/scryglass/public-refresh.env" in service
+    assert "Environment=SCRYGLASS_PUBLIC_RELEASE=1" in service
+    assert "EnvironmentFile=-/etc/scryglass/public-refresh.env" not in service
+    assert "EnvironmentFile=/etc/scryglass/public-refresh.env" in alert
+    assert "EnvironmentFile=/etc/scryglass/public-refresh.env" in watchdog
