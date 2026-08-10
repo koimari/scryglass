@@ -649,8 +649,8 @@ def sync_once(
             },
             published_source,
         )
-        discovered_ids = sorted(observed - known)
-        if not discovered_ids and not force:
+        raw_discovered_ids = sorted(observed - known)
+        if not raw_discovered_ids and not force:
             result = {
                 "status": "no_change",
                 "new_game_ids": [],
@@ -665,6 +665,8 @@ def sync_once(
         candidate_continuity = validate_source_continuity(
             baseline_ids, candidate_source, published_source
         )
+        candidate_ids = set(candidate_source.get("game_ids", []))
+        discovered_ids = sorted(candidate_ids - known)
         statistics_complete = set(candidate_source.get("statistics_complete_game_ids", []))
         new_ids = sorted(set(discovered_ids).intersection(statistics_complete))
         pending_ids = sorted(set(discovered_ids).difference(statistics_complete))
