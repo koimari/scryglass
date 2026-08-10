@@ -279,6 +279,7 @@ def export_public_pack(
     pack_id: str | None = None,
     warehouse_root: Path | None = None,
     project_root: Path | None = None,
+    allowed_game_ids: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     years = tuple(years or spec.DEFAULT_YEARS)
     project = Path(project_root or ROOT).resolve()
@@ -367,6 +368,9 @@ def export_public_pack(
         complete_ids = _complete_player_game_ids(player_identity)
         original_ids = set(_normalized_game_uid(maps_for_records).dropna().astype(str))
         accepted_ids = original_ids.intersection(complete_ids)
+        if allowed_game_ids is not None:
+            allowed = {canonical_source_game_key(value) for value in allowed_game_ids}
+            accepted_ids.intersection_update(value for value in allowed if value)
         rejected_ids = original_ids.difference(accepted_ids)
         if not accepted_ids:
             raise RuntimeError("public pack source has no complete player maps")

@@ -73,7 +73,20 @@ def _source_rows() -> pd.DataFrame:
                         "champion": champion,
                         "side": side,
                         "teamname": blue_team if side == "Blue" else red_team,
+                        "playername": f"{side}-{role}",
                         "result": result,
+                        "kills": 2,
+                        "deaths": 2,
+                        "assists": 8,
+                        "teamkills": 15,
+                        "gamelength": 1800,
+                        "dpm": 500,
+                        "damageshare": 0.2,
+                        "totalgold": 10000,
+                        "cspm": 7,
+                        "wpm": 0.5,
+                        "wcpm": 0.25,
+                        "golddiffat10": 0,
                     }
                 )
     return pd.DataFrame(rows)

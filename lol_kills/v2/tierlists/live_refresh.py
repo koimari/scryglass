@@ -1,4 +1,4 @@
-"""Refresh the tier-list candidate from OE with an optional GRID bridge.
+"""Refresh the public tier-list candidate from Oracle's Elixir.
 
 This command is for a durable worker. It writes a development candidate and a
 hash-bound receipt. With ``--promote``, it runs the descriptive evaluation,
@@ -35,7 +35,6 @@ from lol_kills.v2.champions.atoms.consume import AtomBridge
 from .champion_elo import (
     DEFAULT_OUTPUT,
     DEFAULT_SOURCE_MODE,
-    SOURCE_MODES,
     build_candidate,
     write_candidate,
 )
@@ -55,6 +54,7 @@ BLOB_STORE_ENV = "BLOB_STORE_ID"
 BLOB_STORE_FALLBACK_ENV = "VERCEL_BLOB_STORE_ID"
 BLOB_POINTER_PATH = "tierlists/index-v1.json"
 BLOB_MOVEMENT_PATH = "tierlists/movement-v1.json"
+BLOB_DISPLAY_PATH = "rankings/tierlists.json"
 BLOB_WRITER_ID = "scryglass-tierlist-worker"
 
 
@@ -227,6 +227,19 @@ def _publication_payloads(root: Path) -> dict[str, Any]:
             }
         )
     movement_raw = _production_artifact_bytes(movement_snapshot)
+    display_path = root / "apps/scryglass/public/rankings/tierlists.json"
+    display_raw = display_path.read_bytes()
+    try:
+        display = json.loads(display_raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PublicationError("public tier-list display is malformed") from error
+    if (
+        not isinstance(display, dict)
+        or display.get("schema_version") != "rankings-tierlists-v2"
+        or display.get("status") != "available"
+        or not isinstance(display.get("rows"), list)
+    ):
+        raise PublicationError("public tier-list display is not available")
     return {
         "release_id": release_id,
         "release_index_path": f"tierlists/releases/{release_id}/index-v1.json",
@@ -239,6 +252,9 @@ def _publication_payloads(root: Path) -> dict[str, Any]:
         "movement_raw": movement_raw,
         "movement_artifact_sha256": movement_snapshot["artifact_sha256"],
         "movement_url_suffix": BLOB_MOVEMENT_PATH,
+        "display_raw": display_raw,
+        "display_sha256": _production_sha256_bytes(display_raw),
+        "display_url_suffix": BLOB_DISPLAY_PATH,
         "cell_count": len(cell_bytes),
         "source_index_artifact_sha256": index["artifact_sha256"],
     }
@@ -254,6 +270,7 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
     inventory = _blob_inventory(transport, store_id)
     pointer_identity = inventory.get(BLOB_POINTER_PATH)
     movement_identity = inventory.get(BLOB_MOVEMENT_PATH)
+    display_identity = inventory.get(BLOB_DISPLAY_PATH)
     pointer_mode = WriteMode.NEW_IMMUTABLE
     if pointer_identity is not None:
         current = transport.get_blob(
@@ -275,6 +292,16 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
         if current_movement is None or current_movement[1] != movement_identity:
             raise PublicationError("existing tier-list movement snapshot changed during inventory")
         movement_mode = WriteMode.OVERWRITE
+    display_mode = WriteMode.NEW_IMMUTABLE
+    if display_identity is not None:
+        current_display = transport.get_blob(
+            store_id,
+            BLOB_DISPLAY_PATH,
+            deadline_epoch=int(time.time()) + 30,
+        )
+        if current_display is None or current_display[1] != display_identity:
+            raise PublicationError("existing tier-list display changed during inventory")
+        display_mode = WriteMode.OVERWRITE
 
     writes = [
         PlannedWrite(pathname, raw, WriteMode.NEW_IMMUTABLE)
@@ -292,6 +319,13 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
             BLOB_MOVEMENT_PATH,
             payloads["movement_raw"],
             movement_mode,
+        )
+    )
+    writes.append(
+        PlannedWrite(
+            BLOB_DISPLAY_PATH,
+            payloads["display_raw"],
+            display_mode,
         )
     )
     writes.append(PlannedWrite(BLOB_POINTER_PATH, payloads["pointer_raw"], pointer_mode))
@@ -322,6 +356,13 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
     )
     if movement_readback is None or movement_readback[0] != payloads["movement_raw"]:
         raise PublicationError("published tier-list movement snapshot failed exact readback")
+    display_readback = transport.get_blob(
+        store_id,
+        BLOB_DISPLAY_PATH,
+        deadline_epoch=int(time.time()) + 30,
+    )
+    if display_readback is None or display_readback[0] != payloads["display_raw"]:
+        raise PublicationError("published tier-list display failed exact readback")
     return {
         "status": "published",
         "blob_store_id": store_id,
@@ -338,6 +379,10 @@ def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
         "movement_artifact_sha256": payloads["movement_artifact_sha256"],
         "movement_mode": movement_mode.value,
         "movement_readback_verified": True,
+        "display_path": BLOB_DISPLAY_PATH,
+        "display_sha256": payloads["display_sha256"],
+        "display_mode": display_mode.value,
+        "display_readback_verified": True,
         "pointer_readback_verified": True,
         "retention": {
             "state": result.state.value,
@@ -474,18 +519,14 @@ def refresh_candidate(
     previous_path: Path | None = None,
     output_path: Path = DEFAULT_OUTPUT,
     receipt_path: Path = DEFAULT_RECEIPT,
-    grid_days: int = 21,
-    grid_limit: int = 200,
     source_mode: str = DEFAULT_SOURCE_MODE,
     promote: bool = False,
     skip_annual_oe: bool = False,
     skip_atom_bridge: bool = False,
     prepared_source: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if grid_days < 1 or grid_limit < 1:
-        raise ValueError("grid_days and grid_limit must be positive")
-    if source_mode not in SOURCE_MODES:
-        raise ValueError(f"source_mode must be one of {', '.join(SOURCE_MODES)}")
+    if source_mode != "oe_only":
+        raise ValueError("public tier refresh source_mode must be oe_only")
 
     if prepared_source is not None:
         prepared_mode = prepared_source.get("source_mode")
@@ -518,9 +559,7 @@ def refresh_candidate(
         rating_step = by_source.get(
             "ratings", _skipped_step("ratings", "prepared_source_bundle")
         )
-        grid_step = by_source.get(
-            "grid", _skipped_step("grid", "prepared_source_bundle")
-        )
+        grid_step = _skipped_step("grid", "public_refresh_oe_only")
         observed_as_of = prepared_source.get("source_observed_through")
         if not isinstance(observed_as_of, str) or not observed_as_of:
             observed_as_of = _api_source_latest(root)
@@ -593,23 +632,7 @@ def refresh_candidate(
             if live_source_step["completed"] and _api_player_statistics_complete(root)
             else _skipped_step("ratings", "oe_player_detail_incomplete")
         )
-        if source_mode == "oe_plus_grid":
-            grid_step = _run_step(
-                root,
-                [
-                    "lol_kills.refresh_warehouse",
-                    "--skip-oe",
-                    "--skip-lp",
-                    "--download-grid",
-                    "--grid-days",
-                    str(grid_days),
-                    "--grid-limit",
-                    str(grid_limit),
-                ],
-                source="grid",
-            )
-        else:
-            grid_step = _skipped_step("grid", "source_mode_oe_only")
+        grid_step = _skipped_step("grid", "public_refresh_oe_only")
 
     if prepared_source is None:
         source_steps = [oe_step, oe_api_step, atom_step, live_source_step, rating_step, grid_step]
@@ -668,7 +691,7 @@ def refresh_candidate(
         candidate["source_complete_through_expected_live_as_of"]
         and atom_step["completed"]
         and rating_step["completed"]
-        and (source_mode == "oe_only" or grid_step["completed"])
+        and source_mode == "oe_only"
     ):
         promotion_steps.append(_skipped_step("production_promotion", "source_or_rating_incomplete"))
         promotion_status = "blocked_source_incomplete"
@@ -740,7 +763,7 @@ def refresh_candidate(
         candidate["source_complete_through_expected_live_as_of"]
         and atom_step["completed"]
         and rating_step["completed"]
-        and (source_mode == "oe_only" or grid_step["completed"])
+        and source_mode == "oe_only"
     )
     if promotion_status == "promoted":
         receipt_status = "production_promoted"
@@ -816,8 +839,6 @@ def main() -> int:
     parser.add_argument("--previous", type=Path, default=None)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--receipt", type=Path, default=DEFAULT_RECEIPT)
-    parser.add_argument("--grid-days", type=int, default=21)
-    parser.add_argument("--grid-limit", type=int, default=200)
     parser.add_argument(
         "--promote",
         action="store_true",
@@ -825,9 +846,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--source-mode",
-        choices=SOURCE_MODES,
+        choices=("oe_only",),
         default=DEFAULT_SOURCE_MODE,
-        help="oe_only uses the daily OE export; oe_plus_grid adds the same-day bridge",
+        help="public tier lists use the OE annual source and OE API bridge",
     )
     parser.add_argument(
         "--skip-annual-oe",
@@ -846,8 +867,6 @@ def main() -> int:
         previous_path=args.previous,
         output_path=args.out,
         receipt_path=args.receipt,
-        grid_days=args.grid_days,
-        grid_limit=args.grid_limit,
         source_mode=args.source_mode,
         promote=args.promote,
         skip_annual_oe=args.skip_annual_oe,

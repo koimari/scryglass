@@ -1,79 +1,72 @@
-# Scryglass live feed
+# Six-hour completed-match refresh
 
-The live surface is deliberately split into a server-side worker and a
-read-only public page:
+Public Scryglass updates from Oracle's Elixir only.
 
 ```text
-GRID Series Events → live_worker → verified Blob snapshots → /live
+OE annual files + OE API bridge
+              ↓
+cached six-hour discovery
+              ↓
+new canonical game IDs
+              ↓
+identity, role, and statistic checks
+              ↓
+ratings, player grades, profiles, match pages, and tier lists
+              ↓
+immutable object upload and atomic pointer update
 ```
 
-The browser never receives `GRID_API_KEY` and never opens a GRID connection.
-The worker does not update official Dual Elo while a game is in progress.
+The API bridge discovers completed maps that are waiting for the next annual
+file. It keeps discovery receipts and completed game details in the local
+warehouse. A later cycle requests details again when a map is incomplete.
 
-## Local proof with a captured Series State
+## Acceptance gate
 
-The worker can publish one captured state without opening GRID. This is useful
-for schema and page checks:
+Each accepted map needs one canonical game ID, two named teams with opposite
+results, ten unique named players, five canonical roles on each side, and the
+complete postgame statistics used by player grades. A failed map stays outside
+the public source set.
+
+Before publication, the worker compares the candidate canonical IDs with the
+exact source set behind the current pack. Every completed published map must
+remain present. File sizes and SHA-256 digests must also match the new manifest.
+The current pack remains active when a check fails.
+
+The website reads the object-store pointer at runtime and caches it for six
+hours. Refreshes do not rebuild or redeploy the website. Only a code change can
+start a Vercel build.
+
+## Schedule
+
+The systemd timer in `ops/systemd` runs at minute 0 every six hours. Run the
+same path manually with:
 
 ```bash
-python3 -m lol_kills.live_worker \
-  --series-id 2970137 \
-  --state-file /path/to/series-state.json \
-  --sequence 12 \
-  --local-root apps/scryglass/public/live
+python3 -m lol_kills.postgame_sync \
+  --root . \
+  --public-root apps/scryglass/public/packs \
+  --once
 ```
 
-The resulting files are:
+The worker needs `ORACLES_ELIXIR_API_KEY`. It does not read `GRID_API_KEY`.
 
-```text
-apps/scryglass/public/live/index.json
-apps/scryglass/public/live/health.json
-apps/scryglass/public/live/series/{series_id}/latest.json
-apps/scryglass/public/live/series/{series_id}/snapshots/{sequence}.json
-```
-
-These are generated runtime artifacts. Do not commit a real live snapshot to
-the public repository.
-
-## GRID worker
-
-Discover active professional series and keep the worker running in a separate
-long-lived process or container:
+After the pack and tier display pass their checks, publish them without a site
+build:
 
 ```bash
-python3 -m lol_kills.live_worker \
-  --discovery-seconds 30 \
-  --series-seconds 3600
+cd apps/scryglass
+SCRYGLASS_DATA_PUBLISH_TOKEN=<secret> npm run publish:data -- \
+  --pack-dir ../../output/public_pack/<pack-id> \
+  --tierlists public/rankings/tierlists.json
 ```
 
-The worker resolves `GRID_API_KEY` using the same environment / `.env` lookup as
-the existing GRID ingestion bridge. It writes to local `apps/scryglass/public/live`
-when no Blob token is present. In production provide:
+Use the generated public display path when it differs from the example. The
+maintenance endpoint issues a short-lived Blob token for approved JSON paths.
+The publisher verifies immutable pack files before it replaces the current
+manifest. It then clears the cached ratings and match pages.
 
-```text
-GRID_API_KEY=...
-BLOB_READ_WRITE_TOKEN=...
-```
+## Private GRID modules
 
-The public Next.js app needs only the Blob read prefix:
-
-```text
-LIVE_BLOB_BASE_URL=https://<blob-store-root>
-```
-
-The app reads `live/index.json` and the referenced immutable snapshots with
-`no-store` fetches. Pointer objects are short-lived; numbered snapshots are
-immutable.
-
-## Model boundary
-
-The current live coefficient artifact is calibrated for approximately the
-8:00–20:00 window. The state board remains useful outside that interval, but
-the probability is shown as withheld until a later-horizon calibration artifact
-is trained and validated. This prevents a late-game number from appearing more
-certain than the evidence supports.
-
-The “Compare another model” panel accepts either a JSON object containing
-`p_blue` / `p_red` or a simple pair such as `57/43`. It is an audit surface:
-input mismatches and calibration differences remain visible rather than being
-collapsed into a claim that one model is correct.
+GRID event and checkpoint ingestion remains available for optional private
+historical research. It has no public route, schedule, pack dependency, build
+step, or deployment requirement.

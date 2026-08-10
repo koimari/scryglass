@@ -172,7 +172,10 @@ export function TierListExplorer() {
   const refresh = useCallback(async (signal?: AbortSignal, showLoading = false) => {
     if (showLoading) setLoading(true);
     try {
-      const response = await fetch("/rankings/tierlists.json", { signal });
+      const response = await fetch(
+        "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/rankings/tierlists.json",
+        { signal },
+      );
       if (!response.ok) throw new Error("tier-list file is unavailable");
       setData((await response.json()) as Response);
     } catch {
@@ -184,7 +187,10 @@ export function TierListExplorer() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/rankings/tierlists.json", { signal: controller.signal })
+    fetch(
+      "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/rankings/tierlists.json",
+      { signal: controller.signal },
+    )
       .then((response) => {
         if (!response.ok) throw new Error("tier-list file is unavailable");
         return response.json() as Promise<Response>;

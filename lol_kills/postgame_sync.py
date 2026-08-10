@@ -20,10 +20,19 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from lol_kills.etl.oe_api_ingest import ingest_oe_api
-from lol_kills.etl.oe_live_source import build_live_source
+from lol_kills.etl.oe_live_source import (
+    _complete_player_game_ids,
+    _identity_complete_player_game_ids,
+    build_live_source,
+)
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.export import pack_spec
-from lol_kills.export.public_pack import export_public_pack, source_identity_sha256
+from lol_kills.export.public_pack import (
+    _complete_player_game_ids as _complete_identity_game_ids,
+    export_public_pack,
+    source_identity_sha256,
+)
+from lol_kills.export.upload_pack import publish_blob_pointers, upload_to_blob
 from lol_kills.ratings.player_map_grades import CORE_INPUTS
 
 
@@ -32,6 +41,15 @@ LIVE_ROOT = Path("data/lol/warehouse/parquet/oe_live")
 LIVE_MAPS = LIVE_ROOT / "maps.parquet"
 LIVE_TEAMS = LIVE_ROOT / "oe_team_games.parquet"
 LIVE_PLAYERS = LIVE_ROOT / "oe_player_games.parquet"
+REVIEWED_QUARANTINED_GAME_IDS = frozenset(
+    {
+        "oe:game:40e753290593c20c4cc990b1abfaf674",
+        "oe:game:52db934e7e36169f9bf455bb00110045",
+        "oe:game:9b9c8c1375765cffab98cacea34a3259",
+        "oe:game:b53fb5b013e28c288688f5bb39d518b7",
+        "oe:game:b91ad221257bc4357a3e0d9bc6ea75cd",
+    }
+)
 
 
 class RefreshValidationError(RuntimeError):
@@ -131,17 +149,47 @@ def _identity_frame(path: Path, required: Sequence[str] = ()) -> pd.DataFrame:
 
 
 def validate_live_source(root: Path, new_game_ids: Sequence[str]) -> dict[str, Any]:
-    """Require complete canonical rows for every new game."""
+    """Return the complete canonical source set and verify every new game."""
 
     requested = set(_canonical_ids(list(new_game_ids)))
-    if len(requested) != len(new_game_ids) or not requested:
-        raise RefreshValidationError("new game identities are empty or duplicated")
+    if len(requested) != len(new_game_ids):
+        raise RefreshValidationError("new game identities are duplicated or malformed")
     maps = _identity_frame(root / LIVE_MAPS)
     teams = _identity_frame(root / LIVE_TEAMS, ("side", "result", "teamname"))
     players = _identity_frame(
         root / LIVE_PLAYERS,
         ("side", "position", "playername", *CORE_INPUTS),
     )
+    map_ids = _canonical_ids(maps["_game_id"].tolist())
+    if len(map_ids) != len(maps):
+        raise RefreshValidationError("live maps are not one row per canonical game identity")
+    valid_team_ids: set[str] = set()
+    for game_id, team_rows in teams.groupby("_game_id", sort=False):
+        sides = set(team_rows["side"].astype(str).str.title())
+        results = set(pd.to_numeric(team_rows["result"], errors="coerce").dropna().astype(int))
+        team_names = team_rows["teamname"].astype("string").fillna("").str.strip()
+        if (
+            len(team_rows) == 2
+            and sides == {"Blue", "Red"}
+            and results == {0, 1}
+            and not team_names.eq("").any()
+            and team_names.nunique() == 2
+        ):
+            valid_team_ids.add(str(game_id))
+    legacy_identity_complete_ids = _complete_identity_game_ids(
+        players.assign(game_uid=players["_game_id"])
+    )
+    identity_complete_ids = _identity_complete_player_game_ids(
+        players.assign(game_uid=players["_game_id"])
+    )
+    statistics_complete_ids = _complete_player_game_ids(players)
+    accepted_ids = sorted(set(map_ids).intersection(valid_team_ids, identity_complete_ids))
+    missing_requested = sorted(requested.difference(statistics_complete_ids))
+    if missing_requested:
+        game_id = missing_requested[0]
+        raise RefreshValidationError(
+            f"game {game_id} is absent from the complete OE source set"
+        )
     roles = {"top", "jng", "mid", "bot", "sup"}
     for game_id in sorted(requested):
         map_rows = maps[maps["_game_id"].eq(game_id)]
@@ -177,10 +225,101 @@ def validate_live_source(root: Path, new_game_ids: Sequence[str]) -> dict[str, A
             damage_share = pd.to_numeric(side_rows["damageshare"], errors="coerce").sum()
             if abs(float(damage_share) - 1) > 1e-6:
                 raise RefreshValidationError(f"game {game_id} has malformed {side} damage share")
-    all_ids = _canonical_ids(maps["_game_id"].tolist())
-    if len(all_ids) != len(maps):
-        raise RefreshValidationError("live maps are not one row per canonical game identity")
-    return {"game_ids": all_ids, "game_count": len(all_ids), "identity_sha256": source_identity_sha256(all_ids)}
+    return {
+        "game_ids": accepted_ids,
+        "statistics_complete_game_ids": sorted(statistics_complete_ids),
+        "legacy_identity_game_ids": sorted(
+            set(map_ids).intersection(valid_team_ids, legacy_identity_complete_ids)
+        ),
+        "game_count": len(accepted_ids),
+        "identity_sha256": source_identity_sha256(accepted_ids),
+        "candidate_game_count": len(map_ids),
+        "rejected_incomplete_game_count": len(set(map_ids).difference(accepted_ids)),
+    }
+
+
+def _published_pack_source(public_root: Path) -> dict[str, Any] | None:
+    manifest = _load_json(public_root / "manifest.json")
+    if not manifest:
+        return None
+    ratings = manifest.get("ratings") or {}
+    try:
+        game_count = int(ratings["source_game_count"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise RefreshValidationError("published pack has no valid source game count") from error
+    identity_sha256 = str(ratings.get("source_identity_sha256") or "")
+    if game_count < 1 or len(identity_sha256) != 64:
+        raise RefreshValidationError("published pack has no valid source identity binding")
+    return {
+        "pack_id": str(manifest.get("pack_id") or ""),
+        "game_count": game_count,
+        "identity_sha256": identity_sha256,
+    }
+
+
+def _continuity_baseline(
+    config: SyncConfig,
+    state: dict[str, Any],
+) -> tuple[list[str], dict[str, Any] | None]:
+    """Resolve the exact source set behind the currently published pack."""
+
+    binding = _published_pack_source(config.public_root)
+    state_ids = _canonical_ids(state.get("published_game_ids", []))
+    if binding is None:
+        return state_ids, None
+    if (
+        len(state_ids) == binding["game_count"]
+        and source_identity_sha256(state_ids) == binding["identity_sha256"]
+    ):
+        return state_ids, binding
+    current_source = validate_live_source(config.root, [])
+    if (
+        current_source["game_count"] != binding["game_count"]
+        or current_source["identity_sha256"] != binding["identity_sha256"]
+    ):
+        legacy_ids = _canonical_ids(current_source.get("legacy_identity_game_ids", []))
+        if (
+            len(legacy_ids) != binding["game_count"]
+            or source_identity_sha256(legacy_ids) != binding["identity_sha256"]
+        ):
+            raise RefreshValidationError(
+                "current source cache does not match the published pack; exact continuity cannot be proved"
+            )
+        return legacy_ids, binding
+    return current_source["game_ids"], binding
+
+
+def validate_source_continuity(
+    baseline_game_ids: Sequence[str],
+    source: dict[str, Any],
+    published: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Reject a candidate source when a completed published map disappears."""
+
+    baseline = set(_canonical_ids(list(baseline_game_ids)))
+    candidate = set(_canonical_ids(source.get("game_ids", [])))
+    missing = baseline.difference(candidate)
+    quarantined = sorted(missing.intersection(REVIEWED_QUARANTINED_GAME_IDS))
+    unexpected = sorted(missing.difference(REVIEWED_QUARANTINED_GAME_IDS))
+    if unexpected:
+        raise RefreshValidationError(
+            f"source continuity failed; {len(unexpected)} published completed maps disappeared; first={unexpected[0]}"
+        )
+    if (
+        published is not None
+        and source["game_count"] + len(quarantined) < published["game_count"]
+    ):
+        raise RefreshValidationError("source continuity failed; candidate game count decreased")
+    return {
+        "previous_pack_id": published.get("pack_id") if published else None,
+        "previous_game_count": len(baseline),
+        "candidate_game_count": source["game_count"],
+        "retained_game_count": len(baseline.intersection(candidate)),
+        "added_game_count": len(candidate.difference(baseline)),
+        "missing_game_count": len(missing),
+        "quarantined_game_ids": quarantined,
+        "quarantined_identity_sha256": source_identity_sha256(quarantined),
+    }
 
 
 def validate_pack(pack_dir: Path, manifest: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
@@ -222,7 +361,7 @@ def validate_pack(pack_dir: Path, manifest: dict[str, Any], source: dict[str, An
 
 
 def publish_pack(pack_dir: Path, manifest: dict[str, Any], public_root: Path) -> dict[str, Any]:
-    """Publish an immutable directory, then replace manifest.json last."""
+    """Publish an immutable directory, then replace local and Blob pointers last."""
 
     pack_id = str(manifest.get("pack_id") or "")
     if not pack_id or not pack_dir.is_dir():
@@ -232,17 +371,43 @@ def publish_pack(pack_dir: Path, manifest: dict[str, Any], public_root: Path) ->
     if destination.exists():
         raise FileExistsError(f"immutable pack already exists: {destination}")
     staging = public_root / f".{pack_id}.{uuid.uuid4().hex}.incoming"
+    token = (
+        os.environ.get("BLOB_READ_WRITE_TOKEN")
+        or os.environ.get("VERCEL_BLOB_READ_WRITE_TOKEN")
+        or ""
+    ).strip()
+    blob_base = ""
+    if token:
+        urls = upload_to_blob(pack_dir, pack_id, token)
+        if not urls:
+            raise RefreshValidationError("pack Blob publication uploaded no files")
+        sample = next(iter(urls.values()))
+        marker = f"/packs/{pack_id}/"
+        if marker not in sample:
+            raise RefreshValidationError("pack Blob publication returned an invalid URL")
+        blob_base = sample.rsplit(marker, 1)[0] + f"/packs/{pack_id}"
     published = dict(manifest)
-    published["base_url"] = f"/packs/{pack_id}"
+    published["base_url"] = blob_base or f"/packs/{pack_id}"
     try:
         shutil.copytree(pack_dir, staging)
         _atomic_json(staging / "manifest.json", published)
         os.replace(staging, destination)
         _atomic_json(public_root / "manifest.json", published)
+        blob_pointers = (
+            publish_blob_pointers(token, pack_id, manifest, base_url=blob_base)
+            if token
+            else {}
+        )
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    return {"pack_id": pack_id, "destination": str(destination)}
+    return {
+        "pack_id": pack_id,
+        "destination": str(destination),
+        "runtime": "blob" if token else "local_only",
+        "base_url": published["base_url"],
+        "blob_pointers": blob_pointers,
+    }
 
 
 def _write_health(config: SyncConfig, status: str, now: datetime, **fields: Any) -> None:
@@ -259,13 +424,15 @@ def sync_once(
     validate_live_fn: Callable[..., dict[str, Any]] = validate_live_source,
     validate_pack_fn: Callable[..., dict[str, Any]] = validate_pack,
     publish_pack_fn: Callable[..., dict[str, Any]] = publish_pack,
+    force: bool = False,
 ) -> dict[str, Any]:
     checked_at = now or datetime.now(timezone.utc)
     state = _load_json(config.state_path)
-    known = set(_canonical_ids(state.get("published_game_ids", [])))
+    baseline_ids, published_source = _continuity_baseline(config, state)
+    known = set(baseline_ids)
     _write_health(config, "checking", checked_at)
     try:
-        source_meta = ingest_fn(
+        ingest_fn(
             config.root,
             start=pd.Timestamp(checked_at - timedelta(hours=config.window_hours)),
             end=pd.Timestamp(checked_at),
@@ -274,26 +441,68 @@ def sync_once(
             max_workers=config.max_workers,
         )
         observed = set(_receipt_game_ids(config.root))
-        new_ids = sorted(observed - known)
-        if not new_ids:
+        discovered_ids = sorted(observed - known)
+        if not discovered_ids and not force:
             result = {"status": "no_change", "new_game_ids": [], "pack_id": state.get("pack_id")}
-            _atomic_json(config.state_path, {**state, **result, "published_game_ids": sorted(known | observed)})
+            _atomic_json(config.state_path, {**state, **result, "published_game_ids": sorted(known)})
             _write_health(config, "ok", checked_at, pack_id=result["pack_id"])
             return result
-        if source_meta.get("player_statistics_complete") is not True:
-            result = {"status": "waiting_for_details", "new_game_ids": new_ids, "pack_id": state.get("pack_id")}
-            _atomic_json(config.state_path, {**state, **result, "published_game_ids": sorted(known), "pending_game_ids": new_ids})
-            _write_health(config, "waiting_for_details", checked_at, new_game_ids=new_ids)
-            return result
         build_live_fn(config.root)
+        candidate_source = validate_live_fn(config.root, [])
+        candidate_continuity = validate_source_continuity(
+            baseline_ids, candidate_source, published_source
+        )
+        statistics_complete = set(candidate_source.get("statistics_complete_game_ids", []))
+        new_ids = sorted(set(discovered_ids).intersection(statistics_complete))
+        pending_ids = sorted(set(discovered_ids).difference(statistics_complete))
+        if not new_ids and not force:
+            status = "waiting_for_details" if pending_ids else "no_change"
+            result = {
+                "status": status,
+                "new_game_ids": [],
+                "pending_game_ids": pending_ids,
+                "pack_id": state.get("pack_id"),
+            }
+            _atomic_json(config.state_path, {**state, **result, "published_game_ids": sorted(known)})
+            _write_health(config, status if status != "no_change" else "ok", checked_at, pending_game_ids=pending_ids)
+            return result
         source = validate_live_fn(config.root, new_ids)
+        publish_ids = sorted(
+            set(baseline_ids)
+            .difference(candidate_continuity["quarantined_game_ids"])
+            .union(new_ids)
+        )
+        source_ids = set(source["game_ids"])
+        if not set(publish_ids).issubset(source_ids):
+            raise RefreshValidationError("accepted OE source is missing a publishable completed map")
+        source = {
+            **source,
+            "game_ids": publish_ids,
+            "game_count": len(publish_ids),
+            "identity_sha256": source_identity_sha256(publish_ids),
+        }
+        continuity = validate_source_continuity(baseline_ids, source, published_source)
         pack_id = f"v{checked_at.strftime('%Y.%m.%d.%H%M%S')}"
-        manifest = export_pack_fn(years=config.years, out_root=config.output_root, pack_id=pack_id, project_root=config.root)
+        manifest = export_pack_fn(
+            years=config.years,
+            out_root=config.output_root,
+            pack_id=pack_id,
+            project_root=config.root,
+            allowed_game_ids=publish_ids,
+        )
         validation = validate_pack_fn(config.output_root / pack_id, manifest, source)
         publication = publish_pack_fn(config.output_root / pack_id, manifest, config.public_root)
-        result = {"status": "published", "new_game_ids": new_ids, "pack_id": pack_id, "validation": validation, "publication": publication}
-        _atomic_json(config.state_path, {**result, "published_game_ids": sorted(known | observed), "pending_game_ids": []})
-        _write_health(config, "ok", checked_at, pack_id=pack_id, new_game_ids=new_ids)
+        validation["continuity"] = continuity
+        result = {
+            "status": "published",
+            "new_game_ids": new_ids,
+            "pending_game_ids": pending_ids,
+            "pack_id": pack_id,
+            "validation": validation,
+            "publication": publication,
+        }
+        _atomic_json(config.state_path, {**result, "published_game_ids": source["game_ids"]})
+        _write_health(config, "ok", checked_at, pack_id=pack_id, new_game_ids=new_ids, pending_game_ids=pending_ids)
         return result
     except Exception as error:
         _write_health(config, "error", checked_at, pack_id=state.get("pack_id"), reason=f"{type(error).__name__}: {str(error)[:500]}")
@@ -319,6 +528,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--public-root", type=Path, default=Path("/srv/scryglass-data/public-packs"))
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--force", action="store_true", help="publish a validated pack even when no new game ID appears")
     args = parser.parse_args(argv)
     root = args.root.resolve()
     config = SyncConfig(
@@ -330,7 +540,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         health_path=(root / "data/lol/runtime/postgame-sync-health.json").resolve(),
     )
     with exclusive_lock(config.lock_path):
-        result = sync_once(config)
+        result = sync_once(config, force=args.force)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
