@@ -30,6 +30,9 @@ def _config(tmp_path: Path) -> public_refresh.RefreshConfig:
         state_path=runtime / "public-state.json",
         lock_path=runtime / "lock",
         production=False,
+        publication_backend="blob",
+        supabase_url=None,
+        supabase_secret_key=None,
     )
 
 
@@ -238,6 +241,22 @@ def test_production_preflight_uses_public_release_credentials_only(tmp_path: Pat
         "SCRYGLASS_DATA_PUBLISH_TOKEN": "publish-key",
     }
     with patch.dict("os.environ", values, clear=True):
+        public_refresh._preflight(config)
+
+
+def test_supabase_preflight_does_not_require_blob_credentials(tmp_path: Path) -> None:
+    config = replace(
+        _config(tmp_path),
+        production=True,
+        publication_backend="supabase",
+        supabase_url="https://example.supabase.co",
+        supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    with patch.dict(
+        "os.environ",
+        {"SCRYGLASS_DATA_PUBLISH_TOKEN": "publish-key"},
+        clear=True,
+    ):
         public_refresh._preflight(config)
 
 

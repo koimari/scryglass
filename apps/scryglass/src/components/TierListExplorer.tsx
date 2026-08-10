@@ -28,7 +28,7 @@ import {
 } from "@/lib/tierBoard";
 import styles from "./TierListExplorer.module.css";
 
-const TIER_LIST_URL = "/data/tierlists.json";
+const TIER_LIST_URL = "/api/public-data/tierlists";
 const ROLE_ORDER = TIER_ROLE_ORDER;
 const ROLE_LABELS: Record<string, string> = {
   top: "Top",

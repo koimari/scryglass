@@ -13,7 +13,7 @@ identity, role, and statistic checks
               ↓
 ratings, player grades, profiles, match pages, and tier authority
               ↓
-immutable object upload, cache invalidation, and smoke checks
+Supabase staging, atomic activation, cache invalidation, and smoke checks
 ```
 
 The worker keeps validated annual files and normalized parquet in its local
@@ -32,9 +32,10 @@ exact source set behind the current pack. Every completed published map must
 remain present. File sizes and SHA-256 digests must also match the new manifest.
 The current pack remains active when a check fails.
 
-The website reads the object-store pointer at runtime and caches it for six
-hours. Refreshes do not rebuild or redeploy the website. Only a code change can
-start a Vercel build.
+The website reads the active Supabase release at runtime and caches it for six
+hours. Postgres stores the page-ready rating and profile data. Supabase Storage
+stores the larger tier-list matrix. Refreshes do not rebuild or redeploy the
+website. Only a code change can start a Vercel build.
 
 ## Schedule
 
@@ -48,9 +49,9 @@ six hours. Run the same path manually with:
   --once
 ```
 
-The runner verifies immutable pack files before it replaces the current
-manifest. It then clears the cached ratings, matches, and tier pages. A smoke
-failure restores the previous ratings pointer.
+The runner verifies every file before it activates the staged release. It then
+clears the cached ratings, matches, and tier pages. A smoke failure restores
+the previous Supabase release.
 
 ## Private GRID modules
 

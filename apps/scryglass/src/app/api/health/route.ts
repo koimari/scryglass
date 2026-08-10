@@ -1,18 +1,11 @@
 import { NextResponse } from "next/server";
-import { readRemotePackManifest } from "@/lib/serverPack";
-
-const DEFAULT_BLOB_ROOT = "https://97gks2fobqkgppwx.public.blob.vercel-storage.com";
+import { readPublicTierList, readRemotePackManifest } from "@/lib/serverPack";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function readTierState() {
-  const configured = process.env.SCRYGLASS_TIERLIST_DISPLAY_URL?.trim();
-  const blobRoot = process.env.LIVE_BLOB_BASE_URL?.trim() || DEFAULT_BLOB_ROOT;
-  const url = configured || `${blobRoot.replace(/\/$/, "")}/rankings/tierlists.json`;
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) throw new Error(`tier list ${response.status}`);
-  const payload = (await response.json()) as Record<string, unknown>;
+  const payload = await readPublicTierList<Record<string, unknown>>();
   return {
     status: payload.status === "available" ? "available" : "unavailable",
     as_of: typeof payload.as_of === "string" ? payload.as_of : null,
