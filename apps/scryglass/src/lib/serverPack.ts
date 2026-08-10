@@ -33,6 +33,19 @@ async function readLocalManifest(): Promise<PackManifest> {
   ) as PackManifest;
 }
 
+/** Read the remote pointer without falling back to the bundled outage copy. */
+export async function readRemotePackManifest(): Promise<PackManifest> {
+  const response = await fetch(manifestUrl(), {
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`pack manifest ${response.status}`);
+  const manifest = (await response.json()) as PackManifest;
+  if (!manifest.pack_id || !/^https:\/\//.test(manifest.base_url || "")) {
+    throw new Error("pack manifest is malformed");
+  }
+  return manifest;
+}
+
 /** Read the current Blob pointer. The bundled pointer is an outage fallback. */
 export async function readPackManifest(): Promise<PackManifest> {
   try {
