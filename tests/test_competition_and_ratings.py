@@ -437,6 +437,32 @@ class CompetitionIdentityTests(unittest.TestCase):
 
         self.assertIsNone(record["current_team"])
 
+    def test_player_records_rebuild_blank_live_competition_fields(self) -> None:
+        players = pd.DataFrame(
+            [
+                {
+                    "date": "2026-02-08",
+                    "league": "LEC",
+                    "league_source": None,
+                    "competition_tier": None,
+                    "event_kind": None,
+                    "is_international": None,
+                    "playername": "Baus",
+                    "position": "top",
+                    "teamname": "Los Ratones",
+                    "side": "Blue",
+                    "result": 0,
+                }
+            ]
+        )
+
+        repaired = canonicalize_competition_frame(players)
+        record = build_player_records(repaired, canonicalized=True)["Baus"]
+
+        self.assertEqual(record["current_league"], "LEC")
+        self.assertEqual(record["current_tier"], "tier1")
+        self.assertIsNone(record["current_team"])
+
     def test_full_team_feed_adapter_keeps_developmental_games(self) -> None:
         team_games = pd.DataFrame(
             [

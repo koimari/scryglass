@@ -441,8 +441,10 @@ def export_public_pack(
         years,
         ("year", "oe_year"),
     )
-    if not live_source:
-        player_records_frame = canonicalize_competition_frame(player_records_frame)
+    # Live OE rows can carry empty derived competition fields after source
+    # reconciliation. Rebuild them from the source league before affiliation
+    # records are created so missing values cannot become public "nan" labels.
+    player_records_frame = canonicalize_competition_frame(player_records_frame)
     player_records_frame["game_uid"] = _normalized_game_uid(player_records_frame)
     if player_records_frame["game_uid"].isna().any():
         raise RuntimeError("public pack rating source has rows without a game identity")
@@ -513,9 +515,8 @@ def export_public_pack(
         years,
         ("year", "oe_year"),
     )
-    if not live_source:
-        player_rating_input = canonicalize_competition_frame(player_rating_input)
-    else:
+    player_rating_input = canonicalize_competition_frame(player_rating_input)
+    if live_source:
         player_rating_input["game_uid"] = _normalized_game_uid(player_rating_input)
         player_rating_input = player_rating_input[
             player_rating_input["game_uid"].astype(str).isin(source_game_ids)
