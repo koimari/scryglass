@@ -48,6 +48,7 @@ type BoardMode = TierBoardMode;
 type RankedBoardMode = TierRankedMode;
 type MatrixSize = "overview" | "standard" | "large";
 type MatchupGrade = ReturnType<typeof matchupGrade>;
+type MatchupBasis = NonNullable<ResponseMatrix["basis"]>[number][number];
 type MatchupTooltip = {
   x: number;
   y: number;
@@ -56,11 +57,9 @@ type MatchupTooltip = {
   responseShare: number;
   enemyShare: number;
   grade: MatchupGrade;
-  edge: number;
-  low: number | null | undefined;
-  high: number | null | undefined;
   evidence: "supported" | "limited" | null | undefined;
   maps: number | null | undefined;
+  basis: MatchupBasis | undefined;
 };
 
 type TierResponse = {
@@ -94,9 +93,22 @@ function winShare(value: number): number {
   return Math.max(0, Math.min(100, 50 + value));
 }
 
-function gradeReason(grade: MatchupGrade, edge: number): string {
-  const direction = edge >= 0 ? "above" : "below";
-  return `${grade} grade because the response sits ${Math.abs(edge).toFixed(1)} percentage points ${direction} an even matchup after team strength and side adjustment.`;
+function matchupEvidence(
+  evidence: "supported" | "limited" | null | undefined,
+  maps: number | null | undefined,
+  basis?: MatchupBasis,
+): { label: string; detail: string } {
+  if (basis === "atom_and_strength_inferred") {
+    return { label: "Atom + archetype estimate", detail: "Champion strength included" };
+  }
+  if (basis === "strength_only_inferred") {
+    return { label: "Strength-only estimate", detail: "No direct or atom matchup" };
+  }
+  if (!maps || maps < 0.05) return { label: "Inferred matchup", detail: "Basis refresh pending" };
+  if (basis === "observed_pair_plus_model" || evidence === "supported") {
+    return { label: "Direct + model", detail: `${maps.toFixed(1)} weighted maps` };
+  }
+  return { label: "Thin sample", detail: `${maps.toFixed(1)} weighted maps` };
 }
 
 function numericMetric(value: number | null | undefined): number | null {
@@ -582,8 +594,8 @@ function ResponseBoard({
     if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
     setTooltip(null);
     const rect = event.currentTarget.getBoundingClientRect();
-    const cardWidth = Math.min(320, window.innerWidth - 24);
-    const cardHeight = 230;
+    const cardWidth = Math.min(272, window.innerWidth - 24);
+    const cardHeight = 170;
     const x = Math.max(12, Math.min(window.innerWidth - cardWidth - 12, rect.left + rect.width / 2 - cardWidth / 2));
     const y = rect.bottom + cardHeight + 12 <= window.innerHeight
       ? rect.bottom + 8
@@ -618,6 +630,11 @@ function ResponseBoard({
               <span className={styles.matchupGradeB}>B <small>close</small></span>
               <span className={styles.matchupGradeC}>C <small>unfavorable</small></span>
               <span className={styles.matchupGradeD}>D <small>heavily countered</small></span>
+            </div>
+            <div className={styles.matchupBasisLegend} aria-label="Estimate basis">
+              <span><i data-basis="observed_pair_plus_model" />Direct</span>
+              <span><i data-basis="atom_and_strength_inferred" />Atoms</span>
+              <span><i data-basis="strength_only_inferred" />Strength</span>
             </div>
             <div className={styles.matrixSizeControl} aria-label="Matrix size">
               <span>Matrix size</span>
@@ -676,26 +693,27 @@ function ResponseBoard({
                         const high = matrix.interval_high_pp[responseIndex]?.[enemyIndex];
                         const evidence = matrix.evidence[responseIndex]?.[enemyIndex];
                         const maps = matrix.effective_maps[responseIndex]?.[enemyIndex];
+                        const basis = matrix.basis?.[responseIndex]?.[enemyIndex];
                         if (edge === null || edge === undefined) {
                           return <td className={styles.matchupDiagonal} key={enemy.champion_id}>—</td>;
                         }
                         const grade = matchupGrade(edge);
-                        const detail = `${response.champion} into ${enemy.champion}: ${grade}, ${signedScore(edge)}. ${evidence === "supported" ? "Supported" : "Limited"} evidence, ${maps?.toFixed(1) ?? "0.0"} effective maps, ${low?.toFixed(1) ?? "—"} to ${high?.toFixed(1) ?? "—"} pp interval.`;
+                        const evidenceCopy = matchupEvidence(evidence, maps, basis);
+                        const detail = `${response.champion} into ${enemy.champion}: ${grade}, ${winShare(edge).toFixed(1)}% modeled win share. ${evidenceCopy.label}: ${evidenceCopy.detail}. ${low?.toFixed(1) ?? "—"} to ${high?.toFixed(1) ?? "—"} pp interval.`;
                         const tooltipDetails = {
                           response: response.champion,
                           enemy: enemy.champion,
                           responseShare: winShare(edge),
                           enemyShare: winShare(-edge),
                           grade,
-                          edge,
-                          low,
-                          high,
                           evidence,
                           maps,
+                          basis,
                         };
                         return (
                           <td
-                            className={`${styles.matchupCell} ${gradeClass[grade]} ${evidence === "limited" ? styles.matchupCellLimited : ""}`}
+                            className={`${styles.matchupCell} ${gradeClass[grade]}`}
+                            data-basis={basis ?? "pending"}
                             key={enemy.champion_id}
                             aria-label={detail}
                             onPointerEnter={(event) => queueTooltip(event, tooltipDetails)}
@@ -719,19 +737,24 @@ function ResponseBoard({
               role="tooltip"
             >
               <header>
-                <strong>Your {tooltip.response}</strong>
-                <span>into enemy {tooltip.enemy}</span>
+                <strong>{tooltip.response}</strong>
+                <span aria-hidden="true">→</span>
+                <strong>{tooltip.enemy}</strong>
                 <em className={gradeClass[tooltip.grade]}>{tooltip.grade}</em>
               </header>
-              <div className={styles.tooltipShares}>
-                <span><small>Your pick · {tooltip.response}</small><strong>{tooltip.responseShare.toFixed(1)}%</strong></span>
-                <span><small>Enemy pick · {tooltip.enemy}</small><strong>{tooltip.enemyShare.toFixed(1)}%</strong></span>
+              <div className={styles.tooltipWinLabels}>
+                <span><strong>{tooltip.responseShare.toFixed(1)}%</strong><small>Your pick</small></span>
+                <span><strong>{tooltip.enemyShare.toFixed(1)}%</strong><small>Enemy pick</small></span>
               </div>
-              <p>{gradeReason(tooltip.grade, tooltip.edge)}</p>
-              <dl>
-                <div><dt>Modeled range</dt><dd>{tooltip.low == null || tooltip.high == null ? "Unavailable" : `${winShare(tooltip.low).toFixed(1)}–${winShare(tooltip.high).toFixed(1)}%`}</dd></div>
-                <div><dt>Evidence</dt><dd>{tooltip.evidence === "supported" ? "Supported" : "Limited"} · {tooltip.maps?.toFixed(1) ?? "0.0"} effective maps</dd></div>
-              </dl>
+              <div
+                className={styles.tooltipWinBar}
+                style={{ "--response-share": `${tooltip.responseShare}%` } as CSSProperties}
+                aria-hidden="true"
+              ><i /><i /></div>
+              <footer>
+                <strong>Why {tooltip.grade} · {tooltip.responseShare.toFixed(1)}% modeled WR</strong>
+                <span>{matchupEvidence(tooltip.evidence, tooltip.maps, tooltip.basis).label} · {matchupEvidence(tooltip.evidence, tooltip.maps, tooltip.basis).detail}</span>
+              </footer>
             </aside>
           ) : null}
         </>

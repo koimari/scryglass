@@ -495,6 +495,49 @@
   gap: 0.45rem;
 }
 
+.matchupBasisLegend {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+  color: var(--ink-muted);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.59rem;
+}
+
+.matchupBasisLegend span {
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.matchupBasisLegend i {
+  position: relative;
+  width: 0.72rem;
+  height: 0.72rem;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-subtle);
+}
+
+.matchupBasisLegend i[data-basis="observed_pair_plus_model"] {
+  background: var(--ink-muted);
+}
+
+.matchupBasisLegend i[data-basis="atom_and_strength_inferred"]::after {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--ink);
+  content: "";
+}
+
+.matchupBasisLegend i[data-basis="strength_only_inferred"] {
+  background: transparent;
+}
+
 .matchupLegend > span {
   display: inline-flex;
   gap: 0.35rem;
@@ -567,33 +610,33 @@
   position: fixed;
   z-index: 50;
   display: grid;
-  width: min(20rem, calc(100vw - 1.5rem));
-  gap: 0.7rem;
-  padding: 0.8rem;
+  width: min(17rem, calc(100vw - 1.5rem));
+  gap: 0.55rem;
+  padding: 0.72rem;
   border: 1px solid var(--line-strong);
-  background: color-mix(in oklch, var(--canvas) 96%, transparent);
+  background: var(--canvas);
   color: var(--ink);
-  box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 24%);
+  box-shadow: 0 0.45rem 1rem rgb(0 0 0 / 22%);
   pointer-events: none;
 }
 
 .matchupTooltip header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, auto) auto minmax(0, 1fr) auto;
   gap: 0.35rem;
   align-items: baseline;
 }
 
 .matchupTooltip header strong {
-  font-size: 0.82rem;
-}
-
-.matchupTooltip header span {
   overflow: hidden;
-  color: var(--ink-muted);
-  font-size: 0.7rem;
+  font-size: 0.82rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.matchupTooltip header > span {
+  color: var(--ink-faint);
+  font-size: 0.68rem;
 }
 
 .matchupTooltip header em {
@@ -608,24 +651,23 @@
   text-align: center;
 }
 
-.tooltipShares {
+.tooltipWinLabels {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  border: 1px solid var(--line);
+  gap: 0.7rem;
 }
 
-.tooltipShares span {
+.tooltipWinLabels span {
   display: grid;
-  gap: 0.12rem;
-  padding: 0.55rem;
+  gap: 0.05rem;
 }
 
-.tooltipShares span + span {
-  border-left: 1px solid var(--line);
+.tooltipWinLabels span:last-child {
+  justify-items: end;
+  text-align: right;
 }
 
-.tooltipShares small,
-.matchupTooltip dt {
+.tooltipWinLabels small {
   overflow: hidden;
   color: var(--ink-muted);
   font-size: 0.59rem;
@@ -633,35 +675,41 @@
   white-space: nowrap;
 }
 
-.tooltipShares strong {
+.tooltipWinLabels strong {
   font-family: var(--font-display), Georgia, serif;
-  font-size: 1.2rem;
+  font-size: 1.05rem;
 }
 
-.matchupTooltip p {
-  margin: 0;
-  color: var(--ink-muted);
-  font-size: 0.68rem;
-  line-height: 1.4;
-}
-
-.matchupTooltip dl {
-  display: grid;
-  gap: 0.25rem;
-  margin: 0;
-}
-
-.matchupTooltip dl div {
+.tooltipWinBar {
   display: flex;
-  justify-content: space-between;
-  gap: 0.8rem;
+  height: 0.25rem;
+  overflow: hidden;
+  background: var(--surface-subtle);
 }
 
-.matchupTooltip dd {
-  margin: 0;
+.tooltipWinBar i:first-child {
+  width: var(--response-share);
+  background: var(--accent);
+}
+
+.tooltipWinBar i:last-child {
+  flex: 1;
+  background: var(--line-strong);
+}
+
+.matchupTooltip footer {
+  display: grid;
+  gap: 0.16rem;
+}
+
+.matchupTooltip footer strong,
+.matchupTooltip footer span {
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.59rem;
-  text-align: right;
+  font-size: 0.6rem;
+}
+
+.matchupTooltip footer span {
+  color: var(--ink-muted);
 }
 
 .matchupMatrix {
@@ -817,9 +865,47 @@
 }
 
 .matchupCell {
+  position: relative;
   border-color: var(--line);
   background-color: var(--grade-background);
   color: var(--grade-ink);
+  cursor: default;
+  transition: filter 100ms ease, transform 100ms ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.matchupCell[data-basis="atom_and_strength_inferred"] {
+  background-color: color-mix(in oklch, var(--grade-background) 72%, var(--surface));
+}
+
+.matchupCell[data-basis="atom_and_strength_inferred"]::after {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--grade-ink);
+  content: "";
+  opacity: 0.72;
+}
+
+.matchupCell[data-basis="strength_only_inferred"] {
+  background-color: var(--surface);
+  color: var(--grade-border);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--grade-border) 55%, var(--line));
+}
+
+.matchupCell[data-basis="pending"] {
+  background-color: color-mix(in oklch, var(--grade-background) 58%, var(--surface));
+}
+
+.matchupCell:hover {
+  z-index: 5;
+  box-shadow: 0 0 0 2px var(--canvas), 0 0.25rem 0.55rem rgb(0 0 0 / 28%);
+  filter: brightness(1.12);
+  transform: scale(1.12);
 }
 
 .matchupCell strong,
@@ -836,10 +922,6 @@
   color: var(--grade-ink);
   font-size: 0.55rem;
   opacity: 0.86;
-}
-
-.matchupCellLimited {
-  opacity: 0.78;
 }
 
 .matchupDiagonal {
@@ -1471,7 +1553,8 @@
   .questionTab,
   .questionTabActive,
   .draftRow,
-  .roleRow {
+  .roleRow,
+  .matchupCell {
     transition: none;
   }
 }

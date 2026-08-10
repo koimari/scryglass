@@ -164,6 +164,14 @@ def _counter_count_point_estimate(theta_matrix: np.ndarray) -> int:
     return int(np.count_nonzero(theta_matrix.mean(axis=1) > COUNTER_EFFECT_THRESHOLD_LOGIT))
 
 
+def _response_basis(*, effective_maps: float, atom_supported: bool) -> str:
+    if effective_maps > 0.0:
+        return "observed_pair_plus_model"
+    if atom_supported:
+        return "atom_and_strength_inferred"
+    return "strength_only_inferred"
+
+
 def _safe_normalized_patch(value: object) -> str:
     try:
         return normalize_oe_token(value)
@@ -618,6 +626,7 @@ def _response_matrix(
     atom_vector_cache: dict[tuple[str, str, str | None], AtomFeatureVector],
 ) -> dict[str, Any]:
     pair_keys: list[tuple[str, str]] = []
+    atom_supported: dict[tuple[str, str], bool] = {}
     hypotheses: list[JointMapObservation] = []
     for focal in champion_order:
         for opponent in champion_order:
@@ -656,9 +665,10 @@ def _response_matrix(
                 )
             )
             pair_keys.append((focal, opponent))
+            atom_supported[(focal, opponent)] = any(vector.available)
 
     if not hypotheses:
-        return {"champions": [], "edge_pp": [], "interval_low_pp": [], "interval_high_pp": [], "evidence": [], "effective_maps": []}
+        return {"champions": [], "edge_pp": [], "interval_low_pp": [], "interval_high_pp": [], "evidence": [], "effective_maps": [], "basis": []}
 
     design = sparse.vstack(
         [
@@ -700,6 +710,10 @@ def _response_matrix(
             "high": round(100.0 * (float(expit(center + RESPONSE_INTERVAL_Z * spread)) - 0.5), 2),
             "evidence": "supported" if support["supported"] else "limited",
             "effective_maps": round(float(support["effective_maps"]), 1),
+            "basis": _response_basis(
+                effective_maps=float(support["effective_maps"]),
+                atom_supported=atom_supported[(focal, opponent)],
+            ),
         }
 
     def matrix(field: str) -> list[list[Any]]:
@@ -718,6 +732,7 @@ def _response_matrix(
         "interval_high_pp": matrix("high"),
         "evidence": matrix("evidence"),
         "effective_maps": matrix("effective_maps"),
+        "basis": matrix("basis"),
         "grade_thresholds_pp": {"S": 7.5, "A": 3.0, "B": -3.0, "C": -7.5},
     }
 
