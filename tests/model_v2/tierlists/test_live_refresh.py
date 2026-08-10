@@ -71,6 +71,24 @@ def test_rating_source_rejects_an_incomplete_roster(tmp_path: Path) -> None:
     assert live_refresh._oe_rating_source_complete(tmp_path) is False
 
 
+def test_tier_source_watermark_uses_the_latest_statistics_complete_map(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "data/lol/warehouse/parquet/oe_live/meta.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {
+                "source_latest": "2026-08-08T21:50:46Z",
+                "statistics_complete_source_latest": "2026-07-28T23:45:16Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert live_refresh._oe_source_latest(tmp_path) == "2026-07-28T23:45:16Z"
+
+
 def test_live_merge_deduplicates_prefixed_and_canonical_game_ids() -> None:
     rows = [
         {"game_uid": "oe-api:g1", "gameid": "oe-api:g1", "date": "2026-08-08", "league": "LCK", "side": "Blue", "teamname": "A", "result": 1},

@@ -303,6 +303,17 @@ def build_live_source(root: Path | str = Path(".")) -> dict[str, Any]:
     statistics_complete_ids = _complete_player_game_ids(player)
     player_keys = _game_keys(player)
     source_game_ids = sorted(set(player_keys.dropna().astype(str)))
+    statistics_complete_source_latest: str | None = None
+    if statistics_complete_ids and "date" in player.columns:
+        complete_dates = pd.to_datetime(
+            player.loc[player_keys.isin(statistics_complete_ids), "date"],
+            errors="coerce",
+            utc=True,
+        ).dropna()
+        if not complete_dates.empty:
+            statistics_complete_source_latest = pd.Timestamp(
+                complete_dates.max()
+            ).isoformat()
     source_latest_candidates: list[pd.Timestamp] = []
     try:
         annual_meta = json.loads(annual_meta_path.read_text(encoding="utf-8"))
@@ -380,6 +391,7 @@ def build_live_source(root: Path | str = Path(".")) -> dict[str, Any]:
         "statistics_incomplete_game_count": len(
             identity_complete_ids.difference(statistics_complete_ids)
         ),
+        "statistics_complete_source_latest": statistics_complete_source_latest,
         "player_statistics_complete": identity_complete_ids.issubset(statistics_complete_ids),
         "player_rows": len(player),
         "player_rows_with_names": int(player["playername"].notna().sum()) if "playername" in player else 0,
