@@ -26,6 +26,7 @@ from lol_kills.postgame_sync import (
     exclusive_lock,
     rollback_public_pack,
     sync_once,
+    validate_live_source,
 )
 from lol_kills.v2.tierlists import live_refresh
 
@@ -260,6 +261,14 @@ def seed_supabase_continuity(config: RefreshConfig) -> dict[str, Any] | None:
     if not isinstance(games, dict):
         raise PublicRefreshError("Supabase continuity bootstrap has no game index")
     game_ids = sorted(str(game_id) for game_id in games)
+    source = "profile_index"
+    if len(game_ids) != expected_count or source_identity_sha256(game_ids) != expected_digest:
+        local_source = validate_live_source(config.root, [])
+        local_ids = local_source.get("game_ids")
+        if not isinstance(local_ids, list):
+            raise PublicRefreshError("Supabase continuity bootstrap has no complete source index")
+        game_ids = sorted(str(game_id) for game_id in local_ids)
+        source = "validated_local_cache"
     if len(game_ids) != expected_count or source_identity_sha256(game_ids) != expected_digest:
         raise PublicRefreshError("Supabase continuity bootstrap does not match the active release")
 
@@ -273,7 +282,12 @@ def seed_supabase_continuity(config: RefreshConfig) -> dict[str, Any] | None:
             "status": "bootstrapped",
         },
     )
-    return {"status": "seeded", "pack_id": release_id, "game_count": expected_count}
+    return {
+        "status": "seeded",
+        "pack_id": release_id,
+        "game_count": expected_count,
+        "source": source,
+    }
 
 
 def _sleep_before_retry(attempt: int) -> None:
