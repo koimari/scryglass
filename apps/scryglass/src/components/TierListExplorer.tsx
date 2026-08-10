@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   filterRowsByRegion,
   firstPickMetric,
@@ -38,6 +46,22 @@ const BOARD_MODES = [
 ] as const;
 type BoardMode = TierBoardMode;
 type RankedBoardMode = TierRankedMode;
+type MatrixSize = "overview" | "standard" | "large";
+type MatchupGrade = ReturnType<typeof matchupGrade>;
+type MatchupTooltip = {
+  x: number;
+  y: number;
+  response: string;
+  enemy: string;
+  responseShare: number;
+  enemyShare: number;
+  grade: MatchupGrade;
+  edge: number;
+  low: number | null | undefined;
+  high: number | null | undefined;
+  evidence: "supported" | "limited" | null | undefined;
+  maps: number | null | undefined;
+};
 
 type TierResponse = {
   status: string;
@@ -64,6 +88,15 @@ function roleLabel(role: string): string {
 
 function signedScore(value: number | null | undefined): string {
   return signedPp(value) ?? "Pending";
+}
+
+function winShare(value: number): number {
+  return Math.max(0, Math.min(100, 50 + value));
+}
+
+function gradeReason(grade: MatchupGrade, edge: number): string {
+  const direction = edge >= 0 ? "above" : "below";
+  return `${grade} grade because the response sits ${Math.abs(edge).toFixed(1)} percentage points ${direction} an even matchup after team strength and side adjustment.`;
 }
 
 function numericMetric(value: number | null | undefined): number | null {
@@ -464,10 +497,13 @@ function UnpickedBoard({
                   <small>0 accepted maps</small>
                 </span>
               </div>
-              <div className={styles.similarityBridge}>
+              <div
+                className={styles.similarityBridge}
+                style={{ "--similarity-position": `${Math.round(item.similarity * 100)}%` } as CSSProperties}
+              >
                 <strong>{similarityLabel(item.similarity)}</strong>
-                <i aria-hidden="true" />
-                <span>structural match</span>
+                <span className={styles.similarityTrack} aria-hidden="true"><i /></span>
+                <span className={styles.similarityCaption}>{Math.round(item.similarity * 100)}% structural similarity</span>
               </div>
               <div className={styles.viableReference}>
                 <span>
@@ -508,6 +544,9 @@ function ResponseBoard({
   targetId: string;
   onTargetChange: (value: string) => void;
 }) {
+  const [matrixSize, setMatrixSize] = useState<MatrixSize>("overview");
+  const [tooltip, setTooltip] = useState<MatchupTooltip | null>(null);
+  const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const allowedIds = useMemo(() => new Set(rows.map((row) => row.champion_id)), [rows]);
   const champions = useMemo(
     () => (matrix?.champions ?? []).filter((champion) => allowedIds.has(champion.champion_id)),
@@ -529,6 +568,32 @@ function ResponseBoard({
     D: styles.matchupGradeD,
   } as const;
 
+  const hideTooltip = useCallback(() => {
+    if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+    tooltipTimer.current = null;
+    setTooltip(null);
+  }, []);
+
+  const queueTooltip = useCallback((
+    event: ReactPointerEvent<HTMLTableCellElement>,
+    details: Omit<MatchupTooltip, "x" | "y">,
+  ) => {
+    if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+    setTooltip(null);
+    const rect = event.currentTarget.getBoundingClientRect();
+    const cardWidth = Math.min(320, window.innerWidth - 24);
+    const cardHeight = 230;
+    const x = Math.max(12, Math.min(window.innerWidth - cardWidth - 12, rect.left + rect.width / 2 - cardWidth / 2));
+    const y = rect.bottom + cardHeight + 12 <= window.innerHeight
+      ? rect.bottom + 8
+      : Math.max(12, rect.top - cardHeight - 8);
+    tooltipTimer.current = setTimeout(() => setTooltip({ ...details, x, y }), 1500);
+  }, []);
+
+  useEffect(() => () => {
+    if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+  }, []);
+
   return (
     <section className={styles.matchupMatrixPanel}>
       <div className={styles.questionControls}>
@@ -541,19 +606,41 @@ function ResponseBoard({
             ))}
           </select>
         </label>
-        <p>Rows are your response pick. Columns are the enemy pick. Grades summarize the modeled same-role edge.</p>
+        <p>Rows are your response pick. Columns are the enemy pick. Hover a cell for 1.5 seconds to see both modeled win shares and the grade basis.</p>
       </div>
       {matrix && champions.length ? (
         <>
-          <div className={styles.matchupLegend} aria-label="Matchup grade scale">
-            <span className={styles.matchupGradeS}>S <small>strong counter</small></span>
-            <span className={styles.matchupGradeA}>A <small>good response</small></span>
-            <span className={styles.matchupGradeB}>B <small>close</small></span>
-            <span className={styles.matchupGradeC}>C <small>unfavorable</small></span>
-            <span className={styles.matchupGradeD}>D <small>heavily countered</small></span>
+          <div className={styles.matrixToolbar}>
+            <div className={styles.matchupLegend} aria-label="Matchup grade scale">
+              <span className={styles.matchupGradeS}>S <small>strong counter</small></span>
+              <span className={styles.matchupGradeA}>A <small>good response</small></span>
+              <span className={styles.matchupGradeB}>B <small>close</small></span>
+              <span className={styles.matchupGradeC}>C <small>unfavorable</small></span>
+              <span className={styles.matchupGradeD}>D <small>heavily countered</small></span>
+            </div>
+            <div className={styles.matrixSizeControl} aria-label="Matrix size">
+              <span>Matrix size</span>
+              <div>
+                {([
+                  ["overview", "Overview"],
+                  ["standard", "Standard"],
+                  ["large", "Large"],
+                ] as const).map(([value, label]) => (
+                  <button
+                    type="button"
+                    className={matrixSize === value ? styles.matrixSizeButtonActive : styles.matrixSizeButton}
+                    aria-pressed={matrixSize === value}
+                    key={value}
+                    onClick={() => setMatrixSize(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-          <div className={styles.matchupMatrixScroll}>
-            <table className={styles.matchupMatrix}>
+          <div className={styles.matchupMatrixScroll} onScroll={hideTooltip}>
+            <table className={styles.matchupMatrix} data-matrix-size={matrixSize}>
               <thead>
                 <tr>
                   <th scope="col">Response pick</th>
@@ -590,12 +677,25 @@ function ResponseBoard({
                         }
                         const grade = matchupGrade(edge);
                         const detail = `${response.champion} into ${enemy.champion}: ${grade}, ${signedScore(edge)}. ${evidence === "supported" ? "Supported" : "Limited"} evidence, ${maps?.toFixed(1) ?? "0.0"} effective maps, ${low?.toFixed(1) ?? "—"} to ${high?.toFixed(1) ?? "—"} pp interval.`;
+                        const tooltipDetails = {
+                          response: response.champion,
+                          enemy: enemy.champion,
+                          responseShare: winShare(edge),
+                          enemyShare: winShare(-edge),
+                          grade,
+                          edge,
+                          low,
+                          high,
+                          evidence,
+                          maps,
+                        };
                         return (
                           <td
                             className={`${styles.matchupCell} ${gradeClass[grade]} ${evidence === "limited" ? styles.matchupCellLimited : ""}`}
                             key={enemy.champion_id}
-                            title={detail}
                             aria-label={detail}
+                            onPointerEnter={(event) => queueTooltip(event, tooltipDetails)}
+                            onPointerLeave={hideTooltip}
                           >
                             <strong>{grade}</strong>
                             <small>{signedScore(edge)}</small>
@@ -608,6 +708,28 @@ function ResponseBoard({
               </tbody>
             </table>
           </div>
+          {tooltip ? (
+            <aside
+              className={styles.matchupTooltip}
+              style={{ left: tooltip.x, top: tooltip.y }}
+              role="tooltip"
+            >
+              <header>
+                <strong>{tooltip.response}</strong>
+                <span>into {tooltip.enemy}</span>
+                <em className={gradeClass[tooltip.grade]}>{tooltip.grade}</em>
+              </header>
+              <div className={styles.tooltipShares}>
+                <span><small>{tooltip.response}</small><strong>{tooltip.responseShare.toFixed(1)}%</strong></span>
+                <span><small>{tooltip.enemy}</small><strong>{tooltip.enemyShare.toFixed(1)}%</strong></span>
+              </div>
+              <p>{gradeReason(tooltip.grade, tooltip.edge)}</p>
+              <dl>
+                <div><dt>Modeled range</dt><dd>{tooltip.low == null || tooltip.high == null ? "Unavailable" : `${winShare(tooltip.low).toFixed(1)}–${winShare(tooltip.high).toFixed(1)}%`}</dd></div>
+                <div><dt>Evidence</dt><dd>{tooltip.evidence === "supported" ? "Supported" : "Limited"} · {tooltip.maps?.toFixed(1) ?? "0.0"} effective maps</dd></div>
+              </dl>
+            </aside>
+          ) : null}
         </>
       ) : (
         <div className={styles.unavailable}>
