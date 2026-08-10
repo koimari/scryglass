@@ -302,9 +302,62 @@ def test_fresh_supabase_worker_seeds_exact_active_game_ids(tmp_path: Path) -> No
     ):
         result = public_refresh.seed_supabase_continuity(config)
 
-    assert result == {"status": "seeded", "pack_id": release_id, "game_count": 2}
+    assert result == {
+        "status": "seeded",
+        "pack_id": release_id,
+        "game_count": 2,
+        "source": "profile_index",
+    }
     assert json.loads(config.sync.state_path.read_text())["published_game_ids"] == game_ids
     assert json.loads((config.public_root / "manifest.json").read_text()) == manifest
+
+
+def test_supabase_bootstrap_uses_a_checksum_verified_full_local_cache(tmp_path: Path) -> None:
+    game_ids = ["oe:game:a", "oe:game:b", "oe:game:c"]
+    release_id = "v2026.08.10.001500"
+    manifest = {
+        "pack_id": release_id,
+        "ratings": {
+            "source_game_count": len(game_ids),
+            "source_identity_sha256": source_identity_sha256(game_ids),
+        },
+    }
+    recent_profiles = json.dumps(
+        {"games": {game_ids[-1]: {"game_id": game_ids[-1]}}}
+    ).encode()
+    config = replace(
+        _config(tmp_path),
+        publication_backend="supabase",
+        supabase_url="https://example.supabase.co",
+        supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def active_release(self):
+            return {"release_id": release_id, "manifest": manifest}
+
+        def asset(self, _release_id: str, path: str):
+            return {"body": None, "storage_path": f"{release_id}/{path}"}
+
+        def storage_object(self, _storage_path: str):
+            return recent_profiles
+
+    with patch.object(
+        public_refresh.supabase_publication,
+        "SupabasePublicData",
+        Client,
+    ), patch.object(
+        public_refresh,
+        "validate_live_source",
+        return_value={"game_ids": game_ids},
+    ):
+        result = public_refresh.seed_supabase_continuity(config)
+
+    assert result["source"] == "validated_local_cache"
+    assert json.loads(config.sync.state_path.read_text())["published_game_ids"] == game_ids
 
 
 def test_http_read_retries_transient_statuses(monkeypatch: pytest.MonkeyPatch) -> None:
