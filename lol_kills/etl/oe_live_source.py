@@ -146,12 +146,60 @@ def _complete_player_game_ids(frame: pd.DataFrame) -> set[str]:
         return set()
     keys = _game_keys(frame)
     statistics = frame[list(CORE_INPUTS)].apply(pd.to_numeric, errors="coerce")
-    complete_rows = statistics.notna().all(axis=1)
+    nonnegative = (
+        "kills",
+        "deaths",
+        "assists",
+        "teamkills",
+        "dpm",
+        "damageshare",
+        "totalgold",
+        "cspm",
+        "wpm",
+        "wcpm",
+    )
+    complete_rows = (
+        statistics.notna().all(axis=1)
+        & statistics[list(nonnegative)].ge(0).all(axis=1)
+        & statistics["gamelength"].gt(0)
+        & statistics["kills"].le(statistics["teamkills"])
+        & statistics["damageshare"].le(1)
+    )
     complete_games = complete_rows.groupby(keys, sort=False).all()
+    if "datacompleteness" in frame.columns:
+        source_complete_rows = (
+            frame["datacompleteness"].astype(str).str.casefold().eq("complete")
+        )
+        source_complete_games = set(
+            source_complete_rows.groupby(keys, sort=False)
+            .all()
+            .loc[lambda values: values]
+            .index.astype(str)
+        )
+    else:
+        source_complete_games = set(complete_games.index.astype(str))
+    sides = frame["side"].astype(str).str.title()
+    side_damage = statistics["damageshare"].groupby([keys, sides], sort=False).sum(
+        min_count=1
+    )
+    valid_side_damage = side_damage.sub(1).abs().le(1e-5)
+    valid_damage_games = valid_side_damage.groupby(level=0, sort=False).agg(
+        ["all", "count"]
+    )
+    valid_damage_ids = set(
+        valid_damage_games[
+            valid_damage_games["all"] & valid_damage_games["count"].eq(2)
+        ].index.astype(str)
+    )
     return {
         str(game_id)
         for game_id, complete in complete_games.items()
-        if bool(complete) and str(game_id) in identity_complete
+        if (
+            bool(complete)
+            and str(game_id) in identity_complete
+            and str(game_id) in source_complete_games
+            and str(game_id) in valid_damage_ids
+        )
     }
 
 
