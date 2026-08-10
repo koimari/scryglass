@@ -71,7 +71,7 @@ def test_rating_source_rejects_an_incomplete_roster(tmp_path: Path) -> None:
     assert live_refresh._oe_rating_source_complete(tmp_path) is False
 
 
-def test_tier_source_watermark_uses_the_latest_statistics_complete_map(
+def test_tier_source_watermark_uses_the_latest_identity_complete_map(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "data/lol/warehouse/parquet/oe_live/meta.json"
@@ -86,7 +86,7 @@ def test_tier_source_watermark_uses_the_latest_statistics_complete_map(
         encoding="utf-8",
     )
 
-    assert live_refresh._oe_source_latest(tmp_path) == "2026-07-28T23:45:16Z"
+    assert live_refresh._oe_source_latest(tmp_path) == "2026-08-08T21:50:46Z"
 
 
 def test_live_merge_deduplicates_prefixed_and_canonical_game_ids() -> None:
