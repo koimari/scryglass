@@ -11,6 +11,7 @@ from lol_kills.v2.tierlists.pooled_candidate import (
     _matchup_metrics_available,
     _regional_contexts,
     _response_basis,
+    _scope_atom_patch,
 )
 
 
@@ -109,3 +110,12 @@ def test_response_basis_names_observed_atom_and_strength_only_estimates() -> Non
     assert _response_basis(effective_maps=4.5, atom_supported=True) == "observed_pair_plus_model"
     assert _response_basis(effective_maps=0.0, atom_supported=True) == "atom_and_strength_inferred"
     assert _response_basis(effective_maps=0.0, atom_supported=False) == "strength_only_inferred"
+
+
+def test_scope_atom_patch_uses_the_audited_snapshot_instead_of_the_oe_token() -> None:
+    games = [
+        {"oe_patch_id": "16.15", "atom_snapshot_patch": "26.15"},
+        {"oe_patch_id": "16.15", "atom_snapshot_patch": "26.15"},
+    ]
+    assert _scope_atom_patch(games) == "26.15"
+    assert _scope_atom_patch([*games, {"atom_snapshot_patch": "26.16"}]) is None
