@@ -43,6 +43,8 @@ from lol_kills.ratings.player_map_grades import CORE_INPUTS
 
 
 OE_TEAM_CACHE = Path("data/lol/warehouse/parquet/oe_team_games.parquet")
+OE_API_TEAM_CACHE = Path("data/lol/warehouse/parquet/oe_api_team_games.parquet")
+OE_API_PLAYER_CACHE = Path("data/lol/warehouse/parquet/oe_api_player_games.parquet")
 OE_META = Path("data/lol/warehouse/parquet/oe_meta.json")
 LIVE_ROOT = Path("data/lol/warehouse/parquet/oe_live")
 LIVE_MAPS = LIVE_ROOT / "maps.parquet"
@@ -116,10 +118,7 @@ def _canonical_ids(values: Sequence[Any]) -> list[str]:
 
 
 def _source_game_ids(root: Path) -> list[str]:
-    path = root / OE_TEAM_CACHE
-    if not path.is_file():
-        return []
-    try:
+    def read_ids(path: Path) -> list[str]:
         columns = pq.ParquetFile(path).schema_arrow.names
         identity_column = next(
             (name for name in ("game_uid", "gameid", "oe_gameid") if name in columns),
@@ -128,9 +127,25 @@ def _source_game_ids(root: Path) -> list[str]:
         if identity_column is None:
             return []
         values = pq.read_table(path, columns=[identity_column]).column(identity_column).to_pylist()
-    except (OSError, ValueError, RuntimeError):
-        return []
-    return _canonical_ids(values)
+        return _canonical_ids(values)
+
+    observed: set[str] = set()
+    primary_path = root / OE_TEAM_CACHE
+    if primary_path.is_file():
+        try:
+            observed.update(read_ids(primary_path))
+        except (OSError, ValueError, RuntimeError):
+            pass
+    api_player_path = root / OE_API_PLAYER_CACHE
+    api_team_path = root / OE_API_TEAM_CACHE
+    if api_player_path.is_file() and api_team_path.is_file():
+        try:
+            players = pd.read_parquet(api_player_path)
+            complete_ids = _identity_complete_player_game_ids(players)
+            observed.update(set(read_ids(api_team_path)).intersection(complete_ids))
+        except (OSError, ValueError, RuntimeError, TypeError, KeyError):
+            pass
+    return sorted(observed)
 
 
 def _annual_source_latest(root: Path) -> str | None:
