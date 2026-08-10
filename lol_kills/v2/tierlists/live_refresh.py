@@ -681,12 +681,16 @@ def _oe_source_latest(root: Path) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _oe_player_statistics_complete(root: Path) -> bool:
+def _oe_rating_source_complete(root: Path) -> bool:
     path = root / "data/lol/warehouse/parquet/oe_live/meta.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return False
+    source_games = payload.get("source_game_count")
+    identity_complete_games = payload.get("identity_complete_game_count")
+    if isinstance(source_games, int) and isinstance(identity_complete_games, int):
+        return source_games > 0 and identity_complete_games == source_games
     return payload.get("player_statistics_complete") is True
 
 
@@ -803,8 +807,8 @@ def refresh_candidate(
                 ],
                 source="ratings",
             )
-            if live_source_step["completed"] and _oe_player_statistics_complete(root)
-            else _skipped_step("ratings", "oe_player_statistics_incomplete")
+            if live_source_step["completed"] and _oe_rating_source_complete(root)
+            else _skipped_step("ratings", "oe_player_identity_incomplete")
         )
         grid_step = _skipped_step("grid", "public_refresh_oe_only")
 
