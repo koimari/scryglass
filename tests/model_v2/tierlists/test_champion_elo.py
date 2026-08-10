@@ -129,6 +129,31 @@ def test_replay_covers_all_roles_and_tracks_rank_movement(tmp_path: Path) -> Non
     assert all(row["counterability_status"] == "unavailable" for row in mid["rows"])
 
 
+def test_replay_does_not_require_player_grade_statistics(tmp_path: Path) -> None:
+    _write_identity_sources(tmp_path)
+    source_path = tmp_path / "data/lol/warehouse/parquet/oe_player_games.parquet"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    grade_columns = [
+        "kills",
+        "deaths",
+        "assists",
+        "teamkills",
+        "gamelength",
+        "dpm",
+        "damageshare",
+        "totalgold",
+        "cspm",
+        "wpm",
+        "wcpm",
+        "golddiffat10",
+    ]
+    _source_rows().drop(columns=grade_columns).to_parquet(source_path, index=False)
+
+    candidate = build_candidate(tmp_path)
+
+    assert candidate["source"]["maps_replayed"] == 3
+
+
 def test_matchup_shape_assigns_distinct_blind_and_counter_tiers() -> None:
     rows = []
     for index in range(12):

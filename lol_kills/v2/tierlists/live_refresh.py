@@ -677,9 +677,7 @@ def _oe_source_latest(root: Path) -> str | None:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
-    value = payload.get("statistics_complete_source_latest") or payload.get(
-        "source_latest"
-    )
+    value = payload.get("source_latest")
     return value if isinstance(value, str) else None
 
 
