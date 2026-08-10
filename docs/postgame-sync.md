@@ -41,7 +41,9 @@ store. The deployed server reads the stable manifest and the selected
 immutable pack from that store. It caches the pointer for six hours. Local
 files remain an outage and development fallback.
 
-Keep `ORACLES_ELIXIR_API_KEY` in `/etc/scryglass/postgame-sync.env`. Give the service account read access only.
+Copy `ops/systemd/postgame-sync.env.example` to
+`/etc/scryglass/postgame-sync.env` and set `ORACLES_ELIXIR_API_KEY`. Give the
+service account read access only.
 The service does not use `GRID_API_KEY` or local GRID rows.
 
 Copy `ops/systemd/public-refresh.env.example` to

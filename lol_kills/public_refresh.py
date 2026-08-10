@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import time
 import urllib.error
@@ -34,6 +35,7 @@ LOCK_FILE = "public-refresh.lock"
 DEFAULT_SITE = "https://scryglass.xyz"
 DEFAULT_ATTEMPTS = 3
 DEFAULT_STALE_AFTER_HOURS = 12
+DEFAULT_STEP_TIMEOUT_MINUTES = 15
 RETRYABLE_ERRORS = (OeApiIngestError, TimeoutError, urllib.error.URLError)
 RETRYABLE_HTTP_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 
@@ -62,6 +64,7 @@ class RefreshConfig:
     lock_path: Path
     production: bool
     attempts: int = DEFAULT_ATTEMPTS
+    step_timeout_seconds: float = DEFAULT_STEP_TIMEOUT_MINUTES * 60
 
     @property
     def sync(self) -> SyncConfig:
@@ -93,6 +96,16 @@ def config_from_environment(root: Path, public_root: Path) -> RefreshConfig:
         raise PublicRefreshError("SCRYGLASS_REFRESH_ATTEMPTS must be an integer") from error
     if attempts < 1 or attempts > 5:
         raise PublicRefreshError("SCRYGLASS_REFRESH_ATTEMPTS must be between one and five")
+    try:
+        step_timeout_minutes = float(
+            _read_env("SCRYGLASS_STEP_TIMEOUT_MINUTES") or DEFAULT_STEP_TIMEOUT_MINUTES
+        )
+    except ValueError as error:
+        raise PublicRefreshError("SCRYGLASS_STEP_TIMEOUT_MINUTES must be numeric") from error
+    if not math.isfinite(step_timeout_minutes) or step_timeout_minutes <= 0 or step_timeout_minutes > 55:
+        raise PublicRefreshError(
+            "SCRYGLASS_STEP_TIMEOUT_MINUTES must be greater than zero and at most 55"
+        )
     return RefreshConfig(
         root=root,
         public_root=public_root,
@@ -104,6 +117,7 @@ def config_from_environment(root: Path, public_root: Path) -> RefreshConfig:
         lock_path=runtime / LOCK_FILE,
         production=_read_env("SCRYGLASS_PUBLIC_RELEASE") == "1",
         attempts=attempts,
+        step_timeout_seconds=step_timeout_minutes * 60,
     )
 
 
@@ -172,6 +186,7 @@ def _run_tier_refresh(config: RefreshConfig, expected_live_as_of: str) -> dict[s
         promote=True,
         skip_annual_oe=True,
         skip_atom_bridge=True,
+        step_timeout_seconds=config.step_timeout_seconds,
     )
     if receipt.get("status") != "production_promoted":
         raise PublicRefreshError(
@@ -375,6 +390,21 @@ def _alert_payload(text: str, health: dict[str, Any], *, unit: str | None = None
     }
 
 
+def _tier_publication(tier: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(tier, dict):
+        return None
+    steps = tier.get("promotion_steps")
+    if not isinstance(steps, list):
+        return None
+    for step in steps:
+        if not isinstance(step, dict) or step.get("source") != "blob_publication":
+            continue
+        publication = step.get("publication")
+        if isinstance(publication, dict):
+            return publication
+    return None
+
+
 def notify_watchdog(config: RefreshConfig, *, now: datetime | None = None) -> bool:
     health = _load_json(config.health_path)
     current = now or datetime.now(timezone.utc)
@@ -417,6 +447,8 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
     previous_state = _load_json(config.sync.state_path)
     previous_public_state = _load_json(config.state_path)
     publication: dict[str, Any] | None = None
+    tier: dict[str, Any] | None = None
+    tier_publication: dict[str, Any] | None = None
     post_publication_verified = False
     failure_stage = "preflight"
     _write_health(config, "checking", checked_at)
@@ -424,7 +456,7 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
         _preflight(config)
         failure_stage = "ratings"
         ratings = _run_with_source_retries(config, checked_at, force=force)
-        tier: dict[str, Any] | None = None
+        publication = ratings.get("publication") if isinstance(ratings.get("publication"), dict) else None
         tier_error: str | None = None
         should_run_tier = bool(
             ratings.get("status") == "published"
@@ -437,9 +469,9 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             expected = str(ratings.get("source_observed_through") or _iso(checked_at))
             try:
                 tier = _run_tier_refresh(config, expected)
+                tier_publication = _tier_publication(tier)
             except Exception as error:  # noqa: BLE001
                 tier_error = f"{type(error).__name__}: {str(error)[:500]}"
-        publication = ratings.get("publication") if isinstance(ratings.get("publication"), dict) else None
         changed = ratings.get("status") == "published" or tier is not None
         failure_stage = "cache"
         cache = invalidate_public_cache(config) if changed else None
@@ -466,14 +498,47 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             raise PublicRefreshError(tier_error)
         return result
     except Exception as error:
-        if publication is not None and not post_publication_verified and failure_stage == "smoke":
+        should_rollback = (
+            not post_publication_verified
+            and failure_stage in {"cache", "smoke"}
+            and (publication is not None or tier_publication is not None)
+        )
+        if should_rollback:
+            rollback = {"status": "restoring"}
+            rollback_errors: list[str] = []
+            if publication is not None:
+                try:
+                    rollback["ratings"] = rollback_public_pack(publication, config.public_root)
+                    _atomic_json(config.sync.state_path, previous_state)
+                except Exception as rollback_error:  # noqa: BLE001
+                    rollback_errors.append(
+                        f"ratings: {type(rollback_error).__name__}: {rollback_error}"
+                    )
+            if tier_publication is not None:
+                try:
+                    rollback["tier"] = live_refresh.restore_production_bundle(tier_publication)
+                except Exception as rollback_error:  # noqa: BLE001
+                    rollback_errors.append(
+                        f"tier: {type(rollback_error).__name__}: {rollback_error}"
+                    )
             try:
-                rollback = rollback_public_pack(publication, config.public_root)
-                _atomic_json(config.sync.state_path, previous_state)
-            except Exception as rollback_error:  # noqa: BLE001
-                rollback = {"status": "failed", "reason": f"{type(rollback_error).__name__}: {rollback_error}"}
+                rollback["cache_invalidation"] = invalidate_public_cache(config)
+            except Exception as cache_error:  # noqa: BLE001
+                rollback_errors.append(
+                    f"cache: {type(cache_error).__name__}: {cache_error}"
+                )
+                rollback["cache_invalidation"] = {
+                    "status": "failed",
+                    "reason": f"{type(cache_error).__name__}: {cache_error}",
+                }
+            if rollback_errors:
+                rollback = {
+                    **rollback,
+                    "status": "failed",
+                    "reason": " | ".join(rollback_errors),
+                }
             else:
-                rollback = {"status": "restored", **rollback}
+                rollback["status"] = "restored"
         else:
             rollback = None
         _write_health(

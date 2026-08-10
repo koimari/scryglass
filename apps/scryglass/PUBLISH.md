@@ -6,7 +6,11 @@ The public payload contains nine rating and profile files plus one accepted tier
 
 1. Install the systemd refresh service, alert service, refresh timer, watchdog
    service, and watchdog timer from `ops/systemd`.
-2. Put the OE key, Blob write key, Blob root, data-publish secret, and alert webhook in `/etc/scryglass/public-refresh.env`. Keep all secrets outside the repository.
+2. Copy `ops/systemd/postgame-sync.env.example` to
+   `/etc/scryglass/postgame-sync.env` and set the OE key. Copy
+   `ops/systemd/public-refresh.env.example` to
+   `/etc/scryglass/public-refresh.env` and set the Blob write key, Blob root,
+   data-publish secret, and alert webhook. Keep all secrets outside the repository.
 3. Start one controlled run:
 
    ```bash
