@@ -183,14 +183,22 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _identity_frame(path: Path, required: Sequence[str] = ()) -> pd.DataFrame:
+def _identity_frame(
+    path: Path,
+    required: Sequence[str] = (),
+    optional: Sequence[str] = (),
+) -> pd.DataFrame:
     if not path.is_file():
         raise RefreshValidationError(f"missing live source file: {path}")
     columns = pq.ParquetFile(path).schema_arrow.names
     identity_columns = [name for name in ("game_uid", "gameid", "oe_gameid") if name in columns]
     if not identity_columns or any(name not in columns for name in required):
         raise RefreshValidationError(f"live source schema is incomplete: {path}")
-    frame = pd.read_parquet(path, columns=[*identity_columns, *required])
+    optional_columns = [name for name in optional if name in columns]
+    frame = pd.read_parquet(
+        path,
+        columns=[*identity_columns, *required, *optional_columns],
+    )
     frame["_game_id"] = [
         next(
             (
@@ -218,6 +226,7 @@ def validate_live_source(root: Path, new_game_ids: Sequence[str]) -> dict[str, A
     players = _identity_frame(
         root / LIVE_PLAYERS,
         ("side", "position", "playername", *CORE_INPUTS),
+        ("datacompleteness",),
     )
     map_ids = _canonical_ids(maps["_game_id"].tolist())
     if len(map_ids) != len(maps):
@@ -282,7 +291,7 @@ def validate_live_source(root: Path, new_game_ids: Sequence[str]) -> dict[str, A
             if len(side_rows) != 5 or set(side_rows["position"].astype(str).str.casefold()) != roles:
                 raise RefreshValidationError(f"game {game_id} has malformed {side} roles")
             damage_share = pd.to_numeric(side_rows["damageshare"], errors="coerce").sum()
-            if abs(float(damage_share) - 1) > 1e-6:
+            if abs(float(damage_share) - 1) > 1e-5:
                 raise RefreshValidationError(f"game {game_id} has malformed {side} damage share")
     return {
         "game_ids": accepted_ids,

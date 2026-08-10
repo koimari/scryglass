@@ -123,9 +123,16 @@ def test_live_merge_aligns_bridge_numbers_to_the_annual_schema() -> None:
     assert merged["game"].tolist() == [1.0, 1.0, 2.0, 2.0]
 
 
-def test_live_source_excludes_games_with_missing_or_duplicate_player_names() -> None:
+def test_live_source_excludes_games_with_invalid_identity_or_statistics() -> None:
     rows = []
-    for game_id, bad in (("good", False), ("missing", True), ("duplicate", True)):
+    for game_id in (
+        "good",
+        "missing",
+        "duplicate",
+        "bad-share",
+        "rounded-share",
+        "partial",
+    ):
         for side in ("Blue", "Red"):
             for role in ("top", "jng", "mid", "bot", "sup"):
                 name = f"{side}-{role}"
@@ -146,7 +153,16 @@ def test_live_source_excludes_games_with_missing_or_duplicate_player_names() -> 
                         "teamkills": 15,
                         "gamelength": 1800,
                         "dpm": 500,
-                        "damageshare": 0.2,
+                        "damageshare": (
+                            0.3
+                            if game_id == "bad-share" and side == "Blue" and role == "top"
+                            else 0.2000016
+                            if game_id == "rounded-share" and side == "Blue" and role == "top"
+                            else 0.2
+                        ),
+                        "datacompleteness": (
+                            "partial" if game_id == "partial" else "complete"
+                        ),
                         "totalgold": 10000,
                         "cspm": 7,
                         "wpm": 0.5,
@@ -155,7 +171,10 @@ def test_live_source_excludes_games_with_missing_or_duplicate_player_names() -> 
                     }
                 )
 
-    assert _complete_player_game_ids(pd.DataFrame(rows)) == {"good"}
+    assert _complete_player_game_ids(pd.DataFrame(rows)) == {
+        "good",
+        "rounded-share",
+    }
 
 
 def test_forward_evaluation_accepts_annual_oe_rows_without_game_uid(

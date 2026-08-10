@@ -60,6 +60,7 @@ def _write_live(
     game_id: str | list[str],
     missing_player: bool = False,
     missing_statistics: bool = False,
+    partial_source: bool = False,
 ) -> None:
     game_ids = [game_id] if isinstance(game_id, str) else game_id
     live = root / "data/lol/warehouse/parquet/oe_live"
@@ -98,6 +99,7 @@ def _write_live(
                 "wpm": 0.4 + role_index * 0.05,
                 "wcpm": 0.2 + role_index * 0.02,
                 "golddiffat10": (1 if side == "Blue" else -1) * role_index * 40,
+                "datacompleteness": "partial" if partial_source else "complete",
             }
             for value in game_ids
             for side in ("Blue", "Red")
@@ -241,6 +243,17 @@ def test_live_validation_rejects_incomplete_player_statistics(tmp_path: Path) ->
     _write_live(tmp_path, "game-2", missing_statistics=True)
     with pytest.raises(RefreshValidationError, match="complete OE source set"):
         validate_live_source(tmp_path, ["game-2"])
+
+
+def test_live_validation_keeps_source_labelled_partial_map_pending(
+    tmp_path: Path,
+) -> None:
+    _write_live(tmp_path, "game-2", partial_source=True)
+
+    source = validate_live_source(tmp_path, [])
+
+    assert source["game_ids"] == ["game-2"]
+    assert source["statistics_complete_game_ids"] == []
 
 
 def test_source_continuity_rejects_a_disappearing_published_game(tmp_path: Path) -> None:
