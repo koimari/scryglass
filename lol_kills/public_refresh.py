@@ -394,8 +394,17 @@ def verify_public_release(config: RefreshConfig, *, expected_pack_id: str | None
         if supabase_client is None:
             raise PublicRefreshError("Supabase verification client is unavailable")
         tier_asset = supabase_client.asset(pack_id, supabase_publication.TIER_ASSET_PATH)
+        if not tier_asset:
+            raise PublicRefreshError("Supabase tier-list asset is missing")
         tier_body = tier_asset.get("body") if isinstance(tier_asset, dict) else None
-        tier_status = tier_body.get("status") if isinstance(tier_body, dict) else None
+        tier_manifest = manifest.get("tier")
+        tier_status = (
+            tier_body.get("status")
+            if isinstance(tier_body, dict)
+            else tier_manifest.get("status")
+            if isinstance(tier_manifest, dict)
+            else None
+        )
         if tier_expected and tier_status != "available":
             raise PublicRefreshError("Supabase tier-list display is not available")
     elif config.production and config.blob_root:

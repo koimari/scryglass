@@ -1,0 +1,19 @@
+# macOS public refresh worker
+
+The launch agent runs the Oracle's Elixir public refresh at 00:00, 06:00,
+12:00, and 18:00 local time. macOS starts one missed calendar run after the
+computer wakes.
+
+The worker reads the Supabase publisher key and website cache token from the
+login Keychain. The plist and logs contain no credentials.
+
+The installed runtime uses these paths:
+
+- `~/Library/Application Support/Scryglass Worker/repo`
+- `~/Library/Application Support/Scryglass Worker/venv`
+- `~/Library/Application Support/Scryglass Worker/public-packs`
+- `~/Library/Application Support/Scryglass Worker/logs`
+- `~/Library/LaunchAgents/xyz.scryglass.public-refresh.plist`
+
+Use `ops/launchd/run-public-refresh.sh` for manual runs. The repository remains
+detached at a tested production commit until an operator updates it.

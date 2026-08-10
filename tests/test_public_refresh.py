@@ -324,6 +324,76 @@ def test_production_smoke_requires_the_deployed_app_to_serve_the_new_pack(tmp_pa
             public_refresh.verify_public_release(config, expected_pack_id="new", tier_expected=True)
 
 
+def test_supabase_smoke_accepts_a_storage_backed_tier_asset(tmp_path: Path) -> None:
+    raw = b"data"
+    project_url = "https://example.supabase.co"
+    config = replace(
+        _config(tmp_path),
+        production=True,
+        publication_backend="supabase",
+        supabase_url=project_url,
+        supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    manifest = {
+        "pack_id": "v2026.08.10.001500",
+        "base_url": project_url,
+        "data_backend": "supabase",
+        "tier": {"status": "available", "as_of": "2026-08-07T22:05:18Z"},
+        "total_files": 1,
+        "total_bytes": len(raw),
+        "files": [
+            {
+                "path": "features/a.json",
+                "bytes": len(raw),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            }
+        ],
+    }
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def asset(self, _release_id: str, path: str):
+            if path == "rankings/tierlists.json":
+                return {
+                    "body": None,
+                    "storage_path": "v2026.08.10.001500/rankings/tierlists.json",
+                }
+            return {
+                "bytes": len(raw),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            }
+
+    def http(url: str, **_kwargs):
+        if url.endswith("/api/health"):
+            return json.dumps(
+                {
+                    "status": "ok",
+                    "pack_id": manifest["pack_id"],
+                    "tier": {"status": "available"},
+                }
+            ).encode()
+        return b"page"
+
+    with patch.object(
+        public_refresh,
+        "_load_remote_manifest",
+        return_value=(manifest, project_url),
+    ), patch.object(
+        public_refresh.supabase_publication,
+        "SupabasePublicData",
+        Client,
+    ), patch.object(public_refresh, "_http_bytes", side_effect=http):
+        result = public_refresh.verify_public_release(
+            config,
+            expected_pack_id=manifest["pack_id"],
+            tier_expected=True,
+        )
+
+    assert result["tier_status"] == "available"
+
+
 def test_systemd_worker_cannot_start_without_production_environment() -> None:
     root = Path(__file__).parents[1]
     service = (root / "ops/systemd/scryglass-ratings-sync.service").read_text(encoding="utf-8")
