@@ -29,6 +29,10 @@ export type PackManifest = {
   excluded: string[];
   base_url: string | null;
   data_backend?: "supabase" | "blob" | "local";
+  tier?: {
+    status?: "available" | "unavailable";
+    as_of?: string | null;
+  };
   ratings?: {
     source_mode?: string;
     source_as_of?: string;

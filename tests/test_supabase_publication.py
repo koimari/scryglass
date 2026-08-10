@@ -110,6 +110,10 @@ def test_publish_release_stages_then_activates_complete_snapshot() -> None:
         "v2026.08.10.153000/rankings/tierlists.json"
     ]
     assert client.releases[manifest["pack_id"]]["manifest"]["data_backend"] == "supabase"
+    assert client.releases[manifest["pack_id"]]["manifest"]["tier"] == {
+        "status": "available",
+        "as_of": None,
+    }
 
 
 def test_publish_release_is_idempotent_after_verified_activation() -> None:
