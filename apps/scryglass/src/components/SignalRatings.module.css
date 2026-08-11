@@ -329,7 +329,7 @@
   margin: 0.15rem 0 0;
   font-family: var(--font-display), serif;
   font-size: clamp(2.8rem, 5vw, 5.2rem);
-  font-weight: 650;
+  font-weight: 400;
   letter-spacing: -0.025em;
   line-height: 0.9;
 }

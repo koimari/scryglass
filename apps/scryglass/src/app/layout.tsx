@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import {
   Atkinson_Hyperlegible_Mono,
   Atkinson_Hyperlegible_Next,
+  Instrument_Serif,
 } from "next/font/google";
 import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
 import { SmoothScroll } from "@/components/SmoothScroll";
@@ -24,6 +25,12 @@ const mono = Atkinson_Hyperlegible_Mono({
   adjustFontFallback: false,
 });
 
+const display = Instrument_Serif({
+  variable: "--font-display",
+  subsets: ["latin"],
+  weight: "400",
+});
+
 export const metadata: Metadata = {
   title: "Scryglass — League of Legends ratings",
   description:
@@ -39,7 +46,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${ui.variable} ${mono.variable}`}
+      className={`${ui.variable} ${mono.variable} ${display.variable}`}
       suppressHydrationWarning
     >
       <head>

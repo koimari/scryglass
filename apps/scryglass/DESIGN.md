@@ -6,8 +6,8 @@ The application follows the research-tool system documented in the repository ro
 
 - Core palette: warm gray canvas, solid white or charcoal working surfaces, and near-black or warm-white
   text. Strong borders and secondary text keep both themes readable. Champion and team artwork supplies color.
-- Typeface: Atkinson Hyperlegible Next for interface copy and headings. Atkinson Hyperlegible Mono is
-  reserved for numbers, timestamps, IDs, and model notation.
+- Typeface: Instrument Serif for large editorial titles, Atkinson Hyperlegible Next for interface copy,
+  and Atkinson Hyperlegible Mono for numbers, timestamps, IDs, and model notation.
 - Shell: black navigation and footer; near-full-width working surface.
 - Data flow: operational pages put the requested table, board, or result in the first viewport.
 - Signature: a red proofing line marks an active route, selected filter, or
