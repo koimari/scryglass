@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ThemeToggle } from "./ThemeToggle";
@@ -55,9 +56,14 @@ export function SiteHeader() {
     <header className="site-header">
       <div className="site-header-inner">
         <Link href="/" className="brand">
-          <span className="brand-mark" aria-hidden>
-            <span />
-          </span>
+          <Image
+            className="brand-mark"
+            src="/scryglass-signal-mark.png"
+            width={40}
+            height={40}
+            alt=""
+            priority
+          />
           <strong className="brand-name">Scryglass</strong>
         </Link>
         <nav className="site-nav site-nav-flat site-nav-desktop" aria-label="Primary">

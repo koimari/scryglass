@@ -1,0 +1,29 @@
+.mark {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.mark img {
+  width: 82%;
+  height: 82%;
+  object-fit: contain;
+}
+
+.small {
+  width: 1.8rem;
+  height: 1.8rem;
+}
+
+.medium {
+  width: 3.2rem;
+  height: 3.2rem;
+}
+
+.large {
+  width: clamp(4.5rem, 7vw, 6.5rem);
+  height: clamp(4.5rem, 7vw, 6.5rem);
+}
