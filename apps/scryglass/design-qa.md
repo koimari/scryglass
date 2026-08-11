@@ -40,15 +40,18 @@
 
 ### Identity hierarchy pass
 
-- Added reviewed local team marks to rating leaders, movers, focused profiles, rating cards, and match cards.
+- Added verified transparent PNG team marks to rating leaders, movers, focused profiles, rating cards, and match cards.
 - Enlarged champion portraits in focused profiles and featured matches.
 - Added compact champion groups to rating cards, so champion color identifies recent form at a glance.
-- Teams without a reviewed mark keep the text layout. The interface does not create a generic placeholder.
+- Teams without a source mark use a quiet two-letter fallback.
 - Desktop and mobile layouts keep their document width. Images load without broken assets.
 - Team-name aliases resolve to the same reviewed mark.
 - Team profile headers now carry the reviewed team mark.
-- Player profile headers use reviewed portraits for prominent rated players, with a team-mark or initial fallback.
-- Portrait lookup stays explicit because duplicate player handles can identify different people.
+- Player profile headers use verified Leaguepedia portraits, with a team mark or player initial fallback.
+- Portrait lookup includes the current team because duplicate player handles can identify different people.
+- The generated report records source coverage for every published tier.
+- Current team coverage is 602 of 611. Tier 1 and Tier 3 have complete source-mark coverage.
+- Current rated Tier 1 player coverage is 427 of 429. The other two profiles use verified team-mark fallbacks.
 
 ## Final result
 

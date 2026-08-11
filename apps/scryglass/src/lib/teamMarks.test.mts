@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { teamMarkUrl } from "./teamMarks.ts";
+import { teamInitials, teamMarkUrl } from "./teamMarks.ts";
 
-test("returns reviewed team marks for canonical names and aliases", () => {
-  assert.equal(teamMarkUrl("Gen.G"), "/team-marks/gen-g.png");
-  assert.equal(teamMarkUrl(" LØS "), "/team-marks/los.png");
-  assert.equal(teamMarkUrl("Ground Zero"), "/team-marks/ground-zero-gaming.png");
+test("returns original transparent PNG marks for published teams", () => {
+  assert.match(teamMarkUrl("Gen.G") ?? "", /Gen\.Glogo_square\.png\/revision\/latest\?format=original$/);
+  assert.match(teamMarkUrl(" LØS ") ?? "", /L%C3%98Slogo_square\.png\/revision\/latest\?format=original$/);
+  assert.match(teamMarkUrl("Ground Zero Gaming") ?? "", /\.png\/revision\/latest\?format=original$/);
 });
 
-test("omits a mark when the team has no reviewed asset", () => {
+test("uses a lettermark when no reviewed team image exists", () => {
   assert.equal(teamMarkUrl("Unknown Team"), null);
-  assert.equal(teamMarkUrl(null), null);
+  assert.equal(teamInitials("Unknown Team"), "UT");
+  assert.equal(teamInitials("T1"), "T1");
 });

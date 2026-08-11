@@ -9,6 +9,7 @@ import type {
   TeamRating,
 } from "@/lib/pack";
 import { compactPlayerRatings, findPlayerByRouteName, PLAYER_SIGMA_MIN, softMu } from "@/lib/pack";
+import { playerPortrait } from "@/lib/playerPortraits";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 export const revalidate = 21_600;
@@ -70,6 +71,7 @@ export default async function PlayerEloPage({ params }: Props) {
   return (
     <PlayerRatingProfile
       player={player}
+      portrait={playerPortrait(player.player, currentTeam)}
       champions={playerChampions[player.player] ?? []}
       record={rec}
       team={team}

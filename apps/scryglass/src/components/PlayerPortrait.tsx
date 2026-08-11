@@ -1,15 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { playerPortraitSource, playerPortraitUrl } from "@/lib/playerPortraits";
+import type { PlayerVisualIdentity } from "@/lib/playerPortraits";
 import { teamMarkUrl } from "@/lib/teamMarks";
 import { TeamMark } from "./TeamMark";
 import styles from "./PlayerPortrait.module.css";
 
-export function PlayerPortrait({ player, team }: { player: string; team?: string | null }) {
+export function PlayerPortrait({
+  player,
+  team,
+  portrait,
+}: {
+  player: string;
+  team?: string | null;
+  portrait?: PlayerVisualIdentity | null;
+}) {
   const [failed, setFailed] = useState(false);
-  const src = playerPortraitUrl(player);
-  const source = playerPortraitSource(player);
+  const src = portrait?.src;
+  const source = portrait?.source;
   const hasPortrait = Boolean(src && !failed);
   const hasTeamMark = Boolean(teamMarkUrl(team));
 

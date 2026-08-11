@@ -19,6 +19,7 @@ import {
   type TeamRating,
   type TeamRecord,
 } from "@/lib/pack";
+import type { PlayerVisualIdentity } from "@/lib/playerPortraits";
 import { PlayerPortrait } from "./PlayerPortrait";
 import { TeamMark } from "./TeamMark";
 import styles from "./RatingProfiles.module.css";
@@ -277,6 +278,7 @@ export function MatchRatingProfile({ game, championImages }: { game: ProfileGame
 
 export function PlayerRatingProfile({
   player,
+  portrait,
   champions,
   record,
   team,
@@ -286,6 +288,7 @@ export function PlayerRatingProfile({
   manifest,
 }: {
   player: PlayerRating;
+  portrait?: PlayerVisualIdentity | null;
   champions: PlayerChampionRecord[];
   record?: PlayerRecord;
   team?: TeamRating | null;
@@ -306,7 +309,7 @@ export function PlayerRatingProfile({
       </p>
       <header className={styles.hero}>
         <div className={styles.heroIdentity}>
-          <PlayerPortrait player={player.player} team={currentTeam} />
+          <PlayerPortrait player={player.player} team={currentTeam} portrait={portrait} />
           <div className={styles.identity}>
             <p className={styles.scope}>{tierLabel(record?.current_tier)} · {record?.current_league ?? record?.primary ?? "current pack"}</p>
             <h1>{player.player}</h1>
