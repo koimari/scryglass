@@ -7,9 +7,15 @@ from pathlib import Path
 import pytest
 
 from lol_kills.v2.tierlists.production_bundle import (
+    AUTHORITY_LOCATOR,
+    CANDIDATE_LOCATOR,
+    EVALUATION_LOCATOR,
+    SOURCE_LOCATOR,
+    SOURCE_META_LOCATOR,
     ProductionBundleError,
     _public_structural_similarity,
     _require_public_source_mode,
+    _source_tree_sha256,
     _validate_matchup_profile,
     _validate_regional_views,
     _validate_response_matrix,
@@ -25,6 +31,24 @@ def test_patch_wide_bundle_verifies() -> None:
     assert report["scope_count"] == 39
     assert report["cell_count"] == 195
     assert report["production_cell_count"] == 195
+
+
+def test_source_tree_reads_code_from_the_worker_checkout(tmp_path: Path) -> None:
+    for locator in (
+        CANDIDATE_LOCATOR,
+        EVALUATION_LOCATOR,
+        AUTHORITY_LOCATOR,
+        SOURCE_LOCATOR,
+        SOURCE_META_LOCATOR,
+        Path("data/lol/v2/champions/lcc-atom-bridge-v1.json"),
+    ):
+        target = tmp_path / locator
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(locator.as_posix().encode("utf-8"))
+
+    digest = _source_tree_sha256(tmp_path, {}, code_root=ROOT)
+
+    assert len(digest) == 64
 
 
 def test_public_bundle_rejects_a_grid_backed_candidate() -> None:

@@ -888,6 +888,8 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
                 tier_publication = _tier_publication(tier)
             except Exception as error:  # noqa: BLE001
                 tier_error = f"{type(error).__name__}: {str(error)[:500]}"
+        if tier_error and config.publication_backend == "supabase":
+            raise PublicRefreshError(tier_error)
         if ledger is not None:
             local_manifest = _load_json(
                 config.sync.output_root / str(ratings.get("pack_id") or "") / "manifest.json"
@@ -933,13 +935,18 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             or tier is not None
             or database_publication is not None
         )
+        ledger_release_id = (
+            str(ratings.get("pack_id") or "") or None
+            if database_publication is not None or ratings.get("status") != "published"
+            else None
+        )
         failure_stage = "cache"
         if ledger is not None:
-            ledger.advance("invalidate_cache", release_id=str(ratings.get("pack_id") or "") or None)
+            ledger.advance("invalidate_cache", release_id=ledger_release_id)
         cache = invalidate_public_cache(config) if changed else None
         failure_stage = "smoke"
         if ledger is not None:
-            ledger.advance("smoke", release_id=str(ratings.get("pack_id") or "") or None)
+            ledger.advance("smoke", release_id=ledger_release_id)
         smoke = verify_public_release(
             config,
             expected_pack_id=str(ratings.get("pack_id")) if ratings.get("status") == "published" else None,

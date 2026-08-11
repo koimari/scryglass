@@ -82,6 +82,11 @@ def _sha256_path(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _installed_code_root() -> Path:
+    """Return the checkout that provides this installed worker code."""
+    return Path(__file__).resolve().parents[3]
+
+
 def _canonical_sha256(payload: Mapping[str, Any]) -> str:
     unsigned = {key: value for key, value in payload.items() if key != "artifact_sha256"}
     return _sha256_bytes(_canonical(unsigned))
@@ -585,16 +590,22 @@ def build_production_index(
     return index, cell_bytes, summary
 
 
-def _source_tree_sha256(root: Path, extra: Mapping[str, bytes]) -> str:
+def _source_tree_sha256(
+    root: Path,
+    extra: Mapping[str, bytes],
+    *,
+    code_root: Path | None = None,
+) -> str:
+    source_root = code_root or _installed_code_root()
     paths = {
         CANDIDATE_LOCATOR.as_posix(): _sha256_path(root / CANDIDATE_LOCATOR),
         EVALUATION_LOCATOR.as_posix(): _sha256_path(root / EVALUATION_LOCATOR),
         AUTHORITY_LOCATOR.as_posix(): _sha256_path(root / AUTHORITY_LOCATOR),
         SOURCE_LOCATOR.as_posix(): _sha256_path(root / SOURCE_LOCATOR),
         SOURCE_META_LOCATOR.as_posix(): _sha256_path(root / SOURCE_META_LOCATOR),
-        "lol_kills/v2/tierlists/forward_evaluation.py": _sha256_path(root / "lol_kills/v2/tierlists/forward_evaluation.py"),
-        "lol_kills/v2/tierlists/production_bundle.py": _sha256_path(root / "lol_kills/v2/tierlists/production_bundle.py"),
-        "lol_kills/v2/tierlists/structural_similarity.py": _sha256_path(root / "lol_kills/v2/tierlists/structural_similarity.py"),
+        "lol_kills/v2/tierlists/forward_evaluation.py": _sha256_path(source_root / "lol_kills/v2/tierlists/forward_evaluation.py"),
+        "lol_kills/v2/tierlists/production_bundle.py": _sha256_path(source_root / "lol_kills/v2/tierlists/production_bundle.py"),
+        "lol_kills/v2/tierlists/structural_similarity.py": _sha256_path(source_root / "lol_kills/v2/tierlists/structural_similarity.py"),
         "data/lol/v2/champions/lcc-atom-bridge-v1.json": _sha256_path(root / "data/lol/v2/champions/lcc-atom-bridge-v1.json"),
     }
     paths.update(extra)
@@ -701,7 +712,12 @@ def write_production_bundle(
     display_path = repo_root / PUBLIC_DISPLAY_LOCATOR
     display_path.parent.mkdir(parents=True, exist_ok=True)
     display_path.write_text(json.dumps(display, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
-    source_tree_sha256 = _source_tree_sha256(repo_root, {relative: _sha256_bytes(raw) for relative, raw in cell_bytes.items()})
+    code_root = _installed_code_root()
+    source_tree_sha256 = _source_tree_sha256(
+        repo_root,
+        {relative: _sha256_bytes(raw) for relative, raw in cell_bytes.items()},
+        code_root=code_root,
+    )
     manifest: dict[str, Any] = {
         "schema_version": "scryglass:tierlist-production-manifest:v1",
         "status": "approved",
@@ -714,7 +730,7 @@ def write_production_bundle(
         "production_index_locator": (PRODUCTION_ROOT / "index-v1.json").as_posix(),
         "production_index_sha256": _sha256_bytes(index_raw),
         "source_tree_sha256": source_tree_sha256,
-        "commit_sha": _commit_sha(repo_root),
+        "commit_sha": _commit_sha(code_root),
         "candidate": {
             "locator": CANDIDATE_LOCATOR.as_posix(),
             "raw_sha256": summary["candidate_raw_sha256"],
