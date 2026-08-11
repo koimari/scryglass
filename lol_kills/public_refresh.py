@@ -672,7 +672,6 @@ def verify_public_health_alignment(
     expected = {
         "status": "ok",
         "pack_id": release_id,
-        "source_as_of": source_as_of,
         "refresh_status": "idle",
         "worker_commit": expected_worker_commit,
         "stale": False,
@@ -680,6 +679,16 @@ def verify_public_health_alignment(
     mismatched = [
         key for key, value in expected.items() if payload.get(key) != value
     ]
+    try:
+        expected_source = datetime.fromisoformat(str(source_as_of).replace("Z", "+00:00"))
+        served_source = datetime.fromisoformat(
+            str(payload.get("source_as_of")).replace("Z", "+00:00")
+        )
+    except ValueError:
+        expected_source = source_as_of
+        served_source = payload.get("source_as_of")
+    if served_source != expected_source:
+        mismatched.append("source_as_of")
     if mismatched or not payload.get("last_refresh_success_at"):
         detail = ", ".join(mismatched or ["last_refresh_success_at"])
         raise PublicRefreshError(f"public health does not match the active release: {detail}")
