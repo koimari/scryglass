@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -15,6 +16,9 @@ from pathlib import Path
 
 class DatabaseBackupError(RuntimeError):
     """A logical backup could not be created and verified."""
+
+
+SUPABASE_EXPORT_RE = re.compile(r'^export (PG[A-Z]+)="([^"]+)"$', re.MULTILINE)
 
 
 def _database_connection(value: str) -> tuple[str, str]:
@@ -37,6 +41,34 @@ def _database_connection(value: str) -> tuple[str, str]:
     return safe_url, urllib.parse.unquote(parsed.password)
 
 
+def _supabase_cli_connection(workdir: Path) -> tuple[str, str]:
+    try:
+        result = subprocess.run(
+            ["npx", "supabase", "db", "dump", "--linked", "--dry-run"],
+            cwd=workdir,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or "").strip()[:500]
+        raise DatabaseBackupError(
+            f"Supabase short-lived database login failed: {detail}"
+        ) from error
+    values = dict(SUPABASE_EXPORT_RE.findall(result.stdout))
+    required = {"PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE"}
+    if set(values) < required:
+        raise DatabaseBackupError("Supabase CLI did not return a complete short-lived login")
+    username = urllib.parse.quote(values["PGUSER"], safe="")
+    password = urllib.parse.quote(values["PGPASSWORD"], safe="")
+    database = urllib.parse.quote(values["PGDATABASE"], safe="")
+    return _database_connection(
+        f"postgresql://{username}:{password}@{values['PGHOST']}:{values['PGPORT']}/{database}"
+    )
+
+
 def _retain(paths: list[Path], keep: int) -> list[str]:
     removed: list[str] = []
     for path in sorted(paths, key=lambda item: item.name, reverse=True)[keep:]:
@@ -48,13 +80,19 @@ def _retain(paths: list[Path], keep: int) -> list[str]:
 def create_backup(
     destination_root: Path,
     *,
-    database_url: str,
+    database_url: str | None = None,
+    supabase_workdir: Path | None = None,
     now: datetime | None = None,
     pg_dump: str = "pg_dump",
     pg_restore: str = "pg_restore",
 ) -> dict[str, object]:
     checked_at = now or datetime.now(timezone.utc)
-    url, password = _database_connection(database_url)
+    if database_url:
+        url, password = _database_connection(database_url)
+    elif supabase_workdir is not None:
+        url, password = _supabase_cli_connection(supabase_workdir.resolve())
+    else:
+        raise DatabaseBackupError("a database URL or Supabase work directory is required")
     command_environment = {**os.environ, "PGPASSWORD": password}
     daily = destination_root.expanduser().resolve() / "daily"
     weekly = destination_root.expanduser().resolve() / "weekly"
@@ -76,6 +114,8 @@ def create_backup(
                 "--dbname",
                 url,
                 "--format=custom",
+                "--schema=public",
+                "--role=postgres",
                 "--no-owner",
                 "--no-acl",
                 "--file",
@@ -127,11 +167,16 @@ def create_backup(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--destination", required=True, type=Path)
+    parser.add_argument("--supabase-workdir", type=Path)
     arguments = parser.parse_args(argv)
     database_url = os.environ.get("SCRYGLASS_DATABASE_URL", "").strip()
-    if not database_url:
-        raise DatabaseBackupError("SCRYGLASS_DATABASE_URL is required")
-    result = create_backup(arguments.destination, database_url=database_url)
+    result = create_backup(
+        arguments.destination,
+        database_url=database_url or None,
+        supabase_workdir=arguments.supabase_workdir,
+        pg_dump=os.environ.get("SCRYGLASS_PG_DUMP", "pg_dump"),
+        pg_restore=os.environ.get("SCRYGLASS_PG_RESTORE", "pg_restore"),
+    )
     print(result)
     return 0
 
