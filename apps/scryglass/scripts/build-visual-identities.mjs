@@ -8,7 +8,6 @@ const teamOutputPath = path.join(appRoot, "src", "data", "teamVisualIdentities.j
 const playerOutputPath = path.join(appRoot, "src", "data", "playerVisualIdentities.json");
 const reportPath = path.join(appRoot, "visual-identity-report.json");
 const cacheDir = process.env.SCRYGLASS_IDENTITY_CACHE?.trim() || "";
-const blobRoot = "https://97gks2fobqkgppwx.public.blob.vercel-storage.com";
 const cargoExport = "https://lol.fandom.com/wiki/Special:CargoExport";
 const mediaWikiApi = "https://lol.fandom.com/api.php";
 
@@ -72,12 +71,15 @@ function wikiPageUrl(page) {
   return `https://lol.fandom.com/wiki/${encodeURIComponent(text(page).replaceAll(" ", "_"))}`;
 }
 
-async function fetchJson(url, attempts = 3) {
+async function fetchJson(url, attempts = 3, headers = {}) {
   let latestError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       const response = await fetch(url, {
-        headers: { "user-agent": "Scryglass visual identity builder/1.0" },
+        headers: {
+          "user-agent": "Scryglass visual identity builder/1.0",
+          ...headers,
+        },
       });
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
       return await response.json();
@@ -156,10 +158,50 @@ async function cargoPages(name, query) {
 
 async function currentPack() {
   const configured = process.env.SCRYGLASS_IDENTITY_PACK_BASE_URL?.trim();
-  if (configured) return configured.replace(/\/$/, "");
-  const manifest = await fetchJson(`${blobRoot}/packs/manifest.json`);
-  if (!/^https:\/\//.test(manifest.base_url || "")) throw new Error("Public pack base URL is unavailable");
-  return manifest.base_url.replace(/\/$/, "");
+  if (configured) {
+    const baseUrl = configured.replace(/\/$/, "");
+    return {
+      source: baseUrl,
+      read: (relativePath) => fetchJson(`${baseUrl}/${relativePath}`),
+    };
+  }
+  const supabaseUrl = (process.env.SCRYGLASS_SUPABASE_URL || "").trim().replace(/\/$/, "");
+  const publishableKey = (process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY || "").trim();
+  if (!/^https:\/\/[a-z0-9]+\.supabase\.co$/.test(supabaseUrl) || !publishableKey.startsWith("sb_publishable_")) {
+    throw new Error("Set the Supabase URL and publishable key for the identity source");
+  }
+  const headers = { apikey: publishableKey };
+  const releases = await fetchJson(
+    `${supabaseUrl}/rest/v1/scryglass_public_releases?status=eq.active&select=release_id&limit=1`,
+    3,
+    headers,
+  );
+  const releaseId = text(releases[0]?.release_id);
+  if (!/^v\d{4}\.\d{2}\.\d{2}\.\d{6}$/.test(releaseId)) {
+    throw new Error("Supabase has no active public release");
+  }
+  return {
+    source: `${supabaseUrl}/release/${releaseId}`,
+    read: async (relativePath) => {
+      const release = encodeURIComponent(releaseId);
+      const assetPath = encodeURIComponent(relativePath);
+      const rows = await fetchJson(
+        `${supabaseUrl}/rest/v1/scryglass_public_assets?release_id=eq.${release}&path=eq.${assetPath}&select=body,storage_path&limit=1`,
+        3,
+        headers,
+      );
+      const asset = rows[0];
+      if (asset?.body !== null && asset?.body !== undefined) return asset.body;
+      const storagePath = text(asset?.storage_path)
+        .split("/")
+        .map((part) => encodeURIComponent(part))
+        .join("/");
+      if (!storagePath) throw new Error(`Supabase asset is missing: ${relativePath}`);
+      return fetchJson(
+        `${supabaseUrl}/storage/v1/object/public/scryglass-public/${storagePath}`,
+      );
+    },
+  };
 }
 
 function recordDate(image) {
@@ -198,11 +240,11 @@ function uniqueBroadTeams(teams) {
   return new Map([...index].filter(([, rows]) => rows.length === 1));
 }
 
-const packBase = await currentPack();
+const pack = await currentPack();
 const [playerRecords, playerRatings, teamRecords, leaguePlayers, leagueTeams, teamNames, datedProfileImages, rawProfileImages] = await Promise.all([
-  fetchJson(`${packBase}/features/player_records.json`),
-  fetchJson(`${packBase}/features/player_ratings_snapshot.json`),
-  fetchJson(`${packBase}/features/team_records.json`),
+  pack.read("features/player_records.json"),
+  pack.read("features/player_ratings_snapshot.json"),
+  pack.read("features/team_records.json"),
   cargoPages("players-with-country", {
     tables: "Players",
     fields: "Player,OverviewPage,Image,Team,Name,NationalityPrimary,Country",
@@ -449,7 +491,7 @@ const playerPayload = {
 };
 const report = {
   generated_at: generatedAt,
-  pack_base_url: packBase,
+  pack_base_url: pack.source,
   teams: {
     published: Object.keys(teamRecords).length,
     resolved: Object.keys(teamIdentities).length,
