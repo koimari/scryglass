@@ -602,7 +602,7 @@ def test_public_health_alignment_requires_release_watermark_and_worker(
 ) -> None:
     release_id = "v2026.08.11.184500"
     worker = "a" * 40
-    source_as_of = "2026-08-11T18:00:00Z"
+    source_as_of = "2026-08-11T18:00:00+00:00"
     config = replace(
         _config(tmp_path),
         production=True,
@@ -611,7 +611,7 @@ def test_public_health_alignment_requires_release_watermark_and_worker(
     payload = {
         "status": "ok",
         "pack_id": release_id,
-        "source_as_of": source_as_of,
+        "source_as_of": "2026-08-11T18:00:00Z",
         "last_refresh_success_at": "2026-08-11T18:45:00Z",
         "refresh_status": "idle",
         "worker_commit": worker,
