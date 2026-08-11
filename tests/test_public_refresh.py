@@ -400,6 +400,48 @@ def test_supabase_bootstrap_uses_a_checksum_verified_full_local_cache(tmp_path: 
     assert json.loads(config.sync.state_path.read_text())["published_game_ids"] == game_ids
 
 
+def test_supabase_current_worker_refreshes_its_active_manifest(tmp_path: Path) -> None:
+    game_ids = ["oe:game:a", "oe:game:b"]
+    release_id = "v2026.08.10.001500"
+    manifest = {
+        "pack_id": release_id,
+        "tier": {"status": "available"},
+        "ratings": {
+            "source_game_count": len(game_ids),
+            "source_identity_sha256": source_identity_sha256(game_ids),
+        },
+    }
+    config = replace(
+        _config(tmp_path),
+        publication_backend="supabase",
+        supabase_url="https://example.supabase.co",
+        supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    config.public_root.mkdir(parents=True)
+    (config.public_root / "manifest.json").write_text(
+        json.dumps({"pack_id": release_id}),
+        encoding="utf-8",
+    )
+    config.sync.state_path.parent.mkdir(parents=True, exist_ok=True)
+    config.sync.state_path.write_text(
+        json.dumps({"pack_id": release_id, "published_game_ids": game_ids}),
+        encoding="utf-8",
+    )
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def active_release(self):
+            return {"release_id": release_id, "manifest": manifest}
+
+    with patch.object(public_refresh.supabase_publication, "SupabasePublicData", Client):
+        result = public_refresh.seed_supabase_continuity(config)
+
+    assert result["status"] == "current"
+    assert json.loads((config.public_root / "manifest.json").read_text()) == manifest
+
+
 def test_supabase_no_change_reuses_the_active_tier(tmp_path: Path) -> None:
     config = replace(
         _config(tmp_path),

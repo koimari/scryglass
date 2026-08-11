@@ -386,6 +386,7 @@ def seed_supabase_continuity(config: RefreshConfig) -> dict[str, Any] | None:
         and len(state_ids) == expected_count
         and source_identity_sha256(state_ids) == expected_digest
     ):
+        _atomic_json(config.public_root / "manifest.json", manifest)
         return {"status": "current", "pack_id": release_id, "game_count": expected_count}
 
     profiles = _supabase_asset_json(
