@@ -58,8 +58,8 @@ export default function MethodologyPage() {
           </p>
           <p>
             The evidence label checks precision, stability, freshness, sample
-            support, and active status. Thin or stale evidence stays visible so
-            readers can judge the rating with its limits.
+            support, and active status. Current rankings include active teams
+            and players. Historical profile pages remain available by direct link.
           </p>
         </section>
 

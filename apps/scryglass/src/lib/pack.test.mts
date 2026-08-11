@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  bestChampionRecords,
   compactPlayerRatings,
   findPlayerByRouteName,
+  isActiveRating,
   recentProfileGames,
   scopedTeamWr,
   type PlayerRating,
@@ -104,4 +106,21 @@ test("compact player ratings exclude disconnected players", () => {
   };
 
   assert.deepEqual(compactPlayerRatings([disconnected]), []);
+});
+
+test("public rankings include only rows confirmed as active", () => {
+  assert.equal(isActiveRating({ evidence_active: 1 }), true);
+  assert.equal(isActiveRating({ evidence_active: 0 }), false);
+  assert.equal(isActiveRating({ evidence_active: null }), false);
+  assert.equal(isActiveRating({}), false);
+});
+
+test("best champion records reward results with enough evidence", () => {
+  const ranked = bestChampionRecords([
+    { champion: "One map", games: 1, wins: 1, losses: 0, wr: 1, kills: null, deaths: null, assists: null },
+    { champion: "Proven", games: 12, wins: 9, losses: 3, wr: 0.75, kills: null, deaths: null, assists: null },
+    { champion: "Losing", games: 20, wins: 8, losses: 12, wr: 0.4, kills: null, deaths: null, assists: null },
+  ]);
+
+  assert.deepEqual(ranked.map((record) => record.champion), ["Proven", "One map", "Losing"]);
 });

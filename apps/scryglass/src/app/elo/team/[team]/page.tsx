@@ -5,6 +5,7 @@ import {
   adjustedRating,
   compactPlayerRatings,
   findPlayerByRouteName,
+  isActiveRating,
   PLAYER_SIGMA_MIN,
   softMu,
   TEAM_SIGMA_MIN,
@@ -98,6 +99,7 @@ export default async function TeamEloPage({ params }: Props) {
         ratingNote: "Role rank unavailable",
       }));
   const tierTeams = teams
+    .filter(isActiveRating)
     .filter((candidate) => teamRecords[candidate.team]?.current_tier === record?.current_tier)
     .sort((a, b) => adjustedRating(b, TEAM_SIGMA_MIN) - adjustedRating(a, TEAM_SIGMA_MIN));
   const roleRanks: Record<string, { rank: number; total: number }> = {};
@@ -105,7 +107,7 @@ export default async function TeamEloPage({ params }: Props) {
     if (!player.rating) continue;
     const playerRecord = playerRecords[player.player];
     const peers = players
-      .filter((candidate) => candidate.n_maps >= 20 && candidate.evidence_active !== 0)
+      .filter((candidate) => candidate.n_maps >= 20 && isActiveRating(candidate))
       .filter((candidate) => {
         const candidateRecord = playerRecords[candidate.player];
         return candidateRecord?.current_tier === (record?.current_tier ?? playerRecord?.current_tier)

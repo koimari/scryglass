@@ -374,6 +374,44 @@ export function softMu(mu: number, sigma: number, floor = TEAM_SIGMA_MIN): numbe
   return mu - Math.max(0, sigma - floor);
 }
 
+/** Public ladders contain current competitors. Historical rows remain available to direct profiles. */
+export function isActiveRating(
+  rating: Pick<TeamRating | PlayerRating, "evidence_active">,
+): boolean {
+  return rating.evidence_active === 1;
+}
+
+function championResultScore(record: PlayerChampionRecord): number {
+  if (record.games <= 0) return 0;
+  const rate = record.wins / record.games;
+  const z = 1.2815515655446004;
+  const zSquared = z * z;
+  const denominator = 1 + zSquared / record.games;
+  const centre = rate + zSquared / (2 * record.games);
+  const spread = z * Math.sqrt(
+    (rate * (1 - rate) + zSquared / (4 * record.games)) / record.games,
+  );
+  return (centre - spread) / denominator;
+}
+
+/** Rank champion results while discounting tiny samples. */
+export function bestChampionRecords(
+  records: PlayerChampionRecord[],
+  limit = 5,
+): PlayerChampionRecord[] {
+  if (!Number.isInteger(limit) || limit < 1) return [];
+  return [...records]
+    .filter((record) => record.games > 0)
+    .sort((a, b) => {
+      const byScore = championResultScore(b) - championResultScore(a);
+      if (byScore) return byScore;
+      const byGames = b.games - a.games;
+      if (byGames) return byGames;
+      return a.champion.localeCompare(b.champion);
+    })
+    .slice(0, limit);
+}
+
 /** Keep the public player payload small while preserving its evidence contract. */
 export function compactPlayerRatings(players: PlayerRating[]): PlayerRating[] {
   return players

@@ -2,16 +2,25 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { SignalRatings } from "@/components/SignalRatings";
 import type {
+  CompetitionTier,
+  PlayerChampionRecord,
   PlayerMetadata,
   PlayerRating,
   PlayerRecord,
   PlayerWeeklyRanks,
+  ProfileGame,
+  ProfileRecords,
   TeamRating,
   TeamRecord,
   TeamWeeklyRanks,
-  ProfileRecords,
 } from "@/lib/pack";
-import { compactPlayerRatings, packSourceUpdatedLabel, packUpdatedLabel } from "@/lib/pack";
+import {
+  bestChampionRecords,
+  compactPlayerRatings,
+  isActiveRating,
+  packSourceUpdatedLabel,
+  packUpdatedLabel,
+} from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 import styles from "./EloPage.module.css";
 
@@ -31,6 +40,7 @@ export default async function EloPage() {
   let playerRecords: Record<string, PlayerRecord> = {};
   let playerWeeklyRanks: PlayerWeeklyRanks = { as_of: null, previous_as_of: null, by_player: {} };
   let playerMetadata: Record<string, PlayerMetadata> = {};
+  let playerChampionRecords: Record<string, PlayerChampionRecord[]> = {};
   let profileRecords: ProfileRecords | null = null;
   try {
     teamRecords = await readPackJson(man, "features/team_records.json");
@@ -58,16 +68,119 @@ export default async function EloPage() {
     playerMetadata = {};
   }
   try {
+    playerChampionRecords = await readPackJson<Record<string, PlayerChampionRecord[]>>(
+      man,
+      "features/player_champion_records.json",
+    );
+  } catch {
+    playerChampionRecords = {};
+  }
+  try {
     profileRecords = await readPackJson<ProfileRecords>(man, "features/profile_records.json");
   } catch {
     profileRecords = null;
   }
 
-  const leagueSet = new Set<string>();
-  for (const rec of Object.values(teamRecords)) {
-    for (const lg of rec.leagues || []) leagueSet.add(lg);
+  const activeTeamNames = new Set(
+    teams.filter(isActiveRating).map((team) => team.team),
+  );
+  const leagueSets: Record<CompetitionTier, Set<string>> = {
+    tier1: new Set(),
+    tier2: new Set(),
+    tier3: new Set(),
+  };
+  for (const [team, rec] of Object.entries(teamRecords)) {
+    if (!activeTeamNames.has(team) || !rec.current_tier || !rec.current_league) continue;
+    leagueSets[rec.current_tier].add(rec.current_league);
   }
-  const availableLeagues = [...leagueSet].sort();
+  const availableLeaguesByTier: Record<CompetitionTier, string[]> = {
+    tier1: [...leagueSets.tier1].sort(),
+    tier2: [...leagueSets.tier2].sort(),
+    tier3: [...leagueSets.tier3].sort(),
+  };
+
+  const championsByPlayer = new Map(
+    Object.entries(playerChampionRecords).map(([player, records]) => [
+      player.toLowerCase(),
+      bestChampionRecords(records, 5),
+    ]),
+  );
+  const playerChampionPicks = Object.fromEntries(
+    players.map((player) => [
+      player.player,
+      (championsByPlayer.get(player.player.toLowerCase()) ?? []).map((record) => ({
+        champion: record.champion,
+        label: `${record.champion}: ${record.wins}-${record.losses} in ${record.games} games`,
+      })),
+    ]),
+  );
+  const roleOrder = ["top", "jungle", "mid", "bot", "support"];
+  const teamChampionPicks = Object.fromEntries(
+    teams.map((team) => {
+      const games = (profileRecords?.teams[team.team] ?? [])
+        .map((gameId) => profileRecords?.games[gameId])
+        .filter((game): game is ProfileGame => Boolean(game))
+        .sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+      const latest = games[0];
+      if (!latest) return [team.team, []];
+      const side = latest.blue_team.toLowerCase() === team.team.toLowerCase()
+        ? "Blue"
+        : "Red";
+      const picks = latest.players
+        .filter((participant) => participant.side === side)
+        .sort(
+          (a, b) =>
+            roleOrder.indexOf(a.role.toLowerCase()) -
+            roleOrder.indexOf(b.role.toLowerCase()),
+        )
+        .slice(0, 5)
+        .map((participant) => {
+          const best = championsByPlayer.get(participant.player.toLowerCase())?.[0];
+          const champion = best?.champion ?? participant.champion;
+          return champion
+            ? {
+                champion,
+                label: `${participant.role}: ${participant.player} · ${champion}${
+                  best ? ` · ${best.wins}-${best.losses} in ${best.games} games` : ""
+                }`,
+              }
+            : null;
+        })
+        .filter((pick): pick is { champion: string; label: string } => Boolean(pick));
+      return [team.team, picks];
+    }),
+  );
+  const teamRecentForms = Object.fromEntries(
+    teams.map((team) => {
+      const form = (profileRecords?.teams[team.team] ?? [])
+        .map((gameId) => profileRecords?.games[gameId])
+        .filter((game): game is ProfileGame => Boolean(game))
+        .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+        .map((game) => {
+          const blue = game.blue_team.toLowerCase() === team.team.toLowerCase();
+          return blue ? game.blue_win === 1 : game.blue_win === 0;
+        })
+        .slice(0, 5);
+      return [team.team, form];
+    }),
+  );
+  const playerRecentForms = Object.fromEntries(
+    players.map((player) => {
+      const form = (profileRecords?.players[player.player] ?? [])
+        .map((gameId) => profileRecords?.games[gameId])
+        .filter((game): game is ProfileGame => Boolean(game))
+        .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+        .flatMap((game) => {
+          const participant = game.players.find(
+            (entry) => entry.player.toLowerCase() === player.player.toLowerCase(),
+          );
+          if (!participant) return [];
+          return [participant.side === "Blue" ? game.blue_win === 1 : game.blue_win === 0];
+        })
+        .slice(0, 5);
+      return [player.player, form];
+    }),
+  );
 
   return (
     <div className={styles.page}>
@@ -96,8 +209,11 @@ export default async function EloPage() {
           playerRecords={playerRecords}
           playerWeeklyRanks={playerWeeklyRanks}
           playerMetadata={playerMetadata}
-          availableLeagues={availableLeagues}
-          profileRecords={profileRecords}
+          availableLeaguesByTier={availableLeaguesByTier}
+          championImages={profileRecords?.champion_images ?? {}}
+          playerChampionPicks={playerChampionPicks}
+          recentForms={{ teams: teamRecentForms, players: playerRecentForms }}
+          teamChampionPicks={teamChampionPicks}
         />
       </Suspense>
     </div>
