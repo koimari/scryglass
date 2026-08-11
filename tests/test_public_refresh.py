@@ -50,6 +50,13 @@ def _with_receipt_paths(config: public_refresh.RefreshConfig) -> public_refresh.
     )
 
 
+def test_environment_defaults_to_supabase_publication(tmp_path: Path) -> None:
+    with patch.dict("os.environ", {}, clear=True):
+        config = public_refresh.config_from_environment(tmp_path, tmp_path / "packs")
+
+    assert config.publication_backend == "supabase"
+
+
 def test_tier_failure_keeps_a_smoke_verified_ratings_release(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config.sync.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -242,7 +249,7 @@ def test_watchdog_stays_quiet_when_the_last_success_is_fresh(tmp_path: Path) -> 
     send.assert_not_called()
 
 
-def test_production_preflight_uses_public_release_credentials_only(tmp_path: Path) -> None:
+def test_production_preflight_rejects_the_legacy_blob_backend(tmp_path: Path) -> None:
     base = "https://store-test.public.blob.vercel-storage.com"
     config = _with_receipt_paths(
         replace(
@@ -252,11 +259,11 @@ def test_production_preflight_uses_public_release_credentials_only(tmp_path: Pat
             manifest_url=f"{base}/packs/manifest.json",
         )
     )
-    values = {
-        "BLOB_READ_WRITE_TOKEN": "blob-key",
-        "SCRYGLASS_DATA_PUBLISH_TOKEN": "publish-key",
-    }
-    with patch.dict("os.environ", values, clear=True):
+    with patch.dict(
+        "os.environ",
+        {"SCRYGLASS_DATA_PUBLISH_TOKEN": "publish-key"},
+        clear=True,
+    ), pytest.raises(public_refresh.PublicRefreshError, match="Supabase publication backend"):
         public_refresh._preflight(config)
 
 
@@ -475,6 +482,82 @@ def test_http_read_retries_transient_statuses(monkeypatch: pytest.MonkeyPatch) -
 
     assert public_refresh._http_bytes("https://example.test", attempts=2) == b"ok"
     assert sleeps == [1.0]
+
+
+def test_cache_invalidation_is_bound_to_the_activated_release(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    release_id = "v2026.08.11.184500"
+    monkeypatch.setenv("SCRYGLASS_DATA_PUBLISH_TOKEN", "publish-secret")
+
+    def send(url: str, **kwargs):
+        assert url == "https://example.test/api/data-published"
+        assert kwargs["method"] == "POST"
+        assert kwargs["headers"]["authorization"] == "Bearer publish-secret"
+        assert json.loads(kwargs["body"]) == {"release_id": release_id}
+        return json.dumps(
+            {
+                "revalidated": True,
+                "requested_release_id": release_id,
+                "served_release_id": release_id,
+                "matches": True,
+            }
+        ).encode()
+
+    with patch.object(public_refresh, "_http_bytes", side_effect=send):
+        result = public_refresh.invalidate_public_cache(_config(tmp_path), release_id)
+
+    assert result["served_release_id"] == release_id
+
+
+def test_public_health_alignment_requires_release_watermark_and_worker(
+    tmp_path: Path,
+) -> None:
+    release_id = "v2026.08.11.184500"
+    worker = "a" * 40
+    source_as_of = "2026-08-11T18:00:00Z"
+    config = replace(
+        _config(tmp_path),
+        production=True,
+        publication_backend="supabase",
+    )
+    payload = {
+        "status": "ok",
+        "pack_id": release_id,
+        "source_as_of": source_as_of,
+        "last_refresh_success_at": "2026-08-11T18:45:00Z",
+        "refresh_status": "idle",
+        "worker_commit": worker,
+        "stale": False,
+    }
+
+    with patch.object(
+        public_refresh,
+        "_http_bytes",
+        return_value=json.dumps(payload).encode(),
+    ):
+        result = public_refresh.verify_public_health_alignment(
+            config,
+            release_id=release_id,
+            source_as_of=source_as_of,
+            expected_worker_commit=worker,
+        )
+
+    assert result == payload
+
+    payload["worker_commit"] = "b" * 40
+    with patch.object(
+        public_refresh,
+        "_http_bytes",
+        return_value=json.dumps(payload).encode(),
+    ), pytest.raises(public_refresh.PublicRefreshError, match="worker_commit"):
+        public_refresh.verify_public_health_alignment(
+            config,
+            release_id=release_id,
+            source_as_of=source_as_of,
+            expected_worker_commit=worker,
+        )
 
 
 def test_local_release_retention_keeps_active_and_two_previous(tmp_path: Path) -> None:

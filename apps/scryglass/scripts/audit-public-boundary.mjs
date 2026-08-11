@@ -13,6 +13,7 @@ const forbiddenPaths = [
   "src/app/api/draft-wr",
   "src/app/api/v2/draft",
   "src/app/api/v2/tierlist",
+  "src/app/api/data-upload/route.ts",
   "src/components/DraftSandbox.tsx",
   "src/components/DraftWrPanel.tsx",
   "src/components/HeadToHead.tsx",
@@ -24,6 +25,7 @@ const forbiddenPaths = [
   "src/lib/live.ts",
   "src/lib/publicDraftGate.ts",
   "src/lib/tierlistServer.ts",
+  "scripts/publish-data.mjs",
   "data/draft",
   "api/cron",
   "public/v2/tierlists",
@@ -46,6 +48,12 @@ const forbiddenTierText = [
   "publication_eligible",
   "raw_sha256",
   "training",
+];
+const retiredPublicationText = [
+  "@vercel/blob",
+  "BLOB_READ_WRITE_TOKEN",
+  "LIVE_BLOB_BASE_URL",
+  "SCRYGLASS_TIERLIST_BLOB_BASE_URL",
 ];
 const allowedPackFile = /^public\/packs\/(?:manifest\.json|[^/]+\/features\/(?:ratings_snapshot|player_ratings_snapshot|team_records|team_weekly_ranks|player_records|player_champion_records|profile_records|player_weekly_ranks|player_metadata)\.json)$/;
 const textExtensions = new Set([
@@ -122,6 +130,15 @@ for (const root of ["public", ".next"]) {
       if (content.includes(value)) {
         failures.push(`${value} appears in ${path.relative(appRoot, file)}`);
       }
+    }
+  }
+}
+
+for (const relative of ["package.json", "package-lock.json"]) {
+  const content = await readFile(path.join(appRoot, relative), "utf8");
+  for (const value of retiredPublicationText) {
+    if (content.includes(value)) {
+      failures.push(`retired publication dependency appears in ${relative}: ${value}`);
     }
   }
 }

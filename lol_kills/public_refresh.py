@@ -109,7 +109,7 @@ def config_from_environment(root: Path, public_root: Path) -> RefreshConfig:
     runtime = runtime_root / "data/lol/runtime"
     source_receipt_raw = _read_env("SCRYGLASS_ACCEPTED_SOURCE_RECEIPT")
     import_receipt_raw = _read_env("SCRYGLASS_ACCEPTED_IMPORT_RECEIPT")
-    publication_backend = (_read_env("SCRYGLASS_PUBLICATION_BACKEND") or "blob").lower()
+    publication_backend = (_read_env("SCRYGLASS_PUBLICATION_BACKEND") or "supabase").lower()
     if publication_backend not in {"blob", "supabase"}:
         raise PublicRefreshError("SCRYGLASS_PUBLICATION_BACKEND must be blob or supabase")
     try:
@@ -181,42 +181,27 @@ def _write_health(config: RefreshConfig, status: str, checked_at: datetime, **fi
 def _preflight(config: RefreshConfig) -> None:
     if not config.production:
         return
+    if config.publication_backend != "supabase":
+        raise PublicRefreshError("production refresh requires the Supabase publication backend")
     required = {"SCRYGLASS_DATA_PUBLISH_TOKEN": _read_env("SCRYGLASS_DATA_PUBLISH_TOKEN")}
-    if config.publication_backend == "supabase":
-        required.update(
-            {
-                "SCRYGLASS_SUPABASE_URL": config.supabase_url,
-                "SCRYGLASS_SUPABASE_SECRET_KEY": config.supabase_secret_key,
-            }
-        )
-    else:
-        required.update(
-            {
-                "BLOB_READ_WRITE_TOKEN": (
-                    _read_env("BLOB_READ_WRITE_TOKEN")
-                    or _read_env("VERCEL_BLOB_READ_WRITE_TOKEN")
-                ),
-                "LIVE_BLOB_BASE_URL": config.blob_root,
-            }
-        )
+    required.update(
+        {
+            "SCRYGLASS_SUPABASE_URL": config.supabase_url,
+            "SCRYGLASS_SUPABASE_SECRET_KEY": config.supabase_secret_key,
+        }
+    )
     missing = sorted(name for name, value in required.items() if not value)
     if missing:
         raise PublicRefreshError("public refresh credentials are incomplete: " + ", ".join(missing))
     if not config.site.startswith("https://"):
         raise PublicRefreshError("SCRYGLASS_PUBLISH_ORIGIN must use HTTPS")
-    if (
-        config.publication_backend == "blob"
-        and (not config.blob_root or ".public.blob.vercel-storage.com" not in config.blob_root)
-    ):
-        raise PublicRefreshError("LIVE_BLOB_BASE_URL must be a public Blob root")
-    if config.publication_backend == "supabase":
-        try:
-            supabase_publication.SupabasePublicData(
-                config.supabase_url or "",
-                config.supabase_secret_key or "",
-            )
-        except ValueError as error:
-            raise PublicRefreshError(str(error)) from error
+    try:
+        supabase_publication.SupabasePublicData(
+            config.supabase_url or "",
+            config.supabase_secret_key or "",
+        )
+    except ValueError as error:
+        raise PublicRefreshError(str(error)) from error
     if config.accepted_source_receipt is None or config.accepted_import_receipt is None:
         raise PublicRefreshError("production refresh requires accepted source and import receipts")
     if not config.accepted_source_receipt.is_file() or not config.accepted_import_receipt.is_file():
@@ -661,37 +646,72 @@ def verify_public_release(config: RefreshConfig, *, expected_pack_id: str | None
         )
         if tier_expected and tier_status != "available":
             raise PublicRefreshError("Supabase tier-list display is not available")
-    elif config.production and config.blob_root:
-        tier_raw = _http_bytes(
-            f"{config.blob_root}/rankings/tierlists.json",
-            attempts=config.attempts,
-        )
-        try:
-            tier_payload = json.loads(tier_raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise PublicRefreshError("public tier-list display is invalid JSON") from error
-        tier_status = tier_payload.get("status") if isinstance(tier_payload, dict) else None
-        if tier_expected and tier_status != "available":
-            raise PublicRefreshError("public tier-list display is not available")
-
     return {"pack_id": pack_id, "files": checked_files, "tier_status": tier_status}
 
 
-def invalidate_public_cache(config: RefreshConfig) -> dict[str, Any]:
+def verify_public_health_alignment(
+    config: RefreshConfig,
+    *,
+    release_id: str,
+    source_as_of: str | None,
+    expected_worker_commit: str,
+) -> dict[str, Any] | None:
+    if not config.production or config.publication_backend != "supabase":
+        return None
+    raw = _http_bytes(
+        f"{config.site}/api/health",
+        attempts=config.attempts,
+    )
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PublicRefreshError("public health alignment response is invalid JSON") from error
+    if not isinstance(payload, dict):
+        raise PublicRefreshError("public health alignment response is not an object")
+    expected = {
+        "status": "ok",
+        "pack_id": release_id,
+        "source_as_of": source_as_of,
+        "refresh_status": "idle",
+        "worker_commit": expected_worker_commit,
+        "stale": False,
+    }
+    mismatched = [
+        key for key, value in expected.items() if payload.get(key) != value
+    ]
+    if mismatched or not payload.get("last_refresh_success_at"):
+        detail = ", ".join(mismatched or ["last_refresh_success_at"])
+        raise PublicRefreshError(f"public health does not match the active release: {detail}")
+    return payload
+
+
+def invalidate_public_cache(config: RefreshConfig, release_id: str) -> dict[str, Any]:
     secret = _read_env("SCRYGLASS_DATA_PUBLISH_TOKEN")
     if not secret:
         raise PublicRefreshError("SCRYGLASS_DATA_PUBLISH_TOKEN is required for cache invalidation")
+    if not supabase_publication.PACK_ID_RE.fullmatch(release_id):
+        raise PublicRefreshError("cache invalidation requires a valid activated release ID")
     body = _http_bytes(
         f"{config.site}/api/data-published",
         method="POST",
-        headers={"authorization": f"Bearer {secret}"},
+        body=(json.dumps({"release_id": release_id}) + "\n").encode("utf-8"),
+        headers={
+            "authorization": f"Bearer {secret}",
+            "content-type": "application/json",
+        },
         attempts=config.attempts,
     )
     try:
         payload = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise PublicRefreshError("cache invalidation response is invalid JSON") from error
-    if not isinstance(payload, dict) or payload.get("revalidated") is not True:
+    if (
+        not isinstance(payload, dict)
+        or payload.get("revalidated") is not True
+        or payload.get("requested_release_id") != release_id
+        or payload.get("served_release_id") != release_id
+        or payload.get("matches") is not True
+    ):
         raise PublicRefreshError("cache invalidation was not confirmed")
     return payload
 
@@ -936,7 +956,8 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
         failure_stage = "cache"
         if ledger is not None:
             ledger.advance("invalidate_cache", release_id=str(ratings.get("pack_id") or "") or None)
-        cache = invalidate_public_cache(config) if changed else None
+        active_release_id = str(ratings.get("pack_id") or "")
+        cache = invalidate_public_cache(config, active_release_id) if changed else None
         failure_stage = "smoke"
         if ledger is not None:
             ledger.advance("smoke", release_id=str(ratings.get("pack_id") or "") or None)
@@ -981,6 +1002,16 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             release_id=smoke["pack_id"],
             source_as_of=str(ratings.get("source_observed_through") or "") or None,
         )
+        health_alignment = verify_public_health_alignment(
+            config,
+            release_id=str(smoke["pack_id"]),
+            source_as_of=str(ratings.get("source_observed_through") or "") or None,
+            expected_worker_commit=(
+                ledger.worker_git_commit if ledger is not None else worker_commit(config.root)
+            ),
+        )
+        result["public_health"] = health_alignment
+        _atomic_json(config.state_path, result)
         return result
     except Exception as error:
         if ledger is not None:
@@ -1029,7 +1060,11 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
                             f"supabase: {type(rollback_error).__name__}: {rollback_error}"
                         )
             try:
-                rollback["cache_invalidation"] = invalidate_public_cache(config)
+                rollback_release_id = str(previous_state.get("pack_id") or "")
+                rollback["cache_invalidation"] = invalidate_public_cache(
+                    config,
+                    rollback_release_id,
+                )
             except Exception as cache_error:  # noqa: BLE001
                 rollback_errors.append(
                     f"cache: {type(cache_error).__name__}: {cache_error}"

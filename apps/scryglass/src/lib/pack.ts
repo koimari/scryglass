@@ -28,7 +28,7 @@ export type PackManifest = {
   attribution: string;
   excluded: string[];
   base_url: string | null;
-  data_backend?: "supabase" | "blob" | "local";
+  data_backend?: "supabase" | "local";
   tier?: {
     status?: "available" | "unavailable";
     as_of?: string | null;

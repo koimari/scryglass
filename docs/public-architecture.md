@@ -40,6 +40,10 @@ A data refresh does not start a Vercel deployment. A code deployment does not ac
 
 The browser receives only the active public release and the sanitized health record. Private OE rows, game versions, imports, and refresh runs stay private.
 
+Production requests use Supabase only. The repository pack supports local
+development and build-time rendering. Vercel Blob is not part of the release
+path.
+
 ## Credentials
 
 | Credential | Owner | Storage | Use |
@@ -86,3 +90,4 @@ The repository migrations through `20260811165241` match the live table set and 
 4. Production must use that merged Git commit.
 5. A data release activates only after every declared asset passes size, hash, JSON, metadata, and Storage readback checks.
 6. Rollback restores an immutable Supabase release. Code rollback promotes the previous READY Vercel deployment.
+7. Cache invalidation names the activated release and Vercel returns the release it serves.

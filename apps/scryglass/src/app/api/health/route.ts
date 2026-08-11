@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { readPublicTierList, readRemotePackManifest } from "@/lib/serverPack";
+import { sameTimestamp } from "@/lib/health";
+import {
+  readPublicRefreshHealth,
+  readPublicTierList,
+  readRemotePackManifest,
+} from "@/lib/serverPack";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,19 +25,41 @@ async function readTierState(manifest: Awaited<ReturnType<typeof readRemotePackM
 
 export async function GET() {
   try {
-    const manifest = await readRemotePackManifest();
+    const [manifest, refresh] = await Promise.all([
+      readRemotePackManifest(),
+      readPublicRefreshHealth(),
+    ]);
     let tier = { status: "unavailable", as_of: null as string | null };
     try {
       tier = await readTierState(manifest);
     } catch {
       // Ratings remain useful while a later tier authority cycle is pending.
     }
+    const releaseAligned = !refresh?.active_release_id
+      || refresh.active_release_id === manifest.pack_id
+      || refresh.refresh_status === "running";
+    const sourceAsOf = manifest.ratings?.source_as_of ?? null;
+    const sourceAligned = !refresh?.source_as_of
+      || sameTimestamp(refresh.source_as_of, sourceAsOf)
+      || refresh.refresh_status === "running";
+    const status = refresh
+      && refresh.status === "ok"
+      && tier.status === "available"
+      && releaseAligned
+      && sourceAligned
+      && !refresh.stale
+      ? "ok"
+      : "partial";
     return NextResponse.json({
-      status: tier.status === "available" ? "ok" : "partial",
+      status,
       pack_id: manifest.pack_id,
       pack_created_utc: manifest.created_utc ?? null,
-      source_as_of: manifest.ratings?.source_as_of ?? null,
+      source_as_of: sourceAsOf,
       tier,
+      last_refresh_success_at: refresh?.last_success_at ?? null,
+      refresh_status: refresh?.refresh_status ?? "unknown",
+      worker_commit: refresh?.worker_commit ?? null,
+      stale: refresh?.stale ?? false,
     });
   } catch {
     return NextResponse.json({ status: "error" }, { status: 503 });

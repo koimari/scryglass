@@ -2,34 +2,29 @@
 
 Canonical public site: https://scryglass.xyz
 
-The public payload contains nine rating and profile files plus one accepted tier-list file.
+The public payload contains rating, profile, match, schedule, and tier-list files.
 
-1. Install the systemd refresh service, alert service, refresh timer, watchdog
-   service, and watchdog timer from `ops/systemd`.
-2. Copy `ops/systemd/public-refresh.env.example` to
-   `/etc/scryglass/public-refresh.env` and set the Supabase project URL, worker
-   secret key, and data-publish secret. Keep all secrets outside the
-   repository. Alerts are optional.
-3. Start one controlled run:
+1. Install the refresh and database-backup agents from `ops/launchd`.
+2. Store the Supabase worker key, data-publish token, and database URL in the
+   login Keychain. The launch scripts contain no secrets.
+3. Start one controlled run with the Mac launchd script. It acquires the 2026
+   OE file once and creates the required source and import receipts.
 
    ```bash
-   SCRYGLASS_PUBLIC_RELEASE=1 python3 -m lol_kills.public_refresh \
-     --root . \
-     --public-root /srv/scryglass-data/public-packs \
-     --once
+   /Users/river/Library/Application\ Support/Scryglass\ Worker/run-public-refresh.sh
    ```
 
 4. The runner performs source discovery, ratings, patch-wide tier authority,
    atomic Supabase publication, cache invalidation, and checks for `/elo`,
    `/matches`, and `/tiers`.
-5. Read `data/lol/runtime/public-refresh-health.json`. A failed map stays
+5. Read the runtime `public-refresh-health.json`. A failed game stays
    pending. A failed release keeps the previous pointer.
-6. The watchdog records stale state after the configured twelve-hour freshness
-   window. It does not publish data.
+6. The health endpoint reports stale state after the configured twelve-hour
+   freshness window.
 
 ## Manual refresh
 
-Oracle's Elixir annual files are the public match source. Incomplete maps stay
+Oracle's Elixir annual files are the public match source. Incomplete games stay
 pending for the next cycle. GRID remains available only to private research
 modules.
 
@@ -39,6 +34,8 @@ path. No production workflow or deployment requires `GRID_API_KEY`.
 The worker uses `SCRYGLASS_SUPABASE_SECRET_KEY` to stage and activate releases.
 The website uses a separate publishable key with read-only policies.
 `SCRYGLASS_DATA_PUBLISH_TOKEN` clears the website cache after activation.
+The cache endpoint requires the activated release ID and confirms that Vercel
+serves that same release.
 
 ## Build budget
 
