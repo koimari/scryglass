@@ -1,0 +1,43 @@
+.frame {
+  position: relative;
+  width: clamp(7.5rem, 12vw, 10.5rem);
+  aspect-ratio: 4 / 5;
+  flex: 0 0 auto;
+  margin: 0;
+  overflow: visible;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+
+.photoLink,
+.photo,
+.fallback {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.photo {
+  object-fit: cover;
+  object-position: 50% 18%;
+}
+
+.fallback {
+  display: grid;
+  place-items: center;
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: clamp(2.5rem, 6vw, 4rem);
+}
+
+.teamBadge {
+  position: absolute;
+  right: -0.55rem;
+  bottom: -0.55rem;
+}
+
+@media (max-width: 700px) {
+  .frame {
+    width: 6.25rem;
+  }
+}

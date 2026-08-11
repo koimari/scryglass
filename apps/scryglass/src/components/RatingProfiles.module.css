@@ -18,6 +18,17 @@
   border-bottom: 1px solid var(--line-strong);
 }
 
+.heroIdentity {
+  display: flex;
+  min-width: 0;
+  gap: clamp(1rem, 2.5vw, 2rem);
+  align-items: end;
+}
+
+.heroIdentity > .identity {
+  min-width: 0;
+}
+
 .scope,
 .sectionHeader p {
   margin: 0 0 0.55rem;
@@ -265,6 +276,7 @@
 @media (max-width: 700px) {
   .page { gap: 1.5rem; }
   .hero { grid-template-columns: 1fr; gap: 1.25rem; }
+  .heroIdentity { align-items: center; }
   .identity h1 { font-size: 3rem; }
   .statBand { margin-top: -1.5rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .statBand div:first-child { padding-left: 1rem; }

@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { EloLadders } from "@/components/EloLadders";
+import { SignalRatings } from "@/components/SignalRatings";
 import type {
   PlayerMetadata,
   PlayerRating,
@@ -9,6 +9,7 @@ import type {
   TeamRating,
   TeamRecord,
   TeamWeeklyRanks,
+  ProfileRecords,
 } from "@/lib/pack";
 import { compactPlayerRatings, packSourceUpdatedLabel, packUpdatedLabel } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
@@ -30,6 +31,7 @@ export default async function EloPage() {
   let playerRecords: Record<string, PlayerRecord> = {};
   let playerWeeklyRanks: PlayerWeeklyRanks = { as_of: null, previous_as_of: null, by_player: {} };
   let playerMetadata: Record<string, PlayerMetadata> = {};
+  let profileRecords: ProfileRecords | null = null;
   try {
     teamRecords = await readPackJson(man, "features/team_records.json");
   } catch {
@@ -54,6 +56,11 @@ export default async function EloPage() {
     playerMetadata = await readPackJson<Record<string, PlayerMetadata>>(man, "features/player_metadata.json");
   } catch {
     playerMetadata = {};
+  }
+  try {
+    profileRecords = await readPackJson<ProfileRecords>(man, "features/profile_records.json");
+  } catch {
+    profileRecords = null;
   }
 
   const leagueSet = new Set<string>();
@@ -81,7 +88,7 @@ export default async function EloPage() {
         </div>
       </header>
       <Suspense fallback={<div className="skeleton-block" aria-hidden />}>
-        <EloLadders
+        <SignalRatings
           teams={teams}
           players={players}
           teamRecords={teamRecords}
@@ -90,6 +97,7 @@ export default async function EloPage() {
           playerWeeklyRanks={playerWeeklyRanks}
           playerMetadata={playerMetadata}
           availableLeagues={availableLeagues}
+          profileRecords={profileRecords}
         />
       </Suspense>
     </div>

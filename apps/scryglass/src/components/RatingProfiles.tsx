@@ -19,6 +19,8 @@ import {
   type TeamRating,
   type TeamRecord,
 } from "@/lib/pack";
+import { PlayerPortrait } from "./PlayerPortrait";
+import { TeamMark } from "./TeamMark";
 import styles from "./RatingProfiles.module.css";
 
 const ROLE_ORDER = ["top", "jungle", "mid", "bot", "support"];
@@ -167,10 +169,13 @@ export function TeamRatingProfile({
     <div className={styles.page}>
       <p className={styles.back}><Link className="row-link" href="/elo">← Team ratings</Link></p>
       <header className={styles.hero}>
-        <div className={styles.identity}>
-          <p className={styles.scope}>{tierLabel(record?.current_tier)} · {record?.current_league ?? record?.primary ?? "current pack"}</p>
-          <h1>{team.team}</h1>
-          <p className={styles.summary}>Results across the current rating window. {trust.layman}</p>
+        <div className={styles.heroIdentity}>
+          <TeamMark team={team.team} size="large" />
+          <div className={styles.identity}>
+            <p className={styles.scope}>{tierLabel(record?.current_tier)} · {record?.current_league ?? record?.primary ?? "current pack"}</p>
+            <h1>{team.team}</h1>
+            <p className={styles.summary}>Results across the current rating window. {trust.layman}</p>
+          </div>
         </div>
         <div className={styles.ratingBlock}>
           <span>Adjusted team rating</span>
@@ -300,13 +305,16 @@ export function PlayerRatingProfile({
         {currentTeam ? <> · <Link className="row-link" href={`/elo/team/${teamSlug(currentTeam)}`}>{currentTeam}</Link></> : null}
       </p>
       <header className={styles.hero}>
-        <div className={styles.identity}>
-          <p className={styles.scope}>{tierLabel(record?.current_tier)} · {record?.current_league ?? record?.primary ?? "current pack"}</p>
-          <h1>{player.player}</h1>
-          <p className={styles.summary}>
-            {team ? <><Link className="row-link" href={`/elo/team/${teamSlug(team.team)}`}>{team.team}</Link> · {role}. </> : role !== "—" ? `${role}. ` : null}
-            This rating tracks the strength of team results with this player in the lineup. Recent map grades describe individual performance against four comparison baselines.
-          </p>
+        <div className={styles.heroIdentity}>
+          <PlayerPortrait player={player.player} team={currentTeam} />
+          <div className={styles.identity}>
+            <p className={styles.scope}>{tierLabel(record?.current_tier)} · {record?.current_league ?? record?.primary ?? "current pack"}</p>
+            <h1>{player.player}</h1>
+            <p className={styles.summary}>
+              {team ? <><Link className="row-link" href={`/elo/team/${teamSlug(team.team)}`}>{team.team}</Link> · {role}. </> : role !== "—" ? `${role}. ` : null}
+              This rating tracks the strength of team results with this player in the lineup. Recent map grades describe individual performance against four comparison baselines.
+            </p>
+          </div>
         </div>
         <div className={styles.ratingBlock}>
           <span>Adjusted results rating</span>
