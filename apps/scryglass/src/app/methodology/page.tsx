@@ -21,44 +21,50 @@ export default function MethodologyPage() {
         <section id="team-ratings">
           <h2>Team ratings</h2>
           <p>
-            The team ladder estimates organization strength across regional and
-            international play. A series counts once. This stops a five-game
-            series from carrying five times the weight of a short series.
+            Each completed series tells the model which team beat which opponent.
+            Beating a stronger opponent carries more information. Losing to a
+            weaker opponent carries more information in the other direction. A
+            series counts once, regardless of whether it lasted two or five games.
           </p>
           <p>
-            The default order uses an adjusted rating. The adjustment lowers
-            estimates with wide uncertainty. Established teams with connected
-            regional and international evidence receive a smaller adjustment.
+            Regional results establish domestic strength. International events
+            and roster movement connect those regions on one scale. The default
+            order uses an adjusted rating, which lowers estimates that still have
+            wide uncertainty.
           </p>
           <p className="font-mono text-sm">
             adjusted rating = raw rating − uncertainty above the accepted floor
           </p>
+          <aside className="method-example">
+            <strong>Example: T1 1559, Gen.G 1557</strong>
+            <p>The two-point gap says their accepted results are close. It comes from the full series history, the strength of each opponent, the links between competitions, and the uncertainty around each estimate. It does not mean that T1 won two more games.</p>
+          </aside>
         </section>
 
         <section id="player-ratings">
           <h2>Player ratings</h2>
           <p>
-            Player ratings use one connected results scale across every
-            accepted competition tier. Complete ten-player games enter one
-            regularized fit. Cross-league events and player transfers connect
-            domestic pools. Competition tier is not a fixed bonus or penalty.
+            Every completed game compares two five-player lineups. A player moves
+            up after a win and down after a loss. The change is larger when the
+            result was less expected from the strength of both lineups. Cross-league
+            events and player transfers connect domestic competitions.
           </p>
           <p>
-            The displayed adjustment is more cautious when a player&apos;s current
-            tier has little direct evidence against a stronger tier. Earlier
-            games in stronger competitions reduce that extra uncertainty. This
-            changes the evidence width, not the fitted rating.
+            All five teammates receive the lineup result, with each player&apos;s
+            uncertainty controlling how quickly their estimate can move. KDA,
+            damage, gold, farm, and vision do not enter this rating. Those statistics
+            belong to the separate game-grade calculation.
           </p>
           <p>
-            This rating tracks team results with the player in the lineup. It
-            does not isolate the player&apos;s individual contribution. The game
-            grades below provide that separate performance view. The current
-            team, role, and league come from the latest accepted domestic
-            appearance.
+            The displayed adjustment becomes more cautious when a player has wide
+            uncertainty or weak links to stronger competitions. Earlier games in
+            connected competitions reduce that uncertainty.
           </p>
           <p>
             The evidence label checks precision, stability, freshness, sample
-            support, and active status. Current rankings include active teams
+            support, and active status. These checks are not averaged into the
+            rating and do not carry equal weights. They decide how confidently the
+            site can describe the estimate. Current rankings include active teams
             and players. Historical profile pages remain available by direct link.
           </p>
         </section>
@@ -95,7 +101,9 @@ export default function MethodologyPage() {
             from all regions, leagues, and tournaments enter the same patch
             pool. The calculation controls for team strength and side. A
             champion needs verified appearances in the selected patch and role
-            to enter a performance board.
+            to enter a performance board. The minimum-games filter uses this
+            patch-wide appearance count and removes thin samples from the visible
+            performance and matchup views.
           </p>
           <p>
             Blind tiers show the expected edge in a champion&apos;s weakest common

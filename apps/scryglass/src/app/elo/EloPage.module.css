@@ -18,7 +18,7 @@
   color: var(--ink);
   font-family: var(--font-display), serif;
   font-size: clamp(2.5rem, 4.8vw, 4.75rem);
-  font-weight: 400;
+  font-weight: 650;
   letter-spacing: -0.025em;
   line-height: 0.98;
 }
@@ -55,6 +55,44 @@
   text-decoration-color: var(--accent);
 }
 
+.ratingExplainer {
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.ratingExplainer summary {
+  padding: 0.75rem 0;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.ratingExplainer > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  gap: 1rem 1.5rem;
+  align-items: start;
+  padding: 0 0 1rem 1.2rem;
+}
+
+.ratingExplainer p {
+  max-width: 58ch;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.ratingExplainer p strong {
+  color: var(--ink);
+}
+
+.ratingExplainer a {
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
 @media (max-width: 760px) {
   .page {
     gap: 0.75rem;
@@ -77,5 +115,10 @@
     margin-top: 0.75rem;
     font-size: 0.875rem;
     white-space: normal;
+  }
+
+  .ratingExplainer > div {
+    grid-template-columns: 1fr;
+    padding-left: 0;
   }
 }

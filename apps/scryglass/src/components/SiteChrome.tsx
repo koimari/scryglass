@@ -133,6 +133,11 @@ export function SiteFooter() {
         <span>Completed professional games</span>
         <Link href="/methodology" className="row-link">Method</Link>
       </div>
+      <div className="site-footer-contact" aria-label="Contact">
+        <span>Questions</span>
+        <a href="https://x.com/ninarin00" target="_blank" rel="noreferrer">X @ninarin00</a>
+        <a href="https://discord.com/app" target="_blank" rel="noreferrer" title="Open Discord and message @ninarin">Discord @ninarin</a>
+      </div>
     </footer>
   );
 }

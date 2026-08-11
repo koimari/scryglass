@@ -23,6 +23,7 @@ import {
 } from "@/lib/pack";
 import { playerPortrait, type PlayerVisualIdentity } from "@/lib/playerPortraits";
 import { PlayerPortrait } from "./PlayerPortrait";
+import { RecentGames } from "./RecentGames";
 import { TeamMark } from "./TeamMark";
 import styles from "./RatingProfiles.module.css";
 
@@ -104,10 +105,6 @@ function playerInGame(game: ProfileGame, player: string): ProfileParticipant | u
   return game.players.find((participant) => participant.player.toLowerCase() === player.toLowerCase());
 }
 
-function teamWon(game: ProfileGame, team: string): boolean {
-  return game.blue_team.toLowerCase() === team.toLowerCase() ? game.blue_win === 1 : game.blue_win === 0;
-}
-
 function scoreGrade(score: number): string {
   if (score >= 90) return "A+";
   if (score >= 75) return "A";
@@ -115,15 +112,6 @@ function scoreGrade(score: number): string {
   if (score >= 35) return "C";
   if (score >= 15) return "D";
   return "F";
-}
-
-function gradeMeaning(grade: string): string {
-  if (grade === "A+" || grade === "A") return "Standout";
-  if (grade === "B") return "Strong";
-  if (grade === "C") return "Typical";
-  if (grade === "D") return "Below standard";
-  if (grade === "F") return "Poor";
-  return "Pending";
 }
 
 function gradeSignal(grade: Extract<ProfileGrade, { status: "available" }>): string {
@@ -138,11 +126,6 @@ function gradeSignal(grade: Extract<ProfileGrade, { status: "available" }>): str
     .slice(0, 2)
     .map((signal) => signal.value >= 0 ? signal.positive : signal.negative);
   return signals.join(" · ") || "Near all baselines";
-}
-
-function gradeTitle(grade: Extract<ProfileGrade, { status: "available" }>): string {
-  const direction = (value: number) => value >= 0.25 ? "above" : value <= -0.25 ? "below" : "near";
-  return `Grade ${grade.grade}, score ${grade.score.toFixed(1)}. Usual form: ${direction(grade.components.self)}. Teammates: ${direction(grade.components.team)}. Opposing role: ${direction(grade.components.opponent)}. League-role baseline: ${direction(grade.components.league_role)}. Full-game output matters more than KDA alone.`;
 }
 
 function gameLanguage(value: string): string {
@@ -176,51 +159,6 @@ function ChampionPortrait({ name, imageUrl, size = "small" }: { name: string | n
         <img src={imageUrl} alt={name ?? "Champion"} loading="lazy" />
       ) : <span aria-hidden>{name?.slice(0, 1) ?? "?"}</span>}
     </span>
-  );
-}
-
-function RecentMatches({ games, championImages, player, team }: { games: ProfileGame[]; championImages: Record<string, string>; player?: string; team?: string }) {
-  if (!games.length) return <p className={styles.empty}>Recent match details are waiting for the next accepted data refresh.</p>;
-  return (
-    <div className={styles.matchList}>
-      {games.map((game) => {
-        const participant = player ? playerInGame(game, player) : undefined;
-        const focusTeam = participant
-          ? participant.side === "Blue" ? game.blue_team : game.red_team
-          : team ?? "";
-        const won = focusTeam ? teamWon(game, focusTeam) : false;
-        const opponent = game.blue_team.toLowerCase() === focusTeam.toLowerCase() ? game.red_team : game.blue_team;
-        const availableGrade = participant?.grade?.status === "available" ? participant.grade : null;
-        const grade = availableGrade?.grade ?? "—";
-        return (
-          <Link className={`${styles.matchRow} ${participant ? styles.playerMatch : styles.teamMatch}`} href={`/matches/${encodeURIComponent(game.game_id)}`} key={game.game_id}>
-            <span className={`${styles.resultMark} ${won ? styles.win : styles.loss}`}>{won ? "W" : "L"}</span>
-            {participant ? <ChampionPortrait name={participant.champion} imageUrl={participant.champion ? championImages[participant.champion] : null} /> : null}
-            <div className={styles.matchMain}>
-              <strong>{(participant?.champion ?? opponent) || `${game.blue_team} vs ${game.red_team}`}</strong>
-              <small>
-                {game.league} · {shortDate(game.date)}{participant
-                  ? ""
-                  : ` · ${game.blue_team === focusTeam ? "Blue" : "Red"} side`}
-              </small>
-            </div>
-            {participant ? (
-              <div className={styles.matchOpponent} title={`Versus ${opponent}`}>
-                <span>vs</span>
-                <TeamMark team={opponent} size="small" />
-              </div>
-            ) : null}
-            {participant ? (
-              <div className={styles.matchScore} title={availableGrade ? gradeTitle(availableGrade) : "Grade unavailable."}>
-                <strong>{grade}{availableGrade ? <em>{availableGrade.score.toFixed(0)}</em> : null}</strong>
-                <small>{availableGrade ? gradeSignal(availableGrade) : gradeMeaning(grade)}</small>
-                <span>{participant.kills ?? "—"} / {participant.deaths ?? "—"} / {participant.assists ?? "—"}</span>
-              </div>
-            ) : null}
-          </Link>
-        );
-      })}
-    </div>
   );
 }
 
@@ -324,7 +262,7 @@ export function TeamRatingProfile({
 
       <section className={styles.section}>
         <div className={styles.sectionHeader}><div><p>Latest results</p><h2>Recent games</h2></div><Link className="row-link" href="/matches">All matches →</Link></div>
-        <RecentMatches games={recentGames} championImages={championImages} team={team.team} />
+        <RecentGames games={recentGames} championImages={championImages} team={team.team} />
       </section>
     </div>
   );
@@ -463,6 +401,10 @@ export function PlayerRatingProfile({
         <div><dt>Updated</dt><dd>{packUpdatedLabel(manifest)}</dd></div>
       </dl>
 
+      <p className={styles.confidenceNote}>
+        <strong>Confidence is a data-quality label.</strong> Precision, stability, freshness, sample support, and active status are checks around the rating. They are not five equal parts of the score. The adjusted rating separately becomes more cautious when uncertainty is high.
+      </p>
+
       <section className={styles.section}>
         <div className={styles.sectionHeader}><div><p>Latest results</p><h2>Recent games</h2></div><Link className="row-link" href="/matches">All matches →</Link></div>
         <aside className={styles.gradeGuide} aria-label="Game grade guide">
@@ -472,9 +414,9 @@ export function PlayerRatingProfile({
           <span>C typical</span>
           <span>D below standard</span>
           <span>F poor</span>
-          <small>Kill participation, survival, damage, gold, farm, and vision are compared with 4 baselines. Champion choice is not a baseline.</small>
+          <small>Kill participation, survival, damage, gold, farm, and vision are compared with 4 baselines. Champion choice is not a baseline. <Link className="row-link" href="/methodology#game-grades">How grades work</Link></small>
         </aside>
-        <RecentMatches games={recentGames} championImages={championImages} player={player.player} />
+        <RecentGames games={recentGames} championImages={championImages} player={player.player} />
       </section>
 
       <section className={styles.section}>

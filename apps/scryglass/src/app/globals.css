@@ -24,6 +24,7 @@
   --motion-base: 240ms;
   --text-micro: 0.72rem;
   --text-small: 0.82rem;
+  --font-display: var(--font-ui);
   --shadow-float: 0 0.75rem 2rem rgb(0 0 0 / 10%);
   --shadow-hover: 0 0.65rem 1.5rem rgb(0 0 0 / 8%);
 }
@@ -42,24 +43,6 @@
   --accent-ink: #f6f6f3;
   --danger: #ff7b83;
   --signal-positive: #73c9bd;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) {
-    color-scheme: dark;
-    --canvas: #050505;
-    --surface: #191918;
-    --surface-subtle: #252523;
-    --ink: #fffefa;
-    --ink-muted: #ccccc5;
-    --ink-faint: #a3a39c;
-    --line: #4b4b47;
-    --line-strong: #92928b;
-    --accent: #f6f6f3;
-    --accent-ink: #f6f6f3;
-    --danger: #ff7b83;
-    --signal-positive: #73c9bd;
-  }
 }
 
 * {
@@ -336,6 +319,12 @@ html[data-scroll-motion="ready"][data-scrolled="true"] .site-header-inner {
   color: var(--ink);
 }
 
+.site-footer-contact a {
+  color: var(--ink);
+  font-weight: 600;
+  text-underline-offset: 0.2em;
+}
+
 .row-link {
   color: var(--ink);
   text-decoration-color: var(--accent);
@@ -382,7 +371,7 @@ html[data-scroll-motion="ready"][data-scrolled="true"] .site-header-inner {
   margin: 0;
   font-family: var(--font-display), serif;
   font-size: clamp(3rem, 7vw, 6rem);
-  font-weight: 400;
+  font-weight: 650;
   letter-spacing: -0.025em;
   line-height: 0.96;
 }
@@ -418,6 +407,22 @@ html[data-scroll-motion="ready"][data-scrolled="true"] .site-header-inner {
 
 .method-content p + p {
   margin-top: 0.9rem;
+}
+
+.method-example {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.method-example strong {
+  color: var(--ink);
+}
+
+.method-example p {
+  margin-top: 0.35rem;
 }
 
 .skeleton-block {
@@ -466,7 +471,7 @@ html[data-scroll-motion="ready"][data-scrolled="true"] .site-header-inner {
     left: 0;
     z-index: 42;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     padding: 0.75rem 1rem;
     border-bottom: 1px solid var(--line);
     border-radius: 0 0 var(--radius-lg) var(--radius-lg);

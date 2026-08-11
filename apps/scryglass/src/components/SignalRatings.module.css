@@ -329,7 +329,7 @@
   margin: 0.15rem 0 0;
   font-family: var(--font-display), serif;
   font-size: clamp(2.8rem, 5vw, 5.2rem);
-  font-weight: 400;
+  font-weight: 650;
   letter-spacing: -0.025em;
   line-height: 0.9;
 }
@@ -661,11 +661,7 @@
   }
 
   .rankingRail {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(8rem, 1fr));
-    overflow-x: auto;
-    border-right: 0 !important;
-    border-bottom: 1px solid var(--line-strong);
+    display: none;
   }
 
   .rankingRail header {
@@ -678,7 +674,7 @@
   }
 
   .featured {
-    padding: 1rem 0;
+    padding: 1rem;
   }
 
   .featureIdentity {
