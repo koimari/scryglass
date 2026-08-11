@@ -128,6 +128,32 @@
   background: var(--surface);
 }
 
+.scopeRow .leagueFilter[open] > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.leagueFilter section {
+  min-width: 0;
+}
+
+.leagueFilter section > strong {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.leagueFilter section > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .summaryLine {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -361,6 +387,14 @@
   object-fit: cover;
 }
 
+.championEmpty {
+  display: block;
+  width: clamp(3rem, 4.5vw, 4rem);
+  height: clamp(3rem, 4.5vw, 4rem);
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
 .featured footer {
   display: flex;
   flex-wrap: wrap;
@@ -496,6 +530,11 @@
   height: 2.15rem;
 }
 
+.ratingCard .championEmpty {
+  width: 2.15rem;
+  height: 2.15rem;
+}
+
 .ratingCard .formStrip i {
   width: 1.2rem;
   height: 1.2rem;
@@ -556,6 +595,12 @@
 
   .scopeRow details {
     margin-left: 0;
+  }
+
+  .scopeRow .leagueFilter[open] > div {
+    grid-template-columns: 1fr;
+    max-height: 60vh;
+    overflow-y: auto;
   }
 
   .summaryLine {
@@ -631,6 +676,7 @@
   }
 
   .cardVisuals {
+    flex-direction: column;
     align-items: flex-start;
   }
 

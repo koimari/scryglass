@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   adjustedRating,
   formatWr,
+  isActiveRating,
   playerMatchesQuery,
   playerSlug,
   recordMatchesLeagues,
@@ -19,12 +20,10 @@ import {
   type PlayerRating,
   type PlayerRecord,
   type PlayerWeeklyRanks,
-  type ProfileGame,
-  type ProfileParticipant,
-  type ProfileRecords,
   type TeamRating,
   type TeamRecord,
   type TeamWeeklyRanks,
+  type CompetitionTier,
 } from "@/lib/pack";
 import { evidenceFields, evidenceInfo, formatEvidenceCell } from "@/lib/evidence";
 import { TeamMark } from "./TeamMark";
@@ -38,8 +37,16 @@ type Props = {
   playerRecords: Record<string, PlayerRecord>;
   playerWeeklyRanks: PlayerWeeklyRanks;
   playerMetadata: Record<string, PlayerMetadata>;
-  availableLeagues: string[];
-  profileRecords: ProfileRecords | null;
+  availableLeaguesByTier: Record<CompetitionTier, string[]>;
+  championImages: Record<string, string>;
+  playerChampionPicks: Record<string, ChampionPick[]>;
+  recentForms: Record<Tab, Record<string, boolean[]>>;
+  teamChampionPicks: Record<string, ChampionPick[]>;
+};
+
+type ChampionPick = {
+  champion: string;
+  label: string;
 };
 
 type Tab = "teams" | "players";
@@ -78,36 +85,6 @@ function parseLeagues(value: string | null): string[] {
   return value?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
 }
 
-function gameList(records: ProfileRecords | null, ids: string[] | undefined): ProfileGame[] {
-  if (!records || !ids) return [];
-  return ids
-    .map((id) => records.games[id])
-    .filter((game): game is ProfileGame => Boolean(game))
-    .sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
-}
-
-function teamWon(game: ProfileGame, team: string): boolean {
-  if (game.blue_team.toLowerCase() === team.toLowerCase()) return game.blue_win === 1;
-  return game.blue_win === 0;
-}
-
-function participantFor(game: ProfileGame, player: string): ProfileParticipant | undefined {
-  return game.players.find((participant) => participant.player.toLowerCase() === player.toLowerCase());
-}
-
-function playerWon(game: ProfileGame, player: string): boolean | null {
-  const participant = participantFor(game, player);
-  if (!participant) return null;
-  return participant.side === "Blue" ? game.blue_win === 1 : game.blue_win === 0;
-}
-
-function recentForm(games: ProfileGame[], entity: string, tab: Tab): boolean[] {
-  return games.slice(0, 10).flatMap((game) => {
-    const won = tab === "teams" ? teamWon(game, entity) : playerWon(game, entity);
-    return won == null ? [] : [won];
-  });
-}
-
 function FormStrip({ form }: { form: boolean[] }) {
   if (!form.length) return <span className={styles.formEmpty}>Awaiting recent maps</span>;
   return (
@@ -117,29 +94,15 @@ function FormStrip({ form }: { form: boolean[] }) {
   );
 }
 
-function ChampionStrip({ games, entity, tab, images, limit = 5 }: { games: ProfileGame[]; entity: string; tab: Tab; images: Record<string, string>; limit?: number }) {
-  const champions: string[] = [];
-  for (const game of games) {
-    const participants = tab === "players"
-      ? [participantFor(game, entity)].filter((participant): participant is ProfileParticipant => Boolean(participant))
-      : game.players.filter((participant) => {
-          const team = participant.side === "Blue" ? game.blue_team : game.red_team;
-          return team.toLowerCase() === entity.toLowerCase();
-        });
-    for (const participant of participants) {
-      if (participant.champion && !champions.includes(participant.champion)) champions.push(participant.champion);
-      if (champions.length >= limit) break;
-    }
-    if (champions.length >= limit) break;
-  }
-  if (!champions.length) return null;
+function ChampionStrip({ picks, images }: { picks: ChampionPick[]; images: Record<string, string> }) {
+  const slots = Array.from({ length: 5 }, (_, index) => picks[index] ?? null);
   return (
-    <span className={styles.championStrip} aria-label={`Recent champions: ${champions.join(", ")}`}>
-      {champions.map((champion) => images[champion] ? (
+    <span className={styles.championStrip} aria-label={`Best champions: ${picks.map((pick) => pick.champion).join(", ") || "unavailable"}`}>
+      {slots.map((pick, index) => pick && images[pick.champion] ? (
         // CommunityDragon supplies the champion portraits in the published pack.
         // eslint-disable-next-line @next/next/no-img-element
-        <img key={champion} src={images[champion]} alt={champion} title={champion} loading="lazy" />
-      ) : null)}
+        <img key={`${pick.champion}-${index}`} src={images[pick.champion]} alt={pick.champion} title={pick.label} loading="lazy" />
+      ) : <i key={`empty-${index}`} className={styles.championEmpty} aria-label="Champion record unavailable" />)}
     </span>
   );
 }
@@ -152,8 +115,11 @@ export function SignalRatings({
   playerRecords,
   playerWeeklyRanks,
   playerMetadata,
-  availableLeagues,
-  profileRecords,
+  availableLeaguesByTier,
+  championImages,
+  playerChampionPicks,
+  recentForms,
+  teamChampionPicks,
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -190,7 +156,7 @@ export function SignalRatings({
   };
 
   const filteredTeams = useMemo(() => {
-    const list = teams.filter((team) => teamMatchesQuery(team.team, query) && recordMatchesLeagues(teamRecords[team.team], leagues));
+    const list = teams.filter((team) => isActiveRating(team) && teamMatchesQuery(team.team, query) && recordMatchesLeagues(teamRecords[team.team], leagues));
     return [...list].sort((a, b) => {
       if (sort === "name") return a.team.localeCompare(b.team);
       if (sort === "games") return (b.n_maps ?? 0) - (a.n_maps ?? 0);
@@ -203,6 +169,7 @@ export function SignalRatings({
 
   const filteredPlayers = useMemo(() => {
     const list = players
+      .filter(isActiveRating)
       .filter((player) => player.n_maps >= minGames)
       .filter((player) => {
         const record = playerRecords[player.player];
@@ -234,10 +201,7 @@ export function SignalRatings({
   const featured = entities.find((entity) => entityName(entity) === selected) ?? entities[0];
   const featuredName = featured ? entityName(featured) : "";
   const featuredRecord = featuredName ? (tab === "teams" ? teamRecords[featuredName] : playerRecords[featuredName]) : undefined;
-  const featuredGames = featuredName
-    ? gameList(profileRecords, tab === "teams" ? profileRecords?.teams[featuredName] : profileRecords?.players[featuredName])
-    : [];
-  const featuredForm = recentForm(featuredGames, featuredName, tab);
+  const featuredForm = recentForms[tab][featuredName] ?? [];
   const featuredTrust = featured
     ? evidenceInfo(
         evidenceFields(featured as unknown as Record<string, unknown>),
@@ -252,6 +216,16 @@ export function SignalRatings({
     .slice(0, 5);
   const selectedTiers = leagues.filter((league) => league.startsWith("TIER"));
   const selectedLeagues = leagues.filter((league) => !league.startsWith("TIER"));
+  const selectedTierKey = selectedTiers.length === 1
+    ? selectedTiers[0].toLowerCase() as CompetitionTier
+    : null;
+  const leagueGroups = (selectedTierKey
+    ? TIER_FILTERS.filter((tier) => tier.value.toLowerCase() === selectedTierKey)
+    : TIER_FILTERS
+  ).map((tier) => ({
+    ...tier,
+    leagues: availableLeaguesByTier[tier.value.toLowerCase() as CompetitionTier],
+  })).filter((group) => group.leagues.length);
   const scope = [...selectedTiers.map((tier) => TIER_FILTERS.find((item) => item.value === tier)?.label ?? tier), ...selectedLeagues].join(" · ") || "All levels";
   const topScore = featured ? ratingOf(entities[0]) : null;
   const featuredTeam = tab === "teams"
@@ -259,7 +233,12 @@ export function SignalRatings({
     : (featuredRecord as PlayerRecord | undefined)?.current_team ?? (featured as PlayerRating | undefined)?.last_team;
 
   const setTier = (tier: string | null) => {
-    setLeagues((current) => [...current.filter((league) => !league.startsWith("TIER")), ...(tier ? [tier] : [])]);
+    setLeagues((current) => {
+      const selectedCurrentLeagues = current.filter((league) => !league.startsWith("TIER"));
+      if (!tier) return selectedCurrentLeagues;
+      const allowed = new Set(availableLeaguesByTier[tier.toLowerCase() as CompetitionTier]);
+      return [...selectedCurrentLeagues.filter((league) => allowed.has(league)), tier];
+    });
     setExpanded(false);
   };
 
@@ -290,7 +269,7 @@ export function SignalRatings({
           <span>Level</span>
           <button type="button" className={!selectedTiers.length ? styles.scopeActive : ""} onClick={() => setTier(null)}>All</button>
           {TIER_FILTERS.map((tier) => <button key={tier.value} type="button" className={leagues.includes(tier.value) ? styles.scopeActive : ""} onClick={() => setTier(tier.value)}>{tier.label}</button>)}
-          <details><summary>Leagues {selectedLeagues.length ? `(${selectedLeagues.length})` : ""}</summary><div>{availableLeagues.map((league) => <button key={league} type="button" className={leagues.includes(league) ? styles.scopeActive : ""} onClick={() => toggleLeague(league)}>{league}</button>)}</div></details>
+          <details className={styles.leagueFilter}><summary>Leagues {selectedLeagues.length ? `(${selectedLeagues.length})` : ""}</summary><div>{leagueGroups.map((group) => <section key={group.value}><strong>{group.label}</strong><div>{group.leagues.map((league) => <button key={league} type="button" className={leagues.includes(league) ? styles.scopeActive : ""} onClick={() => toggleLeague(league)}>{league}</button>)}</div></section>)}</div></details>
         </div>
       </section>
 
@@ -318,7 +297,7 @@ export function SignalRatings({
                 <dl><div><dt>Rating</dt><dd>{ratingOf(featured).toFixed(0)}</dd></div><div><dt>Movement</dt><dd className={(deltaOf(featuredName) ?? 0) > 0 ? styles.positive : (deltaOf(featuredName) ?? 0) < 0 ? styles.negative : ""}>{rankDeltaLabel(deltaOf(featuredName))}</dd></div></dl>
               </header>
               <div className={styles.featureBody}>
-                <div className={styles.featureForm}><span>Recent form</span><FormStrip form={featuredForm} /><ChampionStrip games={featuredGames} entity={featuredName} tab={tab} images={profileRecords?.champion_images ?? {}} /></div>
+                <div className={styles.featureForm}><span>Best champions</span><ChampionStrip picks={(tab === "teams" ? teamChampionPicks : playerChampionPicks)[featuredName] ?? []} images={championImages} /><span>Recent form</span><FormStrip form={featuredForm} /></div>
               </div>
               <footer>
                 <span>{featuredTrust ? formatEvidenceCell(featuredTrust) : "Confidence unavailable"}</span>
@@ -343,8 +322,7 @@ export function SignalRatings({
               {visible.map((entity, index) => {
                 const name = entityName(entity);
                 const record = tab === "teams" ? teamRecords[name] : playerRecords[name];
-                const games = gameList(profileRecords, tab === "teams" ? profileRecords?.teams[name] : profileRecords?.players[name]);
-                const form = recentForm(games, name, tab);
+                const form = recentForms[tab][name] ?? [];
                 const entityTeam = tab === "teams" ? name : (record as PlayerRecord | undefined)?.current_team ?? (entity as PlayerRating).last_team;
                 return (
                   <Link className={styles.ratingCard} href={tab === "teams" ? `/elo/team/${teamSlug(name)}` : `/elo/player/${playerSlug(name)}`} key={name}>
@@ -352,7 +330,7 @@ export function SignalRatings({
                     <div className={styles.cardIdentity}><TeamMark team={entityTeam} size="medium" /><div><h3>{tab === "players" && playerMetadata[name]?.flag ? `${playerMetadata[name].flag} ` : ""}{name}</h3><p>{tab === "teams" ? formatAffiliation((record as TeamRecord | undefined)?.current_tier, (record as TeamRecord | undefined)?.current_league ?? (record as TeamRecord | undefined)?.primary) : `${(record as PlayerRecord | undefined)?.current_team ?? (entity as PlayerRating).last_team ?? "Independent"} · ${roleLabel((record as PlayerRecord | undefined)?.primary_role)}`}</p></div></div>
                     <strong>{ratingOf(entity).toFixed(0)}</strong>
                     <span className={(deltaOf(name) ?? 0) > 0 ? styles.positive : (deltaOf(name) ?? 0) < 0 ? styles.negative : ""}>{rankDeltaLabel(deltaOf(name))}</span>
-                    <div className={styles.cardVisuals}><ChampionStrip games={games} entity={name} tab={tab} images={profileRecords?.champion_images ?? {}} limit={3} /><FormStrip form={form.slice(0, 5)} /></div>
+                    <div className={styles.cardVisuals}><ChampionStrip picks={(tab === "teams" ? teamChampionPicks : playerChampionPicks)[name] ?? []} images={championImages} /><FormStrip form={form} /></div>
                   </Link>
                 );
               })}

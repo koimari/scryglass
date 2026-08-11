@@ -8,7 +8,7 @@ import type {
   ProfileRecords,
   TeamRating,
 } from "@/lib/pack";
-import { compactPlayerRatings, findPlayerByRouteName, PLAYER_SIGMA_MIN, softMu } from "@/lib/pack";
+import { compactPlayerRatings, findPlayerByRouteName, isActiveRating, PLAYER_SIGMA_MIN, softMu } from "@/lib/pack";
 import { playerPortrait } from "@/lib/playerPortraits";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
@@ -53,7 +53,7 @@ export default async function PlayerEloPage({ params }: Props) {
   const tier = rec?.current_tier;
   const role = rec?.primary_role;
   const eligible = players
-    .filter((candidate) => candidate.n_maps >= 20 && candidate.evidence_active !== 0)
+    .filter((candidate) => candidate.n_maps >= 20 && isActiveRating(candidate))
     .filter((candidate) => playerRecords[candidate.player]?.current_tier === tier)
     .sort(
       (a, b) =>
