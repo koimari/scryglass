@@ -445,6 +445,50 @@ def test_supabase_no_change_reuses_the_active_tier(tmp_path: Path) -> None:
     assert result["cache_invalidation"] is None
 
 
+def test_supabase_tier_failure_stops_before_publication_and_cache(tmp_path: Path) -> None:
+    config = replace(
+        _config(tmp_path),
+        publication_backend="supabase",
+        supabase_url="https://example.supabase.co",
+        supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    config.public_root.mkdir(parents=True)
+    (config.public_root / "manifest.json").write_text(
+        json.dumps({"pack_id": "old", "tier": {"status": "available"}}),
+        encoding="utf-8",
+    )
+    ratings = {
+        "status": "published",
+        "pack_id": "new",
+        "source_observed_through": "2026-08-11T10:50:41Z",
+    }
+
+    with patch.object(public_refresh, "_preflight"), patch.object(
+        public_refresh,
+        "seed_supabase_continuity",
+        return_value={"status": "current"},
+    ), patch.object(
+        public_refresh,
+        "_run_with_source_retries",
+        return_value=ratings,
+    ), patch.object(
+        public_refresh,
+        "_run_tier_refresh",
+        side_effect=RuntimeError("bundle failed"),
+    ), patch.object(
+        public_refresh.supabase_publication,
+        "publish_release",
+    ) as publish, patch.object(
+        public_refresh,
+        "invalidate_public_cache",
+    ) as invalidate:
+        with pytest.raises(public_refresh.PublicRefreshError, match="bundle failed"):
+            public_refresh.run_once(config, now=NOW)
+
+    publish.assert_not_called()
+    invalidate.assert_not_called()
+
+
 def test_http_read_retries_transient_statuses(monkeypatch: pytest.MonkeyPatch) -> None:
     class Response:
         def __enter__(self):
