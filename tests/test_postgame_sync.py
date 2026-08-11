@@ -20,10 +20,20 @@ from lol_kills.postgame_sync import (
     validate_live_source,
     validate_pack,
     validate_source_continuity,
+    exclusive_lock,
+    SyncAlreadyRunning,
 )
 
 
 NOW = datetime(2026, 8, 9, 18, tzinfo=timezone.utc)
+
+
+def test_exclusive_lock_rejects_overlapping_refreshes(tmp_path: Path) -> None:
+    lock = tmp_path / "runtime/refresh.lock"
+    with exclusive_lock(lock):
+        with pytest.raises(SyncAlreadyRunning):
+            with exclusive_lock(lock):
+                pass
 
 
 def test_browser_refreshed_source_skips_network_download(
@@ -255,6 +265,102 @@ def test_complete_new_game_publishes_manifest_last(tmp_path: Path) -> None:
     pointer = json.loads((config.public_root / "manifest.json").read_text())
     assert pointer["pack_id"] == result["pack_id"]
     assert not (config.public_root / "latest.json").exists()
+    assert pointer["release"]["release_id"] == result["pack_id"]
+    assert len(pointer["release"]["worker_commit"]) == 40
+    assert pointer["release"]["canonical_game_identity_digest"]
+
+
+def test_corrected_game_rebuilds_when_no_identity_is_new(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    _write_receipt(tmp_path, ["game-1"])
+    config.state_path.parent.mkdir(parents=True)
+    config.state_path.write_text(
+        json.dumps({"published_game_ids": ["game-1"]}),
+        encoding="utf-8",
+    )
+
+    def ingest(root: Path, **_kwargs):
+        _write_receipt(root, ["game-1"])
+        return {
+            "source_latest": "2026-08-09T17:00:00Z",
+            "accepted_import_receipt": {
+                "accepted_games": 1,
+                "new_games": 0,
+                "corrected_games": 1,
+                "unchanged_games": 0,
+                "quarantined_games": 0,
+            },
+        }
+
+    def build(root: Path):
+        _write_live(root, ["game-1"])
+        return {}
+
+    def export(*, out_root: Path, pack_id: str, **kwargs):
+        assert kwargs["allowed_game_ids"] == ["game-1"]
+        return _manifest(out_root / pack_id, ["game-1"])
+
+    result = sync_once(
+        config,
+        now=NOW,
+        ingest_fn=ingest,
+        build_live_fn=build,
+        export_pack_fn=export,
+    )
+
+    assert result["status"] == "published"
+    manifest = json.loads((config.public_root / "manifest.json").read_text())
+    assert manifest["release"]["corrected_games"] == 1
+
+
+def test_unpublished_source_hash_retries_after_import_receipt_becomes_current(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    _write_receipt(tmp_path, ["game-1"])
+    config.state_path.parent.mkdir(parents=True)
+    config.state_path.write_text(
+        json.dumps(
+            {
+                "published_game_ids": ["game-1"],
+                "source_file_sha256": "a" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def ingest(root: Path, **_kwargs):
+        _write_receipt(root, ["game-1"])
+        return {
+            "source_latest": "2026-08-09T17:00:00Z",
+            "accepted_import_receipt": {
+                "source_file_sha256": "b" * 64,
+                "accepted_games": 1,
+                "new_games": 0,
+                "corrected_games": 0,
+                "unchanged_games": 1,
+                "quarantined_games": 0,
+            },
+        }
+
+    def build(root: Path):
+        _write_live(root, ["game-1"])
+        return {}
+
+    def export(*, out_root: Path, pack_id: str, **_kwargs):
+        return _manifest(out_root / pack_id, ["game-1"])
+
+    result = sync_once(
+        config,
+        now=NOW,
+        ingest_fn=ingest,
+        build_live_fn=build,
+        export_pack_fn=export,
+    )
+
+    assert result["status"] == "published"
+    state = json.loads(config.state_path.read_text(encoding="utf-8"))
+    assert state["source_file_sha256"] == "b" * 64
 
 
 def test_pack_publication_updates_blob_pointer_without_a_site_build(tmp_path: Path, monkeypatch) -> None:

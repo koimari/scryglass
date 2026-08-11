@@ -225,6 +225,34 @@ def load_refresh_receipt(path: Path) -> dict[str, Any]:
     return payload
 
 
+def validate_accepted_source_receipt(
+    receipt_path: Path,
+    csv_path: Path,
+    year: str | int,
+) -> dict[str, Any]:
+    """Verify that one transport receipt authorizes the exact annual CSV bytes."""
+
+    receipt = load_refresh_receipt(receipt_path.expanduser().resolve())
+    expected_year = str(year)
+    candidate = receipt.get("candidate")
+    if receipt.get("year") != expected_year or not isinstance(candidate, dict):
+        raise OeDownloadError("OE source receipt year does not match the requested import")
+    source = csv_path.expanduser().resolve()
+    validated = _validate_oe_csv(source, expected_year)
+    if candidate.get("raw_sha256") != validated["raw_sha256"]:
+        raise OeDownloadError("OE source receipt does not bind the requested CSV bytes")
+    for field in ("bytes", "row_count", "game_count", "columns_sha256", "date_max_utc"):
+        if candidate.get(field) != validated[field]:
+            raise OeDownloadError(f"OE source receipt field does not match the CSV: {field}")
+    return {
+        "receipt_path": str(receipt_path.expanduser().resolve()),
+        "receipt_canonical_sha256": receipt["receipt_canonical_sha256"],
+        "year": expected_year,
+        "status": receipt.get("status"),
+        **validated,
+    }
+
+
 def oe_csv_path(year: str | int) -> Path:
     y = str(year)
     return RAW_OE_DIR / f"{y}_LoL_esports_match_data_from_OraclesElixir.csv"
@@ -840,10 +868,24 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--install-browser-candidate", type=Path)
     parser.add_argument("--year")
+    parser.add_argument("--receipt-output", type=Path)
     arguments = parser.parse_args()
     if arguments.install_browser_candidate is not None:
         if not arguments.year:
             parser.error("--year is required with --install-browser-candidate")
-        install_browser_download(arguments.install_browser_candidate, arguments.year)
+        installed = install_browser_download(arguments.install_browser_candidate, arguments.year)
+        if arguments.receipt_output is not None:
+            source = _validate_oe_csv(installed, str(arguments.year))
+            matches = sorted(
+                OE_RECEIPT_DIR.glob(
+                    f"oe-{arguments.year}-*-{source['raw_sha256'][:16]}.json"
+                ),
+                key=lambda path: path.stat().st_mtime_ns,
+            )
+            if not matches:
+                raise OeDownloadError("installed browser source has no transport receipt")
+            validate_accepted_source_receipt(matches[-1], installed, arguments.year)
+            arguments.receipt_output.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(matches[-1], arguments.receipt_output)
     else:
         ingest_oe(download=False)

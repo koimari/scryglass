@@ -178,6 +178,61 @@ class SupabasePublicData:
             if isinstance(row.get("path"), str)
         }
 
+    def write_refresh_run(self, payload: dict[str, Any]) -> None:
+        fields = {
+            key: payload.get(key)
+            for key in (
+                "run_id",
+                "scheduled_for",
+                "retry_of",
+                "status",
+                "stage",
+                "input_fingerprint",
+                "worker_commit",
+                "source_file_sha256",
+                "source_observed_through",
+                "release_id",
+                "accepted_games",
+                "new_games",
+                "corrected_games",
+                "unchanged_games",
+                "quarantined_games",
+                "stage_durations",
+                "failure_code",
+                "failure_detail",
+                "started_at",
+                "completed_at",
+            )
+        }
+        fields["updated_at"] = payload.get("updated_at")
+        self._request(
+            "POST",
+            "scryglass_refresh_runs?on_conflict=run_id",
+            [fields],
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+
+    def write_public_health(self, payload: dict[str, Any]) -> None:
+        row = {
+            "health_id": "public-refresh",
+            "status": payload["status"],
+            "refresh_status": payload["refresh_status"],
+            "checked_at": payload["checked_at"],
+            "last_success_at": payload.get("last_success_at"),
+            "source_as_of": payload.get("source_as_of"),
+            "active_release_id": payload.get("active_release_id"),
+            "last_run_id": payload.get("last_run_id"),
+            "worker_commit": payload.get("worker_commit"),
+            "stale": bool(payload.get("stale")),
+            "updated_at": payload["checked_at"],
+        }
+        self._request(
+            "POST",
+            "scryglass_public_health?on_conflict=health_id",
+            [row],
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+
     def storage_object(self, storage_path: str) -> bytes:
         encoded = "/".join(urllib.parse.quote(part, safe="") for part in storage_path.split("/"))
         request = urllib.request.Request(
@@ -430,6 +485,19 @@ def prepare_release(
         "as_of": tier_body.get("as_of"),
         "latest_path": TIER_LATEST_ASSET_PATH,
     }
+    release_metadata = manifest.get("release")
+    if not isinstance(release_metadata, dict):
+        release_metadata = {}
+    artifact_hashes = {
+        str(asset["path"]): str(asset["sha256"])
+        for asset in assets
+    }
+    published_manifest["release"] = {
+        **release_metadata,
+        "release_id": release_id,
+        "tier_list_version": str(tier_body.get("schema_version") or "rankings-tierlists-v2"),
+        "artifact_hashes": artifact_hashes,
+    }
     release = {
         "release_id": release_id,
         "status": "staging",
@@ -439,14 +507,11 @@ def prepare_release(
     return release, assets, storage_objects
 
 
-def _verify_active_release(
+def _verify_release_assets(
     client: SupabasePublicData,
     release_id: str,
     assets: list[dict[str, Any]],
 ) -> None:
-    active = client.active_release()
-    if not active or active.get("release_id") != release_id:
-        raise SupabasePublicationError("Supabase active release readback failed")
     for expected in assets:
         actual = client.asset(release_id, str(expected["path"]))
         if (
@@ -468,6 +533,17 @@ def _verify_active_release(
             raise SupabasePublicationError(
                 f"Supabase asset readback failed: {expected['path']}"
             )
+
+
+def _verify_active_release(
+    client: SupabasePublicData,
+    release_id: str,
+    assets: list[dict[str, Any]],
+) -> None:
+    active = client.active_release()
+    if not active or active.get("release_id") != release_id:
+        raise SupabasePublicationError("Supabase active release readback failed")
+    _verify_release_assets(client, release_id, assets)
 
 
 def publish_release(
@@ -513,8 +589,23 @@ def publish_release(
         assets,
         storage_objects=storage_objects,
     )
+    staged = database.release(release_id)
+    if not staged or staged.get("status") != "staging":
+        raise SupabasePublicationError("Supabase staged release readback failed")
+    _verify_release_assets(database, release_id, assets)
     activation = database.activate(release_id)
-    _verify_active_release(database, release_id, assets)
+    try:
+        _verify_active_release(database, release_id, assets)
+    except Exception:
+        previous_release_id = activation.get("previous_release_id")
+        if isinstance(previous_release_id, str) and previous_release_id:
+            try:
+                database.restore(previous_release_id)
+            except Exception as rollback_error:
+                raise SupabasePublicationError(
+                    "active release verification and rollback failed"
+                ) from rollback_error
+        raise
     pruned = database.prune(retention)
     return {
         "status": "published",

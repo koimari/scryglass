@@ -6,8 +6,12 @@ umask 077
 worker_root="${SCRYGLASS_WORKER_ROOT:-${HOME}/Library/Application Support/Scryglass Worker}"
 repo_root="${worker_root}/repo"
 public_root="${worker_root}/public-packs"
+runtime_root="${worker_root}/runtime"
 python="${worker_root}/venv/bin/python"
 oe_inbox="${worker_root}/oe-inbox"
+cycle_id="$("${python}" -c 'from datetime import datetime; now=datetime.now(); print(f"{now:%Y%m%d}T{now.hour // 6 * 6:02d}0000")')"
+run_root="${runtime_root}/data/lol/runtime/cycles/${cycle_id}"
+worker_lock="${runtime_root}/data/lol/runtime/public-refresh-worker.lock"
 oe_year="2026"
 oe_name="${oe_year}_LoL_esports_match_data_from_OraclesElixir.csv"
 oe_candidate="${oe_inbox}/${oe_name}"
@@ -17,12 +21,14 @@ export PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export SCRYGLASS_PUBLIC_RELEASE=1
 export SCRYGLASS_PUBLISH_ORIGIN="https://scryglass.xyz"
 export SCRYGLASS_PUBLICATION_BACKEND="supabase"
+export SCRYGLASS_RUNTIME_ROOT="${runtime_root}"
 export SCRYGLASS_SUPABASE_URL="https://uytblwbtkwuukbbrugdi.supabase.co"
 export SCRYGLASS_REFRESH_ATTEMPTS=3
 export SCRYGLASS_STEP_TIMEOUT_MINUTES=15
 export SCRYGLASS_STALE_AFTER_HOURS=12
 export SCRYGLASS_OE_BROWSER_REFRESHED=1
 export SCRYGLASS_OE_DATABASE_REFRESHED=1
+export SCRYGLASS_WORKER_COMMIT="$(/usr/bin/git -C "${repo_root}" rev-parse HEAD)"
 export SCRYGLASS_SUPABASE_SECRET_KEY="$(
   /usr/bin/security find-generic-password \
     -a scryglass-public-worker \
@@ -36,37 +42,71 @@ export SCRYGLASS_DATA_PUBLISH_TOKEN="$(
     -w
 )"
 
-mkdir -p "${public_root}" "${worker_root}/logs" "${oe_inbox}"
-rm -f "${oe_candidate}" "${oe_candidate}.crdownload"
-/usr/bin/open -a "Brave Origin" "${oe_download_url}"
+mkdir -p "${public_root}" "${worker_root}/logs" "${oe_inbox}" "${run_root}"
+if ! /usr/bin/shlock -p "$$" -f "${worker_lock}"; then
+  print -u2 "Another Scryglass public refresh owns ${worker_lock}."
+  exit 75
+fi
+trap '/bin/rm -f "${worker_lock}"' EXIT HUP INT TERM
 
-download_ready=0
-for _attempt in {1..180}; do
-  if [[ -f "${oe_candidate}" && ! -f "${oe_candidate}.crdownload" ]]; then
-    first_size="$(/usr/bin/stat -f %z "${oe_candidate}")"
-    /bin/sleep 2
-    second_size="$(/usr/bin/stat -f %z "${oe_candidate}")"
-    if [[ "${first_size}" -ge 10000 && "${first_size}" -eq "${second_size}" ]]; then
-      download_ready=1
-      break
-    fi
+source_receipt="${run_root}/accepted-source.json"
+import_receipt="${run_root}/accepted-import.json"
+export SCRYGLASS_ACCEPTED_SOURCE_RECEIPT="${source_receipt}"
+export SCRYGLASS_ACCEPTED_IMPORT_RECEIPT="${import_receipt}"
+
+/usr/bin/git -C "${repo_root}" archive HEAD \
+  data/lol/v2 \
+  apps/scryglass/public/rankings/tierlists.json \
+  | /usr/bin/tar -x -C "${runtime_root}"
+
+resume_cycle=0
+if [[ -f "${source_receipt}" && -f "${import_receipt}" ]]; then
+  if "${python}" -m lol_kills.etl.oe_database \
+    --csv "${runtime_root}/data/lol/warehouse/raw/${oe_name}" \
+    --year "${oe_year}" \
+    --parquet-dir "${runtime_root}/data/lol/warehouse/parquet" \
+    --source-receipt "${source_receipt}" \
+    --result-output "${import_receipt}" \
+    --validate-only >/dev/null; then
+    resume_cycle=1
   fi
-  /bin/sleep 1
-done
-
-if [[ "${download_ready}" -ne 1 ]]; then
-  print -u2 "Fresh Oracle's Elixir browser download did not arrive within 180 seconds."
-  exit 1
 fi
 
-cd "${repo_root}"
-"${python}" -m lol_kills.etl.oe_ingest \
-  --install-browser-candidate "${oe_candidate}" \
-  --year "${oe_year}"
-"${python}" -m lol_kills.etl.oe_database \
-  --csv "${repo_root}/data/lol/warehouse/raw/${oe_name}" \
-  --year "${oe_year}" \
-  --parquet-dir "${repo_root}/data/lol/warehouse/parquet"
+if [[ "${resume_cycle}" -eq 0 ]]; then
+  rm -f "${oe_candidate}" "${oe_candidate}.crdownload"
+  /usr/bin/open -a "Brave Origin" "${oe_download_url}"
+
+  download_ready=0
+  for _attempt in {1..180}; do
+    if [[ -f "${oe_candidate}" && ! -f "${oe_candidate}.crdownload" ]]; then
+      first_size="$(/usr/bin/stat -f %z "${oe_candidate}")"
+      /bin/sleep 2
+      second_size="$(/usr/bin/stat -f %z "${oe_candidate}")"
+      if [[ "${first_size}" -ge 10000 && "${first_size}" -eq "${second_size}" ]]; then
+        download_ready=1
+        break
+      fi
+    fi
+    /bin/sleep 1
+  done
+
+  if [[ "${download_ready}" -ne 1 ]]; then
+    print -u2 "Fresh Oracle's Elixir browser download did not arrive within 180 seconds."
+    exit 1
+  fi
+
+  cd "${repo_root}"
+  "${python}" -m lol_kills.etl.oe_ingest \
+    --install-browser-candidate "${oe_candidate}" \
+    --year "${oe_year}" \
+    --receipt-output "${source_receipt}"
+  "${python}" -m lol_kills.etl.oe_database \
+    --csv "${runtime_root}/data/lol/warehouse/raw/${oe_name}" \
+    --year "${oe_year}" \
+    --parquet-dir "${runtime_root}/data/lol/warehouse/parquet" \
+    --source-receipt "${source_receipt}" \
+    --result-output "${import_receipt}"
+fi
 
 exec "${python}" -m lol_kills.public_refresh \
   --root "${repo_root}" \

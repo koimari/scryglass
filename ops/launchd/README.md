@@ -24,9 +24,21 @@ The installed runtime uses these paths:
 - `~/Library/Application Support/Scryglass Worker/repo`
 - `~/Library/Application Support/Scryglass Worker/venv`
 - `~/Library/Application Support/Scryglass Worker/public-packs`
+- `~/Library/Application Support/Scryglass Worker/runtime`
 - `~/Library/Application Support/Scryglass Worker/logs`
+- `~/Library/Application Support/Scryglass Worker/backups/postgres`
 - `~/Library/Application Support/Scryglass Worker/oe-inbox`
 - `~/Library/LaunchAgents/xyz.scryglass.public-refresh.plist`
 
 Use `ops/launchd/run-public-refresh.sh` for manual runs. The repository remains
 detached at a tested production commit until an operator updates it.
+
+The launch script locks the complete cycle before it opens Brave. The accepted
+source receipt and import receipt bind all later stages to the same 2026 file.
+The 2025 baseline remains in the runtime cache. Generated data does not enter
+the worker Git checkout.
+
+Install `xyz.scryglass.database-backup.plist.template` as a separate launch
+agent after the database URL is stored in the login Keychain. The backup job
+keeps seven daily dumps and four Sunday dumps. It verifies each dump before
+retention runs.
