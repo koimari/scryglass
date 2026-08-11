@@ -4,6 +4,9 @@ import { SignalMatches } from "@/components/SignalMatches";
 import {
   packSourceUpdatedLabel,
   recentProfileGames,
+  type MatchIndex,
+  type MatchSummary,
+  type PublicSchedule,
   type ProfileRecords,
 } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
@@ -13,7 +16,7 @@ export const revalidate = 21_600;
 
 export const metadata: Metadata = {
   title: "Matches — Scryglass",
-  description: "Latest completed professional League of Legends maps in Scryglass.",
+  description: "Upcoming professional series and completed League of Legends games in Scryglass.",
 };
 
 export default async function MatchesPage() {
@@ -24,14 +27,35 @@ export default async function MatchesPage() {
   } catch {
     notFound();
   }
-  const games = recentProfileGames(profiles, 100);
+  let games: MatchSummary[];
+  try {
+    const archive = await readPackJson<MatchIndex>(manifest, "features/match_index.json");
+    games = archive.games;
+  } catch {
+    games = recentProfileGames(profiles, 100).map((game) => ({
+      game_id: game.game_id,
+      date: game.date,
+      league: game.league,
+      blue_team: game.blue_team,
+      red_team: game.red_team,
+      blue_win: game.blue_win,
+      champions: game.players.flatMap((player) => player.champion ? [player.champion] : []),
+      grades_available: game.players.filter((player) => player.grade?.status === "available").length,
+    }));
+  }
+  let schedule: PublicSchedule | null = null;
+  try {
+    schedule = await readPackJson<PublicSchedule>(manifest, "features/schedule.json");
+  } catch {
+    schedule = null;
+  }
 
   return (
     <div className={styles.page}>
       <header className={styles.header}>
         <div>
           <h1>Matches</h1>
-          <p>Latest accepted results. Open a map to compare every player with their usual form, teammates, opposing role, and league peers.</p>
+          <p>Upcoming professional series, plus accepted Oracle&apos;s Elixir games since January 2025. Open a result for its roster, champions, KDA, and player grades.</p>
         </div>
         <div className={styles.freshness}>
           <span>Source through</span>
@@ -39,7 +63,7 @@ export default async function MatchesPage() {
         </div>
       </header>
 
-      <SignalMatches games={games} championImages={profiles.champion_images} />
+      <SignalMatches games={games} championImages={profiles.champion_images} schedule={schedule} />
     </div>
   );
 }

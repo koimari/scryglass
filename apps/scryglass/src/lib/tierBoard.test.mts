@@ -36,7 +36,7 @@ function row(overrides: Partial<TierRow> = {}): TierRow {
 
 test("first-pick values fall back to the published tier bucket", () => {
   assert.equal(firstPickMetric(row()), "A");
-  assert.equal(firstPickMetric(row({ tier_value_pp: 4.25 })), "+4.3 pp");
+  assert.equal(firstPickMetric(row({ tier_value_pp: 4.25 })), "+4.3 percentage points");
 });
 
 test("matchup-only modes omit rows without their required evidence", () => {

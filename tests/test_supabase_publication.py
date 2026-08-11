@@ -102,10 +102,10 @@ def test_publish_release_stages_then_activates_complete_snapshot() -> None:
 
     assert result["status"] == "published"
     assert result["release_id"] == manifest["pack_id"]
-    assert result["assets"] == 10
+    assert result["assets"] == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 1
     assert result["reused_assets"] == 0
     assert client.active_id == manifest["pack_id"]
-    assert len(client.assets) == 10
+    assert len(client.assets) == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 1
     assert list(client.storage) == [
         "v2026.08.10.153000/rankings/tierlists.json"
     ]
@@ -114,6 +114,35 @@ def test_publish_release_stages_then_activates_complete_snapshot() -> None:
         "status": "available",
         "as_of": None,
     }
+
+
+def test_publish_release_includes_optional_schedule_when_present() -> None:
+    with TemporaryDirectory() as temporary:
+        pack, manifest, tier = _fixture(Path(temporary))
+        path = "features/schedule.json"
+        raw = json.dumps({"schema_version": "scryglass:public-schedule:v1", "upcoming": []}).encode()
+        destination = pack / path
+        destination.write_bytes(raw)
+        manifest["files"].append(
+            {
+                "path": path,
+                "bytes": len(raw),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            }
+        )
+        client = FakeSupabase()
+
+        result = supabase_publication.publish_release(
+            pack,
+            manifest,
+            tier,
+            project_url=client.project_url,
+            secret_key="sb_secret_unused_because_client_is_injected",
+            client=client,
+        )
+
+    assert result["assets"] == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 2
+    assert (manifest["pack_id"], path) in client.assets
 
 
 def test_publish_release_is_idempotent_after_verified_activation() -> None:
@@ -169,3 +198,16 @@ def test_client_repr_redacts_secret_key() -> None:
     )
     assert "abcdefghijklmnopqrstuvwxyz" not in repr(client)
     assert "<redacted>" in repr(client)
+
+
+def test_database_allowlist_matches_publication_contract() -> None:
+    root = Path(__file__).resolve().parents[1]
+    migrations = list((root / "supabase" / "migrations").glob("*_public_match_assets.sql"))
+    assert len(migrations) == 1
+    sql = migrations[0].read_text(encoding="utf-8")
+    for path in supabase_publication.PUBLIC_ASSET_PATHS:
+        assert f"'{path}'" in sql
+    required_section = sql.split("required_assets constant text[] := array[", 1)[1].split("];", 1)[0]
+    for path in (*supabase_publication.PUBLIC_RATING_REQUIRED_FILES, supabase_publication.TIER_ASSET_PATH):
+        assert f"'{path}'" in required_section
+    assert "'features/schedule.json'" not in required_section

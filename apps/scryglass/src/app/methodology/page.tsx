@@ -39,19 +39,19 @@ export default function MethodologyPage() {
           <h2>Player ratings</h2>
           <p>
             Player ratings use one connected results scale across every
-            accepted competition tier. Complete ten-player maps enter one
+            accepted competition tier. Complete ten-player games enter one
             regularized fit. Cross-league events and player transfers connect
             domestic pools. Competition tier is not a fixed bonus or penalty.
           </p>
           <p>
             The displayed adjustment is more cautious when a player&apos;s current
             tier has little direct evidence against a stronger tier. Earlier
-            maps in stronger competitions reduce that extra uncertainty. This
+            games in stronger competitions reduce that extra uncertainty. This
             changes the evidence width, not the fitted rating.
           </p>
           <p>
             This rating tracks team results with the player in the lineup. It
-            does not isolate the player&apos;s individual contribution. The map
+            does not isolate the player&apos;s individual contribution. The game
             grades below provide that separate performance view. The current
             team, role, and league come from the latest accepted domestic
             appearance.
@@ -63,25 +63,28 @@ export default function MethodologyPage() {
           </p>
         </section>
 
-        <section id="map-grades">
-          <h2>Player map grades</h2>
+        <section id="game-grades">
+          <h2>Player game grades</h2>
           <p>
-            A map grade describes one player&apos;s performance. It compares nine
-            match statistics with four references: the player&apos;s earlier maps,
-            their teammates in that map, the opposing player in the same role,
+            A game grade describes one player&apos;s performance. It compares kill
+            participation, survival, damage, gold, farm, and vision with four
+            references: the player&apos;s earlier games, their teammates in that game,
+            the opposing player in the same role,
             and earlier league results for that role. Each reference has equal
             weight in the final score.
           </p>
           <p>
             The calculation uses only reference games from earlier calendar
-            days. It does not use the map winner. A grade appears after the
-            player has ten earlier comparable maps and the source contains two
+            days. It does not use the game winner. A grade appears after the
+            player has ten earlier comparable games and the source contains two
             complete five-player lineups. Missing inputs make the grade
             unavailable.
           </p>
           <p>
-            These grades describe recorded map performance. They do not change
-            the long-term player rating and do not predict the next match.
+            Champion choice is not a comparison baseline. A supportive mid can
+            score below the role baseline despite a clean KDA. These grades
+            describe recorded game performance. They do not change the long-term
+            player rating or predict the next match.
           </p>
         </section>
 
@@ -107,7 +110,7 @@ export default function MethodologyPage() {
             champion strength is accounted for. They do not describe draft order.
           </p>
           <p>
-            Unpicked, but viable starts from champions with zero accepted maps in
+            Unpicked, but viable starts from champions with zero accepted games in
             the selected patch and role. It compares their role, function, and
             mechanic profiles with champions that teams did play. The region
             filter changes the played comparison pool. An unpicked champion must
@@ -120,8 +123,11 @@ export default function MethodologyPage() {
             marks champions with deeper mechanic coverage.
           </p>
           <p>
-            Rank movement compares the current accepted board with its prior
-            snapshot. The public site receives only the finished display rows.
+            Rank movement compares the current tier ladder with the prior Sunday
+            and the positions one, three, and twelve calendar months earlier.
+            A positive change means that the player climbed. “New” means that the
+            player did not meet the ranking rules on the comparison date. The
+            public site receives only the finished display rows.
             Training data, coefficients, and evaluation files stay in the local
             research workspace.
           </p>

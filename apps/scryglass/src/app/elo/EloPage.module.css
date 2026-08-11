@@ -1,5 +1,6 @@
 .page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0;
 }
 
@@ -15,19 +16,19 @@
 .header h1 {
   margin: 0;
   color: var(--ink);
-  font-family: var(--font-ui), system-ui, sans-serif;
-  font-size: clamp(1.8rem, 2.6vw, 2.75rem);
-  font-weight: 600;
-  letter-spacing: -0.055em;
-  line-height: 1.05;
+  font-family: var(--font-display), serif;
+  font-size: clamp(2.5rem, 4.8vw, 4.75rem);
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  line-height: 0.98;
 }
 
 .header p {
   max-width: 60ch;
   margin: 0.45rem 0 0;
   color: var(--ink-muted);
-  font-size: 0.82rem;
-  line-height: 1.45;
+  font-size: 0.98rem;
+  line-height: 1.55;
 }
 
 .provenance {
@@ -38,7 +39,7 @@
   justify-content: flex-end;
   color: var(--ink-muted);
   font-family: var(--font-mono), monospace;
-  font-size: 0.65rem;
+  font-size: var(--text-micro);
   line-height: 1.4;
   white-space: nowrap;
 }
@@ -65,13 +66,13 @@
   }
 
   .header h1 {
-    font-size: 1.8rem;
+    font-size: 2.7rem;
   }
 
   .provenance {
     display: grid;
-    grid-template-columns: max-content max-content;
-    gap: 0.35rem 1rem;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.35rem;
     justify-content: flex-start;
     margin-top: 0.75rem;
     font-size: 0.875rem;

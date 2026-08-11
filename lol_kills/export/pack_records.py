@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Mapping
 
 import pandas as pd
@@ -441,14 +442,93 @@ def _profile_number(value: Any) -> float | int | None:
     return int(result) if result.is_integer() else round(result, 2)
 
 
+def _profile_game_identity(game: Mapping[str, Any]) -> tuple[object, ...]:
+    players = game.get("players")
+    rows = players if isinstance(players, list) else []
+    roster = tuple(
+        sorted(
+            (
+                str(row.get("player") or ""),
+                str(row.get("side") or ""),
+                str(row.get("role") or ""),
+                str(row.get("champion") or ""),
+            )
+            for row in rows
+            if isinstance(row, Mapping)
+        )
+    )
+    return (
+        str(game.get("date") or ""),
+        str(game.get("blue_team") or ""),
+        str(game.get("red_team") or ""),
+        game.get("blue_win"),
+        roster,
+    )
+
+
+def profile_game_has_complete_stats(game: Mapping[str, Any]) -> bool:
+    players = game.get("players")
+    if not isinstance(players, list) or len(players) != 10:
+        return False
+    return all(
+        isinstance(row, Mapping)
+        and row.get("kills") is not None
+        and row.get("deaths") is not None
+        and row.get("assists") is not None
+        for row in players
+    )
+
+
+def merge_accepted_profile_games(
+    candidate_games: Mapping[str, Mapping[str, Any]],
+    accepted_games: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Keep complete candidates and preserve matching accepted KDA or grades."""
+
+    accepted_games = accepted_games or {}
+    merged: dict[str, dict[str, Any]] = {}
+    for game_id, candidate in candidate_games.items():
+        accepted = accepted_games.get(game_id)
+        identities_match = (
+            isinstance(accepted, Mapping)
+            and _profile_game_identity(candidate) == _profile_game_identity(accepted)
+        )
+        if not profile_game_has_complete_stats(candidate):
+            if identities_match and profile_game_has_complete_stats(accepted):
+                merged[game_id] = deepcopy(dict(accepted))
+            continue
+
+        selected = deepcopy(dict(candidate))
+        if identities_match:
+            accepted_by_player = {
+                str(row.get("player") or ""): row
+                for row in accepted.get("players", [])
+                if isinstance(row, Mapping)
+            }
+            for row in selected.get("players", []):
+                previous = accepted_by_player.get(str(row.get("player") or ""))
+                if not isinstance(previous, Mapping):
+                    continue
+                current_grade = row.get("grade") or {}
+                previous_grade = previous.get("grade") or {}
+                if (
+                    current_grade.get("status") != "available"
+                    and previous_grade.get("status") == "available"
+                ):
+                    row["grade"] = deepcopy(previous_grade)
+        merged[game_id] = selected
+    return merged
+
+
 def build_profile_records(
     players: pd.DataFrame,
     *,
     champion_image_urls: Mapping[str, str] | None = None,
     recent_limit: int = 10,
     recent_window_days: int = 120,
+    include_archive: bool = False,
 ) -> dict[str, Any]:
-    """Build one compact, normalized recent-game index for profile pages."""
+    """Build recent profile records and, when requested, the accepted map archive."""
 
     required = {"playername", "teamname", "side", "position", "result", "date"}
     if players is None or players.empty or not required.issubset(players.columns):
@@ -516,6 +596,7 @@ def build_profile_records(
         (str(row["game_id"]), str(row["player"]).casefold()): row
         for _, row in grades.iterrows()
     }
+    archive_frame = frame.copy() if include_archive else None
     latest_date = frame["_date"].max()
     if pd.notna(latest_date):
         frame = frame[
@@ -551,11 +632,12 @@ def build_profile_records(
         for game_id in values
     }
     frame = frame[frame["_game_id"].astype(str).isin(selected)].copy()
+    game_frame = archive_frame if archive_frame is not None else frame
 
     games: dict[str, dict[str, Any]] = {}
     images = champion_image_urls or {}
     role_order = {role: index for index, role in enumerate(PUBLIC_ROLE_ORDER)}
-    for game_id, group in frame.groupby("_game_id", sort=False):
+    for game_id, group in game_frame.groupby("_game_id", sort=False):
         blue = group[group["_side"].eq("Blue")]
         red = group[group["_side"].eq("Red")]
         if len(group) != 10 or len(blue) != 5 or len(red) != 5 or group["_player"].nunique() != 10:
@@ -602,7 +684,8 @@ def build_profile_records(
             "blue_win": int(blue_result),
             "players": participants,
         }
-    available = set(games)
+    archive_games = games
+    available = set(games).intersection(selected)
     player_index = {
         identity: [game_id for game_id in values if game_id in available]
         for identity, values in player_index.items()
@@ -613,7 +696,7 @@ def build_profile_records(
         for identity, values in team_index.items()
         if any(game_id in available for game_id in values)
     }
-    return {
+    payload = {
         "schema_version": "scryglass:profile-records:v2",
         "grade_contract": GRADE_CONTRACT,
         "window_days": recent_window_days,
@@ -622,6 +705,12 @@ def build_profile_records(
         "players": player_index,
         "teams": team_index,
     }
+    if include_archive:
+        payload["_archive_games"] = {
+            game_id: archive_games[game_id]
+            for game_id in sorted(archive_games)
+        }
+    return payload
 
 
 def summarize_player_affiliations(

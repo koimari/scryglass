@@ -540,8 +540,24 @@ class CompetitionIdentityTests(unittest.TestCase):
         self.assertEqual(payload["as_of"], "2026-07-26T00:00:00Z")
         self.assertEqual(payload["previous_as_of"], "2026-07-19T00:00:00Z")
         self.assertEqual(payload["current_through"], "2026-07-26T12:00:00Z")
+        self.assertEqual(
+            payload["position_delta_as_of"],
+            {
+                "1m": "2026-06-26T12:00:00Z",
+                "3m": "2026-04-26T12:00:00Z",
+                "12m": "2025-07-26T12:00:00Z",
+            },
+        )
         self.assertIn("A0", payload["by_player"])
         self.assertIn("tier1", payload["by_player"]["A0"])
+        self.assertEqual(
+            payload["by_player"]["A0"]["tier1"]["position_deltas"],
+            {
+                "1m": {"as_of": "2026-06-26T12:00:00Z", "rank": None, "delta": None},
+                "3m": {"as_of": "2026-04-26T12:00:00Z", "rank": None, "delta": None},
+                "12m": {"as_of": "2025-07-26T12:00:00Z", "rank": None, "delta": None},
+            },
+        )
 
     def test_player_game_uid_falls_back_per_row_to_gameid(self) -> None:
         rows = []

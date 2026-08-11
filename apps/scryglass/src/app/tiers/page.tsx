@@ -17,7 +17,7 @@ export default function TiersPage() {
           <p>
             Check what the patch rewards, how matchups change, and which unused
             champions can fill a similar job. Every performance board pools the
-            accepted professional maps in that patch.
+            accepted professional games in that patch.
           </p>
         </div>
         <div className={styles.provenance}>

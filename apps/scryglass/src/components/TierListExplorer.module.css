@@ -10,6 +10,7 @@
   align-items: end;
   padding: 0.8rem;
   border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
   background: color-mix(in oklch, var(--surface) 84%, transparent);
 }
 
@@ -18,7 +19,7 @@
   gap: 0.25rem;
   min-width: 9rem;
   color: var(--ink-muted);
-  font-size: 0.67rem;
+  font-size: var(--text-micro);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -27,13 +28,14 @@
   min-width: 9rem;
   padding: 0.48rem 0.55rem;
   border: 1px solid var(--line-strong);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   background: var(--canvas);
   color: var(--ink);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: 0.94rem;
   letter-spacing: 0;
   text-transform: none;
+  transition: border-color var(--motion-fast) ease;
 }
 
 .field select:focus-visible,
@@ -51,17 +53,20 @@
 .button {
   padding: 0.5rem 0.85rem;
   border: 1px solid var(--ink);
-  border-radius: 2px;
+  border-radius: var(--radius-pill);
   background: var(--ink);
   color: var(--canvas);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.86rem;
   cursor: pointer;
+  transition: background-color var(--motion-fast) ease, color var(--motion-fast) ease,
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .button:hover:not(:disabled) {
   border-color: var(--accent);
   background: var(--accent);
+  transform: translateY(-1px);
 }
 
 .button:disabled {
@@ -72,7 +77,7 @@
 .meta {
   color: var(--ink-muted);
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.69rem;
+  font-size: 0.76rem;
   letter-spacing: 0.01em;
 }
 
@@ -80,6 +85,8 @@
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
   background: var(--surface);
 }
 
@@ -95,6 +102,7 @@
   color: var(--ink-muted);
   text-align: left;
   cursor: pointer;
+  transition: background-color var(--motion-fast) ease, color var(--motion-fast) ease;
 }
 
 .questionTab:last-child,
@@ -105,14 +113,14 @@
 .questionTab strong,
 .questionTabActive strong {
   color: var(--ink);
-  font-size: 0.84rem;
+  font-size: 0.96rem;
   font-weight: 650;
 }
 
 .questionTab span,
 .questionTabActive span {
-  font-size: 0.68rem;
-  line-height: 1.25;
+  font-size: 0.76rem;
+  line-height: 1.35;
 }
 
 .questionTab:hover,
@@ -121,7 +129,11 @@
 }
 
 .questionTabActive {
-  box-shadow: inset 0 -3px 0 var(--accent);
+  color: var(--ink);
+}
+
+.questionTabActive strong {
+  font-weight: 750;
 }
 
 .summaryGrid {
@@ -140,6 +152,7 @@
   min-height: 9.4rem;
   padding: 0.9rem;
   border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
   background: var(--surface);
 }
 
@@ -155,6 +168,7 @@
   min-height: 9.4rem;
   padding: 1rem 1.2rem;
   border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
   background: color-mix(in oklch, var(--surface-subtle) 22%, var(--surface));
 }
 
@@ -174,7 +188,7 @@
   margin: 0;
   color: var(--accent-ink);
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.64rem;
+  font-size: var(--text-micro);
   letter-spacing: 0.09em;
   line-height: 1.2;
   text-transform: uppercase;
@@ -202,14 +216,14 @@
 .summaryChampion strong {
   overflow: hidden;
   color: var(--ink);
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .summaryChampion span {
   color: var(--ink-muted);
-  font-size: 0.68rem;
+  font-size: 0.76rem;
 }
 
 .summaryUnavailable {
@@ -229,8 +243,8 @@
   align-self: end;
   margin: 0;
   color: var(--ink-muted);
-  font-size: 0.74rem;
-  line-height: 1.35;
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 .championThumb {
@@ -241,6 +255,7 @@
   place-items: center;
   overflow: hidden;
   border: 1px solid color-mix(in oklch, var(--line-strong) 80%, transparent);
+  border-radius: var(--radius-sm);
   background: var(--surface-subtle);
   color: var(--ink-muted);
   font-family: var(--font-display), Georgia, serif;
@@ -257,6 +272,7 @@
 .questionPanel {
   overflow: hidden;
   border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
   background: var(--surface);
 }
 
@@ -278,7 +294,7 @@
 .panelHeading h2 {
   margin: 0;
   color: var(--ink);
-  font-size: 1.05rem;
+  font-size: 1.2rem;
   font-weight: 650;
   letter-spacing: -0.02em;
 }
@@ -286,7 +302,7 @@
 .panelHeading > span {
   color: var(--ink-muted);
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.66rem;
+  font-size: var(--text-micro);
 }
 
 .list,
@@ -313,10 +329,12 @@
   width: 100%;
   cursor: pointer;
   font: inherit;
+  transition: background-color var(--motion-fast) ease, transform var(--motion-fast) var(--ease-out);
 }
 
 .draftRow:hover {
   background: color-mix(in oklch, var(--accent) 8%, var(--surface));
+  transform: translateX(0.2rem);
 }
 
 .draftRow:last-child,
@@ -327,7 +345,7 @@
 .rowRank {
   color: var(--ink-faint);
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.68rem;
+  font-size: var(--text-micro);
 }
 
 .rowName,
@@ -340,7 +358,7 @@
 .rowName strong {
   overflow: hidden;
   color: var(--ink);
-  font-size: 0.86rem;
+  font-size: 0.96rem;
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -350,7 +368,7 @@
 .rowMetric span {
   overflow: hidden;
   color: var(--ink-muted);
-  font-size: 0.68rem;
+  font-size: 0.76rem;
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -468,8 +486,8 @@
   max-width: 48ch;
   margin: 0 0 0.2rem;
   color: var(--ink-muted);
-  font-size: 0.76rem;
-  line-height: 1.4;
+  font-size: 0.84rem;
+  line-height: 1.5;
 }
 
 .matchupMatrixPanel {
@@ -501,7 +519,7 @@
   align-items: center;
   color: var(--ink-muted);
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.59rem;
+  font-size: 0.7rem;
 }
 
 .matchupBasisLegend span {
@@ -552,7 +570,7 @@
 }
 
 .matchupLegend small {
-  font-size: 0.58rem;
+  font-size: 0.68rem;
   font-weight: 500;
   opacity: 0.86;
 }
@@ -566,7 +584,7 @@
 .matrixSizeControl > span {
   color: var(--ink-muted);
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.61rem;
+  font-size: 0.7rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -574,6 +592,8 @@
 .matrixSizeControl > div {
   display: flex;
   border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
 }
 
 .matrixSizeButton,
@@ -585,7 +605,7 @@
   background: var(--surface);
   color: var(--ink-muted);
   font: inherit;
-  font-size: 0.65rem;
+  font-size: 0.74rem;
   cursor: pointer;
 }
 
@@ -614,6 +634,7 @@
   gap: 0.55rem;
   padding: 0.72rem;
   border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
   background: var(--canvas);
   color: var(--ink);
   box-shadow: 0 0.45rem 1rem rgb(0 0 0 / 22%);
@@ -629,14 +650,14 @@
 
 .matchupTooltip header strong {
   overflow: hidden;
-  font-size: 0.82rem;
+  font-size: 0.94rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .matchupTooltip header > span {
   color: var(--ink-faint);
-  font-size: 0.68rem;
+  font-size: var(--text-micro);
 }
 
 .matchupTooltip header em {
@@ -646,7 +667,7 @@
   background: var(--grade-background);
   color: var(--grade-ink);
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.68rem;
+  font-size: var(--text-micro);
   font-style: normal;
   text-align: center;
 }
@@ -670,7 +691,7 @@
 .tooltipWinLabels small {
   overflow: hidden;
   color: var(--ink-muted);
-  font-size: 0.59rem;
+  font-size: 0.7rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -705,7 +726,7 @@
 .matchupTooltip footer strong,
 .matchupTooltip footer span {
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.6rem;
+  font-size: 0.7rem;
 }
 
 .matchupTooltip footer span {
@@ -762,7 +783,7 @@
   padding: 0.38rem 0.25rem;
   background: color-mix(in oklch, var(--surface-subtle) 55%, var(--surface));
   color: var(--ink-muted);
-  font-size: 0.56rem;
+  font-size: 0.65rem;
   font-weight: 600;
   text-align: center;
   vertical-align: bottom;
@@ -790,13 +811,13 @@
 .matchupCorner span {
   margin-bottom: 0.25rem;
   color: var(--ink-faint);
-  font-size: 0.53rem;
+  font-size: 0.62rem;
   font-weight: 500;
 }
 
 .matchupCorner strong {
   color: var(--ink);
-  font-size: 0.62rem;
+  font-size: 0.7rem;
   font-weight: 650;
 }
 
@@ -852,7 +873,7 @@
 
 .matchupMatrix tbody th small {
   color: var(--ink-faint);
-  font-size: 0.58rem;
+  font-size: 0.65rem;
 }
 
 .matchupCell,
@@ -870,7 +891,8 @@
   background-color: var(--grade-background);
   color: var(--grade-ink);
   cursor: default;
-  transition: filter 100ms ease, transform 100ms ease;
+  transition: filter var(--motion-fast) ease, transform var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) ease;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -920,7 +942,7 @@
 .matchupCell small {
   margin-top: 0.15rem;
   color: var(--grade-ink);
-  font-size: 0.55rem;
+  font-size: 0.62rem;
   opacity: 0.86;
 }
 
@@ -977,7 +999,7 @@
 }
 
 .matchupMatrix[data-matrix-size="overview"] tbody th strong {
-  font-size: 0.64rem;
+  font-size: 0.7rem;
 }
 
 .matchupMatrix[data-matrix-size="overview"] .matchupCell strong {
@@ -987,6 +1009,7 @@
 .roleSnapshot {
   overflow: hidden;
   border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
   background: var(--surface);
 }
 
@@ -1008,7 +1031,7 @@
 .roleSnapshotHeader h2 {
   margin: 0;
   color: var(--ink);
-  font-size: 1.15rem;
+  font-size: 1.3rem;
   letter-spacing: -0.025em;
 }
 
@@ -1018,7 +1041,7 @@
   gap: 0.7rem;
   color: var(--ink-muted);
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.63rem;
+  font-size: 0.7rem;
 }
 
 .tierLegend span {
@@ -1054,12 +1077,14 @@
   --role-accent: var(--accent);
   overflow: hidden;
   border: 1px solid var(--line-strong);
-  border-top: 3px solid var(--role-accent);
+  border-top: 1px solid var(--role-accent);
+  border-radius: var(--radius-md);
   background: var(--surface);
 }
 
 .roleSnapshot .roleCard {
-  border-width: 3px 1px 0 0;
+  border-radius: 0;
+  border-width: 1px 1px 0 0;
   border-color: var(--role-accent) var(--line-strong) transparent transparent;
 }
 
@@ -1084,7 +1109,7 @@
 
 .roleCard header span {
   color: var(--ink-faint);
-  font-size: 0.62rem;
+  font-size: 0.7rem;
   text-align: right;
 }
 
@@ -1106,6 +1131,7 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: background-color var(--motion-fast) ease, transform var(--motion-fast) var(--ease-out);
 }
 
 .regionalRoleRow {
@@ -1126,7 +1152,7 @@
 .regionalRoleRow > span:first-child {
   color: var(--ink-faint);
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.64rem;
+  font-size: 0.7rem;
 }
 
 .regionalRoleRow .championThumb {
@@ -1138,7 +1164,7 @@
 
 .regionalRoleRow strong {
   overflow: hidden;
-  font-size: 0.74rem;
+  font-size: 0.84rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1146,7 +1172,7 @@
 .regionalRoleRow em {
   color: var(--ink-muted);
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.62rem;
+  font-size: 0.7rem;
   font-style: normal;
 }
 
@@ -1163,12 +1189,13 @@
 
 .roleRow:hover {
   background: color-mix(in oklch, var(--accent) 8%, var(--surface));
+  transform: translateX(0.15rem);
 }
 
 .roleRow > span:first-child {
   color: var(--ink-faint);
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.64rem;
+  font-size: 0.7rem;
 }
 
 .roleRow .championThumb {
@@ -1180,7 +1207,7 @@
 
 .roleRow strong {
   overflow: hidden;
-  font-size: 0.74rem;
+  font-size: 0.84rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1188,7 +1215,7 @@
 .roleRow em {
   color: var(--ink-muted);
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.62rem;
+  font-size: 0.7rem;
   font-style: normal;
 }
 
@@ -1202,6 +1229,7 @@
 .viablePanel {
   overflow: hidden;
   border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
   background: var(--surface);
 }
 
@@ -1222,7 +1250,7 @@
 .viableHeading h2 {
   margin: 0;
   color: var(--ink);
-  font-size: 1.05rem;
+  font-size: 1.2rem;
   font-weight: 650;
   letter-spacing: -0.02em;
 }
@@ -1230,7 +1258,7 @@
 .viableHeading > span {
   color: var(--ink-muted);
   font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.66rem;
+  font-size: var(--text-micro);
 }
 
 .viableList {
@@ -1274,7 +1302,7 @@
 .viableReference strong {
   overflow: hidden;
   color: var(--ink);
-  font-size: 0.86rem;
+  font-size: 0.96rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1282,7 +1310,7 @@
 .viableChampion small,
 .viableReference small {
   color: var(--ink-muted);
-  font-size: 0.65rem;
+  font-size: var(--text-micro);
 }
 
 .similarityBridge {
@@ -1329,7 +1357,7 @@
 .similarityCaption {
   grid-column: 1 / -1;
   color: var(--ink-muted);
-  font-size: 0.61rem;
+  font-size: 0.7rem;
   text-align: center;
 }
 
@@ -1345,8 +1373,9 @@
 .viableTraits em {
   padding: 0.18rem 0.38rem;
   border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
   color: var(--ink-muted);
-  font-size: 0.59rem;
+  font-size: 0.7rem;
   font-style: normal;
   line-height: 1.2;
 }
@@ -1362,8 +1391,8 @@
   border-top: 1px solid var(--line-strong);
   background: color-mix(in oklch, var(--surface-subtle) 32%, var(--surface));
   color: var(--ink-muted);
-  font-size: 0.7rem;
-  line-height: 1.4;
+  font-size: 0.78rem;
+  line-height: 1.5;
 }
 
 .methodNote {
@@ -1372,8 +1401,8 @@
   padding: 0.85rem 1rem;
   border-top: 1px solid var(--line-strong);
   color: var(--ink-muted);
-  font-size: 0.75rem;
-  line-height: 1.45;
+  font-size: 0.84rem;
+  line-height: 1.55;
 }
 
 .methodNote strong {
@@ -1386,6 +1415,7 @@
   gap: 0.25rem;
   padding: 1rem;
   border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
   color: var(--ink-muted);
   font-size: 0.86rem;
   line-height: 1.4;

@@ -1,20 +1,34 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import {
+  Atkinson_Hyperlegible_Mono,
+  Atkinson_Hyperlegible_Next,
+  Instrument_Serif,
+} from "next/font/google";
 import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
+import { SmoothScroll } from "@/components/SmoothScroll";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeScript } from "@/components/ThemeScript";
+import "lenis/dist/lenis.css";
 import "./globals.css";
 
-const ui = IBM_Plex_Sans({
+const ui = Atkinson_Hyperlegible_Next({
   variable: "--font-ui",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  weight: "variable",
+  adjustFontFallback: false,
 });
 
-const mono = IBM_Plex_Mono({
+const mono = Atkinson_Hyperlegible_Mono({
   variable: "--font-mono",
   subsets: ["latin"],
-  weight: ["400", "500"],
+  weight: "variable",
+  adjustFontFallback: false,
+});
+
+const display = Instrument_Serif({
+  variable: "--font-display",
+  subsets: ["latin"],
+  weight: "400",
 });
 
 export const metadata: Metadata = {
@@ -32,7 +46,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${ui.variable} ${mono.variable}`}
+      className={`${ui.variable} ${mono.variable} ${display.variable}`}
       suppressHydrationWarning
     >
       <head>
@@ -40,6 +54,7 @@ export default function RootLayout({
       </head>
       <body>
         <ThemeProvider>
+          <SmoothScroll />
           <SiteHeader />
           <main className="site-main">{children}</main>
           <SiteFooter />

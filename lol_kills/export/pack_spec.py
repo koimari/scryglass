@@ -100,8 +100,17 @@ PUBLIC_RATING_REQUIRED_FILES: tuple[str, ...] = (
     "features/player_records.json",
     "features/player_champion_records.json",
     "features/profile_records.json",
+    "features/match_index.json",
+    "features/match_records_2025.json",
+    "features/match_records_2026.json",
     "features/player_weekly_ranks.json",
     "features/player_metadata.json",
+)
+
+# Display-only files can be absent when their external source is unavailable.
+# They never take part in the ratings release gate.
+OPTIONAL_PUBLIC_FILES: tuple[str, ...] = (
+    "features/schedule.json",
 )
 
 FORBIDDEN_PUBLIC_MODEL_FILES: tuple[str, ...] = (

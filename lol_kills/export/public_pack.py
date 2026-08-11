@@ -28,10 +28,16 @@ from lol_kills.export.pack_records import (
     build_player_records,
     build_team_records,
     filter_public_team_rating_maps,
+    merge_accepted_profile_games,
     public_team_affiliation,
     summarize_player_affiliations,
 )
 from lol_kills.export.player_metadata import build_player_metadata
+from lol_kills.export.public_schedule import (
+    PublicScheduleError,
+    build_public_schedule,
+    validate_public_schedule,
+)
 from lol_kills.etl.competition import TAXONOMY_VERSION, canonicalize_competition_frame, competition_tier
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.dual_elo import build_dual_ratings, lineup_hashes_from_players
@@ -58,6 +64,34 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _accepted_profile_games(project: Path) -> dict[str, dict[str, Any]]:
+    pointer = project / "apps" / "scryglass" / "public" / "packs" / "manifest.json"
+    try:
+        manifest = json.loads(pointer.read_text(encoding="utf-8"))
+        pack_id = str(manifest.get("pack_id") or "")
+        profile_path = pointer.parent / pack_id / "features" / "profile_records.json"
+        payload = json.loads(profile_path.read_text(encoding="utf-8"))
+        games = payload.get("games")
+        return games if isinstance(games, dict) else {}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {}
+
+
+def _accepted_public_schedule(project: Path) -> dict[str, Any] | None:
+    """Read the last published optional schedule for source-outage continuity."""
+
+    pointer = project / "apps" / "scryglass" / "public" / "packs" / "manifest.json"
+    try:
+        manifest = json.loads(pointer.read_text(encoding="utf-8"))
+        pack_id = str(manifest.get("pack_id") or "")
+        schedule_path = pointer.parent / pack_id / "features" / "schedule.json"
+        payload = json.loads(schedule_path.read_text(encoding="utf-8"))
+        validate_public_schedule(payload)
+        return payload
+    except (OSError, ValueError, TypeError, json.JSONDecodeError, PublicScheduleError):
+        return None
 
 
 def source_identity_sha256(game_ids: Iterable[str]) -> str:
@@ -692,7 +726,23 @@ def export_public_pack(
     profile_records_payload = build_profile_records(
         player_profile_frame,
         champion_image_urls=champion_image_urls,
+        include_archive=True,
     )
+    archive_games = merge_accepted_profile_games(
+        profile_records_payload.pop("_archive_games", {}),
+        _accepted_profile_games(project),
+    )
+    profile_game_ids = set(profile_records_payload.get("games", {})).intersection(archive_games)
+    profile_records_payload["games"] = {
+        game_id: archive_games[game_id]
+        for game_id in sorted(profile_game_ids)
+    }
+    for index_name in ("players", "teams"):
+        profile_records_payload[index_name] = {
+            identity: [game_id for game_id in game_ids if game_id in profile_game_ids]
+            for identity, game_ids in profile_records_payload.get(index_name, {}).items()
+            if any(game_id in profile_game_ids for game_id in game_ids)
+        }
     del player_profile_frame
 
     # These records are intentionally built from the same year-filtered
@@ -755,6 +805,109 @@ def export_public_pack(
         },
         "features/profile_records.json",
     )
+
+    match_index_payload = {
+        "schema_version": "scryglass:match-index:v1",
+        "years": [2025, 2026],
+        "games": sorted(
+            [
+                {
+                    "game_id": game_id,
+                    "date": game["date"],
+                    "league": game["league"],
+                    "blue_team": game["blue_team"],
+                    "red_team": game["red_team"],
+                    "blue_win": game["blue_win"],
+                    "champions": [
+                        player.get("champion")
+                        for player in game.get("players", [])
+                        if player.get("champion")
+                    ],
+                    "grades_available": sum(
+                        1
+                        for player in game.get("players", [])
+                        if (player.get("grade") or {}).get("status") == "available"
+                    ),
+                }
+                for game_id, game in archive_games.items()
+            ],
+            key=lambda game: (game["date"], game["game_id"]),
+            reverse=True,
+        ),
+    }
+    match_index_dest = feat_dir / "match_index.json"
+    match_index_dest.write_text(
+        json.dumps(match_index_payload, separators=(",", ":"), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    register(
+        {
+            "rows": len(match_index_payload["games"]),
+            "cols": None,
+            "bytes": match_index_dest.stat().st_size,
+            "sha256": _sha256(match_index_dest),
+            "columns": None,
+        },
+        "features/match_index.json",
+    )
+
+    # Leaguepedia supplies future fixtures that do not exist in Oracle's
+    # Elixir. This artifact is optional and display-only. A failed fetch keeps
+    # the previous valid schedule when one is available.
+    progress("refreshing optional public schedule")
+    schedule_payload: dict[str, Any] | None = None
+    try:
+        schedule_payload = build_public_schedule()
+    except Exception as error:  # noqa: BLE001 - this lane must stay non-blocking
+        schedule_payload = _accepted_public_schedule(project)
+        if schedule_payload is not None:
+            schedule_payload = dict(schedule_payload)
+            schedule_payload["refresh_status"] = "cached"
+        progress(f"optional schedule fetch unavailable ({type(error).__name__})")
+    if schedule_payload is not None:
+        schedule_dest = feat_dir / "schedule.json"
+        schedule_dest.write_text(
+            json.dumps(schedule_payload, separators=(",", ":"), ensure_ascii=False),
+            encoding="utf-8",
+        )
+        register(
+            {
+                "rows": len(schedule_payload.get("upcoming", [])),
+                "cols": None,
+                "bytes": schedule_dest.stat().st_size,
+                "sha256": _sha256(schedule_dest),
+                "columns": None,
+            },
+            "features/schedule.json",
+        )
+
+    for archive_year in (2025, 2026):
+        year_games = {
+            game_id: game
+            for game_id, game in archive_games.items()
+            if str(game.get("date") or "").startswith(f"{archive_year}-")
+        }
+        archive_payload = {
+            "schema_version": "scryglass:match-records:v1",
+            "year": archive_year,
+            "games": year_games,
+        }
+        archive_dest = feat_dir / f"match_records_{archive_year}.json"
+        archive_dest.write_text(
+            json.dumps(archive_payload, separators=(",", ":"), ensure_ascii=False),
+            encoding="utf-8",
+        )
+        register(
+            {
+                "rows": len(year_games),
+                "cols": None,
+                "bytes": archive_dest.stat().st_size,
+                "sha256": _sha256(archive_dest),
+                "columns": None,
+            },
+            f"features/match_records_{archive_year}.json",
+        )
+    del archive_games
 
     for src_name, cols, out_name in (
         ("ratings_snapshot.parquet", spec.RATINGS_SNAPSHOT_COLS, "ratings_snapshot.json"),
@@ -868,7 +1021,7 @@ def export_public_pack(
             "player_model": player_model_manifest,
             "affiliation_audit": affiliation_audit,
             "artifacts": rating_artifact_paths,
-            "claim_ceiling": "Source-bound descriptive ratings and weekly rank movement only.",
+            "claim_ceiling": "Source-bound descriptive ratings and historical rank movement only.",
         },
         "base_url": None,  # filled by upload / atlas config
         "total_bytes": total_bytes,
