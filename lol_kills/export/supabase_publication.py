@@ -16,11 +16,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from lol_kills.export.pack_spec import PUBLIC_RATING_REQUIRED_FILES
+from lol_kills.export.pack_spec import OPTIONAL_PUBLIC_FILES, PUBLIC_RATING_REQUIRED_FILES
 
 
 TIER_ASSET_PATH = "rankings/tierlists.json"
-PUBLIC_ASSET_PATHS = (*PUBLIC_RATING_REQUIRED_FILES, TIER_ASSET_PATH)
+PUBLIC_ASSET_PATHS = (*PUBLIC_RATING_REQUIRED_FILES, *OPTIONAL_PUBLIC_FILES, TIER_ASSET_PATH)
 PACK_ID_RE = re.compile(r"^v\d{4}\.\d{2}\.\d{2}\.\d{6}$")
 REQUEST_TIMEOUT_SECONDS = 60.0
 INLINE_ASSET_MAX_BYTES = 1_500_000
@@ -319,6 +319,21 @@ def prepare_release(
         raw = (pack_dir / path).read_bytes()
         if len(raw) != metadata.get("bytes") or _sha256(raw) != metadata.get("sha256"):
             raise SupabasePublicationError(f"public asset checksum failed: {path}")
+        asset = _asset(path, raw, release_id)
+        if len(raw) > INLINE_ASSET_MAX_BYTES:
+            storage_path = f"{release_id}/{path}"
+            asset["body"] = None
+            asset["storage_path"] = storage_path
+            storage_objects[storage_path] = raw
+        assets.append(asset)
+
+    for path in OPTIONAL_PUBLIC_FILES:
+        metadata = manifest_files.get(path)
+        if not isinstance(metadata, dict):
+            continue
+        raw = (pack_dir / path).read_bytes()
+        if len(raw) != metadata.get("bytes") or _sha256(raw) != metadata.get("sha256"):
+            raise SupabasePublicationError(f"optional public asset checksum failed: {path}")
         asset = _asset(path, raw, release_id)
         if len(raw) > INLINE_ASSET_MAX_BYTES:
             storage_path = f"{release_id}/{path}"

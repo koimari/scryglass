@@ -195,10 +195,10 @@ def compute_player_map_grades(players: pd.DataFrame) -> pd.DataFrame:
         "Core match statistics or pre-game league-role history are incomplete.",
         np.where(
             frame["_self"].isna(),
-            "The player has fewer than 10 prior comparable maps.",
+            "The player has fewer than 10 prior comparable games.",
             np.where(
                 ~team_count.eq(5) | ~role_count.eq(2),
-                "The map does not contain one complete five-role lineup per side.",
+                "The game does not contain one complete five-role lineup per side.",
                 "A comparison component is unavailable.",
             ),
         ),

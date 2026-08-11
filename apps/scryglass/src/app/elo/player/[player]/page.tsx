@@ -3,6 +3,7 @@ import { PlayerRatingProfile } from "@/components/RatingProfiles";
 import type {
   PlayerChampionRecord,
   PlayerRating,
+  PlayerWeeklyRanks,
   PlayerRecord,
   ProfileGame,
   ProfileRecords,
@@ -26,6 +27,7 @@ export default async function PlayerEloPage({ params }: Props) {
   let playerRecords: Record<string, PlayerRecord> = {};
   let playerChampions: Record<string, PlayerChampionRecord[]> = {};
   let profileRecords: ProfileRecords | null = null;
+  let weeklyRanks: PlayerWeeklyRanks | null = null;
   try {
     playerRecords = await readPackJson(man, "features/player_records.json");
   } catch {
@@ -41,6 +43,11 @@ export default async function PlayerEloPage({ params }: Props) {
   } catch {
     profileRecords = null;
   }
+  try {
+    weeklyRanks = await readPackJson(man, "features/player_weekly_ranks.json");
+  } catch {
+    weeklyRanks = null;
+  }
 
   const player = findPlayerByRouteName(players, name);
   if (!player) notFound();
@@ -52,6 +59,7 @@ export default async function PlayerEloPage({ params }: Props) {
     : null;
   const tier = rec?.current_tier;
   const role = rec?.primary_role;
+  const rankScope = tier === "tier1" || tier === "tier2" || tier === "tier3" ? tier : "all";
   const eligible = players
     .filter((candidate) => candidate.n_maps >= 20 && isActiveRating(candidate))
     .filter((candidate) => playerRecords[candidate.player]?.current_tier === tier)
@@ -81,6 +89,7 @@ export default async function PlayerEloPage({ params }: Props) {
         roleRank: roleEligible.findIndex((candidate) => candidate.player === player.player) + 1,
         roleTotal: roleEligible.length,
       }}
+      positionDeltas={weeklyRanks?.by_player[player.player]?.[rankScope]?.position_deltas}
       recentGames={recentGames}
       championImages={profileRecords?.champion_images ?? {}}
       manifest={man}

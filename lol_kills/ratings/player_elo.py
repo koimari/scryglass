@@ -35,7 +35,11 @@ from lol_kills.etl.competition import canonicalize_competition_frame, is_team_af
 from lol_kills.etl.paths import FEATURES_DIR, PARQUET_DIR
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.dual_elo import DualEloConfig, _is_intl, expected_score
-from lol_kills.ratings.global_player_bt import GlobalPlayerBTConfig, fit_global_player_bt
+from lol_kills.ratings.global_player_bt import (
+    GlobalPlayerBTConfig,
+    GlobalPlayerRatingError,
+    fit_global_player_bt,
+)
 
 # Slight role weights for aggregation (still sums≈5)
 ROLE_WEIGHT = {
@@ -541,7 +545,7 @@ def build_player_weekly_ranks(
     min_games: int = 20,
     player_records: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
-    """Return current ranks and movement from the preceding Sunday snapshot.
+    """Return current ranks with weekly and calendar-month movement.
 
     The player ladder is still the current sequential Elo snapshot.  The
     movement baseline is deliberately discrete: it is captured at Sunday
@@ -557,6 +561,11 @@ def build_player_weekly_ranks(
     cutoff = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp.now(tz="UTC")
     if cutoff.tzinfo is not None:
         cutoff = cutoff.tz_convert("UTC").tz_localize(None)
+    comparison_cutoffs = {
+        "1m": cutoff - pd.DateOffset(months=1),
+        "3m": cutoff - pd.DateOffset(months=3),
+        "12m": cutoff - pd.DateOffset(months=12),
+    }
     if as_of is not None:
         frame = frame[frame["date"].le(cutoff)]
 
@@ -564,20 +573,13 @@ def build_player_weekly_ranks(
         frame,
         players,
         cfg,
-        checkpoint_dates=[previous_start],
+        checkpoint_dates=[previous_start, *comparison_cutoffs.values()],
     )
     current_global, _current_meta = fit_global_player_bt(
         frame,
         players,
         GlobalPlayerBTConfig(minimum_maps=1),
         through=cutoff,
-        validate=False,
-    )
-    previous_global, _previous_meta = fit_global_player_bt(
-        frame,
-        players,
-        GlobalPlayerBTConfig(minimum_maps=1),
-        through=previous_start,
         validate=False,
     )
     # Current affiliation is the publication filter.  Historical matches in a
@@ -593,13 +595,33 @@ def build_player_weekly_ranks(
         cfg,
         through=cutoff,
     )
-    previous_rows = _apply_bridge_uncertainty(
-        _apply_global_scale(checkpoints.get(previous_start, []), previous_global),
-        players,
-        current_records,
-        cfg,
-        through=previous_start,
-    )
+    def historical_rows(anchor: pd.Timestamp) -> list[dict[str, object]]:
+        snapshot = checkpoints.get(anchor, [])
+        if not snapshot:
+            return []
+        try:
+            historical_global, _historical_meta = fit_global_player_bt(
+                frame,
+                players,
+                GlobalPlayerBTConfig(minimum_maps=1),
+                through=anchor,
+                validate=False,
+            )
+        except GlobalPlayerRatingError:
+            return []
+        return _apply_bridge_uncertainty(
+            _apply_global_scale(snapshot, historical_global),
+            players,
+            current_records,
+            cfg,
+            through=anchor,
+        )
+
+    previous_rows = historical_rows(previous_start)
+    comparison_rows = {
+        label: historical_rows(anchor)
+        for label, anchor in comparison_cutoffs.items()
+    }
     current_tiers = {
         player: record.get("current_tier")
         for player, record in current_records.items()
@@ -627,17 +649,30 @@ def build_player_weekly_ranks(
     scopes = ("all", "tier1", "tier2", "tier3")
     current_rank = {scope: order(current_rows, scope) for scope in scopes}
     previous_rank = {scope: order(previous_rows, scope) for scope in scopes}
-    by_player: dict[str, dict[str, dict[str, int | None]]] = {}
+    comparison_rank = {
+        label: {scope: order(rows, scope) for scope in scopes}
+        for label, rows in comparison_rows.items()
+    }
+    by_player: dict[str, dict[str, dict[str, object]]] = {}
     for player, rank in current_rank["all"].items():
-        values: dict[str, dict[str, int | None]] = {}
+        values: dict[str, dict[str, object]] = {}
         for scope in scopes:
             current = current_rank[scope].get(player)
             if current is None:
                 continue
             prior = previous_rank[scope].get(player)
+            position_deltas: dict[str, dict[str, object]] = {}
+            for label, anchor in comparison_cutoffs.items():
+                historical = comparison_rank[label][scope].get(player)
+                position_deltas[label] = {
+                    "as_of": f"{anchor.isoformat()}Z",
+                    "rank": historical,
+                    "delta": (historical - current) if historical is not None else None,
+                }
             values[scope] = {
                 "rank": current,
                 "delta": (prior - current) if prior is not None else None,
+                "position_deltas": position_deltas,
             }
         by_player[player] = values
 
@@ -645,9 +680,13 @@ def build_player_weekly_ranks(
         "as_of": f"{week_start.isoformat()}Z",
         "previous_as_of": f"{previous_start.isoformat()}Z",
         "current_through": f"{cutoff.isoformat()}Z",
+        "position_delta_as_of": {
+            label: f"{anchor.isoformat()}Z"
+            for label, anchor in comparison_cutoffs.items()
+        },
         "min_games": int(min_games),
         "by_player": by_player,
-        "note": "Rank movement compares the adjusted global player results rating at Sunday 00:00 UTC snapshots; positive delta means a climb.",
+        "note": "Rank movement compares the adjusted global player results rating with the prior Sunday and the positions one, three, and twelve calendar months earlier. Positive delta means a climb.",
     }
 
 

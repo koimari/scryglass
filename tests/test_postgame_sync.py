@@ -118,7 +118,13 @@ def _manifest(pack_dir: Path, game_ids: list[str]) -> dict:
     for relative in pack_spec.PUBLIC_RATING_REQUIRED_FILES:
         path = pack_dir / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("[]", encoding="utf-8")
+        if relative == "features/match_index.json":
+            payload = {"schema_version": "scryglass:match-index:v1", "games": []}
+        elif relative.startswith("features/match_records_"):
+            payload = {"schema_version": "scryglass:match-records:v1", "games": {}}
+        else:
+            payload = []
+        path.write_text(json.dumps(payload), encoding="utf-8")
         files.append(
             {"path": relative, "bytes": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
         )
@@ -376,6 +382,32 @@ def test_pack_validation_rejects_a_changed_file(tmp_path: Path) -> None:
     source = {"game_ids": ["game-2"], "game_count": 1, "identity_sha256": source_identity_sha256(["game-2"])}
     with pytest.raises(RefreshValidationError, match="wrong size"):
         validate_pack(pack_dir, manifest, source)
+
+
+def test_pack_validation_accepts_optional_schedule(tmp_path: Path) -> None:
+    pack_dir = tmp_path / "pack"
+    manifest = _manifest(pack_dir, ["game-2"])
+    relative = "features/schedule.json"
+    path = pack_dir / relative
+    path.write_text(
+        json.dumps({"schema_version": "scryglass:public-schedule:v1", "upcoming": [{"team1": "Los Ratones"}]}),
+        encoding="utf-8",
+    )
+    manifest["files"].append(
+        {
+            "path": relative,
+            "bytes": path.stat().st_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+    )
+    manifest["total_files"] += 1
+    manifest["total_bytes"] += path.stat().st_size
+    source = {"game_ids": ["game-2"], "game_count": 1, "identity_sha256": source_identity_sha256(["game-2"])}
+
+    result = validate_pack(pack_dir, manifest, source)
+
+    assert result["game_count"] == 1
+    assert result["files"] == len(pack_spec.PUBLIC_RATING_REQUIRED_FILES) + 1
 
 
 def test_pack_validation_rejects_excluded_team_affiliation(tmp_path: Path) -> None:

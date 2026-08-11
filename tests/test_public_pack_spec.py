@@ -1,11 +1,13 @@
 import pyarrow as pa
 import pandas as pd
 import pytest
+from copy import deepcopy
 
 from lol_kills.export import pack_spec
 from lol_kills.export.pack_records import (
     build_player_champion_records,
     build_profile_records,
+    merge_accepted_profile_games,
     public_team_affiliation,
 )
 from lol_kills.export.public_pack import (
@@ -80,6 +82,9 @@ def test_public_pack_contains_only_rating_display_files() -> None:
         "features/player_records.json",
         "features/player_champion_records.json",
         "features/profile_records.json",
+        "features/match_index.json",
+        "features/match_records_2025.json",
+        "features/match_records_2026.json",
         "features/player_weekly_ranks.json",
         "features/player_metadata.json",
     }
@@ -163,6 +168,69 @@ def test_profile_records_normalize_recent_games_without_raw_tables() -> None:
     assert inspired["role"] == "jungle"
     assert inspired["grade"]["status"] == "unavailable"
     assert payload["champion_images"]["Ivern"] == "https://example.test/ivern.png"
+
+
+def test_profile_records_keep_old_maps_in_the_archive_only() -> None:
+    rows = []
+    roles = ("top", "jng", "mid", "bot", "sup")
+    for game_id, date in (("old-map", "2025-01-10"), ("new-map", "2026-08-09")):
+        for side, team, result in (("Blue", "A", 1), ("Red", "B", 0)):
+            for role in roles:
+                rows.append(
+                    {
+                        "game_uid": game_id,
+                        "date": date,
+                        "league": "LCS",
+                        "side": side,
+                        "teamname": team,
+                        "playername": f"{team}-{role}",
+                        "position": role,
+                        "champion": f"Champion-{role}",
+                        "result": result,
+                        "kills": 2,
+                        "deaths": 1,
+                        "assists": 8,
+                    }
+                )
+
+    payload = build_profile_records(pd.DataFrame(rows), include_archive=True)
+
+    assert set(payload["games"]) == {"new-map"}
+    assert set(payload["_archive_games"]) == {"old-map", "new-map"}
+
+
+def test_match_refresh_preserves_accepted_kda_and_grade() -> None:
+    candidate = {
+        "game_id": "game-1",
+        "date": "2026-08-09T12:00:00Z",
+        "blue_team": "A",
+        "red_team": "B",
+        "blue_win": 1,
+        "players": [
+            {
+                "player": f"player-{index}",
+                "side": "Blue" if index < 5 else "Red",
+                "role": ("top", "jungle", "mid", "bot", "support")[index % 5],
+                "champion": f"champion-{index}",
+                "kills": None,
+                "deaths": None,
+                "assists": None,
+                "grade": {"status": "unavailable", "reason": "stats pending"},
+            }
+            for index in range(10)
+        ],
+    }
+    accepted = deepcopy(candidate)
+    for player in accepted["players"]:
+        player["kills"] = 2
+        player["deaths"] = 1
+        player["assists"] = 8
+        player["grade"] = {"status": "available", "grade": "A"}
+
+    merged = merge_accepted_profile_games({"game-1": candidate}, {"game-1": accepted})
+
+    assert merged["game-1"]["players"][0]["kills"] == 2
+    assert merged["game-1"]["players"][0]["grade"]["grade"] == "A"
 
 
 def test_public_player_ratings_exclude_disconnected_rows() -> None:

@@ -28,6 +28,7 @@ from lol_kills.etl.oe_live_source import (
 )
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.export import pack_spec
+from lol_kills.export.pack_records import profile_game_has_complete_stats
 from lol_kills.export.public_pack import (
     _complete_player_game_ids as _complete_identity_game_ids,
     export_public_pack,
@@ -485,6 +486,42 @@ def validate_public_identity(pack_dir: Path) -> dict[str, Any]:
     }
 
 
+def validate_match_archive(pack_dir: Path) -> dict[str, int]:
+    """Reject missing, duplicate, or incomplete maps in the public archive."""
+
+    index = _read_pack_json(pack_dir, "features/match_index.json")
+    rows = index.get("games") if isinstance(index, dict) else None
+    if not isinstance(rows, list):
+        raise RefreshValidationError("match archive index is malformed")
+    index_ids = [str(row.get("game_id") or "") for row in rows if isinstance(row, dict)]
+    if len(index_ids) != len(rows) or any(not game_id for game_id in index_ids):
+        raise RefreshValidationError("match archive index contains an empty identity")
+    if len(index_ids) != len(set(index_ids)):
+        raise RefreshValidationError("match archive index contains duplicate identities")
+
+    detail_ids: set[str] = set()
+    year_counts: dict[str, int] = {}
+    for year in (2025, 2026):
+        payload = _read_pack_json(pack_dir, f"features/match_records_{year}.json")
+        games = payload.get("games") if isinstance(payload, dict) else None
+        if not isinstance(games, dict):
+            raise RefreshValidationError(f"{year} match archive is malformed")
+        for game_id, game in games.items():
+            if game_id in detail_ids:
+                raise RefreshValidationError("match archive details contain duplicate identities")
+            if not isinstance(game, dict) or str(game.get("game_id") or "") != str(game_id):
+                raise RefreshValidationError(f"match archive game {game_id} has a malformed identity")
+            if not str(game.get("date") or "").startswith(f"{year}-"):
+                raise RefreshValidationError(f"match archive game {game_id} is in the wrong year")
+            if not profile_game_has_complete_stats(game):
+                raise RefreshValidationError(f"match archive game {game_id} has incomplete KDA")
+            detail_ids.add(str(game_id))
+        year_counts[str(year)] = len(games)
+    if set(index_ids) != detail_ids:
+        raise RefreshValidationError("match archive index and detail files contain different maps")
+    return {"maps": len(detail_ids), **year_counts}
+
+
 def validate_pack(pack_dir: Path, manifest: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
     """Verify the compact ratings pack and its source identity binding."""
 
@@ -492,7 +529,9 @@ def validate_pack(pack_dir: Path, manifest: dict[str, Any], source: dict[str, An
     if not isinstance(files, list):
         raise RefreshValidationError("pack manifest has no file inventory")
     paths = {str(item.get("path")) for item in files if isinstance(item, dict)}
-    if paths != set(pack_spec.PUBLIC_RATING_REQUIRED_FILES):
+    required_paths = set(pack_spec.PUBLIC_RATING_REQUIRED_FILES)
+    optional_paths = set(pack_spec.OPTIONAL_PUBLIC_FILES)
+    if not required_paths.issubset(paths) or not paths.issubset(required_paths | optional_paths):
         raise RefreshValidationError("pack inventory differs from the public ratings contract")
     total_bytes = 0
     root = pack_dir.resolve()
@@ -507,11 +546,12 @@ def validate_pack(pack_dir: Path, manifest: dict[str, Any], source: dict[str, An
             raise RefreshValidationError(f"pack file is missing or has the wrong size: {relative}")
         if _sha256(path) != item.get("sha256"):
             raise RefreshValidationError(f"pack checksum mismatch: {relative}")
-        public_text = path.read_text(encoding="utf-8").casefold()
-        if "los ratones" in public_text:
-            raise RefreshValidationError(f"excluded team affiliation appears in public pack: {relative}")
-        if "oracle_elixir_api" in public_text or "public_datalisk_api" in public_text:
-            raise RefreshValidationError(f"transport label appears as a public league: {relative}")
+        if str(relative) in required_paths:
+            public_text = path.read_text(encoding="utf-8").casefold()
+            if "los ratones" in public_text:
+                raise RefreshValidationError(f"excluded team affiliation appears in public pack: {relative}")
+            if "oracle_elixir_api" in public_text or "public_datalisk_api" in public_text:
+                raise RefreshValidationError(f"transport label appears as a public league: {relative}")
         total_bytes += path.stat().st_size
     ratings = manifest.get("ratings") or {}
     if ratings.get("source_game_count") != source["game_count"]:
@@ -521,7 +561,14 @@ def validate_pack(pack_dir: Path, manifest: dict[str, Any], source: dict[str, An
     if manifest.get("total_files") != len(files) or manifest.get("total_bytes") != total_bytes:
         raise RefreshValidationError("pack inventory totals are invalid")
     identity = validate_public_identity(pack_dir)
-    return {"files": len(files), "bytes": total_bytes, "identity": identity, **source}
+    match_archive = validate_match_archive(pack_dir)
+    return {
+        "files": len(files),
+        "bytes": total_bytes,
+        "identity": identity,
+        "match_archive": match_archive,
+        **source,
+    }
 
 
 def _capture_blob_pointers(base_url: str) -> dict[str, str | None]:

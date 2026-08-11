@@ -15,7 +15,6 @@ import {
   matchupGrade,
   regionalOptions,
   rowsForMode,
-  signedPp,
   TIER_ROLE_ORDER,
   viableCandidates,
   type TierBoardMode,
@@ -85,8 +84,13 @@ function roleLabel(role: string): string {
   return ROLE_LABELS[role] ?? role;
 }
 
+function gameCount(value: number): string {
+  return `${value} ${value === 1 ? "game" : "games"}`;
+}
+
 function signedScore(value: number | null | undefined): string {
-  return signedPp(value) ?? "Pending";
+  if (value === null || value === undefined || !Number.isFinite(value)) return "Pending";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(1)}`;
 }
 
 function winShare(value: number): number {
@@ -106,9 +110,9 @@ function matchupEvidence(
   }
   if (!maps || maps < 0.05) return { label: "Inferred matchup", detail: "Basis refresh pending" };
   if (basis === "observed_pair_plus_model" || evidence === "supported") {
-    return { label: "Direct + model", detail: `${maps.toFixed(1)} weighted maps` };
+    return { label: "Direct + model", detail: `${maps.toFixed(1)} weighted games` };
   }
-  return { label: "Thin sample", detail: `${maps.toFixed(1)} weighted maps` };
+  return { label: "Thin sample", detail: `${maps.toFixed(1)} weighted games` };
 }
 
 function numericMetric(value: number | null | undefined): number | null {
@@ -315,7 +319,7 @@ function listMetric(row: TierRow, mode: RankedBoardMode): { value: string; detai
   }
   return {
     value: firstPickMetric(row),
-    detail: `${row.played_maps} observed maps · patch-wide tier`,
+    detail: `${gameCount(row.played_maps)} observed · patch-wide tier`,
   };
 }
 
@@ -336,7 +340,7 @@ function DraftRow({
       <span className={styles.rowName}>
         <strong>{row.champion}</strong>
         <span>
-          {roleLabel(row.role)} · {row.played_maps} maps · <span className={movementClass(row)}>{movementText(row)}</span>
+          {roleLabel(row.role)} · {gameCount(row.played_maps)} · <span className={movementClass(row)}>{movementText(row)}</span>
         </span>
       </span>
       <span className={styles.rowMetric}>
@@ -507,7 +511,7 @@ function UnpickedBoard({
                 <ChampionThumb name={item.candidate.champion} imageUrl={item.candidate.champion_image_url} />
                 <span>
                   <strong>{item.candidate.champion}</strong>
-                  <small>0 accepted maps</small>
+                  <small>0 accepted games</small>
                 </span>
               </div>
               <div
@@ -657,7 +661,7 @@ function ResponseBoard({
               </div>
             </div>
           </div>
-          <div className={styles.matchupMatrixScroll} onScroll={hideTooltip}>
+          <div className={styles.matchupMatrixScroll} data-native-scroll onScroll={hideTooltip}>
             <table className={styles.matchupMatrix} data-matrix-size={matrixSize}>
               <thead>
                 <tr>
@@ -699,7 +703,7 @@ function ResponseBoard({
                         }
                         const grade = matchupGrade(edge);
                         const evidenceCopy = matchupEvidence(evidence, maps, basis);
-                        const detail = `${response.champion} into ${enemy.champion}: ${grade}, ${winShare(edge).toFixed(1)}% modeled win share. ${evidenceCopy.label}: ${evidenceCopy.detail}. ${low?.toFixed(1) ?? "—"} to ${high?.toFixed(1) ?? "—"} pp interval.`;
+                        const detail = `${response.champion} into ${enemy.champion}: ${grade}, ${winShare(edge).toFixed(1)}% modeled win share. ${evidenceCopy.label}: ${evidenceCopy.detail}. Interval: ${low?.toFixed(1) ?? "—"} to ${high?.toFixed(1) ?? "—"} percentage points.`;
                         const tooltipDetails = {
                           response: response.champion,
                           enemy: enemy.champion,

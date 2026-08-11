@@ -73,7 +73,7 @@ export default async function TeamEloPage({ params }: Props) {
         role: publishedPlayer.role,
         rating,
         ratingNote: (rawRating?.n_maps ?? 0) < 5
-          ? "Rating needs 5 maps"
+          ? "Rating needs 5 games"
           : "Rating unavailable",
       };
     })
@@ -85,7 +85,7 @@ export default async function TeamEloPage({ params }: Props) {
         role: participant.role,
         rating: ratingFor(participant.player) ?? null,
         ratingNote: (rawRatingFor(participant.player)?.n_maps ?? 0) < 5
-          ? "Rating needs 5 maps"
+          ? "Rating needs 5 games"
           : "Rating unavailable",
       }))
     : players

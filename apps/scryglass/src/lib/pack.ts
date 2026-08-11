@@ -119,15 +119,27 @@ export type PlayerRating = {
   evidence_state?: string | null;
 };
 
+export type PlayerRankComparison = {
+  as_of: string;
+  rank: number | null;
+  delta: number | null;
+};
+
+export type PlayerPositionDeltas = Partial<
+  Record<"1m" | "3m" | "12m", PlayerRankComparison>
+>;
+
 export type PlayerWeeklyRank = {
   rank: number;
   delta: number | null;
+  position_deltas?: PlayerPositionDeltas;
 };
 
 export type PlayerWeeklyRanks = {
   as_of: string | null;
   previous_as_of: string | null;
   current_through?: string | null;
+  position_delta_as_of?: Partial<Record<"1m" | "3m" | "12m", string>>;
   by_player: Record<string, Partial<Record<CompetitionTier | "all", PlayerWeeklyRank>>>;
 };
 
@@ -194,6 +206,68 @@ export type ProfileRecords = {
   games: Record<string, ProfileGame>;
   players: Record<string, string[]>;
   teams: Record<string, string[]>;
+};
+
+export type MatchSummary = {
+  game_id: string;
+  date: string;
+  league: string;
+  blue_team: string;
+  red_team: string;
+  blue_win: 0 | 1;
+  champions: string[];
+  grades_available: number;
+};
+
+export type MatchIndex = {
+  schema_version: "scryglass:match-index:v1";
+  years: number[];
+  games: MatchSummary[];
+};
+
+export type MatchRecords = {
+  schema_version: "scryglass:match-records:v1";
+  year: number;
+  games: Record<string, ProfileGame>;
+};
+
+export type ScheduleSeries = {
+  series_id: string;
+  start_utc: string;
+  has_time: boolean;
+  status: "scheduled" | "live";
+  team1: string;
+  team2: string;
+  best_of: number | null;
+  tournament: string;
+  overview_page: string;
+  tournament_url: string | null;
+  stage: string | null;
+  region: "Americas" | "EMEA" | "Asia" | "International" | "Other";
+  level: string | null;
+};
+
+export type ScheduleTournament = {
+  name: string;
+  overview_page: string;
+  url: string;
+  start_date: string;
+  end_date: string;
+  region: ScheduleSeries["region"];
+  league: string | null;
+  level: string | null;
+  official: boolean;
+  status: "upcoming" | "current" | "past";
+};
+
+export type PublicSchedule = {
+  schema_version: "scryglass:public-schedule:v1";
+  source: "Leaguepedia Cargo";
+  source_url: string;
+  as_of: string;
+  refresh_status: "fresh" | "cached";
+  upcoming: ScheduleSeries[];
+  tournaments: ScheduleTournament[];
 };
 
 export function recentProfileGames(

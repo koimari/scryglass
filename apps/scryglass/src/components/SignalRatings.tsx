@@ -86,7 +86,7 @@ function parseLeagues(value: string | null): string[] {
 }
 
 function FormStrip({ form }: { form: boolean[] }) {
-  if (!form.length) return <span className={styles.formEmpty}>Awaiting recent maps</span>;
+  if (!form.length) return <span className={styles.formEmpty}>Awaiting recent games</span>;
   return (
     <span className={styles.formStrip} aria-label={`Recent form: ${form.map((won) => won ? "win" : "loss").join(", ")}`}>
       {form.map((won, index) => <i key={index} className={won ? styles.formWin : styles.formLoss}>{won ? "W" : "L"}</i>)}
@@ -269,7 +269,7 @@ export function SignalRatings({
           <span>Level</span>
           <button type="button" className={!selectedTiers.length ? styles.scopeActive : ""} onClick={() => setTier(null)}>All</button>
           {TIER_FILTERS.map((tier) => <button key={tier.value} type="button" className={leagues.includes(tier.value) ? styles.scopeActive : ""} onClick={() => setTier(tier.value)}>{tier.label}</button>)}
-          <details className={styles.leagueFilter}><summary>Leagues {selectedLeagues.length ? `(${selectedLeagues.length})` : ""}</summary><div>{leagueGroups.map((group) => <section key={group.value}><strong>{group.label}</strong><div>{group.leagues.map((league) => <button key={league} type="button" className={leagues.includes(league) ? styles.scopeActive : ""} onClick={() => toggleLeague(league)}>{league}</button>)}</div></section>)}</div></details>
+          <details className={styles.leagueFilter}><summary>Leagues {selectedLeagues.length ? `(${selectedLeagues.length})` : ""}</summary><div data-native-scroll>{leagueGroups.map((group) => <section key={group.value}><strong>{group.label}</strong><div>{group.leagues.map((league) => <button key={league} type="button" className={leagues.includes(league) ? styles.scopeActive : ""} onClick={() => toggleLeague(league)}>{league}</button>)}</div></section>)}</div></details>
         </div>
       </section>
 

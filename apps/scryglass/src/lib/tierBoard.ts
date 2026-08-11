@@ -101,19 +101,19 @@ export type ViableCandidate = {
   sharedTraits: StructuralTrait[];
 };
 
-export function signedPp(value: number | null | undefined): string | null {
+export function signedPercentagePoints(value: number | null | undefined): string | null {
   if (value === null || value === undefined || !Number.isFinite(value)) return null;
-  return `${value >= 0 ? "+" : ""}${value.toFixed(1)} pp`;
+  return `${value >= 0 ? "+" : ""}${value.toFixed(1)} percentage points`;
 }
 
 export function firstPickMetric(row: TierRow | undefined): string {
   if (!row) return "No ranked pick";
-  return signedPp(row.tier_value_pp) ?? row.tier_bucket;
+  return signedPercentagePoints(row.tier_value_pp) ?? row.tier_bucket;
 }
 
 export function rowsForMode(rows: TierRow[], mode: TierRankedMode): TierRow[] {
   if (mode === "blind") {
-    return rows.filter((row) => signedPp(row.blind_score_pp) !== null);
+    return rows.filter((row) => signedPercentagePoints(row.blind_score_pp) !== null);
   }
   if (mode === "counter") {
     return rows.filter(

@@ -15,19 +15,19 @@
 .header h1 {
   margin: 0;
   color: var(--ink);
-  font-family: var(--font-ui), system-ui, sans-serif;
-  font-size: 2.25rem;
-  font-weight: 650;
-  letter-spacing: -0.035em;
-  line-height: 1.05;
+  font-family: var(--font-display), serif;
+  font-size: clamp(2.8rem, 5vw, 5rem);
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  line-height: 0.96;
 }
 
 .header p {
   max-width: 64ch;
   margin: 0.45rem 0 0;
   color: var(--ink-muted);
-  font-size: 0.9rem;
-  line-height: 1.45;
+  font-size: 0.98rem;
+  line-height: 1.55;
 }
 
 .provenance {
@@ -60,7 +60,7 @@
     display: block;
   }
   .header h1 {
-    font-size: 1.8rem;
+    font-size: 2.7rem;
   }
   .provenance {
     justify-content: flex-start;
