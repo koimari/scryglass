@@ -12,7 +12,7 @@ export function uploadPolicy(pathname: string): UploadPolicy | null {
   if (pathname === "packs/manifest.json" || pathname === "packs/latest.json") {
     return { allowOverwrite: true, cacheControlMaxAge: 60, maximumSizeInBytes: 2_000_000 };
   }
-  if (pathname === "rankings/tierlists.json") {
+  if (pathname === "rankings/tierlists.json" || pathname === "rankings/tierlists-latest.json") {
     return { allowOverwrite: true, cacheControlMaxAge: 60, maximumSizeInBytes: 20_000_000 };
   }
   const parts = pathname.split("/");

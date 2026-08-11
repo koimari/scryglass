@@ -12,6 +12,7 @@ test("stable pointers and tier display can be replaced", () => {
   assert.equal(uploadPolicy("packs/manifest.json")?.allowOverwrite, true);
   assert.equal(uploadPolicy("packs/latest.json")?.allowOverwrite, true);
   assert.equal(uploadPolicy("rankings/tierlists.json")?.allowOverwrite, true);
+  assert.equal(uploadPolicy("rankings/tierlists-latest.json")?.allowOverwrite, true);
 });
 
 test("upload policy rejects paths outside the public data contract", () => {

@@ -13,5 +13,6 @@ export async function POST(request: Request) {
   revalidatePath("/elo");
   revalidatePath("/matches");
   revalidatePath("/tiers");
+  revalidatePath("/api/public-data/tierlists");
   return NextResponse.json({ revalidated: true });
 }
