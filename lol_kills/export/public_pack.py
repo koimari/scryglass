@@ -313,23 +313,25 @@ def export_public_pack(
     pack_id: str | None = None,
     warehouse_root: Path | None = None,
     project_root: Path | None = None,
+    runtime_root: Path | None = None,
     allowed_game_ids: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     years = tuple(years or spec.DEFAULT_YEARS)
     project = Path(project_root or ROOT).resolve()
-    features_root = project / "data" / "lol" / "features"
+    runtime = Path(runtime_root or project).resolve()
+    features_root = runtime / "data" / "lol" / "features"
     warehouse = Path(
         warehouse_root
         if warehouse_root is not None
-        else project / "data" / "lol" / "warehouse" / "parquet" / "oe_live"
-        if (project / "data" / "lol" / "warehouse" / "parquet" / "oe_live" / "meta.json").exists()
-        else project / "data" / "lol" / "warehouse" / "parquet"
+        else runtime / "data" / "lol" / "warehouse" / "parquet" / "oe_live"
+        if (runtime / "data" / "lol" / "warehouse" / "parquet" / "oe_live" / "meta.json").exists()
+        else runtime / "data" / "lol" / "warehouse" / "parquet"
     )
     # Include UTC time so the 15-minute freshness workflow can publish more
     # than one immutable pack per day without colliding in Blob storage.
     stamp = datetime.now(timezone.utc).strftime("%Y.%m.%d.%H%M")
     pack_id = pack_id or f"v{stamp}"
-    out_root = Path(out_root or project / "output" / "public_pack")
+    out_root = Path(out_root or runtime / "output" / "public_pack")
     pack_dir = out_root / pack_id
     if pack_dir.exists():
         shutil.rmtree(pack_dir)

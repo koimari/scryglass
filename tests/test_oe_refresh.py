@@ -200,6 +200,12 @@ def test_browser_download_is_validated_archived_and_installed(
     assert receipt["source"]["transport"] == "brave_origin_browser_download"
     assert receipt["candidate"]["date_max_utc"] == "2026-08-11T10:50:41+00:00"
 
+    accepted = oe_ingest.validate_accepted_source_receipt(receipt_path, destination, 2026)
+    assert accepted["raw_sha256"] == hashlib.sha256(replacement).hexdigest()
+    destination.write_bytes(_csv_bytes(date="2026-08-11T10:50:41Z", gameid="changed"))
+    with pytest.raises(oe_ingest.OeDownloadError, match="does not bind"):
+        oe_ingest.validate_accepted_source_receipt(receipt_path, destination, 2026)
+
 
 def test_browser_download_refuses_temporal_regression(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path

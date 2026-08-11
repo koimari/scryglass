@@ -17,7 +17,11 @@ from typing import Any, Iterable, Iterator
 
 import pandas as pd
 
-from lol_kills.etl.oe_ingest import _validate_oe_csv, parse_oe_csv
+from lol_kills.etl.oe_ingest import (
+    _validate_oe_csv,
+    parse_oe_csv,
+    validate_accepted_source_receipt,
+)
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.player_map_grades import CORE_INPUTS
 
@@ -91,6 +95,7 @@ class PreparedImport:
     games: dict[str, PreparedGame]
     source_game_ids: tuple[str, ...]
     quarantined_game_ids: tuple[str, ...]
+    quarantined_games: dict[str, str]
 
 
 def _project_url(value: str) -> str:
@@ -124,6 +129,12 @@ def _canonical_json_sha256(value: object) -> str:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _game_identity_sha256(game_ids: Iterable[str]) -> str:
+    canonical = sorted({str(game_id) for game_id in game_ids if str(game_id)})
+    raw = ("\n".join(canonical) + "\n").encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 
 
@@ -324,7 +335,7 @@ def prepare_import(
         - {""}
     )
     games: dict[str, PreparedGame] = {}
-    quarantined: list[str] = []
+    quarantined: dict[str, str] = {}
     team_group_indices = _group_indices(team_rows)
     player_group_indices = _group_indices(player_rows)
     for game_id in source_ids:
@@ -332,15 +343,18 @@ def prepare_import(
         player_indices = player_group_indices.get(game_id, ())
         teams = team_rows.iloc[list(team_indices)]
         players = player_rows.iloc[list(player_indices)]
-        if _identity_error(teams, players) is not None:
-            quarantined.append(game_id)
+        identity_error = _identity_error(teams, players)
+        if identity_error is not None:
+            quarantined[game_id] = identity_error[:500]
             continue
         teams, players = _sorted_game_rows(teams, players)
         date_text = _single_text(teams, "date") or _single_text(players, "date")
         league = _single_text(teams, "league") or _single_text(players, "league")
         parsed_date = pd.to_datetime(date_text, errors="coerce", utc=True)
         if pd.isna(parsed_date) or not league:
-            quarantined.append(game_id)
+            quarantined[game_id] = (
+                "game_date_invalid" if pd.isna(parsed_date) else "league_missing"
+            )
             continue
         patch = _single_text(teams, "patch") or _single_text(players, "patch")
         payload = {
@@ -370,6 +384,7 @@ def prepare_import(
         games=games,
         source_game_ids=tuple(source_ids),
         quarantined_game_ids=tuple(sorted(quarantined)),
+        quarantined_games=quarantined,
     )
 
 
@@ -650,11 +665,27 @@ def update_local_cache(prepared: PreparedImport, parquet_dir: Path) -> dict[str,
         team = cached_team
         players = cached_players
 
+    def year_ids(frame: pd.DataFrame) -> set[str]:
+        if "oe_year" in frame.columns:
+            frame = frame.loc[
+                pd.to_numeric(frame["oe_year"], errors="coerce").eq(prepared.year)
+            ]
+        return set(_frame_game_ids(frame).dropna().astype(str))
+
+    final_team_ids = year_ids(team)
+    final_player_ids = year_ids(players)
+    if final_team_ids != source_ids or final_player_ids != source_ids:
+        raise OeDatabaseError(
+            "local Parquet cache identity does not match accepted Supabase games"
+        )
+    identity_digest = _game_identity_sha256(source_ids)
+
     years = dict(years)
     years[str(prepared.year)] = {
         "source_file_sha256": prepared.source["raw_sha256"],
         "source_observed_through": prepared.source["date_max_utc"],
         "game_hashes": current_hashes,
+        "canonical_game_identity_digest": identity_digest,
     }
     _atomic_json(
         state_path,
@@ -698,6 +729,7 @@ def update_local_cache(prepared: PreparedImport, parquet_dir: Path) -> dict[str,
         "removed_malformed_games": len(stale_ids),
         "team_rows": int(len(team)),
         "player_rows": int(len(players)),
+        "canonical_game_identity_digest": identity_digest,
     }
 
 
@@ -709,17 +741,27 @@ def sync_csv(
     secret_key: str,
     parquet_dir: Path,
     client: SupabaseOeDatabase | Any | None = None,
+    source_receipt: Path | None = None,
 ) -> dict[str, Any]:
     database = client or SupabaseOeDatabase(project_url, secret_key)
     path = csv_path.expanduser().resolve()
     source = _validate_oe_csv(path, str(year))
+    accepted_source = (
+        validate_accepted_source_receipt(source_receipt, path, year)
+        if source_receipt is not None
+        else None
+    )
     receipt = database.import_receipt(
         year, str(source["raw_sha256"]), TRANSFORM_VERSION
     )
     if receipt is not None and _cache_is_current(
         parquet_dir, year, str(source["raw_sha256"])
     ):
-        return _current_result_from_receipt(receipt, source, parquet_dir)
+        return {
+            **_current_result_from_receipt(receipt, source, parquet_dir),
+            "accepted_source_receipt": accepted_source,
+            "worker_commit": os.environ.get("SCRYGLASS_WORKER_COMMIT") or None,
+        }
     prepared = prepare_import(path, year, source=source)
     existing = database.current_hashes(year)
     accepted_hashes = {
@@ -780,6 +822,7 @@ def sync_csv(
         "corrected_games": len(corrected_ids),
         "unchanged_games": len(unchanged_ids),
         "quarantined_game_ids": list(prepared.quarantined_game_ids),
+        "quarantined_games": prepared.quarantined_games,
         "statistics_complete_games": sum(
             game.statistics_complete for game in prepared.games.values()
         ),
@@ -803,6 +846,8 @@ def sync_csv(
         ),
         "cache": cache,
         "status": "updated" if changed_ids else "current",
+        "accepted_source_receipt": accepted_source,
+        "worker_commit": os.environ.get("SCRYGLASS_WORKER_COMMIT") or None,
     }
 
 
@@ -813,23 +858,67 @@ def _required_environment(name: str) -> str:
     return value
 
 
+def validate_import_receipt(
+    import_receipt: Path,
+    source_receipt: Path,
+    csv_path: Path,
+    year: int,
+) -> dict[str, Any]:
+    accepted_source = validate_accepted_source_receipt(source_receipt, csv_path, year)
+    try:
+        payload = json.loads(import_receipt.expanduser().resolve().read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise OeDatabaseError("accepted import receipt is invalid") from error
+    if not isinstance(payload, dict):
+        raise OeDatabaseError("accepted import receipt is not an object")
+    nested = payload.get("accepted_source_receipt")
+    if (
+        payload.get("source_file_sha256") != accepted_source["raw_sha256"]
+        or not isinstance(nested, dict)
+        or nested.get("receipt_canonical_sha256")
+        != accepted_source["receipt_canonical_sha256"]
+    ):
+        raise OeDatabaseError("accepted import receipt does not match the source receipt")
+    expected_commit = os.environ.get("SCRYGLASS_WORKER_COMMIT", "").strip()
+    if expected_commit and payload.get("worker_commit") != expected_commit:
+        raise OeDatabaseError("accepted import receipt belongs to a different worker commit")
+    return payload
+
+
 def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--csv", required=True, type=Path)
     parser.add_argument("--year", required=True, type=int)
+    parser.add_argument("--source-receipt", required=True, type=Path)
+    parser.add_argument("--result-output", type=Path)
+    parser.add_argument("--validate-only", action="store_true")
     parser.add_argument(
         "--parquet-dir",
         type=Path,
         default=Path("data/lol/warehouse/parquet"),
     )
     arguments = parser.parse_args(list(argv) if argv is not None else None)
+    if arguments.validate_only:
+        if arguments.result_output is None:
+            parser.error("--result-output is required with --validate-only")
+        result = validate_import_receipt(
+            arguments.result_output,
+            arguments.source_receipt,
+            arguments.csv,
+            arguments.year,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
     result = sync_csv(
         arguments.csv,
         arguments.year,
         project_url=_required_environment("SCRYGLASS_SUPABASE_URL"),
         secret_key=_required_environment("SCRYGLASS_SUPABASE_SECRET_KEY"),
         parquet_dir=arguments.parquet_dir.resolve(),
+        source_receipt=arguments.source_receipt,
     )
+    if arguments.result_output is not None:
+        _atomic_json(arguments.result_output.expanduser().resolve(), result)
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 

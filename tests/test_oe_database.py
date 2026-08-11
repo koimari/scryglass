@@ -136,6 +136,7 @@ def test_prepare_import_accepts_complete_games_and_quarantines_bad_identity(
     assert list(prepared.games) == ["game-1"]
     assert prepared.games["game-1"].statistics_complete is True
     assert prepared.quarantined_game_ids == ("game-2",)
+    assert prepared.quarantined_games["game-2"]
     payload = oe_database.payload_for_game(prepared, "game-1")
     assert len(payload["team_rows"]) == 2
     assert len(payload["player_rows"]) == 10
@@ -166,6 +167,7 @@ def test_sync_is_incremental_idempotent_and_records_corrections(tmp_path: Path) 
 
     assert first["new_games"] == 2
     assert first["corrected_games"] == 0
+    assert len(first["cache"]["canonical_game_identity_digest"]) == 64
     assert second["new_games"] == 0
     assert second["corrected_games"] == 0
     assert second["unchanged_games"] == 2

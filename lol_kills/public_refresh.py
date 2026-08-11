@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import time
 import urllib.error
 import urllib.request
@@ -16,6 +17,8 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from lol_kills.etl.oe_ingest import OeDownloadError
+from lol_kills.etl.oe_ingest import load_refresh_receipt
+from lol_kills.etl.oe_database import TRANSFORM_VERSION
 from lol_kills.export import supabase_publication
 from lol_kills.export.public_pack import source_identity_sha256
 from lol_kills.postgame_sync import (
@@ -29,6 +32,7 @@ from lol_kills.postgame_sync import (
     validate_live_source,
 )
 from lol_kills.v2.tierlists import live_refresh
+from lol_kills.refresh_ledger import RefreshRunLedger, worker_commit
 
 
 SCHEMA_VERSION = "scryglass:public-refresh:v1"
@@ -58,6 +62,7 @@ class PublicRefreshHttpError(PublicRefreshError):
 @dataclass(frozen=True)
 class RefreshConfig:
     root: Path
+    runtime_root: Path
     public_root: Path
     site: str
     manifest_url: str | None
@@ -69,6 +74,8 @@ class RefreshConfig:
     publication_backend: str
     supabase_url: str | None
     supabase_secret_key: str | None
+    accepted_source_receipt: Path | None = None
+    accepted_import_receipt: Path | None = None
     attempts: int = DEFAULT_ATTEMPTS
     step_timeout_seconds: float = DEFAULT_STEP_TIMEOUT_MINUTES * 60
 
@@ -77,10 +84,13 @@ class RefreshConfig:
         return SyncConfig(
             root=self.root,
             public_root=self.public_root,
-            output_root=self.root / "output/public_pack",
-            state_path=self.root / "data/lol/runtime/postgame-sync.json",
+            output_root=self.runtime_root / "output/public_pack",
+            state_path=self.runtime_root / "data/lol/runtime/postgame-sync.json",
             lock_path=self.lock_path,
-            health_path=self.root / "data/lol/runtime/postgame-sync-health.json",
+            health_path=self.runtime_root / "data/lol/runtime/postgame-sync-health.json",
+            runtime_root=self.runtime_root,
+            accepted_source_receipt=self.accepted_source_receipt,
+            accepted_import_receipt=self.accepted_import_receipt,
         )
 
 
@@ -95,7 +105,10 @@ def config_from_environment(root: Path, public_root: Path) -> RefreshConfig:
     manifest_url = _read_env("SCRYGLASS_PACK_MANIFEST_URL")
     if manifest_url is None and blob_root:
         manifest_url = f"{blob_root.rstrip('/')}/packs/manifest.json"
-    runtime = root / "data/lol/runtime"
+    runtime_root = Path(_read_env("SCRYGLASS_RUNTIME_ROOT") or root).expanduser().resolve()
+    runtime = runtime_root / "data/lol/runtime"
+    source_receipt_raw = _read_env("SCRYGLASS_ACCEPTED_SOURCE_RECEIPT")
+    import_receipt_raw = _read_env("SCRYGLASS_ACCEPTED_IMPORT_RECEIPT")
     publication_backend = (_read_env("SCRYGLASS_PUBLICATION_BACKEND") or "blob").lower()
     if publication_backend not in {"blob", "supabase"}:
         raise PublicRefreshError("SCRYGLASS_PUBLICATION_BACKEND must be blob or supabase")
@@ -117,6 +130,7 @@ def config_from_environment(root: Path, public_root: Path) -> RefreshConfig:
         )
     return RefreshConfig(
         root=root,
+        runtime_root=runtime_root,
         public_root=public_root,
         site=site,
         manifest_url=manifest_url,
@@ -130,6 +144,16 @@ def config_from_environment(root: Path, public_root: Path) -> RefreshConfig:
         supabase_secret_key=(
             _read_env("SCRYGLASS_SUPABASE_SECRET_KEY")
             or _read_env("SUPABASE_SECRET_KEY")
+        ),
+        accepted_source_receipt=(
+            Path(source_receipt_raw).expanduser().resolve()
+            if source_receipt_raw
+            else None
+        ),
+        accepted_import_receipt=(
+            Path(import_receipt_raw).expanduser().resolve()
+            if import_receipt_raw
+            else None
         ),
         attempts=attempts,
         step_timeout_seconds=step_timeout_minutes * 60,
@@ -193,6 +217,133 @@ def _preflight(config: RefreshConfig) -> None:
             )
         except ValueError as error:
             raise PublicRefreshError(str(error)) from error
+    if config.accepted_source_receipt is None or config.accepted_import_receipt is None:
+        raise PublicRefreshError("production refresh requires accepted source and import receipts")
+    if not config.accepted_source_receipt.is_file() or not config.accepted_import_receipt.is_file():
+        raise PublicRefreshError("accepted source or import receipt is missing")
+
+
+def _accepted_run_inputs(config: RefreshConfig) -> dict[str, Any] | None:
+    if config.accepted_source_receipt is None or config.accepted_import_receipt is None:
+        return None
+    source = load_refresh_receipt(config.accepted_source_receipt)
+    try:
+        imported = json.loads(config.accepted_import_receipt.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PublicRefreshError("accepted import receipt is invalid") from error
+    if not isinstance(imported, dict):
+        raise PublicRefreshError("accepted import receipt is not an object")
+    candidate = source.get("candidate")
+    imported_source = imported.get("accepted_source_receipt")
+    if not isinstance(candidate, dict) or not isinstance(imported_source, dict):
+        raise PublicRefreshError("accepted source binding is missing")
+    source_sha256 = str(candidate.get("raw_sha256") or "")
+    if (
+        imported.get("source_file_sha256") != source_sha256
+        or imported_source.get("raw_sha256") != source_sha256
+        or imported_source.get("receipt_canonical_sha256")
+        != source.get("receipt_canonical_sha256")
+    ):
+        raise PublicRefreshError("accepted import receipt does not match the source receipt")
+    expected_commit = worker_commit(config.root)
+    if imported.get("worker_commit") != expected_commit:
+        raise PublicRefreshError("accepted import receipt belongs to a different worker commit")
+    return {
+        "source_file_sha256": source_sha256,
+        "source_observed_through": imported.get("source_observed_through"),
+        "accepted_games": int(imported.get("accepted_games", 0)),
+        "new_games": int(imported.get("new_games", 0)),
+        "corrected_games": int(imported.get("corrected_games", 0)),
+        "unchanged_games": int(imported.get("unchanged_games", 0)),
+        "quarantined_games": int(imported.get("quarantined_games", 0)),
+        "source_receipt_sha256": source.get("receipt_canonical_sha256"),
+        "import_status": imported.get("status"),
+        "worker_commit": expected_commit,
+        "source_bytes": int((source.get("candidate") or {}).get("bytes", candidate.get("bytes", 0))),
+        "source_rows": int((source.get("candidate") or {}).get("row_count", candidate.get("row_count", 0))),
+        "source_games": int(imported.get("source_games", 0)),
+        "statistics_complete_games": int(imported.get("statistics_complete_games", 0)),
+    }
+
+
+def _start_run_ledger(
+    config: RefreshConfig,
+    checked_at: datetime,
+    accepted: dict[str, Any] | None,
+) -> RefreshRunLedger | None:
+    if accepted is None:
+        return None
+    remote_write = None
+    if config.publication_backend == "supabase":
+        client = supabase_publication.SupabasePublicData(
+            config.supabase_url or "",
+            config.supabase_secret_key or "",
+        )
+        remote_write = client.write_refresh_run
+    counts = {
+        key: int(accepted.get(key, 0))
+        for key in (
+            "accepted_games",
+            "new_games",
+            "corrected_games",
+            "unchanged_games",
+            "quarantined_games",
+        )
+    }
+    return RefreshRunLedger(
+        runtime_root=config.runtime_root / "data/lol/runtime",
+        scheduled_for=checked_at,
+        worker_git_commit=worker_commit(config.root),
+        transform_version=TRANSFORM_VERSION,
+        source_file_sha256=str(accepted["source_file_sha256"]),
+        source_observed_through=(
+            str(accepted["source_observed_through"])
+            if accepted.get("source_observed_through")
+            else None
+        ),
+        counts=counts,
+        remote_write=remote_write,
+    )
+
+
+def _write_remote_health(
+    config: RefreshConfig,
+    *,
+    checked_at: datetime,
+    ledger: RefreshRunLedger | None,
+    status: str,
+    refresh_status: str,
+    release_id: str | None,
+    source_as_of: str | None,
+) -> None:
+    if ledger is None or config.publication_backend != "supabase":
+        return
+    client = supabase_publication.SupabasePublicData(
+        config.supabase_url or "",
+        config.supabase_secret_key or "",
+    )
+    if not release_id:
+        active = client.active_release()
+        if isinstance(active, dict):
+            release_id = str(active.get("release_id") or "") or None
+    previous = _load_json(config.health_path)
+    client.write_public_health(
+        {
+            "status": status,
+            "refresh_status": refresh_status,
+            "checked_at": _iso(checked_at),
+            "last_success_at": (
+                _iso(checked_at)
+                if refresh_status == "idle"
+                else previous.get("last_success_at")
+            ),
+            "source_as_of": source_as_of,
+            "active_release_id": release_id,
+            "last_run_id": ledger.run_id,
+            "worker_commit": ledger.worker_git_commit,
+            "stale": refresh_status == "stale",
+        }
+    )
 
 
 def _supabase_asset_json(
@@ -263,7 +414,7 @@ def seed_supabase_continuity(config: RefreshConfig) -> dict[str, Any] | None:
     game_ids = sorted(str(game_id) for game_id in games)
     source = "profile_index"
     if len(game_ids) != expected_count or source_identity_sha256(game_ids) != expected_digest:
-        local_source = validate_live_source(config.root, [])
+        local_source = validate_live_source(config.runtime_root, [])
         local_ids = local_source.get("game_ids")
         if not isinstance(local_ids, list):
             raise PublicRefreshError("Supabase continuity bootstrap has no complete source index")
@@ -309,9 +460,15 @@ def _run_with_source_retries(config: RefreshConfig, now: datetime, *, force: boo
 
 def _run_tier_refresh(config: RefreshConfig, expected_live_as_of: str) -> dict[str, Any]:
     previous = live_refresh.DEFAULT_OUTPUT
-    previous_path = config.root / previous if (config.root / previous).is_file() else None
+    previous_path = (
+        config.runtime_root / previous
+        if (config.runtime_root / previous).is_file()
+        else config.root / previous
+        if (config.root / previous).is_file()
+        else None
+    )
     receipt = live_refresh.refresh_candidate(
-        config.root,
+        config.runtime_root,
         expected_live_as_of=expected_live_as_of,
         previous_path=previous_path,
         source_mode="oe_only",
@@ -539,6 +696,31 @@ def invalidate_public_cache(config: RefreshConfig) -> dict[str, Any]:
     return payload
 
 
+def prune_local_releases(public_root: Path, active_release_id: str, keep: int = 3) -> list[str]:
+    if keep < 3:
+        raise PublicRefreshError("local release retention must keep at least three releases")
+    candidates = sorted(
+        (
+            path
+            for path in public_root.iterdir()
+            if path.is_dir()
+            and not path.is_symlink()
+            and supabase_publication.PACK_ID_RE.fullmatch(path.name)
+        ),
+        key=lambda path: path.name,
+        reverse=True,
+    ) if public_root.is_dir() else []
+    previous = [path.name for path in candidates if path.name != active_release_id]
+    protected = {active_release_id, *previous[: keep - 1]}
+    removed: list[str] = []
+    for path in candidates:
+        if path.name in protected:
+            continue
+        shutil.rmtree(path)
+        removed.append(path.name)
+    return sorted(removed)
+
+
 def notify_health(config: RefreshConfig, *, failure_unit: str | None = None) -> bool:
     health = _load_json(config.health_path)
     if health.get("status") != "error":
@@ -637,12 +819,42 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
     database_publication: dict[str, Any] | None = None
     post_publication_verified = False
     failure_stage = "preflight"
+    ledger: RefreshRunLedger | None = None
+    accepted_inputs: dict[str, Any] | None = None
     _write_health(config, "checking", checked_at)
     try:
         _preflight(config)
+        accepted_inputs = _accepted_run_inputs(config)
+        ledger = _start_run_ledger(config, checked_at, accepted_inputs)
+        _write_remote_health(
+            config,
+            checked_at=checked_at,
+            ledger=ledger,
+            status="ok",
+            refresh_status="running",
+            release_id=None,
+            source_as_of=(
+                str(accepted_inputs.get("source_observed_through"))
+                if accepted_inputs and accepted_inputs.get("source_observed_through")
+                else None
+            ),
+        )
+        if ledger is not None:
+            ledger.advance(
+                "ingest",
+                metrics={
+                    "bytes": int(accepted_inputs.get("source_bytes", 0)),
+                    "rows": int(accepted_inputs.get("source_rows", 0)),
+                    "games": int(accepted_inputs.get("source_games", 0)),
+                },
+            )
         failure_stage = "continuity_bootstrap"
         continuity_bootstrap = seed_supabase_continuity(config)
+        if ledger is not None:
+            ledger.advance("reconcile")
         failure_stage = "ratings"
+        if ledger is not None:
+            ledger.advance("derive")
         ratings = _run_with_source_retries(config, checked_at, force=force)
         publication = ratings.get("publication") if isinstance(ratings.get("publication"), dict) else None
         tier_error: str | None = None
@@ -676,6 +888,21 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
                 tier_publication = _tier_publication(tier)
             except Exception as error:  # noqa: BLE001
                 tier_error = f"{type(error).__name__}: {str(error)[:500]}"
+        if ledger is not None:
+            local_manifest = _load_json(
+                config.sync.output_root / str(ratings.get("pack_id") or "") / "manifest.json"
+            )
+            ledger.advance(
+                "validate_artifacts",
+                metrics={
+                    "bytes": int(local_manifest.get("total_bytes", 0)),
+                    "files": int(local_manifest.get("total_files", 0)),
+                    "changed_games": int(accepted_inputs.get("new_games", 0))
+                    + int(accepted_inputs.get("corrected_games", 0))
+                    if accepted_inputs
+                    else 0,
+                },
+            )
         if tier is not None and config.publication_backend == "supabase":
             failure_stage = "publication"
             pack_id = str(ratings.get("pack_id") or "")
@@ -683,27 +910,46 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             manifest = _load_json(pack_dir / "manifest.json")
             if not manifest:
                 raise PublicRefreshError("local release manifest is missing before Supabase publication")
+            if ledger is not None:
+                ledger.advance("stage_release")
             database_publication = supabase_publication.publish_release(
                 pack_dir,
                 manifest,
-                config.root / "apps/scryglass/public/rankings/tierlists.json",
+                config.runtime_root / "apps/scryglass/public/rankings/tierlists.json",
                 project_url=config.supabase_url or "",
                 secret_key=config.supabase_secret_key or "",
             )
+            if ledger is not None:
+                ledger.advance(
+                    "activate_release",
+                    release_id=pack_id,
+                    metrics={
+                        "bytes": int(database_publication.get("bytes", 0)),
+                        "assets": int(database_publication.get("assets", 0)),
+                    },
+                )
         changed = (
             ratings.get("status") == "published"
             or tier is not None
             or database_publication is not None
         )
         failure_stage = "cache"
+        if ledger is not None:
+            ledger.advance("invalidate_cache", release_id=str(ratings.get("pack_id") or "") or None)
         cache = invalidate_public_cache(config) if changed else None
         failure_stage = "smoke"
+        if ledger is not None:
+            ledger.advance("smoke", release_id=str(ratings.get("pack_id") or "") or None)
         smoke = verify_public_release(
             config,
             expected_pack_id=str(ratings.get("pack_id")) if ratings.get("status") == "published" else None,
             tier_expected=tier is not None,
         )
         post_publication_verified = True
+        pruned_local_releases = prune_local_releases(
+            config.public_root,
+            str(smoke["pack_id"]),
+        )
         result = {
             "schema_version": SCHEMA_VERSION,
             "status": "partial" if tier_error else str(ratings.get("status") or "ok"),
@@ -715,13 +961,33 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             "database_publication": database_publication,
             "cache_invalidation": cache,
             "smoke": smoke,
+            "pruned_local_releases": pruned_local_releases,
+            "refresh_run_id": ledger.run_id if ledger is not None else None,
+            "accepted_source": accepted_inputs,
         }
         _atomic_json(config.state_path, result)
         _write_health(config, result["status"], checked_at, pack_id=smoke["pack_id"], tier_error=tier_error)
         if tier_error:
             raise PublicRefreshError(tier_error)
+        if ledger is not None:
+            final_status = "no_change" if result["status"] == "no_change" else "success"
+            ledger.finish(final_status, release_id=smoke["pack_id"])
+        _write_remote_health(
+            config,
+            checked_at=checked_at,
+            ledger=ledger,
+            status="ok",
+            refresh_status="idle",
+            release_id=smoke["pack_id"],
+            source_as_of=str(ratings.get("source_observed_through") or "") or None,
+        )
         return result
     except Exception as error:
+        if ledger is not None:
+            try:
+                ledger.fail(error)
+            except Exception:
+                pass
         should_rollback = (
             not post_publication_verified
             and failure_stage in {"cache", "smoke"}
@@ -790,6 +1056,22 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             reason=f"{type(error).__name__}: {str(error)[:500]}",
             rollback=rollback,
         )
+        try:
+            _write_remote_health(
+                config,
+                checked_at=checked_at,
+                ledger=ledger,
+                status="error",
+                refresh_status="failed",
+                release_id=None,
+                source_as_of=(
+                    str(accepted_inputs.get("source_observed_through"))
+                    if accepted_inputs and accepted_inputs.get("source_observed_through")
+                    else None
+                ),
+            )
+        except Exception:
+            pass
         raise
 
 

@@ -20,7 +20,7 @@ from typing import Any, Callable, Iterator, Sequence
 import pandas as pd
 import pyarrow.parquet as pq
 
-from lol_kills.etl.oe_ingest import ingest_oe
+from lol_kills.etl.oe_ingest import ingest_oe, validate_accepted_source_receipt
 from lol_kills.etl.oe_live_source import (
     _complete_player_game_ids,
     _identity_complete_player_game_ids,
@@ -41,6 +41,8 @@ from lol_kills.export.upload_pack import (
     upload_to_blob,
 )
 from lol_kills.ratings.player_map_grades import CORE_INPUTS
+from lol_kills.etl.oe_database import TRANSFORM_VERSION
+from lol_kills.refresh_ledger import worker_commit
 
 
 OE_TEAM_CACHE = Path("data/lol/warehouse/parquet/oe_team_games.parquet")
@@ -83,6 +85,13 @@ class SyncConfig:
     window_hours: int = 24 * 120
     lookback_days: int = 120
     max_workers: int = 8
+    runtime_root: Path | None = None
+    accepted_source_receipt: Path | None = None
+    accepted_import_receipt: Path | None = None
+
+    @property
+    def data_root(self) -> Path:
+        return (self.runtime_root or self.root).resolve()
 
 
 def _iso(value: datetime) -> str:
@@ -162,11 +171,55 @@ def _annual_source_latest(root: Path) -> str | None:
     return max(values) if values else None
 
 
-def ingest_oe_csv(root: Path, *, years: Sequence[int] = (2025, 2026), **_: Any) -> dict[str, Any]:
+def _source_file_hashes(root: Path) -> dict[str, str]:
+    payload = _load_json(root / OE_META)
+    values: dict[str, str] = {}
+    for item in payload.get("source_files", []):
+        if not isinstance(item, dict):
+            continue
+        year = item.get("year")
+        digest = item.get("raw_sha256")
+        if isinstance(year, int) and isinstance(digest, str) and len(digest) == 64:
+            values[str(year)] = digest
+    return values
+
+
+def ingest_oe_csv(
+    root: Path,
+    *,
+    years: Sequence[int] = (2025, 2026),
+    source_receipt: Path | None = None,
+    import_receipt: Path | None = None,
+    **_: Any,
+) -> dict[str, Any]:
     """Refresh the public annual OE cache and return its source receipt."""
 
     database_refreshed = os.environ.get("SCRYGLASS_OE_DATABASE_REFRESHED") == "1"
     browser_refreshed = os.environ.get("SCRYGLASS_OE_BROWSER_REFRESHED") == "1"
+    accepted_source: dict[str, Any] | None = None
+    if source_receipt is not None:
+        current_year = max(years)
+        source_path = (
+            root
+            / "data/lol/warehouse/raw"
+            / f"{current_year}_LoL_esports_match_data_from_OraclesElixir.csv"
+        )
+        accepted_source = validate_accepted_source_receipt(
+            source_receipt,
+            source_path,
+            current_year,
+        )
+    accepted_import: dict[str, Any] | None = None
+    if import_receipt is not None:
+        try:
+            loaded = json.loads(import_receipt.expanduser().resolve().read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise RefreshValidationError("accepted OE import receipt is invalid") from error
+        if not isinstance(loaded, dict):
+            raise RefreshValidationError("accepted OE import receipt is not an object")
+        if accepted_source is None or loaded.get("source_file_sha256") != accepted_source["raw_sha256"]:
+            raise RefreshValidationError("accepted OE import receipt does not match the source")
+        accepted_import = loaded
     if not database_refreshed:
         ingest_oe(
             years=[str(year) for year in years],
@@ -188,6 +241,8 @@ def ingest_oe_csv(root: Path, *, years: Sequence[int] = (2025, 2026), **_: Any) 
         "source_latest": _annual_source_latest(root),
         "source_game_count": len(game_ids),
         "cached": True,
+        "accepted_source_receipt": accepted_source,
+        "accepted_import_receipt": accepted_import,
     }
 
 
@@ -356,7 +411,7 @@ def _continuity_baseline(
         and source_identity_sha256(state_ids) == binding["identity_sha256"]
     ):
         return state_ids, binding
-    current_source = validate_live_source(config.root, [])
+    current_source = validate_live_source(config.data_root, [])
     if (
         current_source["game_count"] != binding["game_count"]
         or current_source["identity_sha256"] != binding["identity_sha256"]
@@ -697,8 +752,10 @@ def sync_once(
     _write_health(config, "checking", checked_at)
     try:
         ingest_result = ingest_fn(
-            config.root,
+            config.data_root,
             years=config.years,
+            source_receipt=config.accepted_source_receipt,
+            import_receipt=config.accepted_import_receipt,
             start=pd.Timestamp(checked_at - timedelta(hours=config.window_hours)),
             end=pd.Timestamp(checked_at),
             lookback_days=config.lookback_days,
@@ -710,7 +767,27 @@ def sync_once(
             if isinstance(ingest_result, dict) and ingest_result.get("source_latest")
             else None
         )
-        observed = set(_source_game_ids(config.root))
+        accepted_import = ingest_result.get("accepted_import_receipt")
+        corrected_game_count = (
+            int(accepted_import.get("corrected_games", 0))
+            if isinstance(accepted_import, dict)
+            else 0
+        )
+        accepted_source = ingest_result.get("accepted_source_receipt")
+        source_file_sha256 = (
+            str(accepted_import.get("source_file_sha256") or "")
+            if isinstance(accepted_import, dict)
+            else ""
+        ) or (
+            str(accepted_source.get("raw_sha256") or "")
+            if isinstance(accepted_source, dict)
+            else ""
+        )
+        source_changed_since_publish = bool(
+            source_file_sha256
+            and state.get("source_file_sha256") != source_file_sha256
+        )
+        observed = set(_source_game_ids(config.data_root))
         validate_source_continuity(
             baseline_ids,
             {
@@ -721,7 +798,12 @@ def sync_once(
             published_source,
         )
         raw_discovered_ids = sorted(observed - known)
-        if not raw_discovered_ids and not force:
+        if (
+            not raw_discovered_ids
+            and not force
+            and corrected_game_count == 0
+            and not source_changed_since_publish
+        ):
             result = {
                 "status": "no_change",
                 "new_game_ids": [],
@@ -731,8 +813,8 @@ def sync_once(
             _atomic_json(config.state_path, {**state, **result, "published_game_ids": sorted(known)})
             _write_health(config, "ok", checked_at, pack_id=result["pack_id"])
             return result
-        build_live_fn(config.root)
-        candidate_source = validate_live_fn(config.root, [])
+        build_live_fn(config.data_root)
+        candidate_source = validate_live_fn(config.data_root, [])
         candidate_continuity = validate_source_continuity(
             baseline_ids, candidate_source, published_source
         )
@@ -741,7 +823,12 @@ def sync_once(
         statistics_complete = set(candidate_source.get("statistics_complete_game_ids", []))
         new_ids = sorted(set(discovered_ids).intersection(statistics_complete))
         pending_ids = sorted(set(discovered_ids).difference(statistics_complete))
-        if not new_ids and not force:
+        if (
+            not new_ids
+            and not force
+            and corrected_game_count == 0
+            and not source_changed_since_publish
+        ):
             status = "waiting_for_details" if pending_ids else "no_change"
             result = {
                 "status": status,
@@ -753,7 +840,7 @@ def sync_once(
             _atomic_json(config.state_path, {**state, **result, "published_game_ids": sorted(known)})
             _write_health(config, status if status != "no_change" else "ok", checked_at, pending_game_ids=pending_ids)
             return result
-        source = validate_live_fn(config.root, new_ids)
+        source = validate_live_fn(config.data_root, new_ids)
         publish_ids = sorted(
             set(baseline_ids)
             .difference(candidate_continuity["quarantined_game_ids"])
@@ -775,8 +862,47 @@ def sync_once(
             out_root=config.output_root,
             pack_id=pack_id,
             project_root=config.root,
+            runtime_root=config.data_root,
+            warehouse_root=config.data_root / "data/lol/warehouse/parquet/oe_live",
             allowed_game_ids=publish_ids,
         )
+        files = manifest.get("files") if isinstance(manifest, dict) else None
+        artifact_hashes = {
+            str(item["path"]): str(item["sha256"])
+            for item in files or []
+            if isinstance(item, dict)
+            and isinstance(item.get("path"), str)
+            and isinstance(item.get("sha256"), str)
+        }
+        source_receipt_sha256 = (
+            accepted_source.get("receipt_canonical_sha256")
+            if isinstance(accepted_source, dict)
+            else None
+        )
+        accepted_import = ingest_result.get("accepted_import_receipt")
+        import_counts = accepted_import if isinstance(accepted_import, dict) else {}
+        manifest["release"] = {
+            "release_id": pack_id,
+            "worker_commit": worker_commit(config.root),
+            "source_file_hashes": _source_file_hashes(config.data_root),
+            "source_receipt_sha256": source_receipt_sha256,
+            "canonical_game_identity_digest": source["identity_sha256"],
+            "source_watermark": source_observed_through,
+            "transform_version": TRANSFORM_VERSION,
+            "ratings_version": "scryglass:dual-elo-public:v1",
+            "tier_list_version": None,
+            "artifact_hashes": artifact_hashes,
+            "accepted_games": int(import_counts.get("accepted_games", source["game_count"])),
+            "new_games": int(import_counts.get("new_games", len(new_ids))),
+            "corrected_games": int(import_counts.get("corrected_games", 0)),
+            "unchanged_games": int(
+                import_counts.get("unchanged_games", max(0, len(baseline_ids) - len(new_ids)))
+            ),
+            "quarantined_games": int(
+                import_counts.get("quarantined_games", len(continuity["quarantined_game_ids"]))
+            ),
+        }
+        _atomic_json(config.output_root / pack_id / "manifest.json", manifest)
         validation = validate_pack_fn(config.output_root / pack_id, manifest, source)
         publication = publish_pack_fn(config.output_root / pack_id, manifest, config.public_root)
         validation["continuity"] = continuity
@@ -786,6 +912,7 @@ def sync_once(
             "pending_game_ids": pending_ids,
             "pack_id": pack_id,
             "source_observed_through": source_observed_through,
+            "source_file_sha256": source_file_sha256 or None,
             "validation": validation,
             "publication": publication,
         }

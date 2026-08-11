@@ -78,6 +78,18 @@ class FakeSupabase:
             "previous_release_id": previous,
         }
 
+    def restore(self, release_id: str):
+        previous = self.active_id
+        if previous:
+            self.releases[previous]["status"] = "superseded"
+        self.active_id = release_id
+        self.releases[release_id]["status"] = "active"
+        return {
+            "status": "restored",
+            "release_id": release_id,
+            "previous_release_id": previous,
+        }
+
     def prune(self, keep: int = 3):
         assert keep == 3
         return 0
@@ -269,6 +281,80 @@ def test_publish_release_rejects_changed_pack_asset_before_upload() -> None:
             )
 
 
+def test_storage_readback_failure_does_not_activate_staged_release() -> None:
+    with TemporaryDirectory() as temporary:
+        pack, manifest, tier = _fixture(Path(temporary))
+        database = FakeSupabase()
+        old_release = "v2026.08.09.120000"
+        database.active_id = old_release
+        database.releases[old_release] = {
+            "release_id": old_release,
+            "status": "active",
+        }
+        original = database.storage_object
+
+        def corrupt(storage_path: str):
+            if storage_path.endswith("rankings/tierlists.json"):
+                return b"corrupt"
+            return original(storage_path)
+
+        database.storage_object = corrupt  # type: ignore[method-assign]
+
+        with pytest.raises(
+            supabase_publication.SupabasePublicationError,
+            match="Storage readback failed",
+        ):
+            supabase_publication.publish_release(
+                pack,
+                manifest,
+                tier,
+                project_url=database.project_url,
+                secret_key="unused",
+                client=database,
+            )
+
+        assert database.active_id == old_release
+
+
+def test_post_activation_readback_failure_restores_previous_release() -> None:
+    with TemporaryDirectory() as temporary:
+        pack, manifest, tier = _fixture(Path(temporary))
+        database = FakeSupabase()
+        old_release = "v2026.08.09.120000"
+        database.active_id = old_release
+        database.releases[old_release] = {
+            "release_id": old_release,
+            "status": "active",
+        }
+        original = database.storage_object
+        reads = 0
+
+        def fail_after_activation(storage_path: str):
+            nonlocal reads
+            reads += 1
+            if reads > 2 and storage_path.endswith("rankings/tierlists.json"):
+                return b"corrupt"
+            return original(storage_path)
+
+        database.storage_object = fail_after_activation  # type: ignore[method-assign]
+
+        with pytest.raises(
+            supabase_publication.SupabasePublicationError,
+            match="Storage readback failed",
+        ):
+            supabase_publication.publish_release(
+                pack,
+                manifest,
+                tier,
+                project_url=database.project_url,
+                secret_key="unused",
+                client=database,
+            )
+
+        assert database.active_id == old_release
+        assert database.releases[old_release]["status"] == "active"
+
+
 def test_client_repr_redacts_secret_key() -> None:
     client = supabase_publication.SupabasePublicData(
         "https://example.supabase.co",
@@ -368,3 +454,13 @@ def test_database_allowlist_matches_publication_contract() -> None:
     for path in (*supabase_publication.PUBLIC_RATING_REQUIRED_FILES, supabase_publication.TIER_ASSET_PATH):
         assert f"'{path}'" in required_section
     assert "'features/schedule.json'" not in required_section
+
+
+def test_quarantine_reason_migration_keeps_details_private() -> None:
+    migration = (
+        ROOT / "supabase/migrations/20260811193000_oe_quarantine_reasons.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "add column if not exists quarantined_games jsonb" in migration
+    assert "jsonb_typeof(quarantined_games) = 'object'" in migration
+    assert "grant" not in migration.lower()

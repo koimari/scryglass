@@ -58,6 +58,10 @@ The Mac starts one refresh at 00:00, 06:00, 12:00, and 18:00 in `America/Sao_Pau
 
 The worker keeps the previous active release when acquisition, validation, derivation, upload, readback, activation, cache invalidation, or smoke testing fails. Quarantined games receive a bounded reason and return for review during a later cycle.
 
+Every cycle has one directory under `runtime/data/lol/runtime/cycles`. It contains the accepted source receipt and import receipt. A retry can reuse them only during the same six-hour cycle and only with the same worker commit. Stage receipts record wall time, CPU time, byte counts, row counts, and changed-game counts.
+
+The worker reads all staged assets before it activates a release. Local retention keeps the active release and two previous releases. A separate daily job keeps seven daily database dumps and four weekly dumps.
+
 ## Baseline recorded on 11 August 2026
 
 | Item | Recorded value |

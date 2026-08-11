@@ -23,6 +23,7 @@ def _config(tmp_path: Path) -> public_refresh.RefreshConfig:
     runtime.mkdir()
     return public_refresh.RefreshConfig(
         root=tmp_path,
+        runtime_root=tmp_path,
         public_root=tmp_path / "packs",
         site="https://example.test",
         manifest_url=None,
@@ -34,6 +35,18 @@ def _config(tmp_path: Path) -> public_refresh.RefreshConfig:
         publication_backend="blob",
         supabase_url=None,
         supabase_secret_key=None,
+    )
+
+
+def _with_receipt_paths(config: public_refresh.RefreshConfig) -> public_refresh.RefreshConfig:
+    source = config.runtime_root / "accepted-source.json"
+    imported = config.runtime_root / "accepted-import.json"
+    source.write_text("{}", encoding="utf-8")
+    imported.write_text("{}", encoding="utf-8")
+    return replace(
+        config,
+        accepted_source_receipt=source,
+        accepted_import_receipt=imported,
     )
 
 
@@ -231,11 +244,13 @@ def test_watchdog_stays_quiet_when_the_last_success_is_fresh(tmp_path: Path) -> 
 
 def test_production_preflight_uses_public_release_credentials_only(tmp_path: Path) -> None:
     base = "https://store-test.public.blob.vercel-storage.com"
-    config = replace(
-        _config(tmp_path),
-        production=True,
-        blob_root=base,
-        manifest_url=f"{base}/packs/manifest.json",
+    config = _with_receipt_paths(
+        replace(
+            _config(tmp_path),
+            production=True,
+            blob_root=base,
+            manifest_url=f"{base}/packs/manifest.json",
+        )
     )
     values = {
         "BLOB_READ_WRITE_TOKEN": "blob-key",
@@ -246,6 +261,24 @@ def test_production_preflight_uses_public_release_credentials_only(tmp_path: Pat
 
 
 def test_supabase_preflight_does_not_require_blob_credentials(tmp_path: Path) -> None:
+    config = _with_receipt_paths(
+        replace(
+            _config(tmp_path),
+            production=True,
+            publication_backend="supabase",
+            supabase_url="https://example.supabase.co",
+            supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
+        )
+    )
+    with patch.dict(
+        "os.environ",
+        {"SCRYGLASS_DATA_PUBLISH_TOKEN": "publish-key"},
+        clear=True,
+    ):
+        public_refresh._preflight(config)
+
+
+def test_production_preflight_requires_bound_source_receipts(tmp_path: Path) -> None:
     config = replace(
         _config(tmp_path),
         production=True,
@@ -257,7 +290,7 @@ def test_supabase_preflight_does_not_require_blob_credentials(tmp_path: Path) ->
         "os.environ",
         {"SCRYGLASS_DATA_PUBLISH_TOKEN": "publish-key"},
         clear=True,
-    ):
+    ), pytest.raises(public_refresh.PublicRefreshError, match="accepted source"):
         public_refresh._preflight(config)
 
 
@@ -444,6 +477,23 @@ def test_http_read_retries_transient_statuses(monkeypatch: pytest.MonkeyPatch) -
     assert sleeps == [1.0]
 
 
+def test_local_release_retention_keeps_active_and_two_previous(tmp_path: Path) -> None:
+    public_root = tmp_path / "packs"
+    public_root.mkdir()
+    releases = [f"v2026.08.{day:02d}.120000" for day in range(1, 6)]
+    for release_id in releases:
+        (public_root / release_id).mkdir()
+    (public_root / "manual-notes").mkdir()
+
+    removed = public_refresh.prune_local_releases(public_root, releases[-1])
+
+    assert removed == releases[:2]
+    assert sorted(path.name for path in public_root.iterdir()) == [
+        "manual-notes",
+        *releases[2:],
+    ]
+
+
 def test_production_smoke_requires_the_deployed_app_to_serve_the_new_pack(tmp_path: Path) -> None:
     raw = b"data"
     config = replace(
@@ -561,3 +611,13 @@ def test_systemd_worker_cannot_start_without_production_environment() -> None:
     assert "ORACLES_ELIXIR_API_KEY=" not in public_env
     assert "SCRYGLASS_ALERT_WEBHOOK_URL=" not in public_env
     assert not (root / "ops/systemd/postgame-sync.env.example").exists()
+
+    launchd = (root / "ops/launchd/run-public-refresh.sh").read_text(encoding="utf-8")
+    assert launchd.count('/usr/bin/open -a "Brave Origin"') == 1
+    assert "/usr/bin/shlock" in launchd
+    assert 'SCRYGLASS_RUNTIME_ROOT="${runtime_root}"' in launchd
+    assert '--source-receipt "${source_receipt}"' in launchd
+    assert '--result-output "${import_receipt}"' in launchd
+    assert '"${repo_root}/data/lol/warehouse' not in launchd
+    assert 'runtime/cycles/${cycle_id}' in launchd
+    assert "--validate-only" in launchd
