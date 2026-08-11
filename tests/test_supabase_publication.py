@@ -10,6 +10,9 @@ import pytest
 from lol_kills.export import supabase_publication
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class FakeSupabase:
     project_url = "https://example.supabase.co"
 
@@ -296,6 +299,62 @@ def test_latest_tier_payload_keeps_only_newest_patch_and_all_views() -> None:
     assert latest["rows"] == [{"patch": "16.10", "champion": "New"}]
     assert latest["scopes"] == [{"patch": "16.10", "response_matrix": {"new": True}}]
     assert latest["structural_similarity"] == payload["structural_similarity"]
+
+
+def test_refresh_ledger_migration_keeps_private_rows_private() -> None:
+    migration = (
+        ROOT / "supabase/migrations/20260811174735_refresh_run_ledger.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "create table public.scryglass_refresh_runs" in migration
+    assert "create table public.scryglass_public_health" in migration
+    assert "alter table public.scryglass_refresh_runs enable row level security" in migration
+    assert "alter table public.scryglass_public_health enable row level security" in migration
+    assert (
+        "revoke all on public.scryglass_refresh_runs "
+        "from public, anon, authenticated, service_role"
+    ) in migration
+    assert "grant select on public.scryglass_public_health to anon, authenticated" in migration
+    assert "grant select on public.scryglass_refresh_runs to anon" not in migration
+
+
+def test_refresh_ledger_migration_restricts_release_functions() -> None:
+    migration = (
+        ROOT / "supabase/migrations/20260811174735_refresh_run_ledger.sql"
+    ).read_text(encoding="utf-8")
+
+    for function in (
+        "activate_scryglass_public_release(text)",
+        "restore_scryglass_public_release(text)",
+        "prune_scryglass_public_releases(integer)",
+    ):
+        assert f"alter function public.{function} security invoker" in migration
+        assert f"grant execute on function public.{function} to service_role" in migration
+    assert "security definer" not in migration
+
+
+def test_refresh_ledger_indexes_every_foreign_key() -> None:
+    migration = (
+        ROOT / "supabase/migrations/20260811174735_refresh_run_ledger.sql"
+    ).read_text(encoding="utf-8")
+
+    for index in (
+        "scryglass_refresh_runs_retry_idx",
+        "scryglass_refresh_runs_release_idx",
+        "scryglass_public_health_release_idx",
+        "scryglass_public_health_run_idx",
+    ):
+        assert f"create index {index}" in migration
+
+
+def test_supabase_cli_is_pinned_and_local_seed_is_disabled() -> None:
+    package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+    config = (ROOT / "supabase/config.toml").read_text(encoding="utf-8")
+
+    assert package["devDependencies"]["supabase"] == "2.113.0"
+    assert package["scripts"]["supabase:migrations"] == "supabase migration list"
+    seed_section = config.split("[db.seed]", 1)[1].split("\n[", 1)[0]
+    assert "enabled = false" in seed_section
 
 
 def test_database_allowlist_matches_publication_contract() -> None:

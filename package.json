@@ -5,6 +5,12 @@
   "scripts": {
     "build": "npm run build --prefix apps/scryglass",
     "dev": "npm run dev --prefix apps/scryglass",
-    "lint": "npm run lint --prefix apps/scryglass"
+    "lint": "npm run lint --prefix apps/scryglass",
+    "supabase:version": "supabase --version",
+    "supabase:migrations": "supabase migration list",
+    "supabase:reset": "supabase db reset"
+  },
+  "devDependencies": {
+    "supabase": "2.113.0"
   }
 }
