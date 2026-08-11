@@ -165,19 +165,25 @@ def _annual_source_latest(root: Path) -> str | None:
 def ingest_oe_csv(root: Path, *, years: Sequence[int] = (2025, 2026), **_: Any) -> dict[str, Any]:
     """Refresh the public annual OE cache and return its source receipt."""
 
+    database_refreshed = os.environ.get("SCRYGLASS_OE_DATABASE_REFRESHED") == "1"
     browser_refreshed = os.environ.get("SCRYGLASS_OE_BROWSER_REFRESHED") == "1"
-    ingest_oe(
-        years=[str(year) for year in years],
-        download=not browser_refreshed,
-        force_download=False,
-    )
+    if not database_refreshed:
+        ingest_oe(
+            years=[str(year) for year in years],
+            download=not browser_refreshed,
+            force_download=False,
+        )
     game_ids = _source_game_ids(root)
     return {
         "source_mode": "oe_only",
         "source_transport": (
-            "brave_origin_browser_download"
-            if browser_refreshed
-            else "public_google_drive_file"
+            "supabase_incremental_oe"
+            if database_refreshed
+            else (
+                "brave_origin_browser_download"
+                if browser_refreshed
+                else "public_google_drive_file"
+            )
         ),
         "source_latest": _annual_source_latest(root),
         "source_game_count": len(game_ids),

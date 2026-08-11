@@ -22,6 +22,7 @@ export SCRYGLASS_REFRESH_ATTEMPTS=3
 export SCRYGLASS_STEP_TIMEOUT_MINUTES=15
 export SCRYGLASS_STALE_AFTER_HOURS=12
 export SCRYGLASS_OE_BROWSER_REFRESHED=1
+export SCRYGLASS_OE_DATABASE_REFRESHED=1
 export SCRYGLASS_SUPABASE_SECRET_KEY="$(
   /usr/bin/security find-generic-password \
     -a scryglass-public-worker \
@@ -62,6 +63,10 @@ cd "${repo_root}"
 "${python}" -m lol_kills.etl.oe_ingest \
   --install-browser-candidate "${oe_candidate}" \
   --year "${oe_year}"
+"${python}" -m lol_kills.etl.oe_database \
+  --csv "${repo_root}/data/lol/warehouse/raw/${oe_name}" \
+  --year "${oe_year}" \
+  --parquet-dir "${repo_root}/data/lol/warehouse/parquet"
 
 exec "${python}" -m lol_kills.public_refresh \
   --root "${repo_root}" \

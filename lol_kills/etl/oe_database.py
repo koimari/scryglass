@@ -1,0 +1,838 @@
+"""Append validated Oracle's Elixir games to Supabase and the local cache."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterable, Iterator
+
+import pandas as pd
+
+from lol_kills.etl.oe_ingest import _validate_oe_csv, parse_oe_csv
+from lol_kills.etl.source_keys import canonical_source_game_key
+from lol_kills.ratings.player_map_grades import CORE_INPUTS
+
+
+GAME_SCHEMA = "scryglass:oe-game:v1"
+IMPORT_SCHEMA = "scryglass:oe-database-import:v1"
+STATE_SCHEMA = "scryglass:oe-local-cache-state:v1"
+TRANSFORM_VERSION = "oe-normalization:v1"
+REQUEST_TIMEOUT_SECONDS = 180.0
+WRITE_BATCH_SIZE = 25
+READ_PAGE_SIZE = 1_000
+ROLE_ORDER = {"top": 0, "jng": 1, "mid": 2, "bot": 3, "sup": 4}
+SIDE_ORDER = {"Blue": 0, "Red": 1}
+
+
+class OeDatabaseError(RuntimeError):
+    """An incremental OE database update failed its safety checks."""
+
+
+@dataclass(frozen=True)
+class PreparedGame:
+    canonical_game_id: str
+    payload_sha256: str
+    source_year: int
+    game_date: str
+    league: str
+    patch: str | None
+    statistics_complete: bool
+    source_file_sha256: str
+
+    def version_row(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if _canonical_json_sha256(payload) != self.payload_sha256:
+            raise OeDatabaseError(
+                f"prepared OE payload changed for {self.canonical_game_id}"
+            )
+        return {
+            "canonical_game_id": self.canonical_game_id,
+            "payload_sha256": self.payload_sha256,
+            "source_year": self.source_year,
+            "game_date": self.game_date,
+            "league": self.league,
+            "patch": self.patch,
+            "statistics_complete": self.statistics_complete,
+            "source_file_sha256": self.source_file_sha256,
+            "payload": payload,
+        }
+
+    def current_row(self) -> dict[str, Any]:
+        return {
+            "canonical_game_id": self.canonical_game_id,
+            "payload_sha256": self.payload_sha256,
+            "source_year": self.source_year,
+            "game_date": self.game_date,
+            "league": self.league,
+            "patch": self.patch,
+            "statistics_complete": self.statistics_complete,
+            "source_file_sha256": self.source_file_sha256,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+@dataclass
+class PreparedImport:
+    year: int
+    csv_path: Path
+    source: dict[str, Any]
+    team_rows: pd.DataFrame
+    player_rows: pd.DataFrame
+    team_group_indices: dict[str, tuple[int, ...]]
+    player_group_indices: dict[str, tuple[int, ...]]
+    games: dict[str, PreparedGame]
+    source_game_ids: tuple[str, ...]
+    quarantined_game_ids: tuple[str, ...]
+
+
+def _project_url(value: str) -> str:
+    raw = value.strip().rstrip("/")
+    parsed = urllib.parse.urlsplit(raw)
+    if (
+        parsed.scheme != "https"
+        or parsed.username
+        or parsed.password
+        or parsed.port
+        or parsed.query
+        or parsed.fragment
+        or not (parsed.hostname or "").endswith(".supabase.co")
+        or parsed.path not in {"", "/"}
+    ):
+        raise ValueError("Supabase URL must be an HTTPS project URL")
+    return raw
+
+
+def _secret_key(value: str) -> str:
+    key = value.strip()
+    if not key.startswith("sb_secret_") or len(key) < 24 or any(char.isspace() for char in key):
+        raise ValueError("Supabase secret key is malformed")
+    return key
+
+
+def _canonical_json_sha256(value: object) -> str:
+    raw = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _payload_rows(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    raw = frame.to_json(
+        orient="records",
+        date_format="iso",
+        date_unit="us",
+        double_precision=15,
+        force_ascii=False,
+    )
+    rows = json.loads(raw)
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise OeDatabaseError("OE rows could not be serialized")
+    return rows
+
+
+def _clean_role(value: Any) -> str:
+    token = str(value or "").strip().casefold()
+    return {"jungle": "jng", "support": "sup", "adc": "bot"}.get(token, token)
+
+
+def _clean_side(value: Any) -> str:
+    return str(value or "").strip().title()
+
+
+def _single_text(frame: pd.DataFrame, column: str) -> str | None:
+    if column not in frame.columns:
+        return None
+    values = {
+        str(value).strip()
+        for value in frame[column]
+        if pd.notna(value) and str(value).strip() and str(value).strip().casefold() != "nan"
+    }
+    if len(values) != 1:
+        return None
+    return next(iter(values))
+
+
+def _statistics_complete(player_rows: pd.DataFrame) -> bool:
+    if any(column not in player_rows.columns for column in CORE_INPUTS):
+        return False
+    statistics = player_rows[list(CORE_INPUTS)].apply(pd.to_numeric, errors="coerce")
+    nonnegative = (
+        "kills",
+        "deaths",
+        "assists",
+        "teamkills",
+        "dpm",
+        "damageshare",
+        "totalgold",
+        "cspm",
+        "wpm",
+        "wcpm",
+    )
+    complete = (
+        statistics.notna().all().all()
+        and statistics[list(nonnegative)].ge(0).all().all()
+        and statistics["gamelength"].gt(0).all()
+        and statistics["kills"].le(statistics["teamkills"]).all()
+        and statistics["damageshare"].le(1).all()
+    )
+    if not bool(complete):
+        return False
+    if "datacompleteness" in player_rows.columns and not player_rows[
+        "datacompleteness"
+    ].astype(str).str.casefold().eq("complete").all():
+        return False
+    for side in ("Blue", "Red"):
+        side_mask = player_rows["side"].map(_clean_side).eq(side)
+        damage_share = pd.to_numeric(
+            player_rows.loc[side_mask, "damageshare"], errors="coerce"
+        ).sum()
+        if abs(float(damage_share) - 1.0) > 1e-5:
+            return False
+    return True
+
+
+def _identity_error(team_rows: pd.DataFrame, player_rows: pd.DataFrame) -> str | None:
+    if len(team_rows) != 2 or len(player_rows) != 10:
+        return "row_count"
+    required_team = {"side", "result", "teamname", "date", "league"}
+    required_player = {
+        "side",
+        "position",
+        "playername",
+        "champion",
+        "teamname",
+        "date",
+        "league",
+    }
+    if not required_team.issubset(team_rows.columns) or not required_player.issubset(
+        player_rows.columns
+    ):
+        return "schema"
+    team_sides = team_rows["side"].map(_clean_side)
+    team_results = pd.to_numeric(team_rows["result"], errors="coerce")
+    team_names = team_rows["teamname"].astype("string").fillna("").str.strip()
+    if (
+        set(team_sides) != {"Blue", "Red"}
+        or set(team_results.dropna().astype(int)) != {0, 1}
+        or team_names.eq("").any()
+        or team_names.str.casefold().nunique() != 2
+    ):
+        return "teams"
+    names = player_rows["playername"].astype("string").fillna("").str.strip()
+    champions = player_rows["champion"].astype("string").fillna("").str.strip()
+    if names.eq("").any() or names.str.casefold().nunique() != 10:
+        return "players"
+    if champions.eq("").any():
+        return "champions"
+    for side in ("Blue", "Red"):
+        team_row = team_rows.loc[team_sides.eq(side)]
+        side_players = player_rows.loc[player_rows["side"].map(_clean_side).eq(side)]
+        if len(team_row) != 1 or len(side_players) != 5:
+            return "sides"
+        roles = side_players["position"].map(_clean_role)
+        if set(roles) != set(ROLE_ORDER) or roles.nunique() != 5:
+            return "roles"
+        expected_team = str(team_row.iloc[0]["teamname"]).strip().casefold()
+        player_teams = {
+            str(value).strip().casefold()
+            for value in side_players["teamname"]
+            if pd.notna(value)
+        }
+        if player_teams != {expected_team}:
+            return "player_teams"
+    combined = pd.concat(
+        [team_rows[["date", "league"]], player_rows[["date", "league"]]],
+        ignore_index=True,
+    )
+    if _single_text(combined, "date") is None or _single_text(combined, "league") is None:
+        return "game_metadata"
+    return None
+
+
+def _sorted_game_rows(
+    team_rows: pd.DataFrame, player_rows: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    teams = team_rows.copy()
+    teams["_side_order"] = teams["side"].map(lambda value: SIDE_ORDER.get(_clean_side(value), 99))
+    teams = teams.sort_values(["_side_order"]).drop(columns=["_side_order"])
+    players = player_rows.copy()
+    players["_side_order"] = players["side"].map(
+        lambda value: SIDE_ORDER.get(_clean_side(value), 99)
+    )
+    players["_role_order"] = players["position"].map(
+        lambda value: ROLE_ORDER.get(_clean_role(value), 99)
+    )
+    players = players.sort_values(["_side_order", "_role_order"]).drop(
+        columns=["_side_order", "_role_order"]
+    )
+    return teams, players
+
+
+def _group_indices(frame: pd.DataFrame) -> dict[str, tuple[int, ...]]:
+    return {
+        str(game_id): tuple(int(index) for index in indices)
+        for game_id, indices in frame.groupby("gameid", sort=False).indices.items()
+    }
+
+
+def _game_frames(
+    prepared: PreparedImport, game_id: str
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    try:
+        team_indices = prepared.team_group_indices[game_id]
+        player_indices = prepared.player_group_indices[game_id]
+    except KeyError as error:
+        raise OeDatabaseError(f"prepared OE game is missing rows: {game_id}") from error
+    return _sorted_game_rows(
+        prepared.team_rows.iloc[list(team_indices)],
+        prepared.player_rows.iloc[list(player_indices)],
+    )
+
+
+def payload_for_game(prepared: PreparedImport, game_id: str) -> dict[str, Any]:
+    teams, players = _game_frames(prepared, game_id)
+    return {
+        "schema_version": GAME_SCHEMA,
+        "canonical_game_id": game_id,
+        "team_rows": _payload_rows(teams),
+        "player_rows": _payload_rows(players),
+    }
+
+
+def prepare_import(
+    csv_path: Path, year: int, *, source: dict[str, Any] | None = None
+) -> PreparedImport:
+    path = csv_path.expanduser().resolve()
+    source = source or _validate_oe_csv(path, str(year))
+    team_rows, player_rows = parse_oe_csv(path)
+    for frame in (team_rows, player_rows):
+        frame["gameid"] = frame["gameid"].map(canonical_source_game_key)
+        frame.reset_index(drop=True, inplace=True)
+    source_ids = sorted(
+        set(team_rows["gameid"].astype(str)).union(player_rows["gameid"].astype(str))
+        - {""}
+    )
+    games: dict[str, PreparedGame] = {}
+    quarantined: list[str] = []
+    team_group_indices = _group_indices(team_rows)
+    player_group_indices = _group_indices(player_rows)
+    for game_id in source_ids:
+        team_indices = team_group_indices.get(game_id, ())
+        player_indices = player_group_indices.get(game_id, ())
+        teams = team_rows.iloc[list(team_indices)]
+        players = player_rows.iloc[list(player_indices)]
+        if _identity_error(teams, players) is not None:
+            quarantined.append(game_id)
+            continue
+        teams, players = _sorted_game_rows(teams, players)
+        date_text = _single_text(teams, "date") or _single_text(players, "date")
+        league = _single_text(teams, "league") or _single_text(players, "league")
+        parsed_date = pd.to_datetime(date_text, errors="coerce", utc=True)
+        if pd.isna(parsed_date) or not league:
+            quarantined.append(game_id)
+            continue
+        patch = _single_text(teams, "patch") or _single_text(players, "patch")
+        payload = {
+            "schema_version": GAME_SCHEMA,
+            "canonical_game_id": game_id,
+            "team_rows": _payload_rows(teams),
+            "player_rows": _payload_rows(players),
+        }
+        games[game_id] = PreparedGame(
+            canonical_game_id=game_id,
+            payload_sha256=_canonical_json_sha256(payload),
+            source_year=year,
+            game_date=pd.Timestamp(parsed_date).isoformat(),
+            league=league,
+            patch=patch,
+            statistics_complete=_statistics_complete(players),
+            source_file_sha256=str(source["raw_sha256"]),
+        )
+    return PreparedImport(
+        year=year,
+        csv_path=path,
+        source=source,
+        team_rows=team_rows,
+        player_rows=player_rows,
+        team_group_indices=team_group_indices,
+        player_group_indices=player_group_indices,
+        games=games,
+        source_game_ids=tuple(source_ids),
+        quarantined_game_ids=tuple(sorted(quarantined)),
+    )
+
+
+def _batches(values: list[Any], size: int = WRITE_BATCH_SIZE) -> Iterator[list[Any]]:
+    for index in range(0, len(values), size):
+        yield values[index : index + size]
+
+
+class SupabaseOeDatabase:
+    """Restricted PostgREST client for the private OE ingestion tables."""
+
+    def __init__(self, project_url: str, secret_key: str, *, opener: Any | None = None) -> None:
+        self.project_url = _project_url(project_url)
+        self._secret_key = _secret_key(secret_key)
+        self._opener = opener or urllib.request.build_opener()
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(project_url={self.project_url!r}, secret_key=<redacted>)"
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: object | None = None,
+        *,
+        prefer: str | None = None,
+    ) -> Any:
+        raw_payload = None
+        headers = {"apikey": self._secret_key, "Accept": "application/json"}
+        if payload is not None:
+            raw_payload = json.dumps(
+                payload, ensure_ascii=False, separators=(",", ":")
+            ).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        if prefer:
+            headers["Prefer"] = prefer
+        request = urllib.request.Request(
+            f"{self.project_url}/rest/v1/{path.lstrip('/')}",
+            data=raw_payload,
+            method=method,
+            headers=headers,
+        )
+        try:
+            with self._opener.open(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                raw = response.read()
+        except urllib.error.HTTPError as error:
+            detail = ""
+            try:
+                body = json.loads(error.read().decode("utf-8"))
+                detail = str(body.get("message") or body.get("hint") or "")[:300]
+            except Exception:  # noqa: BLE001
+                pass
+            suffix = f": {detail}" if detail else ""
+            raise OeDatabaseError(
+                f"Supabase OE request failed with HTTP {error.code} for "
+                f"{path.split('?', 1)[0]}{suffix}"
+            ) from error
+        except (urllib.error.URLError, TimeoutError) as error:
+            raise OeDatabaseError(
+                f"Supabase OE request failed for {path.split('?', 1)[0]}"
+            ) from error
+        if not raw:
+            return None
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise OeDatabaseError("Supabase OE response is invalid JSON") from error
+
+    def current_hashes(self, year: int) -> dict[str, str]:
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            page = self._request(
+                "GET",
+                "scryglass_oe_games"
+                f"?source_year=eq.{year}&select=canonical_game_id,payload_sha256"
+                f"&order=canonical_game_id&limit={READ_PAGE_SIZE}&offset={offset}",
+            )
+            if not isinstance(page, list) or any(not isinstance(row, dict) for row in page):
+                raise OeDatabaseError("Supabase OE game index is malformed")
+            rows.extend(page)
+            if len(page) < READ_PAGE_SIZE:
+                break
+            offset += READ_PAGE_SIZE
+        return {
+            str(row["canonical_game_id"]): str(row["payload_sha256"])
+            for row in rows
+        }
+
+    def import_receipt(
+        self, year: int, source_file_sha256: str, transform_version: str
+    ) -> dict[str, Any] | None:
+        rows = self._request(
+            "GET",
+            "scryglass_oe_imports"
+            f"?source_year=eq.{year}&source_file_sha256=eq.{source_file_sha256}"
+            f"&transform_version=eq.{urllib.parse.quote(transform_version, safe='')}"
+            "&select=*&limit=1",
+        )
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise OeDatabaseError("Supabase OE import receipt is malformed")
+        return rows[0] if rows else None
+
+    def append_versions(self, rows: list[dict[str, Any]]) -> None:
+        for batch in _batches(rows):
+            self._request(
+                "POST",
+                "scryglass_oe_game_versions?on_conflict=canonical_game_id,payload_sha256",
+                batch,
+                prefer="resolution=ignore-duplicates,return=minimal",
+            )
+
+    def upsert_current(self, rows: list[dict[str, Any]]) -> None:
+        for batch in _batches(rows, READ_PAGE_SIZE):
+            self._request(
+                "POST",
+                "scryglass_oe_games?on_conflict=canonical_game_id",
+                batch,
+                prefer="resolution=merge-duplicates,return=minimal",
+            )
+
+    def record_import(self, row: dict[str, Any]) -> None:
+        self._request(
+            "POST",
+            "scryglass_oe_imports?on_conflict=source_year,source_file_sha256",
+            [row],
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+
+
+def _frame_game_ids(frame: pd.DataFrame) -> pd.Series:
+    if frame.empty or "gameid" not in frame.columns:
+        return pd.Series(dtype="string")
+    return frame["gameid"].map(canonical_source_game_key).astype("string")
+
+
+def _atomic_parquet(frame: pd.DataFrame, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".partial", dir=destination.parent
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        frame.to_parquet(temporary, index=False)
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _atomic_json(destination: Path, payload: dict[str, Any]) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".partial", dir=destination.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False, indent=2, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _cache_is_current(parquet_dir: Path, year: int, source_sha256: str) -> bool:
+    if not (parquet_dir / "oe_team_games.parquet").is_file() or not (
+        parquet_dir / "oe_player_games.parquet"
+    ).is_file():
+        return False
+    state = _load_json(parquet_dir / "oe_incremental_state.json")
+    years = state.get("years")
+    if not isinstance(years, dict):
+        return False
+    year_state = years.get(str(year))
+    return bool(
+        isinstance(year_state, dict)
+        and year_state.get("source_file_sha256") == source_sha256
+    )
+
+
+def _current_result_from_receipt(
+    receipt: dict[str, Any], source: dict[str, Any], parquet_dir: Path
+) -> dict[str, Any]:
+    meta = _load_json(parquet_dir / "oe_meta.json")
+    quarantined = receipt.get("quarantined_game_ids")
+    quarantined_count = len(quarantined) if isinstance(quarantined, list) else 0
+    accepted = int(receipt["accepted_games"])
+    return {
+        "schema_version": IMPORT_SCHEMA,
+        "source_year": int(receipt["source_year"]),
+        "source_file_sha256": source["raw_sha256"],
+        "source_observed_through": receipt["source_observed_through"],
+        "source_games": int(receipt["source_games"]),
+        "accepted_games": accepted,
+        "new_games": 0,
+        "corrected_games": 0,
+        "unchanged_games": accepted,
+        "quarantined_games": quarantined_count,
+        "statistics_complete_games": int(receipt["statistics_complete_games"]),
+        "cache": {
+            "replaced_games": 0,
+            "removed_malformed_games": 0,
+            "team_rows": int(meta.get("n_team_rows") or 0),
+            "player_rows": int(meta.get("n_player_rows") or 0),
+        },
+        "status": "current",
+    }
+
+
+def update_local_cache(prepared: PreparedImport, parquet_dir: Path) -> dict[str, Any]:
+    team_path = parquet_dir / "oe_team_games.parquet"
+    player_path = parquet_dir / "oe_player_games.parquet"
+    state_path = parquet_dir / "oe_incremental_state.json"
+    meta_path = parquet_dir / "oe_meta.json"
+    cached_team = pd.read_parquet(team_path) if team_path.is_file() else pd.DataFrame()
+    cached_players = pd.read_parquet(player_path) if player_path.is_file() else pd.DataFrame()
+    state = _load_json(state_path)
+    years = state.get("years") if isinstance(state.get("years"), dict) else {}
+    prior_year = years.get(str(prepared.year)) if isinstance(years, dict) else None
+    prior_hashes = (
+        prior_year.get("game_hashes")
+        if isinstance(prior_year, dict) and isinstance(prior_year.get("game_hashes"), dict)
+        else {}
+    )
+    current_hashes = {
+        game_id: game.payload_sha256 for game_id, game in prepared.games.items()
+    }
+    local_team_ids = set(_frame_game_ids(cached_team).dropna().astype(str))
+    local_player_ids = set(_frame_game_ids(cached_players).dropna().astype(str))
+    source_ids = set(current_hashes)
+    changed_ids = {
+        game_id
+        for game_id, digest in current_hashes.items()
+        if prior_hashes.get(game_id) != digest
+    }
+    changed_ids.update(source_ids.difference(local_team_ids.intersection(local_player_ids)))
+    stale_ids = (
+        local_team_ids.union(local_player_ids)
+        .difference(source_ids)
+        .intersection(set(prepared.source_game_ids))
+    )
+    remove_ids = changed_ids.union(stale_ids)
+    if remove_ids:
+        if not cached_team.empty:
+            cached_team = cached_team.loc[~_frame_game_ids(cached_team).isin(remove_ids)].copy()
+        if not cached_players.empty:
+            cached_players = cached_players.loc[
+                ~_frame_game_ids(cached_players).isin(remove_ids)
+            ].copy()
+        replacement_team = prepared.team_rows.loc[
+            _frame_game_ids(prepared.team_rows).isin(changed_ids)
+        ].copy()
+        replacement_players = prepared.player_rows.loc[
+            _frame_game_ids(prepared.player_rows).isin(changed_ids)
+        ].copy()
+        team = pd.concat([cached_team, replacement_team], ignore_index=True, sort=False)
+        players = pd.concat(
+            [cached_players, replacement_players], ignore_index=True, sort=False
+        )
+        team = team.sort_values("date").drop_duplicates(["gameid", "side"], keep="last")
+        players = players.sort_values("date").drop_duplicates(
+            ["gameid", "side", "position"], keep="last"
+        )
+        _atomic_parquet(team, team_path)
+        _atomic_parquet(players, player_path)
+    else:
+        team = cached_team
+        players = cached_players
+
+    years = dict(years)
+    years[str(prepared.year)] = {
+        "source_file_sha256": prepared.source["raw_sha256"],
+        "source_observed_through": prepared.source["date_max_utc"],
+        "game_hashes": current_hashes,
+    }
+    _atomic_json(
+        state_path,
+        {
+            "schema_version": STATE_SCHEMA,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "years": years,
+        },
+    )
+    previous_meta = _load_json(meta_path)
+    source_files = [
+        item
+        for item in previous_meta.get("source_files", [])
+        if isinstance(item, dict) and item.get("year") != prepared.year
+    ]
+    source_files.append(
+        {
+            "locator": str(prepared.csv_path),
+            "year": prepared.year,
+            **prepared.source,
+        }
+    )
+    _atomic_json(
+        meta_path,
+        {
+            "schema_version": "scryglass:oe-normalized-cache:v3",
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "n_team_rows": int(len(team)),
+            "n_player_rows": int(len(players)),
+            "n_team_cols": int(len(team.columns)),
+            "n_player_cols": int(len(players.columns)),
+            "n_games": int(_frame_game_ids(team).nunique()),
+            "source_files": sorted(source_files, key=lambda item: int(item.get("year") or 0)),
+            "schema": "full_oe_incremental",
+            "team_columns": list(team.columns),
+            "player_columns": list(players.columns),
+        },
+    )
+    return {
+        "replaced_games": len(changed_ids),
+        "removed_malformed_games": len(stale_ids),
+        "team_rows": int(len(team)),
+        "player_rows": int(len(players)),
+    }
+
+
+def sync_csv(
+    csv_path: Path,
+    year: int,
+    *,
+    project_url: str,
+    secret_key: str,
+    parquet_dir: Path,
+    client: SupabaseOeDatabase | Any | None = None,
+) -> dict[str, Any]:
+    database = client or SupabaseOeDatabase(project_url, secret_key)
+    path = csv_path.expanduser().resolve()
+    source = _validate_oe_csv(path, str(year))
+    receipt = database.import_receipt(
+        year, str(source["raw_sha256"]), TRANSFORM_VERSION
+    )
+    if receipt is not None and _cache_is_current(
+        parquet_dir, year, str(source["raw_sha256"])
+    ):
+        return _current_result_from_receipt(receipt, source, parquet_dir)
+    prepared = prepare_import(path, year, source=source)
+    existing = database.current_hashes(year)
+    accepted_hashes = {
+        game_id: game.payload_sha256 for game_id, game in prepared.games.items()
+    }
+    missing_existing = sorted(set(existing).difference(accepted_hashes))
+    if missing_existing:
+        preview = ", ".join(missing_existing[:5])
+        raise OeDatabaseError(
+            f"OE source lost {len(missing_existing)} stored games; first: {preview}"
+        )
+    new_ids = sorted(set(accepted_hashes).difference(existing))
+    corrected_ids = sorted(
+        game_id
+        for game_id in set(accepted_hashes).intersection(existing)
+        if accepted_hashes[game_id] != existing[game_id]
+    )
+    unchanged_ids = sorted(
+        game_id
+        for game_id in set(accepted_hashes).intersection(existing)
+        if accepted_hashes[game_id] == existing[game_id]
+    )
+    changed_ids = [*new_ids, *corrected_ids]
+    if changed_ids:
+        for game_id_batch in _batches(changed_ids):
+            database.append_versions(
+                [
+                    prepared.games[game_id].version_row(
+                        payload_for_game(prepared, game_id)
+                    )
+                    for game_id in game_id_batch
+                ]
+            )
+        for game_id_batch in _batches(changed_ids, READ_PAGE_SIZE):
+            database.upsert_current(
+                [prepared.games[game_id].current_row() for game_id in game_id_batch]
+            )
+    readback = database.current_hashes(year)
+    mismatched = sorted(
+        game_id
+        for game_id, digest in accepted_hashes.items()
+        if readback.get(game_id) != digest
+    )
+    if mismatched:
+        raise OeDatabaseError(
+            f"Supabase OE readback failed for {len(mismatched)} games; first: {mismatched[0]}"
+        )
+    cache = update_local_cache(prepared, parquet_dir)
+    import_row = {
+        "source_year": year,
+        "source_file_sha256": prepared.source["raw_sha256"],
+        "transform_version": TRANSFORM_VERSION,
+        "source_bytes": prepared.source["bytes"],
+        "source_rows": prepared.source["row_count"],
+        "source_games": len(prepared.source_game_ids),
+        "accepted_games": len(prepared.games),
+        "new_games": len(new_ids),
+        "corrected_games": len(corrected_ids),
+        "unchanged_games": len(unchanged_ids),
+        "quarantined_game_ids": list(prepared.quarantined_game_ids),
+        "statistics_complete_games": sum(
+            game.statistics_complete for game in prepared.games.values()
+        ),
+        "source_observed_through": prepared.source["date_max_utc"],
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    database.record_import(import_row)
+    return {
+        "schema_version": IMPORT_SCHEMA,
+        "source_year": year,
+        "source_file_sha256": prepared.source["raw_sha256"],
+        "source_observed_through": prepared.source["date_max_utc"],
+        "source_games": len(prepared.source_game_ids),
+        "accepted_games": len(prepared.games),
+        "new_games": len(new_ids),
+        "corrected_games": len(corrected_ids),
+        "unchanged_games": len(unchanged_ids),
+        "quarantined_games": len(prepared.quarantined_game_ids),
+        "statistics_complete_games": sum(
+            game.statistics_complete for game in prepared.games.values()
+        ),
+        "cache": cache,
+        "status": "updated" if changed_ids else "current",
+    }
+
+
+def _required_environment(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise OeDatabaseError(f"required environment variable is missing: {name}")
+    return value
+
+
+def main(argv: Iterable[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--csv", required=True, type=Path)
+    parser.add_argument("--year", required=True, type=int)
+    parser.add_argument(
+        "--parquet-dir",
+        type=Path,
+        default=Path("data/lol/warehouse/parquet"),
+    )
+    arguments = parser.parse_args(list(argv) if argv is not None else None)
+    result = sync_csv(
+        arguments.csv,
+        arguments.year,
+        project_url=_required_environment("SCRYGLASS_SUPABASE_URL"),
+        secret_key=_required_environment("SCRYGLASS_SUPABASE_SECRET_KEY"),
+        parquet_dir=arguments.parquet_dir.resolve(),
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
