@@ -13,6 +13,12 @@ worker waits for the download, validates it, archives changed source bytes, and
 stops if a fresh browser download does not arrive. It does not publish from an
 older annual-file cache after a browser download failure.
 
+After validation, the worker groups the annual file by canonical game ID. It
+adds new games to the private Supabase OE tables and records corrected versions
+without replacing history. Previously stored games must remain present. The
+local normalized cache updates from the same accepted groups, so the public
+refresh does not parse the annual file a second time.
+
 The installed runtime uses these paths:
 
 - `~/Library/Application Support/Scryglass Worker/repo`

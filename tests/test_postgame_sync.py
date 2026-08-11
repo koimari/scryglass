@@ -50,6 +50,27 @@ def test_browser_refreshed_source_skips_network_download(
     assert receipt["source_game_count"] == 1
 
 
+def test_database_refreshed_source_skips_all_annual_parsing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def unexpected(**_kwargs):
+        raise AssertionError("database-refreshed source must not parse annual CSVs again")
+
+    monkeypatch.setenv("SCRYGLASS_OE_DATABASE_REFRESHED", "1")
+    monkeypatch.setattr(postgame_sync, "ingest_oe", unexpected)
+    monkeypatch.setattr(postgame_sync, "_source_game_ids", lambda _root: {"game-1"})
+    monkeypatch.setattr(
+        postgame_sync,
+        "_annual_source_latest",
+        lambda _root: "2026-08-11T10:50:41Z",
+    )
+
+    receipt = postgame_sync.ingest_oe_csv(tmp_path)
+
+    assert receipt["source_transport"] == "supabase_incremental_oe"
+    assert receipt["source_game_count"] == 1
+
+
 def _config(root: Path) -> SyncConfig:
     return SyncConfig(
         root=root,
