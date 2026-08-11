@@ -464,3 +464,13 @@ def test_quarantine_reason_migration_keeps_details_private() -> None:
     assert "add column if not exists quarantined_games jsonb" in migration
     assert "jsonb_typeof(quarantined_games) = 'object'" in migration
     assert "grant" not in migration.lower()
+
+
+def test_rls_auto_enable_migration_removes_public_execution() -> None:
+    migration = (
+        ROOT / "supabase/migrations/20260811193736_restrict_rls_auto_enable.sql"
+    ).read_text(encoding="utf-8").lower()
+
+    assert "revoke all on function public.rls_auto_enable()" in migration
+    assert "from public, anon, authenticated, service_role" in migration
+    assert "grant execute" not in migration
