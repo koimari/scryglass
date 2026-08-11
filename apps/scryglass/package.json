@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --import tsx --test src/lib/*.test.mts",
+    "identities:build": "node scripts/build-visual-identities.mjs",
     "publish:data": "node scripts/publish-data.mjs",
     "audit:public-boundary": "node scripts/audit-public-boundary.mjs"
   },

@@ -1,14 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { playerPortraitSource, playerPortraitUrl } from "./playerPortraits.ts";
+import { playerPortrait } from "./playerPortraits.ts";
 
-test("returns only reviewed player portraits", () => {
-  assert.match(playerPortraitUrl("Inspired") ?? "", /^https:\/\/static\.wikia\.nocookie\.net\//);
-  assert.equal(playerPortraitSource("Viper"), "https://lol.fandom.com/wiki/Viper_(Park_Do-hyeon)");
-  assert.equal(playerPortraitUrl("random"), null);
+test("uses team context to resolve duplicate player handles", () => {
+  const viper = playerPortrait("Viper", "Bilibili Gaming");
+  assert.match(viper?.src ?? "", /BLG_Viper_2026_Split_1\.png/);
+  assert.equal(viper?.source, "https://lol.fandom.com/wiki/Viper_(Park_Do-hyeon)");
+  assert.equal(playerPortrait("Viper", "Unknown Team"), null);
 });
 
-test("portrait lookup is case-insensitive and trims the handle", () => {
-  assert.equal(playerPortraitUrl(" CHOVY "), playerPortraitUrl("chovy"));
+test("portrait lookup is case-insensitive and trims identity fields", () => {
+  assert.deepEqual(
+    playerPortrait(" CHOVY ", " GEN.G "),
+    playerPortrait("chovy", "gen.g"),
+  );
+});
+
+test("unknown duplicate handles fail closed", () => {
+  assert.match(playerPortrait("Random", "Disruptors")?.src ?? "", /KHK_Random_2025_Split_1\.png/);
+  assert.match(playerPortrait("random", "Team Solid")?.src ?? "", /VAS_random_2026\.png/);
+  assert.equal(playerPortrait("random", "Unknown Team"), null);
 });
