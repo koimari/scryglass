@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  filterRowsByMinimumGames,
   filterRowsByRegion,
   firstPickMetric,
   matchupGrade,
@@ -48,6 +49,19 @@ test("matchup-only modes omit rows without their required evidence", () => {
   assert.deepEqual(rowsForMode(rows, "blind").map((item) => item.champion), ["Kennen"]);
   assert.deepEqual(rowsForMode(rows, "counter").map((item) => item.champion), ["Jax"]);
   assert.equal(rowsForMode(rows, "first_pick").length, 3);
+});
+
+test("minimum-games filtering removes thin samples without changing row order", () => {
+  const rows = [
+    row({ champion: "Nasus", champion_id: "riot:champion:75", played_maps: 1 }),
+    row({ champion: "Riven", champion_id: "riot:champion:92", played_maps: 8 }),
+    row({ champion: "Kennen", champion_id: "riot:champion:85", played_maps: 5 }),
+  ];
+  assert.deepEqual(
+    filterRowsByMinimumGames(rows, 5).map((item) => item.champion),
+    ["Riven", "Kennen"],
+  );
+  assert.equal(filterRowsByMinimumGames(rows, Number.NaN).length, 3);
 });
 
 test("regional choices combine every role for the selected patch", () => {

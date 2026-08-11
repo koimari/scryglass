@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { useTheme, type ThemeChoice } from "./ThemeProvider";
 
 const OPTIONS: { id: ThemeChoice; label: string }[] = [
-  { id: "system", label: "System" },
   { id: "light", label: "Light" },
   { id: "dark", label: "Dark" },
 ];
@@ -53,7 +52,7 @@ export function ThemeToggle() {
     };
   }, [open, choice]);
 
-  const label = OPTIONS.find((o) => o.id === choice)?.label ?? "System";
+  const label = OPTIONS.find((o) => o.id === choice)?.label ?? "Light";
 
   return (
     <div className="theme-toggle" ref={root}>

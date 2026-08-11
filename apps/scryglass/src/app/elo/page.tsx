@@ -200,6 +200,14 @@ export default async function EloPage() {
           <Link href="/methodology">Method</Link>
         </div>
       </header>
+      <details className={styles.ratingExplainer}>
+        <summary>How is the rating calculated?</summary>
+        <div>
+          <p><strong>Teams:</strong> series results, opponent strength, and uncertainty. Beating a strong team carries more information than beating a weak one.</p>
+          <p><strong>Players:</strong> game results with that player in the five-person lineup, adjusted for the opposing lineup and uncertainty. Individual statistics affect game grades, not the rating.</p>
+          <Link href="/methodology#player-ratings">Read the full method →</Link>
+        </div>
+      </details>
       <Suspense fallback={<div className="skeleton-block" aria-hidden />}>
         <SignalRatings
           teams={teams}

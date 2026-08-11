@@ -123,6 +123,11 @@ export function rowsForMode(rows: TierRow[], mode: TierRankedMode): TierRow[] {
   return rows;
 }
 
+export function filterRowsByMinimumGames(rows: TierRow[], minimumGames: number): TierRow[] {
+  const threshold = Number.isFinite(minimumGames) ? Math.max(1, Math.floor(minimumGames)) : 1;
+  return rows.filter((row) => row.played_maps >= threshold);
+}
+
 export function viableCandidates(
   library: StructuralSimilarity | undefined,
   playedPatchRoleRows: TierRow[],

@@ -130,6 +130,7 @@
 
 .questionTabActive {
   color: var(--ink);
+  box-shadow: inset 0 -3px 0 var(--ink);
 }
 
 .questionTabActive strong {
@@ -140,6 +141,10 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.7rem;
+}
+
+.activeSummary {
+  width: min(100%, 34rem);
 }
 
 .summaryGridPartial {
@@ -1530,6 +1535,11 @@
 
   .button {
     min-height: 2.25rem;
+    grid-column: 1 / -1;
+  }
+
+  .activeSummary {
+    width: 100%;
   }
 
   .roleGrid,

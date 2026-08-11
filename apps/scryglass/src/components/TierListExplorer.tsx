@@ -10,6 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
+  filterRowsByMinimumGames,
   filterRowsByRegion,
   firstPickMetric,
   matchupGrade,
@@ -38,12 +39,13 @@ const ROLE_LABELS: Record<string, string> = {
   support: "Support",
 };
 const BOARD_MODES = [
-  { value: "first_pick", label: "First pick", note: "overall strength" },
-  { value: "blind", label: "Blind", note: "stability across matchups" },
-  { value: "counter", label: "Good into", note: "positive matchups" },
-  { value: "responses", label: "Matchup matrix", note: "every role matchup" },
-  { value: "unpicked", label: "Unpicked, but viable", note: "structural alternatives" },
+  { value: "first_pick", label: "First pick", note: "best general pick" },
+  { value: "blind", label: "Blind", note: "safest worst case" },
+  { value: "counter", label: "Good into", note: "widest matchup edge" },
+  { value: "responses", label: "Matchup matrix", note: "pick-by-pick answers" },
+  { value: "unpicked", label: "Unpicked, but viable", note: "similar job, no games" },
 ] as const;
+const MINIMUM_GAME_OPTIONS = [1, 3, 5, 10, 20] as const;
 type BoardMode = TierBoardMode;
 type RankedBoardMode = TierRankedMode;
 type MatrixSize = "overview" | "standard" | "large";
@@ -324,6 +326,11 @@ function listMetric(row: TierRow, mode: RankedBoardMode): { value: string; detai
   };
 }
 
+function compactMetricValue(row: TierRow, mode: RankedBoardMode): string {
+  if (mode === "first_pick") return signedScore(row.tier_value_pp);
+  return listMetric(row, mode).value;
+}
+
 function DraftRow({
   row,
   mode,
@@ -384,7 +391,7 @@ function RoleBoardGrid({
   const title = mode === "blind"
     ? "Safest blind picks by role"
     : mode === "counter"
-      ? "Most positive matchups by role"
+      ? "Widest matchup edges by role"
       : "Five-role draft sheet";
   return (
     <section className={styles.roleSnapshot}>
@@ -421,7 +428,7 @@ function RoleBoardGrid({
                     <ChampionThumb name={row.champion} imageUrl={row.champion_image_url} />
                     <strong>{row.champion}</strong>
                     <span className={styles.roleMetric}>
-                      <em>{listMetric(row, mode).value}</em>
+                      <em title={listMetric(row, mode).value}>{compactMetricValue(row, mode)}</em>
                       <MetricRail row={row} mode={mode} compact />
                     </span>
                   </button>
@@ -776,6 +783,7 @@ function ResponseBoard({
 export function TierListExplorer() {
   const [role, setRole] = useState("");
   const [patch, setPatch] = useState("");
+  const [minimumGames, setMinimumGames] = useState(5);
   const [mode, setMode] = useState<BoardMode>("first_pick");
   const [responseChampion, setResponseChampion] = useState("");
   const [region, setRegion] = useState("");
@@ -835,7 +843,8 @@ export function TierListExplorer() {
   const rows = (data.rows ?? []).filter((row) => row.patch === activePatch);
   const regionOptions = regionalOptions(scopes, activePatch);
   const activeRegion = regionOptions.some((candidate) => candidate.id === region) ? region : "";
-  const visibleRows = filterRowsByRegion(rows, scopes, activePatch, activeRegion);
+  const regionalRows = filterRowsByRegion(rows, scopes, activePatch, activeRegion);
+  const visibleRows = filterRowsByMinimumGames(regionalRows, minimumGames);
   const selectedRows = role ? visibleRows.filter((row) => row.role === role) : [];
   const selectedScope = role
     ? scopes.find((scope) => scope.patch === activePatch && scope.role === role)
@@ -890,6 +899,14 @@ export function TierListExplorer() {
           }}
           emptyLabel={regionOptions.length ? "all regions" : "regional refresh pending"}
         />
+        <label className={styles.field}>
+          <span>Minimum games</span>
+          <select value={minimumGames} onChange={(event) => setMinimumGames(Number(event.target.value))}>
+            {MINIMUM_GAME_OPTIONS.map((value) => (
+              <option key={value} value={value}>{value}+</option>
+            ))}
+          </select>
+        </label>
         <button
           className={styles.button}
           onClick={() => void load(activePatch === latestPatch ? LATEST_TIER_LIST_URL : TIER_LIST_URL, undefined, true)}
@@ -901,7 +918,7 @@ export function TierListExplorer() {
 
       <div className={styles.meta}>
         {role ? `${selectedRows.length} champions · ${roleLabel(role)}` : `${visibleRows.length} champions across all roles`}
-        {activeRegionLabel ? ` · ${activeRegionLabel}` : " · all regions"} · {freshnessLabel(data)} · updated {data.as_of ?? data.generated_at}
+        {activeRegionLabel ? ` · ${activeRegionLabel}` : " · all regions"} · {minimumGames}+ games · {freshnessLabel(data)} · updated {data.as_of ?? data.generated_at}
       </div>
 
       <nav className={styles.questionNav} aria-label="Draft questions">
@@ -911,6 +928,7 @@ export function TierListExplorer() {
             type="button"
             className={mode === item.value ? styles.questionTabActive : styles.questionTab}
             aria-pressed={mode === item.value}
+            aria-current={mode === item.value ? "page" : undefined}
             onClick={() => setMode(item.value)}
           >
             <strong>{item.label}</strong>
@@ -919,39 +937,41 @@ export function TierListExplorer() {
         ))}
       </nav>
 
-      {mode !== "unpicked" ? <div className={`${styles.summaryGrid} ${!blindPick && !counterPick ? styles.summaryGridPartial : ""}`}>
-        <SummaryCard
-          label="Top first-pick strength"
-          row={firstPick}
-          value={firstPickMetric(firstPick)}
-          mode="first_pick"
-          description="Overall patch-wide strength in the selected role."
-        />
-        {blindPick || counterPick ? (
-          <>
-            <SummaryCard
-              label="Safest blind"
-              row={blindPick}
-              value={blindPick ? signedScore(blindPick.blind_score_pp) : "Matchup refresh pending"}
-              mode="blind"
-              description="Expected edge in the weakest common matchup."
-            />
-            <SummaryCard
-              label="Most positive matchups"
-              row={counterPick}
-              value={counterPick?.countered_opponent_count === null || counterPick?.countered_opponent_count === undefined ? "Matchup refresh pending" : `${counterPick.countered_opponent_count} / 5`}
-              mode="counter"
-              description={counterPick ? `${counterPick.champion} has a positive modeled edge into ${counterPick.countered_opponent_count} of 5 common ${roleLabel(counterPick.role)} opponents.` : "Matchup refresh pending."}
-            />
-          </>
-        ) : (
-          <article className={styles.matchupNotice}>
-            <p className={styles.cardLabel}>Matchup views</p>
-            <strong>Refresh pending</strong>
-            <span>Blind stability, positive matchups, and direct responses will appear after the next accepted matchup artifact.</span>
-          </article>
-        )}
-      </div> : null}
+      {mode === "first_pick" ? (
+        <div className={styles.activeSummary}>
+          <SummaryCard
+            label="Best first pick"
+            row={firstPick}
+            value={firstPickMetric(firstPick)}
+            mode="first_pick"
+            description={`Strongest general result among champions with at least ${minimumGames} accepted games.`}
+          />
+        </div>
+      ) : null}
+
+      {mode === "blind" ? (
+        <div className={styles.activeSummary}>
+          <SummaryCard
+            label="Safest blind pick"
+            row={blindPick}
+            value={blindPick ? signedScore(blindPick.blind_score_pp) : "Matchup refresh pending"}
+            mode="blind"
+            description="Best expected result in the champion’s weakest common matchup."
+          />
+        </div>
+      ) : null}
+
+      {mode === "counter" ? (
+        <div className={styles.activeSummary}>
+          <SummaryCard
+            label="Widest matchup edge"
+            row={counterPick}
+            value={counterPick?.countered_opponent_count === null || counterPick?.countered_opponent_count === undefined ? "Matchup refresh pending" : `${counterPick.countered_opponent_count} / 5`}
+            mode="counter"
+            description={counterPick ? `${counterPick.champion} is favored into ${counterPick.countered_opponent_count} of 5 common ${roleLabel(counterPick.role)} opponents.` : "Matchup refresh pending."}
+          />
+        </div>
+      ) : null}
 
       {mode === "responses" && !role ? (
         <div className={styles.unavailable}>
@@ -994,7 +1014,7 @@ export function TierListExplorer() {
             <header className={styles.panelHeading}>
               <div>
                 <p className={styles.cardLabel}>{roleLabel(role)} · Patch {activePatch}</p>
-                <h2>{mode === "blind" ? "Blind stability" : mode === "counter" ? "Positive matchups" : "First-pick board"}</h2>
+                <h2>{mode === "blind" ? "Blind stability" : mode === "counter" ? "Good into common picks" : "First-pick board"}</h2>
               </div>
               <span>{selectedRows.length} champions</span>
             </header>
@@ -1005,7 +1025,7 @@ export function TierListExplorer() {
               }} />
             ) : (
               <div className={styles.unavailable}>
-                <p>{mode === "blind" ? "Blind stability" : "Positive matchups"} is waiting for the matchup refresh.</p>
+                <p>{mode === "blind" ? "Blind stability" : "Good into common picks"} is waiting for the matchup refresh.</p>
                 <span>The first-pick A–D board remains available for this role and patch.</span>
               </div>
             )}
@@ -1020,7 +1040,7 @@ export function TierListExplorer() {
 
       <div className={styles.methodNote}>
         <strong>How to read this board</strong>
-        <span>First pick uses the patch-wide model. Blind shows the expected weakest common matchup. Good into counts positive modeled edges against five common role opponents. Unpicked alternatives use structural similarity and carry no performance claim. Region filters observed appearances and keeps the patch-wide fit fixed.</span>
+        <span>First pick uses the patch-wide model. Blind shows the expected weakest common matchup. Good into counts favorable modeled results against five common role opponents. Minimum games uses patch-wide accepted appearances. Unpicked alternatives use structural similarity and carry no performance claim. Region filters observed appearances and keeps the patch-wide fit fixed.</span>
       </div>
     </section>
   );

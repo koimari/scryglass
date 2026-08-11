@@ -17,7 +17,7 @@
   color: var(--ink);
   font-family: var(--font-display), serif;
   font-size: clamp(2.8rem, 5vw, 5rem);
-  font-weight: 400;
+  font-weight: 650;
   letter-spacing: -0.025em;
   line-height: 0.96;
 }
