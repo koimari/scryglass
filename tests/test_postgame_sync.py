@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+import lol_kills.postgame_sync as postgame_sync
 from lol_kills.export import pack_spec
 from lol_kills.export.public_pack import source_identity_sha256
 from lol_kills.postgame_sync import (
@@ -23,6 +24,30 @@ from lol_kills.postgame_sync import (
 
 
 NOW = datetime(2026, 8, 9, 18, tzinfo=timezone.utc)
+
+
+def test_browser_refreshed_source_skips_network_download(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def ingest(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setenv("SCRYGLASS_OE_BROWSER_REFRESHED", "1")
+    monkeypatch.setattr(postgame_sync, "ingest_oe", ingest)
+    monkeypatch.setattr(postgame_sync, "_source_game_ids", lambda _root: {"game-1"})
+    monkeypatch.setattr(
+        postgame_sync,
+        "_annual_source_latest",
+        lambda _root: "2026-08-11T10:50:41Z",
+    )
+
+    receipt = postgame_sync.ingest_oe_csv(tmp_path)
+
+    assert calls == [{"years": ["2025", "2026"], "download": False, "force_download": False}]
+    assert receipt["source_transport"] == "brave_origin_browser_download"
+    assert receipt["source_game_count"] == 1
 
 
 def _config(root: Path) -> SyncConfig:

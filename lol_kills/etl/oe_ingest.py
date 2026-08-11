@@ -558,6 +558,105 @@ def download_oe_years(years: Iterable[str | int], force: bool = False) -> list[P
     return out_paths
 
 
+def install_browser_download(candidate_path: Path, year: str | int) -> Path:
+    """Validate and atomically install an annual CSV downloaded by Brave Origin."""
+
+    y = str(year)
+    source = candidate_path.expanduser().resolve()
+    destination = oe_csv_path(y)
+    RAW_OE_DIR.mkdir(parents=True, exist_ok=True)
+    candidate = _validate_oe_csv(source, y)
+
+    previous: dict[str, Any] | None = None
+    previous_error: str | None = None
+    if destination.exists():
+        try:
+            previous = _validate_oe_csv(destination, y)
+        except OeDownloadError as exc:
+            previous_error = str(exc)
+    if (
+        previous is not None
+        and str(candidate["date_max_utc"]) < str(previous["date_max_utc"])
+    ):
+        raise OeDownloadError(
+            "OE browser candidate date_max regressed "
+            f"from {previous['date_max_utc']} to {candidate['date_max_utc']}"
+        )
+
+    archive: Path | None = None
+    status = "downloaded"
+    if previous is not None and previous["raw_sha256"] == candidate["raw_sha256"]:
+        status = "unchanged"
+    else:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.", suffix=".browser", dir=RAW_OE_DIR
+        )
+        os.close(descriptor)
+        temporary = Path(temporary_name)
+        try:
+            shutil.copy2(source, temporary)
+            if _sha256_file(temporary) != candidate["raw_sha256"]:
+                raise OeDownloadError(f"OE browser copy verification failed for {y}")
+            if destination.exists():
+                old_sha = _sha256_file(destination)
+                archive = _archive_existing(destination, old_sha)
+                status = "refreshed"
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    previous_summary: dict[str, Any] | None = None
+    if previous is not None:
+        previous_summary = {
+            **previous,
+            "archive_locator": _display_path(archive) if archive is not None else None,
+        }
+    elif previous_error is not None:
+        previous_summary = {
+            "validation_status": "invalid_replaced",
+            "validation_error": previous_error,
+            "archive_locator": _display_path(archive) if archive is not None else None,
+        }
+
+    retrieved_at = datetime.now(timezone.utc).isoformat()
+    receipt = {
+        "schema": "scryglass:oe-source-refresh:v1",
+        "year": y,
+        "retrieved_at_utc": retrieved_at,
+        "status": status,
+        "source": {
+            "provider": "Oracle's Elixir",
+            "transport": "brave_origin_browser_download",
+            "locator": f"https://drive.google.com/uc?export=download&id={OE_DRIVE_IDS.get(y, '')}",
+            "drive_file_id": OE_DRIVE_IDS.get(y),
+            "folder_locator": OE_FOLDER,
+            "remote_signature": None,
+        },
+        "destination_locator": _display_path(destination),
+        "candidate": candidate,
+        "previous": previous_summary,
+        "authority": {
+            "descriptive_source_freshness_evidence": True,
+            "model_validation_authority": False,
+            "probability_authority": False,
+            "recommendation_authority": False,
+            "betting_authority": False,
+        },
+        "claim_ceiling": (
+            "This receipt proves browser transport, structural validation, temporal coverage, "
+            "and exact source bytes only. It does not validate a model, probability, odds, "
+            "recommendation, or wager."
+        ),
+    }
+    receipt_path = _write_refresh_receipt(receipt)
+    print(
+        f"[oe] {status} browser download {destination.name}; "
+        f"max={candidate['date_max_utc']} sha256={candidate['raw_sha256']} "
+        f"receipt={receipt_path.name}"
+    )
+    return destination
+
+
 def _strip_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Preserve OE column names (stripped); drop accidental duplicate headers."""
     out = df.copy()
@@ -736,4 +835,15 @@ def ingest_oe(
 
 
 if __name__ == "__main__":
-    ingest_oe(download=False)
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--install-browser-candidate", type=Path)
+    parser.add_argument("--year")
+    arguments = parser.parse_args()
+    if arguments.install_browser_candidate is not None:
+        if not arguments.year:
+            parser.error("--year is required with --install-browser-candidate")
+        install_browser_download(arguments.install_browser_candidate, arguments.year)
+    else:
+        ingest_oe(download=False)

@@ -177,6 +177,46 @@ def test_failed_strict_refresh_preserves_existing_bytes(
     assert not list(raw.glob("*.download"))
 
 
+def test_browser_download_is_validated_archived_and_installed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    raw, receipts = _configure_paths(monkeypatch, tmp_path)
+    destination = raw / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+    original = _csv_bytes(date="2026-06-14T22:24:48Z")
+    replacement = _csv_bytes(date="2026-08-11T10:50:41Z", gameid="g2")
+    destination.write_bytes(original)
+    browser_file = tmp_path / "browser.csv"
+    browser_file.write_bytes(replacement)
+
+    installed = oe_ingest.install_browser_download(browser_file, 2026)
+
+    assert installed == destination
+    assert destination.read_bytes() == replacement
+    old_sha = hashlib.sha256(original).hexdigest()
+    archive = raw / "archive" / f"{destination.stem}.{old_sha}.csv"
+    assert archive.read_bytes() == original
+    receipt_path = next(receipts.glob("*.json"))
+    receipt = oe_ingest.load_refresh_receipt(receipt_path)
+    assert receipt["source"]["transport"] == "brave_origin_browser_download"
+    assert receipt["candidate"]["date_max_utc"] == "2026-08-11T10:50:41+00:00"
+
+
+def test_browser_download_refuses_temporal_regression(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    raw, _receipts = _configure_paths(monkeypatch, tmp_path)
+    destination = raw / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+    original = _csv_bytes(date="2026-08-11T10:50:41Z")
+    destination.write_bytes(original)
+    browser_file = tmp_path / "browser.csv"
+    browser_file.write_bytes(_csv_bytes(date="2026-08-10T22:03:59Z"))
+
+    with pytest.raises(oe_ingest.OeDownloadError, match="date_max regressed"):
+        oe_ingest.install_browser_download(browser_file, 2026)
+
+    assert destination.read_bytes() == original
+
+
 def test_parse_normalizes_numeric_playoffs_to_nullable_boolean(tmp_path: Path) -> None:
     path = tmp_path / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
     path.write_text(
