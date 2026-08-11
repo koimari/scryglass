@@ -214,10 +214,27 @@ export async function readPublicTierList<T>(): Promise<T> {
 
 /** Send the large tier artifact from storage instead of proxying it through Vercel. */
 export async function publicTierListDownloadUrl(): Promise<string> {
+  return publicTierListViewDownloadUrl("full");
+}
+
+export async function publicTierListViewDownloadUrl(view: "full" | "latest"): Promise<string> {
+  const relativePath = view === "latest"
+    ? "rankings/tierlists-latest.json"
+    : "rankings/tierlists.json";
   const config = supabaseConfig();
   if (config) {
     const manifest = await readSupabaseManifest("no-store");
-    const storagePath = `${manifest.pack_id}/rankings/tierlists.json`
+    const release = encodeURIComponent(manifest.pack_id);
+    const assetPath = encodeURIComponent(relativePath);
+    const response = await fetch(
+      `${config.url}/rest/v1/scryglass_public_assets?release_id=eq.${release}&path=eq.${assetPath}&select=storage_path&limit=1`,
+      { headers: { apikey: config.publishableKey }, cache: "no-store" },
+    );
+    if (!response.ok) throw new Error(`Supabase public tier asset ${response.status}`);
+    const rows = (await response.json()) as Array<{ storage_path?: string | null }>;
+    const stored = rows[0]?.storage_path;
+    if (!stored) throw new Error("Supabase public tier asset has no storage path");
+    const storagePath = stored
       .split("/")
       .map((part) => encodeURIComponent(part))
       .join("/");
@@ -225,7 +242,11 @@ export async function publicTierListDownloadUrl(): Promise<string> {
   }
   const configured = process.env.SCRYGLASS_TIERLIST_DISPLAY_URL?.trim();
   const blobRoot = process.env.LIVE_BLOB_BASE_URL?.trim() || DEFAULT_BLOB_ROOT;
-  const url = configured || `${blobRoot.replace(/\/$/, "")}/rankings/tierlists.json`;
+  const url = configured
+    ? view === "latest"
+      ? configured.replace(/tierlists\.json$/, "tierlists-latest.json")
+      : configured
+    : `${blobRoot.replace(/\/$/, "")}/${relativePath}`;
   if (!/^https:\/\//.test(url)) throw new Error("tier-list download URL is invalid");
   return url;
 }

@@ -67,10 +67,27 @@ await upload("packs/latest.json", `${JSON.stringify(latest, null, 2)}\n`, {
   access: "public", contentType: "application/json", handleUploadUrl: endpoint, headers,
 });
 const tierBody = await readFile(tierPath);
-JSON.parse(tierBody.toString("utf8"));
+const tierPayload = JSON.parse(tierBody.toString("utf8"));
 await upload("rankings/tierlists.json", tierBody, {
   access: "public", contentType: "application/json", handleUploadUrl: endpoint, headers,
   multipart: tierBody.byteLength > 4_000_000,
+});
+const patchOrder = (value) => {
+  const [major, minor] = String(value || "").split(".").map(Number);
+  return (Number.isFinite(major) ? major : 0) * 1000 + (Number.isFinite(minor) ? minor : 0);
+};
+const latestPatch = [...(tierPayload.options?.patches || [])]
+  .map(String)
+  .sort((left, right) => patchOrder(right) - patchOrder(left))[0];
+if (!latestPatch) throw new Error("Tier list has no latest patch");
+const latestTierBody = Buffer.from(`${JSON.stringify({
+  ...tierPayload,
+  latest_patch: latestPatch,
+  rows: (tierPayload.rows || []).filter((row) => row.patch === latestPatch),
+  scopes: (tierPayload.scopes || []).filter((scope) => scope.patch === latestPatch),
+})}\n`);
+await upload("rankings/tierlists-latest.json", latestTierBody, {
+  access: "public", contentType: "application/json", handleUploadUrl: endpoint, headers,
 });
 
 const cleared = await fetch(`${site}/api/data-published`, { method: "POST", headers });

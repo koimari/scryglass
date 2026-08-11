@@ -35,10 +35,33 @@ class FakeSupabase:
     def stage_release(self, release, assets, *, storage_objects=None):
         self.stage_calls += 1
         self.releases[release["release_id"]] = dict(release)
+        return self.stage_assets(
+            str(release["release_id"]),
+            assets,
+            storage_objects=storage_objects,
+        )
+
+    def stage_assets(self, release_id, assets, *, storage_objects=None):
+        reused = 0
         for asset in assets:
+            key = (asset["release_id"], asset["path"])
+            prior = self.assets.get(key)
+            if prior and prior.get("bytes") == asset["bytes"] and prior.get("sha256") == asset["sha256"]:
+                reused += 1
+                continue
+            if prior:
+                raise supabase_publication.SupabasePublicationError(
+                    f"existing public asset has different content: {asset['path']}"
+                )
             self.assets[(asset["release_id"], asset["path"])] = dict(asset)
-        self.storage.update(storage_objects or {})
-        return 0
+        for path, raw in (storage_objects or {}).items():
+            prior = self.storage.get(path)
+            if prior is not None and prior != raw:
+                raise supabase_publication.SupabasePublicationError(
+                    "existing Supabase Storage object has different content"
+                )
+            self.storage[path] = raw
+        return reused
 
     def activate(self, release_id: str):
         previous = self.active_id
@@ -82,7 +105,23 @@ def _fixture(root: Path):
         "files": files,
     }
     tier = root / "tierlists.json"
-    tier.write_text(json.dumps({"status": "available", "rows": []}), encoding="utf-8")
+    tier.write_text(
+        json.dumps(
+            {
+                "status": "available",
+                "options": {"patches": ["16.14", "16.15"]},
+                "rows": [
+                    {"patch": "16.14", "champion": "Old"},
+                    {"patch": "16.15", "champion": "Current"},
+                ],
+                "scopes": [
+                    {"patch": "16.14", "role": "mid"},
+                    {"patch": "16.15", "role": "mid"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     return pack, manifest, tier
 
 
@@ -102,17 +141,19 @@ def test_publish_release_stages_then_activates_complete_snapshot() -> None:
 
     assert result["status"] == "published"
     assert result["release_id"] == manifest["pack_id"]
-    assert result["assets"] == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 1
+    assert result["assets"] == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 2
     assert result["reused_assets"] == 0
     assert client.active_id == manifest["pack_id"]
-    assert len(client.assets) == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 1
+    assert len(client.assets) == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 2
     assert list(client.storage) == [
-        "v2026.08.10.153000/rankings/tierlists.json"
+        "v2026.08.10.153000/rankings/tierlists.json",
+        "v2026.08.10.153000/rankings/tierlists-latest.json",
     ]
     assert client.releases[manifest["pack_id"]]["manifest"]["data_backend"] == "supabase"
     assert client.releases[manifest["pack_id"]]["manifest"]["tier"] == {
         "status": "available",
         "as_of": None,
+        "latest_path": "rankings/tierlists-latest.json",
     }
 
 
@@ -141,7 +182,7 @@ def test_publish_release_includes_optional_schedule_when_present() -> None:
             client=client,
         )
 
-    assert result["assets"] == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 2
+    assert result["assets"] == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 3
     assert (manifest["pack_id"], path) in client.assets
 
 
@@ -168,7 +209,41 @@ def test_publish_release_is_idempotent_after_verified_activation() -> None:
 
     assert first["status"] == "published"
     assert second["status"] == "already_active"
+    assert second["reused_assets"] == second["assets"]
     assert client.stage_calls == 1
+
+
+def test_publish_release_adds_latest_view_to_existing_active_release() -> None:
+    with TemporaryDirectory() as temporary:
+        pack, manifest, tier = _fixture(Path(temporary))
+        client = FakeSupabase()
+        supabase_publication.publish_release(
+            pack,
+            manifest,
+            tier,
+            project_url=client.project_url,
+            secret_key="sb_secret_unused_because_client_is_injected",
+            client=client,
+        )
+        latest_key = (manifest["pack_id"], supabase_publication.TIER_LATEST_ASSET_PATH)
+        latest_storage = f"{manifest['pack_id']}/{supabase_publication.TIER_LATEST_ASSET_PATH}"
+        del client.assets[latest_key]
+        del client.storage[latest_storage]
+
+        result = supabase_publication.publish_release(
+            pack,
+            manifest,
+            tier,
+            project_url=client.project_url,
+            secret_key="sb_secret_unused_because_client_is_injected",
+            client=client,
+        )
+
+    assert result["status"] == "already_active"
+    assert result["reused_assets"] == result["assets"] - 1
+    assert latest_key in client.assets
+    assert latest_storage in client.storage
+    assert client.active_id == manifest["pack_id"]
 
 
 def test_publish_release_rejects_changed_pack_asset_before_upload() -> None:
@@ -200,14 +275,37 @@ def test_client_repr_redacts_secret_key() -> None:
     assert "<redacted>" in repr(client)
 
 
+def test_latest_tier_payload_keeps_only_newest_patch_and_all_views() -> None:
+    payload = {
+        "status": "available",
+        "options": {"patches": ["16.9", "16.10"]},
+        "rows": [
+            {"patch": "16.9", "champion": "Old"},
+            {"patch": "16.10", "champion": "New"},
+        ],
+        "scopes": [
+            {"patch": "16.9", "response_matrix": {"old": True}},
+            {"patch": "16.10", "response_matrix": {"new": True}},
+        ],
+        "structural_similarity": {"champions": ["New"]},
+    }
+
+    latest = supabase_publication.latest_tier_payload(payload)
+
+    assert latest["latest_patch"] == "16.10"
+    assert latest["rows"] == [{"patch": "16.10", "champion": "New"}]
+    assert latest["scopes"] == [{"patch": "16.10", "response_matrix": {"new": True}}]
+    assert latest["structural_similarity"] == payload["structural_similarity"]
+
+
 def test_database_allowlist_matches_publication_contract() -> None:
     root = Path(__file__).resolve().parents[1]
-    migrations = list((root / "supabase" / "migrations").glob("*_public_match_assets.sql"))
-    assert len(migrations) == 1
-    sql = migrations[0].read_text(encoding="utf-8")
+    migrations = sorted((root / "supabase" / "migrations").glob("*.sql"))
+    sql = "\n".join(path.read_text(encoding="utf-8") for path in migrations)
     for path in supabase_publication.PUBLIC_ASSET_PATHS:
         assert f"'{path}'" in sql
-    required_section = sql.split("required_assets constant text[] := array[", 1)[1].split("];", 1)[0]
+    activation = (root / "supabase" / "migrations" / "20260811121932_public_match_assets.sql").read_text(encoding="utf-8")
+    required_section = activation.split("required_assets constant text[] := array[", 1)[1].split("];", 1)[0]
     for path in (*supabase_publication.PUBLIC_RATING_REQUIRED_FILES, supabase_publication.TIER_ASSET_PATH):
         assert f"'{path}'" in required_section
     assert "'features/schedule.json'" not in required_section

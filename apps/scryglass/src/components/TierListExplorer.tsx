@@ -28,6 +28,7 @@ import {
 import styles from "./TierListExplorer.module.css";
 
 const TIER_LIST_URL = "/api/public-data/tierlists";
+const LATEST_TIER_LIST_URL = `${TIER_LIST_URL}?view=latest`;
 const ROLE_ORDER = TIER_ROLE_ORDER;
 const ROLE_LABELS: Record<string, string> = {
   top: "Top",
@@ -780,13 +781,15 @@ export function TierListExplorer() {
   const [region, setRegion] = useState("");
   const [data, setData] = useState<TierResponse>(EMPTY);
   const [loading, setLoading] = useState(true);
+  const [fullHistoryLoaded, setFullHistoryLoaded] = useState(false);
 
-  const refresh = useCallback(async (signal?: AbortSignal, showLoading = false) => {
+  const load = useCallback(async (url: string, signal?: AbortSignal, showLoading = false) => {
     if (showLoading) setLoading(true);
     try {
-      const response = await fetch(TIER_LIST_URL, { signal, cache: "no-store" });
+      const response = await fetch(url, { signal });
       if (!response.ok) throw new Error("tier-list file is unavailable");
       setData((await response.json()) as TierResponse);
+      setFullHistoryLoaded(url === TIER_LIST_URL);
     } catch {
       if (!signal?.aborted) setData(EMPTY);
     } finally {
@@ -796,12 +799,15 @@ export function TierListExplorer() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch(TIER_LIST_URL, { signal: controller.signal, cache: "no-store" })
+    fetch(LATEST_TIER_LIST_URL, { signal: controller.signal })
       .then((response) => {
         if (!response.ok) throw new Error("tier-list file is unavailable");
         return response.json() as Promise<TierResponse>;
       })
-      .then((payload) => setData(payload))
+      .then((payload) => {
+        setData(payload);
+        setFullHistoryLoaded(false);
+      })
       .catch(() => {
         if (!controller.signal.aborted) setData(EMPTY);
       })
@@ -824,6 +830,7 @@ export function TierListExplorer() {
   const patchOptions = [...new Set(data.options?.patches ?? scopes.map((scope) => scope.patch))]
     .sort((left, right) => patchOrder(right) - patchOrder(left));
   const activePatch = patch || patchOptions[0] || "";
+  const latestPatch = patchOptions[0] || "";
   const roleOptions = (data.options?.roles ?? [...ROLE_ORDER]).map((value) => ({ value, label: roleLabel(value) }));
   const rows = (data.rows ?? []).filter((row) => row.patch === activePatch);
   const regionOptions = regionalOptions(scopes, activePatch);
@@ -857,6 +864,9 @@ export function TierListExplorer() {
             setPatch(value);
             setResponseChampion("");
             setRegion("");
+            if (value && value !== latestPatch && !fullHistoryLoaded) {
+              void load(TIER_LIST_URL, undefined, true);
+            }
           }}
           emptyLabel={`latest (${activePatch})`}
         />
@@ -880,7 +890,11 @@ export function TierListExplorer() {
           }}
           emptyLabel={regionOptions.length ? "all regions" : "regional refresh pending"}
         />
-        <button className={styles.button} onClick={() => void refresh(undefined, true)} disabled={loading}>
+        <button
+          className={styles.button}
+          onClick={() => void load(activePatch === latestPatch ? LATEST_TIER_LIST_URL : TIER_LIST_URL, undefined, true)}
+          disabled={loading}
+        >
           {loading ? "Loading…" : "Refresh"}
         </button>
       </div>

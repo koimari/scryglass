@@ -20,7 +20,13 @@ from lol_kills.export.pack_spec import OPTIONAL_PUBLIC_FILES, PUBLIC_RATING_REQU
 
 
 TIER_ASSET_PATH = "rankings/tierlists.json"
-PUBLIC_ASSET_PATHS = (*PUBLIC_RATING_REQUIRED_FILES, *OPTIONAL_PUBLIC_FILES, TIER_ASSET_PATH)
+TIER_LATEST_ASSET_PATH = "rankings/tierlists-latest.json"
+PUBLIC_ASSET_PATHS = (
+    *PUBLIC_RATING_REQUIRED_FILES,
+    *OPTIONAL_PUBLIC_FILES,
+    TIER_ASSET_PATH,
+    TIER_LATEST_ASSET_PATH,
+)
 PACK_ID_RE = re.compile(r"^v\d{4}\.\d{2}\.\d{2}\.\d{6}$")
 REQUEST_TIMEOUT_SECONDS = 60.0
 INLINE_ASSET_MAX_BYTES = 1_500_000
@@ -223,7 +229,22 @@ class SupabasePublicData:
             [release],
             prefer="resolution=merge-duplicates,return=minimal",
         )
-        existing = self.asset_metadata(str(release["release_id"]))
+        return self.stage_assets(
+            str(release["release_id"]),
+            assets,
+            storage_objects=storage_objects,
+        )
+
+    def stage_assets(
+        self,
+        release_id: str,
+        assets: list[dict[str, Any]],
+        *,
+        storage_objects: dict[str, bytes] | None = None,
+    ) -> int:
+        """Add immutable assets to an existing release and reuse exact matches."""
+
+        existing = self.asset_metadata(release_id)
         reused = 0
         for asset in assets:
             prior = existing.get(str(asset["path"]))
@@ -234,6 +255,10 @@ class SupabasePublicData:
             ):
                 reused += 1
                 continue
+            if prior:
+                raise SupabasePublicationError(
+                    f"existing public asset has different content: {asset['path']}"
+                )
             storage_path = asset.get("storage_path")
             if isinstance(storage_path, str):
                 raw = (storage_objects or {}).get(storage_path)
@@ -291,6 +316,35 @@ def _asset(path: str, raw: bytes, release_id: str) -> dict[str, Any]:
         "bytes": len(raw),
         "sha256": _sha256(raw),
     }
+
+
+def _patch_order(value: object) -> tuple[int, int]:
+    parts = str(value or "").split(".", 1)
+    try:
+        return int(parts[0]), int(parts[1])
+    except (IndexError, ValueError):
+        return 0, 0
+
+
+def latest_tier_payload(tier_body: dict[str, Any]) -> dict[str, Any]:
+    """Keep the newest patch while preserving every view for that patch."""
+
+    options = tier_body.get("options")
+    patches = options.get("patches") if isinstance(options, dict) else None
+    if not isinstance(patches, list) or not patches:
+        raise SupabasePublicationError("tier-list asset has no patch options")
+    latest_patch = max((str(value) for value in patches), key=_patch_order)
+    rows = tier_body.get("rows")
+    scopes = tier_body.get("scopes")
+    if not isinstance(rows, list) or not isinstance(scopes, list):
+        raise SupabasePublicationError("tier-list asset has invalid rows or scopes")
+    latest = dict(tier_body)
+    latest["rows"] = [row for row in rows if isinstance(row, dict) and row.get("patch") == latest_patch]
+    latest["scopes"] = [scope for scope in scopes if isinstance(scope, dict) and scope.get("patch") == latest_patch]
+    latest["latest_patch"] = latest_patch
+    if not latest["rows"] or not latest["scopes"]:
+        raise SupabasePublicationError("latest tier-list patch has no public data")
+    return latest
 
 
 def prepare_release(
@@ -353,12 +407,28 @@ def prepare_release(
     assets.append(tier_asset)
     storage_objects[tier_storage_path] = tier_raw
 
+    latest_tier_raw = (
+        json.dumps(
+            latest_tier_payload(tier_body),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+    latest_tier_asset = _asset(TIER_LATEST_ASSET_PATH, latest_tier_raw, release_id)
+    latest_tier_storage_path = f"{release_id}/{TIER_LATEST_ASSET_PATH}"
+    latest_tier_asset["body"] = None
+    latest_tier_asset["storage_path"] = latest_tier_storage_path
+    assets.append(latest_tier_asset)
+    storage_objects[latest_tier_storage_path] = latest_tier_raw
+
     published_manifest = dict(manifest)
     published_manifest["base_url"] = _project_url(project_url)
     published_manifest["data_backend"] = "supabase"
     published_manifest["tier"] = {
         "status": "available",
         "as_of": tier_body.get("as_of"),
+        "latest_path": TIER_LATEST_ASSET_PATH,
     }
     release = {
         "release_id": release_id,
@@ -422,12 +492,18 @@ def publish_release(
     if existing and existing.get("status") == "superseded":
         raise SupabasePublicationError("a superseded release ID cannot be changed")
     if existing and existing.get("status") == "active":
+        reused_assets = database.stage_assets(
+            release_id,
+            assets,
+            storage_objects=storage_objects,
+        )
         _verify_active_release(database, release_id, assets)
         return {
             "status": "already_active",
             "release_id": release_id,
             "previous_release_id": None,
             "assets": len(assets),
+            "reused_assets": reused_assets,
             "bytes": sum(int(asset["bytes"]) for asset in assets),
             "retained_releases": retention,
         }
