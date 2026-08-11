@@ -61,6 +61,10 @@ The old active Supabase release and previous Vercel deployment remain rollback t
 
 ## Backup
 
-The database backup launch agent runs at 03:20 local time. It reads the Supabase Postgres connection URL from the macOS Keychain item `scryglass-database-url`. It keeps seven daily dumps and four Sunday dumps. Each dump must pass `pg_restore --list` before it replaces its temporary file.
+The database backup launch agent runs at 03:20 local time. The linked Supabase
+CLI creates a short-lived database login for each run. Homebrew `libpq` supplies
+`pg_dump` and `pg_restore`. The job keeps seven daily dumps and four Sunday
+dumps. Each dump must pass `pg_restore --list` before it replaces its temporary
+file.
 
 Restore a backup into a temporary database before calling the backup lane ready. Compare table counts and canonical game identity digests with production.
