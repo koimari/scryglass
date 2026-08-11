@@ -5,8 +5,9 @@ Canonical public site: https://scryglass.xyz
 The public payload contains rating, profile, match, schedule, and tier-list files.
 
 1. Install the refresh and database-backup agents from `ops/launchd`.
-2. Store the Supabase worker key, data-publish token, and database URL in the
-   login Keychain. The launch scripts contain no secrets.
+2. Store the Supabase worker key and data-publish token in the login Keychain.
+   Log in with the pinned Supabase CLI for short-lived backup access. The
+   launch scripts contain no secrets.
 3. Start one controlled run with the Mac launchd script. It acquires the 2026
    OE file once and creates the required source and import receipts.
 

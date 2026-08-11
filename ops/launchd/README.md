@@ -39,6 +39,7 @@ The 2025 baseline remains in the runtime cache. Generated data does not enter
 the worker Git checkout.
 
 Install `xyz.scryglass.database-backup.plist.template` as a separate launch
-agent after the database URL is stored in the login Keychain. The backup job
-keeps seven daily dumps and four Sunday dumps. It verifies each dump before
-retention runs.
+agent after the pinned Supabase CLI is logged in and the worker checkout is
+linked to the project. Install Homebrew `libpq` for `pg_dump` and `pg_restore`.
+The backup job uses a short-lived database login. It keeps seven daily dumps
+and four Sunday dumps. It verifies each dump before retention runs.
