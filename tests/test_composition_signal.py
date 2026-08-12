@@ -14,6 +14,7 @@ from lol_kills.research.composition_signal import (
     _match_delta_intervals,
     _matrix,
     _recalibrate_history_probabilities,
+    _select_history_regularization,
     _select_regularization,
     build_composition_games,
     evaluate_composition_signal,
@@ -215,6 +216,117 @@ def test_public_contributions_are_relative_to_the_picking_side() -> None:
     assert signal["blue"]["signal"] == 0.5
     assert signal["red"]["signal"] == -0.25
     assert "coefficients" not in signal
+
+
+def test_per_role_mastery_features_use_strictly_prior_experience() -> None:
+    players: list[tuple[str, str, str, str]] = []
+    for side, team in (("Blue", "Blue Team"), ("Red", "Red Team")):
+        for role in ROLES:
+            players.append((f"{team}-{role}", side, role, f"{side}-{role}-champ"))
+
+    def rows(game_id: str, date: str, result: int, *, red_swaps: bool = False) -> list[dict[str, object]]:
+        built: list[dict[str, object]] = []
+        for playername, side, role, champion in players:
+            champion = f"{side}-{role}-other" if red_swaps and side == "Red" else champion
+            built.append(
+                {
+                    "game_uid": game_id,
+                    "date": date,
+                    "league": "LCS",
+                    "patch": "16.15",
+                    "side": side,
+                    "teamname": "Blue Team" if side == "Blue" else "Red Team",
+                    "playername": playername,
+                    "position": role,
+                    "champion": champion,
+                    "result": result if side == "Blue" else 1 - result,
+                }
+            )
+        return built
+
+    frame = pd.DataFrame(
+        [
+            *rows("prior-1", "2025-12-01", 1),
+            *rows("prior-2", "2025-12-02", 0),
+            *rows("prior-3", "2025-12-03", 1, red_swaps=True),
+            *rows("target", "2026-01-01", 1),
+        ]
+    )
+    games = build_composition_games(frame, strength_features=None)
+    target = next(game for game in games if game["game_uid"] == "target")
+    names = _feature_names([target])
+    for role in ROLES:
+        assert f"draft|exp|{role}" in names
+    # Blue players kept their champion across three prior games; red players
+    # swapped in the last prior game, so blue mastery exceeds red by one game.
+    for side, expected in (("blue", 3), ("red", 2)):
+        for role in ROLES:
+            assert target[side][role]["experience"] == expected
+    matrix = _matrix([target], names, include_draft=True)
+    dense = matrix.toarray()[0]
+    index = {name: position for position, name in enumerate(names)}
+    for role in ROLES:
+        assert abs(dense[index[f"draft|exp|{role}"]] - 1.0 / 50.0) < 1e-9
+    baseline = _matrix([target], names, include_draft=False)
+    assert abs(baseline.toarray()[0, index[f"draft|exp|top"]] - 0.0) < 1e-12
+
+
+def _dated_rows(count: int) -> list[list[dict[str, object]]]:
+    start = pd.Timestamp("2026-01-01T12:00:00Z")
+    return [
+        _rows(
+            f"game-{index}",
+            (start + pd.Timedelta(days=index)).isoformat(),
+            index % 2,
+        )
+        for index in range(count)
+    ]
+
+
+def test_select_history_regularization_picks_a_candidate_on_internal_split() -> None:
+    games = _games(*_dated_rows(120))
+    names = _feature_names(games)
+    model = _fit_model(games, names=names, include_draft=True)
+    assert model is not None
+    history = _history_features(games, model)
+    train_x = np.column_stack(
+        [
+            _matrix(games, model.feature_names, include_draft=True) @ np.asarray(model.coefficients),
+            history,
+        ]
+    )
+    chosen = _select_history_regularization(
+        games,
+        train_x,
+        candidates=(0.03, 0.1, 0.3, 1.0, 3.0),
+        internal_fraction=0.15,
+        min_training_games=4,
+    )
+    assert chosen in (0.03, 0.1, 0.3, 1.0, 3.0)
+
+
+def test_select_history_regularization_falls_back_on_thin_data() -> None:
+    games = _games(*_dated_rows(100))
+    names = _feature_names(games)
+    model = _fit_model(games, names=names, include_draft=True)
+    assert model is not None
+    history = _history_features(games, model)
+    train_x = np.column_stack(
+        [
+            _matrix(games, model.feature_names, include_draft=True) @ np.asarray(model.coefficients),
+            history,
+        ]
+    )
+    assert (
+        _select_history_regularization(
+            games,
+            train_x,
+            candidates=(0.1, 1.0),
+            internal_fraction=0.15,
+            min_training_games=100,
+        )
+        == 1.0
+    )
 
 
 def test_evaluator_writes_four_windows_and_keeps_team_history_diagnostic() -> None:
