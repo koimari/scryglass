@@ -343,6 +343,13 @@ def build_composition_games(
             )
             game["blue_exp"] = blue_exp
             game["red_exp"] = red_exp
+            for side in ("blue", "red"):
+                for role in ROLES:
+                    pick = game[side][role]
+                    pick["experience"] = experience.get(
+                        (str(pick.get("player") or "").casefold(), _champion(pick.get("champion"))),
+                        0,
+                    )
             games.append(game)
         for _, row in group.iterrows():
             player_key = str(row.get("_player_key") or "")
@@ -388,6 +395,7 @@ def _feature_names(games: Sequence[Mapping[str, Any]]) -> list[str]:
             del sign
             for role in ROLES:
                 names.add(f"draft|{role}|{_champion(game[side][role].get('champion'))}")
+                names.add(f"draft|exp|{role}")
     controls = sorted(name for name in names if name.startswith("control|"))
     context = sorted(name for name in names if name.startswith(("league|", "patch|")))
     draft = sorted(name for name in names if name.startswith("draft|"))
@@ -420,6 +428,16 @@ def _matrix(games: Sequence[Mapping[str, Any]], names: Sequence[str], *, include
                 "control|exp_diff",
                 (float(game.get("blue_exp") or 0.0) - float(game.get("red_exp") or 0.0)) / 100.0,
             )
+            for role in ROLES:
+                add(
+                    row_index,
+                    f"draft|exp|{role}",
+                    (
+                        float(game["blue"][role].get("experience") or 0.0)
+                        - float(game["red"][role].get("experience") or 0.0)
+                    )
+                    / 50.0,
+                )
             for side, sign in (("blue", 1.0), ("red", -1.0)):
                 for role in ROLES:
                     champion = _champion(game[side][role].get("champion"))
@@ -563,6 +581,44 @@ def _select_regularization(
         if model is None:
             continue
         probabilities = [_probability(model.logit(game, include_draft=True)) for game in check_games]
+        check_brier = brier_score_loss(
+            check_y, np.clip(np.asarray(probabilities, dtype=float), 1e-5, 1 - 1e-5)
+        )
+        if check_brier < best_brier:
+            best_brier = check_brier
+            best_c = candidate
+    return best_c
+
+
+def _select_history_regularization(
+    train: Sequence[Mapping[str, Any]],
+    history_train_x: np.ndarray,
+    *,
+    candidates: Sequence[float],
+    internal_fraction: float,
+    min_training_games: int,
+) -> float:
+    """Pick the team-history model regularization on an internal date split.
+
+    The most recent `internal_fraction` of the training fold (by position in
+    the strictly-lagged history sequence) is held out; every candidate C is
+    fit on the earlier part and scored on the tail with Brier. The winning C
+    is used for the full-training-fold refit. No validation game is used.
+    """
+
+    cutoff = max(int(len(train) * (1.0 - internal_fraction)), min_training_games)
+    if cutoff >= len(train) or len(train) - cutoff < 8:
+        return 1.0
+    fit_y = [int(game["y"]) for game in train[:cutoff]]
+    check_y = [int(game["y"]) for game in train[cutoff:]]
+    if len(set(check_y)) < 2:
+        return 1.0
+    best_c = 1.0
+    best_brier = float("inf")
+    for candidate in candidates:
+        model = LogisticRegression(C=candidate, solver="liblinear", max_iter=2000, random_state=461)
+        model.fit(history_train_x[:cutoff], fit_y)
+        probabilities = model.predict_proba(history_train_x[cutoff:])[:, 1]
         check_brier = brier_score_loss(
             check_y, np.clip(np.asarray(probabilities, dtype=float), 1e-5, 1 - 1e-5)
         )
@@ -1083,7 +1139,7 @@ def _history_features(games: Sequence[Mapping[str, Any]], model: FittedCompositi
         blue_sum, red_sum = blue_prior_mean * blue_prior_count, red_prior_mean * red_prior_count
         draft_mean[blue_team] = ((blue_sum + blue_signal) / (blue_total + 1), blue_total + 1)
         draft_mean[red_team] = ((red_sum + red_signal) / (red_total + 1), red_total + 1)
-        alpha = 0.1
+        alpha = 0.2
         outcome = float(int(game["y"]))
         momentum[blue_team] = alpha * outcome + (1.0 - alpha) * momentum.get(blue_team, 0.5)
         momentum[red_team] = alpha * (1.0 - outcome) + (1.0 - alpha) * momentum.get(red_team, 0.5)
@@ -1102,6 +1158,7 @@ def _recalibrate_history_probabilities(
     *,
     folds: int = 4,
     shrink: float = 0.5,
+    fold_c: float = 1.0,
 ) -> np.ndarray:
     """Affine-recalibrate the team-history model using training-fold data only.
 
@@ -1131,7 +1188,7 @@ def _recalibrate_history_probabilities(
     history = _history_features(sequence, fold_draft)
     fit_history = history[: len(fit_games)]
     cal_history = history[len(fit_games) :]
-    fold_model = LogisticRegression(C=1.0, solver="liblinear", max_iter=2000, random_state=461)
+    fold_model = LogisticRegression(C=fold_c, solver="liblinear", max_iter=2000, random_state=461)
     fold_train_x = np.column_stack(
         [
             _matrix(fit_games, fold_draft.feature_names, include_draft=True) @ np.asarray(fold_draft.coefficients),
@@ -1306,7 +1363,7 @@ def evaluate_composition_signal(
     bootstrap_reps: int = 200,
     seed: int = 461,
     min_training_games: int = MIN_TRAINING_GAMES,
-    history_calibrate_shrink: float = 0.5,
+    history_calibrate_shrink: float = 0.25,
 ) -> dict[str, Any]:
     """Run four chronological holdouts for the composition candidate.
 
@@ -1387,13 +1444,20 @@ def evaluate_composition_signal(
         history = _history_features(train + validation, draft)
         train_history = history[: len(train)]
         validation_history = history[len(train) :]
-        history_model = LogisticRegression(C=1.0, solver="liblinear", max_iter=2000, random_state=461)
         history_train_x = np.column_stack(
             [
                 _matrix(train, draft.feature_names, include_draft=True) @ np.asarray(draft.coefficients),
                 train_history,
             ]
         )
+        history_c = _select_history_regularization(
+            train,
+            history_train_x,
+            candidates=(0.03, 0.1, 0.3, 1.0, 3.0),
+            internal_fraction=0.15,
+            min_training_games=min_training_games,
+        )
+        history_model = LogisticRegression(C=history_c, solver="liblinear", max_iter=2000, random_state=461)
         history_model.fit(history_train_x, [int(game["y"]) for game in train])
         history_validation_x = np.column_stack(
             [
@@ -1410,6 +1474,7 @@ def evaluate_composition_signal(
             history_model,
             folds=4,
             shrink=history_calibrate_shrink,
+            fold_c=history_c,
         )
         windows[-1]["draft_plus_team_history"] = _metrics(y, history_probabilities)
         windows[-1]["draft_plus_team_history"]["probabilities"] = [
