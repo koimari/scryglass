@@ -149,6 +149,24 @@ def test_profile_records_normalize_recent_games_without_raw_tables() -> None:
                     "kills": 2,
                     "deaths": 1,
                     "assists": 8,
+                    "teamkills": 10,
+                    "gamelength": 1800,
+                    "dpm": 512.5,
+                    "damageshare": 0.22,
+                    "totalgold": 11000,
+                    "minionkills": 180,
+                    "monsterkills": 20,
+                    "cspm": 6.67,
+                    "visionscore": 31,
+                    "wardsplaced": 14,
+                    "golddiffat10": 125,
+                    "dragons": 3 if side == "Blue" else 1,
+                    "heralds": 1,
+                    "void_grubs": 4 if side == "Blue" else 2,
+                    "barons": 1 if side == "Blue" else 0,
+                    "atakhans": 0,
+                    "towers": 8 if side == "Blue" else 3,
+                    "inhibitors": 2 if side == "Blue" else 0,
                 }
             )
 
@@ -164,8 +182,15 @@ def test_profile_records_normalize_recent_games_without_raw_tables() -> None:
     game = payload["games"]["game-1"]
     assert game["blue_team"] == "LYON"
     assert game["red_team"] == "Other"
+    assert game["competition_tier"] == "tier1"
+    assert game["duration_seconds"] == 1800
+    assert game["team_stats"]["Blue"]["dragons"] == 3
+    assert game["team_stats"]["Blue"]["gold"] == 55000
     inspired = next(row for row in game["players"] if row["player"] == "Inspired")
     assert inspired["role"] == "jungle"
+    assert inspired["cs"] == 200
+    assert inspired["damage_per_minute"] == 512.5
+    assert inspired["vision_score"] == 31
     assert inspired["grade"]["status"] == "unavailable"
     assert payload["champion_images"]["Ivern"] == "https://example.test/ivern.png"
 

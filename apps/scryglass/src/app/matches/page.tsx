@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { SignalMatches } from "@/components/SignalMatches";
 import {
   packSourceUpdatedLabel,
@@ -36,6 +37,7 @@ export default async function MatchesPage() {
       game_id: game.game_id,
       date: game.date,
       league: game.league,
+      competition_tier: game.competition_tier,
       blue_team: game.blue_team,
       red_team: game.red_team,
       blue_win: game.blue_win,
@@ -63,7 +65,9 @@ export default async function MatchesPage() {
         </div>
       </header>
 
-      <SignalMatches games={games} championImages={profiles.champion_images} schedule={schedule} />
+      <Suspense fallback={<p>Loading results…</p>}>
+        <SignalMatches games={games} championImages={profiles.champion_images} schedule={schedule} />
+      </Suspense>
     </div>
   );
 }

@@ -169,7 +169,28 @@ export type ProfileParticipant = {
   kills: number | null;
   deaths: number | null;
   assists: number | null;
+  team_kills?: number | null;
+  cs?: number | null;
+  cs_per_minute?: number | null;
+  damage_per_minute?: number | null;
+  damage_share?: number | null;
+  gold?: number | null;
+  gold_diff_at_10?: number | null;
+  vision_score?: number | null;
+  wards_placed?: number | null;
   grade?: ProfileGrade;
+};
+
+export type ProfileTeamStats = {
+  kills?: number | null;
+  gold?: number | null;
+  dragons?: number | null;
+  heralds?: number | null;
+  void_grubs?: number | null;
+  barons?: number | null;
+  atakhans?: number | null;
+  towers?: number | null;
+  inhibitors?: number | null;
 };
 
 export type ProfileGrade =
@@ -192,9 +213,12 @@ export type ProfileGame = {
   game_id: string;
   date: string;
   league: string;
+  competition_tier?: string | null;
   blue_team: string;
   red_team: string;
   blue_win: 0 | 1;
+  duration_seconds?: number | null;
+  team_stats?: Partial<Record<"Blue" | "Red", ProfileTeamStats>>;
   players: ProfileParticipant[];
 };
 
@@ -212,6 +236,7 @@ export type MatchSummary = {
   game_id: string;
   date: string;
   league: string;
+  competition_tier?: string | null;
   blue_team: string;
   red_team: string;
   blue_win: 0 | 1;

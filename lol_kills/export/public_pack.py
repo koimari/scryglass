@@ -707,7 +707,9 @@ def export_public_pack(
             "league_source", "tournament", "result", "side", "position",
             "teamname", "playername", "champion", "kills", "deaths", "assists",
             "teamkills", "gamelength", "dpm", "damageshare", "totalgold",
-            "cspm", "wpm", "wcpm", "golddiffat10",
+            "total cs", "minionkills", "monsterkills", "cspm", "visionscore",
+            "wardsplaced", "wpm", "wcpm", "golddiffat10", "dragons",
+            "heralds", "void_grubs", "barons", "atakhans", "towers", "inhibitors",
         ),
         player_available,
     )
@@ -817,6 +819,7 @@ def export_public_pack(
                     "game_id": game_id,
                     "date": game["date"],
                     "league": game["league"],
+                    "competition_tier": game.get("competition_tier"),
                     "blue_team": game["blue_team"],
                     "red_team": game["red_team"],
                     "blue_win": game["blue_win"],

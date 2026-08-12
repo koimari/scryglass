@@ -520,26 +520,83 @@
 }
 
 .matchHero {
+  display: grid;
+  gap: 1rem;
   padding-bottom: 1.25rem;
   border-bottom: 1px solid var(--line-strong);
 }
-.matchHero h1 { margin: 0.25rem 0 0.65rem; font-family: var(--font-display), serif; font-size: clamp(3rem, 5vw, 5rem); font-weight: 400; letter-spacing: -0.025em; line-height: 0.94; }
+.matchHero h1 { max-width: 18ch; margin: 0; font-family: var(--font-display), serif; font-size: clamp(3rem, 5vw, 5rem); font-weight: 400; letter-spacing: -0.025em; line-height: 0.94; }
 .matchHero > p:last-child { max-width: 48rem; color: var(--ink-muted); line-height: 1.65; }
-.matchTeams { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; }
+.matchResult {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 1rem;
+  align-items: center;
+  max-width: 52rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
+}
+.matchResult > span {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.1rem 0.65rem;
+  align-items: center;
+}
+.matchResult > span > span { grid-row: 1 / 3; }
+.matchResult > span:last-child { grid-template-columns: minmax(0, 1fr) auto; text-align: right; }
+.matchResult > span:last-child > span { grid-column: 2; }
+.matchResult > span:last-child > strong,
+.matchResult > span:last-child > small { grid-column: 1; }
+.matchResult small { color: var(--ink-muted); font-size: var(--text-small); }
+.matchResult > b { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: var(--text-micro); text-transform: uppercase; }
+.matchGradeGuide {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.25rem 1rem;
+  max-width: 60rem;
+  padding: 0.75rem 0.9rem;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-subtle);
+}
+.matchGradeGuide > span { color: var(--ink); }
+.matchGradeGuide > small { grid-column: 2; color: var(--ink-muted); line-height: 1.45; }
+.matchTeams { display: grid; grid-template-columns: 1fr; gap: 2.5rem; }
 .matchTeam { min-width: 0; }
+.teamGameStats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr));
+  margin: 0;
+  border-block: 1px solid var(--line);
+}
+.teamGameStats > div { padding: 0.65rem 0.75rem; border-right: 1px solid var(--line); }
+.teamGameStats > div:last-child { border-right: 0; }
+.teamGameStats dt,
+.playerGameStats dt { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: var(--text-micro); letter-spacing: 0.05em; text-transform: uppercase; }
+.teamGameStats dd,
+.playerGameStats dd { margin: 0.15rem 0 0; font-weight: 700; }
 .matchPlayer {
   display: grid;
-  grid-template-columns: 3.5rem minmax(8rem, 1fr) minmax(9rem, 1.2fr);
-  gap: 0.8rem;
+  grid-template-columns: 3.5rem minmax(9rem, 0.75fr) minmax(24rem, 2fr) minmax(9rem, 0.8fr);
+  gap: 1rem;
   align-items: center;
-  padding: 0.8rem 0;
+  padding: 0.85rem 0.75rem;
   border-bottom: 1px solid var(--line);
 }
-.matchPlayer > div:nth-child(2) { display: grid; gap: 0.12rem; min-width: 0; }
-.matchPlayer > div:nth-child(2) > span,
-.matchPlayer > div:nth-child(2) > small,
+.matchPlayerIdentity { display: grid; gap: 0.12rem; min-width: 0; }
+.matchPlayerIdentity > span,
+.matchPlayerIdentity > small,
 .gradeDetails small,
 .gradeUnavailable { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: 0.7rem; }
+.playerGameStats {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(3.4rem, 1fr));
+  gap: 0.5rem;
+  margin: 0;
+}
+.playerGameStats > div { min-width: 0; }
+.playerGameStats dd { font-size: 0.82rem; white-space: nowrap; }
 .gradeDetails { display: grid; grid-template-columns: auto 1fr; column-gap: 0.55rem; align-items: baseline; }
 .gradeDetails > strong { font-size: 1.5rem; }
 .gradeDetails > span { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: 0.72rem; }
@@ -550,7 +607,8 @@
   .rosterCard { border-bottom: 1px solid var(--line); }
   .statBand { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .matchList { grid-template-columns: 1fr; }
-  .matchTeams { grid-template-columns: 1fr; }
+  .matchPlayer { grid-template-columns: 3.5rem minmax(8rem, 0.8fr) minmax(18rem, 2fr) minmax(8rem, 0.7fr); }
+  .playerGameStats { grid-template-columns: repeat(4, minmax(3.5rem, 1fr)); row-gap: 0.65rem; }
 }
 
 @media (max-width: 700px) {
@@ -576,9 +634,20 @@
   .matchOpponent { gap: 0.2rem; }
   .matchOpponent > span { font-size: 0.65rem; }
   .gradeGuide small { width: 100%; margin-left: 0; }
-  .matchPlayer { grid-template-columns: 3.5rem minmax(0, 1fr); }
+  .matchResult { grid-template-columns: 1fr; }
+  .matchResult > b { display: none; }
+  .matchResult > span:last-child { grid-template-columns: auto minmax(0, 1fr); text-align: left; }
+  .matchResult > span:last-child > span { grid-column: 1; }
+  .matchResult > span:last-child > strong,
+  .matchResult > span:last-child > small { grid-column: 2; }
+  .matchGradeGuide { grid-template-columns: 1fr; }
+  .matchGradeGuide > small { grid-column: 1; }
+  .teamGameStats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .teamGameStats > div:nth-child(3n) { border-right: 0; }
+  .matchPlayer { grid-template-columns: 3.5rem minmax(0, 1fr) auto; gap: 0.65rem; }
+  .playerGameStats { grid-column: 1 / -1; grid-row: 2; grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .gradeDetails,
-  .gradeUnavailable { grid-column: 2; }
+  .gradeUnavailable { grid-column: 3; grid-row: 1; }
 }
 
 @media (max-width: 520px) {
