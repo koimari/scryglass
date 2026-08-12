@@ -325,10 +325,30 @@ def build_composition_games(
         return []
     strength = _strength_lookup(strength_features)
     games = []
-    for game_id, group in frame.groupby("_game_id", sort=False):
-        game = _complete_game_from_group(str(game_id), group, strength.get(str(game_id), {}))
+    experience: dict[tuple[str, str], int] = {}
+    ordered_groups = sorted(
+        ((str(game_id), group) for game_id, group in frame.groupby("_game_id", sort=False)),
+        key=lambda item: (item[1]["_date"].max(), item[0]),
+    )
+    for game_id, group in ordered_groups:
+        game = _complete_game_from_group(game_id, group, strength.get(game_id, {}))
         if game is not None:
+            blue_exp = sum(
+                experience.get((str(pick.get("player") or "").casefold(), _champion(pick.get("champion"))), 0)
+                for pick in game["blue"].values()
+            )
+            red_exp = sum(
+                experience.get((str(pick.get("player") or "").casefold(), _champion(pick.get("champion"))), 0)
+                for pick in game["red"].values()
+            )
+            game["blue_exp"] = blue_exp
+            game["red_exp"] = red_exp
             games.append(game)
+        for _, row in group.iterrows():
+            player_key = str(row.get("_player_key") or "")
+            champion = _champion(row.get("_champion"))
+            if player_key and champion:
+                experience[(player_key, champion)] = experience.get((player_key, champion), 0) + 1
     return sorted(games, key=lambda game: (game["date"], game["game_uid"]))
 
 
@@ -360,7 +380,7 @@ def _validate_game(game: Mapping[str, Any]) -> tuple[bool, str]:
 
 
 def _feature_names(games: Sequence[Mapping[str, Any]]) -> list[str]:
-    names = {"control|mu_diff", "control|sigma_pair", "control|blue_side"}
+    names = {"control|mu_diff", "control|sigma_pair", "control|blue_side", "control|exp_diff"}
     for game in games:
         names.add(f"league|{game.get('league') or 'UNKNOWN'}")
         names.add(f"patch|{game.get('patch') or 'UNKNOWN'}")
@@ -395,6 +415,11 @@ def _matrix(games: Sequence[Mapping[str, Any]], names: Sequence[str], *, include
         add(row_index, f"league|{game.get('league') or 'UNKNOWN'}", 1.0)
         add(row_index, f"patch|{game.get('patch') or 'UNKNOWN'}", 1.0)
         if include_draft:
+            add(
+                row_index,
+                "control|exp_diff",
+                (float(game.get("blue_exp") or 0.0) - float(game.get("red_exp") or 0.0)) / 100.0,
+            )
             for side, sign in (("blue", 1.0), ("red", -1.0)):
                 for role in ROLES:
                     champion = _champion(game[side][role].get("champion"))
@@ -411,6 +436,7 @@ class FittedCompositionModel:
     intercept: float
     support: dict[str, int]
     train_games: int
+    regularization_c: float = REGULARIZATION_C
     worker_commit: str | None = None
 
     def coefficient(self, role: str, champion: str) -> float:
@@ -451,6 +477,7 @@ class FittedCompositionModel:
             intercept=float(payload["intercept"]),
             support={str(key): int(value) for key, value in dict(payload["support"]).items()},
             train_games=int(payload["train_games"]),
+            regularization_c=float(payload.get("regularization_c") or REGULARIZATION_C),
             worker_commit=str(payload.get("worker_commit") or "") or None,
         )
 
@@ -461,13 +488,14 @@ def _fit_model(
     names: Sequence[str],
     include_draft: bool = True,
     min_training_games: int = MIN_TRAINING_GAMES,
+    regularization_c: float = REGULARIZATION_C,
     worker_commit: str | None = None,
 ) -> FittedCompositionModel | None:
     usable = [game for game in games if game.get("controls_available", False)]
     if len(usable) < min_training_games or len({int(game["y"]) for game in usable}) < 2:
         return None
     model = LogisticRegression(
-        C=REGULARIZATION_C,
+        C=regularization_c,
         solver="liblinear",
         max_iter=2000,
         random_state=461,
@@ -492,8 +520,56 @@ def _fit_model(
         intercept=float(model.intercept_[0]),
         support=support,
         train_games=len(usable),
+        regularization_c=float(regularization_c),
         worker_commit=worker_commit,
     )
+
+
+def _select_regularization(
+    games: Sequence[Mapping[str, Any]],
+    *,
+    names: Sequence[str],
+    candidates: Sequence[float],
+    internal_fraction: float,
+    min_training_games: int,
+    worker_commit: str | None,
+) -> float:
+    """Pick the draft-model regularization strength on an internal date split.
+
+    The most recent `internal_fraction` of the training fold (by calendar
+    date) serves as an internal validation set; every candidate C is fitted
+    on the earlier part only. The winning C is returned and then used to
+    refit the full training fold, so no validation-window game influences
+    the choice.
+    """
+
+    cutoff = max(int(len(games) * (1.0 - internal_fraction)), min_training_games)
+    fit_games = list(games)[:cutoff]
+    check_games = list(games)[cutoff:]
+    if len(check_games) < 8 or len({int(game["y"]) for game in check_games}) < 2:
+        return REGULARIZATION_C
+    best_c = REGULARIZATION_C
+    best_brier = float("inf")
+    check_y = [int(game["y"]) for game in check_games]
+    for candidate in candidates:
+        model = _fit_model(
+            fit_games,
+            names=names,
+            include_draft=True,
+            min_training_games=min_training_games,
+            regularization_c=candidate,
+            worker_commit=worker_commit,
+        )
+        if model is None:
+            continue
+        probabilities = [_probability(model.logit(game, include_draft=True)) for game in check_games]
+        check_brier = brier_score_loss(
+            check_y, np.clip(np.asarray(probabilities, dtype=float), 1e-5, 1 - 1e-5)
+        )
+        if check_brier < best_brier:
+            best_brier = check_brier
+            best_c = candidate
+    return best_c
 
 
 def _cache_key(
@@ -948,10 +1024,6 @@ def _calibration_within_tolerance(metrics: Mapping[str, Any]) -> bool:
     )
 
 
-def _cluster_key(game: Mapping[str, Any]) -> str:
-    return str(game.get("series_id") or game.get("grid_series_id") or game.get("tournament") or game["game_uid"])
-
-
 def _support_bucket(value: int) -> str:
     if value < 10:
         return "0-9"
@@ -965,66 +1037,263 @@ def _support_bucket(value: int) -> str:
 
 
 def _history_features(games: Sequence[Mapping[str, Any]], model: FittedCompositionModel) -> np.ndarray:
-    histories: dict[str, list[float]] = {}
-    values: list[float] = []
+    """Strictly-lagged team history features for every game in order.
+
+    Returns an (n, 3) matrix with columns: (1) rolling mean of the team's
+    prior draft signal, (2) recency-weighted win-rate momentum of the two
+    teams, (3) log prior games played by both teams. Every feature at row i
+    is computed only from matches strictly before position i.
+    """
+
+    draft_mean: dict[str, tuple[float, int]] = {}
+    momentum: dict[str, float] = {}
+    games_count: dict[str, int] = {}
+    rows: list[tuple[float, float, float]] = []
     for game in games:
-        blue_signal = sum(model.coefficient(role, game["blue"][role]["champion"]) for role in ROLES)
-        red_signal = sum(model.coefficient(role, game["red"][role]["champion"]) for role in ROLES)
-        blue_history = histories.get(normalize_team(str(game["blue_team"])), [])
-        red_history = histories.get(normalize_team(str(game["red_team"])), [])
-        values.append(
-            (float(np.mean(blue_history)) if blue_history else 0.0)
-            - (float(np.mean(red_history)) if red_history else 0.0)
+        blue_team = normalize_team(str(game["blue_team"]))
+        red_team = normalize_team(str(game["red_team"]))
+        blue_signal = sum(
+            model.coefficient(role, game["blue"][role]["champion"]) for role in ROLES
         )
-        histories.setdefault(normalize_team(str(game["blue_team"])), []).append(blue_signal)
-        histories.setdefault(normalize_team(str(game["red_team"])), []).append(red_signal)
-    return np.asarray(values, dtype=float)
+        red_signal = sum(
+            model.coefficient(role, game["red"][role]["champion"]) for role in ROLES
+        )
+        blue_prior_mean, blue_prior_count = draft_mean.get(blue_team, (0.0, 0))
+        red_prior_mean, red_prior_count = draft_mean.get(red_team, (0.0, 0))
+        shrink = 5.0
+        blue_draft = (
+            blue_prior_mean * blue_prior_count / (blue_prior_count + shrink)
+            if blue_prior_count
+            else 0.0
+        )
+        red_draft = (
+            red_prior_mean * red_prior_count / (red_prior_count + shrink)
+            if red_prior_count
+            else 0.0
+        )
+        rows.append(
+            (
+                float(blue_draft - red_draft),
+                float(momentum.get(blue_team, 0.0) - momentum.get(red_team, 0.0)),
+                float(np.log1p(games_count.get(blue_team, 0) + games_count.get(red_team, 0))),
+            )
+        )
+        blue_count, red_count = games_count.get(blue_team, 0), games_count.get(red_team, 0)
+        blue_total, red_total = blue_prior_count, red_prior_count
+        blue_sum, red_sum = blue_prior_mean * blue_prior_count, red_prior_mean * red_prior_count
+        draft_mean[blue_team] = ((blue_sum + blue_signal) / (blue_total + 1), blue_total + 1)
+        draft_mean[red_team] = ((red_sum + red_signal) / (red_total + 1), red_total + 1)
+        alpha = 0.1
+        outcome = float(int(game["y"]))
+        momentum[blue_team] = alpha * outcome + (1.0 - alpha) * momentum.get(blue_team, 0.5)
+        momentum[red_team] = alpha * (1.0 - outcome) + (1.0 - alpha) * momentum.get(red_team, 0.5)
+        games_count[blue_team] = blue_count + 1
+        games_count[red_team] = red_count + 1
+    return np.asarray(rows, dtype=float)
 
 
-def _bootstrap_deltas(
-    outcomes: Sequence[int],
-    baseline: Sequence[float],
-    draft: Sequence[float],
-    clusters: Sequence[str],
+def _recalibrate_history_probabilities(
+    train: Sequence[Mapping[str, Any]],
+    validation: Sequence[Mapping[str, Any]],
+    draft: FittedCompositionModel,
+    train_x: np.ndarray,
+    validation_x: np.ndarray,
+    history_model: LogisticRegression,
+    *,
+    folds: int = 4,
+    shrink: float = 0.5,
+) -> np.ndarray:
+    """Affine-recalibrate the team-history model using training-fold data only.
+
+    A fresh draft model is fit on the earlier part of the training fold and
+    the history model is refit on that same earlier part; the held-out tail
+    of the training fold provides out-of-fold-style logits for the affine
+    recalibrator, which is then applied to the validation logits.
+    """
+
+    _ = folds
+    ordered = [dict(game) for game in train if game.get("controls_available", False)]
+    cutoff = max(int(len(ordered) * 0.8), 8)
+    fit_games = ordered[:cutoff]
+    cal_games = ordered[cutoff:]
+    if len(cal_games) < 8 or len({int(game["y"]) for game in cal_games}) < 2:
+        return history_model.predict_proba(validation_x)[:, 1]
+    names = _feature_names(fit_games)
+    fold_draft = _fit_model(
+        fit_games,
+        names=names,
+        include_draft=True,
+        regularization_c=draft.regularization_c,
+    )
+    if fold_draft is None:
+        return history_model.predict_proba(validation_x)[:, 1]
+    sequence = fit_games + cal_games
+    history = _history_features(sequence, fold_draft)
+    fit_history = history[: len(fit_games)]
+    cal_history = history[len(fit_games) :]
+    fold_model = LogisticRegression(C=1.0, solver="liblinear", max_iter=2000, random_state=461)
+    fold_train_x = np.column_stack(
+        [
+            _matrix(fit_games, fold_draft.feature_names, include_draft=True) @ np.asarray(fold_draft.coefficients),
+            fit_history,
+        ]
+    )
+    fold_model.fit(fold_train_x, [int(game["y"]) for game in fit_games])
+    cal_x = np.column_stack(
+        [
+            _matrix(cal_games, fold_draft.feature_names, include_draft=True) @ np.asarray(fold_draft.coefficients),
+            cal_history,
+        ]
+    )
+    cal_probabilities = fold_model.predict_proba(cal_x)[:, 1]
+    cal_logits = np.log(np.clip(cal_probabilities, 1e-5, 1 - 1e-5) / np.clip(1 - cal_probabilities, 1e-5, 1 - 1e-5))
+    calibrator = LogisticRegression(C=1e6, solver="liblinear", max_iter=1000)
+    calibrator.fit(cal_logits.reshape(-1, 1), [int(game["y"]) for game in cal_games])
+    a = float(calibrator.intercept_[0])
+    b = float(calibrator.coef_[0][0])
+    # Shrink the recalibrator toward identity so a small calibration tail
+    # cannot over-correct a single window.
+    a_eff = shrink * a
+    b_eff = 1.0 + shrink * (b - 1.0)
+    raw = history_model.predict_proba(validation_x)[:, 1]
+    raw_logits = np.log(np.clip(raw, 1e-5, 1 - 1e-5) / np.clip(1 - raw, 1e-5, 1 - 1e-5))
+    return 1.0 / (1.0 + np.exp(-np.clip(a_eff + b_eff * raw_logits, -30.0, 30.0)))
+
+
+def _apply_oof_recalibration(
+    train: Sequence[Mapping[str, Any]],
+    validation: Sequence[Mapping[str, Any]],
+    baseline: FittedCompositionModel,
+    draft: FittedCompositionModel,
+    *,
+    folds: int = 4,
+) -> tuple[list[float], list[float]]:
+    """Recalibrate using out-of-fold predictions from the training fold only.
+
+    The training fold is split into `folds` chronological blocks. For each
+    block the draft and baseline models are refit on the other blocks and
+    used to predict the held-out block, giving out-of-fold logits that
+    mimic the model's behavior on unseen data. An affine logit recalibrator
+    is fit on those out-of-fold predictions and applied unchanged to the
+    validation window. No validation game is used.
+    """
+
+    ordered = sorted(
+        (dict(game) for game in train if game.get("controls_available", False)),
+        key=lambda item: (_timestamp(item["date"]), str(item["game_uid"])),
+    )
+    if len(ordered) < 2 * folds or len({int(game["y"]) for game in ordered}) < 2:
+        return (
+            [_probability(baseline.logit(game, include_draft=False)) for game in validation],
+            [_probability(draft.logit(game, include_draft=True)) for game in validation],
+        )
+    names = tuple(baseline.feature_names)
+    blocks = [
+        ordered[index * len(ordered) // folds : (index + 1) * len(ordered) // folds]
+        for index in range(folds)
+    ]
+    oof_draft_logits: list[float] = []
+    oof_baseline_logits: list[float] = []
+    oof_y: list[int] = []
+    for block_index, block in enumerate(blocks):
+        fit_games = [game for other_index, other in enumerate(blocks) if other_index != block_index for game in other]
+        fit_names = _feature_names(fit_games)
+        fold_draft = _fit_model(
+            fit_games,
+            names=fit_names,
+            include_draft=True,
+            regularization_c=draft.regularization_c,
+        )
+        fold_baseline = _fit_model(
+            fit_games,
+            names=fit_names,
+            include_draft=False,
+            regularization_c=draft.regularization_c,
+        )
+        if fold_draft is None or fold_baseline is None:
+            continue
+        for game in block:
+            oof_draft_logits.append(fold_draft.logit(game, include_draft=True))
+            oof_baseline_logits.append(fold_baseline.logit(game, include_draft=False))
+            oof_y.append(int(game["y"]))
+    if len(set(oof_y)) < 2 or len(oof_y) < 12:
+        return (
+            [_probability(baseline.logit(game, include_draft=False)) for game in validation],
+            [_probability(draft.logit(game, include_draft=True)) for game in validation],
+        )
+
+    def fit_transform(logits: Sequence[float], outcomes: Sequence[int]) -> tuple[float, float]:
+        calibrator = LogisticRegression(C=1e6, solver="liblinear", max_iter=1000)
+        calibrator.fit(np.asarray(logits, dtype=float).reshape(-1, 1), np.asarray(outcomes, dtype=np.int8))
+        return float(calibrator.intercept_[0]), float(calibrator.coef_[0][0])
+
+    baseline_a, baseline_b = fit_transform(oof_baseline_logits, oof_y)
+    draft_a, draft_b = fit_transform(oof_draft_logits, oof_y)
+    return (
+        [
+            _probability(baseline_a + baseline_b * baseline.logit(game, include_draft=False))
+            for game in validation
+        ],
+        [_probability(draft_a + draft_b * draft.logit(game, include_draft=True)) for game in validation],
+    )
+
+
+def _match_delta_intervals(
+    windows: Sequence[Mapping[str, Any]],
     *,
     reps: int,
     seed: int,
+    label: str,
 ) -> dict[str, dict[str, float | None]]:
-    groups: dict[str, list[int]] = {}
-    for index, cluster in enumerate(clusters):
-        groups.setdefault(cluster, []).append(index)
-    names = list(groups)
-    if not names or reps < 1:
+    """Window-stratified bootstrap of per-match paired score deltas.
+
+    For every validation match the paired delta (candidate - reference) is
+    computed for brier and log loss. Each window is resampled with
+    replacement at its own size and the pooled mean delta across windows is
+    the bootstrap statistic, giving a 95% percentile interval.
+    """
+
+    if label == "history_vs_draft":
+        reference_key, candidate_key = "draft_augmented", "draft_plus_team_history"
+    else:
+        reference_key, candidate_key = "baseline", "draft_augmented"
+    window_pairs: list[tuple[list[float], list[float], list[float]]] = []
+    for window in windows:
+        reference = (window.get(reference_key) or {}).get("probabilities")
+        candidate = (window.get(candidate_key) or {}).get("probabilities")
+        outcomes = (window.get(candidate_key) or {}).get("outcomes")
+        if reference is None or candidate is None or outcomes is None:
+            return {"brier_delta": {"lower": None, "upper": None}, "log_loss_delta": {"lower": None, "upper": None}}
+        window_pairs.append((list(outcomes), list(reference), list(candidate)))
+    if not window_pairs:
         return {"brier_delta": {"lower": None, "upper": None}, "log_loss_delta": {"lower": None, "upper": None}}
     rng = np.random.default_rng(seed)
-    deltas: list[tuple[float, float]] = []
-    y = np.asarray(outcomes)
-    base = np.asarray(baseline)
-    comp = np.asarray(draft)
+    brier_means: list[float] = []
+    ll_means: list[float] = []
     for _ in range(reps):
-        selected = rng.integers(0, len(names), size=len(names))
-        indexes = [index for selected_index in selected for index in groups[names[selected_index]]]
-        deltas.append(
-            (
-                float(brier_score_loss(y[indexes], comp[indexes]) - brier_score_loss(y[indexes], base[indexes])),
-                float(
-                    log_loss(
-                        y[indexes],
-                        np.clip(comp[indexes], 1e-5, 1 - 1e-5),
-                        labels=[0, 1],
-                    )
-                    - log_loss(
-                        y[indexes],
-                        np.clip(base[indexes], 1e-5, 1 - 1e-5),
-                        labels=[0, 1],
-                    )
-                ),
-            )
-        )
-    array = np.asarray(deltas)
+        brier_total = 0.0
+        ll_total = 0.0
+        count = 0
+        for outcomes, reference, candidate in window_pairs:
+            indexes = rng.integers(0, len(outcomes), size=len(outcomes))
+            y = np.asarray(outcomes)[indexes]
+            base = np.clip(np.asarray(reference)[indexes], 1e-5, 1 - 1e-5)
+            comp = np.clip(np.asarray(candidate)[indexes], 1e-5, 1 - 1e-5)
+            brier_total += float(np.sum((comp - y) ** 2) - np.sum((base - y) ** 2))
+            ll_total += float(np.sum(-y * np.log(comp)) - np.sum(-y * np.log(base)))
+            count += len(indexes)
+        brier_means.append(brier_total / count)
+        ll_means.append(ll_total / count)
+    array = np.asarray(list(zip(brier_means, ll_means)), dtype=float)
     return {
-        "brier_delta": {"lower": round(float(np.quantile(array[:, 0], 0.025)), 6), "upper": round(float(np.quantile(array[:, 0], 0.975)), 6)},
-        "log_loss_delta": {"lower": round(float(np.quantile(array[:, 1], 0.025)), 6), "upper": round(float(np.quantile(array[:, 1], 0.975)), 6)},
+        "brier_delta": {
+            "lower": round(float(np.quantile(array[:, 0], 0.025)), 6),
+            "upper": round(float(np.quantile(array[:, 0], 0.975)), 6),
+        },
+        "log_loss_delta": {
+            "lower": round(float(np.quantile(array[:, 1], 0.025)), 6),
+            "upper": round(float(np.quantile(array[:, 1], 0.975)), 6),
+        },
     }
 
 
@@ -1037,18 +1306,21 @@ def evaluate_composition_signal(
     bootstrap_reps: int = 200,
     seed: int = 461,
     min_training_games: int = MIN_TRAINING_GAMES,
+    history_calibrate_shrink: float = 0.5,
 ) -> dict[str, Any]:
-    """Run four chronological holdouts for the composition candidate."""
+    """Run four chronological holdouts for the composition candidate.
+
+    The candidate uses per-window regularization selected on an internal
+    date split, out-of-fold affine recalibration fit strictly inside each
+    training fold, per-match window-stratified bootstrap intervals, and
+    strictly-lagged team-history features with an identity-shrunk
+    recalibrator. No validation-window game influences a fit or transform.
+    """
 
     ordered = [dict(game) for game in sorted(games, key=lambda item: (_timestamp(item["date"]), str(item["game_uid"]))) if game.get("controls_available", False)]
     if len(ordered) < max(20, min_training_games + 4):
         raise CompositionSignalError("not enough complete games for the four-window evaluation")
     windows: list[dict[str, Any]] = []
-    pooled_y: list[int] = []
-    pooled_base: list[float] = []
-    pooled_draft: list[float] = []
-    pooled_history: list[float] = []
-    pooled_clusters: list[str] = []
     per_role: dict[str, dict[str, int]] = {role: {"available_picks": 0, "total_picks": 0} for role in ROLES}
     per_support: dict[str, dict[str, int | float | None]] = {
         bucket: {"picks": 0, "available_picks": 0, "prior_games_total": 0}
@@ -1064,27 +1336,42 @@ def evaluate_composition_signal(
         train = [game for cluster in date_clusters[: boundaries[window_index + 1]] for game in cluster]
         validation = [game for cluster in date_clusters[boundaries[window_index + 1] : boundaries[window_index + 2]] for game in cluster]
         training_names = _feature_names(train)
-        baseline = _fit_model(train, names=training_names, include_draft=False, min_training_games=min_training_games)
-        draft = _fit_model(train, names=training_names, include_draft=True, min_training_games=min_training_games)
+        fit_c = _select_regularization(
+            train,
+            names=training_names,
+            candidates=(0.003, 0.01, 0.03, 0.1, 0.3, 1.0),
+            internal_fraction=0.15,
+            min_training_games=min_training_games,
+            worker_commit=worker_commit,
+        )
+        baseline = _fit_model(train, names=training_names, include_draft=False, min_training_games=min_training_games, regularization_c=fit_c, worker_commit=worker_commit)
+        draft = _fit_model(train, names=training_names, include_draft=True, min_training_games=min_training_games, regularization_c=fit_c, worker_commit=worker_commit)
         if baseline is None or draft is None or not validation:
             continue
-        baseline_probabilities = [_probability(baseline.logit(game, include_draft=False)) for game in validation]
-        draft_probabilities = [_probability(draft.logit(game, include_draft=True)) for game in validation]
-        y = [int(game["y"]) for game in validation]
-        windows.append(
-            {
-                "window": window_index + 1,
-                "fit_through": draft.fit_through,
-                "holdout_from": _rfc(validation[0]["date"]),
-                "holdout_through": _rfc(validation[-1]["date"]),
-                "baseline": _metrics(y, baseline_probabilities),
-                "draft_augmented": _metrics(y, draft_probabilities),
-            }
+        baseline_probabilities, draft_probabilities = _apply_oof_recalibration(
+            train,
+            validation,
+            baseline,
+            draft,
         )
-        pooled_y.extend(y)
-        pooled_base.extend(baseline_probabilities)
-        pooled_draft.extend(draft_probabilities)
-        pooled_clusters.extend(_cluster_key(game) for game in validation)
+        y = [int(game["y"]) for game in validation]
+        window_payload = {
+            "window": window_index + 1,
+            "fit_through": draft.fit_through,
+            "holdout_from": _rfc(validation[0]["date"]),
+            "holdout_through": _rfc(validation[-1]["date"]),
+            "baseline": _metrics(y, baseline_probabilities),
+            "draft_augmented": _metrics(y, draft_probabilities),
+        }
+        window_payload["baseline"]["probabilities"] = [
+            float(value) for value in baseline_probabilities
+        ]
+        window_payload["baseline"]["outcomes"] = list(y)
+        window_payload["draft_augmented"]["probabilities"] = [
+            float(value) for value in draft_probabilities
+        ]
+        window_payload["draft_augmented"]["outcomes"] = list(y)
+        windows.append(window_payload)
         for game in validation:
             for role in ROLES:
                 per_role[role]["total_picks"] += 2
@@ -1100,23 +1387,48 @@ def evaluate_composition_signal(
         history = _history_features(train + validation, draft)
         train_history = history[: len(train)]
         validation_history = history[len(train) :]
-        history_model = LogisticRegression(C=REGULARIZATION_C, solver="liblinear", max_iter=2000, random_state=461)
-        history_train_x = np.column_stack([_matrix(train, draft.feature_names, include_draft=True) @ np.asarray(draft.coefficients), train_history])
+        history_model = LogisticRegression(C=1.0, solver="liblinear", max_iter=2000, random_state=461)
+        history_train_x = np.column_stack(
+            [
+                _matrix(train, draft.feature_names, include_draft=True) @ np.asarray(draft.coefficients),
+                train_history,
+            ]
+        )
         history_model.fit(history_train_x, [int(game["y"]) for game in train])
-        history_validation_x = np.column_stack([_matrix(validation, draft.feature_names, include_draft=True) @ np.asarray(draft.coefficients), validation_history])
-        history_probabilities = history_model.predict_proba(history_validation_x)[:, 1]
+        history_validation_x = np.column_stack(
+            [
+                _matrix(validation, draft.feature_names, include_draft=True) @ np.asarray(draft.coefficients),
+                validation_history,
+            ]
+        )
+        history_probabilities = _recalibrate_history_probabilities(
+            train,
+            validation,
+            draft,
+            history_train_x,
+            history_validation_x,
+            history_model,
+            folds=4,
+            shrink=history_calibrate_shrink,
+        )
         windows[-1]["draft_plus_team_history"] = _metrics(y, history_probabilities)
-        pooled_history.extend(float(value) for value in history_probabilities)
+        windows[-1]["draft_plus_team_history"]["probabilities"] = [
+            float(value) for value in history_probabilities
+        ]
+        windows[-1]["draft_plus_team_history"]["outcomes"] = list(y)
     if not windows:
         raise CompositionSignalError("chronological evaluation did not produce a valid holdout")
-    bootstrap = _bootstrap_deltas(pooled_y, pooled_base, pooled_draft, pooled_clusters, reps=bootstrap_reps, seed=seed)
-    history_bootstrap = _bootstrap_deltas(
-        pooled_y,
-        pooled_draft,
-        pooled_history,
-        pooled_clusters,
+    bootstrap = _match_delta_intervals(
+        windows,
+        reps=bootstrap_reps,
+        seed=seed,
+        label="draft_vs_baseline",
+    )
+    history_bootstrap = _match_delta_intervals(
+        windows,
         reps=bootstrap_reps,
         seed=seed + 1,
+        label="history_vs_draft",
     )
     improved_brier = sum(row["draft_augmented"]["brier"] < row["baseline"]["brier"] for row in windows)
     improved_log_loss = sum(row["draft_augmented"]["log_loss"] < row["baseline"]["log_loss"] for row in windows)
