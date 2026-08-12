@@ -523,7 +523,7 @@ def test_source_continuity_allows_only_reviewed_unknown_player_maps() -> None:
 
     result = validate_source_continuity(["game-1", *quarantined], source, None)
 
-    assert result["missing_game_count"] == 5
+    assert result["missing_game_count"] == len(quarantined)
     assert result["quarantined_game_ids"] == quarantined
 
 
