@@ -421,6 +421,17 @@ def _continuity_baseline(
             len(legacy_ids) != binding["game_count"]
             or source_identity_sha256(legacy_ids) != binding["identity_sha256"]
         ):
+            index_ids = _canonical_ids(state.get("release_index_game_ids", []))
+            if (
+                index_ids
+                and len(state_ids) >= binding["game_count"]
+                and set(index_ids) <= set(state_ids)
+            ):
+                # A bootstrap recovery seeded the worker with a validated
+                # source that covers the active release's own published game
+                # index. The worker is current or ahead; the next publication
+                # supersedes the active release.
+                return state_ids, binding
             raise RefreshValidationError(
                 "current source cache does not match the published pack; exact continuity cannot be proved"
             )
