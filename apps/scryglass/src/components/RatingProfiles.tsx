@@ -18,16 +18,19 @@ import {
   type ProfileGame,
   type ProfileGrade,
   type ProfileParticipant,
+  type ProfileTeamStats,
   type TeamRating,
   type TeamRecord,
 } from "@/lib/pack";
 import { playerPortrait, type PlayerVisualIdentity } from "@/lib/playerPortraits";
+import { matchTeamHref } from "@/lib/matchFilters";
 import { PlayerPortrait } from "./PlayerPortrait";
 import { RecentGames } from "./RecentGames";
 import { TeamMark } from "./TeamMark";
 import styles from "./RatingProfiles.module.css";
 
 const ROLE_ORDER = ["top", "jungle", "mid", "bot", "support"];
+const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 
 export type TeamRosterEntry = {
   player: string;
@@ -52,8 +55,34 @@ function shortDate(value: string): string {
   return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 
+function fullDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
+  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric", timeZone: "UTC" });
+}
+
 function gameCount(value: number): string {
   return `${value} ${value === 1 ? "game" : "games"}`;
+}
+
+function durationLabel(seconds: number | null | undefined): string | null {
+  if (!seconds || seconds < 1) return null;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.round(seconds % 60);
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function compactNumber(value: number): string {
+  return COMPACT_NUMBER_FORMATTER.format(value);
+}
+
+function percentLabel(value: number): string {
+  const normalized = Math.abs(value) <= 1 ? value * 100 : value;
+  return `${normalized.toFixed(0)}%`;
+}
+
+function signedNumber(value: number): string {
+  return `${value > 0 ? "+" : ""}${Math.round(value)}`;
 }
 
 function positionChange(comparison: PlayerRankComparison | undefined): {
@@ -261,7 +290,7 @@ export function TeamRatingProfile({
       </section>
 
       <section className={styles.section}>
-        <div className={styles.sectionHeader}><div><p>Latest results</p><h2>Recent games</h2></div><Link className="row-link" href="/matches">All matches →</Link></div>
+        <div className={styles.sectionHeader}><div><p>Latest results</p><h2>Recent games</h2></div><Link className="row-link" href={matchTeamHref(team.team)}>All matches →</Link></div>
         <RecentGames games={recentGames} championImages={championImages} team={team.team} />
       </section>
     </div>
@@ -275,14 +304,52 @@ function GradeDetails({ grade }: { grade?: ProfileGrade }) {
   return (
     <div className={styles.gradeDetails}>
       <strong>{grade.grade}</strong>
-      <span>{grade.score.toFixed(0)} / 100</span>
-      <small>{gradeSignal(grade)}. The score compares full-game output with usual form, teammates, the opposing role, and league-role history.</small>
+      <span>{grade.score.toFixed(0)}</span>
+      <small>{gradeSignal(grade)}</small>
     </div>
   );
 }
 
+function TeamGameStats({ stats }: { stats?: ProfileTeamStats }) {
+  if (!stats) return null;
+  const values = [
+    ["Kills", stats.kills],
+    ["Gold", stats.gold == null ? null : compactNumber(stats.gold)],
+    ["Towers", stats.towers],
+    ["Dragons", stats.dragons],
+    ["Barons", stats.barons],
+    ["Grubs", stats.void_grubs],
+    ["Heralds", stats.heralds],
+    ["Atakhans", stats.atakhans],
+    ["Inhibitors", stats.inhibitors],
+  ].filter((entry) => entry[1] !== null && entry[1] !== undefined);
+  if (!values.length) return null;
+  return <dl className={styles.teamGameStats}>{values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
+}
+
+function PlayerGameStats({ player }: { player: ProfileParticipant }) {
+  const participation = player.team_kills && player.kills != null && player.assists != null
+    ? (player.kills + player.assists) / player.team_kills
+    : null;
+  const values = [
+    ["KDA", `${player.kills ?? "—"} / ${player.deaths ?? "—"} / ${player.assists ?? "—"}`],
+    ["KP", participation == null ? null : percentLabel(participation)],
+    ["CS", player.cs == null ? null : `${Math.round(player.cs)}${player.cs_per_minute == null ? "" : ` · ${player.cs_per_minute.toFixed(1)}/m`}`],
+    ["DPM", player.damage_per_minute == null ? null : Math.round(player.damage_per_minute).toString()],
+    ["Gold", player.gold == null ? null : compactNumber(player.gold)],
+    ["Damage", player.damage_share == null ? null : percentLabel(player.damage_share)],
+    ["Vision", player.vision_score == null ? null : `${Math.round(player.vision_score)}${player.wards_placed == null ? "" : ` · ${Math.round(player.wards_placed)}w`}`],
+    ["GD@10", player.gold_diff_at_10 == null ? null : signedNumber(player.gold_diff_at_10)],
+  ].filter((entry) => entry[1] !== null);
+  return <dl className={styles.playerGameStats}>{values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
+}
+
 export function MatchRatingProfile({ game, championImages }: { game: ProfileGame; championImages: Record<string, string> }) {
   const gradesAvailable = game.players.some((player) => player.grade?.status === "available");
+  const blueWon = game.blue_win === 1;
+  const winner = blueWon ? game.blue_team : game.red_team;
+  const loser = blueWon ? game.red_team : game.blue_team;
+  const duration = durationLabel(game.duration_seconds);
   const sides = (["Blue", "Red"] as const).map((side) => ({
     side,
     team: side === "Blue" ? game.blue_team : game.red_team,
@@ -293,20 +360,31 @@ export function MatchRatingProfile({ game, championImages }: { game: ProfileGame
     <div className={styles.page}>
       <p className={styles.back}><Link className="row-link" href="/matches">← Matches</Link></p>
       <header className={styles.matchHero}>
-        <p className={styles.scope}>{game.league} · {shortDate(game.date)}</p>
-        <h1>{game.blue_team} vs {game.red_team}</h1>
-        <p>{gradesAvailable
-          ? "Player grades compare this game with the player’s prior form, their teammates, the same-role opponent, and the league-role baseline. The result is excluded."
-          : "The result, roster, roles, and champions are available. Player grades will appear after the completed stat line reaches the accepted source."}</p>
+        <p className={styles.scope}>{game.league} · {fullDate(game.date)}{duration ? ` · ${duration}` : ""}</p>
+        <h1>{winner} defeated {loser}</h1>
+        <div className={styles.matchResult}>
+          <span><TeamMark team={game.blue_team} size="medium" /><strong>{game.blue_team}</strong><small>Blue · {blueWon ? "Winner" : "Defeat"}</small></span>
+          <b>vs</b>
+          <span><TeamMark team={game.red_team} size="medium" /><strong>{game.red_team}</strong><small>Red · {!blueWon ? "Winner" : "Defeat"}</small></span>
+        </div>
+        {gradesAvailable ? (
+          <aside className={styles.matchGradeGuide} aria-label="Player grade guide">
+            <strong>Game grade</strong>
+            <span>A standout · B strong · C typical · D below standard · F poor</span>
+            <small>Each score compares the player with their usual form, teammates, role opponent, and league-role history. <Link className="row-link" href="/methodology#game-grades">How grades work</Link></small>
+          </aside>
+        ) : <p>Player grades will appear when Oracle&apos;s Elixir supplies a complete stat line.</p>}
       </header>
       <div className={styles.matchTeams}>
         {sides.map((side) => (
           <section className={styles.matchTeam} key={side.side}>
-            <div className={styles.sectionHeader}><div><p>{side.side} side</p><h2><Link className="row-link" href={`/elo/team/${teamSlug(side.team)}`}>{side.team}</Link></h2></div><span>{side.won ? "Win" : "Loss"}</span></div>
+            <div className={styles.sectionHeader}><div><p>{side.side} side</p><h2><Link className="row-link" href={`/elo/team/${teamSlug(side.team)}`}>{side.team}</Link></h2></div><span>{side.won ? "Winner" : "Defeat"}</span></div>
+            <TeamGameStats stats={game.team_stats?.[side.side]} />
             {side.players.map((player) => (
-              <article className={styles.matchPlayer} key={player.player}>
+              <article className={styles.matchPlayer} key={`${side.side}-${player.role}-${player.player}`}>
                 <ChampionPortrait name={player.champion} imageUrl={player.champion ? championImages[player.champion] : null} size="large" />
-                <div><span>{roleLabel(player.role)}</span><strong><Link className="row-link" href={`/elo/player/${playerSlug(player.player)}`}>{player.player}</Link></strong><small>{player.champion} · {player.kills ?? "—"} / {player.deaths ?? "—"} / {player.assists ?? "—"}</small></div>
+                <div className={styles.matchPlayerIdentity}><span>{roleLabel(player.role)}</span><strong><Link className="row-link" href={`/elo/player/${playerSlug(player.player)}`}>{player.player}</Link></strong><small>{player.champion}</small></div>
+                <PlayerGameStats player={player} />
                 <GradeDetails grade={player.grade} />
               </article>
             ))}
@@ -406,7 +484,7 @@ export function PlayerRatingProfile({
       </p>
 
       <section className={styles.section}>
-        <div className={styles.sectionHeader}><div><p>Latest results</p><h2>Recent games</h2></div><Link className="row-link" href="/matches">All matches →</Link></div>
+        <div className={styles.sectionHeader}><div><p>Latest results</p><h2>Recent games</h2></div><Link className="row-link" href={currentTeam ? matchTeamHref(currentTeam) : "/matches?section=results"}>All matches →</Link></div>
         <aside className={styles.gradeGuide} aria-label="Game grade guide">
           <strong>Full game, not KDA</strong>
           <span>A+/A standout</span>

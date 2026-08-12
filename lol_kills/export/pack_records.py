@@ -11,6 +11,7 @@ from lol_kills.etl.aliases import normalize_team
 from lol_kills.etl.competition import (
     TRANSPORT_LEAGUE_LABELS,
     canonicalize_competition_frame,
+    competition_tier as classify_competition_tier,
     is_team_affiliation_league,
     source_league,
     team_identity_key,
@@ -442,6 +443,12 @@ def _profile_number(value: Any) -> float | int | None:
     return int(result) if result.is_integer() else round(result, 2)
 
 
+def _profile_sum(*values: Any) -> float | int | None:
+    numbers = [_profile_number(value) for value in values]
+    present = [number for number in numbers if number is not None]
+    return _profile_number(sum(present)) if present else None
+
+
 def _profile_game_identity(game: Mapping[str, Any]) -> tuple[object, ...]:
     players = game.get("players")
     rows = players if isinstance(players, list) else []
@@ -560,10 +567,22 @@ def build_profile_records(
             "dpm",
             "damageshare",
             "totalgold",
+            "total cs",
+            "minionkills",
+            "monsterkills",
             "cspm",
+            "visionscore",
+            "wardsplaced",
             "wpm",
             "wcpm",
             "golddiffat10",
+            "dragons",
+            "heralds",
+            "void_grubs",
+            "barons",
+            "atakhans",
+            "towers",
+            "inhibitors",
         )
         if column in players.columns
     ]
@@ -657,9 +676,14 @@ def build_profile_records(
             continue
         date = group["_date"].max()
         league = str(group["league"].iloc[0]) if "league" in group.columns else "UNKNOWN"
+        tier_values = group.get("competition_tier", pd.Series(dtype="string")).dropna()
+        tier = str(tier_values.iloc[0]).strip().casefold() if not tier_values.empty else classify_competition_tier(league)
         participants: list[dict[str, Any]] = []
         for _, row in group.sort_values(["_side", "_role"], key=lambda values: values.map(role_order) if values.name == "_role" else values).iterrows():
             champion = str(row.get("champion") or "").strip()
+            farm = _profile_number(row.get("total cs"))
+            if farm is None:
+                farm = _profile_sum(row.get("minionkills"), row.get("monsterkills"))
             participants.append(
                 {
                     "player": str(row["_player"]),
@@ -669,19 +693,45 @@ def build_profile_records(
                     "kills": _profile_number(row.get("kills")),
                     "deaths": _profile_number(row.get("deaths")),
                     "assists": _profile_number(row.get("assists")),
+                    "team_kills": _profile_number(row.get("teamkills")),
+                    "cs": farm,
+                    "cs_per_minute": _profile_number(row.get("cspm")),
+                    "damage_per_minute": _profile_number(row.get("dpm")),
+                    "damage_share": _profile_number(row.get("damageshare")),
+                    "gold": _profile_number(row.get("totalgold")),
+                    "gold_diff_at_10": _profile_number(row.get("golddiffat10")),
+                    "vision_score": _profile_number(row.get("visionscore")),
+                    "wards_placed": _profile_number(row.get("wardsplaced")),
                     "grade": grade_payload(
                         grade_lookup.get((str(game_id), str(row["_player"]).casefold()))
                     ),
                 }
             )
+        team_stats: dict[str, dict[str, Any]] = {}
+        for side_name, side_frame in (("Blue", blue), ("Red", red)):
+            first = side_frame.iloc[0]
+            team_stats[side_name] = {
+                "kills": _profile_number(first.get("teamkills")),
+                "gold": _profile_number(pd.to_numeric(side_frame.get("totalgold"), errors="coerce").sum(min_count=1)) if "totalgold" in side_frame.columns else None,
+                "dragons": _profile_number(first.get("dragons")),
+                "heralds": _profile_number(first.get("heralds")),
+                "void_grubs": _profile_number(first.get("void_grubs")),
+                "barons": _profile_number(first.get("barons")),
+                "atakhans": _profile_number(first.get("atakhans")),
+                "towers": _profile_number(first.get("towers")),
+                "inhibitors": _profile_number(first.get("inhibitors")),
+            }
         key = str(game_id)
         games[key] = {
             "game_id": key,
             "date": date.isoformat().replace("+00:00", "Z"),
             "league": league,
+            "competition_tier": tier,
             "blue_team": blue_team,
             "red_team": red_team,
             "blue_win": int(blue_result),
+            "duration_seconds": _profile_number(group["gamelength"].iloc[0]) if "gamelength" in group.columns else None,
+            "team_stats": team_stats,
             "players": participants,
         }
     archive_games = games

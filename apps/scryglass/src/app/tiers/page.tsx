@@ -3,7 +3,7 @@ import { TierListExplorer } from "@/components/TierListExplorer";
 import styles from "./TiersPage.module.css";
 
 export const metadata = {
-  title: "Champion draft board — Scryglass",
+  title: "Tier Lists — Scryglass",
   description:
     "Patch-wide champion strength, matchup shape, and unpicked structural alternatives.",
 };
@@ -13,7 +13,7 @@ export default function TiersPage() {
     <main className={styles.page}>
       <header className={styles.header}>
         <div>
-          <h1>Champion draft board</h1>
+          <h1>Tier Lists</h1>
           <p>
             Check what the patch rewards, how matchups change, and which unused
             champions can fill a similar job. Every performance board pools the

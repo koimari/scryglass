@@ -20,9 +20,9 @@ Canonical machine-readable allowlists and defaults live in
 | `maps/year=Y/part.parquet` | `maps.parquet` | Trimmed identity + both-side draft/obj/@10–25; `source_oe` / `source_grid` preserve provenance |
 | `features/*_snapshot.*` | Hierarchical team ladder and player Dual Elo snapshots | Parquet + JSON twins for ladders |
 | `features/player_weekly_ranks.json` | Player rank movement | Current rank and change versus the prior Sunday plus 1, 3, and 12 calendar months, by competitive tier |
-| `features/match_index.json` | Match archive index | Compact list of every accepted 2025 and 2026 OE map |
-| `features/match_records_2025.json` | 2025 match details | Ten-player rosters, champions, KDA, and grades for accepted 2025 OE maps |
-| `features/match_records_2026.json` | 2026 match details | Ten-player rosters, champions, KDA, and grades for accepted 2026 OE maps |
+| `features/match_index.json` | Match archive index | Compact list of every accepted 2025 and 2026 OE game, including competition level |
+| `features/match_records_2025.json` | 2025 match details | Ten-player rosters, champions, grades, KDA, farm, gold, damage, vision, and team objectives when OE supplies them |
+| `features/match_records_2026.json` | 2026 match details | Ten-player rosters, champions, grades, KDA, farm, gold, damage, vision, and team objectives when OE supplies them |
 | `features/player_metadata.json` | Player display metadata | Leaguepedia nationality/country code/flag when available |
 | `features/team_records.json` | Current team affiliation and ladder scope aggregates | Includes `current_tier`, `by_league`, and `by_tier` for hierarchical filters and win rates |
 | `features/*_history.parquet` | Elo history | Rows whose `game_uid` is in year-filtered maps |
