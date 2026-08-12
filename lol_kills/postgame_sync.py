@@ -61,6 +61,11 @@ REVIEWED_QUARANTINED_GAME_IDS = frozenset(
         "oe:game:9b9c8c1375765cffab98cacea34a3259",
         "oe:game:b53fb5b013e28c288688f5bb39d518b7",
         "oe:game:b91ad221257bc4357a3e0d9bc6ea75cd",
+        # OE re-identified the 2026-08-11 LJL series (L Guide Gaming vs Uwinks)
+        # in the 2026-08-12T16:08Z revision; the old IDs left the source.
+        "LOLTMNT01_441503",
+        "LOLTMNT01_442486",
+        "LOLTMNT01_442514",
     }
 )
 

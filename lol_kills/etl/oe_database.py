@@ -28,6 +28,19 @@ from lol_kills.ratings.player_map_grades import CORE_INPUTS
 
 GAME_SCHEMA = "scryglass:oe-game:v1"
 IMPORT_SCHEMA = "scryglass:oe-database-import:v1"
+
+# Oracle's Elixir revisions can remove or re-identify stored games (forfeits,
+# replays, ID renumbering). The import fails closed when the source loses a
+# stored game unless the game is reviewed and acknowledged here. Each entry
+# records the canonical game ID and why it was removed from the OE source.
+REVIEWED_REMOVED_GAME_IDS: dict[str, str] = {
+    # LJL 2026-08-11 series L Guide Gaming vs Uwinks (BO3 at 08:09/09:13/10:18Z)
+    # was re-identified by OE in the 2026-08-12T16:08Z revision; the same
+    # matchup appears under new IDs (LOLTMNT01_442537, LOLTMNT01_441618).
+    "LOLTMNT01_441503": "oe-revision-2026-08-12: ljl series re-identified",
+    "LOLTMNT01_442486": "oe-revision-2026-08-12: ljl series re-identified",
+    "LOLTMNT01_442514": "oe-revision-2026-08-12: ljl series re-identified",
+}
 STATE_SCHEMA = "scryglass:oe-local-cache-state:v1"
 TRANSFORM_VERSION = "oe-normalization:v1"
 REQUEST_TIMEOUT_SECONDS = 180.0
@@ -767,7 +780,9 @@ def sync_csv(
     accepted_hashes = {
         game_id: game.payload_sha256 for game_id, game in prepared.games.items()
     }
-    missing_existing = sorted(set(existing).difference(accepted_hashes))
+    missing_existing = sorted(
+        set(existing).difference(accepted_hashes).difference(REVIEWED_REMOVED_GAME_IDS)
+    )
     if missing_existing:
         preview = ", ".join(missing_existing[:5])
         raise OeDatabaseError(
