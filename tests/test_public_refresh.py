@@ -400,6 +400,109 @@ def test_supabase_bootstrap_uses_a_checksum_verified_full_local_cache(tmp_path: 
     assert json.loads(config.sync.state_path.read_text())["published_game_ids"] == game_ids
 
 
+def test_supabase_bootstrap_recovers_a_worker_ahead_of_the_active_release(tmp_path: Path) -> None:
+    release_ids = ["oe:game:a", "oe:game:b"]
+    local_ids = ["oe:game:a", "oe:game:b", "oe:game:c"]
+    release_id = "v2026.08.10.001500"
+    manifest = {
+        "pack_id": release_id,
+        "ratings": {
+            "source_game_count": len(release_ids),
+            "source_identity_sha256": source_identity_sha256(release_ids),
+        },
+    }
+    config = replace(
+        _config(tmp_path),
+        publication_backend="supabase",
+        supabase_url="https://example.supabase.co",
+        supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def active_release(self):
+            return {"release_id": release_id, "manifest": manifest}
+
+        def asset(self, _release_id: str, path: str):
+            return {"body": None, "storage_path": f"{release_id}/{path}"}
+
+        def storage_object(self, storage_path: str):
+            if storage_path.endswith("features/match_index.json"):
+                return json.dumps(
+                    {"games": [{"game_id": game_id} for game_id in release_ids]}
+                ).encode()
+            return json.dumps({"games": {"oe:game:a": {"game_id": "oe:game:a"}}}).encode()
+
+    with patch.object(
+        public_refresh.supabase_publication,
+        "SupabasePublicData",
+        Client,
+    ), patch.object(
+        public_refresh,
+        "validate_live_source",
+        return_value={"game_ids": local_ids},
+    ):
+        result = public_refresh.seed_supabase_continuity(config)
+
+    assert result == {
+        "status": "seeded",
+        "pack_id": release_id,
+        "game_count": len(local_ids),
+        "source": "validated_local_cache_superset",
+    }
+    assert json.loads(config.sync.state_path.read_text())["published_game_ids"] == local_ids
+    assert json.loads((config.public_root / "manifest.json").read_text()) == manifest
+
+
+def test_supabase_bootstrap_rejects_a_worker_missing_release_games(tmp_path: Path) -> None:
+    release_ids = ["oe:game:a", "oe:game:b"]
+    local_ids = ["oe:game:a"]
+    release_id = "v2026.08.10.001500"
+    manifest = {
+        "pack_id": release_id,
+        "ratings": {
+            "source_game_count": len(release_ids),
+            "source_identity_sha256": source_identity_sha256(release_ids),
+        },
+    }
+    config = replace(
+        _config(tmp_path),
+        publication_backend="supabase",
+        supabase_url="https://example.supabase.co",
+        supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def active_release(self):
+            return {"release_id": release_id, "manifest": manifest}
+
+        def asset(self, _release_id: str, path: str):
+            return {"body": None, "storage_path": f"{release_id}/{path}"}
+
+        def storage_object(self, storage_path: str):
+            if storage_path.endswith("features/match_index.json"):
+                return json.dumps(
+                    {"games": [{"game_id": game_id} for game_id in release_ids]}
+                ).encode()
+            return json.dumps({"games": {"oe:game:a": {"game_id": "oe:game:a"}}}).encode()
+
+    with patch.object(
+        public_refresh.supabase_publication,
+        "SupabasePublicData",
+        Client,
+    ), patch.object(
+        public_refresh,
+        "validate_live_source",
+        return_value={"game_ids": local_ids},
+    ), pytest.raises(public_refresh.PublicRefreshError, match="does not match"):
+        public_refresh.seed_supabase_continuity(config)
+
+
 def test_supabase_current_worker_refreshes_its_active_manifest(tmp_path: Path) -> None:
     game_ids = ["oe:game:a", "oe:game:b"]
     release_id = "v2026.08.10.001500"
