@@ -19,6 +19,7 @@ from typing import Any, Sequence
 from lol_kills.etl.oe_ingest import OeDownloadError
 from lol_kills.etl.oe_ingest import load_refresh_receipt
 from lol_kills.etl.oe_database import TRANSFORM_VERSION
+from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.export import supabase_publication
 from lol_kills.export.public_pack import source_identity_sha256
 from lol_kills.postgame_sync import (
@@ -42,7 +43,7 @@ LOCK_FILE = "public-refresh.lock"
 DEFAULT_SITE = "https://scryglass.xyz"
 DEFAULT_ATTEMPTS = 3
 DEFAULT_STALE_AFTER_HOURS = 12
-DEFAULT_STEP_TIMEOUT_MINUTES = 15
+DEFAULT_STEP_TIMEOUT_MINUTES = 30
 RETRYABLE_ERRORS = (OeDownloadError, TimeoutError, urllib.error.URLError)
 RETRYABLE_HTTP_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 
@@ -407,6 +408,29 @@ def seed_supabase_continuity(config: RefreshConfig) -> dict[str, Any] | None:
         game_ids = sorted(str(game_id) for game_id in local_ids)
         source = "validated_local_cache"
     if len(game_ids) != expected_count or source_identity_sha256(game_ids) != expected_digest:
+        # Recovery: the local worker can be ahead of the active release when a
+        # local pack was published but Supabase activation was interrupted.
+        # Verify that the active release's own published game index is fully
+        # covered by the validated local source, then seed from the local
+        # source so the next publish continues from it.
+        release_index_ids = _release_index_game_ids(client, release_id)
+        if release_index_ids and release_index_ids <= set(game_ids):
+            _atomic_json(config.public_root / "manifest.json", manifest)
+            _atomic_json(
+                config.sync.state_path,
+                {
+                    **state,
+                    "pack_id": release_id,
+                    "published_game_ids": game_ids,
+                    "status": "bootstrapped",
+                },
+            )
+            return {
+                "status": "seeded",
+                "pack_id": release_id,
+                "game_count": len(game_ids),
+                "source": "validated_local_cache_superset",
+            }
         raise PublicRefreshError("Supabase continuity bootstrap does not match the active release")
 
     _atomic_json(config.public_root / "manifest.json", manifest)
@@ -425,6 +449,28 @@ def seed_supabase_continuity(config: RefreshConfig) -> dict[str, Any] | None:
         "game_count": expected_count,
         "source": source,
     }
+
+
+def _release_index_game_ids(
+    client: supabase_publication.SupabasePublicData,
+    release_id: str,
+) -> set[str]:
+    """The active release's own published game index, when available."""
+
+    try:
+        payload = _supabase_asset_json(client, release_id, "features/match_index.json")
+    except PublicRefreshError:
+        return set()
+    games = payload.get("games")
+    if not isinstance(games, list):
+        return set()
+    index_ids = {
+        canonical_source_game_key(str(game.get("game_id")))
+        for game in games
+        if isinstance(game, dict)
+    }
+    index_ids.discard("")
+    return index_ids
 
 
 def _sleep_before_retry(attempt: int) -> None:
