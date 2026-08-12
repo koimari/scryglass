@@ -453,6 +453,9 @@ def test_supabase_bootstrap_recovers_a_worker_ahead_of_the_active_release(tmp_pa
         "source": "validated_local_cache_superset",
     }
     assert json.loads(config.sync.state_path.read_text())["published_game_ids"] == local_ids
+    assert json.loads(config.sync.state_path.read_text())["release_index_game_ids"] == sorted(
+        release_ids
+    )
     assert json.loads((config.public_root / "manifest.json").read_text()) == manifest
 
 

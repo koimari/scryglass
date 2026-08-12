@@ -422,6 +422,7 @@ def seed_supabase_continuity(config: RefreshConfig) -> dict[str, Any] | None:
                     **state,
                     "pack_id": release_id,
                     "published_game_ids": game_ids,
+                    "release_index_game_ids": sorted(release_index_ids),
                     "status": "bootstrapped",
                 },
             )
@@ -1084,7 +1085,7 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
                 pass
         should_rollback = (
             not post_publication_verified
-            and failure_stage in {"cache", "smoke"}
+            and failure_stage in {"tier", "publication", "cache", "smoke"}
             and (
                 publication is not None
                 or tier_publication is not None

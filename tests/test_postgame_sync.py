@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -204,6 +205,82 @@ def test_no_new_game_skips_all_rebuild_work(tmp_path: Path) -> None:
 
     result = sync_once(config, now=NOW, ingest_fn=_ingest(tmp_path, ["game-1"]), build_live_fn=unexpected)
     assert result["status"] == "no_change"
+
+
+def test_continuity_baseline_accepts_a_recovery_seeded_superset(tmp_path: Path) -> None:
+    release_ids = ["oe:game:a", "oe:game:b"]
+    seeded_ids = ["oe:game:a", "oe:game:b", "oe:game:c"]
+    config = _config(tmp_path)
+    config.public_root.mkdir(parents=True)
+    (config.public_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "v2026.08.10.001500",
+                "ratings": {
+                    "source_game_count": len(release_ids),
+                    "source_identity_sha256": source_identity_sha256(release_ids),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = {
+        "pack_id": "v2026.08.10.001500",
+        "published_game_ids": seeded_ids,
+        "release_index_game_ids": release_ids,
+    }
+    with patch.object(
+        postgame_sync,
+        "validate_live_source",
+        return_value={
+            "game_ids": seeded_ids,
+            "game_count": len(seeded_ids),
+            "identity_sha256": source_identity_sha256(seeded_ids),
+            "legacy_identity_game_ids": [],
+        },
+    ):
+        baseline, binding = postgame_sync._continuity_baseline(config, state)
+
+    assert baseline == seeded_ids
+    assert binding == {
+        "pack_id": "v2026.08.10.001500",
+        "game_count": len(release_ids),
+        "identity_sha256": source_identity_sha256(release_ids),
+    }
+
+
+def test_continuity_baseline_rejects_a_state_without_a_release_index(tmp_path: Path) -> None:
+    release_ids = ["oe:game:a", "oe:game:b"]
+    seeded_ids = ["oe:game:a", "oe:game:b", "oe:game:c"]
+    config = _config(tmp_path)
+    config.public_root.mkdir(parents=True)
+    (config.public_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "v2026.08.10.001500",
+                "ratings": {
+                    "source_game_count": len(release_ids),
+                    "source_identity_sha256": source_identity_sha256(release_ids),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = {
+        "pack_id": "v2026.08.10.001500",
+        "published_game_ids": seeded_ids,
+    }
+    with patch.object(
+        postgame_sync,
+        "validate_live_source",
+        return_value={
+            "game_ids": seeded_ids,
+            "game_count": len(seeded_ids),
+            "identity_sha256": source_identity_sha256(seeded_ids),
+            "legacy_identity_game_ids": [],
+        },
+    ), pytest.raises(RefreshValidationError, match="exact continuity cannot be proved"):
+        postgame_sync._continuity_baseline(config, state)
 
 
 def test_no_new_game_still_rejects_a_disappearing_published_game(tmp_path: Path) -> None:
