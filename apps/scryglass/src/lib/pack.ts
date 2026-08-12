@@ -10,6 +10,36 @@ export type PackFile = {
   columns?: string[] | null;
 };
 
+export type CompositionSignalAudit = {
+  schema_version?: string;
+  model_version?: string;
+  included_terms?: string[];
+  excluded_terms?: string[];
+  training_order?: string;
+  status?: "available" | "limited" | "unavailable";
+  published_status?: "available" | "limited" | "unavailable";
+  target_games?: number;
+  available_games?: number;
+  limited_games?: number;
+  unavailable_games?: number;
+  published_games?: number;
+  published_available_games?: number;
+  published_limited_games?: number;
+  published_unavailable_games?: number;
+  fit_through?: string | null;
+  source_as_of?: string | null;
+  source_identity_sha256?: string | null;
+  canonical_game_identity_sha256?: string | null;
+  worker_commit?: string | null;
+  cache_hits?: number;
+  min_support_games?: number;
+  regularization_c?: number;
+  calibration_tolerance?: {
+    slope?: number;
+    intercept?: number;
+  };
+};
+
 export type PackManifest = {
   pack_id: string;
   schema_version: string;
@@ -33,6 +63,7 @@ export type PackManifest = {
     status?: "available" | "unavailable";
     as_of?: string | null;
   };
+  composition_signal?: CompositionSignalAudit;
   ratings?: {
     source_mode?: string;
     source_as_of?: string;
@@ -209,6 +240,31 @@ export type ProfileGrade =
     }
   | { status: "unavailable"; reason: string };
 
+export type DraftContribution = {
+  schema_version: "scryglass:composition-signal:v1";
+  status: "available" | "limited" | "unavailable";
+  model_version: string;
+  fit_through: string | null;
+  blue: {
+    signal: number | null;
+    prior_role_games: number;
+  };
+  red: {
+    signal: number | null;
+    prior_role_games: number;
+  };
+  picks: Array<{
+    side: "Blue" | "Red";
+    role: string;
+    champion: string;
+    contribution: number | null;
+    prior_role_games: number;
+    evidence_status: "available" | "limited" | "unavailable";
+  }>;
+  note: string;
+  reason?: string;
+};
+
 export type ProfileGame = {
   game_id: string;
   date: string;
@@ -220,6 +276,7 @@ export type ProfileGame = {
   duration_seconds?: number | null;
   team_stats?: Partial<Record<"Blue" | "Red", ProfileTeamStats>>;
   players: ProfileParticipant[];
+  draft_contribution?: DraftContribution;
 };
 
 export type ProfileRecords = {

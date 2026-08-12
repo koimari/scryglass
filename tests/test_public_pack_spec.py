@@ -16,9 +16,11 @@ from lol_kills.export.public_pack import (
     _ensure_year_column,
     _filter_years,
     _public_player_rating_rows,
+    _validate_public_composition_records,
     _validate_public_record_tiers,
     source_identity_sha256,
 )
+from lol_kills.research.composition_signal import CompositionSignalError
 
 
 def test_public_team_ratings_receive_evidence_fields() -> None:
@@ -193,6 +195,104 @@ def test_profile_records_normalize_recent_games_without_raw_tables() -> None:
     assert inspired["vision_score"] == 31
     assert inspired["grade"]["status"] == "unavailable"
     assert payload["champion_images"]["Ivern"] == "https://example.test/ivern.png"
+
+
+def test_profile_records_keep_public_composition_evidence_optional() -> None:
+    rows = []
+    for side, team, result in (("Blue", "A", 1), ("Red", "B", 0)):
+        for role in ("top", "jng", "mid", "bot", "sup"):
+            rows.append(
+                {
+                    "game_uid": "game-1",
+                    "date": "2026-08-09T12:00:00Z",
+                    "league": "LCS",
+                    "side": side,
+                    "teamname": team,
+                    "playername": f"{team}-{role}",
+                    "position": role,
+                    "champion": f"{side}-{role}",
+                    "result": result,
+                    "kills": 1,
+                    "deaths": 1,
+                    "assists": 5,
+                }
+            )
+    evidence = {
+        "schema_version": "scryglass:composition-signal:v1",
+        "status": "available",
+        "model_version": "composition-signal-v1",
+        "fit_through": "2026-08-08T00:00:00Z",
+        "blue": {"signal": 0.5, "prior_role_games": 200},
+        "red": {"signal": -0.1, "prior_role_games": 200},
+        "picks": [],
+        "note": "Descriptive composition signal.",
+    }
+
+    payload = build_profile_records(
+        pd.DataFrame(rows),
+        composition_signals={"game-1": evidence},
+    )
+
+    assert payload["games"]["game-1"]["draft_contribution"] == evidence
+    assert "coefficients" not in payload["games"]["game-1"]["draft_contribution"]
+
+
+def test_public_composition_evidence_matches_the_published_picks() -> None:
+    roles = ("top", "jungle", "mid", "bot", "support")
+    players = [
+        {
+            "player": f"{side}-{role}",
+            "side": side,
+            "role": role,
+            "champion": f"{side}-{role}",
+        }
+        for side in ("Blue", "Red")
+        for role in roles
+    ]
+    picks = [
+        {
+            "side": side,
+            "role": {"jungle": "jng", "support": "sup"}.get(role, role),
+            "champion": f"{side}-{role}",
+            "contribution": 0.1,
+            "prior_role_games": 40,
+            "evidence_status": "available",
+        }
+        for side in ("Blue", "Red")
+        for role in roles
+    ]
+    game = {
+        "game_id": "game-1",
+        "date": "2026-08-09T12:00:00Z",
+        "players": players,
+    }
+    signal = {
+        "schema_version": "scryglass:composition-signal:v1",
+        "status": "available",
+        "model_version": "composition-signal-v1",
+        "fit_through": "2026-08-08T00:00:00Z",
+        "blue": {"signal": 0.5, "prior_role_games": 200},
+        "red": {"signal": 0.5, "prior_role_games": 200},
+        "picks": picks,
+        "note": "Values are model contribution units.",
+    }
+
+    assert _validate_public_composition_records({"games": {"game-1": {**game, "draft_contribution": signal}}}) == {
+        "games": 1,
+        "available": 1,
+        "limited": 0,
+        "unavailable": 0,
+    }
+
+    leaked = deepcopy(signal)
+    leaked["coefficients"] = [0.4]
+    with pytest.raises(CompositionSignalError, match="private composition fields"):
+        _validate_public_composition_records({"games": {"game-1": {**game, "draft_contribution": leaked}}})
+
+    same_fit = deepcopy(signal)
+    same_fit["fit_through"] = game["date"]
+    with pytest.raises(CompositionSignalError, match="fit watermark"):
+        _validate_public_composition_records({"games": {"game-1": {**game, "draft_contribution": same_fit}}})
 
 
 def test_profile_records_keep_old_maps_in_the_archive_only() -> None:

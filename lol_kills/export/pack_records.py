@@ -531,6 +531,7 @@ def build_profile_records(
     players: pd.DataFrame,
     *,
     champion_image_urls: Mapping[str, str] | None = None,
+    composition_signals: Mapping[str, Mapping[str, Any]] | None = None,
     recent_limit: int = 10,
     recent_window_days: int = 120,
     include_archive: bool = False,
@@ -734,6 +735,8 @@ def build_profile_records(
             "team_stats": team_stats,
             "players": participants,
         }
+        if composition_signals and key in composition_signals:
+            games[key]["draft_contribution"] = deepcopy(dict(composition_signals[key]))
     archive_games = games
     available = set(games).intersection(selected)
     player_index = {

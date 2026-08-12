@@ -156,7 +156,7 @@ jobs:
           cache: pip
 
       - name: Install focused test dependencies
-        run: python -m pip install -r apps/scryglass/requirements.txt pytest
+        run: python -m pip install -r requirements.txt pytest
 
       - name: Validate ratings and patch-wide tier contracts
         run: >-

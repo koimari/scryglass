@@ -40,6 +40,7 @@ from lol_kills.export.public_schedule import (
 )
 from lol_kills.etl.competition import TAXONOMY_VERSION, canonicalize_competition_frame, competition_tier
 from lol_kills.etl.source_keys import canonical_source_game_key
+from lol_kills.refresh_ledger import worker_commit as resolve_worker_commit
 from lol_kills.ratings.dual_elo import build_dual_ratings, lineup_hashes_from_players
 from lol_kills.ratings.evidence import attach_player_evidence, attach_team_evidence
 from lol_kills.ratings.hierarchical_bt import build_team_weekly_ranks, fit_hierarchical_bt
@@ -47,6 +48,14 @@ from lol_kills.ratings.player_elo import (
     build_maps_frame_from_players,
     build_player_ratings,
     build_player_weekly_ranks,
+)
+from lol_kills.research.composition_signal import (
+    CompositionSignalError,
+    build_composition_games,
+    evaluate_composition_signal,
+    score_games_temporally,
+    write_evaluation_report,
+    validate_public_signal,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -274,6 +283,28 @@ def _validate_public_record_tiers(records: dict[str, dict[str, Any]], *, label: 
                 f"{label} {identity} has inconsistent league tier: "
                 f"league={league} tier={tier} expected={expected}"
             )
+
+
+def _validate_public_composition_records(
+    profile_records: Mapping[str, Any],
+) -> dict[str, int]:
+    """Validate composition evidence against each published ten-player game."""
+
+    games = profile_records.get("games") if isinstance(profile_records, Mapping) else None
+    if not isinstance(games, Mapping):
+        raise CompositionSignalError("profile records have no game collection")
+    counts = {"games": 0, "available": 0, "limited": 0, "unavailable": 0}
+    for game_id, game in games.items():
+        if not isinstance(game, Mapping):
+            raise CompositionSignalError(f"profile game {game_id} is malformed")
+        signal = game.get("draft_contribution")
+        if signal is None:
+            continue
+        validate_public_signal(signal, game)
+        status = str(signal.get("status"))
+        counts["games"] += 1
+        counts[status] += 1
+    return counts
 
 
 def _normalized_game_uid(frame: pd.DataFrame) -> pd.Series:
@@ -565,7 +596,7 @@ def export_public_pack(
     if player_maps_for_ratings.empty:
         raise RuntimeError("public pack rating source has no complete player maps")
     progress("building sequential team ratings")
-    build_dual_ratings(
+    dual_rating_features = build_dual_ratings(
         rating_input,
         lineup_by_game=lineup_hashes_from_players(player_rating_input),
         output_dir=features_root,
@@ -706,6 +737,7 @@ def export_public_pack(
             "gameid", "game_uid", "date", "year", "oe_year", "league",
             "league_source", "tournament", "result", "side", "position",
             "teamname", "playername", "champion", "kills", "deaths", "assists",
+            "patch", "grid_series_id",
             "teamkills", "gamelength", "dpm", "damageshare", "totalgold",
             "total cs", "minionkills", "monsterkills", "cspm", "visionscore",
             "wardsplaced", "wpm", "wcpm", "golddiffat10", "dragons",
@@ -732,6 +764,70 @@ def export_public_pack(
         champion_image_urls=champion_image_urls,
         include_archive=True,
     )
+    progress("building composition evidence")
+    composition_source_digest = source_identity_sha256(source_game_ids)
+    composition_worker_commit = resolve_worker_commit(project)
+    composition_games = build_composition_games(
+        player_profile_frame,
+        strength_features=dual_rating_features,
+    )
+    composition_model_dir = runtime / "data" / "lol" / "models" / "composition_signal"
+    composition_evaluation_path = composition_model_dir / "evaluation.json"
+    composition_evaluation: dict[str, Any] | None = None
+    if composition_evaluation_path.exists():
+        try:
+            candidate_evaluation = json.loads(
+                composition_evaluation_path.read_text(encoding="utf-8")
+            )
+            if (
+                candidate_evaluation.get("model_version") == "composition-signal-v1"
+                and candidate_evaluation.get("source_hash") == composition_source_digest
+                and candidate_evaluation.get("canonical_game_identity_sha256") == composition_source_digest
+                and candidate_evaluation.get("worker_commit") == composition_worker_commit
+            ):
+                composition_evaluation = candidate_evaluation
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            composition_evaluation = None
+    if composition_evaluation is None:
+        progress("evaluating composition evidence")
+        composition_evaluation = evaluate_composition_signal(
+            composition_games,
+            source_hash=composition_source_digest,
+            canonical_game_identity_sha256=composition_source_digest,
+            worker_commit=composition_worker_commit,
+        )
+        write_evaluation_report(composition_evaluation, composition_evaluation_path)
+    promotion_gate = composition_evaluation.get("promotion_gate") or {}
+    if promotion_gate.get("composition_candidate_passes") is not True:
+        raise CompositionSignalError(
+            "composition signal promotion gate did not pass; public release remains on the previous pack"
+        )
+    composition_result = score_games_temporally(
+        composition_games,
+        target_game_ids=profile_records_payload.get("games", {}).keys(),
+        cache_dir=composition_model_dir,
+        source_digest=composition_source_digest,
+        worker_commit=composition_worker_commit,
+    )
+    composition_audit = dict(composition_result.audit)
+    composition_audit["source_as_of"] = source_as_of.isoformat().replace("+00:00", "Z")
+    composition_audit["canonical_game_identity_sha256"] = composition_source_digest
+    composition_audit["evaluation"] = {
+        "status": "passed",
+        "source_hash": composition_evaluation.get("source_hash"),
+        "canonical_game_identity_sha256": composition_evaluation.get(
+            "canonical_game_identity_sha256"
+        ),
+        "fit_through": composition_evaluation.get("fit_through"),
+        "worker_commit": composition_evaluation.get("worker_commit"),
+        "promotion_gate_passed": True,
+    }
+    for game_id, signal in composition_result.signals.items():
+        if game_id in profile_records_payload.get("games", {}):
+            profile_records_payload["games"][game_id]["draft_contribution"] = signal
+        archive_candidate = profile_records_payload.get("_archive_games", {}).get(game_id)
+        if isinstance(archive_candidate, dict):
+            archive_candidate["draft_contribution"] = signal
     archive_games = merge_accepted_profile_games(
         profile_records_payload.pop("_archive_games", {}),
         _accepted_profile_games(project),
@@ -747,6 +843,22 @@ def export_public_pack(
             for identity, game_ids in profile_records_payload.get(index_name, {}).items()
             if any(game_id in profile_game_ids for game_id in game_ids)
         }
+    published_composition = _validate_public_composition_records(profile_records_payload)
+    composition_audit.update(
+        {
+            "published_games": published_composition["games"],
+            "published_available_games": published_composition["available"],
+            "published_limited_games": published_composition["limited"],
+            "published_unavailable_games": published_composition["unavailable"],
+            "published_status": (
+                "available"
+                if published_composition["available"]
+                else "limited"
+                if published_composition["limited"]
+                else "unavailable"
+            ),
+        }
+    )
     del player_profile_frame
 
     # These records are intentionally built from the same year-filtered
@@ -1008,6 +1120,7 @@ def export_public_pack(
             },
         },
         "attribution": spec.ATTRIBUTION,
+        "composition_signal": composition_audit,
         "excluded": [
             "raw game rows",
             "research studies",

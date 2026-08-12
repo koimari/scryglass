@@ -94,6 +94,29 @@ export default function MethodologyPage() {
           </p>
         </section>
 
+        <section id="composition-signal">
+          <h2>Composition signal</h2>
+          <p>
+            A completed game can show a descriptive signal for the two
+            compositions. The model reads the champions and roles that were
+            available before the game. It also controls for the pre-game team
+            strength gap, uncertainty, league, and patch.
+          </p>
+          <p>
+            Each pick receives a signed contribution when the model has at least
+            forty earlier games for that champion in that role. A positive value
+            helps that side&apos;s composition. The team totals add the ten pick
+            contributions. Thin evidence leaves the total unavailable and shows
+            the prior role-game count instead.
+          </p>
+          <p>
+            This signal describes the composition input. It does not grade the
+            player&apos;s execution, change team or player ratings, or give a betting
+            probability. The private research model and its training data stay
+            outside the public pack.
+          </p>
+        </section>
+
         <section id="tier-lists">
           <h2>Champion tier lists</h2>
           <p>
