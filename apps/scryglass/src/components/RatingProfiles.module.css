@@ -527,6 +527,86 @@
 }
 .matchHero h1 { max-width: 18ch; margin: 0; font-family: var(--font-display), serif; font-size: clamp(3rem, 5vw, 5rem); font-weight: 400; letter-spacing: -0.025em; line-height: 0.94; }
 .matchHero > p:last-child { max-width: 48rem; color: var(--ink-muted); line-height: 1.65; }
+.compositionSignal {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
+}
+.compositionHeader {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.compositionHeader p {
+  margin: 0 0 0.25rem;
+  color: var(--accent-ink);
+  font-family: var(--font-mono), monospace;
+  font-size: var(--text-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.compositionHeader h2 { margin: 0; font-size: 1.25rem; }
+.compositionStatus {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: var(--text-micro);
+}
+.compositionAvailable { color: var(--accent-ink); }
+.compositionLimited { color: var(--ink-muted); }
+.compositionUnavailable { color: var(--danger); }
+.compositionCompare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem;
+  border-block: 1px solid var(--line);
+}
+.compositionTeam {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  align-items: center;
+  min-width: 0;
+}
+.compositionTeamRight { grid-template-columns: auto minmax(0, 1fr) auto; text-align: right; }
+.compositionTeam > div { display: grid; gap: 0.08rem; min-width: 0; }
+.compositionTeam strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compositionTeam span { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: var(--text-micro); }
+.compositionTeam b { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.compositionVs { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: var(--text-micro); text-transform: uppercase; }
+.compositionPicks { display: grid; gap: 0.35rem; }
+.compositionPickRow {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.45rem;
+  align-items: center;
+}
+.compositionRole { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: var(--text-micro); }
+.compositionPick {
+  display: grid;
+  grid-template-columns: 1.7rem minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.compositionPick > .portrait { width: 1.7rem; height: 1.7rem; border-radius: 0.25rem; }
+.compositionPick > span { overflow: hidden; font-size: 0.78rem; text-overflow: ellipsis; white-space: nowrap; }
+.compositionPick > strong { font-family: var(--font-mono), monospace; font-size: 0.74rem; font-variant-numeric: tabular-nums; }
+.compositionPick > small { grid-column: 2 / -1; color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: 0.58rem; }
+.compositionNote,
+.compositionEmpty { margin: 0; color: var(--ink-muted); font-size: var(--text-small); line-height: 1.45; }
 .matchResult {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -635,6 +715,15 @@
   .matchOpponent > span { font-size: 0.65rem; }
   .gradeGuide small { width: 100%; margin-left: 0; }
   .matchResult { grid-template-columns: 1fr; }
+  .compositionCompare { grid-template-columns: 1fr; gap: 0.4rem; }
+  .compositionVs { display: none; }
+  .compositionTeamRight { text-align: left; }
+  .compositionTeamRight > b { grid-column: 3; grid-row: 1; }
+  .compositionTeamRight > div { grid-column: 2; grid-row: 1; }
+  .compositionTeamRight > .portrait { grid-column: 1; grid-row: 1; }
+  .compositionPickRow { grid-template-columns: 3.5rem minmax(0, 1fr); }
+  .compositionPickRow > .compositionPick:last-child { grid-column: 2; }
+  .compositionPick > small { display: none; }
   .matchResult > b { display: none; }
   .matchResult > span:last-child { grid-template-columns: auto minmax(0, 1fr); text-align: left; }
   .matchResult > span:last-child > span { grid-column: 1; }

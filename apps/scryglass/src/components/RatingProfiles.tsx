@@ -10,6 +10,7 @@ import {
   TEAM_SIGMA_MIN,
   teamSlug,
   type PackManifest,
+  type DraftContribution,
   type PlayerChampionRecord,
   type PlayerRating,
   type PlayerPositionDeltas,
@@ -344,6 +345,91 @@ function PlayerGameStats({ player }: { player: ProfileParticipant }) {
   return <dl className={styles.playerGameStats}>{values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
 }
 
+function compositionNumber(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
+}
+
+function CompositionEvidence({
+  contribution,
+  blueTeam,
+  redTeam,
+  championImages,
+}: {
+  contribution?: DraftContribution;
+  blueTeam: string;
+  redTeam: string;
+  championImages: Record<string, string>;
+}) {
+  const status: DraftContribution["status"] = contribution?.status === "available"
+    || contribution?.status === "limited"
+    || contribution?.status === "unavailable"
+    ? contribution.status
+    : "unavailable";
+  const picks = contribution?.picks ?? [];
+  const pickFor = (side: "Blue" | "Red", role: string) => {
+    const modelRole = role === "jungle" ? "jng" : role === "support" ? "sup" : role;
+    return picks.find((pick) => pick.side === side && pick.role === modelRole);
+  };
+  return (
+    <section className={styles.compositionSignal} aria-label="Composition signal">
+      <div className={styles.compositionHeader}>
+        <div>
+          <p>Before the game</p>
+          <h2>Composition signal</h2>
+        </div>
+        <span className={`${styles.compositionStatus} ${styles[`composition${status[0].toUpperCase()}${status.slice(1)}`]}`}>
+          {status === "available" ? "Available" : status === "limited" ? "Limited evidence" : "Unavailable"}
+        </span>
+      </div>
+      {status === "unavailable" ? (
+        <p className={styles.compositionEmpty}>{contribution?.reason ?? "The complete pre-game draft evidence is not available for this game."}</p>
+      ) : (
+        <>
+          <div className={styles.compositionCompare}>
+            <div className={styles.compositionTeam}>
+              <TeamMark team={blueTeam} size="small" />
+              <div><strong>{blueTeam}</strong><span>Blue side</span></div>
+              <b>{compositionNumber(contribution?.blue.signal ?? null)}</b>
+            </div>
+            <span className={styles.compositionVs}>vs</span>
+            <div className={`${styles.compositionTeam} ${styles.compositionTeamRight}`}>
+              <b>{compositionNumber(contribution?.red.signal ?? null)}</b>
+              <div><strong>{redTeam}</strong><span>Red side</span></div>
+              <TeamMark team={redTeam} size="small" />
+            </div>
+          </div>
+          <div className={styles.compositionPicks}>
+            {ROLE_ORDER.map((role) => {
+              const blue = pickFor("Blue", role);
+              const red = pickFor("Red", role);
+              return (
+                <div className={styles.compositionPickRow} key={role}>
+                  <span className={styles.compositionRole}>{roleLabel(role)}</span>
+                  {[blue, red].map((pick) => (
+                    <div className={styles.compositionPick} key={`${pick?.side ?? "missing"}-${role}`}>
+                      <ChampionPortrait
+                        name={pick?.champion ?? null}
+                        imageUrl={pick?.champion ? championImages[pick.champion] : null}
+                      />
+                      <span>{pick?.champion ?? "—"}</span>
+                      <strong className={pick?.evidence_status === "available" ? styles.compositionAvailable : styles.compositionLimited}>
+                        {pick?.evidence_status === "available" ? compositionNumber(pick.contribution) : "Limited"}
+                      </strong>
+                      <small>{pick?.evidence_status === "available" ? `${pick.prior_role_games} prior role games` : `${pick?.prior_role_games ?? 0} prior role games`}</small>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+          <p className={styles.compositionNote}>{contribution?.note ?? "The signal uses information available before the game."}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function MatchRatingProfile({ game, championImages }: { game: ProfileGame; championImages: Record<string, string> }) {
   const gradesAvailable = game.players.some((player) => player.grade?.status === "available");
   const blueWon = game.blue_win === 1;
@@ -375,6 +461,12 @@ export function MatchRatingProfile({ game, championImages }: { game: ProfileGame
           </aside>
         ) : <p>Player grades will appear when Oracle&apos;s Elixir supplies a complete stat line.</p>}
       </header>
+      <CompositionEvidence
+        contribution={game.draft_contribution}
+        blueTeam={game.blue_team}
+        redTeam={game.red_team}
+        championImages={championImages}
+      />
       <div className={styles.matchTeams}>
         {sides.map((side) => (
           <section className={styles.matchTeam} key={side.side}>

@@ -42,6 +42,7 @@ from lol_kills.export.upload_pack import (
 )
 from lol_kills.ratings.player_map_grades import CORE_INPUTS
 from lol_kills.etl.oe_database import TRANSFORM_VERSION
+from lol_kills.research.composition_signal import CompositionSignalError, validate_public_signal
 from lol_kills.refresh_ledger import worker_commit
 
 
@@ -559,6 +560,29 @@ def validate_public_identity(pack_dir: Path) -> dict[str, Any]:
             names = [str(row.get("player") or "").strip() for row in rows if isinstance(row, dict)]
             if len(names) != 10 or any(not name for name in names) or len(set(names)) != 10:
                 raise RefreshValidationError(f"profile game {key} contains malformed player identities")
+            expected_roles = {"top", "jungle", "mid", "bot", "support"}
+            side_roles: dict[str, set[str]] = {"Blue": set(), "Red": set()}
+            champions: list[str] = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    raise RefreshValidationError(f"profile game {key} contains a malformed player")
+                side = str(row.get("side") or "").strip().title()
+                role = str(row.get("role") or "").strip().casefold()
+                champion = str(row.get("champion") or "").strip().casefold()
+                if side not in side_roles or role not in expected_roles or not champion:
+                    raise RefreshValidationError(f"profile game {key} has an incomplete pick identity")
+                side_roles[side].add(role)
+                champions.append(champion)
+            if any(roles != expected_roles for roles in side_roles.values()) or len(set(champions)) != 10:
+                raise RefreshValidationError(f"profile game {key} has an invalid ten-pick identity")
+            signal = game.get("draft_contribution")
+            if signal is not None:
+                try:
+                    validate_public_signal(signal, game)
+                except CompositionSignalError as error:
+                    raise RefreshValidationError(
+                        f"profile game {key} has invalid composition evidence: {error}"
+                    ) from error
 
     return {
         "team_key_count": len(team_keys),
@@ -596,6 +620,14 @@ def validate_match_archive(pack_dir: Path) -> dict[str, int]:
                 raise RefreshValidationError(f"match archive game {game_id} is in the wrong year")
             if not profile_game_has_complete_stats(game):
                 raise RefreshValidationError(f"match archive game {game_id} has incomplete KDA")
+            signal = game.get("draft_contribution")
+            if signal is not None:
+                try:
+                    validate_public_signal(signal, game)
+                except CompositionSignalError as error:
+                    raise RefreshValidationError(
+                        f"match archive game {game_id} has invalid composition evidence: {error}"
+                    ) from error
             detail_ids.add(str(game_id))
         year_counts[str(year)] = len(games)
     if set(index_ids) != detail_ids:
