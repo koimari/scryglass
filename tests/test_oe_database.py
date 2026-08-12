@@ -225,6 +225,51 @@ def test_sync_rejects_disappearance_before_database_writes(tmp_path: Path) -> No
     assert database.imports == []
 
 
+def test_sync_accepts_reviewed_removed_games_and_drops_them_from_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+    parquet = tmp_path / "parquet"
+    rows = _game_rows("game-1", "2026-08-11T10:00:00Z")
+    rows.extend(_game_rows("game-2", "2026-08-11T11:00:00Z"))
+    rows.extend(_game_rows("game-3", "2026-08-11T12:00:00Z"))
+    pd.DataFrame(rows).to_csv(path, index=False)
+    database = FakeDatabase()
+
+    first = oe_database.sync_csv(
+        path,
+        2026,
+        project_url="https://example.supabase.co",
+        secret_key="sb_secret_unused_in_fake_database",
+        parquet_dir=parquet,
+        client=database,
+    )
+    assert first["accepted_games"] == 3
+
+    monkeypatch.setattr(
+        oe_database, "REVIEWED_REMOVED_GAME_IDS", {"game-3": "test revision"}
+    )
+    rows = _game_rows("game-1", "2026-08-11T10:00:00Z")
+    rows.extend(_game_rows("game-2", "2026-08-11T11:00:00Z"))
+    pd.DataFrame(rows).to_csv(path, index=False)
+
+    second = oe_database.sync_csv(
+        path,
+        2026,
+        project_url="https://example.supabase.co",
+        secret_key="sb_secret_unused_in_fake_database",
+        parquet_dir=parquet,
+        client=database,
+    )
+
+    assert second["accepted_games"] == 2
+    assert second["new_games"] == 0
+    players = pd.read_parquet(parquet / "oe_player_games.parquet")
+    teams = pd.read_parquet(parquet / "oe_team_games.parquet")
+    assert "game-3" not in set(players["gameid"].astype(str))
+    assert "game-3" not in set(teams["gameid"].astype(str))
+
+
 def test_database_migration_keeps_oe_tables_private() -> None:
     migration_dir = (
         Path(__file__).resolve().parents[1]

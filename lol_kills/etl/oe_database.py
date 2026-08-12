@@ -648,7 +648,7 @@ def update_local_cache(prepared: PreparedImport, parquet_dir: Path) -> dict[str,
     stale_ids = (
         local_team_ids.union(local_player_ids)
         .difference(source_ids)
-        .intersection(set(prepared.source_game_ids))
+        .intersection(set(prepared.source_game_ids).union(REVIEWED_REMOVED_GAME_IDS))
     )
     remove_ids = changed_ids.union(stale_ids)
     if remove_ids:
