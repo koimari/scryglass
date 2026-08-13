@@ -1017,6 +1017,7 @@ class FittedCompositionModel:
     regularization_c: float = REGULARIZATION_C
     worker_commit: str | None = None
     atom_prior: dict[str, Any] | None = None
+    code_digest: str | None = None
 
     def coefficient(self, role: str, champion: str) -> float:
         key = f"draft|{role}|{_champion(champion)}"
@@ -1060,6 +1061,7 @@ class FittedCompositionModel:
             "support": self.support,
             "train_games": self.train_games,
             "worker_commit": self.worker_commit,
+            "code_digest": self.code_digest,
             "atom_prior": self.atom_prior,
         }
 
@@ -1077,6 +1079,7 @@ class FittedCompositionModel:
             train_games=int(payload["train_games"]),
             regularization_c=float(payload.get("regularization_c") or REGULARIZATION_C),
             worker_commit=str(payload.get("worker_commit") or "") or None,
+            code_digest=str(payload.get("code_digest") or "") or None,
             atom_prior=(
                 dict(payload["atom_prior"])
                 if isinstance(payload.get("atom_prior"), dict)
@@ -1131,6 +1134,7 @@ def _fit_model(
         train_games=len(usable),
         regularization_c=float(regularization_c),
         worker_commit=worker_commit,
+        code_digest=_composition_code_digest(),
         atom_prior=atom_prior,
     )
 
@@ -1409,7 +1413,9 @@ def _load_or_fit(
                 cached = FittedCompositionModel.from_json(
                     json.loads(candidate_path.read_text(encoding="utf-8"))
                 )
-                if cached.worker_commit == worker_commit:
+                if cached.worker_commit == worker_commit or (
+                    cached.code_digest and cached.code_digest == _composition_code_digest()
+                ):
                     return cached, True
             except (OSError, ValueError, KeyError, TypeError, CompositionSignalError):
                 pass
