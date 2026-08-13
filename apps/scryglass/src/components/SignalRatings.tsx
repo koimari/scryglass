@@ -45,7 +45,7 @@ type Props = {
   availableLeaguesByTier: Record<CompetitionTier, string[]>;
   championImages: Record<string, string>;
   playerChampionPicks: Record<string, ChampionPick[]>;
-  recentForms: Record<Tab, Record<string, boolean[]>>;
+  recentForms: { teams: Record<string, boolean[]>; players: Record<string, boolean[]> };
   teamChampionPicks: Record<string, ChampionPick[]>;
 };
 
@@ -208,7 +208,7 @@ export function SignalRatings({
   const featured = entities.find((entity) => entityName(entity) === selected) ?? entities[0];
   const featuredName = featured ? entityName(featured) : "";
   const featuredRecord = featuredName ? (tab === "teams" ? teamRecords[featuredName] : playerRecords[featuredName]) : undefined;
-  const featuredForm = recentForms[tab][featuredName] ?? [];
+  const featuredForm = (tab === "draft" ? [] : recentForms[tab][featuredName] ?? []);
   const featuredTrust = featured
     ? evidenceInfo(
         evidenceFields(featured as unknown as Record<string, unknown>),
@@ -360,7 +360,7 @@ export function SignalRatings({
               {visible.map((entity, index) => {
                 const name = entityName(entity);
                 const record = tab === "teams" ? teamRecords[name] : playerRecords[name];
-                const form = recentForms[tab][name] ?? [];
+                const form = (tab === "draft" ? [] : recentForms[tab][name] ?? []);
                 const entityTeam = tab === "teams" ? name : (record as PlayerRecord | undefined)?.current_team ?? (entity as PlayerRating).last_team;
                 return (
                   <Link className={styles.ratingCard} href={tab === "teams" ? `/elo/team/${teamSlug(name)}` : `/elo/player/${playerSlug(name)}`} key={name}>
