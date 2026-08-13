@@ -1,0 +1,166 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { draftRankingsFromProfile, filterDraftRankings } from "./draftRankings";
+import type { ProfileRecords } from "./pack";
+
+function game(
+  id: string,
+  blueTeam: string,
+  redTeam: string,
+  blueSignal: number,
+  redSignal: number,
+  status: "available" | "limited" = "available",
+) {
+  return {
+    game_id: id,
+    date: "2026-08-01",
+    league: "LCK",
+    competition_tier: "tier1",
+    blue_team: blueTeam,
+    red_team: redTeam,
+    blue_win: 1 as const,
+    players: [
+      { player: "BlueMid", side: "Blue" as const, role: "mid", champion: "Ahri", kills: null, deaths: null, assists: null },
+      { player: "RedMid", side: "Red" as const, role: "mid", champion: "Azir", kills: null, deaths: null, assists: null },
+    ],
+    draft_contribution: {
+      schema_version: "scryglass:composition-signal:v1" as const,
+      status,
+      model_version: "test",
+      fit_through: null,
+      blue: { signal: blueSignal, prior_role_games: 10 },
+      red: { signal: redSignal, prior_role_games: 10 },
+      picks: [
+        { side: "Blue" as const, role: "mid", champion: "Ahri", contribution: 0.2, prior_role_games: 10, evidence_status: "available" as const },
+        { side: "Red" as const, role: "mid", champion: "Azir", contribution: -0.1, prior_role_games: 10, evidence_status: "available" as const },
+      ],
+      note: "test",
+    },
+  };
+}
+
+test("derives team and player rankings when the leaderboard asset is missing", () => {
+  const games = Object.fromEntries(
+    Array.from({ length: 5 }, (_, index) => [
+      `game-${index}`,
+      game(`game-${index}`, "Team A", "Team B", 0.5, 0.1),
+    ]),
+  );
+  const records = {
+    schema_version: "scryglass:profile-records:v2",
+    window_days: 120,
+    champion_images: {},
+    players: {},
+    teams: {},
+    games,
+  } satisfies ProfileRecords;
+
+  const result = draftRankingsFromProfile(records);
+  assert.equal(result.scope, "profile_window");
+  assert.equal(result.evidenceGames, 5);
+  assert.deepEqual(result.teams, [
+    { team: "Team A", games: 5, draft_win_share: 0.5987, draft_edge: 0.4, league: "LCK", tier: "tier1" },
+    { team: "Team B", games: 5, draft_win_share: 0.4013, draft_edge: -0.4, league: "LCK", tier: "tier1" },
+  ]);
+  assert.deepEqual(result.players, [
+    { player: "BlueMid", games: 5, draft_score: 0.2, best_pick_rate: 1, role: "mid", team: "Team A", league: "LCK", tier: "tier1" },
+    { player: "RedMid", games: 5, draft_score: -0.1, best_pick_rate: 1, role: "mid", team: "Team B", league: "LCK", tier: "tier1" },
+  ]);
+});
+
+test("ranks players by the share of highest-contribution picks", () => {
+  const games = Object.fromEntries(
+    Array.from({ length: 5 }, (_, index) => {
+      const value = game(`best-${index}`, "Team A", "Team B", 0.5, 0.1);
+      value.draft_contribution!.picks[0].contribution = index < 4 ? 0.2 : -0.2;
+      value.draft_contribution!.picks[1].contribution = 0.1;
+      value.players.push(
+        { player: "BlueTop", side: "Blue" as const, role: "top", champion: "Gnar", kills: null, deaths: null, assists: null },
+        { player: "RedTop", side: "Red" as const, role: "top", champion: "Ornn", kills: null, deaths: null, assists: null },
+      );
+      value.draft_contribution!.picks.push(
+        { side: "Blue" as const, role: "top", champion: "Gnar", contribution: 0.1, prior_role_games: 10, evidence_status: "available" as const },
+        { side: "Red" as const, role: "top", champion: "Ornn", contribution: 0.2, prior_role_games: 10, evidence_status: "available" as const },
+      );
+      return [`best-${index}`, value];
+    }),
+  );
+  const records = {
+    schema_version: "scryglass:profile-records:v2",
+    window_days: 120,
+    champion_images: {},
+    players: {},
+    teams: {},
+    games,
+  } satisfies ProfileRecords;
+
+  const result = draftRankingsFromProfile(records);
+  assert.equal(result.players[0]?.player, "RedTop");
+  assert.equal(result.players.find((row) => row.player === "BlueMid")?.best_pick_rate, 0.8);
+  assert.equal(result.players.find((row) => row.player === "BlueTop")?.best_pick_rate, 0.2);
+});
+
+test("accepts the limited status and normalizes role abbreviations", () => {
+  const games = Object.fromEntries(
+    Array.from({ length: 5 }, (_, index) => [
+      `game-${index}`,
+      game(`game-${index}`, "Team A", "Team B", 0.2, 0.1),
+    ]),
+  );
+  const record = games["game-0"];
+  record.draft_contribution!.status = "limited";
+  for (const value of Object.values(games)) {
+    value.draft_contribution!.picks[0].role = "jng";
+    value.players[0].role = "jungle";
+  }
+  const records = {
+    schema_version: "scryglass:profile-records:v2",
+    window_days: 0,
+    champion_images: {},
+    players: {},
+    teams: {},
+    games,
+  } satisfies ProfileRecords;
+
+  const result = draftRankingsFromProfile(records);
+  assert.equal(result.scope, "whole_archive");
+  assert.equal(result.evidenceGames, 5);
+  assert.equal(result.players[0]?.role, "jungle");
+});
+
+test("filters scoped rows and aggregates teams across selected leagues", () => {
+  const records = {
+    schema_version: "scryglass:profile-records:v2",
+    window_days: 120,
+    champion_images: {},
+    players: {},
+    teams: {},
+    games: {
+      ...Object.fromEntries(Array.from({ length: 5 }, (_, index) => [`lck-${index}`, game(`lck-${index}`, "Team A", "Team B", 0.5, 0.1)])),
+      ...Object.fromEntries(Array.from({ length: 5 }, (_, index) => [`lec-${index}`, { ...game(`lec-${index}`, "Team A", "Team C", 0.1, 0.0), league: "LEC" }])),
+    },
+  } satisfies ProfileRecords;
+  const result = draftRankingsFromProfile(records);
+  const lck = filterDraftRankings(result, { leagues: ["LCK"], minGames: 5 });
+  assert.equal(lck.teams.length, 2);
+  assert.equal(lck.teams[0]?.team, "Team A");
+  const all = filterDraftRankings(result, { leagues: [], minGames: 5 });
+  assert.equal(all.teams[0]?.team, "Team A");
+});
+
+test("marks a profile payload as whole archive when it contains older games", () => {
+  const games = Object.fromEntries(Array.from({ length: 5 }, (_, index) => {
+    const value = game(`archive-${index}`, "Team A", "Team B", 0.5, 0.1);
+    value.date = index === 0 ? "2025-01-01" : "2026-08-01";
+    return [`archive-${index}`, value];
+  }));
+  const records = {
+    schema_version: "scryglass:profile-records:v2",
+    window_days: 120,
+    champion_images: {},
+    players: {},
+    teams: {},
+    games,
+  } satisfies ProfileRecords;
+  assert.equal(draftRankingsFromProfile(records).scope, "whole_archive");
+});

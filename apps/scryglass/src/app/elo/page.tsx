@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { SignalRatings, type DraftPlayerRow, type DraftTeamRow } from "@/components/SignalRatings";
+import { SignalRatings } from "@/components/SignalRatings";
 import type {
   CompetitionTier,
   PlayerChampionRecord,
@@ -21,6 +21,7 @@ import {
   packSourceUpdatedLabel,
   packUpdatedLabel,
 } from "@/lib/pack";
+import { draftRankingsFromProfile, type DraftPlayerRow, type DraftRankingsScope, type DraftTeamRow } from "@/lib/draftRankings";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 import styles from "./EloPage.module.css";
 
@@ -44,10 +45,14 @@ export default async function EloPage() {
   let profileRecords: ProfileRecords | null = null;
   let draftTeams: DraftTeamRow[] = [];
   let draftPlayers: DraftPlayerRow[] = [];
+  let draftScope: DraftRankingsScope = "whole_archive";
+  let draftEvidenceGames: number | null = null;
+  let draftAssetLoaded = false;
   try {
     const leaderboards = await readPackJson<{ teams_draft?: DraftTeamRow[]; players_draft?: DraftPlayerRow[] }>(man, "features/leaderboards.json");
     draftTeams = leaderboards.teams_draft ?? [];
     draftPlayers = leaderboards.players_draft ?? [];
+    draftAssetLoaded = true;
   } catch {
     // draft rankings are optional
   }
@@ -88,6 +93,16 @@ export default async function EloPage() {
     profileRecords = await readPackJson<ProfileRecords>(man, "features/profile_records.json");
   } catch {
     profileRecords = null;
+  }
+
+  const fallbackDraft = profileRecords ? draftRankingsFromProfile(profileRecords) : null;
+  const draftAssetHasScopes = draftTeams.some((row) => row.tier || row.league)
+    || draftPlayers.some((row) => row.tier || row.league);
+  if (fallbackDraft && (!draftAssetLoaded || !draftAssetHasScopes)) {
+    draftTeams = fallbackDraft.teams;
+    draftPlayers = fallbackDraft.players;
+    draftScope = fallbackDraft.scope;
+    draftEvidenceGames = fallbackDraft.evidenceGames;
   }
 
   const activeTeamNames = new Set(
@@ -221,6 +236,9 @@ export default async function EloPage() {
         <SignalRatings
           draftTeams={draftTeams}
           draftPlayers={draftPlayers}
+          draftScope={draftScope}
+          draftWindowDays={draftScope === "profile_window" ? profileRecords?.window_days ?? null : null}
+          draftEvidenceGames={draftEvidenceGames}
           teams={teams}
           players={players}
           teamRecords={teamRecords}

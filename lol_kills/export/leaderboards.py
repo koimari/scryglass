@@ -12,6 +12,7 @@ Nothing here touches ratings math; it only aggregates already-public payloads.
 from __future__ import annotations
 
 import json
+import math
 from typing import Any, Mapping
 
 LEADERBOARDS_SCHEMA = "scryglass:leaderboards:v1"
@@ -29,9 +30,12 @@ def _number(value: object) -> float | None:
 
 
 def _finite(value: float) -> bool:
-    import math
-
     return math.isfinite(value)
+
+
+def _sigmoid(value: float) -> float:
+    """Map the published descriptive edge to its display win-share scale."""
+    return 1.0 / (1.0 + math.exp(-value))
 
 
 def _grade_a_games(
@@ -185,7 +189,7 @@ def _teams_draft(draft_records: Mapping[str, Any] | None) -> list[dict[str, Any]
     games = draft_records.get("games")
     if not isinstance(games, Mapping):
         return []
-    by_team: dict[str, list[float]] = {}
+    by_team: dict[str, list[tuple[float, float]]] = {}
     for game in games.values():
         if not isinstance(game, Mapping):
             continue
@@ -194,26 +198,31 @@ def _teams_draft(draft_records: Mapping[str, Any] | None) -> list[dict[str, Any]
         edge = game.get("draft_edge")
         if not isinstance(edge, (int, float)):
             continue
+        edge_value = float(edge)
+        blue_share = _sigmoid(edge_value)
         if blue:
-            by_team.setdefault(blue, []).append(float(edge))
+            by_team.setdefault(blue, []).append((edge_value, blue_share))
         if red:
-            by_team.setdefault(red, []).append(-float(edge))
+            by_team.setdefault(red, []).append((-edge_value, 1.0 - blue_share))
     rows = []
-    for team, edges in by_team.items():
-        games_n = len(edges)
+    for team, evidence in by_team.items():
+        games_n = len(evidence)
         if games_n < 5:
             continue
+        edges = [edge for edge, _ in evidence]
+        shares = [share for _, share in evidence]
         rows.append({
             "team": team,
             "games": games_n,
             "draft_edge": round(sum(edges) / games_n, 4),
+            "draft_win_share": round(sum(shares) / games_n, 4),
         })
-    rows.sort(key=lambda row: -row["draft_edge"])
+    rows.sort(key=lambda row: (-row["draft_win_share"], -row["draft_edge"], -row["games"], row["team"]))
     return rows[:TOP_LIMIT]
 
 
 def _players_draft(players: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Players ranked by mean draft score (pick contribution) across the archive."""
+    """Players ranked by the share of highest-contribution picks."""
     rows = []
     for entry in players:
         if not isinstance(entry, Mapping):
@@ -221,16 +230,23 @@ def _players_draft(players: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]
         name = str(entry.get("player") or "").strip()
         games_n = int(entry.get("games") or 0)
         score = _number(entry.get("draft_score"))
+        best_pick_rate = _number(entry.get("best_pick_rate"))
         if not name or games_n < 5 or score is None:
             continue
         rows.append({
             "player": name,
             "games": games_n,
             "draft_score": round(score, 4),
+            "best_pick_rate": round(best_pick_rate, 4) if best_pick_rate is not None else None,
             "role": str(entry.get("role") or "").strip() or None,
             "team": str(entry.get("team") or "").strip() or None,
         })
-    rows.sort(key=lambda row: -row["draft_score"])
+    rows.sort(key=lambda row: (
+        -(row["best_pick_rate"] if row["best_pick_rate"] is not None else float("-inf")),
+        -row["games"],
+        -row["draft_score"],
+        row["player"],
+    ))
     return rows[:TOP_LIMIT]
 
 def build_leaderboards(
