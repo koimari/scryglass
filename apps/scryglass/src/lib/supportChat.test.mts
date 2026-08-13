@@ -6,7 +6,7 @@ import {
   routeQuestion,
   TOOLS,
   type ToolName,
-} from "./supportChat.ts";
+} from "./supportChat";
 
 const EXAMPLES: Array<{ question: string; tool: ToolName; args: Record<string, string> }> = [
   { question: "who is the player with most A grade games", tool: "query_players", args: { q: "who is the player with most A grade games" } },

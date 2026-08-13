@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { playerPortrait } from "./playerPortraits.ts";
+import { playerPortrait } from "./playerPortraits";
 
 test("uses team context to resolve duplicate player handles", () => {
   const viper = playerPortrait("Viper", "Bilibili Gaming");

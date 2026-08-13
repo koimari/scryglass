@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { METHODOLOGY_SECTIONS, NAVIGATION_HELP, matchTopic } from "./supportContent.ts";
+import { METHODOLOGY_SECTIONS, NAVIGATION_HELP, matchTopic } from "./supportContent";
 
 test("methodology sections cover every topic", () => {
   for (const topic of ["ratings", "grades", "tiers", "draft", "matches", "schedule", "elo", "all"]) {

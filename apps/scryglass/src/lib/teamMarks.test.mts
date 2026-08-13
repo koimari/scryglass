@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { teamInitials, teamMarkUrl } from "./teamMarks.ts";
+import { teamInitials, teamMarkUrl } from "./teamMarks";
 
 test("returns original transparent PNG marks for published teams", () => {
   assert.match(teamMarkUrl("Gen.G") ?? "", /Gen\.Glogo_square\.png\/revision\/latest\?format=original$/);

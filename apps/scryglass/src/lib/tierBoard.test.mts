@@ -12,7 +12,7 @@ import {
   type StructuralSimilarity,
   type TierRow,
   type TierScope,
-} from "./tierBoard.ts";
+} from "./tierBoard";
 
 function row(overrides: Partial<TierRow> = {}): TierRow {
   return {
