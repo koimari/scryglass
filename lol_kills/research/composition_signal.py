@@ -267,6 +267,107 @@ _ATOM_DEPTH3_PATH = (
     / "atom-corpus-aggregate-v3.json"
 )
 _ATOM_DEPTH3_CACHE: dict[str, dict[str, float]] | None = None
+_ATOM_DEPTH4_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "data"
+    / "lol"
+    / "v2"
+    / "champions"
+    / "atom-corpus-aggregate-v4.json"
+)
+_DEPTH4_KEYS = (
+    "d4_dmg_cd", "d4_burst_cd", "d4_cd_uptime", "d4_cd_x_uptime",
+    "d4_recast_share", "d4_channel_share", "d4_cast_share", "d4_impact_share",
+    "d4_travel_share", "d4_aftermath_share", "d4_persistent_share", "d4_chain_len",
+)
+_ATOM_DEPTH4_CACHE: dict[str, dict[str, float]] | None = None
+
+
+def _atom_depth4_index() -> dict[str, dict[str, float]]:
+    """The depth-4 atom index (per-champion d4_* ability/state descriptors).
+
+    Built from atom-corpus-aggregate-v4.json; falls back to an empty index
+    when the corpus is absent so older checkouts keep working.
+    """
+    global _ATOM_DEPTH4_CACHE
+    if _ATOM_DEPTH4_CACHE is None:
+        try:
+            payload = json.loads(_ATOM_DEPTH4_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            payload = {}
+        _ATOM_DEPTH4_CACHE = {
+            str(key): {str(k): float(v) for k, v in dict(entry).items()}
+            for key, entry in (payload.get("champions") or {}).items()
+            if isinstance(entry, dict)
+        }
+    return _ATOM_DEPTH4_CACHE
+
+
+def _depth4_keys() -> list[str]:
+    index = _atom_depth4_index()
+    keys: list[str] = []
+    for entry in index.values():
+        for key in entry:
+            if key not in keys:
+                keys.append(key)
+    return sorted(keys)
+
+
+def _depth4_game_row(game: Mapping[str, Any]) -> np.ndarray:
+    index = _atom_depth4_index()
+
+    def mean_of(side: str, key: str) -> float:
+        values = [
+            index.get(_corpus_slug(str(game[side][role].get("champion") or "")), {}).get(key, 0.0)
+            for role in ROLES
+        ]
+        return float(np.mean(values)) if values else 0.0
+
+    return np.asarray([mean_of("blue", key) - mean_of("red", key) for key in _depth4_keys()], dtype=float)
+
+
+# State-space team dynamics (Glicko-2-lite), strictly prior: the feature is
+# read from the state BEFORE this game's outcome updates it.
+_SS_KEYS = ("ss_mu_diff", "ss_sig_diff", "ss_p_diff", "ss_vol_diff")
+
+
+def _build_ss_rows(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.ndarray]:
+    rows: dict[str, np.ndarray] = {}
+    state: dict[str, dict[str, float]] = {}
+
+    def get_team(team: str) -> dict[str, float]:
+        entry = state.get(team)
+        if entry is None:
+            entry = {"mu": 1500.0, "sig": 350.0, "vol": 0.5}
+            state[team] = entry
+        return entry
+
+    for game in ordered_games:
+        blue_team = str(game.get("blue_team") or "").strip()
+        red_team = str(game.get("red_team") or "").strip()
+        b = get_team(blue_team)
+        r = get_team(red_team)
+        scale = 400.0
+        expected = 1.0 / (1.0 + 10 ** ((r["mu"] - b["mu"]) / scale))
+        rows[str(game.get("game_uid"))] = np.asarray([
+            b["mu"] - r["mu"],
+            b["sig"] - r["sig"],
+            expected - 0.5,
+            b["vol"] - r["vol"],
+        ], dtype=float)
+        outcome = int(game.get("y") or 0)
+        k = 0.35
+        b["mu"] += k * scale * (outcome - expected)
+        r["mu"] -= k * scale * (outcome - expected)
+        residual = abs(outcome - expected)
+        for entry in (b, r):
+            entry["vol"] = 0.9 * entry["vol"] + 0.1 * residual
+            entry["sig"] = max(40.0, entry["sig"] * 0.995)
+    return rows
+
+
+def _ss_game_row(game: Mapping[str, Any], rows: Mapping[str, np.ndarray]) -> np.ndarray:
+    return rows.get(str(game.get("game_uid")), np.zeros(len(_SS_KEYS)))
 
 
 def _atom_depth3_index() -> dict[str, dict[str, float]]:
@@ -1948,6 +2049,7 @@ def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.
     """One date-ordered strictly-prior pass; every feature uses prior games only."""
     global _FRONTIER_NAMES, _FRONTIER
     bans = _ban_table(ordered_games)
+    ss_rows = _build_ss_rows(ordered_games)
 
     patch_first: dict[str, pd.Timestamp] = {}
     for game in ordered_games:
@@ -1983,6 +2085,8 @@ def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.
         "corp_counters",
         *[f"d2_{key}" for key in _depth2_keys()],
         *[f"d3_{key}" for key in _depth3_keys()],
+        *[f"d4_{key}" for key in _depth4_keys()],
+        *[f"ss_{name}" for name in _SS_KEYS],
         *[f"l7_{name}" for name in ("ccm", "dmg", "heal", "int", "stack", "vision")],
         *[f"l7r_{role}_{name}" for role in ROLES for name in ("ccm", "dmg", "heal", "int", "stack", "vision")],
     ]
@@ -2091,6 +2195,8 @@ def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.
         row.extend(_corpus_game_features(game))
         row.extend(_depth2_game_row(game))
         row.extend(_depth3_game_row(game))
+        row.extend(_depth4_game_row(game))
+        row.extend(_ss_game_row(game, ss_rows))
 
         # L7 row from PRIOR player profiles (strictly prior: read before update)
         def l7_team(players: Sequence[str], champs: Sequence[str], team_outcome: float) -> list[np.ndarray]:
