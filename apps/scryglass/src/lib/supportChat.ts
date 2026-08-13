@@ -10,6 +10,8 @@
 
 export type ToolName =
   | "query_players"
+  | "query_champions"
+  | "query_drafts"
   | "leaderboards"
   | "player"
   | "compare_players"
@@ -31,6 +33,8 @@ export type ToolSpec = {
 
 export const TOOLS: ToolSpec[] = [
   { name: "query_players", description: "General player-data query. Use for named player comparisons, filtered player rankings, ratings, win rates, experience, A grades, and best-player-on-champion questions. The server resolves entities and executes a validated query plan against published data.", args: [{ name: "q", description: "the complete original player question" }] },
+  { name: "query_champions", description: "Aggregate champion rankings across active published player-champion records. Use for general best, worst, top, bottom, most played, or role-filtered champion questions. The response states its tier and sample floor.", args: [{ name: "q", description: "the complete original champion question" }] },
+  { name: "query_drafts", description: "Rank team draft scores in either direction or compare two named teams over their published draft history. Use for best, worst, top, bottom, named-team, between-team, or versus-team draft-score questions. The response states the active profile window and sample floor.", args: [{ name: "q", description: "the complete original team draft-score question" }] },
   { name: "leaderboards", description: "Top players by A-grade games, rating, or win rate; optionally filtered by role and competitive tier.", args: [{ name: "category", description: "a_grades | rating | win_rate | teams" }, { name: "role", description: "top | jng | mid | bot | sup (optional)" }, { name: "tier", description: "tier1 | tier2 | tier3 (optional; use tier1 by default)" }, { name: "limit", description: "number of results (optional)" }] },
   { name: "player", description: "Player profile: rating, role, team, grades, win rate, recent form.", args: [{ name: "name", description: "player name" }] },
   { name: "compare_players", description: "Compare the ratings of two named players and answer which rating is higher.", args: [{ name: "player1", description: "first player name" }, { name: "player2", description: "second player name" }] },
@@ -114,6 +118,31 @@ function ratingTarget(text: string): string | null {
   return null;
 }
 
+function deterministicDataRoute(text: string): RouteResult | null {
+  const lower = text.toLowerCase();
+  if (/\bdraft\s+(?:score|scores|points?|pts|ranking|rankings)\b/.test(lower)) {
+    return { call: { tool: "query_drafts", args: { q: text.trim() } } };
+  }
+  if (
+    /[’']s\s+(?:best|worst|top|bottom|highest|lowest|most|least|median|average|middle)\b.*\bchampions?\b/i.test(text)
+    || /\b(?:rank|show|list)\b.*[’']s\s+champions?\b/i.test(text)
+    || (
+      /\b(?:best|worst|top|bottom|highest|lowest|most|least|median|average|middle)\b.*\bchampions?\b.*\b(?:for|of)\b/i.test(text)
+      && !/\b(?:patch|overall|general|all time)\b/i.test(text)
+    )
+  ) {
+    return { call: { tool: "query_players", args: { q: text.trim() } } };
+  }
+  if (
+    /\bchampions?\b/.test(lower)
+    && /\b(?:best|worst|top|bottom|highest|lowest|most|least|median|average|middle|rank|ranking|played)\b/.test(lower)
+    && !/\b(?:this patch|in patch|current patch)\b/.test(lower)
+  ) {
+    return { call: { tool: "query_champions", args: { q: text.trim() } } };
+  }
+  return null;
+}
+
 function comparisonTargets(text: string): [string, string] | null {
   const patterns = [
     /better\s+rating\s*[,;:]?\s*(.+?)\s+(?:or|vs\.?|versus)\s+(.+?)\s*\??$/i,
@@ -131,6 +160,9 @@ function comparisonTargets(text: string): [string, string] | null {
 
 export function fallbackRoute(text: string): RouteResult {
   const lower = text.toLowerCase();
+
+  const deterministic = deterministicDataRoute(text);
+  if (deterministic) return deterministic;
 
   const generalPlayerQuery = /(player|laner|jungler|support|adc|rating|rated|win rate|\bwr\b|a grade|best .* on|best .* player|better|compare|between|(?:best|top|highest).*\b(?:mid|top|jungle|bot|support)\b|tier\s*[123].*\b(?:mid|top|jungle|bot|support)\b)/.test(lower)
     && !/(rating of \d|rated \d|with a rating)/.test(lower)
@@ -249,7 +281,7 @@ export function fallbackRoute(text: string): RouteResult {
     return name ? { call: { tool: "player", args: { name } } } : { call: { tool: "leaderboards", args: { category: "rating" } } };
   }
 
-  return { explanation: "I can help with players, teams, matches, ratings, tier lists, schedules, and methodology. Try: \"who is the player with the most A grade games?\", \"show me T1's recent matches\", or \"how does the draft win share work?\"." };
+  return { explanation: "I can help with players, champions, teams, matches, ratings, draft scores, tier lists, schedules, and methodology. Try: \"what is the worst champion in general?\", \"show me T1's recent matches\", or \"how does the draft win share work?\"." };
 }
 
 // --- Cactus / Needle WASM adapter ------------------------------------------
@@ -295,6 +327,8 @@ export async function needleRoute(text: string): Promise<RouteResult | null> {
   const prompt = [
     "You route a question about the Scryglass League of Legends data site to exactly one tool.",
     "Prefer query_players for any question that compares, filters, ranks, or evaluates players. Pass the complete original question as q.",
+    "Use query_drafts for team draft-score rankings or comparisons between two named teams. Pass the complete original question as q.",
+    "Use query_champions for general champion rankings. Pass the complete original question as q.",
     "TOOLS:\n" + schema,
     "Respond with ONLY a JSON object: {\"tool\": \"<name>\", \"args\": {\"<arg>\": \"<value>\"}}.",
     "If the question is off-topic or ambiguous, respond {\"explanation\": \"...\"}.",
@@ -316,6 +350,8 @@ export async function needleRoute(text: string): Promise<RouteResult | null> {
 /** Route a question: prefer the on-device model, fall back deterministically. */
 export async function routeQuestion(text: string): Promise<RouteResult> {
   if (!text.trim()) return { explanation: "Ask me anything about players, teams, matches, ratings, tiers, schedules, or methodology." };
+  const deterministic = deterministicDataRoute(text);
+  if (deterministic) return deterministic;
   const routed = await needleRoute(text);
   if (routed) return routed;
   return fallbackRoute(text);

@@ -25,7 +25,7 @@ test("chat route, scrolling, expansion, and floating resize work", async ({ page
   await expect(chat).toHaveCSS("position", "fixed");
   await page.getByRole("button", { name: "Restore chat size" }).click();
 
-  await page.goto("/");
+  await page.goto("/elo");
   await page.getByRole("button", { name: "Open Ask Scryglass" }).click();
   const floatingChat = page.getByRole("region", { name: "Ask Scryglass" });
   await expect(floatingChat).toHaveCSS("resize", "both");
@@ -50,6 +50,37 @@ test("reported player questions return constrained answers and proof rows", asyn
   await expect(champion.getByTestId("player-query-basis")).toContainText("95% Wilson lower bound");
   await expect(champion.getByTestId("player-query-caveat")).toContainText("descriptive player-champion record");
   await expect(champion.locator("thead")).toContainText("Champion games");
+
+  const worstPlayerChampion = await ask(page, "what is Inspired's worst champion?");
+  await expect(worstPlayerChampion.getByTestId("player-query-headline")).toContainText("Inspired");
+  await expect(worstPlayerChampion.getByTestId("player-query-headline")).toContainText("lowest");
+  await expect(worstPlayerChampion.locator("thead")).toContainText("Champion");
+  await expect(worstPlayerChampion.locator("tbody tr").first()).toContainText("Skarner");
+
+  const median = await ask(page, "what is Faker's most median performance champion?");
+  await expect(median.getByTestId("player-query-headline")).toContainText("Faker");
+  await expect(median.getByTestId("player-query-headline")).toContainText("median-performance");
+  await expect(median.locator("tbody tr").first()).toContainText("Annie");
+
+  await page.getByLabel("Ask a question").fill("what is the worst champion in general?");
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  const championRanking = page.getByTestId("champion-query-result");
+  await expect(championRanking).toHaveCount(1);
+  await expect(championRanking.getByTestId("champion-query-headline")).toContainText("lowest");
+  await expect(championRanking.locator("thead")).toContainText("Champion");
+
+  await page.getByLabel("Ask a question").fill("which team has the best draft score");
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  const draftRanking = page.getByTestId("team-draft-query-result");
+  await expect(draftRanking).toHaveCount(1);
+  await expect(draftRanking.getByTestId("team-draft-query-headline")).toContainText(/draft score/i);
+
+  await page.getByLabel("Ask a question").fill("which team has better draft score historically between T1 and Gen.G?");
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  const draftComparison = page.getByTestId("team-draft-comparison-result");
+  await expect(draftComparison).toHaveCount(1);
+  await expect(draftComparison.getByTestId("team-draft-query-headline")).toContainText(/T1|Gen\.G/);
+  await expect(draftComparison.getByTestId("team-draft-query-headline")).toContainText(/historical/i);
 
   const filtered = await ask(page, "best Tier 1 LCK mid with at least 100 games");
   await expect(filtered.getByTestId("player-query-basis")).toContainText("mid role, LCK, Tier 1, at least 100 games");

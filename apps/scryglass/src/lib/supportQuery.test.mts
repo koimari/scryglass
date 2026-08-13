@@ -28,7 +28,11 @@ const index = buildSupportQueryIndex({
     random: { wins: 10, games: 20, wr: 0.5, current_team: "Team Solid", current_league: "CD", current_tier: "tier1", primary_role: "mid" },
   },
   champions: {
-    Faker: [{ champion: "Galio", games: 30, wins: 24, wr: 0.8 }],
+    Faker: [
+      { champion: "Galio", games: 30, wins: 24, wr: 0.8 },
+      { champion: "Azir", games: 40, wins: 20, wr: 0.5 },
+      { champion: "Orianna", games: 20, wins: 13, wr: 0.65 },
+    ],
     Chovy: [{ champion: "Galio", games: 5, wins: 5, wr: 1 }],
     Knight: [{ champion: "Galio", games: 20, wins: 12, wr: 0.6 }],
   },
@@ -120,6 +124,76 @@ test("best-rated champion question orders overall rating within champion evidenc
   const result = executeQueryPlan(planned.plan, index);
   assert.equal(result.rows[0].name, "Chovy");
   assert.equal(result.plan.orderBy[0].field, "rating");
+});
+
+test("a named player's worst champion returns the ordered record set", () => {
+  const planned = planPlayerQuestion("what is Faker's worst champion?", index);
+  assert.ok(planned.ok);
+  assert.equal(planned.plan.dataset, "player_champions");
+  assert.deepEqual(planned.plan.orderBy[0], { field: "champion_win_rate", direction: "asc" });
+  assert.equal(planned.plan.limit, 20);
+  const result = executeQueryPlan(planned.plan, index);
+  assert.deepEqual(result.rows.map((row) => row.champion), ["Azir", "Orianna", "Galio"]);
+  assert.match(result.answer.headline, /Faker's lowest published champion win rate is 50% on Azir across 40 games/);
+});
+
+test("best and bottom N champion questions use the same bidirectional ranking", () => {
+  const best = planPlayerQuestion("show me Faker's best 2 champions", index);
+  const worst = planPlayerQuestion("show me Faker's bottom 2 champions", index);
+  assert.ok(best.ok);
+  assert.ok(worst.ok);
+  assert.deepEqual(executeQueryPlan(best.plan, index).rows.map((row) => row.champion), ["Galio", "Orianna"]);
+  assert.deepEqual(executeQueryPlan(worst.plan, index).rows.map((row) => row.champion), ["Azir", "Orianna"]);
+});
+
+test("a named player's champion list supports both full ordering phrases", () => {
+  const descending = planPlayerQuestion("list Faker's champions from best to worst", index);
+  const ascending = planPlayerQuestion("rank Faker's champions from worst to best", index);
+  assert.ok(descending.ok);
+  assert.ok(ascending.ok);
+  assert.deepEqual(executeQueryPlan(descending.plan, index).rows.map((row) => row.champion), ["Galio", "Orianna", "Azir"]);
+  assert.deepEqual(executeQueryPlan(ascending.plan, index).rows.map((row) => row.champion), ["Azir", "Orianna", "Galio"]);
+});
+
+test("median performance selects the champion closest to the player's median win rate", () => {
+  const planned = planPlayerQuestion("what is Faker's most median performance champion?", index);
+  assert.ok(planned.ok);
+  assert.equal(planned.plan.orderBy[0].field, "champion_median_distance");
+  assert.equal(planned.plan.orderBy[0].direction, "asc");
+  const result = executeQueryPlan(planned.plan, index);
+  assert.equal(result.rows[0].champion, "Orianna");
+  assert.match(result.answer.headline, /Faker's median-performance champion is Orianna at 65%/);
+});
+
+test("median performance uses the midpoint of an even champion sample", () => {
+  const planned = planPlayerQuestion("what is Faker's most median performance champion?", {
+    ...index,
+    playerChampions: index.playerChampions.filter((row) => ["Faker", "Galio", "Azir"].includes(row.name) && row.champion !== "Orianna"),
+  });
+  assert.ok(planned.ok);
+  const result = executeQueryPlan(planned.plan, {
+    ...index,
+    playerChampions: index.playerChampions.filter((row) => row.name === "Faker" && row.champion !== "Orianna"),
+  });
+  assert.equal(result.rows[0].champion, "Azir");
+  assert.match(result.answer.headline, /median champion win rate of 65%/);
+});
+
+test("median performance resolves a player introduced with for", () => {
+  const planned = planPlayerQuestion("what is the median performance champion for Faker?", index);
+  assert.ok(planned.ok);
+  assert.deepEqual(planned.plan.filters[0], { field: "name", op: "eq", value: "Faker" });
+  assert.equal(executeQueryPlan(planned.plan, index).rows[0].champion, "Orianna");
+});
+
+test("average performance also chooses the closest champion record", () => {
+  const planned = planPlayerQuestion("what is Faker's average performance champion?", index);
+  assert.ok(planned.ok);
+  assert.equal(planned.plan.orderBy[0].field, "champion_mean_distance");
+  assert.equal(planned.plan.orderBy[0].direction, "asc");
+  const result = executeQueryPlan(planned.plan, index);
+  assert.equal(result.rows[0].champion, "Orianna");
+  assert.match(result.answer.headline, /Faker's mean-performance champion is Orianna/);
 });
 
 test("filtered rankings apply dynamic league, role, tier, and games constraints", () => {
