@@ -24,5 +24,5 @@ test("navigation help lists the site pages with paths", () => {
   assert.ok(paths.includes("/matches"));
   assert.ok(paths.includes("/tiers"));
   assert.ok(paths.includes("/methodology"));
-  assert.ok(paths.includes("/support"));
+  assert.ok(paths.includes("/chat"));
 });

@@ -9,8 +9,30 @@ async function ask(page: Page, question: string) {
   return results.nth(previousCount);
 }
 
-test("reported player questions return constrained answers and proof rows", async ({ page }) => {
+test("chat route, scrolling, expansion, and floating resize work", async ({ page }) => {
   await page.goto("/support");
+  await expect(page).toHaveURL(/\/chat$/);
+  await expect(page.getByRole("link", { name: "Chat", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: "Ask Scryglass", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Ask Scryglass" })).toHaveCount(0);
+
+  const chat = page.getByRole("region", { name: "Ask Scryglass" });
+  const thread = page.getByRole("log", { name: "Chat messages" });
+  await expect(thread).toHaveAttribute("data-native-scroll", "true");
+
+  await page.getByRole("button", { name: "Expand chat" }).click();
+  await expect(page.getByRole("button", { name: "Restore chat size" })).toBeVisible();
+  await expect(chat).toHaveCSS("position", "fixed");
+  await page.getByRole("button", { name: "Restore chat size" }).click();
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open Ask Scryglass" }).click();
+  const floatingChat = page.getByRole("region", { name: "Ask Scryglass" });
+  await expect(floatingChat).toHaveCSS("resize", "both");
+});
+
+test("reported player questions return constrained answers and proof rows", async ({ page }) => {
+  await page.goto("/chat");
 
   const comparison = await ask(page, "who has better rating, Inspired or Faker?");
   await expect(comparison.getByTestId("player-query-headline")).toContainText(/Inspired|Faker/);
@@ -34,4 +56,8 @@ test("reported player questions return constrained answers and proof rows", asyn
   await expect(filtered.locator("tbody tr").first()).toContainText("Mid");
   await expect(filtered.locator("tbody tr").first()).toContainText("LCK");
   await expect(filtered.locator("tbody tr").first()).toContainText("Tier 1");
+
+  const thread = page.getByRole("log", { name: "Chat messages" });
+  await expect.poll(() => thread.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await expect.poll(() => thread.evaluate((element) => element.scrollTop > 0)).toBe(true);
 });
