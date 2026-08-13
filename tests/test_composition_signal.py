@@ -492,16 +492,17 @@ def test_ban_v2_builder_shape_and_strictly_prior() -> None:
 
 
 def test_frontier_is_strictly_prior_and_shaped() -> None:
-    from lol_kills.research.composition_signal import _build_frontier, _frontier_names, _frontier_rows, _depth2_keys
+    from lol_kills.research.composition_signal import _build_frontier, _frontier_names, _frontier_rows, _depth2_keys, _depth3_keys
     games = _games(*[_rows_with_extras(f"game-{index}", f"2026-01-{index + 1:02d}", index % 2) for index in range(6)])
     ordered = sorted(games, key=lambda game: (game["date"], game["game_uid"]))
     _build_frontier(ordered)
     names = _frontier_names()
-    # 67 round-5+L5 + 23 depth-2 descriptors + 6 L7 + 30 per-role L7 (l7r_*)
-    assert len(names) == 126
+    # 67 round-5+L5 + 23 depth-2 + 17 depth-3 descriptors + 6 L7 + 30 per-role L7
+    assert len(names) == 143
     assert len(_depth2_keys()) == 23
+    assert len(_depth3_keys()) == 17
     rows = _frontier_rows(ordered)
-    assert rows.shape == (6, 126)
+    assert rows.shape == (6, 143)
     # Fake champion names -> no corpus/depth2/L7 data; strictly-prior features zero on game 1
     assert np.allclose(rows[0], 0.0)
 
