@@ -1272,6 +1272,7 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
         if ledger is not None:
             final_status = "no_change" if result["status"] == "no_change" else "success"
             ledger.finish(final_status, release_id=smoke["pack_id"])
+        post_publication_verified = True
         _atomic_json(config.state_path, result)
         _write_health(
             config,
@@ -1280,7 +1281,6 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             pack_id=smoke["pack_id"],
             tier_error=tier_error,
         )
-        post_publication_verified = True
         return result
     except Exception as error:
         if ledger is not None:

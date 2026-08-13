@@ -28,7 +28,6 @@ from lol_kills.export.public_query_projection import (
     QUERY_API_SCHEMA,
     QUERY_DATASETS,
     QUERY_PROJECTION_PATH,
-    TIER_QUERY_DATASET,
     TIER_QUERY_DATASETS,
     PublicQueryProjectionError,
     build_tier_query_datasets,

@@ -77,7 +77,6 @@ const forbiddenArtifactText = [
   "private source receipts",
   '"training_rows"',
   '"raw_sha256"',
-  "public.blob.vercel-storage.com",
 ];
 const forbiddenPublicDataText = [
   "oracle_elixir_api",
@@ -93,6 +92,12 @@ const retiredPublicationText = [
   "SCRYGLASS_TIERLIST_BLOB_BASE_URL",
 ];
 const textExtensions = new Set([".css", ".html", ".js", ".json", ".map", ".mjs", ".rsc", ".txt"]);
+const retiredBlobHost = ["public", "blob", "vercel-storage", "com"].join(".");
+const failures = [];
+
+if ([...allowedAssetPaths].some((assetPath) => !/^[a-z0-9/_-]+\.json$/.test(assetPath))) {
+  failures.push("public asset allowlist contains an invalid path");
+}
 
 async function exists(relative) {
   try {
@@ -128,7 +133,6 @@ async function findText(root, values, failures) {
   }
 }
 
-const failures = [];
 for (const relative of forbiddenPaths) {
   if (await exists(relative)) failures.push(`retired public path exists: ${relative}`);
 }
@@ -158,8 +162,15 @@ for (const relative of ["package.json", "package-lock.json"]) {
 
 for (const relative of ["next.config.ts", "src/proxy.ts", "src/lib/pack.ts", "src/lib/serverPack.ts"]) {
   const content = await readFile(path.join(appRoot, relative), "utf8");
-  if (content.includes("public.blob.vercel-storage.com")) {
-    failures.push(`retired public Blob origin appears in ${relative}`);
+  for (const candidate of content.match(/https?:\/\/[^\s"'`<>]+/g) ?? []) {
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.hostname === retiredBlobHost || parsed.hostname.endsWith(`.${retiredBlobHost}`)) {
+        failures.push(`retired public Blob origin appears in ${relative}`);
+      }
+    } catch {
+      // Ignore non-URLs. The boundary check only blocks parsed host matches.
+    }
   }
 }
 
