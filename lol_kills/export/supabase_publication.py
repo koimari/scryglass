@@ -245,6 +245,27 @@ class SupabasePublicData:
         except Exception as error:  # noqa: BLE001
             raise SupabasePublicationError("Supabase Storage read failed") from error
 
+    def storage_object_metadata(self, storage_path: str) -> dict[str, Any]:
+        """Object metadata (size, etag) without downloading the body.
+
+        Used for post-publish verification so a 140MB release is verified by
+        metadata instead of being downloaded back (cached-egress cost).
+        """
+        encoded = "/".join(urllib.parse.quote(part, safe="") for part in storage_path.split("/"))
+        request = urllib.request.Request(
+            f"{self.project_url}/storage/v1/object/info/public/scryglass-public/{encoded}",
+            method="GET",
+            headers={"apikey": self._api_key},
+        )
+        try:
+            with self._opener.open(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as error:  # noqa: BLE001
+            raise SupabasePublicationError("Supabase Storage metadata read failed") from error
+        if not isinstance(payload, dict):
+            raise SupabasePublicationError("Supabase Storage metadata is malformed")
+        return payload
+
     def put_storage_object(self, storage_path: str, raw: bytes) -> None:
         encoded = "/".join(urllib.parse.quote(part, safe="") for part in storage_path.split("/"))
         request = urllib.request.Request(
@@ -524,8 +545,8 @@ def _verify_release_assets(
             )
         storage_path = expected.get("storage_path")
         if isinstance(storage_path, str):
-            raw = client.storage_object(storage_path)
-            if len(raw) != expected["bytes"] or _sha256(raw) != expected["sha256"]:
+            metadata = client.storage_object_metadata(storage_path)
+            if int(metadata.get("size") or -1) != expected["bytes"]:
                 raise SupabasePublicationError(
                     f"Supabase Storage readback failed: {expected['path']}"
                 )

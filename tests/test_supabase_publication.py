@@ -35,6 +35,12 @@ class FakeSupabase:
     def storage_object(self, storage_path: str):
         return self.storage[storage_path]
 
+    def storage_object_metadata(self, storage_path: str):
+        raw = self.storage.get(storage_path)
+        if raw is None:
+            return {}
+        return {"size": len(raw), "etag": "fake"}
+
     def stage_release(self, release, assets, *, storage_objects=None):
         self.stage_calls += 1
         self.releases[release["release_id"]] = dict(release)
@@ -291,14 +297,14 @@ def test_storage_readback_failure_does_not_activate_staged_release() -> None:
             "release_id": old_release,
             "status": "active",
         }
-        original = database.storage_object
+        original = database.storage_object_metadata
 
         def corrupt(storage_path: str):
             if storage_path.endswith("rankings/tierlists.json"):
-                return b"corrupt"
+                return {"size": -1}
             return original(storage_path)
 
-        database.storage_object = corrupt  # type: ignore[method-assign]
+        database.storage_object_metadata = corrupt  # type: ignore[method-assign]
 
         with pytest.raises(
             supabase_publication.SupabasePublicationError,
@@ -326,17 +332,17 @@ def test_post_activation_readback_failure_restores_previous_release() -> None:
             "release_id": old_release,
             "status": "active",
         }
-        original = database.storage_object
+        original = database.storage_object_metadata
         reads = 0
 
         def fail_after_activation(storage_path: str):
             nonlocal reads
             reads += 1
             if reads > 2 and storage_path.endswith("rankings/tierlists.json"):
-                return b"corrupt"
+                return {"size": -1}
             return original(storage_path)
 
-        database.storage_object = fail_after_activation  # type: ignore[method-assign]
+        database.storage_object_metadata = fail_after_activation  # type: ignore[method-assign]
 
         with pytest.raises(
             supabase_publication.SupabasePublicationError,
