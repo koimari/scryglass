@@ -520,6 +520,16 @@ def _draft_metadata_from_maps(frame: pd.DataFrame) -> dict[str, dict[str, Any]]:
             continue
         value: dict[str, Any] = {
             "patch": clean(row.get("patch")) or None,
+            "blue_bans": [
+                clean(row.get(f"blue_ban{slot}"))
+                for slot in range(1, 6)
+                if clean(row.get(f"blue_ban{slot}"))
+            ],
+            "red_bans": [
+                clean(row.get(f"red_ban{slot}"))
+                for slot in range(1, 6)
+                if clean(row.get(f"red_ban{slot}"))
+            ],
             "blue_picks": [
                 clean(row.get(f"blue_pick{slot}"))
                 for slot in range(1, 6)
@@ -839,6 +849,45 @@ def export_public_pack(
         )
         del player_identity, complete_ids, original_ids, accepted_ids, rejected_ids
         maps = pa.Table.from_pandas(maps_for_records, preserve_index=False)
+    # The compact player feed keeps bans but drops team-level pick slots. The
+    # team feed retains the complete draft metadata. Overlay those fields onto
+    # the canonical map frame before profile records are built.
+    draft_metadata_columns = [
+        "patch",
+        "blue_firstPick", "red_firstPick",
+        *(f"blue_ban{slot}" for slot in range(1, 6)),
+        *(f"red_ban{slot}" for slot in range(1, 6)),
+        *(f"blue_pick{slot}" for slot in range(1, 6)),
+        *(f"red_pick{slot}" for slot in range(1, 6)),
+    ]
+    metadata_source_columns = [
+        column for column in ("game_uid", *draft_metadata_columns)
+        if column in team_maps_for_ratings.columns
+    ]
+    if len(metadata_source_columns) > 1 and "game_uid" in maps_for_records.columns:
+        metadata_source = (
+            team_maps_for_ratings[metadata_source_columns]
+            .drop_duplicates("game_uid")
+            .copy()
+        )
+        maps_for_records = maps_for_records.merge(
+            metadata_source,
+            on="game_uid",
+            how="left",
+            suffixes=("", "_team_source"),
+        )
+        for column in draft_metadata_columns:
+            source_column = f"{column}_team_source"
+            if source_column not in maps_for_records.columns:
+                continue
+            if column not in maps_for_records.columns:
+                maps_for_records[column] = maps_for_records[source_column]
+            else:
+                maps_for_records[column] = maps_for_records[column].where(
+                    maps_for_records[column].notna(),
+                    maps_for_records[source_column],
+                )
+            maps_for_records.drop(columns=[source_column], inplace=True)
     source_as_of = pd.to_datetime(maps_for_records["date"], utc=True, errors="coerce").max()
     if pd.isna(source_as_of):
         raise RuntimeError("public pack source has no usable map dates")

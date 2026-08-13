@@ -105,8 +105,14 @@ def _public_draft_payload(
             continue
         first = side_frame.iloc[0]
         bans[side] = _draft_slots(first, "ban")
+        if len(bans[side]) != 5 and metadata:
+            bans[side] = [
+                _draft_text(value)
+                for value in (metadata.get(f"{side.lower()}_bans") or [])
+                if _draft_text(value)
+            ]
         picks = _draft_slots(first, "pick")
-        if not picks and metadata:
+        if len(picks) != 5 and metadata:
             picks = [
                 _draft_text(value)
                 for value in (metadata.get(f"{side.lower()}_picks") or [])
@@ -230,13 +236,43 @@ def build_maps_frame_from_team_games(team_games: pd.DataFrame) -> pd.DataFrame:
     if blue.empty or red.empty:
         return pd.DataFrame()
 
-    blue_columns = [c for c in ("_game_uid", "date", "league", "tournament", "result", "teamname", "grid_series_id") if c in blue.columns]
-    red_columns = [c for c in ("_game_uid", "teamname") if c in red.columns]
-    maps = blue[blue_columns].rename(
-        columns={"_game_uid": "game_uid", "result": "y_blue_win", "teamname": "blue_team"}
+    draft_columns = (
+        "patch",
+        "firstPick",
+        "ban1", "ban2", "ban3", "ban4", "ban5",
+        "pick1", "pick2", "pick3", "pick4", "pick5",
     )
+    blue_columns = [
+        c
+        for c in (
+            "_game_uid", "date", "league", "tournament", "result", "teamname", "grid_series_id",
+            *draft_columns,
+        )
+        if c in blue.columns
+    ]
+    red_columns = [
+        c
+        for c in ("_game_uid", "teamname", "firstPick", *draft_columns[2:])
+        if c in red.columns
+    ]
+    blue_renames = {
+        "_game_uid": "game_uid",
+        "result": "y_blue_win",
+        "teamname": "blue_team",
+        "firstPick": "blue_firstPick",
+        **{f"ban{slot}": f"blue_ban{slot}" for slot in DRAFT_PICK_SLOTS},
+        **{f"pick{slot}": f"blue_pick{slot}" for slot in DRAFT_PICK_SLOTS},
+    }
+    red_renames = {
+        "_game_uid": "game_uid",
+        "teamname": "red_team",
+        "firstPick": "red_firstPick",
+        **{f"ban{slot}": f"red_ban{slot}" for slot in DRAFT_PICK_SLOTS},
+        **{f"pick{slot}": f"red_pick{slot}" for slot in DRAFT_PICK_SLOTS},
+    }
+    maps = blue[blue_columns].rename(columns=blue_renames)
     maps = maps.merge(
-        red[red_columns].rename(columns={"_game_uid": "game_uid", "teamname": "red_team"}),
+        red[red_columns].rename(columns=red_renames),
         on="game_uid",
         how="inner",
     )
