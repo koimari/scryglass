@@ -105,19 +105,21 @@ def _public_draft_payload(
             continue
         first = side_frame.iloc[0]
         bans[side] = _draft_slots(first, "ban")
-        if len(bans[side]) != 5 and metadata:
-            bans[side] = [
-                _draft_text(value)
-                for value in (metadata.get(f"{side.lower()}_bans") or [])
-                if _draft_text(value)
-            ]
+        metadata_bans = [
+            _draft_text(value)
+            for value in (metadata or {}).get(f"{side.lower()}_bans") or []
+            if _draft_text(value)
+        ]
+        if len(metadata_bans) > len(bans[side]):
+            bans[side] = metadata_bans
         picks = _draft_slots(first, "pick")
-        if len(picks) != 5 and metadata:
-            picks = [
-                _draft_text(value)
-                for value in (metadata.get(f"{side.lower()}_picks") or [])
-                if _draft_text(value)
-            ]
+        metadata_picks = [
+            _draft_text(value)
+            for value in (metadata or {}).get(f"{side.lower()}_picks") or []
+            if _draft_text(value)
+        ]
+        if len(metadata_picks) > len(picks):
+            picks = metadata_picks
         picks_by_side[side] = picks
 
     roster_by_side_champion = {

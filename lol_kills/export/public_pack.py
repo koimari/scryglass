@@ -780,6 +780,11 @@ def export_public_pack(
             "gameid", "game_uid", "oe_gameid", "date", "year", "oe_year",
             "league", "league_source", "tournament", "result", "side",
             "position", "teamname", "grid_series_id",
+            "patch", "blue_firstPick", "red_firstPick",
+            *(f"blue_ban{slot}" for slot in range(1, 6)),
+            *(f"red_ban{slot}" for slot in range(1, 6)),
+            *(f"blue_pick{slot}" for slot in range(1, 6)),
+            *(f"red_pick{slot}" for slot in range(1, 6)),
         ),
         team_available,
     )
@@ -880,12 +885,19 @@ def export_public_pack(
             source_column = f"{column}_team_source"
             if source_column not in maps_for_records.columns:
                 continue
+            source_values = maps_for_records[source_column]
+            source_present = source_values.map(
+                lambda value: bool(_draft_text(value)),
+            )
             if column not in maps_for_records.columns:
-                maps_for_records[column] = maps_for_records[source_column]
+                maps_for_records[column] = source_values
             else:
+                existing_missing = maps_for_records[column].isna() | ~maps_for_records[column].map(
+                    lambda value: bool(_draft_text(value)),
+                )
                 maps_for_records[column] = maps_for_records[column].where(
-                    maps_for_records[column].notna(),
-                    maps_for_records[source_column],
+                    ~existing_missing | ~source_present,
+                    source_values,
                 )
             maps_for_records.drop(columns=[source_column], inplace=True)
     source_as_of = pd.to_datetime(maps_for_records["date"], utc=True, errors="coerce").max()
