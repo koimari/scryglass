@@ -13,6 +13,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -322,6 +323,7 @@ class SupabasePublicData:
 
         existing = self.asset_metadata(release_id)
         reused = 0
+        pending: list[dict[str, Any]] = []
         for asset in assets:
             prior = existing.get(str(asset["path"]))
             if (
@@ -335,12 +337,24 @@ class SupabasePublicData:
                 raise SupabasePublicationError(
                     f"existing public asset has different content: {asset['path']}"
                 )
-            storage_path = asset.get("storage_path")
-            if isinstance(storage_path, str):
-                raw = (storage_objects or {}).get(storage_path)
-                if raw is None:
-                    raise SupabasePublicationError("large public asset has no storage payload")
-                self.put_storage_object(storage_path, raw)
+            pending.append(asset)
+        # Phase 1: upload all large storage objects concurrently (bounded workers).
+        uploads = [
+            (asset, (storage_objects or {}).get(str(asset.get("storage_path"))))
+            for asset in pending
+            if isinstance(asset.get("storage_path"), str)
+        ]
+        for asset, raw in uploads:
+            if raw is None:
+                raise SupabasePublicationError("large public asset has no storage payload")
+        if uploads:
+            with ThreadPoolExecutor(max_workers=min(6, len(uploads))) as executor:
+                list(executor.map(
+                    lambda item: self.put_storage_object(str(item[0]["storage_path"]), item[1]),
+                    uploads,
+                ))
+        # Phase 2: insert the asset rows (inline small assets and storage-backed).
+        for asset in pending:
             self._request(
                 "POST",
                 "scryglass_public_assets?on_conflict=release_id,path",

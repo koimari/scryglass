@@ -110,7 +110,11 @@ class AtomFeatureRegistry:
 
     @property
     def names(self) -> tuple[str, ...]:
-        return tuple(feature.name for feature in self.features)
+        cached = getattr(self, "_names_cache", None)
+        if cached is None:
+            cached = tuple(feature.name for feature in self.features)
+            object.__setattr__(self, "_names_cache", cached)
+        return cached
 
     @property
     def sources(self) -> dict[str, str]:

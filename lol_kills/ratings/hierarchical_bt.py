@@ -524,6 +524,7 @@ def build_team_weekly_ranks(
     as_of: pd.Timestamp | None = None,
     min_series: int = 5,
     previous_as_of: pd.Timestamp | None = None,
+    current: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     """Return team rank movement against the previous refresh's ladder.
 
@@ -541,7 +542,8 @@ def build_team_weekly_ranks(
     previous_start = week_start - pd.Timedelta(days=7)
     cutoff = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp.now(tz="UTC")
     recent_anchor = _recent_team_baseline_anchor(previous_as_of, previous_start, cutoff)
-    current, _ = fit_hierarchical_bt(maps, as_of=cutoff, write=False)
+    if current is None:
+        current, _ = fit_hierarchical_bt(maps, as_of=cutoff, write=False)
     previous, _ = fit_hierarchical_bt(maps, as_of=recent_anchor - pd.Timedelta(microseconds=1), write=False)
 
     def order(snapshot: pd.DataFrame) -> tuple[dict[str, int], dict[str, float]]:
