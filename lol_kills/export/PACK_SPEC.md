@@ -40,10 +40,13 @@ Canonical machine-readable allowlists and defaults live in
 ## Build
 
 ```bash
-python3 -m lol_kills.update_public_pack --years 2025,2026 --refresh-oe --publish
-# Or, when the warehouse is already current:
+python3 -m lol_kills.update_public_pack --years 2025,2026 --refresh-oe
+# When the warehouse is already current:
 python3 -m lol_kills.export.public_pack --years 2025,2026
-python3 -m lol_kills.export.upload_pack --local-only   # or Blob with token
 ```
+
+These commands create a local candidate. The production worker verifies and
+publishes it through private Supabase Storage. Public Vercel Blob pack uploads
+and static app pack copies are disabled.
 
 Target size: tens of MB compressed (current ~26 MB for 2025–2026).

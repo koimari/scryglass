@@ -440,32 +440,33 @@ def test_unpublished_source_hash_retries_after_import_receipt_becomes_current(
     assert state["source_file_sha256"] == "b" * 64
 
 
-def test_pack_publication_updates_blob_pointer_without_a_site_build(tmp_path: Path, monkeypatch) -> None:
+def test_pack_publication_stays_local_when_blob_token_exists(tmp_path: Path, monkeypatch) -> None:
     pack_dir = tmp_path / "output/v1"
     manifest = _manifest(pack_dir, ["game-1"])
     monkeypatch.setenv("BLOB_READ_WRITE_TOKEN", "test-token")
-    calls: list[str] = []
+    with patch("lol_kills.export.upload_pack._blob_put") as blob_put:
+        result = publish_pack(pack_dir, manifest, tmp_path / "staging/packs")
 
-    def upload(_pack_dir: Path, pack_id: str, token: str) -> dict[str, str]:
-        calls.append("files")
-        assert token == "test-token"
-        return {"features/ratings_snapshot.json": f"https://store.example/packs/{pack_id}/features/ratings_snapshot.json"}
+    blob_put.assert_not_called()
+    assert result["runtime"] == "local_staging"
+    assert "blob_pointers" not in result
+    pointer = json.loads((tmp_path / "staging/packs/manifest.json").read_text())
+    assert pointer["base_url"] == "/packs/v1"
 
-    def pointers(token: str, pack_id: str, _manifest: dict, *, base_url: str) -> dict[str, str]:
-        calls.append("pointer")
-        assert token == "test-token"
-        assert base_url == f"https://store.example/packs/{pack_id}"
-        return {"packs/manifest.json": "https://store.example/packs/manifest.json"}
 
-    monkeypatch.setattr("lol_kills.postgame_sync.upload_to_blob", upload)
-    monkeypatch.setattr("lol_kills.postgame_sync.publish_blob_pointers", pointers)
-    monkeypatch.setattr("lol_kills.postgame_sync._blob_get", lambda _url: None)
-    result = publish_pack(pack_dir, manifest, tmp_path / "served/packs")
+def test_pack_candidate_cannot_stage_inside_web_public_directory(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    pack_dir = tmp_path / "output/v1"
+    manifest = _manifest(pack_dir, ["game-1"])
+    app_public = tmp_path / "apps/scryglass/public"
+    monkeypatch.setattr(postgame_sync, "STATIC_APP_PUBLIC_ROOT", app_public.resolve())
 
-    assert calls == ["files", "pointer"]
-    assert result["runtime"] == "blob"
-    pointer = json.loads((tmp_path / "served/packs/manifest.json").read_text())
-    assert pointer["base_url"] == "https://store.example/packs/v1"
+    with pytest.raises(RefreshValidationError, match="web app public directory"):
+        publish_pack(pack_dir, manifest, app_public / "packs")
+
+    assert not (app_public / "packs").exists()
 
 
 def test_live_validation_rejects_incomplete_players(tmp_path: Path) -> None:

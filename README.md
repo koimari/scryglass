@@ -28,18 +28,18 @@ the small remote file signature first. It downloads a file only when its size
 or modification time changes. A validated local copy remains active when the
 source is unchanged or temporarily unavailable.
 
-Accepted page data goes to Supabase. Postgres holds ratings, profiles, match
-records, and the active release. Supabase Storage holds the larger tier-list
-matrix. The worker makes the complete release visible in one database
-transaction. The site caches it for six hours. A data refresh does not run a
-site build or create a deployment.
+Accepted page data goes to Supabase. Postgres holds the active release and each
+asset's verified metadata. Private Supabase Storage holds every published JSON
+asset. The worker makes the complete release visible in one database
+transaction. A data refresh does not run a site build or create a deployment.
 
 Run the complete local control loop with:
 
 ```bash
+export SCRYGLASS_RUNTIME_ROOT="$(mktemp -d)"
 SCRYGLASS_PUBLIC_RELEASE=1 python3 -m lol_kills.public_refresh \
   --root . \
-  --public-root apps/scryglass/public/packs \
+  --public-root "${SCRYGLASS_RUNTIME_ROOT}/public-packs" \
   --once \
   --force
 ```
@@ -76,8 +76,12 @@ For an already-current OE warehouse:
 
 ```bash
 python3 -m lol_kills.export.public_pack --years 2025,2026
-python3 -m lol_kills.export.upload_pack
 ```
+
+This command writes a local candidate. Production publication runs only through
+the private Supabase Storage refresh in `ops/launchd/run-public-refresh.sh`.
+The retired `upload_pack` command cannot copy assets into the web app or upload
+them to public Vercel Blob storage.
 
 ## Build budget
 

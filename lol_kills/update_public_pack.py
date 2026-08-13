@@ -1,4 +1,4 @@
-"""Refresh research data, rebuild ratings, export, and publish a public pack.
+"""Refresh research data, rebuild ratings, and export a candidate pack.
 
 This is the automation entrypoint for the public site. It intentionally stops
 short of the broader internal model-training command: current ratings and
@@ -8,8 +8,8 @@ time-safe calibration/draft-score refresh that feeds the public pack.
 Examples:
 
   python3 -m lol_kills.update_public_pack --refresh-oe
-  python3 -m lol_kills.update_public_pack --skip-oe --publish
-  python3 -m lol_kills.update_public_pack --skip-oe --allow-missing-lp --publish
+  python3 -m lol_kills.update_public_pack --skip-oe
+  python3 -m lol_kills.update_public_pack --skip-oe --allow-missing-lp
 
 Public refreshes always pass ``--skip-grid`` to the warehouse build. GRID
 ingestion remains available through its private research modules.
@@ -52,10 +52,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--publish",
         action="store_true",
-        help="Run upload_pack after export; uses Blob when BLOB_READ_WRITE_TOKEN exists",
+        help=argparse.SUPPRESS,
     )
-    parser.add_argument("--local-only", action="store_true")
+    parser.add_argument("--local-only", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.publish or args.local_only:
+        parser.error(
+            "legacy public pack publication is disabled; use the private Supabase refresh"
+        )
 
     refresh_args = ["--oe-years", *[x.strip() for x in args.years.split(",") if x.strip()]]
     if args.download_oe:
@@ -98,11 +102,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     pack_id = str(manifest["pack_id"])
     print(f"[update] exported {pack_id}")
 
-    if args.publish:
-        upload_args = ["--pack-root", str(args.out), "--pack-id", pack_id]
-        if args.local_only:
-            upload_args.append("--local-only")
-        _run_module("lol_kills.export.upload_pack", upload_args)
     return 0
 
 

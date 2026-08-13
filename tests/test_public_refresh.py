@@ -64,7 +64,7 @@ def test_tier_failure_keeps_a_smoke_verified_ratings_release(tmp_path: Path) -> 
     ratings = {
         "status": "published",
         "pack_id": "new",
-        "publication": {"runtime": "blob", "pack_id": "new"},
+        "publication": {"runtime": "local_staging", "pack_id": "new"},
     }
 
     with patch.object(public_refresh, "_preflight"), patch.object(
@@ -96,7 +96,7 @@ def test_failed_public_smoke_restores_the_previous_pack(tmp_path: Path) -> None:
     ratings = {
         "status": "published",
         "pack_id": "new",
-        "publication": {"runtime": "blob", "pack_id": "new"},
+        "publication": {"runtime": "local_staging", "pack_id": "new"},
     }
 
     with patch.object(public_refresh, "_preflight"), patch.object(
@@ -136,7 +136,7 @@ def test_cache_failure_restores_the_new_pack_and_retries_cache_clear(tmp_path: P
     ratings = {
         "status": "published",
         "pack_id": "new",
-        "publication": {"runtime": "blob", "pack_id": "new"},
+        "publication": {"runtime": "local_staging", "pack_id": "new"},
     }
 
     with patch.object(public_refresh, "_preflight"), patch.object(
