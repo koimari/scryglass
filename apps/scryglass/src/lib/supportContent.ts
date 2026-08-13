@@ -50,7 +50,7 @@ export const NAVIGATION_HELP: Array<{ page: string; path: string; description: s
   { page: "Matches", path: "/matches", description: "Completed games and upcoming fixtures; open a match for rosters, champions, KDA, grades, and the draft win share." },
   { page: "Tier lists", path: "/tiers", description: "Patch-wide champion tier lists per role, with role and regional views." },
   { page: "Methodology", path: "/methodology", description: "How ratings, grades, tier lists, and the draft win share are computed." },
-  { page: "Support", path: "/support", description: "This chat: ask about players, teams, matches, ratings, tiers, schedules, or methodology." },
+  { page: "Chat", path: "/chat", description: "Ask Scryglass about players, teams, matches, ratings, tiers, schedules, or methodology." },
 ];
 
 export function matchTopic(text: string): MethodologyTopic | null {
