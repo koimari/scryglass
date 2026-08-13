@@ -9,6 +9,7 @@
  */
 
 export type ToolName =
+  | "query_players"
   | "leaderboards"
   | "player"
   | "compare_players"
@@ -29,6 +30,7 @@ export type ToolSpec = {
 };
 
 export const TOOLS: ToolSpec[] = [
+  { name: "query_players", description: "General player-data query. Use for named player comparisons, filtered player rankings, ratings, win rates, experience, A grades, and best-player-on-champion questions. The server resolves entities and executes a validated query plan against published data.", args: [{ name: "q", description: "the complete original player question" }] },
   { name: "leaderboards", description: "Top players by A-grade games, rating, or win rate; optionally filtered by role and competitive tier.", args: [{ name: "category", description: "a_grades | rating | win_rate | teams" }, { name: "role", description: "top | jng | mid | bot | sup (optional)" }, { name: "tier", description: "tier1 | tier2 | tier3 (optional; use tier1 by default)" }, { name: "limit", description: "number of results (optional)" }] },
   { name: "player", description: "Player profile: rating, role, team, grades, win rate, recent form.", args: [{ name: "name", description: "player name" }] },
   { name: "compare_players", description: "Compare the ratings of two named players and answer which rating is higher.", args: [{ name: "player1", description: "first player name" }, { name: "player2", description: "second player name" }] },
@@ -129,6 +131,13 @@ function comparisonTargets(text: string): [string, string] | null {
 
 export function fallbackRoute(text: string): RouteResult {
   const lower = text.toLowerCase();
+
+  const generalPlayerQuery = /(player|laner|jungler|support|adc|rating|rated|win rate|\bwr\b|a grade|best .* on|best .* player|better|compare|between|(?:best|top|highest).*\b(?:mid|top|jungle|bot|support)\b|tier\s*[123].*\b(?:mid|top|jungle|bot|support)\b)/.test(lower)
+    && !/(rating of \d|rated \d|with a rating)/.test(lower)
+    && !/(recent match|recent game|schedule|fixture|when does|methodology|how does|what does|explain|how do|\bwork\b|how is .* computed|tier list|best .* champion this patch)/.test(lower);
+  if (generalPlayerQuery) {
+    return { call: { tool: "query_players", args: { q: text.trim() } } };
+  }
 
   const comparedPlayers = comparisonTargets(text);
   if (comparedPlayers) {
@@ -285,6 +294,7 @@ export async function needleRoute(text: string): Promise<RouteResult | null> {
   ).join("\n");
   const prompt = [
     "You route a question about the Scryglass League of Legends data site to exactly one tool.",
+    "Prefer query_players for any question that compares, filters, ranks, or evaluates players. Pass the complete original question as q.",
     "TOOLS:\n" + schema,
     "Respond with ONLY a JSON object: {\"tool\": \"<name>\", \"args\": {\"<arg>\": \"<value>\"}}.",
     "If the question is off-topic or ambiguous, respond {\"explanation\": \"...\"}.",

@@ -8,16 +8,18 @@ import {
 } from "./supportChat.ts";
 
 const EXAMPLES: Array<{ question: string; tool: ToolName; args: Record<string, string> }> = [
-  { question: "who is the player with most A grade games", tool: "leaderboards", args: { category: "a_grades" } },
+  { question: "who is the player with most A grade games", tool: "query_players", args: { q: "who is the player with most A grade games" } },
   { question: "what is the jungler with a rating of 1643", tool: "leaderboards", args: { category: "rating", role: "jng" } },
   { question: "show me T1's recent matches", tool: "matches", args: { team: "T1", limit: "10" } },
-  { question: "what is the best mid laner this patch", tool: "leaderboards", args: { category: "rating", role: "mid", tier: "tier1", limit: "5" } },
+  { question: "what is the best mid laner this patch", tool: "query_players", args: { q: "what is the best mid laner this patch" } },
   { question: "when does the next LEC game happen", tool: "schedule", args: { league: "LEC" } },
   { question: "how does the draft win share work", tool: "methodology", args: { topic: "draft" } },
   { question: "what is the top 1 team", tool: "leaderboards", args: { category: "teams", limit: "1" } },
-  { question: "what is inspired's rating", tool: "player", args: { name: "inspired" } },
-  { question: "what is faker rating", tool: "player", args: { name: "faker" } },
-  { question: "who has better rating, inspired or faker?", tool: "compare_players", args: { player1: "inspired", player2: "faker" } },
+  { question: "what is inspired's rating", tool: "query_players", args: { q: "what is inspired's rating" } },
+  { question: "what is faker rating", tool: "query_players", args: { q: "what is faker rating" } },
+  { question: "who has better rating, inspired or faker?", tool: "query_players", args: { q: "who has better rating, inspired or faker?" } },
+  { question: "who is the best Galio player", tool: "query_players", args: { q: "who is the best Galio player" } },
+  { question: "best Tier 1 LCK mid with at least 100 games", tool: "query_players", args: { q: "best Tier 1 LCK mid with at least 100 games" } },
   { question: "what is the best mid champion this patch", tool: "tier", args: { role: "mid" } },
 ];
 
@@ -60,7 +62,7 @@ test("fallback router returns an explanation for off-topic input", () => {
 test("the tool schema covers each supported domain with unique names", () => {
   const names = TOOLS.map((tool) => tool.name);
   assert.equal(new Set(names).size, names.length);
-  assert.deepEqual(names, ["leaderboards", "player", "compare_players", "team", "matches", "tier", "schedule", "methodology", "navigation"]);
+  assert.deepEqual(names, ["query_players", "leaderboards", "player", "compare_players", "team", "matches", "tier", "schedule", "methodology", "navigation"]);
 });
 
 test("executeTool builds the right endpoint and parses the response", async () => {

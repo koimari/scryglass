@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --import tsx --test src/lib/*.test.mts",
+    "test:e2e": "playwright test",
     "identities:build": "node scripts/build-visual-identities.mjs",
     "audit:public-boundary": "node scripts/audit-public-boundary.mjs"
   },
@@ -18,6 +19,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
