@@ -102,6 +102,9 @@ jobs:
               "mode",
               "objects",
               "prefixes",
+              "preserved_bytes",
+              "preserved_objects",
+              "preserved_sha256",
               "schema_version",
               "store_id",
           }
@@ -117,6 +120,11 @@ jobs:
               or receipt["objects"] < 0
               or type(receipt.get("bytes")) is not int
               or receipt["bytes"] < 0
+              or type(receipt.get("preserved_objects")) is not int
+              or receipt["preserved_objects"] < 0
+              or type(receipt.get("preserved_bytes")) is not int
+              or receipt["preserved_bytes"] < 0
+              or re.fullmatch(r"[0-9a-f]{64}", str(receipt.get("preserved_sha256"))) is None
               or type(digest) is not str
               or re.fullmatch(r"[0-9a-f]{64}", digest) is None
           ):
@@ -137,6 +145,8 @@ jobs:
               summary.write(f"- Store: `{receipt['store_id']}`\n")
               summary.write(f"- Objects: `{receipt['objects']}`\n")
               summary.write(f"- Bytes: `{receipt['bytes']}`\n")
+              summary.write(f"- Preserved objects: `{receipt['preserved_objects']}`\n")
+              summary.write(f"- Preserved bytes: `{receipt['preserved_bytes']}`\n")
               summary.write(f"- Inventory SHA-256: `{digest}`\n")
           PY
 
@@ -214,12 +224,15 @@ jobs:
               or execution.get("bytes") != expected_bytes
               or execution.get("inventory_sha256") != expected_digest
               or execution.get("deleted") != expected_objects
-              or execution.get("verified_empty") is not True
+              or execution.get("verified_prefixes_empty") is not True
               or verification.get("mode") != "plan"
               or verification.get("store_id") != "97gks2fobqkgppwx"
               or verification.get("prefixes") != expected_prefixes
               or verification.get("objects") != 0
               or verification.get("bytes") != 0
+              or verification.get("preserved_objects") != execution.get("preserved_objects")
+              or verification.get("preserved_bytes") != execution.get("preserved_bytes")
+              or verification.get("preserved_sha256") != execution.get("preserved_sha256")
               or verification.get("inventory_sha256")
                  != execution.get("post_inventory_sha256")
           ):
@@ -238,7 +251,10 @@ jobs:
               "run_id": int(os.environ["GITHUB_RUN_ID"]),
               "schema_version": "scryglass:retired-public-blob-receipt:v1",
               "store_id": "97gks2fobqkgppwx",
-              "verified_empty": True,
+              "preserved_bytes": execution["preserved_bytes"],
+              "preserved_objects": execution["preserved_objects"],
+              "preserved_sha256": execution["preserved_sha256"],
+              "verified_prefixes_empty": True,
           }
           serialized = json.dumps(receipt, sort_keys=True, separators=(",", ":"))
           if "vercel_blob_rw_" in serialized or "pathname" in serialized or "etag" in serialized:
@@ -247,7 +263,8 @@ jobs:
           with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
               summary.write("## Public Blob retirement\n\n")
               summary.write(f"- Deleted objects: `{receipt['deleted']}`\n")
-              summary.write("- Empty-store verification: `passed`\n")
+              summary.write("- Approved-prefix verification: `empty`\n")
+              summary.write(f"- Preserved objects: `{receipt['preserved_objects']}`\n")
               summary.write(f"- Inventory SHA-256: `{expected_digest}`\n")
           PY
 

@@ -92,10 +92,34 @@ def test_retired_store_cleanup_requires_exact_target_and_confirmation() -> None:
         retire(FakeTransport([row]), execute=True, confirmation="wrong")
 
 
-def test_retired_store_cleanup_rejects_unknown_paths_before_deletion() -> None:
+def test_retired_store_cleanup_preserves_objects_outside_the_approved_prefixes() -> (
+    None
+):
+    preserved = BlobIdentity("unrelated/customer.json", 10, "a")
+    retired = BlobIdentity("packs/release/manifest.json", 20, "b")
+    transport = FakeTransport([preserved, retired])
+    expected = inventory_sha256(transport.rows)
+    result = retire(
+        transport,
+        execute=True,
+        confirmation=CONFIRMATION,
+        expected_inventory_sha256=expected,
+    )
+    assert result["objects"] == 1
+    assert result["preserved_objects"] == 1
+    assert result["preserved_sha256"] == inventory_sha256([preserved])
+    assert result["verified_prefixes_empty"] is True
+    assert transport.rows == [preserved]
+    assert transport.deleted == [retired.pathname]
+
+
+def test_retired_store_plan_redacts_preserved_paths() -> None:
     transport = FakeTransport([BlobIdentity("unrelated/customer.json", 10, "a")])
-    with pytest.raises(RetiredStoreError, match="unexpected path"):
-        inventory(transport, deadline_epoch=100)
+    result = retire(transport, execute=False, confirmation="")
+    assert result["objects"] == 0
+    assert result["preserved_objects"] == 1
+    assert "unrelated" not in str(result)
+    assert "customer" not in str(result)
     assert transport.deleted == []
 
 
@@ -114,7 +138,7 @@ def test_retired_store_cleanup_deletes_each_bound_identity_and_proves_empty() ->
         expected_inventory_sha256=expected,
     )
     assert result["deleted"] == 2
-    assert result["verified_empty"] is True
+    assert result["verified_prefixes_empty"] is True
     assert result["inventory_sha256"] == expected
     assert result["post_inventory_sha256"] == inventory_sha256([])
     assert transport.rows == []

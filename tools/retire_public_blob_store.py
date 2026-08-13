@@ -76,10 +76,6 @@ def inventory(transport: Transport, *, deadline_epoch: int) -> list[BlobIdentity
                 ) from error
             if item.pathname in by_path:
                 raise RetiredStoreError("the Blob inventory contains a duplicate path")
-            if not item.pathname.startswith(ALLOWED_RETIRED_PREFIXES):
-                raise RetiredStoreError(
-                    "an unexpected path blocks retired-store cleanup"
-                )
             by_path[item.pathname] = item
         has_more = page.get("hasMore")
         next_cursor = page.get("cursor")
@@ -109,6 +105,18 @@ def inventory_sha256(items: list[BlobIdentity]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _retired_items(items: list[BlobIdentity]) -> list[BlobIdentity]:
+    return [
+        item for item in items if item.pathname.startswith(ALLOWED_RETIRED_PREFIXES)
+    ]
+
+
+def _preserved_items(items: list[BlobIdentity]) -> list[BlobIdentity]:
+    return [
+        item for item in items if not item.pathname.startswith(ALLOWED_RETIRED_PREFIXES)
+    ]
+
+
 def retire(
     transport: Transport,
     *,
@@ -120,13 +128,18 @@ def retire(
         raise RetiredStoreError("the credential belongs to a different Blob store")
     deadline_epoch = int(time.time()) + 3_600
     before = inventory(transport, deadline_epoch=deadline_epoch)
+    retired = _retired_items(before)
+    preserved = _preserved_items(before)
     before_sha256 = inventory_sha256(before)
     result: dict[str, object] = {
         "schema_version": RECEIPT_SCHEMA_VERSION,
         "store_id": RETIRED_STORE_ID,
         "mode": "execute" if execute else "plan",
-        "objects": len(before),
-        "bytes": sum(item.size for item in before),
+        "objects": len(retired),
+        "bytes": sum(item.size for item in retired),
+        "preserved_objects": len(preserved),
+        "preserved_bytes": sum(item.size for item in preserved),
+        "preserved_sha256": inventory_sha256(preserved),
         "prefixes": list(ALLOWED_RETIRED_PREFIXES),
         "inventory_sha256": before_sha256,
     }
@@ -139,7 +152,7 @@ def retire(
     if expected_inventory_sha256 != before_sha256:
         raise RetiredStoreError("the Blob inventory changed after the dry run")
     deleted = 0
-    for item in before:
+    for item in retired:
         removed = transport.delete_if_match(
             RETIRED_STORE_ID,
             item.pathname,
@@ -152,12 +165,15 @@ def retire(
             )
         deleted += 1
     after = inventory(transport, deadline_epoch=deadline_epoch)
-    if after:
-        raise RetiredStoreError("the retired Blob store is not empty after cleanup")
+    if _retired_items(after):
+        raise RetiredStoreError("the retired Blob prefixes are not empty after cleanup")
+    after_preserved = _preserved_items(after)
+    if after_preserved != preserved:
+        raise RetiredStoreError("preserved Blob objects changed during cleanup")
     return {
         **result,
         "deleted": deleted,
-        "verified_empty": True,
+        "verified_prefixes_empty": True,
         "post_inventory_sha256": inventory_sha256(after),
     }
 
