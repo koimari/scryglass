@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
+from lol_kills import refresh_ledger
 from lol_kills.refresh_ledger import RefreshRunLedger, reusable_stage_receipt
 
 
@@ -93,3 +95,49 @@ def test_same_input_after_failure_records_retry_relationship(tmp_path: Path) -> 
 
     assert second.retry_of == first.run_id
     assert payload["retry_of"] == first.run_id
+
+
+def test_worker_commit_uses_real_head_and_requires_a_clean_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commit = "a" * 40
+    monkeypatch.setenv("SCRYGLASS_WORKER_COMMIT", commit)
+    with patch.object(
+        refresh_ledger,
+        "_git_output",
+        side_effect=[str(tmp_path.resolve()), commit, ""],
+    ) as git:
+        assert refresh_ledger.worker_commit(tmp_path, require_clean=True) == commit
+    assert git.call_args_list[-1].args[1:] == (
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=normal",
+    )
+
+
+def test_worker_commit_rejects_an_environment_value_that_differs_from_head(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SCRYGLASS_WORKER_COMMIT", "b" * 40)
+    with patch.object(
+        refresh_ledger,
+        "_git_output",
+        side_effect=[str(tmp_path.resolve()), "a" * 40],
+    ), pytest.raises(RuntimeError, match="does not match HEAD"):
+        refresh_ledger.worker_commit(tmp_path)
+
+
+def test_worker_commit_rejects_dirty_checkout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commit = "a" * 40
+    monkeypatch.setenv("SCRYGLASS_WORKER_COMMIT", commit)
+    with patch.object(
+        refresh_ledger,
+        "_git_output",
+        side_effect=[str(tmp_path.resolve()), commit, " M tracked.py"],
+    ), pytest.raises(RuntimeError, match="uncommitted"):
+        refresh_ledger.worker_commit(tmp_path, require_clean=True)

@@ -48,26 +48,55 @@ def canonical_sha256(value: object) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def worker_commit(root: Path) -> str:
+def _git_output(root: Path, *arguments: str) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", *arguments],
+            cwd=root,
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).strip()
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError("worker Git checkout cannot be inspected") from error
+
+
+def worker_commit(root: Path, *, require_clean: bool = False) -> str:
+    """Resolve the real worker HEAD and verify its operator-provided binding."""
+
+    checkout = root.expanduser().resolve()
     configured = os.environ.get("SCRYGLASS_WORKER_COMMIT", "").strip().lower()
-    if len(configured) == 40 and all(character in "0123456789abcdef" for character in configured):
-        return configured
-    value = ""
-    for candidate in (root, Path(__file__).resolve().parents[1]):
-        try:
-            value = subprocess.check_output(
-                ["git", "rev-parse", "HEAD"],
-                cwd=candidate,
-                text=True,
-                stderr=subprocess.DEVNULL,
-                timeout=5,
-            ).strip().lower()
-        except (OSError, subprocess.SubprocessError):
-            value = ""
-        if len(value) == 40 and all(character in "0123456789abcdef" for character in value):
-            break
+    try:
+        top_level = Path(_git_output(checkout, "rev-parse", "--show-toplevel")).resolve()
+        value = _git_output(checkout, "rev-parse", "--verify", "HEAD").lower()
+    except RuntimeError:
+        if require_clean or configured:
+            raise
+        checkout = Path(__file__).resolve().parents[1]
+        top_level = Path(_git_output(checkout, "rev-parse", "--show-toplevel")).resolve()
+        value = _git_output(checkout, "rev-parse", "--verify", "HEAD").lower()
+    if require_clean and top_level != checkout:
+        raise RuntimeError("worker root is not the Git checkout root")
     if len(value) != 40 or any(character not in "0123456789abcdef" for character in value):
         raise RuntimeError("worker Git commit cannot be resolved")
+
+    if configured:
+        if len(configured) != 40 or any(
+            character not in "0123456789abcdef" for character in configured
+        ):
+            raise RuntimeError("configured worker Git commit is malformed")
+        if configured != value:
+            raise RuntimeError("configured worker Git commit does not match HEAD")
+
+    if require_clean:
+        dirty = _git_output(
+            checkout,
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=normal",
+        )
+        if dirty:
+            raise RuntimeError("worker Git checkout has uncommitted files")
     return value
 
 

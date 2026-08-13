@@ -36,7 +36,7 @@ class UploadPackTests(unittest.TestCase):
 
     def test_publish_blob_pointers_uses_stable_overwritable_paths(self) -> None:
         manifest = {
-            "pack_id": "v2026.07.26.1700",
+            "pack_id": "v2026.07.26.170000",
             "created_utc": "2026-07-26T17:00:00+00:00",
             "base_url": None,
         }
@@ -59,7 +59,7 @@ class UploadPackTests(unittest.TestCase):
                 "token",
                 manifest["pack_id"],
                 manifest,
-                base_url="https://blob/packs/v2026.07.26.1700",
+                base_url="https://blob/packs/v2026.07.26.170000",
             )
 
         self.assertEqual(set(urls), {"packs/manifest.json", "packs/latest.json"})
@@ -74,8 +74,21 @@ class UploadPackTests(unittest.TestCase):
         manifest_payload = json.loads(put.call_args_list[0].args[2])
         self.assertEqual(
             manifest_payload["base_url"],
-            "https://blob/packs/v2026.07.26.1700",
+            "https://blob/packs/v2026.07.26.170000",
         )
+
+    def test_pack_directory_rejects_symlinks_and_noncanonical_ids(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pack = root / "v2026.08.13.120000"
+            pack.mkdir()
+            self.assertEqual(upload_pack._pack_directory(root, pack.name), pack.resolve())
+            with self.assertRaisesRegex(RuntimeError, "pack ID is invalid"):
+                upload_pack._pack_directory(root, "../escape")
+            alias = root / "v2026.08.13.120001"
+            alias.symlink_to(pack, target_is_directory=True)
+            with self.assertRaisesRegex(RuntimeError, "pack directory is invalid"):
+                upload_pack._pack_directory(root, alias.name)
 
 
 if __name__ == "__main__":

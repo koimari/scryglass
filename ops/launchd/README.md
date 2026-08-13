@@ -31,7 +31,10 @@ The installed runtime uses these paths:
 - `~/Library/LaunchAgents/xyz.scryglass.public-refresh.plist`
 
 Use `ops/launchd/run-public-refresh.sh` for manual runs. The repository remains
-detached at a tested production commit until an operator updates it.
+detached at a tested production commit until an operator updates it. Replace
+`__TESTED_WORKER_COMMIT__` in the launch-agent template with the exact
+40-character commit. The worker stops when the real HEAD differs or the
+checkout contains uncommitted files.
 
 The launch script locks the complete cycle before it opens Brave. The accepted
 source receipt and import receipt bind all later stages to the same 2026 file.

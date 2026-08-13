@@ -11,7 +11,7 @@ With BLOB_READ_WRITE_TOKEN:
 
 Usage:
   python3 -m lol_kills.export.upload_pack
-  python3 -m lol_kills.export.upload_pack --pack-id v2026.07.25
+  python3 -m lol_kills.export.upload_pack --pack-id v2026.07.25.120000
 """
 
 from __future__ import annotations
@@ -19,16 +19,42 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
 
+from lol_kills.net import require_https_url
+
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PACK_ROOT = ROOT / "output" / "public_pack"
 ATLAS_PUBLIC = ROOT / "apps" / "scryglass" / "public" / "packs"
 BLOB_TIMEOUT_SECONDS = 45.0
+PACK_ID_RE = re.compile(r"^v\d{4}\.\d{2}\.\d{2}\.\d{6}$")
+
+
+def _pack_id(value: object) -> str:
+    pack_id = str(value or "")
+    if not PACK_ID_RE.fullmatch(pack_id):
+        raise RuntimeError("pack ID is invalid")
+    return pack_id
+
+
+def _pack_directory(pack_root: Path, pack_id: str) -> Path:
+    root = pack_root.expanduser().resolve(strict=True)
+    unresolved = root / _pack_id(pack_id)
+    if unresolved.is_symlink():
+        raise RuntimeError("pack directory is invalid")
+    candidate = unresolved.resolve(strict=True)
+    try:
+        candidate.relative_to(root)
+    except ValueError as error:
+        raise RuntimeError("pack directory leaves the configured pack root") from error
+    if not candidate.is_dir():
+        raise RuntimeError("pack directory is invalid")
+    return candidate
 
 
 def _load_manifest(pack_dir: Path) -> dict[str, Any]:
@@ -36,9 +62,10 @@ def _load_manifest(pack_dir: Path) -> dict[str, Any]:
 
 
 def copy_to_atlas(pack_dir: Path, pack_id: str) -> Path:
+    pack_id = _pack_id(pack_id)
     dest = ATLAS_PUBLIC / pack_id
     if dest.exists():
-        shutil.rmtree(dest)
+        raise FileExistsError(f"immutable public pack already exists: {dest}")
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(pack_dir, dest)
     return dest
@@ -86,6 +113,12 @@ def _blob_put(
 def _blob_get(url: str, *, timeout: float = 45.0) -> bytes | None:
     """Read a public Blob object; return None when the object does not exist."""
 
+    url = require_https_url(
+        url,
+        hosts={"blob.vercel-storage.com", "public.blob.vercel-storage.com"},
+        allow_subdomains=True,
+    )
+
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
             return response.read()
@@ -105,6 +138,7 @@ def _blob_root(base_url: str) -> str:
 
 
 def upload_to_blob(pack_dir: Path, pack_id: str, token: str) -> dict[str, str]:
+    pack_id = _pack_id(pack_id)
     urls: dict[str, str] = {}
     for path in sorted(pack_dir.rglob("*")):
         if not path.is_file():
@@ -129,6 +163,9 @@ def write_atlas_manifest(
     *,
     base_url: str,
 ) -> Path:
+    pack_id = _pack_id(pack_id)
+    if manifest.get("pack_id") != pack_id:
+        raise RuntimeError("manifest pack ID does not match the selected pack")
     ATLAS_PUBLIC.mkdir(parents=True, exist_ok=True)
     man = dict(manifest)
     man["base_url"] = base_url.rstrip("/")
@@ -177,6 +214,9 @@ def publish_blob_pointers(
     base_url: str,
 ) -> dict[str, str]:
     """Publish mutable discovery files after the immutable pack is complete."""
+    pack_id = _pack_id(pack_id)
+    if manifest.get("pack_id") != pack_id:
+        raise RuntimeError("manifest pack ID does not match the selected pack")
     published_manifest = dict(manifest)
     published_manifest["base_url"] = base_url.rstrip("/")
     latest = {
@@ -260,11 +300,14 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("No --pack-id and no latest.json — run public_pack export first")
         pack_id = json.loads(latest.read_text())["pack_id"]
 
-    pack_dir = args.pack_root / pack_id
-    if not pack_dir.is_dir():
-        raise SystemExit(f"Missing pack directory: {pack_dir}")
+    try:
+        pack_dir = _pack_directory(args.pack_root, str(pack_id))
+    except (OSError, RuntimeError) as error:
+        raise SystemExit(str(error)) from error
 
     manifest = _load_manifest(pack_dir)
+    if manifest.get("pack_id") != pack_id:
+        raise SystemExit("manifest pack ID does not match the selected pack")
     token = os.environ.get("BLOB_READ_WRITE_TOKEN") or os.environ.get("VERCEL_BLOB_READ_WRITE_TOKEN")
 
     print(f"Publishing {pack_id} ({manifest['total_bytes']/1024/1024:.1f} MB)")

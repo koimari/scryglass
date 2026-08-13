@@ -349,6 +349,21 @@ def build_draft_records_payload(
     return payload
 
 
+def _withhold_unpromoted_draft_fields(payload: Mapping[str, Any]) -> None:
+    """Remove model-derived draft fields from one public profile payload."""
+
+    if isinstance(payload, dict):
+        payload.pop("draft_pool_audit", None)
+    games = payload.get("games")
+    if not isinstance(games, Mapping):
+        return
+    for game in games.values():
+        if not isinstance(game, dict):
+            continue
+        game.pop("draft_contribution", None)
+        game.pop("draft_pool", None)
+
+
 def _draft_players_from_signals(
     signals: Mapping[str, Any], games: Mapping[str, Any] | Sequence[Mapping[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -754,7 +769,7 @@ def export_public_pack(
     )
     # Include UTC time so the 15-minute freshness workflow can publish more
     # than one immutable pack per day without colliding in Blob storage.
-    stamp = datetime.now(timezone.utc).strftime("%Y.%m.%d.%H%M")
+    stamp = datetime.now(timezone.utc).strftime("%Y.%m.%d.%H%M%S")
     pack_id = pack_id or f"v{stamp}"
     out_root = Path(out_root or runtime / "output" / "public_pack")
     pack_dir = out_root / pack_id
@@ -1335,21 +1350,6 @@ def export_public_pack(
         "scope": "published profile window after accepted-profile bridge",
         **draft_pool_audit,
     }
-    draft_records_dest = feat_dir / "draft_records.json"
-    draft_records_dest.write_text(
-        json.dumps(draft_records_payload, separators=(",", ":"), ensure_ascii=False),
-        encoding="utf-8",
-    )
-    register(
-        {
-            "rows": len(draft_records_payload["games"]),
-            "cols": None,
-            "bytes": draft_records_dest.stat().st_size,
-            "sha256": _sha256(draft_records_dest),
-            "columns": None,
-        },
-        "features/draft_records.json",
-    )
     published_composition = _validate_public_composition_records(profile_records_payload)
     composition_audit.update(
         {
@@ -1366,6 +1366,8 @@ def export_public_pack(
             ),
         }
     )
+    _withhold_unpromoted_draft_fields(profile_records_payload)
+    _withhold_unpromoted_draft_fields({"games": archive_games})
     del player_profile_frame
 
     # These records are intentionally built from the same year-filtered
@@ -1603,9 +1605,6 @@ def export_public_pack(
         team_records_payload_raw = dict(team_records_payload)
         player_champion_records_raw = dict(player_champions_payload)
         match_index_raw = dict(match_index_payload)
-        draft_players_rows = _draft_players_from_signals(
-            composition_result.signals, profile_records_payload
-        )
         leaderboards = build_leaderboards(
             player_records_payload,
             profile_records_payload,
@@ -1614,9 +1613,9 @@ def export_public_pack(
             team_records=team_records_payload_raw,
             player_champion_records=player_champion_records_raw,
             match_index=match_index_raw,
-            draft_records=draft_records_payload,
-            draft_players=draft_players_rows,
-            draft_profile_records=profile_records_payload,
+            draft_records=None,
+            draft_players=[],
+            draft_profile_records=None,
         )
         leaderboards_dest = feat_dir / "leaderboards.json"
         leaderboards_dest.write_text(
@@ -1698,6 +1697,15 @@ def export_public_pack(
         "attribution": spec.ATTRIBUTION,
         "composition_signal": composition_audit,
         "draft_pool": draft_pool_audit,
+        "draft_authority": {
+            "schema_version": "scryglass:draft-authority:v1",
+            "status": "unavailable",
+            "release_id": pack_id,
+            "model_version": None,
+            "receipt_sha256": None,
+            "issued_utc": None,
+            "reason": "model_not_promoted",
+        },
         "excluded": [
             "raw game rows",
             "research studies",
@@ -1741,7 +1749,11 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Export the public LoL ratings payload")
     ap.add_argument("--years", default="2025,2026", help="Comma-separated years (default 2025,2026)")
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT, help="Output root directory")
-    ap.add_argument("--pack-id", default=None, help="Override pack id (default vYYYY.MM.DD)")
+    ap.add_argument(
+        "--pack-id",
+        default=None,
+        help="Override pack id (default vYYYY.MM.DD.HHMMSS)",
+    )
     ap.add_argument("--warehouse-root", type=Path, default=None, help="Use a source-root overlay for live refreshes")
     args = ap.parse_args(argv)
     years = tuple(int(x.strip()) for x in args.years.split(",") if x.strip())

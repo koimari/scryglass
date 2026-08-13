@@ -10,6 +10,7 @@ import os
 import shutil
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -46,6 +47,17 @@ DEFAULT_STALE_AFTER_HOURS = 12
 DEFAULT_STEP_TIMEOUT_MINUTES = 30
 RETRYABLE_ERRORS = (OeDownloadError, TimeoutError, urllib.error.URLError)
 RETRYABLE_HTTP_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
+PUBLIC_RELEASE_PROBES = (
+    "/elo",
+    "/matches",
+    "/tiers",
+    "/chat",
+    "/api/public-data/tierlists",
+    "/api/chat/leaderboards?category=rating&limit=1",
+    "/api/chat/leaderboards?category=teams_draft&limit=1",
+    "/api/chat/tier?limit=1",
+    "/api/chat/methodology?topic=ratings",
+)
 
 
 class PublicRefreshError(RuntimeError):
@@ -101,7 +113,7 @@ def _read_env(name: str) -> str | None:
 
 
 def config_from_environment(root: Path, public_root: Path) -> RefreshConfig:
-    site = (_read_env("SCRYGLASS_PUBLISH_ORIGIN") or DEFAULT_SITE).rstrip("/")
+    site = _read_env("SCRYGLASS_PUBLISH_ORIGIN") or DEFAULT_SITE
     blob_root = (_read_env("LIVE_BLOB_BASE_URL") or _read_env("SCRYGLASS_TIERLIST_BLOB_BASE_URL"))
     manifest_url = _read_env("SCRYGLASS_PACK_MANIFEST_URL")
     if manifest_url is None and blob_root:
@@ -194,8 +206,21 @@ def _preflight(config: RefreshConfig) -> None:
     missing = sorted(name for name, value in required.items() if not value)
     if missing:
         raise PublicRefreshError("public refresh credentials are incomplete: " + ", ".join(missing))
-    if not config.site.startswith("https://"):
-        raise PublicRefreshError("SCRYGLASS_PUBLISH_ORIGIN must use HTTPS")
+    parsed_site = urllib.parse.urlsplit(config.site)
+    if (
+        parsed_site.scheme != "https"
+        or parsed_site.hostname != "scryglass.xyz"
+        or parsed_site.port is not None
+        or parsed_site.username is not None
+        or parsed_site.password is not None
+        or parsed_site.path
+        or parsed_site.query
+        or parsed_site.fragment
+        or config.site != DEFAULT_SITE
+    ):
+        raise PublicRefreshError(
+            "SCRYGLASS_PUBLISH_ORIGIN must be exactly https://scryglass.xyz"
+        )
     try:
         supabase_publication.SupabasePublicData(
             config.supabase_url or "",
@@ -207,6 +232,10 @@ def _preflight(config: RefreshConfig) -> None:
         raise PublicRefreshError("production refresh requires accepted source and import receipts")
     if not config.accepted_source_receipt.is_file() or not config.accepted_import_receipt.is_file():
         raise PublicRefreshError("accepted source or import receipt is missing")
+    try:
+        worker_commit(config.root, require_clean=True)
+    except RuntimeError as error:
+        raise PublicRefreshError(str(error)) from error
 
 
 def _accepted_run_inputs(config: RefreshConfig) -> dict[str, Any] | None:
@@ -584,6 +613,18 @@ def _load_remote_manifest(config: RefreshConfig) -> tuple[dict[str, Any], str]:
     return manifest, str(manifest.get("base_url") or "").rstrip("/")
 
 
+def _diagnostic_headers() -> dict[str, str]:
+    token = _read_env("SCRYGLASS_DIAGNOSTIC_TOKEN") or _read_env(
+        "SCRYGLASS_DATA_PUBLISH_TOKEN"
+    )
+    return {"authorization": f"Bearer {token}"} if token else {}
+
+
+def _health_diagnostics(payload: dict[str, Any]) -> dict[str, Any]:
+    diagnostics = payload.get("diagnostics")
+    return diagnostics if isinstance(diagnostics, dict) else payload
+
+
 def verify_public_release(config: RefreshConfig, *, expected_pack_id: str | None = None, tier_expected: bool = False) -> dict[str, Any]:
     manifest, base_url = _load_remote_manifest(config)
     pack_id = str(manifest.get("pack_id") or "")
@@ -657,14 +698,21 @@ def verify_public_release(config: RefreshConfig, *, expected_pack_id: str | None
     if config.production:
         for route in ("/elo", "/matches", "/tiers"):
             _http_bytes(f"{config.site}{route}", attempts=config.attempts)
-        health_raw = _http_bytes(f"{config.site}/api/health", attempts=config.attempts)
+        health_raw = _http_bytes(
+            f"{config.site}/api/health",
+            headers=_diagnostic_headers(),
+            attempts=config.attempts,
+        )
         try:
             health_payload = json.loads(health_raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise PublicRefreshError("public health response is invalid JSON") from error
         if not isinstance(health_payload, dict) or health_payload.get("status") not in {"ok", "partial"}:
             raise PublicRefreshError("public health response is not ready")
-        served_pack_id = str(health_payload.get("pack_id") or "")
+        health_detail = _health_diagnostics(health_payload)
+        served_pack_id = str(
+            health_detail.get("release_id") or health_payload.get("pack_id") or ""
+        )
         if not served_pack_id:
             raise PublicRefreshError("public health response has no pack ID")
         if expected_pack_id and served_pack_id != expected_pack_id:
@@ -672,7 +720,7 @@ def verify_public_release(config: RefreshConfig, *, expected_pack_id: str | None
                 f"public app serves {served_pack_id}, expected {expected_pack_id}"
             )
         if tier_expected:
-            served_tier = health_payload.get("tier")
+            served_tier = health_detail.get("tier") or health_payload.get("tier")
             if not isinstance(served_tier, dict) or served_tier.get("status") != "available":
                 raise PublicRefreshError("public health response has no available tier list")
 
@@ -708,6 +756,7 @@ def verify_public_health_alignment(
         return None
     raw = _http_bytes(
         f"{config.site}/api/health",
+        headers=_diagnostic_headers(),
         attempts=config.attempts,
     )
     try:
@@ -716,28 +765,40 @@ def verify_public_health_alignment(
         raise PublicRefreshError("public health alignment response is invalid JSON") from error
     if not isinstance(payload, dict):
         raise PublicRefreshError("public health alignment response is not an object")
+    health_detail = _health_diagnostics(payload)
     expected = {
-        "status": "ok",
-        "pack_id": release_id,
+        "release_id": release_id,
         "refresh_status": "idle",
         "worker_commit": expected_worker_commit,
-        "stale": False,
     }
     mismatched = [
-        key for key, value in expected.items() if payload.get(key) != value
+        key
+        for key, value in expected.items()
+        if (
+            health_detail.get(key)
+            if key != "release_id"
+            else health_detail.get("release_id") or payload.get("pack_id")
+        )
+        != value
     ]
+    if payload.get("status") != "ok":
+        mismatched.append("status")
+    if payload.get("stale") is not False:
+        mismatched.append("stale")
     try:
         expected_source = datetime.fromisoformat(str(source_as_of).replace("Z", "+00:00"))
         served_source = datetime.fromisoformat(
-            str(payload.get("source_as_of")).replace("Z", "+00:00")
+            str(health_detail.get("source_as_of")).replace("Z", "+00:00")
         )
     except ValueError:
         expected_source = source_as_of
-        served_source = payload.get("source_as_of")
+        served_source = health_detail.get("source_as_of")
     if served_source != expected_source:
         mismatched.append("source_as_of")
-    if mismatched or not payload.get("last_refresh_success_at"):
-        detail = ", ".join(mismatched or ["last_refresh_success_at"])
+    if mismatched or not (
+        payload.get("last_success_at") or payload.get("last_refresh_success_at")
+    ):
+        detail = ", ".join(mismatched or ["last_success_at"])
         raise PublicRefreshError(f"public health does not match the active release: {detail}")
     return payload
 
@@ -746,8 +807,12 @@ def invalidate_public_cache(config: RefreshConfig, release_id: str) -> dict[str,
     secret = _read_env("SCRYGLASS_DATA_PUBLISH_TOKEN")
     if not secret:
         raise PublicRefreshError("SCRYGLASS_DATA_PUBLISH_TOKEN is required for cache invalidation")
-    if not supabase_publication.PACK_ID_RE.fullmatch(release_id):
-        raise PublicRefreshError("cache invalidation requires a valid activated release ID")
+    try:
+        release_id = supabase_publication._rollback_release_id(release_id)
+    except supabase_publication.SupabasePublicationError as error:
+        raise PublicRefreshError(
+            "cache invalidation requires a valid activated release ID"
+        ) from error
     body = _http_bytes(
         f"{config.site}/api/data-published",
         method="POST",
@@ -771,6 +836,54 @@ def invalidate_public_cache(config: RefreshConfig, release_id: str) -> dict[str,
     ):
         raise PublicRefreshError("cache invalidation was not confirmed")
     return payload
+
+
+def probe_public_release_families(
+    config: RefreshConfig,
+    release_id: str,
+) -> dict[str, Any] | None:
+    """Warm each public data family and keep the release watermark stable."""
+
+    if not config.production:
+        return None
+    if not supabase_publication.PACK_ID_RE.fullmatch(release_id):
+        raise PublicRefreshError("public probes require a valid activated release ID")
+
+    def health_watermark() -> str:
+        raw = _http_bytes(
+            f"{config.site}/api/health",
+            headers={**_diagnostic_headers(), "Cache-Control": "no-cache"},
+            attempts=config.attempts,
+        )
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise PublicRefreshError("public probe health response is invalid JSON") from error
+        if not isinstance(payload, dict):
+            raise PublicRefreshError("public probe health response is not an object")
+        detail = _health_diagnostics(payload)
+        return str(detail.get("release_id") or payload.get("pack_id") or "")
+
+    if health_watermark() != release_id:
+        raise PublicRefreshError("public probes started on a different release")
+    checked: list[str] = []
+    for path in PUBLIC_RELEASE_PROBES:
+        raw = _http_bytes(
+            f"{config.site}{path}",
+            headers={"Cache-Control": "no-cache"},
+            attempts=config.attempts,
+        )
+        if path.startswith("/api/"):
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise PublicRefreshError(f"public probe returned invalid JSON: {path}") from error
+            if not isinstance(payload, (dict, list)):
+                raise PublicRefreshError(f"public probe returned an invalid payload: {path}")
+        checked.append(path)
+    if health_watermark() != release_id:
+        raise PublicRefreshError("public probes ended on a different release")
+    return {"release_id": release_id, "routes": checked}
 
 
 def prune_local_releases(public_root: Path, active_release_id: str, keep: int = 3) -> list[str]:
@@ -1022,6 +1135,7 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             ledger.advance("invalidate_cache", release_id=ledger_release_id)
         active_release_id = str(ratings.get("pack_id") or "")
         cache = invalidate_public_cache(config, active_release_id) if changed else None
+        cache_probes = probe_public_release_families(config, active_release_id)
         failure_stage = "smoke"
         if ledger is not None:
             ledger.advance("smoke", release_id=ledger_release_id)
@@ -1030,7 +1144,8 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             expected_pack_id=str(ratings.get("pack_id")) if ratings.get("status") == "published" else None,
             tier_expected=tier is not None,
         )
-        post_publication_verified = True
+        if config.publication_backend != "supabase":
+            post_publication_verified = True
         pruned_local_releases = prune_local_releases(
             config.public_root,
             str(smoke["pack_id"]),
@@ -1045,18 +1160,15 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             "tier_error": tier_error,
             "database_publication": database_publication,
             "cache_invalidation": cache,
+            "cache_probes": cache_probes,
             "smoke": smoke,
             "pruned_local_releases": pruned_local_releases,
             "refresh_run_id": ledger.run_id if ledger is not None else None,
             "accepted_source": accepted_inputs,
         }
-        _atomic_json(config.state_path, result)
-        _write_health(config, result["status"], checked_at, pack_id=smoke["pack_id"], tier_error=tier_error)
         if tier_error:
+            _atomic_json(config.state_path, result)
             raise PublicRefreshError(tier_error)
-        if ledger is not None:
-            final_status = "no_change" if result["status"] == "no_change" else "success"
-            ledger.finish(final_status, release_id=smoke["pack_id"])
         _write_remote_health(
             config,
             checked_at=checked_at,
@@ -1071,11 +1183,31 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             release_id=str(smoke["pack_id"]),
             source_as_of=str(ratings.get("source_observed_through") or "") or None,
             expected_worker_commit=(
-                ledger.worker_git_commit if ledger is not None else worker_commit(config.root)
+                ledger.worker_git_commit
+                if ledger is not None
+                else worker_commit(config.root)
+                if config.production
+                else ""
             ),
         )
+        if (
+            isinstance(database_publication, dict)
+            and database_publication.get("status") == "activated_pending_health"
+        ):
+            database_publication["status"] = "published"
         result["public_health"] = health_alignment
+        if ledger is not None:
+            final_status = "no_change" if result["status"] == "no_change" else "success"
+            ledger.finish(final_status, release_id=smoke["pack_id"])
         _atomic_json(config.state_path, result)
+        _write_health(
+            config,
+            result["status"],
+            checked_at,
+            pack_id=smoke["pack_id"],
+            tier_error=tier_error,
+        )
+        post_publication_verified = True
         return result
     except Exception as error:
         if ledger is not None:
