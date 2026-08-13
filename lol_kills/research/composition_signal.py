@@ -1917,7 +1917,9 @@ def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.
     matchup: dict[tuple, list[int]] = {}
     # L7: strictly-prior per-player atom-family proficiency (read before update)
     l7_profile: dict[str, np.ndarray] = {}
-    l7_alpha = 0.1
+    l7_alpha = 0.05
+    # L7 per-role: strictly-prior per-(player, role) atom-family proficiency
+    l7r_profile: dict[tuple[str, str], np.ndarray] = {}
 
     names = [
         "f1_h2h", "f2_kda", "f2_ds", "f2_cspm", "f2_vis",
@@ -1931,6 +1933,7 @@ def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.
         "corp_counters",
         *[f"d2_{key}" for key in _depth2_keys()],
         *[f"l7_{name}" for name in ("ccm", "dmg", "heal", "int", "stack", "vision")],
+        *[f"l7r_{role}_{name}" for role in ROLES for name in ("ccm", "dmg", "heal", "int", "stack", "vision")],
     ]
     _FRONTIER_NAMES = names
     _FRONTIER = {}
@@ -2050,10 +2053,27 @@ def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.
                 l7_profile[player] = (1 - l7_alpha) * prior + l7_alpha * (team_outcome * fam)
             return vals
 
+        # L7 per-role row from PRIOR per-(player, role) profiles (strictly prior)
+        def l7r_team(players: Sequence[str], champs: Sequence[str], team_outcome: float) -> list[np.ndarray]:
+            vals: list[np.ndarray] = []
+            for role, player, champ in zip(ROLES, players, champs):
+                vector = _cached_atom_vector(champ)
+                fam = vector[:6] if vector is not None else np.zeros(6)
+                key = (player, role)
+                prior = l7r_profile.get(key)
+                if prior is None:
+                    prior = np.zeros(6)
+                vals.append(prior.copy())
+                l7r_profile[key] = (1 - l7_alpha) * prior + l7_alpha * (team_outcome * fam)
+            return vals
+
         outcome = int(game["y"])
         blue_prof = l7_team(blue_players, blue_champs, float(outcome))
         red_prof = l7_team(red_players, red_champs, 1.0 - float(outcome))
         row.extend(np.mean(blue_prof, axis=0) - np.mean(red_prof, axis=0))
+        blue_rprof = l7r_team(blue_players, blue_champs, float(outcome))
+        red_rprof = l7r_team(red_players, red_champs, 1.0 - float(outcome))
+        row.extend(np.concatenate(blue_rprof) - np.concatenate(red_rprof))
         rows[game_uid] = np.asarray(row, dtype=float)
         h2h.setdefault(blue_team, {})[red_team] = ewma(
             h2h.get(blue_team, {}).get(red_team), float(outcome), alpha=0.2)
