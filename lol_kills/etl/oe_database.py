@@ -12,9 +12,11 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
+import numpy as np
 import pandas as pd
 
 from lol_kills.etl.oe_ingest import (
@@ -44,7 +46,8 @@ REVIEWED_REMOVED_GAME_IDS: dict[str, str] = {
 STATE_SCHEMA = "scryglass:oe-local-cache-state:v1"
 TRANSFORM_VERSION = "oe-normalization:v1"
 REQUEST_TIMEOUT_SECONDS = 180.0
-WRITE_BATCH_SIZE = 25
+WRITE_BATCH_SIZE = 100
+WRITE_CONCURRENCY = 8
 READ_PAGE_SIZE = 1_000
 ROLE_ORDER = {"top": 0, "jng": 1, "mid": 2, "bot": 3, "sup": 4}
 SIDE_ORDER = {"Blue": 0, "Red": 1}
@@ -109,6 +112,19 @@ class PreparedImport:
     source_game_ids: tuple[str, ...]
     quarantined_game_ids: tuple[str, ...]
     quarantined_games: dict[str, str]
+    _team_row_payloads: list[dict[str, Any]] | None = None
+    _player_row_payloads: list[dict[str, Any]] | None = None
+
+    def payload_rows_for(self, game_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Precomputed canonical row payloads for one game (fast path)."""
+        if self._team_row_payloads is None or self._player_row_payloads is None:
+            return _game_frames_and_payload_rows(self, game_id)
+        team_indices = self.team_group_indices[game_id]
+        player_indices = self.player_group_indices[game_id]
+        return (
+            [self._team_row_payloads[pos] for pos in team_indices],
+            [self._player_row_payloads[pos] for pos in player_indices],
+        )
 
 
 def _project_url(value: str) -> str:
@@ -145,6 +161,20 @@ def _canonical_json_sha256(value: object) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _canonical_string_sha256(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _parse_game_date(date_text: str) -> pd.Timestamp:
+    try:
+        parsed = pd.Timestamp(date_text)
+    except (ValueError, TypeError):
+        return pd.NaT
+    if parsed.tzinfo is None:
+        parsed = parsed.tz_localize("UTC")
+    return parsed
+
+
 def _game_identity_sha256(game_ids: Iterable[str]) -> str:
     canonical = sorted({str(game_id) for game_id in game_ids if str(game_id)})
     raw = ("\n".join(canonical) + "\n").encode("utf-8")
@@ -163,6 +193,43 @@ def _payload_rows(frame: pd.DataFrame) -> list[dict[str, Any]]:
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
         raise OeDatabaseError("OE rows could not be serialized")
     return rows
+
+
+def _payload_rows_fast(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    """Faster _payload_rows: same row dicts, ujson decode of the frame JSON."""
+    raw = frame.to_json(
+        orient="records",
+        date_format="iso",
+        date_unit="us",
+        double_precision=15,
+        force_ascii=False,
+    )
+    try:
+        from pandas._libs import json as _ujson
+        rows = _ujson.loads(raw)
+    except (ImportError, AttributeError):
+        rows = json.loads(raw)
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise OeDatabaseError("OE rows could not be serialized")
+    return rows
+
+
+def _serialize_rows_chunk(chunk: list[dict[str, Any]]) -> list[str]:
+    return [
+        json.dumps(row, ensure_ascii=False, sort_keys=False, separators=(",", ":"))
+        for row in chunk
+    ]
+
+
+def _serialize_rows_parallel(rows: list[dict[str, Any]], workers: int = 8) -> list[str]:
+    if len(rows) < 20_000 or workers <= 1:
+        return _serialize_rows_chunk(rows)
+    chunk_size = max(len(rows) // workers, 1)
+    chunks = [rows[index : index + chunk_size] for index in range(0, len(rows), chunk_size)]
+    from concurrent.futures import ProcessPoolExecutor
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        serialized = list(executor.map(_serialize_rows_chunk, chunks))
+    return [value for chunk in serialized for value in chunk]
 
 
 def _clean_role(value: Any) -> str:
@@ -324,19 +391,183 @@ def _game_frames(
     )
 
 
-def payload_for_game(prepared: PreparedImport, game_id: str) -> dict[str, Any]:
+def _game_frames_and_payload_rows(
+    prepared: PreparedImport, game_id: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     teams, players = _game_frames(prepared, game_id)
+    return _payload_rows(teams), _payload_rows(players)
+
+
+def payload_for_game(prepared: PreparedImport, game_id: str) -> dict[str, Any]:
+    team_rows, player_rows = prepared.payload_rows_for(game_id)
     return {
         "schema_version": GAME_SCHEMA,
         "canonical_game_id": game_id,
-        "team_rows": _payload_rows(teams),
-        "player_rows": _payload_rows(players),
+        "team_rows": team_rows,
+        "player_rows": player_rows,
     }
 
 
-def prepare_import(
+
+
+def _canonical_order(frame: pd.DataFrame, *, by_role: bool) -> pd.DataFrame:
+    """One global stable sort so every game's rows are contiguous and canonical."""
+    game_ids = frame["gameid"].astype(str).to_numpy()
+    side_order = np.fromiter(
+        (SIDE_ORDER.get(_clean_side(value), 99) for value in frame["side"].astype(str).to_numpy()),
+        dtype=np.int64,
+        count=len(frame),
+    )
+    keys: list[np.ndarray] = []
+    if by_role:
+        role_order = np.fromiter(
+            (ROLE_ORDER.get(_clean_role(value), 99) for value in frame["position"].astype(str).to_numpy()),
+            dtype=np.int64,
+            count=len(frame),
+        )
+        keys.append(role_order)
+    keys.append(side_order)
+    keys.append(game_ids)
+    order = np.lexsort(keys)
+    return frame.iloc[order].reset_index(drop=True)
+
+
+def _clean_text_values(series: pd.Series) -> np.ndarray:
+    """Object array of stripped strings; None for empty or 'nan' values."""
+    values = series.astype(str).to_numpy()
+    out = np.empty(len(values), dtype=object)
+    for index, value in enumerate(values):
+        cleaned = value.strip()
+        out[index] = None if (not cleaned or cleaned.casefold() == "nan") else cleaned
+    return out
+
+
+def _single_text_per_game(game_ids: np.ndarray, values: np.ndarray) -> dict[str, str | None]:
+    """For each contiguous game: the single distinct non-empty value, else None."""
+    result: dict[str, str | None] = {}
+    total = len(game_ids)
+    index = 0
+    while index < total:
+        game_id = str(game_ids[index])
+        end = index + 1
+        while end < total and str(game_ids[end]) == game_id:
+            end += 1
+        distinct: set[str] = set()
+        value: str | None = None
+        for pos in range(index, end):
+            candidate = values[pos]
+            if candidate is None:
+                continue
+            if value is None:
+                value = candidate
+            distinct.add(candidate)
+        result[game_id] = value if len(distinct) == 1 else None
+        index = end
+    return result
+
+
+def _merge_single_text(*maps: dict[str, str | None]) -> dict[str, str | None]:
+    """Per game: the common single value across maps, or None when they differ."""
+    game_ids = set()
+    for mapping in maps:
+        game_ids.update(mapping)
+    result: dict[str, str | None] = {}
+    for game_id in game_ids:
+        values = {
+            value
+            for mapping in maps
+            if (value := mapping.get(game_id)) is not None and str(value).strip()
+        }
+        result[game_id] = next(iter(values)) if len(values) <= 1 else None
+    return result
+
+
+def _game_identity_error(
+    team: dict[str, np.ndarray], t_index: tuple[int, ...],
+    players: dict[str, np.ndarray], p_index: tuple[int, ...],
+    date_single: str | None, league_single: str | None,
+) -> str | None:
+    if len(t_index) != 2 or len(p_index) != 10:
+        return "row_count"
+    team_sides = set(team["side"][list(t_index)])
+    if team_sides != {"Blue", "Red"}:
+        return "teams"
+    team_result_values = pd.to_numeric(
+        pd.Series(team["result"][list(t_index)]), errors="coerce"
+    )
+    if team_result_values.isna().any():
+        return "teams"
+    team_results = {int(value) for value in team_result_values}
+    if team_results != {0, 1}:
+        return "teams"
+    team_names = team["name"][list(t_index)]
+    if any(not value for value in team_names) or len(set(team_names)) != 2:
+        return "teams"
+    player_names = players["name"][list(p_index)]
+    if any(not value for value in player_names) or len(set(player_names)) != 10:
+        return "players"
+    player_champions = players["champion"][list(p_index)]
+    if any(not value for value in player_champions):
+        return "champions"
+    for side in ("Blue", "Red"):
+        team_row = [pos for pos in t_index if team["side"][pos] == side]
+        side_positions = [pos for pos in p_index if players["side"][pos] == side]
+        if len(team_row) != 1 or len(side_positions) != 5:
+            return "sides"
+        roles = {players["role"][pos] for pos in side_positions}
+        if roles != set(ROLE_ORDER) or len(roles) != 5:
+            return "roles"
+        expected_team = str(team["name"][team_row[0]]).strip().casefold()
+        player_teams = {
+            str(players["team"][pos]).strip().casefold()
+            for pos in side_positions
+        }
+        if player_teams != {expected_team}:
+            return "player_teams"
+    if date_single is None or league_single is None:
+        return "game_metadata"
+    return None
+
+
+def _game_statistics_complete(players: dict[str, np.ndarray], p_index: tuple[int, ...]) -> bool:
+    positions = list(p_index)
+    stats = players["stat"]
+    if any(column not in stats for column in CORE_INPUTS):
+        return False
+    for column in CORE_INPUTS:
+        if np.isnan(stats[column][positions]).any():
+            return False
+    for column in ("kills", "deaths", "assists", "teamkills", "dpm", "damageshare", "totalgold", "cspm", "wpm", "wcpm"):
+        if (stats[column][positions] < 0).any():
+            return False
+    if (stats["gamelength"][positions] <= 0).any():
+        return False
+    if (stats["kills"][positions] > stats["teamkills"][positions]).any():
+        return False
+    if (stats["damageshare"][positions] > 1).any():
+        return False
+    completeness = players["datacompleteness"]
+    if len(completeness) and any(
+        str(value).casefold() != "complete" for value in completeness[positions]
+    ):
+        return False
+    for side in ("Blue", "Red"):
+        side_positions = [pos for pos in positions if players["side"][pos] == side]
+        damage_share = float(np.sum(stats["damageshare"][side_positions]))
+        if abs(damage_share - 1.0) > 1e-5:
+            return False
+    return True
+
+
+
+def _prepare_import_fast(
     csv_path: Path, year: int, *, source: dict[str, Any] | None = None
 ) -> PreparedImport:
+    """Vectorized prepare_import: one global sort + precomputed arrays.
+
+    Semantics are byte-identical to prepare_import (same payloads, hashes,
+    quarantines, and receipts); only the pandas per-game overhead is removed.
+    """
     path = csv_path.expanduser().resolve()
     source = source or _validate_oe_csv(path, str(year))
     team_rows, player_rows = parse_oe_csv(path)
@@ -347,43 +578,121 @@ def prepare_import(
         set(team_rows["gameid"].astype(str)).union(player_rows["gameid"].astype(str))
         - {""}
     )
+    team_rows = _canonical_order(team_rows, by_role=False)
+    player_rows = _canonical_order(player_rows, by_role=True)
+    team_ids = team_rows["gameid"].astype(str).to_numpy()
+    player_ids = player_rows["gameid"].astype(str).to_numpy()
+    # Column-sort once so every row's keys are already in sorted order; then
+    # json.dumps with sort_keys=False produces the exact canonical bytes the
+    # original sort_keys=True serialization would, without re-sorting per row.
+    team_rows_sorted = team_rows[list(sorted(team_rows.columns))]
+    player_rows_sorted = player_rows[list(sorted(player_rows.columns))]
+    all_team_rows = _payload_rows_fast(team_rows_sorted)
+    all_player_rows = _payload_rows_fast(player_rows_sorted)
+    team_row_json = _serialize_rows_chunk(all_team_rows)
+    player_row_json = _serialize_rows_chunk(all_player_rows)
+    game_id_json = {
+        game_id: json.dumps(game_id, ensure_ascii=False)[1:-1]
+        for game_id in source_ids
+    }
+
+    team_date = _single_text_per_game(team_ids, _clean_text_values(team_rows["date"]))
+    player_date = _single_text_per_game(player_ids, _clean_text_values(player_rows["date"]))
+    date_single = _merge_single_text(team_date, player_date)
+    team_league = _single_text_per_game(team_ids, _clean_text_values(team_rows["league"]))
+    player_league = _single_text_per_game(player_ids, _clean_text_values(player_rows["league"]))
+    league_single = _merge_single_text(team_league, player_league)
+    team_patch = (
+        _single_text_per_game(team_ids, _clean_text_values(team_rows["patch"]))
+        if "patch" in team_rows.columns
+        else {}
+    )
+    player_patch = (
+        _single_text_per_game(player_ids, _clean_text_values(player_rows["patch"]))
+        if "patch" in player_rows.columns
+        else {}
+    )
+
+    team_arrays: dict[str, np.ndarray] = {
+        "gameid": team_ids,
+        "side": np.fromiter(
+            (_clean_side(value) for value in team_rows["side"].astype(str).to_numpy()),
+            dtype=object,
+            count=len(team_rows),
+        ),
+        "name": _clean_text_values(team_rows["teamname"]),
+        "result": pd.to_numeric(team_rows["result"], errors="coerce").to_numpy(dtype=float),
+    }
+    player_arrays: dict[str, np.ndarray] = {
+        "gameid": player_ids,
+        "side": np.fromiter(
+            (_clean_side(value) for value in player_rows["side"].astype(str).to_numpy()),
+            dtype=object,
+            count=len(player_rows),
+        ),
+        "name": _clean_text_values(player_rows["playername"]),
+        "champion": _clean_text_values(player_rows["champion"]),
+        "team": _clean_text_values(player_rows["teamname"]),
+        "role": np.fromiter(
+            (_clean_role(value) for value in player_rows["position"].astype(str).to_numpy()),
+            dtype=object,
+            count=len(player_rows),
+        ),
+        "datacompleteness": (
+            _clean_text_values(player_rows["datacompleteness"])
+            if "datacompleteness" in player_rows.columns
+            else np.empty(0, dtype=object)
+        ),
+        "stat": {
+            column: pd.to_numeric(player_rows[column], errors="coerce").to_numpy(dtype=float)
+            for column in CORE_INPUTS
+            if column in player_rows.columns
+        },
+    }
+
+    team_group = _group_indices(team_rows)
+    player_group = _group_indices(player_rows)
     games: dict[str, PreparedGame] = {}
     quarantined: dict[str, str] = {}
-    team_group_indices = _group_indices(team_rows)
-    player_group_indices = _group_indices(player_rows)
     for game_id in source_ids:
-        team_indices = team_group_indices.get(game_id, ())
-        player_indices = player_group_indices.get(game_id, ())
-        teams = team_rows.iloc[list(team_indices)]
-        players = player_rows.iloc[list(player_indices)]
-        identity_error = _identity_error(teams, players)
+        t_index = team_group.get(game_id, ())
+        p_index = player_group.get(game_id, ())
+        date_text = date_single.get(game_id)
+        league = league_single.get(game_id)
+        identity_error = _game_identity_error(
+            team_arrays, t_index, player_arrays, p_index, date_text, league
+        )
         if identity_error is not None:
             quarantined[game_id] = identity_error[:500]
             continue
-        teams, players = _sorted_game_rows(teams, players)
-        date_text = _single_text(teams, "date") or _single_text(players, "date")
-        league = _single_text(teams, "league") or _single_text(players, "league")
-        parsed_date = pd.to_datetime(date_text, errors="coerce", utc=True)
+        parsed_date = _parse_game_date(date_text)
         if pd.isna(parsed_date) or not league:
             quarantined[game_id] = (
                 "game_date_invalid" if pd.isna(parsed_date) else "league_missing"
             )
             continue
-        patch = _single_text(teams, "patch") or _single_text(players, "patch")
-        payload = {
-            "schema_version": GAME_SCHEMA,
-            "canonical_game_id": game_id,
-            "team_rows": _payload_rows(teams),
-            "player_rows": _payload_rows(players),
-        }
+        patch = team_patch.get(game_id) or player_patch.get(game_id)
+        team_join = ",".join(team_row_json[pos] for pos in t_index)
+        player_join = ",".join(player_row_json[pos] for pos in p_index)
+        payload_text = (
+            '{"canonical_game_id":"'
+            + game_id_json[game_id]
+            + '","player_rows":['
+            + player_join
+            + '],"schema_version":"'
+            + GAME_SCHEMA
+            + '","team_rows":['
+            + team_join
+            + "]}"
+        )
         games[game_id] = PreparedGame(
             canonical_game_id=game_id,
-            payload_sha256=_canonical_json_sha256(payload),
+            payload_sha256=_canonical_string_sha256(payload_text),
             source_year=year,
-            game_date=pd.Timestamp(parsed_date).isoformat(),
+            game_date=parsed_date.isoformat(),
             league=league,
             patch=patch,
-            statistics_complete=_statistics_complete(players),
+            statistics_complete=_game_statistics_complete(player_arrays, p_index),
             source_file_sha256=str(source["raw_sha256"]),
         )
     return PreparedImport(
@@ -392,13 +701,26 @@ def prepare_import(
         source=source,
         team_rows=team_rows,
         player_rows=player_rows,
-        team_group_indices=team_group_indices,
-        player_group_indices=player_group_indices,
+        team_group_indices=team_group,
+        player_group_indices=player_group,
         games=games,
         source_game_ids=tuple(source_ids),
         quarantined_game_ids=tuple(sorted(quarantined)),
         quarantined_games=quarantined,
+        _team_row_payloads=all_team_rows,
+        _player_row_payloads=all_player_rows,
     )
+
+
+def prepare_import(
+    csv_path: Path, year: int, *, source: dict[str, Any] | None = None
+) -> PreparedImport:
+    """Vectorized OE import preparation (globally sorted rows + numpy checks).
+
+    Output is byte-identical to the previous per-game pandas implementation:
+    same payloads, payload sha256s, quarantines, and receipts.
+    """
+    return _prepare_import_fast(csv_path, year, source=source)
 
 
 def _batches(values: list[Any], size: int = WRITE_BATCH_SIZE) -> Iterator[list[Any]]:
@@ -801,19 +1123,60 @@ def sync_csv(
     )
     changed_ids = [*new_ids, *corrected_ids]
     if changed_ids:
-        for game_id_batch in _batches(changed_ids):
-            database.append_versions(
-                [
-                    prepared.games[game_id].version_row(
-                        payload_for_game(prepared, game_id)
-                    )
-                    for game_id in game_id_batch
-                ]
-            )
-        for game_id_batch in _batches(changed_ids, READ_PAGE_SIZE):
-            database.upsert_current(
-                [prepared.games[game_id].current_row() for game_id in game_id_batch]
-            )
+        # Build rows once via the precomputed payloads (no per-game to_json and
+        # no re-serialization per upload); the payload_sha256 was computed
+        # during prepare from these exact row dicts.
+        version_rows_by_game: dict[str, dict[str, Any]] = {}
+        for game_id in changed_ids:
+            game = prepared.games[game_id]
+            team_rows, player_rows = prepared.payload_rows_for(game_id)
+            version_rows_by_game[game_id] = {
+                "canonical_game_id": game_id,
+                "payload_sha256": game.payload_sha256,
+                "source_year": game.source_year,
+                "game_date": game.game_date,
+                "league": game.league,
+                "patch": game.patch,
+                "statistics_complete": game.statistics_complete,
+                "source_file_sha256": game.source_file_sha256,
+                "payload": {
+                    "schema_version": GAME_SCHEMA,
+                    "canonical_game_id": game_id,
+                    "team_rows": team_rows,
+                    "player_rows": player_rows,
+                },
+            }
+        current_rows_by_game: dict[str, dict[str, Any]] = {
+            game_id: prepared.games[game_id].current_row() for game_id in changed_ids
+        }
+
+        batches = list(_batches(changed_ids))
+        if len(batches) <= 1:
+            for game_id_batch in batches:
+                database.append_versions(
+                    [version_rows_by_game[game_id] for game_id in game_id_batch]
+                )
+            for game_id_batch in batches:
+                database.upsert_current(
+                    [current_rows_by_game[game_id] for game_id in game_id_batch]
+                )
+        else:
+            # Phase 1: every immutable version insert must succeed before any
+            # current pointer advances (the previous two-phase contract).
+            with ThreadPoolExecutor(max_workers=WRITE_CONCURRENCY) as executor:
+                list(executor.map(
+                    lambda batch: database.append_versions(
+                        [version_rows_by_game[game_id] for game_id in batch]
+                    ),
+                    batches,
+                ))
+            with ThreadPoolExecutor(max_workers=WRITE_CONCURRENCY) as executor:
+                list(executor.map(
+                    lambda batch: database.upsert_current(
+                        [current_rows_by_game[game_id] for game_id in batch]
+                    ),
+                    batches,
+                ))
     readback = database.current_hashes(year)
     mismatched = sorted(
         game_id
