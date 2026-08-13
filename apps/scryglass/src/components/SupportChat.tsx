@@ -68,14 +68,19 @@ type TeamDraftQueryResult = {
 
 type ChampionQueryRow = {
   champion: string;
-  games: number;
-  wins: number;
-  win_rate: number;
-  players: number;
+  role: string | null;
+  tier_bucket: string | null;
+  rank: number | null;
+  patch: string | null;
+  games: number | null;
+  wins: number | null;
+  win_rate: number | null;
+  players: number | null;
 };
 
 type ChampionQueryResult = {
   kind: "champion_query";
+  metric: "tier" | "win_rate" | "games";
   answer: {
     headline: string;
     basis: string;
@@ -231,7 +236,22 @@ function resultTable(result: unknown, call: ToolCall): React.ReactNode {
         <p className={styles.queryHeadline} data-testid="champion-query-headline">{query.answer.headline}</p>
         <p className={styles.queryBasis}>{query.answer.basis}</p>
         <p className={styles.queryCaveat}>{query.answer.caveat}</p>
-        {query.rows.length ? table(
+        {query.rows.length ? query.metric === "tier" ? table(
+          <table className={styles.resultTable}>
+            <thead><tr><th>Champion</th><th>Role</th><th>Tier</th><th className={styles.numeric}>Rank</th><th className={styles.numeric}>Maps</th></tr></thead>
+            <tbody>
+              {query.rows.map((row) => (
+                <tr key={`${row.champion}-${row.role ?? ""}-${row.rank ?? ""}`}>
+                  <td>{row.champion}</td>
+                  <td>{roleName(row.role)}</td>
+                  <td>{present(row.tier_bucket)}</td>
+                  <td className={styles.numeric}>{present(row.rank)}</td>
+                  <td className={styles.numeric}>{present(row.games)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>,
+        ) : table(
           <table className={styles.resultTable}>
             <thead><tr><th>Champion</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>Wins</th><th className={styles.numeric}>WR</th><th className={styles.numeric}>Players</th></tr></thead>
             <tbody>

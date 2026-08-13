@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { queryChampions } from "./championQuery";
+import { queryChampions, type PublishedTierBoard } from "./championQuery";
 import { buildSupportQueryIndex } from "./supportQuery";
 
 const index = buildSupportQueryIndex({
@@ -27,24 +27,42 @@ const index = buildSupportQueryIndex({
   },
 });
 
-test("general worst champion aggregates player records and excludes inactive rows", () => {
-  const result = queryChampions(index, "what is the worst champion in general?");
+const tierBoard: PublishedTierBoard = {
+  options: { patches: ["16.15"] },
+  rows: [
+    { champion: "Azir", role: "mid", patch: "16.15", rank: 1, tier_bucket: "A", played_maps: 100 },
+    { champion: "Tahm Kench", role: "mid", patch: "16.15", rank: 2, tier_bucket: "B", played_maps: 100 },
+    { champion: "Zed", role: "mid", patch: "16.15", rank: 3, tier_bucket: "D", played_maps: 100 },
+    { champion: "Riven", role: "top", patch: "16.15", rank: 1, tier_bucket: "A", played_maps: 100 },
+  ],
+};
+
+test("general worst champion follows the published tier list", () => {
+  const result = queryChampions(index, "what is the worst champion in general?", tierBoard);
   assert.equal(result.tier, "tier1");
-  assert.equal(result.minimumGames, 100);
-  assert.equal(result.rows[0].champion, "Tahm Kench");
-  assert.equal(result.rows[0].games, 120);
-  assert.equal(result.rows[0].wins, 50);
-  assert.match(result.answer.headline, /Tahm Kench has the lowest published Tier 1 win rate at 42%/);
-  assert.match(result.answer.caveat, /does not isolate champion strength/);
+  assert.equal(result.metric, "tier");
+  assert.equal(result.minimumGames, 1);
+  assert.equal(result.rows[0].champion, "Zed");
+  assert.equal(result.rows[0].rank, 3);
+  assert.match(result.answer.headline, /Zed \(mid\) ranks last on the published 16\.15 champion tier list/);
+  assert.match(result.answer.caveat, /published patch tier-list order/);
 });
 
 test("general champion rankings support direction, role, and sample controls", () => {
-  const best = queryChampions(index, "what is the best Tier 1 mid champion with at least 100 games?");
+  const best = queryChampions(index, "what is the best Tier 1 mid champion with at least 100 games?", tierBoard);
   assert.equal(best.rows[0].champion, "Azir");
-  assert.equal(best.rows[0].games, 200);
+  assert.equal(best.rows[0].games, 100);
 
-  const allTiers = queryChampions(index, "bottom 2 champions across all tiers with at least 20 games");
+  const allTiers = queryChampions(index, "bottom 2 champions across all tiers with at least 20 games", tierBoard);
   assert.equal(allTiers.tier, "all");
-  assert.equal(allTiers.rows[0].champion, "Tahm Kench");
+  assert.equal(allTiers.rows[0].champion, "Zed");
+  assert.equal(allTiers.rows[1].champion, "Tahm Kench");
   assert.equal(allTiers.rows.length, 2);
+});
+
+test("explicit champion win-rate questions keep the descriptive aggregate metric", () => {
+  const result = queryChampions(index, "which champion has the lowest win rate?", tierBoard);
+  assert.equal(result.metric, "win_rate");
+  assert.equal(result.rows[0].champion, "Tahm Kench");
+  assert.match(result.answer.headline, /lowest published Tier 1 win rate at 42%/);
 });

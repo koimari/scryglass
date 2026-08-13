@@ -1,4 +1,12 @@
-import { teamQueryAliases, type ProfileRecords } from "@/lib/pack";
+import {
+  INTL_LEAGUES,
+  REGION_LEAGUES,
+  SECONDARY_REGIONAL_LEAGUES,
+  teamQueryAliases,
+  type ProfileRecords,
+} from "@/lib/pack";
+
+type DraftTier = "tier1" | "tier2" | "tier3" | "international" | "all";
 
 export type TeamDraftRow = {
   team: string;
@@ -20,7 +28,7 @@ export type TeamDraftComparison = {
 export type TeamDraftQueryResult = {
   kind: "team_draft_query" | "team_draft_comparison";
   direction: "asc" | "desc";
-  tier: "tier1" | "tier2" | "tier3" | "all";
+  tier: DraftTier;
   answer: {
     headline: string;
     basis: string;
@@ -69,10 +77,42 @@ function detectMinimumGames(question: string): number | null {
   return Number.isFinite(value) && value > 0 ? Math.min(value, 10_000) : null;
 }
 
-function detectTier(question: string): TeamDraftQueryResult["tier"] {
+function inferLeagueTier(records: ProfileRecords, league: string): Exclude<DraftTier, "all"> {
+  const normalizedLeague = normalize(league);
+  if (INTL_LEAGUES.some((candidate) => normalize(candidate) === normalizedLeague)) return "international";
+  if (SECONDARY_REGIONAL_LEAGUES.some((candidate) => normalize(candidate) === normalizedLeague)) return "tier2";
+  const observedTier = Object.values(records.games)
+    .find((game) => normalize(game.league) === normalizedLeague && game.competition_tier)?.competition_tier;
+  if (observedTier === "tier2" || observedTier === "tier3" || observedTier === "international") return observedTier;
+  return "tier1";
+}
+
+function detectTier(question: string, records: ProfileRecords, league: string | null): TeamDraftQueryResult["tier"] {
   if (/\ball tiers\b/i.test(question)) return "all";
   const match = /\btier\s*([123])\b/i.exec(question);
-  return match ? `tier${match[1]}` as "tier1" | "tier2" | "tier3" : "tier1";
+  if (match) return `tier${match[1]}` as "tier1" | "tier2" | "tier3";
+  if (/\binternational\b/i.test(question)) return "international";
+  return league ? inferLeagueTier(records, league) : "tier1";
+}
+
+function detectLeague(question: string, availableLeagues: string[]): string | null {
+  const normalizedQuestion = ` ${normalize(question)} `;
+  const aliases: Array<{ canonical: string; names: string[] }> = [
+    { canonical: "LEC", names: ["emea", "europe", "european", "eu"] },
+    { canonical: "LCS", names: ["americas", "north america", "north american", "na"] },
+  ];
+  for (const alias of aliases) {
+    if (alias.names.some((name) => normalizedQuestion.includes(` ${normalize(name)} `))) return alias.canonical;
+  }
+  const candidates = [...new Set([
+    ...availableLeagues,
+    ...REGION_LEAGUES,
+    ...INTL_LEAGUES,
+    "LTA",
+  ])]
+    .filter((league) => normalize(league).length > 0)
+    .sort((left, right) => normalize(right).length - normalize(left).length);
+  return candidates.find((league) => normalizedQuestion.includes(` ${normalize(league)} `)) ?? null;
 }
 
 type TeamMention = {
@@ -140,6 +180,11 @@ function percentagePointGap(first: number, second: number): string {
   return `${Math.abs(Math.round(first * 100) - Math.round(second * 100))} percentage-point`;
 }
 
+function scopeLabel(tier: TeamDraftQueryResult["tier"], league: string | null): string {
+  const tierLabel = tier === "all" ? "all tiers" : tier.replace("tier", "Tier ");
+  return league ? `${league}, ${tierLabel}` : tierLabel;
+}
+
 function toDraftRow(team: string, aggregate: DraftAggregate): TeamDraftRow {
   return {
     team,
@@ -151,7 +196,11 @@ function toDraftRow(team: string, aggregate: DraftAggregate): TeamDraftRow {
   };
 }
 
-function collectDraftAggregates(records: ProfileRecords, tier: TeamDraftQueryResult["tier"]): Map<string, DraftAggregate> {
+function collectDraftAggregates(
+  records: ProfileRecords,
+  tier: TeamDraftQueryResult["tier"],
+  league: string | null,
+): Map<string, DraftAggregate> {
   const aggregates = new Map<string, DraftAggregate>();
   for (const game of Object.values(records.games)) {
     const contribution = game.draft_contribution;
@@ -159,6 +208,7 @@ function collectDraftAggregates(records: ProfileRecords, tier: TeamDraftQueryRes
     const red = contribution?.red.signal;
     if (
       (tier !== "all" && game.competition_tier !== tier)
+      || (league && normalize(game.league) !== normalize(league))
       || contribution?.status !== "available"
       || !finite(blue)
       || !finite(red)
@@ -176,12 +226,13 @@ function comparisonAnswer(
   firstTeam: string,
   secondTeam: string,
   tier: TeamDraftQueryResult["tier"],
+  league: string | null,
   minimumGames: number,
   windowDays: number,
   direction: "higher" | "lower",
 ): TeamDraftQueryResult {
-  const tierLabel = tier === "all" ? "all tiers" : tier.replace("tier", "Tier ");
-  const basis = `Compared ${firstTeam} and ${secondTeam} in ${tierLabel} by average published draft win share, using at least ${minimumGames} available ${minimumGames === 1 ? "draft" : "drafts"} in the active ${windowDays}-day profile window. “Historical” here means this profile window, not all seasons.`;
+  const scope = scopeLabel(tier, league);
+  const basis = `Compared ${firstTeam} and ${secondTeam} in ${scope} by average published draft win share, using at least ${minimumGames} available ${minimumGames === 1 ? "draft" : "drafts"} in the active ${windowDays}-day profile window. “Historical” here means this profile window, not all seasons.`;
   const caveat = "Draft win share is the estimated pre-game probability from the picks. It is not the team's match win rate, a stable team rating, or a prediction guarantee.";
 
   if (!first || !second) {
@@ -208,9 +259,10 @@ function comparisonAnswer(
       : winShareDifference < 0 ? first.team : second.team;
   const shareLeader = winner ? (winner === first.team ? first : second) : null;
   const shareOther = winner ? (winner === first.team ? second : first) : null;
+  const leaguePhrase = league ? ` in ${league}` : "";
   const relation = shareLeader && shareOther
-    ? `${shareLeader.team} has the ${direction} average published draft win share in the active ${windowDays}-day profile window at ${percent(shareLeader.average_win_share)} across ${shareLeader.games} games, versus ${percent(shareOther.average_win_share)} for ${shareOther.team} across ${shareOther.games} games. That is a ${percentagePointGap(shareLeader.average_win_share, shareOther.average_win_share)} edge for ${shareLeader.team}.`
-    : `${first.team} and ${second.team} have the same average published draft win share in the active ${windowDays}-day profile window at ${percent(first.average_win_share)} across ${first.games} and ${second.games} games.`;
+    ? `${shareLeader.team} has the ${direction} average published draft win share${leaguePhrase} in the active ${windowDays}-day profile window at ${percent(shareLeader.average_win_share)} across ${shareLeader.games} games, versus ${percent(shareOther.average_win_share)} for ${shareOther.team} across ${shareOther.games} games. That is a ${percentagePointGap(shareLeader.average_win_share, shareOther.average_win_share)} edge for ${shareLeader.team}.`
+    : `${first.team} and ${second.team} have the same average published draft win share${leaguePhrase} in the active ${windowDays}-day profile window at ${percent(first.average_win_share)} across ${first.games} and ${second.games} games.`;
 
   return {
     kind: "team_draft_comparison",
@@ -236,12 +288,14 @@ export function queryTeamDraftScores(records: ProfileRecords, question: string):
     : /\b(?:worst|lowest|bottom)\b.*\bto\b.*\b(?:best|highest|top)\b/i.test(question)
       ? "asc"
       : /\b(worst|lowest|bottom|least)\b/i.test(directionalText) ? "asc" : "desc";
-  const tier = detectTier(question);
+  const availableLeagues = Array.from(new Set(Object.values(records.games).map((game) => game.league)));
+  const league = detectLeague(question, availableLeagues);
+  const tier = detectTier(question, records, league);
   const teams = Array.from(new Set(Object.values(records.games).flatMap((game) => [game.blue_team, game.red_team])));
   const comparisonNames = asksForComparison(question) ? namedTeams(question, teams) : [];
   const team = comparisonNames.length < 2 ? namedTeam(question, teams) : null;
   const minimumGames = detectMinimumGames(question) ?? (comparisonNames.length >= 2 ? 3 : team ? 1 : 3);
-  const aggregates = collectDraftAggregates(records, tier);
+  const aggregates = collectDraftAggregates(records, tier, league);
 
   if (comparisonNames.length >= 2) {
     const [firstTeam, secondTeam] = comparisonNames;
@@ -253,6 +307,7 @@ export function queryTeamDraftScores(records: ProfileRecords, question: string):
       firstTeam,
       secondTeam,
       tier,
+      league,
       minimumGames,
       records.window_days,
       /\b(?:worse|lower)\b/i.test(question) ? "lower" : "higher",
@@ -274,12 +329,14 @@ export function queryTeamDraftScores(records: ProfileRecords, question: string):
   const visibleRows = rows.slice(0, detectLimit(question));
   const first = visibleRows[0];
   const rankWord = direction === "asc" ? "lowest" : "highest";
+  const scope = scopeLabel(tier, league);
+  const leaguePhrase = league ? ` in ${league}` : "";
   const headline = first
     ? team
-      ? `${first.team}'s average published draft win share is ${percent(first.average_win_share)} across ${first.games} games.`
-      : `${first.team} has the ${rankWord} average published draft win share at ${percent(first.average_win_share)} across ${first.games} games.`
+      ? `${first.team}'s average published draft win share is ${percent(first.average_win_share)} in ${scope} across ${first.games} games.`
+      : `${first.team} has the ${rankWord} average published draft win share${leaguePhrase} at ${percent(first.average_win_share)} across ${first.games} games.`
     : team
-      ? `No available draft scores meet the requested sample for ${team}.`
+      ? `No available draft scores meet the requested sample for ${team}${league ? ` in ${league}` : ""}.`
       : "Team draft score rankings are unavailable for the active release.";
 
   return {
@@ -288,7 +345,7 @@ export function queryTeamDraftScores(records: ProfileRecords, question: string):
     tier,
     answer: {
       headline,
-      basis: `Ranked ${rows.length} ${rows.length === 1 ? "team" : "teams"} by average published draft win share in ${tier === "all" ? "all tiers" : tier.replace("tier", "Tier ")} with at least ${minimumGames} available ${minimumGames === 1 ? "draft" : "drafts"} in the active ${records.window_days}-day profile window.`,
+      basis: `Ranked ${rows.length} ${rows.length === 1 ? "team" : "teams"} by average published draft win share in ${scope} with at least ${minimumGames} available ${minimumGames === 1 ? "draft" : "drafts"} in the active ${records.window_days}-day profile window.`,
       caveat: "Draft win share is the estimated pre-game probability from the picks. It is not the team's match win rate or a stable team rating.",
     },
     rows: visibleRows,
