@@ -41,6 +41,16 @@ const shareRankingRecords = {
   },
 } satisfies ProfileRecords;
 
+const leagueRecords = {
+  ...records,
+  games: {
+    ...records.games,
+    lecOne: { ...game("lec-one", "LEC High", "LEC Opponent One", 2, 0), league: "LEC" },
+    lecTwo: { ...game("lec-two", "LEC High", "LEC Opponent Two", 2, 0), league: "LEC" },
+    lecThree: { ...game("lec-three", "LEC High", "LEC Opponent Three", 2, 0), league: "LEC" },
+  },
+} satisfies ProfileRecords;
+
 function game(
   gameId: string,
   blueTeam: string,
@@ -128,4 +138,11 @@ test("draft rankings use the visible win-share percentage metric", () => {
   const result = queryTeamDraftScores(shareRankingRecords, "which team has the best draft with at least 2 drafts");
   assert.equal(result.rows[0]?.team, "ShareHigh");
   assert.match(result.answer.headline, /ShareHigh has the highest average published draft win share at 60%/);
+});
+
+test("team draft rankings stay inside the requested league", () => {
+  const result = queryTeamDraftScores(leagueRecords, "which team has the best draft in LEC?");
+  assert.deepEqual(result.rows.map((row) => row.team), ["LEC High"]);
+  assert.match(result.answer.headline, /LEC High has the highest average published draft win share in LEC at 88%/);
+  assert.match(result.answer.basis, /Ranked 1 team .* in LEC, Tier 1/);
 });
