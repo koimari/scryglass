@@ -17,6 +17,8 @@ alter table public.scryglass_public_assets
       'features/player_weekly_ranks.json',
       'features/player_metadata.json',
       'features/schedule.json',
+    'features/leaderboards.json',
+      'features/leaderboards.json',
       'rankings/tierlists.json',
       'rankings/tierlists-latest.json'
     )
