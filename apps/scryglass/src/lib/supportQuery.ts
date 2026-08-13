@@ -210,6 +210,17 @@ export function wilsonLowerBound(wins: number, games: number, z = 1.96): number 
   return Math.max(0, (centre - margin) / denominator);
 }
 
+const RANKING_WORDS = new Set([
+  "best",
+  "worst",
+  "top",
+  "bottom",
+  "highest",
+  "lowest",
+  "most",
+  "least",
+]);
+
 function gradeACounts(profile: ProfileAsset): Map<string, number> {
   const counts = new Map<string, number>();
   for (const game of Object.values(profile.games ?? {})) {
@@ -567,6 +578,9 @@ export function planPlayerQuestion(
     players = [resolved.name];
   }
   const champion = champions[0] ?? null;
+  if (!namedTarget && champion && /\b(?:best|worst|top|bottom|highest|lowest|most|least)\b/i.test(text)) {
+    players = players.filter((player) => !RANKING_WORDS.has(normalizeEntity(player)));
+  }
   const championQuery = Boolean(champion) || /\bchampions?\b/i.test(text);
   const metric = metricFor(text, championQuery, Boolean(champion), players.length > 0);
   const direction = directionFor(text);

@@ -17,6 +17,7 @@ const index = buildSupportQueryIndex({
     { player: "MISSING", mu_total: 1000, n_maps: 20, last_team: "LNG Esports", home_league: "LPL", evidence_active: 1 },
     { player: "Random", mu_total: 1500, n_maps: 20, last_team: "Disruptors", home_league: "AL", evidence_active: 1 },
     { player: "random", mu_total: 1400, n_maps: 20, last_team: "Team Solid", home_league: "CD", evidence_active: 1 },
+    { player: "Worst", mu_total: 1600, n_maps: 100, last_team: "Test Team", home_league: "TEST", evidence_active: 1 },
   ],
   records: {
     Faker: { wins: 195, games: 300, wr: 0.65, current_team: "T1", current_league: "LCK", current_tier: "tier1", primary_role: "mid" },
@@ -26,6 +27,7 @@ const index = buildSupportQueryIndex({
     MISSING: { wins: 10, games: 20, wr: 0.5, current_team: "LNG Esports", current_league: "LPL", current_tier: "tier1", primary_role: "sup" },
     Random: { wins: 10, games: 20, wr: 0.5, current_team: "Disruptors", current_league: "AL", current_tier: "tier1", primary_role: "mid" },
     random: { wins: 10, games: 20, wr: 0.5, current_team: "Team Solid", current_league: "CD", current_tier: "tier1", primary_role: "mid" },
+    Worst: { wins: 60, games: 100, wr: 0.6, current_team: "Test Team", current_league: "TEST", current_tier: "tier1", primary_role: "mid" },
   },
   champions: {
     Faker: [
@@ -35,6 +37,7 @@ const index = buildSupportQueryIndex({
     ],
     Chovy: [{ champion: "Galio", games: 5, wins: 5, wr: 1 }],
     Knight: [{ champion: "Galio", games: 20, wins: 12, wr: 0.6 }],
+    Worst: [{ champion: "Galio", games: 10, wins: 1, wr: 0.1 }],
   },
   profiles: {
     games: {
@@ -116,6 +119,16 @@ test("vague champion question uses the declared Tier 1 evidence rule", () => {
   assert.equal(result.rows[0].name, "Faker");
   assert.match(result.answer.basis, /95% Wilson lower bound/);
   assert.match(result.answer.caveat ?? "", /not a champion-specific rating/);
+});
+
+test("vague worst champion question ignores ranking words that match player handles", () => {
+  const planned = planPlayerQuestion("who is the worst Galio player", index);
+  assert.ok(planned.ok);
+  assert.equal(planned.plan.filters.some((filter) => filter.field === "name"), false);
+  assert.deepEqual(planned.plan.orderBy[0], { field: "champion_score", direction: "asc" });
+  const result = executeQueryPlan(planned.plan, index);
+  assert.equal(result.rows[0].name, "Worst");
+  assert.match(result.answer.headline, /Worst ranks last for Galio under the evidence rule/);
 });
 
 test("best-rated champion question orders overall rating within champion evidence", () => {
