@@ -492,16 +492,18 @@ def test_ban_v2_builder_shape_and_strictly_prior() -> None:
 
 
 def test_frontier_is_strictly_prior_and_shaped() -> None:
-    from lol_kills.research.composition_signal import _build_frontier, _frontier_names, _frontier_rows
+    from lol_kills.research.composition_signal import _build_frontier, _frontier_names, _frontier_rows, _depth2_keys
     games = _games(*[_rows_with_extras(f"game-{index}", f"2026-01-{index + 1:02d}", index % 2) for index in range(6)])
     ordered = sorted(games, key=lambda game: (game["date"], game["game_uid"]))
     _build_frontier(ordered)
     names = _frontier_names()
-    # 65 round-5 + 2 layer-5 features (f_l5_elo_p, f_l5_elo_sigma)
-    assert len(names) == 67
+    # 67 round-5+L5 + 23 depth-2 descriptors + 6 L7 atom-family profiles
+    assert len(names) == 96
+    assert len(_depth2_keys()) == 23
     rows = _frontier_rows(ordered)
-    assert rows.shape == (6, 67)
-    assert np.allclose(rows[0][:18], 0.0)
+    assert rows.shape == (6, 96)
+    # Fake champion names -> no corpus/depth2/L7 data; strictly-prior features zero on game 1
+    assert np.allclose(rows[0], 0.0)
 
 
 def test_corpus_game_features_shape_and_unknown_champion_zeros() -> None:
@@ -584,3 +586,75 @@ def test_unsupported_pick_gets_atom_estimate() -> None:
     assert syndra["contribution"] is not None
     assert signal["status"] == "available"
     assert signal["blue"]["signal"] is not None and signal["red"]["signal"] is not None
+
+
+def _fixed_players_rows(game_id: str, date: str, result: int, *, champs: list[str]) -> list[dict[str, object]]:
+    """Rows with FIXED player/team names (L7 profiles persist across games) and real champions."""
+    rows: list[dict[str, object]] = []
+    for side, team, side_result in (("Blue", "Blue Team", result), ("Red", "Red Team", 1 - result)):
+        for index, role in enumerate(ROLES):
+            rows.append(
+                {
+                    "game_uid": game_id,
+                    "date": date,
+                    "league": "LCS",
+                    "patch": "16.15",
+                    "side": side,
+                    "teamname": team,
+                    "playername": f"pro-{side.lower()}-{role}",
+                    "position": role,
+                    "champion": champs[index if side == "Blue" else index + 5],
+                    "result": side_result,
+                }
+            )
+    return rows
+
+
+def test_depth2_rows_are_static_blue_minus_red() -> None:
+    from lol_kills.research.composition_signal import _build_frontier, _frontier_names, _frontier_rows, _champion_depth2, _depth2_keys
+    pool = ["Ahri", "Lux", "Zed", "Yasuo", "Jinx", "Leona", "LeeSin", "Thresh", "Azir", "Rakan"]
+    games = _games(*[_fixed_players_rows(f"g{i}", f"2026-01-{i+1:02d}", i % 2, champs=pool) for i in range(4)])
+    ordered = sorted(games, key=lambda game: (game["date"], game["game_uid"]))
+    _build_frontier(ordered)
+    names = _frontier_names()
+    rows = _frontier_rows(ordered)
+    start = names.index("d2_" + sorted(_depth2_keys())[0])
+    end = start + len(_depth2_keys())
+    # blue-minus-red means of the 5 picks' depth2 descriptors; identical across games (static)
+    first = rows[0][start:end]
+    for game, row in zip(ordered, rows):
+        blue = [_champion_depth2(game["blue"][r]["champion"]) for r in ROLES]
+        red = [_champion_depth2(game["red"][r]["champion"]) for r in ROLES]
+        for key_index, key in enumerate(sorted(_depth2_keys())):
+            b = float(np.mean([e.get(key, 0.0) for e in blue]))
+            r = float(np.mean([e.get(key, 0.0) for e in red]))
+            assert abs(row[start + key_index] - (b - r)) < 1e-9, key
+    assert np.allclose(rows[:, start:end], first)  # static per champion -> identical rows
+
+
+def test_l7_is_strictly_prior_to_own_outcome() -> None:
+    from lol_kills.research.composition_signal import _build_frontier, _frontier_names, _frontier_rows
+    pool = ["Ahri", "Lux", "Zed", "Yasuo", "Jinx", "Leona", "LeeSin", "Thresh", "Azir", "Rakan"]
+    champs_a = pool
+    champs_b = ["Syndra", "Ahri", "Lux", "Zed", "Yasuo", "Jinx", "Leona", "LeeSin", "Thresh", "Azir"]
+    # scenario A: g2 outcome 1; scenario B: g2 outcome 0 (g1 identical)
+    games_a = _games(
+        _fixed_players_rows("g1", "2026-01-01", 1, champs=champs_a),
+        _fixed_players_rows("g2", "2026-01-02", 1, champs=champs_b),
+        _fixed_players_rows("g3", "2026-01-03", 1, champs=champs_a),
+    )
+    games_b = _games(
+        _fixed_players_rows("g1", "2026-01-01", 1, champs=champs_a),
+        _fixed_players_rows("g2", "2026-01-02", 0, champs=champs_b),
+        _fixed_players_rows("g3", "2026-01-03", 0, champs=champs_a),
+    )
+    _build_frontier(sorted(games_a, key=lambda g: (g["date"], g["game_uid"])))
+    names_a = _frontier_names()
+    rows_a = _frontier_rows(sorted(games_a, key=lambda g: (g["date"], g["game_uid"])))
+    l7_start = names_a.index("l7_ccm")
+    _build_frontier(sorted(games_b, key=lambda g: (g["date"], g["game_uid"])))
+    rows_b = _frontier_rows(sorted(games_b, key=lambda g: (g["date"], g["game_uid"])))
+    # g2's L7 feature must NOT depend on g2's own outcome (strictly prior)
+    assert np.allclose(rows_a[1][l7_start:l7_start + 6], rows_b[1][l7_start:l7_start + 6])
+    # g3's L7 feature SHOULD reflect g2's outcome (profile updated after g2)
+    assert not np.allclose(rows_a[2][l7_start:l7_start + 6], rows_b[2][l7_start:l7_start + 6])

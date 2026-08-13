@@ -220,6 +220,67 @@ def _corpus_game_features(game: Mapping[str, Any]) -> np.ndarray:
     )
 
 
+_ATOM_DEPTH2_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "data"
+    / "lol"
+    / "v2"
+    / "champions"
+    / "atom-corpus-aggregate-v2.json"
+)
+_ATOM_DEPTH2_CACHE: dict[str, dict[str, float]] | None = None
+_ATOM_VECTOR_CACHE: dict[str, np.ndarray | None] = {}
+
+
+def _atom_depth2_index() -> dict[str, dict[str, float]]:
+    """The depth-2 numeric atom index (per-champion d2_* descriptors)."""
+    global _ATOM_DEPTH2_CACHE
+    if _ATOM_DEPTH2_CACHE is None:
+        try:
+            payload = json.loads(_ATOM_DEPTH2_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            payload = {}
+        _ATOM_DEPTH2_CACHE = {
+            str(key): {str(k): float(v) for k, v in dict(entry).items()}
+            for key, entry in (payload.get("champions") or {}).items()
+            if isinstance(entry, dict)
+        }
+    return _ATOM_DEPTH2_CACHE
+
+
+def _depth2_keys() -> list[str]:
+    index = _atom_depth2_index()
+    keys: list[str] = []
+    for entry in index.values():
+        for key in entry:
+            if key not in keys:
+                keys.append(key)
+    return sorted(keys)
+
+
+def _champion_depth2(champion: str) -> dict[str, float]:
+    return _atom_depth2_index().get(_corpus_slug(champion), {})
+
+
+def _cached_atom_vector(champion: str) -> np.ndarray | None:
+    slug = _corpus_slug(champion)
+    if slug not in _ATOM_VECTOR_CACHE:
+        _ATOM_VECTOR_CACHE[slug] = _atom_feature_vector(champion)
+    return _ATOM_VECTOR_CACHE[slug]
+
+
+def _depth2_game_row(game: Mapping[str, Any]) -> np.ndarray:
+    """Blue-minus-red per-descriptor means over the 5 picks (depth-2 numeric spine)."""
+    blue = [_champion_depth2(game.get("blue", {}).get(role, {}).get("champion")) for role in ROLES]
+    red = [_champion_depth2(game.get("red", {}).get(role, {}).get("champion")) for role in ROLES]
+
+    def mean_of(entries: Sequence[Mapping[str, float]], key: str) -> float:
+        values = [entry.get(key, 0.0) for entry in entries]
+        return float(np.mean(values)) if values else 0.0
+
+    return np.asarray([mean_of(blue, key) - mean_of(red, key) for key in _depth2_keys()], dtype=float)
+
+
 class CompositionSignalError(RuntimeError):
     """Raised when a composition signal cannot be built safely."""
 
@@ -1854,6 +1915,9 @@ def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.
     pools: dict[str, Any] = {}
     lineups: dict[str, Any] = {}
     matchup: dict[tuple, list[int]] = {}
+    # L7: strictly-prior per-player atom-family proficiency (read before update)
+    l7_profile: dict[str, np.ndarray] = {}
+    l7_alpha = 0.1
 
     names = [
         "f1_h2h", "f2_kda", "f2_ds", "f2_cspm", "f2_vis",
@@ -1865,6 +1929,8 @@ def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.
         *[f"corp_mech{index}" for index in range(len(ATOM_MECHANIC_KEYS))],
         *[f"corp_role{role}_{index}" for role in ROLES for index in range(len(ATOM_FAMILIES))],
         "corp_counters",
+        *[f"d2_{key}" for key in _depth2_keys()],
+        *[f"l7_{name}" for name in ("ccm", "dmg", "heal", "int", "stack", "vision")],
     ]
     _FRONTIER_NAMES = names
     _FRONTIER = {}
@@ -1969,9 +2035,26 @@ def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.
             row.append(rate - 0.5)
 
         row.extend(_corpus_game_features(game))
-        rows[game_uid] = np.asarray(row, dtype=float)
+        row.extend(_depth2_game_row(game))
+
+        # L7 row from PRIOR player profiles (strictly prior: read before update)
+        def l7_team(players: Sequence[str], champs: Sequence[str], team_outcome: float) -> list[np.ndarray]:
+            vals: list[np.ndarray] = []
+            for player, champ in zip(players, champs):
+                vector = _cached_atom_vector(champ)
+                fam = vector[:6] if vector is not None else np.zeros(6)
+                prior = l7_profile.get(player)
+                if prior is None:
+                    prior = np.zeros(6)
+                vals.append(prior.copy())
+                l7_profile[player] = (1 - l7_alpha) * prior + l7_alpha * (team_outcome * fam)
+            return vals
 
         outcome = int(game["y"])
+        blue_prof = l7_team(blue_players, blue_champs, float(outcome))
+        red_prof = l7_team(red_players, red_champs, 1.0 - float(outcome))
+        row.extend(np.mean(blue_prof, axis=0) - np.mean(red_prof, axis=0))
+        rows[game_uid] = np.asarray(row, dtype=float)
         h2h.setdefault(blue_team, {})[red_team] = ewma(
             h2h.get(blue_team, {}).get(red_team), float(outcome), alpha=0.2)
         h2h.setdefault(red_team, {})[blue_team] = ewma(
@@ -2029,7 +2112,7 @@ def _catboost_factory(params: Mapping[str, Any]) -> Any:
         return CatBoostClassifier(
             iterations=int(params.get("n_estimators", 600)),
             learning_rate=float(params.get("lr", 0.03)),
-            depth=int(params.get("depth", 5)),
+            depth=int(params.get("depth", 4)),
             l2_leaf_reg=float(params.get("reg", 8.0)),
             random_seed=461,
             verbose=0,
