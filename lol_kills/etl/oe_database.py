@@ -473,8 +473,12 @@ def _merge_single_text(*maps: dict[str, str | None]) -> dict[str, str | None]:
         game_ids.update(mapping)
     result: dict[str, str | None] = {}
     for game_id in game_ids:
-        values = {mapping.get(game_id) for mapping in maps}
-        result[game_id] = next(iter(values)) if len(values) == 1 else None
+        values = {
+            value
+            for mapping in maps
+            if (value := mapping.get(game_id)) is not None and str(value).strip()
+        }
+        result[game_id] = next(iter(values)) if len(values) <= 1 else None
     return result
 
 
@@ -488,7 +492,12 @@ def _game_identity_error(
     team_sides = set(team["side"][list(t_index)])
     if team_sides != {"Blue", "Red"}:
         return "teams"
-    team_results = {int(value) for value in team["result"][list(t_index)]}
+    team_result_values = pd.to_numeric(
+        pd.Series(team["result"][list(t_index)]), errors="coerce"
+    )
+    if team_result_values.isna().any():
+        return "teams"
+    team_results = {int(value) for value in team_result_values}
     if team_results != {0, 1}:
         return "teams"
     team_names = team["name"][list(t_index)]
@@ -508,8 +517,11 @@ def _game_identity_error(
         roles = {players["role"][pos] for pos in side_positions}
         if roles != set(ROLE_ORDER) or len(roles) != 5:
             return "roles"
-        expected_team = team["name"][team_row[0]]
-        player_teams = {players["team"][pos] for pos in side_positions}
+        expected_team = str(team["name"][team_row[0]]).strip().casefold()
+        player_teams = {
+            str(players["team"][pos]).strip().casefold()
+            for pos in side_positions
+        }
         if player_teams != {expected_team}:
             return "player_teams"
     if date_single is None or league_single is None:
@@ -1138,21 +1150,33 @@ def sync_csv(
             game_id: prepared.games[game_id].current_row() for game_id in changed_ids
         }
 
-        def _upload_batch(game_id_batch: list[str]) -> None:
-            database.append_versions(
-                [version_rows_by_game[game_id] for game_id in game_id_batch]
-            )
-            database.upsert_current(
-                [current_rows_by_game[game_id] for game_id in game_id_batch]
-            )
-
         batches = list(_batches(changed_ids))
         if len(batches) <= 1:
             for game_id_batch in batches:
-                _upload_batch(game_id_batch)
+                database.append_versions(
+                    [version_rows_by_game[game_id] for game_id in game_id_batch]
+                )
+            for game_id_batch in batches:
+                database.upsert_current(
+                    [current_rows_by_game[game_id] for game_id in game_id_batch]
+                )
         else:
+            # Phase 1: every immutable version insert must succeed before any
+            # current pointer advances (the previous two-phase contract).
             with ThreadPoolExecutor(max_workers=WRITE_CONCURRENCY) as executor:
-                list(executor.map(_upload_batch, batches))
+                list(executor.map(
+                    lambda batch: database.append_versions(
+                        [version_rows_by_game[game_id] for game_id in batch]
+                    ),
+                    batches,
+                ))
+            with ThreadPoolExecutor(max_workers=WRITE_CONCURRENCY) as executor:
+                list(executor.map(
+                    lambda batch: database.upsert_current(
+                        [current_rows_by_game[game_id] for game_id in batch]
+                    ),
+                    batches,
+                ))
     readback = database.current_hashes(year)
     mismatched = sorted(
         game_id

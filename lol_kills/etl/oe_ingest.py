@@ -722,7 +722,7 @@ def parse_oe_csv(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     try:
         # pyarrow engine is ~12x faster; keep date as str so payload bytes are
         # identical to the default-engine output (ISO dates stay verbatim).
-        df = _strip_columns(pd.read_csv(path, low_memory=False, engine="pyarrow", dtype={"date": str}))
+        df = _strip_columns(pd.read_csv(path, engine="pyarrow", dtype={"date": str}))
     except (ValueError, TypeError):
         df = _strip_columns(pd.read_csv(path, low_memory=False))
     # position/participant: team rows have position == 'team'
