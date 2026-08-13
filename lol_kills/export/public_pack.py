@@ -1005,6 +1005,7 @@ def export_public_pack(
         rating_input,
         as_of=source_as_of,
         min_series=5,
+        current=public_ratings,
     )
     public_ratings = _attach_public_team_evidence(
         public_ratings,

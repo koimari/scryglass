@@ -249,14 +249,19 @@ def _atom_depth2_index() -> dict[str, dict[str, float]]:
     return _ATOM_DEPTH2_CACHE
 
 
+_DEPTH2_KEYS_CACHE: list[str] | None = None
+
 def _depth2_keys() -> list[str]:
-    index = _atom_depth2_index()
-    keys: list[str] = []
-    for entry in index.values():
-        for key in entry:
-            if key not in keys:
-                keys.append(key)
-    return sorted(keys)
+    global _DEPTH2_KEYS_CACHE
+    if _DEPTH2_KEYS_CACHE is None:
+        index = _atom_depth2_index()
+        keys: list[str] = []
+        for entry in index.values():
+            for key in entry:
+                if key not in keys:
+                    keys.append(key)
+        _DEPTH2_KEYS_CACHE = sorted(keys)
+    return list(_DEPTH2_KEYS_CACHE)
 
 
 _ATOM_DEPTH3_PATH = (
@@ -442,6 +447,9 @@ def _role(value: Any) -> str:
     return ROLE_ALIASES.get(raw, raw[:3])
 
 
+from functools import lru_cache as _lru_cache
+
+@_lru_cache(maxsize=65536)
 def _champion(value: Any) -> str:
     return normalize_champ(str(value or "").strip())
 
@@ -714,41 +722,161 @@ def build_composition_games(
     if frame.empty:
         return []
     strength = _strength_lookup(strength_features)
+    _ROLE_SLOT = {"top": 0, "jng": 1, "mid": 2, "bot": 3, "sup": 4}
+    frame["_slot"] = frame["_side"].eq("Red").astype(np.int8) * 5 + frame["_role"].map(_ROLE_SLOT).astype(np.int8)
+    frame = frame.sort_values(["_game_id", "_slot"]).reset_index(drop=True)
+    gid = frame["_game_id"].to_numpy(dtype=object)
+    slot = frame["_slot"].to_numpy(dtype=np.int8)
+    pkey = frame["_player_key"].to_numpy(dtype=object)
+    player = frame["_player"].to_numpy(dtype=object)
+    team = frame["_team"].to_numpy(dtype=object)
+    champ = frame["_champion"].to_numpy(dtype=object)
+    result = frame["_result"].to_numpy(dtype=float)
+    dates = frame["_date"].to_numpy(dtype="datetime64[ns]")
+    ban_cols = [c for c in ("ban1", "ban2", "ban3", "ban4", "ban5") if c in frame.columns]
+    bans_arr = {c: frame[c].to_numpy(dtype=object) for c in ban_cols}
+    stat_cols = [c for c in ("kills", "deaths", "damageshare", "cspm", "visionscore") if c in frame.columns]
+    stats_arr = {c: frame[c].to_numpy(dtype=object) for c in stat_cols}
+    league_arr = frame["league"].to_numpy(dtype=object) if "league" in frame.columns else None
+    patch_arr = frame["patch"].to_numpy(dtype=object) if "patch" in frame.columns else None
+    series_arr = frame["grid_series_id"].to_numpy(dtype=object) if "grid_series_id" in frame.columns else None
+    tourn_arr = frame["tournament"].to_numpy(dtype=object) if "tournament" in frame.columns else None
+    # contiguous blocks per game (frame sorted by game_id); process
+    # chronologically like the original ((max date, game id) order).
+    starts = np.flatnonzero(np.concatenate(([True], gid[1:] != gid[:-1])))
+    ends = np.concatenate((starts[1:], [len(gid)]))
+    block_dates = np.maximum.reduceat(dates, starts)
+    order = np.lexsort((gid[starts], block_dates))
+    block_starts = starts[order]
+    block_ends = ends[order]
+    game_ids = gid[block_starts]
+
+    def _update_exp(experience: dict[tuple[str, str], int], pkeys: np.ndarray, champs: np.ndarray) -> None:
+        for pk, ch in zip(pkeys, champs):
+            pk = str(pk or "")
+            ch = _champion(ch)
+            if pk and ch:
+                experience[(pk, ch)] = experience.get((pk, ch), 0) + 1
+
     games = []
     experience: dict[tuple[str, str], int] = {}
-    ordered_groups = sorted(
-        ((str(game_id), group) for game_id, group in frame.groupby("_game_id", sort=False)),
-        key=lambda item: (item[1]["_date"].max(), item[0]),
-    )
-    for game_id, group in ordered_groups:
-        game = _complete_game_from_group(game_id, group, strength.get(game_id, {}))
-        if game is not None:
-            elo = player_elo_lookup.get(str(game_id))
-            if elo:
-                game["player_elo"] = elo
-            blue_exp = sum(
-                experience.get((str(pick.get("player") or "").casefold(), _champion(pick.get("champion"))), 0)
-                for pick in game["blue"].values()
-            )
-            red_exp = sum(
-                experience.get((str(pick.get("player") or "").casefold(), _champion(pick.get("champion"))), 0)
-                for pick in game["red"].values()
-            )
-            game["blue_exp"] = blue_exp
-            game["red_exp"] = red_exp
-            for side in ("blue", "red"):
-                for role in ROLES:
-                    pick = game[side][role]
-                    pick["experience"] = experience.get(
-                        (str(pick.get("player") or "").casefold(), _champion(pick.get("champion"))),
-                        0,
-                    )
-            games.append(game)
-        for _, row in group.iterrows():
-            player_key = str(row.get("_player_key") or "")
-            champion = _champion(row.get("_champion"))
-            if player_key and champion:
-                experience[(player_key, champion)] = experience.get((player_key, champion), 0) + 1
+    for gi, game_id in enumerate(game_ids):
+        s = int(block_starts[gi])
+        e = int(block_ends[gi])
+        n = e - s
+        if n != 10 or not np.array_equal(slot[s:e], np.arange(10, dtype=np.int8)):
+            _update_exp(experience, pkey[s:e], champ[s:e])
+            continue
+        sides: dict[str, dict[str, dict[str, str]]] = {}
+        teams: dict[str, str] = {}
+        champions: list[str] = []
+        valid = True
+        for side, lo, hi in (("Blue", 0, 5), ("Red", 5, 10)):
+            idx = np.arange(s + lo, s + hi)
+            side_team = set(str(team[i]).strip() for i in idx)
+            if len(side_team) != 1 or not any(side_team):
+                valid = False
+                break
+            team_name = next(iter(side_team))
+            pick_map: dict[str, dict[str, str]] = {}
+            for role, i in zip(ROLES, idx):
+                c = str(champ[i] or "")
+                p = str(player[i] or "").strip()
+                if not c or not p:
+                    valid = False
+                    break
+                stats = {col: _number(stats_arr[col][i], 0.0) or 0.0 for col in stat_cols}
+                pick_map[role] = {"champion": c, "player": p, "stats": stats}
+                champions.append(c)
+            if not valid:
+                break
+            teams[side] = team_name
+            sides[side] = pick_map
+        if not valid:
+            _update_exp(experience, pkey[s:e], champ[s:e])
+            continue
+        if len(set(pkey[s:e])) != 10 or len(set(champions)) != 10 or not teams.get("Blue") or not teams.get("Red"):
+            _update_exp(experience, pkey[s:e], champ[s:e])
+            continue
+        if teams["Blue"] == teams["Red"]:
+            _update_exp(experience, pkey[s:e], champ[s:e])
+            continue
+        blue_results = result[s : s + 5]
+        red_results = result[s + 5 : s + 10]
+        if (
+            np.isnan(blue_results).any()
+            or np.isnan(red_results).any()
+            or len(set(blue_results.tolist())) != 1
+            or len(set(red_results.tolist())) != 1
+            or float(blue_results[0]) not in (0.0, 1.0)
+            or float(red_results[0]) != 1.0 - float(blue_results[0])
+        ):
+            _update_exp(experience, pkey[s:e], champ[s:e])
+            continue
+        date = pd.Timestamp(dates[s : s + 10].max(), tz="UTC")
+        if pd.isna(date):
+            _update_exp(experience, pkey[s:e], champ[s:e])
+            continue
+        strength_row = dict(strength.get(str(game_id)) or {})
+        mu_diff = _number(strength_row.get("mu_diff"))
+        sigma_pair = _number(strength_row.get("sigma_pair"))
+        bans: dict[str, list[str]] = {}
+        if ban_cols:
+            bans["blue"] = [_text(bans_arr[c][s]) for c in ban_cols if _text(bans_arr[c][s])]
+            bans["red"] = [_text(bans_arr[c][s + 5]) for c in ban_cols if _text(bans_arr[c][s + 5])]
+        player_stats: dict[str, dict[str, float]] = {}
+        for side in ("Blue", "Red"):
+            for role in ROLES:
+                stats = sides[side][role].get("stats") or {}
+                player_key = str(sides[side][role].get("player") or "").casefold()
+                if player_key:
+                    player_stats[player_key] = {
+                        "kills": float(stats.get("kills", 0.0)),
+                        "deaths": float(stats.get("deaths", 0.0)),
+                        "damageshare": float(stats.get("damageshare", 0.0)),
+                        "cspm": float(stats.get("cspm", 0.0)),
+                        "visionscore": float(stats.get("visionscore", 0.0)),
+                    }
+        first = s
+        game = {
+            "game_uid": str(game_id),
+            "date": date,
+            "league": _text(league_arr[first], "UNKNOWN").upper() if league_arr is not None else "UNKNOWN",
+            "patch": _patch(patch_arr[first] if patch_arr is not None else None),
+            "blue_team": teams["Blue"],
+            "red_team": teams["Red"],
+            "y": int(float(blue_results[0])),
+            "blue": sides["Blue"],
+            "red": sides["Red"],
+            "bans": bans,
+            "player_stats": player_stats,
+            "mu_diff": mu_diff,
+            "sigma_pair": sigma_pair,
+            "controls_available": mu_diff is not None and sigma_pair is not None,
+            "series_id": _text(series_arr[first]) if series_arr is not None else "",
+            "tournament": _text(tourn_arr[first]) if tourn_arr is not None else "",
+        }
+        elo = player_elo_lookup.get(str(game_id))
+        if elo:
+            game["player_elo"] = elo
+        blue_exp = sum(
+            experience.get((str(pick.get("player") or "").casefold(), _champion(pick.get("champion"))), 0)
+            for pick in game["blue"].values()
+        )
+        red_exp = sum(
+            experience.get((str(pick.get("player") or "").casefold(), _champion(pick.get("champion"))), 0)
+            for pick in game["red"].values()
+        )
+        game["blue_exp"] = blue_exp
+        game["red_exp"] = red_exp
+        for side in ("blue", "red"):
+            for role in ROLES:
+                pick = game[side][role]
+                pick["experience"] = experience.get(
+                    (str(pick.get("player") or "").casefold(), _champion(pick.get("champion"))), 0
+                )
+        games.append(game)
+        _update_exp(experience, pkey[s:e], champ[s:e])
     return sorted(games, key=lambda game: (game["date"], game["game_uid"]))
 
 
@@ -798,51 +926,83 @@ def _feature_names(games: Sequence[Mapping[str, Any]]) -> list[str]:
     return controls + context + draft + atom
 
 
-def _matrix(games: Sequence[Mapping[str, Any]], names: Sequence[str], *, include_draft: bool) -> sparse.csr_matrix:
+_MATRIX_ROW_CACHE: dict[tuple[Any, tuple[str, ...], bool], tuple[list[int], list[float]]] = {}
+
+def _matrix(game_or_games: Any, names: Sequence[str], *, include_draft: bool) -> sparse.csr_matrix:
+    games: Sequence[Mapping[str, Any]] = game_or_games
     columns = {name: index for index, name in enumerate(names)}
+    names_tuple = tuple(names)
     rows: list[int] = []
     cols: list[int] = []
     values: list[float] = []
+    for row_index, game in enumerate(games):
+        key = (id(game), names_tuple, include_draft)
+        cached = _MATRIX_ROW_CACHE.get(key)
+        if cached is None:
+            if len(_MATRIX_ROW_CACHE) > 60000:
+                _MATRIX_ROW_CACHE.clear()
+            game_rows: list[int] = []
+            game_cols: list[int] = []
+            game_vals: list[float] = []
+            _matrix_row(game, names, columns, game_rows, game_cols, game_vals, include_draft=include_draft)
+            cached = (game_cols, game_vals)
+            _MATRIX_ROW_CACHE[key] = cached
+        for column_index, value in zip(cached[0], cached[1]):
+            rows.append(row_index)
+            cols.append(column_index)
+            values.append(value)
+    return sparse.csr_matrix(
+        (np.asarray(values, dtype=float), (np.asarray(rows, dtype=int), np.asarray(cols, dtype=int))),
+        shape=(len(games), len(names)),
+        dtype=float,
+    )
 
-    def add(row: int, name: str, value: float) -> None:
+
+def _matrix_row(
+    game: Mapping[str, Any],
+    names: Sequence[str],
+    columns: Mapping[str, int],
+    rows: list[int],
+    cols: list[int],
+    values: list[float],
+    *,
+    include_draft: bool,
+) -> None:
+    def add(name: str, value: float) -> None:
         column = columns.get(name)
         if column is None:
             return
-        rows.append(row)
+        rows.append(0)
         cols.append(column)
         values.append(float(value))
 
-    for row_index, game in enumerate(games):
-        add(row_index, "control|mu_diff", float(game.get("mu_diff") or 0.0) / 400.0)
-        add(row_index, "control|sigma_pair", float(game.get("sigma_pair") or 0.0) / 120.0)
-        add(row_index, "control|blue_side", 1.0)
-        add(row_index, f"league|{game.get('league') or 'UNKNOWN'}", 1.0)
-        add(row_index, f"patch|{game.get('patch') or 'UNKNOWN'}", 1.0)
-        if include_draft:
+    add("control|mu_diff", float(game.get("mu_diff") or 0.0) / 400.0)
+    add("control|sigma_pair", float(game.get("sigma_pair") or 0.0) / 120.0)
+    add("control|blue_side", 1.0)
+    add(f"league|{game.get('league') or 'UNKNOWN'}", 1.0)
+    add(f"patch|{game.get('patch') or 'UNKNOWN'}", 1.0)
+    if include_draft:
+        add(
+            "control|exp_diff",
+            (float(game.get("blue_exp") or 0.0) - float(game.get("red_exp") or 0.0)) / 100.0,
+        )
+        for role in ROLES:
             add(
-                row_index,
-                "control|exp_diff",
-                (float(game.get("blue_exp") or 0.0) - float(game.get("red_exp") or 0.0)) / 100.0,
-            )
-            for role in ROLES:
-                add(
-                    row_index,
-                    f"draft|exp|{role}",
-                    (
-                        float(game["blue"][role].get("experience") or 0.0)
-                        - float(game["red"][role].get("experience") or 0.0)
-                    )
-                    / 50.0,
+                f"draft|exp|{role}",
+                (
+                    float(game["blue"][role].get("experience") or 0.0)
+                    - float(game["red"][role].get("experience") or 0.0)
                 )
-            for side, sign in (("blue", 1.0), ("red", -1.0)):
-                for role in ROLES:
-                    champion = _champion(game[side][role].get("champion"))
-                    add(row_index, f"draft|{role}|{champion}", sign)
-                    for key in _atom_term_keys():
-                        descriptor = _atom_desc_value(champion, key)
-                        if descriptor:
-                            add(row_index, f"atom|{role}|{key}", sign * descriptor)
-    return sparse.csr_matrix((values, (rows, cols)), shape=(len(games), len(names)), dtype=np.float64)
+                / 50.0,
+            )
+        for side, sign in (("blue", 1.0), ("red", -1.0)):
+            for role in ROLES:
+                champion = _champion(game[side][role].get("champion"))
+                add(f"draft|{role}|{champion}", sign)
+                for key in _atom_term_keys():
+                    descriptor = _atom_desc_value(champion, key)
+                    if descriptor:
+                        add(f"atom|{role}|{key}", sign * descriptor)
 
 
 @dataclass(frozen=True)
@@ -1486,6 +1646,10 @@ def validate_public_signal(
             if support < min_support_games or contribution is None:
                 raise CompositionSignalError("available composition pick lacks support")
             contribution_totals[side] += float(contribution)
+        elif evidence == "atom_estimate":
+            if support >= min_support_games or contribution is None:
+                raise CompositionSignalError("atom_estimate composition pick is malformed")
+            contribution_totals[side] += float(contribution)
         elif evidence == "limited":
             if support >= min_support_games or contribution is not None:
                 raise CompositionSignalError("limited composition pick has full support")
@@ -1496,7 +1660,7 @@ def validate_public_signal(
     if seen != set(expected):
         raise CompositionSignalError("composition signal has incomplete pick identities")
     if status == "available":
-        if any(evidence != "available" for evidence in evidence_statuses):
+        if any(evidence not in {"available", "atom_estimate"} for evidence in evidence_statuses):
             raise CompositionSignalError("available composition signal has limited picks")
         for side in ("Blue", "Red"):
             summary = float(side_payloads[side.lower()]["signal"])
