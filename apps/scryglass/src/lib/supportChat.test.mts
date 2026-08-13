@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   fallbackRoute,
   executeTool,
+  routeQuestion,
   TOOLS,
   type ToolName,
 } from "./supportChat.ts";
@@ -19,6 +20,13 @@ const EXAMPLES: Array<{ question: string; tool: ToolName; args: Record<string, s
   { question: "what is faker rating", tool: "query_players", args: { q: "what is faker rating" } },
   { question: "who has better rating, inspired or faker?", tool: "query_players", args: { q: "who has better rating, inspired or faker?" } },
   { question: "who is the best Galio player", tool: "query_players", args: { q: "who is the best Galio player" } },
+  { question: "what is Inspired's worst champion?", tool: "query_players", args: { q: "what is Inspired's worst champion?" } },
+  { question: "what is Faker's most median performance champion?", tool: "query_players", args: { q: "what is Faker's most median performance champion?" } },
+  { question: "what is the median performance champion for Faker?", tool: "query_players", args: { q: "what is the median performance champion for Faker?" } },
+  { question: "what is Faker's average performance champion?", tool: "query_players", args: { q: "what is Faker's average performance champion?" } },
+  { question: "what is the worst champion in general?", tool: "query_champions", args: { q: "what is the worst champion in general?" } },
+  { question: "which team has the best draft score", tool: "query_drafts", args: { q: "which team has the best draft score" } },
+  { question: "bottom 5 team draft scores", tool: "query_drafts", args: { q: "bottom 5 team draft scores" } },
   { question: "best Tier 1 LCK mid with at least 100 games", tool: "query_players", args: { q: "best Tier 1 LCK mid with at least 100 games" } },
   { question: "what is the best mid champion this patch", tool: "tier", args: { role: "mid" } },
 ];
@@ -62,7 +70,28 @@ test("fallback router returns an explanation for off-topic input", () => {
 test("the tool schema covers each supported domain with unique names", () => {
   const names = TOOLS.map((tool) => tool.name);
   assert.equal(new Set(names).size, names.length);
-  assert.deepEqual(names, ["query_players", "leaderboards", "player", "compare_players", "team", "matches", "tier", "schedule", "methodology", "navigation"]);
+  assert.deepEqual(names, ["query_players", "query_champions", "query_drafts", "leaderboards", "player", "compare_players", "team", "matches", "tier", "schedule", "methodology", "navigation"]);
+});
+
+test("high-confidence ranking routes bypass model inference", async () => {
+  assert.deepEqual(await routeQuestion("which team has the best draft score"), {
+    call: { tool: "query_drafts", args: { q: "which team has the best draft score" } },
+  });
+  assert.deepEqual(await routeQuestion("what is Inspired's worst champion?"), {
+    call: { tool: "query_players", args: { q: "what is Inspired's worst champion?" } },
+  });
+  assert.deepEqual(await routeQuestion("what is Faker's most median performance champion?"), {
+    call: { tool: "query_players", args: { q: "what is Faker's most median performance champion?" } },
+  });
+  assert.deepEqual(await routeQuestion("what is the median performance champion for Faker?"), {
+    call: { tool: "query_players", args: { q: "what is the median performance champion for Faker?" } },
+  });
+  assert.deepEqual(await routeQuestion("what is Faker's average performance champion?"), {
+    call: { tool: "query_players", args: { q: "what is Faker's average performance champion?" } },
+  });
+  assert.deepEqual(await routeQuestion("what is the worst champion in general?"), {
+    call: { tool: "query_champions", args: { q: "what is the worst champion in general?" } },
+  });
 });
 
 test("executeTool builds the right endpoint and parses the response", async () => {
@@ -78,6 +107,24 @@ test("executeTool builds the right endpoint and parses the response", async () =
   try {
     const data = await executeTool({ tool: "tier", args: { role: "mid" } });
     assert.deepEqual(data, { patch: "16.15", rows: [] });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("executeTool preserves the original question for aggregate champion queries", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    assert.equal(url, "/api/chat/query_champions?q=what+is+the+worst+champion+in+general%3F");
+    return new Response(JSON.stringify({ ok: true, data: { kind: "champion_query", rows: [] } }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+  try {
+    const data = await executeTool({ tool: "query_champions", args: { q: "what is the worst champion in general?" } });
+    assert.deepEqual(data, { kind: "champion_query", rows: [] });
   } finally {
     globalThis.fetch = originalFetch;
   }
