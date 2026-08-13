@@ -1,4 +1,4 @@
-import { chatError, chatJson, clean, readChatJson, searchParams } from "@/lib/chatApi";
+import { chatError, chatJson, clean, readChatJson, searchParams, secureChatRoute } from "@/lib/chatApi";
 
 export const runtime = "nodejs";
 
@@ -14,7 +14,7 @@ type Upcoming = {
   league?: string;
 };
 
-export async function GET(request: Request) {
+async function get(request: Request) {
   const league = clean(searchParams(request).get("league"));
   const limit = Math.min(Math.max(parseInt(searchParams(request).get("limit") ?? "10", 10) || 10, 1), 50);
   try {
@@ -34,3 +34,5 @@ export async function GET(request: Request) {
     return chatError("The schedule is unavailable for the current release.");
   }
 }
+
+export const GET = secureChatRoute(get);

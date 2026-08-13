@@ -1,4 +1,4 @@
-import { chatError, chatJson, clean, readChatJson, searchParams } from "@/lib/chatApi";
+import { chatError, chatJson, clean, readChatJson, searchParams, secureChatRoute } from "@/lib/chatApi";
 
 export const runtime = "nodejs";
 
@@ -12,7 +12,7 @@ type TierRow = {
   movement?: string | null;
 };
 
-export async function GET(request: Request) {
+async function get(request: Request) {
   const params = searchParams(request);
   const role = clean(params.get("role"));
   const patch = clean(params.get("patch"));
@@ -34,3 +34,5 @@ export async function GET(request: Request) {
     return chatError("Tier lists are unavailable for the current release.");
   }
 }
+
+export const GET = secureChatRoute(get);

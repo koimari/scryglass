@@ -1,0 +1,42 @@
+{
+  "pack_id": "v2026.08.13.183000",
+  "schema_version": "2.0.0",
+  "created_utc": "2026-08-13T18:31:17.030645+00:00",
+  "filters": {
+    "years": [2025, 2026],
+    "leagues": "all_in_year_window"
+  },
+  "attribution": "Completed professional match data from Oracle's Elixir.",
+  "excluded": ["raw game rows", "research studies", "predictive artifacts"],
+  "base_url": "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/packs/v2026.08.13.1830",
+  "data_backend": "local",
+  "draft_authority": {
+    "schema_version": "scryglass:draft-authority:v1",
+    "status": "unavailable",
+    "release_id": "v2026.08.13.183000",
+    "model_version": null,
+    "receipt_sha256": null,
+    "reason": "Build-only fallback has no promotion authority."
+  },
+  "ratings": {
+    "source_as_of": "2026-08-12T16:08:15Z"
+  },
+  "total_bytes": 163892613,
+  "total_files": 14,
+  "files": [
+    { "path": "features/leaderboards.json", "relative": "features/leaderboards.json", "rows": 50, "cols": null, "bytes": 985344, "sha256": "d93bfedec5a791d5af43351110ff3e2c2cc33162dda7ff24aae439e77a89e82f" },
+    { "path": "features/match_index.json", "relative": "features/match_index.json", "rows": 17272, "cols": null, "bytes": 5155489, "sha256": "670846970c1e01c7edad50a4f12a26f025417d5170f3a7334eb554f2df3f9599" },
+    { "path": "features/match_records_2025.json", "relative": "features/match_records_2025.json", "rows": 9932, "cols": null, "bytes": 47272979, "sha256": "425d96ba1329d6a2aa3a1e5b428ba98ea21887a2379804004a8b07a0a9eaf4d7" },
+    { "path": "features/match_records_2026.json", "relative": "features/match_records_2026.json", "rows": 7340, "cols": null, "bytes": 41345214, "sha256": "6da9b46f3ef8c1a1b564f57aace2719e08212388cfcaf0f2c1722952831f6a3a" },
+    { "path": "features/player_champion_records.json", "relative": "features/player_champion_records.json", "rows": 43478, "cols": 8, "bytes": 4470351, "sha256": "ec83b7098f23b35b5ff7251364b233144cf78fd06570ed7f59e7d9598df89b50" },
+    { "path": "features/player_metadata.json", "relative": "features/player_metadata.json", "rows": 3257, "cols": null, "bytes": 307800, "sha256": "37eed7a1922b47212d6d62669f6494795d7cba0b2db101020d393d8748f69d63" },
+    { "path": "features/player_ratings_snapshot.json", "relative": "features/player_ratings_snapshot.json", "rows": 3853, "cols": 18, "bytes": 2039515, "sha256": "d87a16ca758130daf855945b7e021a57b653e68fb7346736285d8317916d354f" },
+    { "path": "features/player_records.json", "relative": "features/player_records.json", "rows": 3855, "cols": null, "bytes": 2542731, "sha256": "6845f5e2027f869c7a1304edd0f47fd88210ae02eb97a4e46ff32ac9b07d9cff" },
+    { "path": "features/player_weekly_ranks.json", "relative": "features/player_weekly_ranks.json", "rows": 1946, "cols": null, "bytes": 1926070, "sha256": "29d4fa37643e78a21bc7d13c35a55db1526c46ec0c1d7896594f2fd7baf0866f" },
+    { "path": "features/profile_records.json", "relative": "features/profile_records.json", "rows": 2984, "cols": null, "bytes": 56719681, "sha256": "0a32cecb0fc44164a147c30f08c779779c5c755755526da16e9b7d0252c9fc1c" },
+    { "path": "features/ratings_snapshot.json", "relative": "features/ratings_snapshot.json", "rows": 612, "cols": 21, "bytes": 379737, "sha256": "48a25f2fb91e28a4c92c354aede606920e74a421d69d72bd5338e1f139ae48b3" },
+    { "path": "features/schedule.json", "relative": "features/schedule.json", "rows": 360, "cols": null, "bytes": 189202, "sha256": "ae8ee68de851924f6944a521218b6a9821f6f7cc1109056a79d2bd2a2166ce77" },
+    { "path": "features/team_records.json", "relative": "features/team_records.json", "rows": 612, "cols": null, "bytes": 501279, "sha256": "be20ba3938af988158883221f6b38cd28ca99bf2c116eb4c47455424038ad620" },
+    { "path": "features/team_weekly_ranks.json", "relative": "features/team_weekly_ranks.json", "rows": 535, "cols": null, "bytes": 57221, "sha256": "6638b594b5f7ff36648b6cc81c58e98a8832ccd65edfc2d70487695d2f670861" }
+  ]
+}

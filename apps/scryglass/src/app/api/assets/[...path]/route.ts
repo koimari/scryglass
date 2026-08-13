@@ -1,79 +1,91 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { supabaseConfig } from "@/lib/serverPack";
+import {
+  fetchVerifiedStorageAsset,
+  readActivePublicAsset,
+  readVerifiedAssetBytes,
+  type ActivePublicAsset,
+} from "@/lib/serverPack";
 
 export const runtime = "nodejs";
 export const revalidate = 3600;
 
-/** Vercel-side proxy for Supabase public pack assets (storage + DB rows).
- * The pack assets are immutable per release, so responses are CDN-cached
- * (s-maxage) and the Next data cache absorbs refetches — Supabase egress
- * becomes one fetch per release instead of one per cache miss. */
-export async function GET(
-  request: Request,
-  context: { params: Promise<{ path: string[] }> },
-) {
-  const { path } = await context.params;
-  const config = supabaseConfig();
-  if (!config) {
-    return NextResponse.json({ error: "Supabase is not configured" }, { status: 500 });
-  }
-  const [releaseId, ...rest] = path;
-  if (!releaseId || rest.length === 0) {
-    return NextResponse.json({ error: "expected /api/assets/<release_id>/<asset path>" }, { status: 400 });
-  }
-  const release = encodeURIComponent(releaseId);
-  const assetPath = encodeURIComponent(rest.join("/"));
+const IMMUTABLE_CACHE = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800";
 
-  // 1) Storage-backed assets (objects live under <release_id>/<path>).
-  const storagePath = [releaseId, ...rest].map((part) => encodeURIComponent(part)).join("/");
-  const storageUrl = `${config.url}/storage/v1/object/public/scryglass-public/${storagePath}`;
-  let response: Response | null = null;
-  try {
-    const storageResponse = await fetch(storageUrl, {
-      headers: { apikey: config.publishableKey },
-      cache: "force-cache",
-    });
-    if (storageResponse.ok) response = storageResponse;
-  } catch {
-    response = null;
-  }
+function unavailable(status = 404): NextResponse {
+  return NextResponse.json(
+    { error: "asset unavailable" },
+    { status, headers: { "Cache-Control": "private, no-store" } },
+  );
+}
 
-  // 2) DB-row (inline) assets: fall back to the public assets table.
-  if (!response) {
-    try {
-      const rowResponse = await fetch(
-        `${config.url}/rest/v1/scryglass_public_assets?release_id=eq.${release}&path=eq.${assetPath}&select=body&limit=1`,
-        {
-          headers: { apikey: config.publishableKey },
-          cache: "force-cache",
-        },
-      );
-      if (rowResponse.ok) {
-        const rows = (await rowResponse.json()) as Array<{ body?: unknown }>;
-        const body = rows[0]?.body;
-        if (body !== undefined && body !== null) {
-          return new NextResponse(JSON.stringify(body), {
-            headers: {
-              "Content-Type": "application/json",
-              "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
-            },
-          });
+function verifiedStream(body: ReadableStream<Uint8Array>, asset: ActivePublicAsset): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  const digest = createHash("sha256");
+  let bytes = 0;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read();
+        if (!chunk.done) {
+          bytes += chunk.value.byteLength;
+          if (bytes > asset.bytes) {
+            await reader.cancel("asset size mismatch");
+            controller.error(new Error("Public asset integrity check failed"));
+            return;
+          }
+          digest.update(chunk.value);
+          controller.enqueue(chunk.value);
+          return;
         }
+        if (bytes !== asset.bytes || digest.digest("hex") !== asset.sha256) {
+          controller.error(new Error("Public asset integrity check failed"));
+          return;
+        }
+        controller.close();
+      } catch (error) {
+        controller.error(error);
       }
-    } catch {
-      // fall through to the 404
-    }
-  }
-
-  if (!response) {
-    return NextResponse.json({ error: `asset ${404}` }, { status: 404 });
-  }
-  // Stream the body: Vercel Functions cap buffered responses at 4.5MB and
-  // the pack assets are 20-47MB.
-  return new NextResponse(response.body, {
-    headers: {
-      "Content-Type": "application/json",
-      "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
     },
   });
+}
+
+/** Serve only assets that belong to the active, manifest-bound release. */
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  const segments = (await context.params).path;
+  const [releaseId, ...rest] = segments;
+  if (!releaseId || rest.length === 0 || segments.length > 4) return unavailable();
+
+  let asset: ActivePublicAsset | null;
+  try {
+    asset = await readActivePublicAsset(releaseId, rest.join("/"));
+  } catch {
+    return unavailable();
+  }
+  if (!asset) return unavailable();
+
+  try {
+    const body = asset.storagePath
+      ? verifiedStream((await fetchVerifiedStorageAsset(asset)).body!, asset)
+      : await readVerifiedAssetBytes(asset);
+    const responseBody = body instanceof Uint8Array ? Uint8Array.from(body).buffer : body;
+    return new NextResponse(responseBody, {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": IMMUTABLE_CACHE,
+        "Content-Length": String(asset.bytes),
+        "Content-Type": asset.contentType,
+        "Cross-Origin-Resource-Policy": "cross-origin",
+        ETag: `"${asset.sha256}"`,
+      },
+    });
+  } catch {
+    return unavailable(502);
+  }
 }

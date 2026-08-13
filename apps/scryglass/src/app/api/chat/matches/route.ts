@@ -1,16 +1,16 @@
-import { chatError, chatJson, clean, searchParams } from "@/lib/chatApi";
+import { chatError, chatJson, clean, searchParams, secureChatRoute } from "@/lib/chatApi";
 import { filterChatMatchesByTeam, loadChatMatches } from "@/lib/chatData";
 
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
+async function get(request: Request) {
   const params = searchParams(request);
   const team = clean(params.get("team"));
   const league = clean(params.get("league"));
   const champion = clean(params.get("champion"));
   const limit = Math.min(Math.max(parseInt(params.get("limit") ?? "10", 10) || 10, 1), 50);
   if (!team && !league && !champion) {
-    return chatError("One of team, league, or champion is required.", 400);
+    return chatError("One of team, league, or champion is required.", 422);
   }
   try {
     let games = await loadChatMatches();
@@ -33,3 +33,5 @@ export async function GET(request: Request) {
     return chatError("Match search is unavailable for the current release.");
   }
 }
+
+export const GET = secureChatRoute(get);

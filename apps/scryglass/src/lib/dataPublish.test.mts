@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validPublishSecret, validReleaseId } from "./dataPublish";
+import { validDiagnosticSecret, validPublishSecret, validReleaseId } from "./dataPublish";
 
 test("release IDs use the immutable public format", () => {
   assert.equal(validReleaseId("v2026.08.09.234328"), true);
@@ -14,4 +14,10 @@ test("publish secret requires an exact bearer token", () => {
   assert.equal(validPublishSecret("Bearer wrong", "known"), false);
   assert.equal(validPublishSecret(null, "known"), false);
   assert.equal(validPublishSecret("Bearer known", undefined), false);
+});
+
+test("diagnostics use their own token and can fall back to the publisher token", () => {
+  assert.equal(validDiagnosticSecret("Bearer diagnostics", "diagnostics", "publisher"), true);
+  assert.equal(validDiagnosticSecret("Bearer publisher", "diagnostics", "publisher"), false);
+  assert.equal(validDiagnosticSecret("Bearer publisher", undefined, "publisher"), true);
 });

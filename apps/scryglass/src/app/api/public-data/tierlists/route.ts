@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const view = new URL(request.url).searchParams.get("view") === "latest" ? "latest" : "full";
   try {
-    const url = await publicTierListViewDownloadUrl(view);
+    const url = new URL(await publicTierListViewDownloadUrl(view), request.url);
     return NextResponse.redirect(url, {
       status: 307,
       headers: {
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   } catch {
     if (view === "latest") {
       try {
-        const url = await publicTierListViewDownloadUrl("full");
+        const url = new URL(await publicTierListViewDownloadUrl("full"), request.url);
         return NextResponse.redirect(url, {
           status: 307,
           headers: {

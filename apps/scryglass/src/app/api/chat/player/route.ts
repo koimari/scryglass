@@ -1,12 +1,14 @@
-import { chatError, chatJson, clean, searchParams } from "@/lib/chatApi";
+import { chatError, chatJson, clean, searchParams, secureChatRoute } from "@/lib/chatApi";
 import { lookupPlayer } from "@/lib/chatData";
 
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
+async function get(request: Request) {
   const name = clean(searchParams(request).get("name"));
-  if (!name) return chatError("A player name is required.", 400);
+  if (!name) return chatError("A player name is required.", 422);
   const player = await lookupPlayer(name);
-  if (!player) return chatError(`No player found for "${name}".`);
+  if (!player) return chatError("A matching player was not found.");
   return chatJson(player);
 }
+
+export const GET = secureChatRoute(get);
