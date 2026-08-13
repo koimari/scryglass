@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sameTimestamp } from "./health.ts";
+import { sameTimestamp } from "./health";
 
 test("health timestamps compare the same instant across UTC formats", () => {
   assert.equal(

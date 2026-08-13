@@ -13,6 +13,9 @@ import {
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 import styles from "./MatchesPage.module.css";
 
+// The active release is a runtime dependency. A build must stay independent
+// from a retired or temporarily unavailable data object.
+export const dynamic = "force-dynamic";
 export const revalidate = 21_600;
 
 export const metadata: Metadata = {
