@@ -9,7 +9,7 @@ import type {
   ProfileRecords,
   TeamRating,
 } from "@/lib/pack";
-import { compactPlayerRatings, findPlayerByRouteName, isActiveRating, PLAYER_SIGMA_MIN, softMu } from "@/lib/pack";
+import { compactPlayerRatings, findPlayerByRouteName, hasPromotedDraftAuthority, isActiveRating, PLAYER_SIGMA_MIN, softMu } from "@/lib/pack";
 import { draftRankingsFromProfile, filterDraftRankings } from "@/lib/draftRankings";
 import { playerPortrait } from "@/lib/playerPortraits";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
@@ -76,7 +76,7 @@ export default async function PlayerEloPage({ params }: Props) {
   const recentGames = gameIds
     .map((gameId) => profileRecords?.games[gameId])
     .filter((game): game is ProfileGame => Boolean(game));
-  const draftProfile = profileRecords
+  const draftProfile = hasPromotedDraftAuthority(man) && profileRecords
     ? filterDraftRankings(draftRankingsFromProfile(profileRecords), { leagues: [], minGames: 5 })
     : null;
   const draftMetric = draftProfile?.players.find(

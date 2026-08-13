@@ -5,6 +5,7 @@ import {
   adjustedRating,
   compactPlayerRatings,
   findPlayerByRouteName,
+  hasPromotedDraftAuthority,
   isActiveRating,
   PLAYER_SIGMA_MIN,
   softMu,
@@ -124,7 +125,7 @@ export default async function TeamEloPage({ params }: Props) {
       total: peers.length,
     };
   }
-  const draftProfile = profileRecords
+  const draftProfile = hasPromotedDraftAuthority(man) && profileRecords
     ? filterDraftRankings(draftRankingsFromProfile(profileRecords), { leagues: [], minGames: 5 })
     : null;
   const draftMetric = draftProfile?.teams.find(

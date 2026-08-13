@@ -133,6 +133,10 @@ export function SiteFooter() {
       <div>
         <span>Completed professional games</span>
         <Link href="/methodology" className="row-link">Method</Link>
+        <Link href="/sources" className="row-link">Sources</Link>
+        <Link href="/privacy" className="row-link">Privacy</Link>
+        <Link href="/legal" className="row-link">Legal</Link>
+        <Link href="/security" className="row-link">Security</Link>
       </div>
       <div className="site-footer-contact" aria-label="Contact">
         <span>Questions</span>

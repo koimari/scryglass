@@ -73,6 +73,15 @@ export type PackManifest = {
     quality_picks?: number;
     coverage?: number;
   };
+  draft_authority?: {
+    schema_version: "scryglass:draft-authority:v1";
+    status: "unavailable" | "promoted";
+    release_id: string;
+    model_version: string | null;
+    receipt_sha256: string | null;
+    issued_utc?: string | null;
+    reason?: string | null;
+  };
   ratings?: {
     source_mode?: string;
     source_as_of?: string;
@@ -538,6 +547,30 @@ export function findPlayerByRouteName(
 ): PlayerRating | undefined {
   const exact = players.find((player) => player.player === routeName);
   return exact ?? players.find((player) => player.player.toLowerCase() === routeName.toLowerCase());
+}
+
+/** Match a display identity to a record without making source casing part of the join. */
+export function findRecordByName<T>(
+  records: Record<string, T>,
+  name: string,
+): T | undefined {
+  const exact = records[name];
+  if (exact) return exact;
+  const wanted = normKey(name);
+  const entry = Object.entries(records).find(([candidate]) => normKey(candidate) === wanted);
+  return entry?.[1];
+}
+
+/** Draft results stay private until an independent, release-bound receipt is published. */
+export function hasPromotedDraftAuthority(manifest: PackManifest): boolean {
+  const authority = manifest.draft_authority;
+  return authority?.schema_version === "scryglass:draft-authority:v1"
+    && authority.status === "promoted"
+    && authority.release_id === manifest.pack_id
+    && typeof authority.model_version === "string"
+    && authority.model_version.trim().length > 0
+    && typeof authority.receipt_sha256 === "string"
+    && /^[a-f0-9]{64}$/i.test(authority.receipt_sha256);
 }
 
 export function packUpdatedLabel(manifest: PackManifest): string {

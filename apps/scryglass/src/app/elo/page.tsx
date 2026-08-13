@@ -1,238 +1,219 @@
-import { Suspense } from "react";
+import type { Metadata } from "next";
 import Link from "next/link";
-import { SignalRatings } from "@/components/SignalRatings";
+import {
+  SignalRatings,
+  type PlayerRatingView,
+  type PlayerRecordView,
+  type RatingsTab,
+  type TeamRatingView,
+  type TeamRecordView,
+} from "@/components/SignalRatings";
 import type {
   CompetitionTier,
-  PlayerChampionRecord,
-  PlayerMetadata,
   PlayerRating,
   PlayerRecord,
   PlayerWeeklyRanks,
-  ProfileGame,
-  ProfileRecords,
   TeamRating,
   TeamRecord,
   TeamWeeklyRanks,
 } from "@/lib/pack";
 import {
-  bestChampionRecords,
   compactPlayerRatings,
+  findRecordByName,
+  hasPromotedDraftAuthority,
   isActiveRating,
   packSourceUpdatedLabel,
   packUpdatedLabel,
+  recordMatchesLeagues,
 } from "@/lib/pack";
-import { draftRankingsFromProfile, type DraftPlayerRow, type DraftRankingsScope, type DraftTeamRow } from "@/lib/draftRankings";
+import type { DraftPlayerRow, DraftRankingsScope, DraftTeamRow } from "@/lib/draftRankings";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 import styles from "./EloPage.module.css";
 
-function RatingsLoadingState() {
-  return (
-    <div className={styles.loadingState} role="status" aria-live="polite">
-      <div className={styles.loadingHeader}>
-        <i aria-hidden="true" />
-        <div>
-          <strong>Loading ratings</strong>
-          <span>Reading the accepted team and player snapshot</span>
-        </div>
-      </div>
-      <div className={styles.loadingGrid} aria-hidden="true">
-        {["teams", "players"].map((label) => (
-          <div className={styles.loadingPanel} key={label}>
-            <span />
-            <span />
-            <span />
-            <span />
-            <span />
-          </div>
-        ))}
-      </div>
-      <small>Filters and evidence fields appear when the snapshot is ready.</small>
-    </div>
-  );
-}
-
-// Ratings use the current validated local pack. A local sync can replace this
-// pack without rebuilding the application.
-// The active release is a runtime dependency. A build must stay independent
-// from a retired or temporarily unavailable data object.
-export const dynamic = "force-dynamic";
 export const revalidate = 21_600;
 
-export default async function EloPage() {
-  const man = await readPackManifest();
-  const sourceUpdated = packSourceUpdatedLabel(man);
-  const teams = await readPackJson<TeamRating[]>(man, "features/ratings_snapshot.json");
-  const playersRaw = await readPackJson<PlayerRating[]>(man, "features/player_ratings_snapshot.json");
-  const players = compactPlayerRatings(playersRaw);
+export const metadata: Metadata = {
+  title: "Team And Player Ratings",
+  description: "Current professional League of Legends team and player ratings with evidence-aware filters.",
+};
 
-  let teamRecords: Record<string, TeamRecord> = {};
-  let teamWeeklyRanks: TeamWeeklyRanks = { as_of: null, previous_as_of: null, by_team: {} };
-  let playerRecords: Record<string, PlayerRecord> = {};
-  let playerWeeklyRanks: PlayerWeeklyRanks = { as_of: null, previous_as_of: null, by_player: {} };
-  let playerMetadata: Record<string, PlayerMetadata> = {};
-  let playerChampionRecords: Record<string, PlayerChampionRecord[]> = {};
-  let profileRecords: ProfileRecords | null = null;
-  let draftTeams: DraftTeamRow[] = [];
-  let draftPlayers: DraftPlayerRow[] = [];
-  let draftScope: DraftRankingsScope = "whole_archive";
-  let draftEvidenceGames: number | null = null;
-  try {
-    const leaderboards = await readPackJson<{ teams_draft?: DraftTeamRow[]; players_draft?: DraftPlayerRow[] }>(man, "features/leaderboards.json");
-    draftTeams = leaderboards.teams_draft ?? [];
-    draftPlayers = leaderboards.players_draft ?? [];
-  } catch {
-    // draft rankings are optional
-  }
-  try {
-    teamRecords = await readPackJson(man, "features/team_records.json");
-  } catch {
-    teamRecords = {};
-  }
-  try {
-    teamWeeklyRanks = await readPackJson<TeamWeeklyRanks>(man, "features/team_weekly_ranks.json");
-  } catch {
-    teamWeeklyRanks = { as_of: null, previous_as_of: null, by_team: {} };
-  }
-  try {
-    playerRecords = await readPackJson(man, "features/player_records.json");
-  } catch {
-    playerRecords = {};
-  }
-  try {
-    playerWeeklyRanks = await readPackJson<PlayerWeeklyRanks>(man, "features/player_weekly_ranks.json");
-  } catch {
-    playerWeeklyRanks = { as_of: null, previous_as_of: null, by_player: {} };
-  }
-  try {
-    playerMetadata = await readPackJson<Record<string, PlayerMetadata>>(man, "features/player_metadata.json");
-  } catch {
-    playerMetadata = {};
-  }
-  try {
-    playerChampionRecords = await readPackJson<Record<string, PlayerChampionRecord[]>>(
-      man,
-      "features/player_champion_records.json",
-    );
-  } catch {
-    playerChampionRecords = {};
-  }
-  try {
-    profileRecords = await readPackJson<ProfileRecords>(man, "features/profile_records.json");
-  } catch {
-    profileRecords = null;
-  }
+type PageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
 
-  const fallbackDraft = profileRecords ? draftRankingsFromProfile(profileRecords) : null;
-  // Profile records are the canonical evidence for this view. The optional
-  // leaderboard asset can contain one row per league or tier, which splits a
-  // player's picks and makes the total disagree with their profile.
-  if (fallbackDraft) {
-    draftTeams = fallbackDraft.teams;
-    draftPlayers = fallbackDraft.players;
-    draftScope = fallbackDraft.scope;
-    draftEvidenceGames = fallbackDraft.evidenceGames;
-  }
+function first(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
 
-  const activeTeamNames = new Set(
-    teams.filter(isActiveRating).map((team) => team.team),
-  );
-  const leagueSets: Record<CompetitionTier, Set<string>> = {
+function selectedTab(value: string | undefined): RatingsTab {
+  return value === "players" || value === "draft" ? value : "teams";
+}
+
+function selectedScopes(value: string | undefined): string[] {
+  if (value === "ALL") return [];
+  const scopes = value?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
+  return scopes.length ? scopes : ["TIER1"];
+}
+
+function compactTeamRating(row: TeamRating): TeamRatingView {
+  return {
+    team: row.team,
+    mu_total: row.mu_total,
+    sigma: row.sigma,
+    rating_p10: row.rating_p10,
+    n_maps: row.n_maps,
+    evidence_active: row.evidence_active,
+  };
+}
+
+function compactPlayerRating(row: PlayerRating): PlayerRatingView {
+  return {
+    player: row.player,
+    mu_total: row.mu_total,
+    sigma: row.sigma,
+    n_maps: row.n_maps,
+    last_team: row.last_team,
+    evidence_active: row.evidence_active,
+  };
+}
+
+function compactTeamRecord(row: TeamRecord): TeamRecordView {
+  return {
+    leagues: row.leagues ?? [],
+    primary: row.primary ?? null,
+    intl: Boolean(row.intl),
+    interregional: Boolean(row.interregional),
+    current_league: row.current_league ?? null,
+    current_tier: row.current_tier ?? null,
+    current_team: row.current_team ?? null,
+    games: row.games,
+    wr: row.wr,
+    by_league: row.by_league,
+    by_tier: row.by_tier,
+  };
+}
+
+function compactPlayerRecord(row: PlayerRecord): PlayerRecordView {
+  return {
+    games: row.games,
+    wr: row.wr,
+    primary_role: row.primary_role ?? row.roles?.[0] ?? null,
+    current_league: row.current_league ?? null,
+    current_tier: row.current_tier ?? null,
+    current_team: row.current_team ?? null,
+  };
+}
+
+function recordsFor<T, R>(
+  names: string[],
+  records: Record<string, T>,
+  compact: (row: T) => R,
+): Record<string, R> {
+  return Object.fromEntries(names.flatMap((name) => {
+    const record = findRecordByName(records, name);
+    return record ? [[name, compact(record)] as const] : [];
+  }));
+}
+
+function availableLeagues(records: Record<string, TeamRecord>): Record<CompetitionTier, string[]> {
+  const sets: Record<CompetitionTier, Set<string>> = {
     tier1: new Set(),
     tier2: new Set(),
     tier3: new Set(),
   };
-  for (const [team, rec] of Object.entries(teamRecords)) {
-    if (!activeTeamNames.has(team) || !rec.current_tier || !rec.current_league) continue;
-    leagueSets[rec.current_tier].add(rec.current_league);
+  for (const record of Object.values(records)) {
+    if (record.current_tier && record.current_league) {
+      sets[record.current_tier].add(record.current_league);
+    }
   }
-  const availableLeaguesByTier: Record<CompetitionTier, string[]> = {
-    tier1: [...leagueSets.tier1].sort(),
-    tier2: [...leagueSets.tier2].sort(),
-    tier3: [...leagueSets.tier3].sort(),
+  return {
+    tier1: [...sets.tier1].sort(),
+    tier2: [...sets.tier2].sort(),
+    tier3: [...sets.tier3].sort(),
   };
+}
 
-  const championsByPlayer = new Map(
-    Object.entries(playerChampionRecords).map(([player, records]) => [
-      player.toLowerCase(),
-      bestChampionRecords(records, 5),
-    ]),
-  );
-  const playerChampionPicks = Object.fromEntries(
-    players.map((player) => [
-      player.player,
-      (championsByPlayer.get(player.player.toLowerCase()) ?? []).map((record) => ({
-        champion: record.champion,
-        label: `${record.champion}: ${record.wins}-${record.losses} in ${record.games} games`,
-      })),
-    ]),
-  );
-  const roleOrder = ["top", "jungle", "mid", "bot", "support"];
-  const teamChampionPicks = Object.fromEntries(
-    teams.map((team) => {
-      const games = (profileRecords?.teams[team.team] ?? [])
-        .map((gameId) => profileRecords?.games[gameId])
-        .filter((game): game is ProfileGame => Boolean(game))
-        .sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
-      const latest = games[0];
-      if (!latest) return [team.team, []];
-      const side = latest.blue_team.toLowerCase() === team.team.toLowerCase()
-        ? "Blue"
-        : "Red";
-      const picks = latest.players
-        .filter((participant) => participant.side === side)
-        .sort(
-          (a, b) =>
-            roleOrder.indexOf(a.role.toLowerCase()) -
-            roleOrder.indexOf(b.role.toLowerCase()),
-        )
-        .slice(0, 5)
-        .map((participant) => {
-          const best = championsByPlayer.get(participant.player.toLowerCase())?.[0];
-          const champion = best?.champion ?? participant.champion;
-          return champion
-            ? {
-                champion,
-                label: `${participant.role}: ${participant.player} · ${champion}${
-                  best ? ` · ${best.wins}-${best.losses} in ${best.games} games` : ""
-                }`,
-              }
-            : null;
-        })
-        .filter((pick): pick is { champion: string; label: string } => Boolean(pick));
-      return [team.team, picks];
-    }),
-  );
-  const teamRecentForms = Object.fromEntries(
-    teams.map((team) => {
-      const form = (profileRecords?.teams[team.team] ?? [])
-        .map((gameId) => profileRecords?.games[gameId])
-        .filter((game): game is ProfileGame => Boolean(game))
-        .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
-        .map((game) => {
-          const blue = game.blue_team.toLowerCase() === team.team.toLowerCase();
-          return blue ? game.blue_win === 1 : game.blue_win === 0;
-        })
-        .slice(0, 5);
-      return [team.team, form];
-    }),
-  );
-  const playerRecentForms = Object.fromEntries(
-    players.map((player) => {
-      const form = (profileRecords?.players[player.player] ?? [])
-        .map((gameId) => profileRecords?.games[gameId])
-        .filter((game): game is ProfileGame => Boolean(game))
-        .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
-        .flatMap((game) => {
-          const participant = game.players.find(
-            (entry) => entry.player.toLowerCase() === player.player.toLowerCase(),
-          );
-          if (!participant) return [];
-          return [participant.side === "Blue" ? game.blue_win === 1 : game.blue_win === 0];
-        })
-        .slice(0, 5);
-      return [player.player, form];
-    }),
-  );
+export default async function EloPage({ searchParams }: PageProps) {
+  const query = await searchParams;
+  const tab = selectedTab(first(query.tab));
+  const scopes = selectedScopes(first(query.leagues));
+  const manifest = await readPackManifest();
+  const sourceUpdated = packSourceUpdatedLabel(manifest);
+  const draftAuthorized = hasPromotedDraftAuthority(manifest);
+
+  let teams: TeamRatingView[] = [];
+  let players: PlayerRatingView[] = [];
+  let teamRecords: Record<string, TeamRecordView> = {};
+  let playerRecords: Record<string, PlayerRecordView> = {};
+  let movementByName: Record<string, number | null> = {};
+  let draftTeams: DraftTeamRow[] = [];
+  let draftPlayers: DraftPlayerRow[] = [];
+  let draftScope: DraftRankingsScope = "whole_archive";
+  let draftEvidenceGames: number | null = null;
+
+  let allTeamRecords: Record<string, TeamRecord> = {};
+
+  if (tab === "teams") {
+    const [ratingRows, records, ranks] = await Promise.all([
+      readPackJson<TeamRating[]>(manifest, "features/ratings_snapshot.json"),
+      readPackJson<Record<string, TeamRecord>>(manifest, "features/team_records.json").catch(() => ({})),
+      readPackJson<TeamWeeklyRanks>(manifest, "features/team_weekly_ranks.json").catch(() => null),
+    ]);
+    allTeamRecords = records;
+    teams = ratingRows
+      .filter(isActiveRating)
+      .filter((team) => recordMatchesLeagues(findRecordByName(allTeamRecords, team.team), scopes))
+      .map(compactTeamRating);
+    teamRecords = recordsFor(teams.map((team) => team.team), allTeamRecords, compactTeamRecord);
+    if (ranks) {
+      movementByName = Object.fromEntries(teams.flatMap((team) => {
+        const delta = ranks.by_team[team.team]?.delta;
+        return delta == null ? [] : [[team.team, delta] as const];
+      }));
+    }
+  }
+
+  if (tab === "players") {
+    const [ratingRows, allPlayerRecords, records, ranks] = await Promise.all([
+      readPackJson<PlayerRating[]>(manifest, "features/player_ratings_snapshot.json"),
+      readPackJson<Record<string, PlayerRecord>>(manifest, "features/player_records.json").catch(() => ({})),
+      readPackJson<Record<string, TeamRecord>>(manifest, "features/team_records.json").catch(() => ({})),
+      readPackJson<PlayerWeeklyRanks>(manifest, "features/player_weekly_ranks.json").catch(() => null),
+    ]);
+    allTeamRecords = records;
+    players = compactPlayerRatings(ratingRows)
+      .filter(isActiveRating)
+      .filter((player) => recordMatchesLeagues(findRecordByName(allPlayerRecords, player.player), scopes))
+      .map(compactPlayerRating);
+    playerRecords = recordsFor(players.map((player) => player.player), allPlayerRecords, compactPlayerRecord);
+    if (ranks) {
+      movementByName = Object.fromEntries(players.flatMap((player) => {
+        const tier = playerRecords[player.player]?.current_tier ?? "all";
+        const rank = ranks.by_player[player.player]?.[tier] ?? ranks.by_player[player.player]?.all;
+        return rank?.delta == null ? [] : [[player.player, rank.delta] as const];
+      }));
+    }
+  }
+
+  if (tab === "draft" && draftAuthorized) {
+    try {
+      const [leaderboards, records] = await Promise.all([
+        readPackJson<{ teams_draft?: DraftTeamRow[]; players_draft?: DraftPlayerRow[] }>(
+          manifest,
+          "features/leaderboards.json",
+        ),
+        readPackJson<Record<string, TeamRecord>>(manifest, "features/team_records.json").catch(() => ({})),
+      ]);
+      allTeamRecords = records;
+      draftTeams = leaderboards.teams_draft ?? [];
+      draftPlayers = leaderboards.players_draft ?? [];
+      draftScope = "whole_archive";
+      draftEvidenceGames = manifest.draft_pool?.quality_games ?? manifest.draft_pool?.games ?? null;
+    } catch {
+      draftTeams = [];
+      draftPlayers = [];
+    }
+  }
 
   return (
     <div className={styles.page}>
@@ -246,7 +227,7 @@ export default async function EloPage() {
         </div>
         <div className={styles.provenance} aria-label="Ratings provenance">
           <span>
-            Updated <time dateTime={man.created_utc}>{packUpdatedLabel(man)}</time>
+            Updated <time dateTime={manifest.created_utc}>{packUpdatedLabel(manifest)}</time>
           </span>
           {sourceUpdated ? <span>Source through {sourceUpdated}</span> : null}
           <Link href="/methodology">Method</Link>
@@ -260,27 +241,23 @@ export default async function EloPage() {
           <Link href="/methodology#player-ratings">Read the full method →</Link>
         </div>
       </details>
-      <Suspense fallback={<RatingsLoadingState />}>
-        <SignalRatings
-          draftTeams={draftTeams}
-          draftPlayers={draftPlayers}
-          draftScope={draftScope}
-          draftWindowDays={draftScope === "profile_window" ? profileRecords?.window_days ?? null : null}
-          draftEvidenceGames={draftEvidenceGames}
-          teams={teams}
-          players={players}
-          teamRecords={teamRecords}
-          teamWeeklyRanks={teamWeeklyRanks}
-          playerRecords={playerRecords}
-          playerWeeklyRanks={playerWeeklyRanks}
-          playerMetadata={playerMetadata}
-          availableLeaguesByTier={availableLeaguesByTier}
-          championImages={profileRecords?.champion_images ?? {}}
-          playerChampionPicks={playerChampionPicks}
-          recentForms={{ teams: teamRecentForms, players: playerRecentForms }}
-          teamChampionPicks={teamChampionPicks}
-        />
-      </Suspense>
+      <SignalRatings
+        key={tab}
+        loadedTab={tab}
+        draftAuthorized={draftAuthorized}
+        draftUnavailableReason={manifest.draft_authority?.reason ?? "Draft Score is waiting for an independent promotion receipt."}
+        draftTeams={draftTeams}
+        draftPlayers={draftPlayers}
+        draftScope={draftScope}
+        draftWindowDays={null}
+        draftEvidenceGames={draftEvidenceGames}
+        teams={teams}
+        players={players}
+        teamRecords={teamRecords}
+        playerRecords={playerRecords}
+        movementByName={movementByName}
+        availableLeaguesByTier={availableLeagues(allTeamRecords)}
+      />
     </div>
   );
 }

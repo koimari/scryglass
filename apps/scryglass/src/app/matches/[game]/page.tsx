@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { MatchRatingProfile } from "@/components/RatingProfiles";
-import type { MatchIndex, MatchRecords, ProfileGame, ProfileRecords } from "@/lib/pack";
+import { hasPromotedDraftAuthority, type MatchIndex, type MatchRecords, type ProfileGame, type ProfileRecords } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 export const revalidate = 21_600;
@@ -42,5 +42,8 @@ export default async function MatchPage({ params }: Props) {
     }
   }
   if (!game) notFound();
-  return <MatchRatingProfile game={game} championImages={profiles.champion_images} />;
+  const publishedGame = hasPromotedDraftAuthority(manifest)
+    ? game
+    : { ...game, draft_pool: undefined, draft_contribution: undefined };
+  return <MatchRatingProfile game={publishedGame} championImages={profiles.champion_images} />;
 }
