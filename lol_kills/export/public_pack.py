@@ -1516,21 +1516,45 @@ def export_public_pack(
             "year": archive_year,
             "games": year_games,
         }
-        archive_dest = feat_dir / f"match_records_{archive_year}.json"
-        archive_dest.write_text(
-            json.dumps(archive_payload, separators=(",", ":"), ensure_ascii=False),
-            encoding="utf-8",
-        )
-        register(
-            {
-                "rows": len(year_games),
-                "cols": None,
-                "bytes": archive_dest.stat().st_size,
-                "sha256": _sha256(archive_dest),
-                "columns": None,
-            },
-            f"features/match_records_{archive_year}.json",
-        )
+        # Whole-archive match records are split into calendar quarters so
+        # every published object stays under the Supabase storage size limit
+        # (~50 MiB); the site resolves the quarter from the game date.
+        quarters: dict[int, dict[str, Any]] = {}
+        for game_id, game in year_games.items():
+            month = int(str(game.get("date") or "")[5:7] or 0)
+            quarter = ((month - 1) // 3) + 1
+            bucket = quarters.setdefault(
+                quarter,
+                {
+                    "schema_version": archive_payload["schema_version"],
+                    "year": archive_year,
+                    "games": {},
+                },
+            )
+            bucket["games"][game_id] = game
+        for quarter in (1, 2, 3, 4):
+            if quarter not in quarters:
+                quarters[quarter] = {
+                    "schema_version": archive_payload["schema_version"],
+                    "year": archive_year,
+                    "games": {},
+                }
+        for quarter in sorted(quarters):
+            archive_dest = feat_dir / f"match_records_{archive_year}_q{quarter}.json"
+            archive_dest.write_text(
+                json.dumps(quarters[quarter], separators=(",", ":"), ensure_ascii=False),
+                encoding="utf-8",
+            )
+            register(
+                {
+                    "rows": len(quarters[quarter]["games"]),
+                    "cols": None,
+                    "bytes": archive_dest.stat().st_size,
+                    "sha256": _sha256(archive_dest),
+                    "columns": None,
+                },
+                f"features/match_records_{archive_year}_q{quarter}.json",
+            )
     del archive_games
 
     for src_name, cols, out_name in (

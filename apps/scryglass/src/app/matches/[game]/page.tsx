@@ -24,8 +24,18 @@ export default async function MatchPage({ params }: Props) {
       const summary = index.games.find((candidate) => candidate.game_id === gameId);
       const year = summary ? new Date(summary.date).getUTCFullYear() : 0;
       if (year === 2025 || year === 2026) {
-        const archive = await readPackJson<MatchRecords>(manifest, `features/match_records_${year}.json`);
-        game = archive.games[gameId];
+        const month = summary ? new Date(summary.date).getUTCMonth() + 1 : 0;
+        const quarter = Math.min(4, Math.max(1, Math.ceil(month / 3)));
+        try {
+          // quarter-split archive files (whole-archive draft evidence made
+          // the year files exceed the storage object limit)
+          const archive = await readPackJson<MatchRecords>(manifest, `features/match_records_${year}_q${quarter}.json`);
+          game = archive.games[gameId];
+        } catch {
+          // legacy packs kept the single year file
+          const archive = await readPackJson<MatchRecords>(manifest, `features/match_records_${year}.json`);
+          game = archive.games[gameId];
+        }
       }
     } catch {
       game = undefined;
