@@ -209,8 +209,8 @@ function comparisonAnswer(
   const shareLeader = winner ? (winner === first.team ? first : second) : null;
   const shareOther = winner ? (winner === first.team ? second : first) : null;
   const relation = shareLeader && shareOther
-    ? `${shareLeader.team} has the ${direction} historical average draft win share at ${percent(shareLeader.average_win_share)} across ${shareLeader.games} games, versus ${percent(shareOther.average_win_share)} for ${shareOther.team} across ${shareOther.games} games. That is a ${percentagePointGap(shareLeader.average_win_share, shareOther.average_win_share)} edge for ${shareLeader.team}.`
-    : `${first.team} and ${second.team} have the same historical average draft win share at ${percent(first.average_win_share)} across ${first.games} and ${second.games} games.`;
+    ? `${shareLeader.team} has the ${direction} average published draft win share in the active ${windowDays}-day profile window at ${percent(shareLeader.average_win_share)} across ${shareLeader.games} games, versus ${percent(shareOther.average_win_share)} for ${shareOther.team} across ${shareOther.games} games. That is a ${percentagePointGap(shareLeader.average_win_share, shareOther.average_win_share)} edge for ${shareLeader.team}.`
+    : `${first.team} and ${second.team} have the same average published draft win share in the active ${windowDays}-day profile window at ${percent(first.average_win_share)} across ${first.games} and ${second.games} games.`;
 
   return {
     kind: "team_draft_comparison",
