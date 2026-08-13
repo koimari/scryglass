@@ -45,6 +45,43 @@ type PlayerQueryResult = {
   rows: PlayerQueryRow[];
 };
 
+type TeamDraftRow = {
+  team: string;
+  average_score: number;
+  average_win_share: number;
+  games: number;
+  best_score: number;
+  worst_score: number;
+};
+
+type TeamDraftQueryResult = {
+  kind: "team_draft_query" | "team_draft_comparison";
+  answer: {
+    headline: string;
+    basis: string;
+    caveat: string;
+  };
+  rows: TeamDraftRow[];
+};
+
+type ChampionQueryRow = {
+  champion: string;
+  games: number;
+  wins: number;
+  win_rate: number;
+  players: number;
+};
+
+type ChampionQueryResult = {
+  kind: "champion_query";
+  answer: {
+    headline: string;
+    basis: string;
+    caveat: string;
+  };
+  rows: ChampionQueryRow[];
+};
+
 type TierRow = {
   champion: string;
   role: string;
@@ -80,6 +117,11 @@ function rating(value: number | null | undefined): string | number {
 
 function percentage(value: number | null | undefined): string {
   return value == null || !Number.isFinite(value) ? "—" : `${Math.round(value * 100)}%`;
+}
+
+function draftScore(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
 }
 
 function roleName(value: string | null | undefined): string {
@@ -166,9 +208,67 @@ function leaderboardTable(rows: LeaderboardRow[], category: string): React.React
 function resultTable(result: unknown, call: ToolCall): React.ReactNode {
   const data = result as Record<string, unknown> | null;
 
+  if (call.tool === "query_champions" && data?.kind === "champion_query" && Array.isArray(data.rows)) {
+    const query = data as unknown as ChampionQueryResult;
+    return (
+      <div className={styles.queryResult} data-testid="champion-query-result">
+        <p className={styles.queryHeadline} data-testid="champion-query-headline">{query.answer.headline}</p>
+        <p className={styles.queryBasis}>{query.answer.basis}</p>
+        <p className={styles.queryCaveat}>{query.answer.caveat}</p>
+        {query.rows.length ? table(
+          <table className={styles.resultTable}>
+            <thead><tr><th>Champion</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>Wins</th><th className={styles.numeric}>WR</th><th className={styles.numeric}>Players</th></tr></thead>
+            <tbody>
+              {query.rows.map((row) => (
+                <tr key={row.champion}>
+                  <td>{row.champion}</td>
+                  <td className={styles.numeric}>{present(row.games)}</td>
+                  <td className={styles.numeric}>{present(row.wins)}</td>
+                  <td className={styles.numeric}>{percentage(row.win_rate)}</td>
+                  <td className={styles.numeric}>{present(row.players)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>,
+        ) : null}
+      </div>
+    );
+  }
+
+  if (call.tool === "query_drafts" && (data?.kind === "team_draft_query" || data?.kind === "team_draft_comparison") && Array.isArray(data.rows)) {
+    const query = data as unknown as TeamDraftQueryResult;
+    return (
+      <div className={styles.queryResult} data-testid={query.kind === "team_draft_comparison" ? "team-draft-comparison-result" : "team-draft-query-result"}>
+        <p className={styles.queryHeadline} data-testid="team-draft-query-headline">{query.answer.headline}</p>
+        <p className={styles.queryBasis}>{query.answer.basis}</p>
+        <p className={styles.queryCaveat}>{query.answer.caveat}</p>
+        {query.rows.length ? table(
+          <table className={styles.resultTable}>
+            <thead><tr><th>Team</th><th className={styles.numeric}>Avg draft pts</th><th className={styles.numeric}>Avg draft win share</th><th className={styles.numeric}>Drafts</th><th className={styles.numeric}>Best</th><th className={styles.numeric}>Worst</th></tr></thead>
+            <tbody>
+              {query.rows.map((row) => (
+                <tr key={row.team}>
+                  <td><a className="row-link" href={`/elo/team/${teamSlug(row.team)}`}>{row.team}</a></td>
+                  <td className={styles.numeric}>{draftScore(row.average_score)}</td>
+                  <td className={styles.numeric}>{percentage(row.average_win_share)}</td>
+                  <td className={styles.numeric}>{row.games}</td>
+                  <td className={styles.numeric}>{draftScore(row.best_score)}</td>
+                  <td className={styles.numeric}>{draftScore(row.worst_score)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>,
+        ) : null}
+      </div>
+    );
+  }
+
   if (call.tool === "query_players" && data?.kind === "player_query" && Array.isArray(data.rows)) {
     const query = data as unknown as PlayerQueryResult;
     const hasChampion = query.rows.some((row) => Boolean(row.champion));
+    const singlePlayerChampion = hasChampion
+      && query.rows.length > 0
+      && query.rows.every((row) => row.name === query.rows[0].name);
     return (
       <div className={styles.queryResult} data-testid="player-query-result">
         <p className={styles.queryHeadline} data-testid="player-query-headline">{query.answer.headline}</p>
@@ -177,7 +277,9 @@ function resultTable(result: unknown, call: ToolCall): React.ReactNode {
         {query.rows.length ? table(
           <table className={styles.resultTable}>
             <thead>
-              {hasChampion ? (
+              {singlePlayerChampion ? (
+                <tr><th>Champion</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>Wins</th><th className={styles.numeric}>WR</th></tr>
+              ) : hasChampion ? (
                 <tr><th>Player</th><th>Champion</th><th>Role</th><th>Level</th><th className={styles.numeric}>Champion games</th><th className={styles.numeric}>Champion WR</th><th className={styles.numeric}>Rating</th></tr>
               ) : (
                 <tr><th>Player</th><th>Role</th><th>Team</th><th>League</th><th>Level</th><th className={styles.numeric}>Rating</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>WR</th></tr>
@@ -186,9 +288,16 @@ function resultTable(result: unknown, call: ToolCall): React.ReactNode {
             <tbody>
               {query.rows.map((row) => (
                 <tr key={`${row.name}-${row.champion ?? "player"}`}>
-                  <td><a className="row-link" href={`/elo/player/${playerSlug(row.name)}`}>{row.name}</a></td>
-                  {hasChampion ? (
+                  {singlePlayerChampion ? (
                     <>
+                      <td>{present(row.champion)}</td>
+                      <td className={styles.numeric}>{present(row.champion_games)}</td>
+                      <td className={styles.numeric}>{present(row.champion_wins)}</td>
+                      <td className={styles.numeric}>{percentage(row.champion_win_rate)}</td>
+                    </>
+                  ) : hasChampion ? (
+                    <>
+                      <td><a className="row-link" href={`/elo/player/${playerSlug(row.name)}`}>{row.name}</a></td>
                       <td>{present(row.champion)}</td>
                       <td>{roleName(row.role)}</td>
                       <td>{tierName(row.tier)}</td>
@@ -198,6 +307,7 @@ function resultTable(result: unknown, call: ToolCall): React.ReactNode {
                     </>
                   ) : (
                     <>
+                      <td><a className="row-link" href={`/elo/player/${playerSlug(row.name)}`}>{row.name}</a></td>
                       <td>{roleName(row.role)}</td>
                       <td>{row.team ? <a className="row-link" href={`/elo/team/${teamSlug(row.team)}`}>{row.team}</a> : "—"}</td>
                       <td>{present(row.league)}</td>
@@ -443,10 +553,11 @@ export default function SupportChat({ floating = false }: { floating?: boolean }
   const suggested = [
     "who is best rated between Faker and Chovy",
     "who is the best Galio player",
+    "which team has the best draft score",
+    "what is the worst champion in general?",
     "show me T1's recent matches",
     "best Tier 1 LCK mid with at least 100 games",
-    "when does the next LEC game happen",
-    "how does the draft win share work",
+    "what is Faker's most median performance champion?",
   ];
 
   if (floating && pathname === "/chat") return null;
@@ -504,7 +615,7 @@ export default function SupportChat({ floating = false }: { floating?: boolean }
       >
         {messages.length === 0 && (
           <div className={styles.empty}>
-            <p>Ask about players, teams, matches, ratings, tier lists, schedules, or methodology.</p>
+            <p>Ask about players, champions, teams, matches, ratings, draft scores, tier lists, schedules, or methodology.</p>
             <div className={styles.suggestions}>
               {suggested.map((suggestion) => (
                 <button key={suggestion} type="button" onClick={() => setInput(suggestion)}>{suggestion}</button>

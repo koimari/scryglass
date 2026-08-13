@@ -19,7 +19,9 @@ export type QueryField =
   | "champion_games"
   | "champion_wins"
   | "champion_win_rate"
-  | "champion_score";
+  | "champion_score"
+  | "champion_median_distance"
+  | "champion_mean_distance";
 export type QueryOperator = "eq" | "in" | "gte" | "lte";
 
 export type QueryFilter = {
@@ -54,6 +56,8 @@ export type QueryPlayerRow = {
   champion_wins: number | null;
   champion_win_rate: number | null;
   champion_score: number | null;
+  champion_median_distance: number | null;
+  champion_mean_distance: number | null;
 };
 
 export type SupportQueryIndex = {
@@ -132,7 +136,7 @@ const DATASET_FIELDS: Record<QueryDataset, Set<QueryField>> = {
   player_champions: new Set([
     "name", "role", "team", "league", "tier", "champion", "active", "rating", "games",
     "wins", "win_rate", "grade_a_games", "champion_games", "champion_wins",
-    "champion_win_rate", "champion_score",
+    "champion_win_rate", "champion_score", "champion_median_distance", "champion_mean_distance",
   ]),
 };
 
@@ -140,6 +144,7 @@ const STRING_FIELDS = new Set<QueryField>(["name", "role", "team", "league", "ti
 const NUMBER_FIELDS = new Set<QueryField>([
   "active", "rating", "games", "wins", "win_rate", "grade_a_games", "champion_games",
   "champion_wins", "champion_win_rate", "champion_score",
+  "champion_median_distance", "champion_mean_distance",
 ]);
 const PLAN_KEYS = new Set(["version", "dataset", "operation", "filters", "orderBy", "limit"]);
 const FILTER_KEYS = new Set(["field", "op", "value"]);
@@ -271,6 +276,8 @@ export function buildSupportQueryIndex(assets: {
       champion_wins: null,
       champion_win_rate: null,
       champion_score: null,
+      champion_median_distance: null,
+      champion_mean_distance: null,
     });
   }
 
@@ -299,6 +306,8 @@ export function buildSupportQueryIndex(assets: {
         champion_wins: championWins,
         champion_win_rate: championWinRate,
         champion_score: wilsonLowerBound(championWins, championGames),
+        champion_median_distance: null,
+        champion_mean_distance: null,
       });
     }
   }
@@ -455,14 +464,16 @@ function resolvePlayerTarget(
 
 function namedMetricTarget(question: string): string | null {
   const stripped = question.trim()
-    .replace(/^(?:what(?:'s| is)|show me|give me|tell me)\s+/i, "")
+    .replace(/^(?:what(?:'s| is)|show me|give me|tell me|rank|list)\s+/i, "")
     .replace(/\?+$/g, "")
     .trim();
   const possessive = /^(.+?)[’']s\s+/.exec(stripped);
   const metricOf = /^(?:rating|win rate|games|maps|a grades?)\s+of\s+(.+)$/i.exec(stripped);
   const trailingMetric = /^(.+?)\s+(?:rating|win rate|games|maps|a grades?)$/i.exec(stripped);
-  const target = possessive?.[1] ?? metricOf?.[1] ?? trailingMetric?.[1] ?? null;
+  const subjectFor = /\b(?:champions?|performance)\s+(?:for|of)\s+(.+)$/i.exec(stripped);
+  const target = possessive?.[1] ?? metricOf?.[1] ?? trailingMetric?.[1] ?? subjectFor?.[1] ?? null;
   if (!target || /\b(best|highest|top|most|average)\b/i.test(target)) return null;
+  if (/^(?:the\s+)?(?:patch|current patch|overall|general|all time)$/i.test(target.trim())) return null;
   return target;
 }
 
@@ -498,21 +509,45 @@ function detectMinimumGames(question: string): number | null {
   return Number.isFinite(value) && value > 0 ? Math.min(value, 10_000) : null;
 }
 
-function detectLimit(question: string): number {
-  const match = /\b(?:top|best)\s+(\d+)\b/i.exec(question);
-  if (!match) return 5;
-  return Math.min(Math.max(Number.parseInt(match[1], 10) || 5, 1), 20);
+function detectLimit(question: string, fallback = 5): number {
+  const match = /\b(?:top|best|bottom|worst)\s+(\d+)\b/i.exec(question);
+  if (!match) return fallback;
+  return Math.min(Math.max(Number.parseInt(match[1], 10) || fallback, 1), 20);
 }
 
-function metricFor(question: string, hasChampion: boolean): QueryField {
+function metricFor(
+  question: string,
+  championQuery: boolean,
+  hasNamedChampion: boolean,
+  hasNamedPlayer: boolean,
+): QueryField {
   const normalized = normalizeEntity(question);
   if (/\ba grade|grade a\b/.test(normalized)) return "grade_a_games";
-  if (/\bwin rate|\bwr\b/.test(normalized)) return hasChampion ? "champion_win_rate" : "win_rate";
+  if (championQuery && /\bmedian\b|\bmiddle(?:most)?\b|\bmidpoint\b/.test(normalized)) return "champion_median_distance";
+  if (championQuery && /\baverage performance\b|\bmean performance\b/.test(normalized)) return "champion_mean_distance";
+  if (/\bwin rate|\bwr\b/.test(normalized)) return championQuery ? "champion_win_rate" : "win_rate";
   if (/\bmost games|\bmost maps|\bexperience|\bexperienced\b/.test(normalized)) {
-    return hasChampion ? "champion_games" : "games";
+    return championQuery ? "champion_games" : "games";
   }
   if (/\brating|\brated\b/.test(normalized)) return "rating";
-  return hasChampion ? "champion_score" : "rating";
+  if (championQuery && hasNamedPlayer && !hasNamedChampion) return "champion_win_rate";
+  return championQuery ? "champion_score" : "rating";
+}
+
+function directionFor(question: string): QueryDirection {
+  if (/\bmedian\b|\bmiddle(?:most)?\b|\bmidpoint\b|\bmean\b|\baverage performance\b|\bclosest to\b/i.test(question)) return "asc";
+  if (/\b(?:best|highest|top)\b.*\bto\b.*\b(?:worst|lowest|bottom)\b/i.test(question)) return "desc";
+  if (/\b(?:worst|lowest|bottom)\b.*\bto\b.*\b(?:best|highest|top)\b/i.test(question)) return "asc";
+  const directionalText = question.replace(/\bat least\b/gi, "");
+  return /\b(worst|lowest|bottom|least)\b/i.test(directionalText) ? "asc" : "desc";
+}
+
+function medianValue(values: number[]): number | null {
+  if (!values.length) return null;
+  const middle = Math.floor(values.length / 2);
+  return values.length % 2 === 1
+    ? values[middle]
+    : (values[middle - 1] + values[middle]) / 2;
 }
 
 export function planPlayerQuestion(
@@ -532,7 +567,9 @@ export function planPlayerQuestion(
     players = [resolved.name];
   }
   const champion = champions[0] ?? null;
-  const metric = metricFor(text, Boolean(champion));
+  const championQuery = Boolean(champion) || /\bchampions?\b/i.test(text);
+  const metric = metricFor(text, championQuery, Boolean(champion), players.length > 0);
+  const direction = directionFor(text);
   const comparisonLanguage = /\b(compare|between|versus|vs|better|higher)\b|\sor\s/i.test(text);
   const comparisonTargets = comparisonLanguage ? comparisonTargetNames(text) : null;
   if (comparisonTargets) {
@@ -547,7 +584,7 @@ export function planPlayerQuestion(
     return { ok: false, reason: "I could not resolve two published player names for that comparison." };
   }
 
-  const dataset: QueryDataset = champion ? "player_champions" : "players";
+  const dataset: QueryDataset = championQuery ? "player_champions" : "players";
   const filters: QueryFilter[] = [];
   if (players.length) filters.push({ field: "name", op: players.length > 1 ? "in" : "eq", value: players.length > 1 ? players : players[0] });
   if (champion) filters.push({ field: "champion", op: "eq", value: champion });
@@ -564,9 +601,8 @@ export function planPlayerQuestion(
   }
   const minimumGames = detectMinimumGames(text);
   if (minimumGames != null) {
-    const championSpecific = champion && new RegExp(`${normalizeEntity(champion)}\\s+(?:games|maps)`, "i").test(normalizeEntity(text));
-    filters.push({ field: championSpecific ? "champion_games" : "games", op: "gte", value: minimumGames });
-  } else if (champion) {
+    filters.push({ field: championQuery ? "champion_games" : "games", op: "gte", value: minimumGames });
+  } else if (championQuery) {
     filters.push({ field: "champion_games", op: "gte", value: 5 });
   }
 
@@ -576,10 +612,12 @@ export function planPlayerQuestion(
     operation,
     filters,
     orderBy: [
-      { field: metric, direction: "desc" },
-      { field: champion ? "champion_games" : "games", direction: "desc" },
+      { field: metric, direction },
+      { field: championQuery ? "champion_games" : "games", direction: "desc" },
     ],
-    limit: operation === "compare" ? Math.min(players.length, 20) : detectLimit(text),
+    limit: operation === "compare"
+      ? Math.min(players.length, 20)
+      : detectLimit(text, championQuery && players.length === 1 ? 20 : 5),
   };
   return parseQueryPlan(rawPlan);
 }
@@ -638,7 +676,12 @@ function filterDescription(plan: QueryPlan): string {
   return descriptions.length ? descriptions.join(", ") : "the active public release";
 }
 
-function answerFor(plan: QueryPlan, rows: QueryPlayerRow[], total: number): QueryAnswer {
+function answerFor(
+  plan: QueryPlan,
+  rows: QueryPlayerRow[],
+  total: number,
+  allRows: QueryPlayerRow[] = rows,
+): QueryAnswer {
   if (!rows.length) {
     return {
       headline: "No published player rows match those constraints.",
@@ -648,6 +691,8 @@ function answerFor(plan: QueryPlan, rows: QueryPlayerRow[], total: number): Quer
   }
   const top = rows[0];
   const metric = plan.orderBy[0].field;
+  const direction = plan.orderBy[0].direction;
+  const rankWord = direction === "asc" ? "lowest" : "highest";
   const value = rowValue(top, metric);
   const rounded = typeof value === "number" ? Math.round(value) : null;
   let headline: string;
@@ -668,21 +713,48 @@ function answerFor(plan: QueryPlan, rows: QueryPlayerRow[], total: number): Quer
       const points = Math.round(difference);
       headline = `${top.name} ranks higher than ${runnerUp.name} by ${points} ${metric.replaceAll("_", " ")} ${points === 1 ? "point" : "points"}.`;
     }
+  } else if (metric === "champion_median_distance" || metric === "champion_mean_distance") {
+    const values = allRows
+      .map((row) => row.champion_win_rate)
+      .filter((candidate): candidate is number => candidate != null && Number.isFinite(candidate))
+      .sort((left, right) => left - right);
+    const reference = values.length
+      ? metric === "champion_median_distance"
+        ? medianValue(values)
+        : values.reduce((sum, candidate) => sum + candidate, 0) / values.length
+      : null;
+    const label = metric === "champion_median_distance" ? "median" : "mean";
+    headline = reference == null
+      ? `${top.name}'s ${label}-performance champion is ${top.champion}.`
+      : `${top.name}'s ${label}-performance champion is ${top.champion} at ${Math.round(Number(top.champion_win_rate) * 100)}%, closest to the ${label} champion win rate of ${Math.round(reference * 100)}%.`;
+  } else if (plan.dataset === "player_champions" && plan.filters.some((filter) => filter.field === "name" && filter.op === "eq")) {
+    if (metric === "champion_win_rate") {
+      headline = `${top.name}'s ${rankWord} published champion win rate is ${Math.round(Number(value) * 100)}% on ${top.champion} across ${top.champion_games ?? "—"} games.`;
+    } else if (metric === "champion_games") {
+      headline = `${top.name} has the ${direction === "asc" ? "fewest" : "most"} published games on ${top.champion}, with ${rounded ?? "—"}.`;
+    } else {
+      headline = `${top.name}'s ${rankWord} matching ${metric.replaceAll("_", " ")} is on ${top.champion}.`;
+    }
   } else if (metric === "champion_score") {
-    headline = `${top.name} ranks first for ${top.champion} under the evidence rule.`;
+    headline = `${top.name} ranks ${direction === "asc" ? "last" : "first"} for ${top.champion} under the evidence rule.`;
   } else if (metric === "champion_win_rate" || metric === "win_rate") {
-    headline = `${top.name} has the highest matching win rate at ${Math.round(Number(value) * 100)}%.`;
+    headline = `${top.name} has the ${rankWord} matching win rate at ${Math.round(Number(value) * 100)}%.`;
   } else if (metric === "champion_games" || metric === "games" || metric === "grade_a_games") {
-    headline = `${top.name} ranks first with ${rounded ?? "—"} ${metric.replaceAll("_", " ")}.`;
+    headline = `${top.name} ranks ${direction === "asc" ? "last" : "first"} with ${rounded ?? "—"} ${metric.replaceAll("_", " ")}.`;
   } else {
-    headline = `${top.name} has the highest matching published rating at ${rounded ?? "—"}.`;
+    headline = `${top.name} has the ${rankWord} matching published rating at ${rounded ?? "—"}.`;
   }
   const championEvidence = plan.dataset === "player_champions";
+  const subject = championEvidence ? "matching player-champion records" : "matching players";
   return {
     headline,
     basis: championEvidence && metric === "champion_score"
-      ? `Ranked ${total} matching players by the 95% Wilson lower bound on champion win rate; ${filterDescription(plan)}.`
-      : `Ranked ${total} matching players by ${metric.replaceAll("_", " ")}; ${filterDescription(plan)}.`,
+      ? `Ranked ${total} ${subject} by the 95% Wilson lower bound on champion win rate; ${filterDescription(plan)}.`
+      : `Ranked ${total} ${subject} by ${metric === "champion_median_distance"
+        ? "distance from the median champion win rate"
+        : metric === "champion_mean_distance"
+          ? "distance from the mean champion win rate"
+          : metric.replaceAll("_", " ")}; ${filterDescription(plan)}.`,
     caveat: championEvidence
       ? "This is a descriptive player-champion record, not a champion-specific rating or causal estimate."
       : null,
@@ -694,14 +766,37 @@ export function executeQueryPlan(planInput: unknown, index: SupportQueryIndex): 
   if (!parsed.ok) throw new Error(parsed.reason);
   const plan = parsed.plan;
   const source = plan.dataset === "player_champions" ? index.playerChampions : index.players;
-  const matching = source.filter((row) => plan.filters.every((filter) => matchesFilter(row, filter)));
+  const baseMatching = source.filter((row) => plan.filters.every((filter) => matchesFilter(row, filter)));
+  const derivedField = plan.orderBy[0].field;
+  const matching = derivedField === "champion_median_distance" || derivedField === "champion_mean_distance"
+    ? (() => {
+      const values = baseMatching
+        .map((row) => row.champion_win_rate)
+        .filter((candidate): candidate is number => candidate != null && Number.isFinite(candidate))
+        .sort((left, right) => left - right);
+      const reference = values.length
+        ? derivedField === "champion_median_distance"
+          ? medianValue(values)
+          : values.reduce((sum, candidate) => sum + candidate, 0) / values.length
+        : null;
+      return baseMatching.map((row) => ({
+        ...row,
+        champion_median_distance: derivedField === "champion_median_distance" && reference != null && row.champion_win_rate != null
+          ? Math.abs(row.champion_win_rate - reference)
+          : null,
+        champion_mean_distance: derivedField === "champion_mean_distance" && reference != null && row.champion_win_rate != null
+          ? Math.abs(row.champion_win_rate - reference)
+          : null,
+      }));
+    })()
+    : baseMatching;
   const rows = [...matching]
     .sort((left, right) => compareRows(left, right, plan.orderBy))
     .slice(0, plan.limit);
   return {
     kind: "player_query",
     plan,
-    answer: answerFor(plan, rows, matching.length),
+    answer: answerFor(plan, rows, matching.length, matching),
     rows,
     proof: { sources: QUERY_SOURCES, resultCount: matching.length },
   };
