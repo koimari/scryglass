@@ -111,6 +111,7 @@ PUBLIC_RATING_REQUIRED_FILES: tuple[str, ...] = (
 # They never take part in the ratings release gate.
 OPTIONAL_PUBLIC_FILES: tuple[str, ...] = (
     "features/schedule.json",
+    "features/leaderboards.json",
 )
 
 FORBIDDEN_PUBLIC_MODEL_FILES: tuple[str, ...] = (

@@ -1,0 +1,105 @@
+.chat {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  gap: 0.75rem;
+  height: min(62vh, 34rem);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 0.75rem);
+  background: var(--surface, transparent);
+  padding: 0.75rem;
+}
+
+.thread {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-right: 0.25rem;
+}
+
+.empty { color: var(--ink-muted); font-size: var(--text-small, 0.875rem); }
+
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.suggestions button {
+  font: inherit;
+  font-size: var(--text-small, 0.875rem);
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface, transparent);
+  color: inherit;
+  cursor: pointer;
+}
+
+.message {
+  max-width: 88%;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius-sm, 0.5rem);
+  font-size: var(--text-small, 0.875rem);
+  line-height: 1.45;
+}
+
+.message p { margin: 0; }
+
+.user {
+  align-self: flex-end;
+  background: var(--accent, #2456ff);
+  color: var(--ink-strong, #fff);
+}
+
+.assistant {
+  align-self: flex-start;
+  border: 1px solid var(--line);
+}
+
+.error { color: var(--danger, #c0392b); }
+
+.resultTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-micro, 0.75rem);
+  margin-top: 0.35rem;
+}
+
+.resultTable th, .resultTable td {
+  text-align: left;
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.resultText, .resultLines p { margin: 0.25rem 0 0; }
+
+.form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+}
+
+.form input {
+  font: inherit;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 0.5rem);
+  background: var(--surface, transparent);
+  color: inherit;
+}
+
+.form button {
+  font: inherit;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 0.5rem);
+  background: var(--accent, #2456ff);
+  color: var(--ink-strong, #fff);
+  cursor: pointer;
+}
+
+.form button:disabled { opacity: 0.5; cursor: default; }
+
+.note { color: var(--ink-muted); font-size: var(--text-micro, 0.75rem); margin: 0; }

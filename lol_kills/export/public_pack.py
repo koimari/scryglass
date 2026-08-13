@@ -21,6 +21,7 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from lol_kills.export import pack_spec as spec
+from lol_kills.export.leaderboards import build_leaderboards
 from lol_kills.export.pack_records import (
     build_maps_frame_from_team_games,
     build_player_champion_records,
@@ -1060,6 +1061,45 @@ def export_public_pack(
             },
             f"features/{dest.name}",
         )
+
+    # Support-chat leaderboards: per-player aggregates + top-N indexes over the
+    # already-public payloads. Optional display artifact; never part of the gate.
+    try:
+        player_rating_rows = json.loads(
+            (feat_dir / "player_ratings_snapshot.json").read_text(encoding="utf-8")
+        )
+        team_rating_rows = json.loads(
+            (feat_dir / "ratings_snapshot.json").read_text(encoding="utf-8")
+        )
+        team_records_payload_raw = dict(team_records_payload)
+        player_champion_records_raw = dict(player_champions_payload)
+        match_index_raw = dict(match_index_payload)
+        leaderboards = build_leaderboards(
+            player_records_payload,
+            profile_records_payload,
+            player_rating_rows,
+            team_rating_rows,
+            team_records=team_records_payload_raw,
+            player_champion_records=player_champion_records_raw,
+            match_index=match_index_raw,
+        )
+        leaderboards_dest = feat_dir / "leaderboards.json"
+        leaderboards_dest.write_text(
+            json.dumps(leaderboards, separators=(",", ":"), ensure_ascii=False),
+            encoding="utf-8",
+        )
+        register(
+            {
+                "rows": len(leaderboards.get("players", {})),
+                "cols": None,
+                "bytes": leaderboards_dest.stat().st_size,
+                "sha256": _sha256(leaderboards_dest),
+                "columns": None,
+            },
+            "features/leaderboards.json",
+        )
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        raise RuntimeError("support-chat leaderboards could not be built") from error
 
     present_paths = {str(item["path"]) for item in files_meta}
     missing_public_files = sorted(
