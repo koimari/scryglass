@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { SignalRatings } from "@/components/SignalRatings";
+import { SignalRatings, type DraftPlayerRow, type DraftTeamRow } from "@/components/SignalRatings";
 import type {
   CompetitionTier,
   PlayerChampionRecord,
@@ -42,6 +42,15 @@ export default async function EloPage() {
   let playerMetadata: Record<string, PlayerMetadata> = {};
   let playerChampionRecords: Record<string, PlayerChampionRecord[]> = {};
   let profileRecords: ProfileRecords | null = null;
+  let draftTeams: DraftTeamRow[] = [];
+  let draftPlayers: DraftPlayerRow[] = [];
+  try {
+    const leaderboards = await readPackJson<{ teams_draft?: DraftTeamRow[]; players_draft?: DraftPlayerRow[] }>(man, "features/leaderboards.json");
+    draftTeams = leaderboards.teams_draft ?? [];
+    draftPlayers = leaderboards.players_draft ?? [];
+  } catch {
+    // draft rankings are optional
+  }
   try {
     teamRecords = await readPackJson(man, "features/team_records.json");
   } catch {
@@ -210,6 +219,8 @@ export default async function EloPage() {
       </details>
       <Suspense fallback={<div className="skeleton-block" aria-hidden />}>
         <SignalRatings
+          draftTeams={draftTeams}
+          draftPlayers={draftPlayers}
           teams={teams}
           players={players}
           teamRecords={teamRecords}

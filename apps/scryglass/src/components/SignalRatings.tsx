@@ -29,7 +29,12 @@ import { evidenceFields, evidenceInfo, formatEvidenceCell } from "@/lib/evidence
 import { TeamMark } from "./TeamMark";
 import styles from "./SignalRatings.module.css";
 
+export type DraftTeamRow = { team: string; games: number; draft_win_share: number };
+export type DraftPlayerRow = { player: string; games: number; draft_score: number; role?: string | null; team?: string | null };
+
 type Props = {
+  draftTeams: DraftTeamRow[];
+  draftPlayers: DraftPlayerRow[];
   teams: TeamRating[];
   players: PlayerRating[];
   teamRecords: Record<string, TeamRecord>;
@@ -49,7 +54,7 @@ type ChampionPick = {
   label: string;
 };
 
-type Tab = "teams" | "players";
+type Tab = "teams" | "players" | "draft";
 type Sort = "rating" | "movement" | "games" | "name";
 
 const PLAYER_ROLES = [
@@ -108,6 +113,8 @@ function ChampionStrip({ picks, images }: { picks: ChampionPick[]; images: Recor
 }
 
 export function SignalRatings({
+  draftTeams,
+  draftPlayers,
   teams,
   players,
   teamRecords,
@@ -124,7 +131,7 @@ export function SignalRatings({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<Tab>(searchParams.get("tab") === "players" ? "players" : "teams");
+  const [tab, setTab] = useState<Tab>((searchParams.get("tab") as Tab) === "players" || (searchParams.get("tab") as Tab) === "draft" ? (searchParams.get("tab") as Tab) : "teams");
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
   const [leagues, setLeagues] = useState<string[]>(() => {
     const parsed = parseLeagues(searchParams.get("leagues"));
@@ -252,9 +259,9 @@ export function SignalRatings({
       <section className={styles.controls} aria-label="Rating controls">
         <div className={styles.controlMain}>
           <div className={styles.tabs} aria-label="Rating type">
-            {(["teams", "players"] as const).map((value) => (
+            {(["teams", "players", "draft"] as const).map((value) => (
               <button key={value} type="button" className={tab === value ? styles.tabActive : ""} aria-pressed={tab === value} onClick={() => { setTab(value); setExpanded(false); setSelected(""); }}>
-                {value === "teams" ? "Teams" : "Players"}
+                {value === "teams" ? "Teams" : value === "players" ? "Players" : "Draft"}
               </button>
             ))}
           </div>
@@ -315,6 +322,37 @@ export function SignalRatings({
               })}
             </aside>
           </section>
+
+          {tab === "draft" ? (
+            <section className={styles.draftSection} aria-label="Draft rankings">
+              <div className={styles.draftColumn}>
+                <header><h2>Teams by draft</h2><p>Mean draft win share across the whole accepted archive</p></header>
+                <ol className={styles.draftList}>
+                  {draftTeams.map((row, index) => (
+                    <li key={row.team}>
+                      <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
+                      <Link className="row-link" href={`/elo/team/${teamSlug(row.team)}`}>{row.team}</Link>
+                      <b>{(row.draft_win_share * 100).toFixed(1)}%</b>
+                      <small>{row.games} games</small>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+              <div className={styles.draftColumn}>
+                <header><h2>Players by draft</h2><p>Mean draft score of their picks across the whole accepted archive</p></header>
+                <ol className={styles.draftList}>
+                  {draftPlayers.map((row, index) => (
+                    <li key={row.player}>
+                      <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
+                      <Link className="row-link" href={`/elo/player/${playerSlug(row.player)}`}>{row.player}</Link>
+                      <b>{row.draft_score >= 0 ? "+" : ""}{row.draft_score.toFixed(3)}</b>
+                      <small>{row.games} picks{row.role ? ` · ${roleLabel(row.role)}` : ""}</small>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </section>
+          ) : null}
 
           <section className={styles.gallerySection}>
             <header><h2>{tab === "teams" ? "Team ratings" : "Player ratings"}</h2><p>{entities.length} shown · {scope}</p></header>

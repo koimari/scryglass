@@ -286,6 +286,45 @@ def _validate_public_record_tiers(records: dict[str, dict[str, Any]], *, label: 
             )
 
 
+def _draft_players_from_signals(signals: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Per-player mean draft pick contribution across the scored archive."""
+    scores: dict[str, list[float]] = {}
+    roles: dict[str, str] = {}
+    teams: dict[str, str] = {}
+    for signal in signals.values():
+        if not isinstance(signal, Mapping):
+            continue
+        for pick in signal.get("picks") or []:
+            if not isinstance(pick, Mapping):
+                continue
+            name = str(pick.get("player") or "").strip()
+            contribution = _number(pick.get("contribution"))
+            if not name or contribution is None:
+                continue
+            scores.setdefault(name, []).append(float(contribution))
+            if not roles.get(name):
+                roles[name] = str(pick.get("role") or "").strip()
+            if not teams.get(name):
+                teams[name] = ""
+    rows = []
+    for name, values in scores.items():
+        if len(values) < 5:
+            continue
+        rows.append({
+            "player": name,
+            "games": len(values),
+            "draft_score": sum(values) / len(values),
+            "role": roles.get(name),
+            "team": teams.get(name),
+        })
+    return rows
+
+
+def _sigmoid(blue: float, red: float) -> float:
+    import math
+    return 1.0 / (1.0 + math.exp(-(blue - red)))
+
+
 def _validate_public_composition_records(
     profile_records: Mapping[str, Any],
 ) -> dict[str, int]:
@@ -806,7 +845,7 @@ def export_public_pack(
         )
     composition_result = score_games_temporally(
         composition_games,
-        target_game_ids=profile_records_payload.get("games", {}).keys(),
+        target_game_ids=None,
         cache_dir=composition_model_dir,
         source_digest=composition_source_digest,
         worker_commit=composition_worker_commit,
@@ -824,12 +863,49 @@ def export_public_pack(
         "worker_commit": composition_evaluation.get("worker_commit"),
         "promotion_gate_passed": True,
     }
+    draft_records_payload: dict[str, Any] = {
+        "schema_version": "scryglass:draft-records:v1",
+        "model_version": str(composition_evaluation.get("model_version") or ""),
+        "fit_through": composition_evaluation.get("fit_through"),
+        "games": {},
+    }
+    draft_game_index = {str(game["game_uid"]): game for game in composition_games}
     for game_id, signal in composition_result.signals.items():
         if game_id in profile_records_payload.get("games", {}):
             profile_records_payload["games"][game_id]["draft_contribution"] = signal
         archive_candidate = profile_records_payload.get("_archive_games", {}).get(game_id)
         if isinstance(archive_candidate, dict):
             archive_candidate["draft_contribution"] = signal
+        game = draft_game_index.get(str(game_id))
+        if not isinstance(game, Mapping) or signal.get("status") not in ("available", "limited"):
+            continue
+        blue_signal = _number(signal.get("blue", {}).get("signal"))
+        red_signal = _number(signal.get("red", {}).get("signal"))
+        draft_records_payload["games"][str(game_id)] = {
+            "date": str(game.get("date") or ""),
+            "league": str(game.get("league") or ""),
+            "blue_team": str(game.get("blue_team") or ""),
+            "red_team": str(game.get("red_team") or ""),
+            "blue_signal": blue_signal,
+            "red_signal": red_signal,
+            "blue_draft_win": round(_sigmoid(blue_signal, red_signal), 4) if blue_signal is not None and red_signal is not None else None,
+            "red_draft_win": round(1.0 - _sigmoid(blue_signal, red_signal), 4) if blue_signal is not None and red_signal is not None else None,
+        }
+    draft_records_dest = feat_dir / "draft_records.json"
+    draft_records_dest.write_text(
+        json.dumps(draft_records_payload, separators=(",", ":"), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    register(
+        {
+            "rows": len(draft_records_payload["games"]),
+            "cols": None,
+            "bytes": draft_records_dest.stat().st_size,
+            "sha256": _sha256(draft_records_dest),
+            "columns": None,
+        },
+        "features/draft_records.json",
+    )
     archive_games = merge_accepted_profile_games(
         profile_records_payload.pop("_archive_games", {}),
         _accepted_profile_games(project),
@@ -1074,6 +1150,7 @@ def export_public_pack(
         team_records_payload_raw = dict(team_records_payload)
         player_champion_records_raw = dict(player_champions_payload)
         match_index_raw = dict(match_index_payload)
+        draft_players_rows = _draft_players_from_signals(composition_result.signals)
         leaderboards = build_leaderboards(
             player_records_payload,
             profile_records_payload,
@@ -1082,6 +1159,8 @@ def export_public_pack(
             team_records=team_records_payload_raw,
             player_champion_records=player_champion_records_raw,
             match_index=match_index_raw,
+            draft_records=draft_records_payload,
+            draft_players=draft_players_rows,
         )
         leaderboards_dest = feat_dir / "leaderboards.json"
         leaderboards_dest.write_text(
