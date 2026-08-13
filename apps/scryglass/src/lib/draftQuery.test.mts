@@ -31,6 +31,16 @@ const aliasRecords = {
   },
 } satisfies ProfileRecords;
 
+const shareRankingRecords = {
+  ...records,
+  games: {
+    rawHighOne: game("raw-high-one", "RawHigh", "Opponent One", 3, -2),
+    rawHighTwo: game("raw-high-two", "RawHigh", "Opponent Two", -2, 3),
+    shareHighOne: game("share-high-one", "ShareHigh", "Opponent Three", 0.4, 0),
+    shareHighTwo: game("share-high-two", "ShareHigh", "Opponent Four", 0.4, 0),
+  },
+} satisfies ProfileRecords;
+
 function game(
   gameId: string,
   blueTeam: string,
@@ -112,4 +122,10 @@ test("team draft comparisons resolve common team aliases", () => {
   const comparison = queryTeamDraftScores(aliasRecords, "who has the best draft between KC and G2?");
   assert.equal(comparison.kind, "team_draft_comparison");
   assert.deepEqual(comparison.rows.map((row) => row.team), ["Karmine Corp", "G2 Esports"]);
+});
+
+test("draft rankings use the visible win-share percentage metric", () => {
+  const result = queryTeamDraftScores(shareRankingRecords, "which team has the best draft with at least 2 drafts");
+  assert.equal(result.rows[0]?.team, "ShareHigh");
+  assert.match(result.answer.headline, /ShareHigh has the highest average published draft win share at 60%/);
 });
