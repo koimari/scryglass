@@ -1532,6 +1532,13 @@ def export_public_pack(
                 },
             )
             bucket["games"][game_id] = game
+        for quarter in (1, 2, 3, 4):
+            if quarter not in quarters:
+                quarters[quarter] = {
+                    "schema_version": archive_payload["schema_version"],
+                    "year": archive_year,
+                    "games": {},
+                }
         for quarter in sorted(quarters):
             archive_dest = feat_dir / f"match_records_{archive_year}_q{quarter}.json"
             archive_dest.write_text(

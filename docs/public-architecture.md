@@ -32,7 +32,7 @@ A data refresh does not start a Vercel deployment. A code deployment does not ac
 | Public surface | Supabase source | Worker source |
 | --- | --- | --- |
 | `/elo` and rating profiles | Active release manifest plus `features/ratings_snapshot.json`, player rating files, record files, metadata, and weekly ranks | Accepted OE snapshot |
-| `/matches` and match profiles | Active release `features/match_index.json`, `features/match_records_2025.json`, and `features/match_records_2026.json` | The same accepted OE snapshot used for ratings |
+| `/matches` and match profiles | Active release `features/match_index.json` plus quarter-split `features/match_records_{year}_q{n}.json` (legacy packs keep the single year file) | The same accepted OE snapshot used for ratings |
 | `/tiers` | Active release `rankings/tierlists-latest.json` | Patch-wide tier derivation from the accepted OE snapshot |
 | `/api/public-data/tierlists` | Active release tier asset | None at request time |
 | `/api/health` | Active release manifest and sanitized public refresh health | Latest completed refresh receipt |
