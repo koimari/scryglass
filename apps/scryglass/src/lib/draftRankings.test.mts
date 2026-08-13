@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { draftRankingsFromProfile } from "./draftRankings";
+import { draftRankingsFromProfile, filterDraftRankings } from "./draftRankings";
 import type { ProfileRecords } from "./pack";
 
 function game(
@@ -59,12 +59,12 @@ test("derives team and player rankings when the leaderboard asset is missing", (
   assert.equal(result.scope, "profile_window");
   assert.equal(result.evidenceGames, 5);
   assert.deepEqual(result.teams, [
-    { team: "Team A", games: 5, draft_edge: 0.4 },
-    { team: "Team B", games: 5, draft_edge: -0.4 },
+    { team: "Team A", games: 5, draft_win_share: 0.5987, draft_edge: 0.4, league: "LCK", tier: "tier1" },
+    { team: "Team B", games: 5, draft_win_share: 0.4013, draft_edge: -0.4, league: "LCK", tier: "tier1" },
   ]);
   assert.deepEqual(result.players, [
-    { player: "BlueMid", games: 5, draft_score: 0.2, role: "mid", team: "Team A" },
-    { player: "RedMid", games: 5, draft_score: -0.1, role: "mid", team: "Team B" },
+    { player: "BlueMid", games: 5, draft_score: 0.2, role: "mid", team: "Team A", league: "LCK", tier: "tier1" },
+    { player: "RedMid", games: 5, draft_score: -0.1, role: "mid", team: "Team B", league: "LCK", tier: "tier1" },
   ]);
 });
 
@@ -94,4 +94,41 @@ test("accepts the limited status and normalizes role abbreviations", () => {
   assert.equal(result.scope, "whole_archive");
   assert.equal(result.evidenceGames, 5);
   assert.equal(result.players[0]?.role, "jungle");
+});
+
+test("filters scoped rows and aggregates teams across selected leagues", () => {
+  const records = {
+    schema_version: "scryglass:profile-records:v2",
+    window_days: 120,
+    champion_images: {},
+    players: {},
+    teams: {},
+    games: {
+      ...Object.fromEntries(Array.from({ length: 5 }, (_, index) => [`lck-${index}`, game(`lck-${index}`, "Team A", "Team B", 0.5, 0.1)])),
+      ...Object.fromEntries(Array.from({ length: 5 }, (_, index) => [`lec-${index}`, { ...game(`lec-${index}`, "Team A", "Team C", 0.1, 0.0), league: "LEC" }])),
+    },
+  } satisfies ProfileRecords;
+  const result = draftRankingsFromProfile(records);
+  const lck = filterDraftRankings(result, { leagues: ["LCK"], minGames: 5 });
+  assert.equal(lck.teams.length, 2);
+  assert.equal(lck.teams[0]?.team, "Team A");
+  const all = filterDraftRankings(result, { leagues: [], minGames: 5 });
+  assert.equal(all.teams[0]?.team, "Team A");
+});
+
+test("marks a profile payload as whole archive when it contains older games", () => {
+  const games = Object.fromEntries(Array.from({ length: 5 }, (_, index) => {
+    const value = game(`archive-${index}`, "Team A", "Team B", 0.5, 0.1);
+    value.date = index === 0 ? "2025-01-01" : "2026-08-01";
+    return [`archive-${index}`, value];
+  }));
+  const records = {
+    schema_version: "scryglass:profile-records:v2",
+    window_days: 120,
+    champion_images: {},
+    players: {},
+    teams: {},
+    games,
+  } satisfies ProfileRecords;
+  assert.equal(draftRankingsFromProfile(records).scope, "whole_archive");
 });

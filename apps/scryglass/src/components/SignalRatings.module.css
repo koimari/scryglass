@@ -722,28 +722,112 @@
 
 .draftSection {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
-  gap: 1rem;
-  margin-block: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(1rem, 2.5vw, 2.5rem);
+  margin-block: 0.8rem 1.5rem;
 }
-.draftColumn header h2 { margin: 0 0 0.25rem; }
-.draftColumn header p { margin: 0 0 0.75rem; color: var(--ink-muted); font-size: var(--text-small); }
+.draftNote {
+  margin: 0;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--ink-muted);
+  font-size: var(--text-small);
+}
+.draftColumn {
+  min-width: 0;
+}
+.draftColumn header {
+  display: flex;
+  min-height: 4.1rem;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--line-strong);
+}
+.draftColumn header h2 { margin: 0 0 0.25rem; font-size: 1.25rem; }
+.draftColumn header p { margin: 0; color: var(--ink-muted); font-size: var(--text-small); }
+.draftColumn header > b {
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: var(--text-micro);
+  font-weight: 500;
+  white-space: nowrap;
+}
 .draftList {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.35rem;
+  gap: 0;
 }
 .draftList li {
   display: grid;
-  grid-template-columns: 1.6rem minmax(0, 1fr) auto auto;
-  gap: 0.5rem;
+  grid-template-columns: 1.7rem minmax(8rem, 1fr) minmax(7.5rem, 0.9fr) auto;
+  gap: 0.65rem;
   align-items: center;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  min-height: 3.25rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--line);
 }
-.draftList b { font-variant-numeric: tabular-nums; }
+.draftList li:first-child { border-top: 0; }
+.draftList .cardRank {
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: var(--text-micro);
+}
+.draftIdentity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+}
+.draftIdentity a {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.draftMetric {
+  display: grid;
+  grid-template-columns: 3.2rem minmax(3rem, 1fr);
+  gap: 0.55rem;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+.draftMetric b { font-family: var(--font-mono), monospace; font-size: 0.95rem; }
+.draftBarTrack {
+  position: relative;
+  display: block;
+  height: 0.45rem;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--surface-subtle);
+}
+.draftBarTrack::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--line-strong);
+  content: "";
+}
+.draftBarPositive,
+.draftBarNegative {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: block;
+  border-radius: var(--radius-pill);
+  background: var(--signal-positive);
+}
+.draftBarPositive { left: 50%; }
+.draftBarNegative { right: 50%; background: var(--danger); }
 .draftList small { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: var(--text-micro); }
+
+@media (max-width: 760px) {
+  .draftSection { grid-template-columns: 1fr; gap: 1.5rem; }
+  .draftList li { grid-template-columns: 1.6rem minmax(0, 1fr) auto; }
+  .draftMetric { grid-column: 2 / -1; grid-row: 2; }
+  .draftList small { grid-column: 3; grid-row: 1; }
+}

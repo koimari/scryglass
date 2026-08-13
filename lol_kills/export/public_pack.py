@@ -907,6 +907,7 @@ def export_public_pack(
         draft_records_payload["games"][str(game_id)] = {
             "date": str(game.get("date") or ""),
             "league": str(game.get("league") or ""),
+            "competition_tier": str(game.get("competition_tier") or "") or None,
             "blue_team": str(game.get("blue_team") or ""),
             "red_team": str(game.get("red_team") or ""),
             "blue_signal": blue_signal,
