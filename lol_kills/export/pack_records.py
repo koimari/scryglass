@@ -66,7 +66,7 @@ def _draft_slots(row: pd.Series, prefix: str) -> list[str]:
 
 def _first_pick_value(group: pd.DataFrame, metadata: Mapping[str, Any] | None) -> bool | None:
     candidate = (metadata or {}).get("blue_first_pick")
-    if candidate is None:
+    if not _draft_text(candidate):
         for column in ("blue_firstPick", "firstPick"):
             if column in group.columns:
                 candidate = group.iloc[0].get(column)

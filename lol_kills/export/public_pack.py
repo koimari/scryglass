@@ -60,6 +60,7 @@ from lol_kills.research.composition_signal import (
     write_evaluation_report,
     validate_public_signal,
 )
+from lol_kills.v2.tierlists.patch_mapping import normalize_oe_token
 
 ROOT = Path(__file__).resolve().parents[2]
 WAREHOUSE = ROOT / "data" / "lol" / "warehouse" / "parquet"
@@ -539,6 +540,18 @@ def _draft_key(value: Any) -> str:
     return normalize_champ(str(value or "").strip()).casefold()
 
 
+def _draft_patch(value: Any) -> str:
+    """Canonicalize an OE patch token while keeping malformed values unavailable."""
+
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return normalize_oe_token(text)
+    except (TypeError, ValueError):
+        return text
+
+
 def _draft_role(value: Any) -> str:
     return {
         "jng": "jungle",
@@ -569,7 +582,7 @@ def _attach_published_draft_pools(
         for row in rows:
             if not isinstance(row, Mapping):
                 continue
-            patch = str(row.get("patch") or "").strip()
+            patch = _draft_patch(row.get("patch"))
             role = _draft_role(row.get("role"))
             champion = str(row.get("champion") or "").strip()
             rank = row.get("rank")
@@ -609,18 +622,24 @@ def _attach_published_draft_pools(
         bans = pool.get("bans") if isinstance(pool.get("bans"), Mapping) else {}
         blue_bans = [str(value).strip() for value in bans.get("Blue", []) if str(value).strip()]
         red_bans = [str(value).strip() for value in bans.get("Red", []) if str(value).strip()]
+        phase_one_banned = {_draft_key(value) for value in (*blue_bans[:3], *red_bans[:3])}
         banned = {_draft_key(value) for value in (*blue_bans, *red_bans)}
         bans_complete = len(blue_bans) == 5 and len(red_bans) == 5 and len(banned) == 10
         complete_bans += int(bans_complete)
         picked = pool.get("picked") if isinstance(pool.get("picked"), list) else []
         picked = [dict(item) for item in picked if isinstance(item, Mapping)]
+        orders: list[int] = []
+        try:
+            orders = [int(item.get("order")) for item in picked]
+        except (TypeError, ValueError):
+            orders = []
         order_complete = (
             len(picked) == 10
             and len({_draft_key(item.get("champion")) for item in picked}) == 10
-            and all(item.get("order") is not None for item in picked)
+            and sorted(orders) == list(range(1, 11))
         )
         complete_order += int(order_complete)
-        patch = str(pool.get("patch") or game.get("patch") or "").strip()
+        patch = _draft_patch(pool.get("patch") or game.get("patch"))
         picked_keys = {_draft_key(item.get("champion")) for item in picked if item.get("champion")}
         universe = {
             row["key"]: row["champion"]
@@ -645,14 +664,20 @@ def _attach_published_draft_pools(
             if not (bans_complete and order_complete and patch and role and champion_key):
                 continue
             scoped = rows_by_scope.get((patch, role), [])
+            order = int(item["order"])
+            bans_before_pick = phase_one_banned if order <= 6 else banned
             prior = {
                 _draft_key(previous.get("champion"))
                 for previous in picked
                 if isinstance(previous, Mapping)
                 and previous.get("order") is not None
-                and int(previous.get("order")) < int(item.get("order"))
+                and int(previous.get("order")) < order
             }
-            available = [row for row in scoped if row["key"] not in banned and row["key"] not in prior]
+            available = [
+                row
+                for row in scoped
+                if row["key"] not in bans_before_pick and row["key"] not in prior
+            ]
             chosen = next((row for row in scoped if row["key"] == champion_key), None)
             if not chosen or not available:
                 continue
@@ -1201,19 +1226,42 @@ def export_public_pack(
             tier_payload = candidate_tier_payload
     except (OSError, UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError):
         tier_payload = None
-    draft_pool_audit = _attach_published_draft_pools(profile_records_payload, tier_payload)
+    _attach_published_draft_pools(profile_records_payload, tier_payload)
     archive_payload = profile_records_payload.get("_archive_games")
     if isinstance(archive_payload, dict):
-        draft_pool_audit = _attach_published_draft_pools({"games": archive_payload}, tier_payload)
+        _attach_published_draft_pools({"games": archive_payload}, tier_payload)
+    archive_games = merge_accepted_profile_games(
+        profile_records_payload.pop("_archive_games", {}),
+        _accepted_profile_games(project),
+    )
+    profile_game_ids = set(profile_records_payload.get("games", {})).intersection(archive_games)
+    profile_records_payload["games"] = {
+        game_id: archive_games[game_id]
+        for game_id in sorted(profile_game_ids)
+    }
+    for index_name in ("players", "teams"):
+        profile_records_payload[index_name] = {
+            identity: [game_id for game_id in game_ids if game_id in profile_game_ids]
+            for identity, game_ids in profile_records_payload.get(index_name, {}).items()
+            if any(game_id in profile_game_ids for game_id in game_ids)
+        }
+    # Compute the public coverage audit only from games that survive the
+    # accepted-profile bridge. Candidate archive rows can be dropped when no
+    # accepted KDA or grade record exists for the same identity.
+    draft_pool_audit = _attach_published_draft_pools(
+        {"games": profile_records_payload["games"]},
+        tier_payload,
+    )
     for game_id, entry in draft_records_payload.get("games", {}).items():
         profile_game = profile_records_payload.get("games", {}).get(game_id)
-        if not isinstance(profile_game, Mapping) and isinstance(archive_payload, Mapping):
-            profile_game = archive_payload.get(game_id)
+        if not isinstance(profile_game, Mapping):
+            profile_game = archive_games.get(game_id)
         if isinstance(profile_game, Mapping) and isinstance(profile_game.get("draft_pool"), Mapping):
             entry["draft_pool"] = profile_game["draft_pool"]
     profile_records_payload["draft_pool_audit"] = {
         "schema_version": "scryglass:draft-pool-audit:v1",
         "source": "Oracle's Elixir bans and pick order plus published patch tier list",
+        "scope": "published profile window after accepted-profile bridge",
         **draft_pool_audit,
     }
     draft_records_dest = feat_dir / "draft_records.json"
@@ -1231,21 +1279,6 @@ def export_public_pack(
         },
         "features/draft_records.json",
     )
-    archive_games = merge_accepted_profile_games(
-        profile_records_payload.pop("_archive_games", {}),
-        _accepted_profile_games(project),
-    )
-    profile_game_ids = set(profile_records_payload.get("games", {})).intersection(archive_games)
-    profile_records_payload["games"] = {
-        game_id: archive_games[game_id]
-        for game_id in sorted(profile_game_ids)
-    }
-    for index_name in ("players", "teams"):
-        profile_records_payload[index_name] = {
-            identity: [game_id for game_id in game_ids if game_id in profile_game_ids]
-            for identity, game_ids in profile_records_payload.get(index_name, {}).items()
-            if any(game_id in profile_game_ids for game_id in game_ids)
-        }
     published_composition = _validate_public_composition_records(profile_records_payload)
     composition_audit.update(
         {

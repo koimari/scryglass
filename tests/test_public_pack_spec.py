@@ -5,6 +5,7 @@ from copy import deepcopy
 
 from lol_kills.export import pack_spec
 from lol_kills.export.pack_records import (
+    _first_pick_value,
     build_player_champion_records,
     build_profile_records,
     merge_accepted_profile_games,
@@ -339,13 +340,13 @@ def test_published_draft_pool_uses_bans_and_fails_closed_without_them() -> None:
             order += 1
     game = {
         "game_id": "game-1",
-        "patch": "16.15",
+        "patch": "16.1",
         "players": players,
         "draft_pool": {
             "schema_version": "scryglass:draft-pool:v1",
             "status": "limited",
             "source": "oracle-elixir",
-            "patch": "16.15",
+            "patch": "16.1",
             "bans": {"Blue": ["Ban Blue 1", "Ban Blue 2", "Ban Blue 3", "Ban Blue 4", "Ban Blue 5"], "Red": ["Ban Red 1", "Ban Red 2", "Ban Red 3", "Ban Red 4", "Ban Red 5"]},
             "picked": picked,
             "unpicked": [],
@@ -365,19 +366,58 @@ def test_published_draft_pool_uses_bans_and_fails_closed_without_them() -> None:
     for role in roles:
         selected = f"Blue-{role}"
         tier_rows.extend([
-            {"patch": "16.15", "role": role, "champion": selected, "rank": 2},
-            {"patch": "16.15", "role": role, "champion": "Red-" + role, "rank": 1},
-            {"patch": "16.15", "role": role, "champion": "Best-" + role, "rank": 3},
+            {"patch": "16.10", "role": role, "champion": selected, "rank": 2},
+            {"patch": "16.10", "role": role, "champion": "Red-" + role, "rank": 1},
+            {"patch": "16.10", "role": role, "champion": "Best-" + role, "rank": 3},
         ])
     payload = {"games": {"game-1": game}}
     audit = _attach_published_draft_pools(payload, {"rows": tier_rows})
     assert audit["quality_games"] == 1
+    assert game["draft_pool"]["patch"] == "16.10"
     assert game["draft_pool"]["evaluated_picks"] == 10
     assert game["draft_contribution"]["picks"][0]["best_available"] is False
     assert game["draft_contribution"]["picks"][5]["best_available"] is True
     game["draft_pool"]["bans"]["Red"] = []
     _attach_published_draft_pools(payload, {"rows": tier_rows})
     assert game["draft_contribution"]["picks"][0]["best_available"] is None
+
+
+def test_first_pick_falls_back_from_null_map_metadata() -> None:
+    group = pd.DataFrame([{"blue_firstPick": pd.NA, "firstPick": "Blue"}])
+    assert _first_pick_value(group, {"blue_first_pick": float("nan")}) is True
+
+
+def test_published_draft_pool_applies_second_phase_bans_after_sixth_pick() -> None:
+    picked = [
+        {"side": "Blue" if index % 2 else "Red", "role": "mid", "champion": f"Pick-{index}", "order": index}
+        for index in range(1, 11)
+    ]
+    game = {
+        "game_id": "game-2",
+        "patch": "16.1",
+        "draft_pool": {
+            "patch": "16.1",
+            "bans": {
+                "Blue": ["Blue ban 1", "Blue ban 2", "Blue ban 3", "Second phase best", "Blue ban 5"],
+                "Red": ["Red ban 1", "Red ban 2", "Red ban 3", "Red ban 4", "Red ban 5"],
+            },
+            "picked": picked,
+        },
+        "draft_contribution": {"picks": [dict(item, contribution=0.1) for item in picked]},
+    }
+    tier_rows = [
+        {"patch": "16.10", "role": "mid", "champion": "Second phase best", "rank": 1},
+        *[
+            {"patch": "16.10", "role": "mid", "champion": f"Pick-{index}", "rank": index + 1}
+            for index in range(1, 11)
+        ],
+    ]
+
+    _attach_published_draft_pools({"games": {"game-2": game}}, {"rows": tier_rows})
+
+    assert game["draft_pool"]["evaluated_picks"] == 10
+    assert game["draft_pool"]["picked"][0]["best_available"] is False
+    assert game["draft_pool"]["picked"][6]["best_available"] is True
 
 
 def test_profile_records_keep_old_maps_in_the_archive_only() -> None:

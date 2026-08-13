@@ -65,6 +65,7 @@ export type PackManifest = {
   };
   composition_signal?: CompositionSignalAudit;
   draft_pool?: {
+    scope?: string;
     games?: number;
     complete_bans?: number;
     complete_pick_order?: number;
