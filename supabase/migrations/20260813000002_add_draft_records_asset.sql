@@ -1,0 +1,98 @@
+-- Add the whole-archive draft records asset to the publication allowlist.
+
+alter table public.scryglass_public_assets
+  drop constraint if exists scryglass_public_assets_path_check;
+
+alter table public.scryglass_public_assets
+  add constraint scryglass_public_assets_path_check check (
+    path in (
+      'features/ratings_snapshot.json',
+      'features/player_ratings_snapshot.json',
+      'features/team_records.json',
+      'features/team_weekly_ranks.json',
+      'features/player_records.json',
+      'features/player_champion_records.json',
+      'features/profile_records.json',
+      'features/match_index.json',
+      'features/match_records_2025.json',
+      'features/match_records_2026.json',
+      'features/player_weekly_ranks.json',
+      'features/player_metadata.json',
+      'features/schedule.json',
+      'features/leaderboards.json',
+      'features/draft_records.json',
+      'rankings/tierlists.json',
+      'rankings/tierlists-latest.json'
+    )
+  );
+
+create or replace function public.activate_scryglass_public_release(p_release_id text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  previous_release_id text;
+  required_assets constant text[] := array[
+    'features/ratings_snapshot.json',
+    'features/player_ratings_snapshot.json',
+    'features/team_records.json',
+    'features/team_weekly_ranks.json',
+    'features/player_records.json',
+    'features/player_champion_records.json',
+    'features/profile_records.json',
+    'features/match_index.json',
+    'features/match_records_2025.json',
+    'features/match_records_2026.json',
+    'features/player_weekly_ranks.json',
+    'features/player_metadata.json',
+    'rankings/tierlists.json'
+  ];
+  present_assets integer;
+begin
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('scryglass-public-release'));
+
+  if not exists (
+    select 1
+    from public.scryglass_public_releases
+    where release_id = p_release_id
+      and status in ('staging', 'active')
+  ) then
+    raise exception 'Scryglass release is not ready for activation';
+  end if;
+
+  select count(*)
+  into present_assets
+  from public.scryglass_public_assets
+  where release_id = p_release_id
+    and path = any(required_assets);
+
+  if present_assets <> pg_catalog.cardinality(required_assets) then
+    raise exception 'Scryglass release has % of % required assets',
+      present_assets, pg_catalog.cardinality(required_assets);
+  end if;
+
+  select release_id
+  into previous_release_id
+  from public.scryglass_public_releases
+  where status = 'active'
+    and release_id <> p_release_id
+  limit 1;
+
+  update public.scryglass_public_releases
+  set status = 'superseded'
+  where status = 'active'
+    and release_id <> p_release_id;
+
+  update public.scryglass_public_releases
+  set status = 'active', activated_at = now()
+  where release_id = p_release_id;
+
+  return jsonb_build_object(
+    'status', 'active',
+    'release_id', p_release_id,
+    'previous_release_id', previous_release_id
+  );
+end;
+$$;

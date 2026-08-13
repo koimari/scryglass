@@ -25,6 +25,8 @@ type LeaderboardRow = {
   wins: number | null;
   win_rate: number | null;
   grade_a_games: number;
+  grade_games: number;
+  recent_form: number | null;
 };
 
 type PlayerQueryRow = LeaderboardRow & {
@@ -164,6 +166,25 @@ function table(children: React.ReactNode): React.ReactNode {
 }
 
 function leaderboardTable(rows: LeaderboardRow[], category: string): React.ReactNode {
+  if (category === "teams_draft" || category === "players_draft") {
+    const teamsDraft = category === "teams_draft";
+    return table(
+      <table className={styles.resultTable}>
+        <thead><tr>{teamsDraft ? <th>Team</th> : <th>Player</th>}{teamsDraft ? null : <th>Role</th>}<th className={styles.numeric}>Games</th><th className={styles.numeric}>{teamsDraft ? "Draft edge" : "Draft score"}</th></tr></thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.name}>
+              <td><a className="row-link" href={teamsDraft ? `/elo/team/${teamSlug(row.name)}` : `/elo/player/${playerSlug(row.name)}`}>{present(row.name)}</a></td>
+              {teamsDraft ? null : <td>{roleName(row.role)}</td>}
+              <td className={styles.numeric}>{present(row.games)}</td>
+              <td className={styles.numeric}>{row.recent_form != null ? `${row.recent_form >= 0 ? "+" : ""}${row.recent_form.toFixed(3)}` : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>,
+    );
+  }
+
   if (category === "teams") {
     return table(
       <table className={styles.resultTable}>

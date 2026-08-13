@@ -176,6 +176,63 @@ def _champion_performers(
     return output
 
 
+
+
+def _teams_draft(draft_records: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """Teams ranked by mean draft win share across the whole accepted archive."""
+    if not isinstance(draft_records, Mapping):
+        return []
+    games = draft_records.get("games")
+    if not isinstance(games, Mapping):
+        return []
+    by_team: dict[str, list[float]] = {}
+    for game in games.values():
+        if not isinstance(game, Mapping):
+            continue
+        blue = str(game.get("blue_team") or "").strip()
+        red = str(game.get("red_team") or "").strip()
+        edge = game.get("draft_edge")
+        if not isinstance(edge, (int, float)):
+            continue
+        if blue:
+            by_team.setdefault(blue, []).append(float(edge))
+        if red:
+            by_team.setdefault(red, []).append(-float(edge))
+    rows = []
+    for team, edges in by_team.items():
+        games_n = len(edges)
+        if games_n < 5:
+            continue
+        rows.append({
+            "team": team,
+            "games": games_n,
+            "draft_edge": round(sum(edges) / games_n, 4),
+        })
+    rows.sort(key=lambda row: -row["draft_edge"])
+    return rows[:TOP_LIMIT]
+
+
+def _players_draft(players: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Players ranked by mean draft score (pick contribution) across the archive."""
+    rows = []
+    for entry in players:
+        if not isinstance(entry, Mapping):
+            continue
+        name = str(entry.get("player") or "").strip()
+        games_n = int(entry.get("games") or 0)
+        score = _number(entry.get("draft_score"))
+        if not name or games_n < 5 or score is None:
+            continue
+        rows.append({
+            "player": name,
+            "games": games_n,
+            "draft_score": round(score, 4),
+            "role": str(entry.get("role") or "").strip() or None,
+            "team": str(entry.get("team") or "").strip() or None,
+        })
+    rows.sort(key=lambda row: -row["draft_score"])
+    return rows[:TOP_LIMIT]
+
 def build_leaderboards(
     player_records: Mapping[str, Any],
     profile_records: Mapping[str, Any],
@@ -184,6 +241,8 @@ def build_leaderboards(
     team_records: Mapping[str, Any] | None = None,
     player_champion_records: Mapping[str, Any] | None = None,
     match_index: Mapping[str, Any] | None = None,
+    draft_records: Mapping[str, Any] | None = None,
+    draft_players: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Aggregate the public payloads into the leaderboards artifact."""
 
@@ -312,6 +371,8 @@ def build_leaderboards(
         "teams": teams,
         "champions": champions,
         "indexes": indexes,
+        "teams_draft": _teams_draft(draft_records),
+        "players_draft": _players_draft(draft_players or []),
     }
 
 

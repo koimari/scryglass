@@ -112,6 +112,7 @@ PUBLIC_RATING_REQUIRED_FILES: tuple[str, ...] = (
 OPTIONAL_PUBLIC_FILES: tuple[str, ...] = (
     "features/schedule.json",
     "features/leaderboards.json",
+    "features/draft_records.json",
 )
 
 FORBIDDEN_PUBLIC_MODEL_FILES: tuple[str, ...] = (
