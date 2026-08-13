@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { executeTool, routeQuestion, type RouteResult, type ToolCall } from "@/lib/supportChat";
 import { playerSlug, teamSlug } from "@/lib/pack";
 import styles from "./SupportChat.module.css";
@@ -382,16 +383,41 @@ function ChatIcon() {
   );
 }
 
+function ExpandIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      {expanded ? (
+        <path d="M9 4v5H4M15 20v-5h5M4 9l5-5M20 15l-5 5" />
+      ) : (
+        <path d="M9 4H4v5M15 20h5v-5M4 9l5-5M20 15l-5 5" />
+      )}
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m6.5 6.5 11 11m0-11-11 11" />
+    </svg>
+  );
+}
+
 export default function SupportChat({ floating = false }: { floating?: boolean }) {
+  const pathname = usePathname();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(!floating);
-  const endRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const threadRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    const thread = threadRef.current;
+    if (!thread) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    thread.scrollTo({ top: thread.scrollHeight, behavior: reducedMotion ? "auto" : "smooth" });
+  }, [messages, busy]);
 
   async function send() {
     const text = input.trim();
@@ -423,26 +449,59 @@ export default function SupportChat({ floating = false }: { floating?: boolean }
     "how does the draft win share work",
   ];
 
+  if (floating && pathname === "/chat") return null;
+
   if (floating && !open) {
     return (
-      <button type="button" className={styles.floatingButton} onClick={() => setOpen(true)} aria-label="Open support chat">
+      <button type="button" className={styles.floatingButton} onClick={() => setOpen(true)} aria-label="Open Ask Scryglass">
         <ChatIcon />
       </button>
     );
   }
 
+  const chatClassName = [
+    floating ? styles.chatFloating : styles.chat,
+    expanded ? styles.chatExpanded : "",
+  ].filter(Boolean).join(" ");
+
   return (
-    <section className={floating ? styles.chatFloating : styles.chat} aria-label="Scryglass support chat">
+    <section className={chatClassName} aria-label="Ask Scryglass">
       <header className={styles.chatHeader}>
-        <div>
-          <span>Research support</span>
-          <strong>Ask Scryglass</strong>
+        <strong>Ask Scryglass</strong>
+        <div className={styles.windowActions}>
+          <button
+            type="button"
+            className={styles.windowButton}
+            onClick={() => setExpanded((value) => !value)}
+            aria-label={expanded ? "Restore chat size" : "Expand chat"}
+            aria-pressed={expanded}
+          >
+            <ExpandIcon expanded={expanded} />
+          </button>
+          {floating ? (
+            <button
+              type="button"
+              className={styles.windowButton}
+              onClick={() => {
+                setExpanded(false);
+                setOpen(false);
+              }}
+              aria-label="Close Ask Scryglass"
+            >
+              <CloseIcon />
+            </button>
+          ) : null}
         </div>
-        {floating ? (
-          <button type="button" className={styles.floatingClose} onClick={() => setOpen(false)} aria-label="Close support chat">×</button>
-        ) : null}
       </header>
-      <div className={styles.thread}>
+      <div
+        ref={threadRef}
+        className={styles.thread}
+        data-native-scroll
+        role="log"
+        aria-label="Chat messages"
+        aria-live="polite"
+        tabIndex={0}
+      >
         {messages.length === 0 && (
           <div className={styles.empty}>
             <p>Ask about players, teams, matches, ratings, tier lists, schedules, or methodology.</p>
@@ -461,7 +520,6 @@ export default function SupportChat({ floating = false }: { floating?: boolean }
           </div>
         ))}
         {busy && <div className={`${styles.message} ${styles.assistant}`}><p>…</p></div>}
-        <div ref={endRef} />
       </div>
       <form
         className={styles.form}

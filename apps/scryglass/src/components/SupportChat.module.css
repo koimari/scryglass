@@ -2,6 +2,7 @@
 .chatFloating {
   display: grid;
   min-width: 0;
+  min-height: 24rem;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -12,12 +13,15 @@
 }
 
 .chat {
-  height: min(64vh, 36rem);
+  width: 100%;
+  height: clamp(34rem, calc(100dvh - 14rem), 50rem);
+  max-height: calc(100dvh - 8rem);
+  resize: vertical;
 }
 
 .chatHeader {
   display: flex;
-  min-height: 4.25rem;
+  min-height: 3.75rem;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
@@ -26,22 +30,43 @@
   background: var(--surface-subtle);
 }
 
-.chatHeader > div {
-  display: grid;
-  gap: 0.1rem;
-}
-
-.chatHeader span {
-  color: var(--ink-muted);
-  font-family: var(--font-mono), monospace;
-  font-size: var(--text-micro);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .chatHeader strong {
-  font-size: 1rem;
+  font-size: 0.95rem;
   line-height: 1.2;
+}
+
+.windowActions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.windowButton {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.windowButton:hover {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.windowButton svg {
+  width: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.65;
 }
 
 .thread {
@@ -50,8 +75,11 @@
   flex-direction: column;
   gap: 0.75rem;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 1rem;
+  scrollbar-gutter: stable;
   scrollbar-color: var(--line-strong) transparent;
+  touch-action: pan-y;
 }
 
 .empty {
@@ -113,7 +141,7 @@
 }
 
 .assistant {
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
   align-self: flex-start;
   border: 1px solid var(--line);
@@ -319,9 +347,23 @@
   right: max(1rem, env(safe-area-inset-right));
   bottom: max(1rem, env(safe-area-inset-bottom));
   z-index: 60;
-  width: min(24rem, calc(100vw - 2rem));
-  height: min(34rem, calc(100dvh - 2rem));
-  max-height: 70vh;
+  width: clamp(22rem, 30vw, 30rem);
+  height: clamp(30rem, 68vh, 44rem);
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100dvh - 2rem);
+  resize: both;
+}
+
+.chatExpanded {
+  position: fixed;
+  inset: max(0.75rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right))
+    max(0.75rem, env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left));
+  z-index: 80;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  resize: none;
 }
 
 .floatingButton {
@@ -354,33 +396,27 @@
   stroke-width: 1.6;
 }
 
-.floatingClose {
-  display: grid;
-  width: 2rem;
-  height: 2rem;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--ink-muted);
-  cursor: pointer;
-  font-size: 1.1rem;
-  line-height: 1;
-}
-
-.floatingClose:hover {
-  border-color: var(--line-strong);
-  color: var(--ink);
-}
-
 @media (max-width: 32rem) {
+  .chat {
+    height: max(30rem, calc(100dvh - 11rem));
+    max-height: calc(100dvh - 2rem);
+    resize: none;
+  }
+
   .chatFloating {
     right: max(0.5rem, env(safe-area-inset-right));
     bottom: max(0.5rem, env(safe-area-inset-bottom));
     width: min(24rem, calc(100vw - 1rem));
     height: min(38rem, calc(100dvh - 1rem));
     max-height: calc(100dvh - 1rem);
+    resize: none;
+  }
+
+  .chatExpanded {
+    inset: max(0.5rem, env(safe-area-inset-top)) max(0.5rem, env(safe-area-inset-right))
+      max(0.5rem, env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
+    width: auto;
+    height: auto;
   }
 
   .thread {
