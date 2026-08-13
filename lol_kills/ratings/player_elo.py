@@ -536,6 +536,22 @@ def _sunday_utc(as_of: pd.Timestamp | None) -> pd.Timestamp:
     return stamp.normalize() - pd.Timedelta(days=(stamp.weekday() + 1) % 7)
 
 
+def _recent_baseline_anchor(
+    previous_as_of: pd.Timestamp | None,
+    sunday_baseline: pd.Timestamp,
+    cutoff: pd.Timestamp,
+) -> pd.Timestamp:
+    """Previous-refresh movement anchor with safe fallbacks."""
+    if previous_as_of is None:
+        return sunday_baseline
+    anchor = pd.Timestamp(previous_as_of)
+    if anchor.tzinfo is not None:
+        anchor = anchor.tz_convert("UTC").tz_localize(None)
+    if anchor >= cutoff or anchor < sunday_baseline - pd.Timedelta(days=400):
+        return sunday_baseline
+    return anchor
+
+
 def build_player_weekly_ranks(
     maps: pd.DataFrame,
     players: pd.DataFrame,
@@ -544,13 +560,16 @@ def build_player_weekly_ranks(
     as_of: pd.Timestamp | None = None,
     min_games: int = 20,
     player_records: Mapping[str, Mapping[str, object]] | None = None,
+    previous_as_of: pd.Timestamp | None = None,
 ) -> dict[str, object]:
-    """Return current ranks with weekly and calendar-month movement.
+    """Return current ranks with recent and calendar-month movement.
 
     The player ladder is still the current sequential Elo snapshot.  The
-    movement baseline is deliberately discrete: it is captured at Sunday
-    00:00 UTC and compared with the prior Sunday, which makes rank changes
-    auditable and avoids a noisy day-to-day pseudo-trend.
+    recent movement baseline is the previous refresh's cutoff when
+    ``previous_as_of`` is provided (so movement reflects every published
+    cycle - after every batch of games), falling back to the prior Sunday
+    00:00 UTC snapshot otherwise.  Calendar-month comparisons (1/3/12m)
+    are unchanged.
     """
 
     cfg = cfg or PlayerEloConfig()
@@ -569,11 +588,12 @@ def build_player_weekly_ranks(
     if as_of is not None:
         frame = frame[frame["date"].le(cutoff)]
 
+    recent_anchor = _recent_baseline_anchor(previous_as_of, previous_start, cutoff)
     _, states, checkpoints, _recent_mus = _run_player_elo(
         frame,
         players,
         cfg,
-        checkpoint_dates=[previous_start, *comparison_cutoffs.values()],
+        checkpoint_dates=[recent_anchor, *comparison_cutoffs.values()],
     )
     current_global, _current_meta = fit_global_player_bt(
         frame,
@@ -617,7 +637,7 @@ def build_player_weekly_ranks(
             through=anchor,
         )
 
-    previous_rows = historical_rows(previous_start)
+    previous_rows = historical_rows(recent_anchor)
     comparison_rows = {
         label: historical_rows(anchor)
         for label, anchor in comparison_cutoffs.items()
@@ -678,7 +698,7 @@ def build_player_weekly_ranks(
 
     return {
         "as_of": f"{week_start.isoformat()}Z",
-        "previous_as_of": f"{previous_start.isoformat()}Z",
+        "previous_as_of": f"{recent_anchor.isoformat()}Z",
         "current_through": f"{cutoff.isoformat()}Z",
         "position_delta_as_of": {
             label: f"{anchor.isoformat()}Z"
@@ -686,7 +706,7 @@ def build_player_weekly_ranks(
         },
         "min_games": int(min_games),
         "by_player": by_player,
-        "note": "Rank movement compares the adjusted global player results rating with the prior Sunday and the positions one, three, and twelve calendar months earlier. Positive delta means a climb.",
+        "note": "Rank movement compares the adjusted global player results rating with the previous refresh (or the prior Sunday when no earlier refresh exists) and the positions one, three, and twelve calendar months earlier. Positive delta means a climb.",
     }
 
 
