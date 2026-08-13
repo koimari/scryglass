@@ -48,6 +48,15 @@ const leagueRecords = {
     lecOne: { ...game("lec-one", "LEC High", "LEC Opponent One", 2, 0), league: "LEC" },
     lecTwo: { ...game("lec-two", "LEC High", "LEC Opponent Two", 2, 0), league: "LEC" },
     lecThree: { ...game("lec-three", "LEC High", "LEC Opponent Three", 2, 0), league: "LEC" },
+    lcsOne: { ...game("lcs-one", "LCS High", "LCS Opponent One", 1.5, 0), league: "LCS" },
+    lcsTwo: { ...game("lcs-two", "LCS High", "LCS Opponent Two", 1.5, 0), league: "LCS" },
+    lcsThree: { ...game("lcs-three", "LCS High", "LCS Opponent Three", 1.5, 0), league: "LCS" },
+    pcsOne: { ...game("pcs-one", "PCS High", "PCS Opponent One", 1.4, 0), league: "PCS", competition_tier: "tier2" },
+    pcsTwo: { ...game("pcs-two", "PCS High", "PCS Opponent Two", 1.4, 0), league: "PCS", competition_tier: "tier2" },
+    pcsThree: { ...game("pcs-three", "PCS High", "PCS Opponent Three", 1.4, 0), league: "PCS", competition_tier: "tier2" },
+    msiOne: { ...game("msi-one", "MSI High", "MSI Opponent One", 1.3, 0), league: "MSI", competition_tier: "international" },
+    msiTwo: { ...game("msi-two", "MSI High", "MSI Opponent Two", 1.3, 0), league: "MSI", competition_tier: "international" },
+    msiThree: { ...game("msi-three", "MSI High", "MSI Opponent Three", 1.3, 0), league: "MSI", competition_tier: "international" },
   },
 } satisfies ProfileRecords;
 
@@ -145,4 +154,18 @@ test("team draft rankings stay inside the requested league", () => {
   assert.deepEqual(result.rows.map((row) => row.team), ["LEC High"]);
   assert.match(result.answer.headline, /LEC High has the highest average published draft win share in LEC at 88%/);
   assert.match(result.answer.basis, /Ranked 1 team .* in LEC, Tier 1/);
+
+  const emea = queryTeamDraftScores(leagueRecords, "which team has the best draft in EMEA?");
+  assert.deepEqual(emea.rows.map((row) => row.team), ["LEC High"]);
+
+  const americas = queryTeamDraftScores(leagueRecords, "which team has the best draft in the Americas?");
+  assert.deepEqual(americas.rows.map((row) => row.team), ["LCS High"]);
+
+  const secondary = queryTeamDraftScores(leagueRecords, "which team has the best draft in PCS?");
+  assert.equal(secondary.tier, "tier2");
+  assert.deepEqual(secondary.rows.map((row) => row.team), ["PCS High"]);
+
+  const international = queryTeamDraftScores(leagueRecords, "which team has the best draft at MSI?");
+  assert.equal(international.tier, "international");
+  assert.deepEqual(international.rows.map((row) => row.team), ["MSI High"]);
 });

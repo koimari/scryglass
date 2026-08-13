@@ -1,4 +1,12 @@
-import { INTL_LEAGUES, REGION_LEAGUES, teamQueryAliases, type ProfileRecords } from "@/lib/pack";
+import {
+  INTL_LEAGUES,
+  REGION_LEAGUES,
+  SECONDARY_REGIONAL_LEAGUES,
+  teamQueryAliases,
+  type ProfileRecords,
+} from "@/lib/pack";
+
+type DraftTier = "tier1" | "tier2" | "tier3" | "international" | "all";
 
 export type TeamDraftRow = {
   team: string;
@@ -20,7 +28,7 @@ export type TeamDraftComparison = {
 export type TeamDraftQueryResult = {
   kind: "team_draft_query" | "team_draft_comparison";
   direction: "asc" | "desc";
-  tier: "tier1" | "tier2" | "tier3" | "all";
+  tier: DraftTier;
   answer: {
     headline: string;
     basis: string;
@@ -69,21 +77,38 @@ function detectMinimumGames(question: string): number | null {
   return Number.isFinite(value) && value > 0 ? Math.min(value, 10_000) : null;
 }
 
-function detectTier(question: string): TeamDraftQueryResult["tier"] {
+function inferLeagueTier(records: ProfileRecords, league: string): Exclude<DraftTier, "all"> {
+  const normalizedLeague = normalize(league);
+  if (INTL_LEAGUES.some((candidate) => normalize(candidate) === normalizedLeague)) return "international";
+  if (SECONDARY_REGIONAL_LEAGUES.some((candidate) => normalize(candidate) === normalizedLeague)) return "tier2";
+  const observedTier = Object.values(records.games)
+    .find((game) => normalize(game.league) === normalizedLeague && game.competition_tier)?.competition_tier;
+  if (observedTier === "tier2" || observedTier === "tier3" || observedTier === "international") return observedTier;
+  return "tier1";
+}
+
+function detectTier(question: string, records: ProfileRecords, league: string | null): TeamDraftQueryResult["tier"] {
   if (/\ball tiers\b/i.test(question)) return "all";
   const match = /\btier\s*([123])\b/i.exec(question);
-  return match ? `tier${match[1]}` as "tier1" | "tier2" | "tier3" : "tier1";
+  if (match) return `tier${match[1]}` as "tier1" | "tier2" | "tier3";
+  if (/\binternational\b/i.test(question)) return "international";
+  return league ? inferLeagueTier(records, league) : "tier1";
 }
 
 function detectLeague(question: string, availableLeagues: string[]): string | null {
   const normalizedQuestion = ` ${normalize(question)} `;
+  const aliases: Array<{ canonical: string; names: string[] }> = [
+    { canonical: "LEC", names: ["emea", "europe", "european", "eu"] },
+    { canonical: "LCS", names: ["americas", "north america", "north american", "na"] },
+  ];
+  for (const alias of aliases) {
+    if (alias.names.some((name) => normalizedQuestion.includes(` ${normalize(name)} `))) return alias.canonical;
+  }
   const candidates = [...new Set([
     ...availableLeagues,
     ...REGION_LEAGUES,
     ...INTL_LEAGUES,
     "LTA",
-    "EMEA",
-    "AMERICAS",
   ])]
     .filter((league) => normalize(league).length > 0)
     .sort((left, right) => normalize(right).length - normalize(left).length);
@@ -263,9 +288,9 @@ export function queryTeamDraftScores(records: ProfileRecords, question: string):
     : /\b(?:worst|lowest|bottom)\b.*\bto\b.*\b(?:best|highest|top)\b/i.test(question)
       ? "asc"
       : /\b(worst|lowest|bottom|least)\b/i.test(directionalText) ? "asc" : "desc";
-  const tier = detectTier(question);
   const availableLeagues = Array.from(new Set(Object.values(records.games).map((game) => game.league)));
   const league = detectLeague(question, availableLeagues);
+  const tier = detectTier(question, records, league);
   const teams = Array.from(new Set(Object.values(records.games).flatMap((game) => [game.blue_team, game.red_team])));
   const comparisonNames = asksForComparison(question) ? namedTeams(question, teams) : [];
   const team = comparisonNames.length < 2 ? namedTeam(question, teams) : null;
