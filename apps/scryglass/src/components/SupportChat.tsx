@@ -106,10 +106,11 @@ function resultTable(result: unknown, call: ToolCall): React.ReactNode {
   return <p className={styles.resultText}>{renderValue(result)}</p>;
 }
 
-export default function SupportChat() {
+export default function SupportChat({ floating = false }: { floating?: boolean }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(!floating);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -146,8 +147,18 @@ export default function SupportChat() {
     "how does the draft win share work",
   ];
 
+  if (floating && !open) {
+    return (
+      <button type="button" className={styles.floatingButton} onClick={() => setOpen(true)} aria-label="Open support chat">
+        💬
+      </button>
+    );
+  }
   return (
-    <section className={styles.chat} aria-label="Scryglass support chat">
+    <section className={floating ? styles.chatFloating : styles.chat} aria-label="Scryglass support chat">
+      {floating ? (
+        <button type="button" className={styles.floatingClose} onClick={() => setOpen(false)} aria-label="Close support chat">×</button>
+      ) : null}
       <div className={styles.thread}>
         {messages.length === 0 && (
           <div className={styles.empty}>

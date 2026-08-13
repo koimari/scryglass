@@ -10,6 +10,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeScript } from "@/components/ThemeScript";
 import "lenis/dist/lenis.css";
 import "./globals.css";
+import SupportChat from "@/components/SupportChat";
 
 const ui = Atkinson_Hyperlegible_Next({
   variable: "--font-ui",
@@ -58,6 +59,7 @@ export default function RootLayout({
           <SiteHeader />
           <main className="site-main">{children}</main>
           <SiteFooter />
+          <SupportChat floating />
         </ThemeProvider>
       </body>
     </html>

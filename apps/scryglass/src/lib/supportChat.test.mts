@@ -14,6 +14,8 @@ const EXAMPLES: Array<{ question: string; tool: ToolName; args: Record<string, s
   { question: "what is the best mid laner this patch", tool: "tier", args: { role: "mid" } },
   { question: "when does the next LEC game happen", tool: "schedule", args: { league: "LEC" } },
   { question: "how does the draft win share work", tool: "methodology", args: { topic: "draft" } },
+  { question: "what is the top 1 team", tool: "leaderboards", args: { category: "teams", limit: "1" } },
+  { question: "what is inspired's rating", tool: "player", args: { name: "inspired" } },
 ];
 
 test("fallback router handles example questions from every domain", () => {

@@ -103,3 +103,46 @@
 .form button:disabled { opacity: 0.5; cursor: default; }
 
 .note { color: var(--ink-muted); font-size: var(--text-micro, 0.75rem); margin: 0; }
+
+.chatFloating {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  width: min(24rem, calc(100vw - 2rem));
+  max-height: min(32rem, 70vh);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  border-radius: 0.9rem;
+  overflow: hidden;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #ddd);
+}
+.floatingButton {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 60;
+  width: 3.4rem;
+  height: 3.4rem;
+  border-radius: 50%;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  background: var(--accent, #2f6fed);
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+.floatingClose {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.5rem;
+  z-index: 2;
+  border: none;
+  background: transparent;
+  font-size: 1.1rem;
+  cursor: pointer;
+  color: var(--ink-muted, #666);
+  line-height: 1;
+}
