@@ -55,6 +55,7 @@ from lol_kills.ratings.player_elo import (
 from lol_kills.research.composition_signal import (
     MODEL_VERSION,
     CompositionSignalError,
+    _composition_code_digest,
     build_composition_games,
     evaluate_composition_signal,
     score_games_temporally,
@@ -1235,7 +1236,10 @@ def export_public_pack(
                 candidate_evaluation.get("model_version") == MODEL_VERSION
                 and candidate_evaluation.get("source_hash") == composition_source_digest
                 and candidate_evaluation.get("canonical_game_identity_sha256") == composition_source_digest
-                and candidate_evaluation.get("worker_commit") == composition_worker_commit
+                and (
+                    candidate_evaluation.get("worker_commit") == composition_worker_commit
+                    or candidate_evaluation.get("code_digest") == _composition_code_digest()
+                )
             ):
                 composition_evaluation = candidate_evaluation
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
@@ -1248,6 +1252,8 @@ def export_public_pack(
             canonical_game_identity_sha256=composition_source_digest,
             worker_commit=composition_worker_commit,
         )
+        composition_evaluation = dict(composition_evaluation)
+        composition_evaluation["code_digest"] = _composition_code_digest()
         write_evaluation_report(composition_evaluation, composition_evaluation_path)
     promotion_gate = composition_evaluation.get("promotion_gate") or {}
     if promotion_gate.get("composition_candidate_passes") is not True:

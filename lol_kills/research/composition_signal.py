@@ -1372,6 +1372,20 @@ def _games_digest(games: Sequence[Mapping[str, Any]]) -> str:
     ).hexdigest()
 
 
+def _composition_code_digest() -> str:
+    """SHA-256 of the composition signal implementation.
+
+    The eval/checkpoint caches must be invalidated when this code changes,
+    not merely when the worker deploys (the model JSON itself records the
+    exact worker commit and is verified on load).
+    """
+    try:
+        source = Path(__file__).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()[:24]
+
+
 def _load_or_fit(
     games: Sequence[Mapping[str, Any]],
     cutoff: pd.Timestamp,
@@ -1385,16 +1399,21 @@ def _load_or_fit(
     training_digest = _games_digest(training_games)
     path = None
     if cache_dir is not None:
-        path = cache_dir / "checkpoints" / f"{_cache_key(training_digest, cutoff, names=training_names, worker_commit=worker_commit)}.json"
-        if path.exists():
+        cache_key = _cache_key(training_digest, cutoff, names=training_names, worker_commit=worker_commit)
+        stable_key = _cache_key(training_digest, cutoff, names=training_names, worker_commit=None)
+        for candidate_key in (cache_key, stable_key):
+            candidate_path = cache_dir / "checkpoints" / f"{candidate_key}.json"
+            if not candidate_path.exists():
+                continue
             try:
                 cached = FittedCompositionModel.from_json(
-                    json.loads(path.read_text(encoding="utf-8"))
+                    json.loads(candidate_path.read_text(encoding="utf-8"))
                 )
                 if cached.worker_commit == worker_commit:
                     return cached, True
             except (OSError, ValueError, KeyError, TypeError, CompositionSignalError):
                 pass
+        path = cache_dir / "checkpoints" / f"{stable_key}.json"
     model = _fit_model(
         training_games,
         names=training_names,
