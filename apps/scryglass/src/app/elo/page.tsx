@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { SignalRatings, type DraftPlayerRow, type DraftTeamRow } from "@/components/SignalRatings";
+import { SignalRatings } from "@/components/SignalRatings";
 import type {
   CompetitionTier,
   PlayerChampionRecord,
@@ -21,6 +21,7 @@ import {
   packSourceUpdatedLabel,
   packUpdatedLabel,
 } from "@/lib/pack";
+import { draftRankingsFromProfile, type DraftPlayerRow, type DraftRankingsScope, type DraftTeamRow } from "@/lib/draftRankings";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 import styles from "./EloPage.module.css";
 
@@ -44,10 +45,13 @@ export default async function EloPage() {
   let profileRecords: ProfileRecords | null = null;
   let draftTeams: DraftTeamRow[] = [];
   let draftPlayers: DraftPlayerRow[] = [];
+  let draftScope: DraftRankingsScope = "whole_archive";
+  let draftAssetLoaded = false;
   try {
     const leaderboards = await readPackJson<{ teams_draft?: DraftTeamRow[]; players_draft?: DraftPlayerRow[] }>(man, "features/leaderboards.json");
     draftTeams = leaderboards.teams_draft ?? [];
     draftPlayers = leaderboards.players_draft ?? [];
+    draftAssetLoaded = true;
   } catch {
     // draft rankings are optional
   }
@@ -88,6 +92,15 @@ export default async function EloPage() {
     profileRecords = await readPackJson<ProfileRecords>(man, "features/profile_records.json");
   } catch {
     profileRecords = null;
+  }
+
+  const fallbackDraft = profileRecords ? draftRankingsFromProfile(profileRecords) : null;
+  if (fallbackDraft && (!draftTeams.length || !draftPlayers.length)) {
+    if (!draftTeams.length) draftTeams = fallbackDraft.teams;
+    if (!draftPlayers.length) draftPlayers = fallbackDraft.players;
+    draftScope = fallbackDraft.scope;
+  } else if (!draftAssetLoaded && fallbackDraft) {
+    draftScope = fallbackDraft.scope;
   }
 
   const activeTeamNames = new Set(
@@ -221,6 +234,8 @@ export default async function EloPage() {
         <SignalRatings
           draftTeams={draftTeams}
           draftPlayers={draftPlayers}
+          draftScope={draftScope}
+          draftWindowDays={profileRecords?.window_days ?? null}
           teams={teams}
           players={players}
           teamRecords={teamRecords}

@@ -26,15 +26,17 @@ import {
   type CompetitionTier,
 } from "@/lib/pack";
 import { evidenceFields, evidenceInfo, formatEvidenceCell } from "@/lib/evidence";
+import type { DraftPlayerRow, DraftRankingsScope, DraftTeamRow } from "@/lib/draftRankings";
 import { TeamMark } from "./TeamMark";
 import styles from "./SignalRatings.module.css";
 
-export type DraftTeamRow = { team: string; games: number; draft_edge: number };
-export type DraftPlayerRow = { player: string; games: number; draft_score: number; role?: string | null; team?: string | null };
+export type { DraftPlayerRow, DraftTeamRow } from "@/lib/draftRankings";
 
 type Props = {
   draftTeams: DraftTeamRow[];
   draftPlayers: DraftPlayerRow[];
+  draftScope: DraftRankingsScope;
+  draftWindowDays: number | null;
   teams: TeamRating[];
   players: PlayerRating[];
   teamRecords: Record<string, TeamRecord>;
@@ -115,6 +117,8 @@ function ChampionStrip({ picks, images }: { picks: ChampionPick[]; images: Recor
 export function SignalRatings({
   draftTeams,
   draftPlayers,
+  draftScope,
+  draftWindowDays,
   teams,
   players,
   teamRecords,
@@ -254,6 +258,11 @@ export function SignalRatings({
     setExpanded(false);
   };
 
+  const draftScopeLabel = draftScope === "whole_archive"
+    ? "Whole accepted archive"
+    : draftWindowDays ? `Published ${draftWindowDays}-day window` : "Published profile window";
+  const formatDraftMetric = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
+
   return (
     <div className={styles.root}>
       <section className={styles.controls} aria-label="Rating controls">
@@ -272,7 +281,7 @@ export function SignalRatings({
           {tab === "draft" ? null : <label><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="rating">Rating</option><option value="movement">Movement</option><option value="games">Games</option><option value="name">Name</option></select></label>}
           {tab === "players" ? <label className={styles.minGames}><span>Min games</span><input type="number" min={5} value={minGames} onChange={(event) => setMinGames(Math.max(5, Number(event.target.value) || 5))} /></label> : null}
         </div>
-        {tab === "draft" ? <p className={styles.draftNote}>Whole accepted archive · descriptive draft edge (not a win probability)</p> : <div className={styles.scopeRow} role="group" aria-label="Competition level">
+        {tab === "draft" ? <p className={styles.draftNote}>{draftScopeLabel} · descriptive draft edge in model units, not a win probability</p> : <div className={styles.scopeRow} role="group" aria-label="Competition level">
           <span>Level</span>
           <button type="button" className={!selectedTiers.length ? styles.scopeActive : ""} onClick={() => setTier(null)}>All</button>
           {TIER_FILTERS.map((tier) => <button key={tier.value} type="button" className={leagues.includes(tier.value) ? styles.scopeActive : ""} onClick={() => setTier(tier.value)}>{tier.label}</button>)}
@@ -281,34 +290,30 @@ export function SignalRatings({
       </section>
 
       {tab === "draft" ? (
-        <section className={styles.draftSection} aria-label="Draft rankings">
+        draftTeams.length || draftPlayers.length ? <section className={styles.draftSection} aria-label="Draft rankings">
               <div className={styles.draftColumn}>
-                <header><h2>Teams by draft</h2><p>Mean draft edge across the whole accepted archive</p></header>
-                <ol className={styles.draftList}>
-                  {draftTeams.map((row, index) => (
-                    <li key={row.team}>
-                      <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
-                      <Link className="row-link" href={`/elo/team/${teamSlug(row.team)}`}>{row.team}</Link>
-                      <b>{row.draft_edge >= 0 ? "+" : ""}{row.draft_edge.toFixed(3)}</b>
-                      <small>{row.games} games</small>
-                    </li>
-                  ))}
-                </ol>
+                <header><h2>Teams by draft</h2><p>Mean descriptive draft edge · model units</p></header>
+                {draftTeams.length ? <ol className={styles.draftList}>
+                  {draftTeams.map((row, index) => <li key={row.team}>
+                    <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
+                    <Link className="row-link" href={`/elo/team/${teamSlug(row.team)}`}>{row.team}</Link>
+                    <b title="Descriptive draft edge in model units">{formatDraftMetric(row.draft_edge)}</b>
+                    <small>{row.games} games</small>
+                  </li>)}
+                </ol> : <p className={styles.empty}>No team rows meet the evidence floor.</p>}
               </div>
               <div className={styles.draftColumn}>
-                <header><h2>Players by draft</h2><p>Mean draft score of their picks across the whole accepted archive</p></header>
-                <ol className={styles.draftList}>
-                  {draftPlayers.map((row, index) => (
-                    <li key={row.player}>
-                      <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
-                      <Link className="row-link" href={`/elo/player/${playerSlug(row.player)}`}>{row.player}</Link>
-                      <b>{row.draft_score >= 0 ? "+" : ""}{row.draft_score.toFixed(3)}</b>
-                      <small>{row.games} picks{row.role ? ` · ${roleLabel({ jng: "jungle", sup: "support" }[row.role] ?? row.role)}` : ""}</small>
-                    </li>
-                  ))}
-                </ol>
+                <header><h2>Players by draft</h2><p>Mean pick contribution · model units</p></header>
+                {draftPlayers.length ? <ol className={styles.draftList}>
+                  {draftPlayers.map((row, index) => <li key={row.player}>
+                    <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
+                    <Link className="row-link" href={`/elo/player/${playerSlug(row.player)}`}>{row.player}</Link>
+                    <b title="Descriptive pick contribution in model units">{formatDraftMetric(row.draft_score)}</b>
+                    <small>{row.games} picks{row.role ? ` · ${roleLabel(row.role)}` : ""}</small>
+                  </li>)}
+                </ol> : <p className={styles.empty}>No player rows meet the evidence floor.</p>}
               </div>
-        </section>
+        </section> : <p className={styles.empty}>Draft evidence is not included in this release.</p>
       ) : featured ? (
         <>
           <section className={styles.summaryLine} aria-label="Rating summary">
