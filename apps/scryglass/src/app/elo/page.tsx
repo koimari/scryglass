@@ -46,6 +46,7 @@ export default async function EloPage() {
   let draftTeams: DraftTeamRow[] = [];
   let draftPlayers: DraftPlayerRow[] = [];
   let draftScope: DraftRankingsScope = "whole_archive";
+  let draftEvidenceGames: number | null = null;
   let draftAssetLoaded = false;
   try {
     const leaderboards = await readPackJson<{ teams_draft?: DraftTeamRow[]; players_draft?: DraftPlayerRow[] }>(man, "features/leaderboards.json");
@@ -95,12 +96,13 @@ export default async function EloPage() {
   }
 
   const fallbackDraft = profileRecords ? draftRankingsFromProfile(profileRecords) : null;
-  if (fallbackDraft && (!draftTeams.length || !draftPlayers.length)) {
-    if (!draftTeams.length) draftTeams = fallbackDraft.teams;
-    if (!draftPlayers.length) draftPlayers = fallbackDraft.players;
+  const draftAssetHasScopes = draftTeams.some((row) => row.tier || row.league)
+    || draftPlayers.some((row) => row.tier || row.league);
+  if (fallbackDraft && (!draftAssetLoaded || !draftAssetHasScopes)) {
+    draftTeams = fallbackDraft.teams;
+    draftPlayers = fallbackDraft.players;
     draftScope = fallbackDraft.scope;
-  } else if (!draftAssetLoaded && fallbackDraft) {
-    draftScope = fallbackDraft.scope;
+    draftEvidenceGames = fallbackDraft.evidenceGames;
   }
 
   const activeTeamNames = new Set(
@@ -235,7 +237,8 @@ export default async function EloPage() {
           draftTeams={draftTeams}
           draftPlayers={draftPlayers}
           draftScope={draftScope}
-          draftWindowDays={profileRecords?.window_days ?? null}
+          draftWindowDays={draftScope === "profile_window" ? profileRecords?.window_days ?? null : null}
+          draftEvidenceGames={draftEvidenceGames}
           teams={teams}
           players={players}
           teamRecords={teamRecords}

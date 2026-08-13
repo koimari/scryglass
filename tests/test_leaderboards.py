@@ -92,6 +92,19 @@ def _match_index() -> dict:
     }
 
 
+def _draft_records() -> dict:
+    return {
+        "games": {
+            f"draft-{index}": {
+                "blue_team": "Team A",
+                "red_team": "Team B",
+                "draft_edge": 0.4,
+            }
+            for index in range(5)
+        }
+    }
+
+
 def test_build_leaderboards_aggregates_all_domains() -> None:
     payload = build_leaderboards(
         _player_records(),
@@ -101,6 +114,7 @@ def test_build_leaderboards_aggregates_all_domains() -> None:
         team_records=_team_records(),
         player_champion_records=_player_champions(),
         match_index=_match_index(),
+        draft_records=_draft_records(),
     )
 
     assert payload["schema_version"] == LEADERBOARDS_SCHEMA
@@ -133,6 +147,8 @@ def test_build_leaderboards_aggregates_all_domains() -> None:
     assert payload["indexes"]["teams"]["Team A"]["team_key"] == "team-a"
     assert "Orianna" in payload["indexes"]["champions"]
     assert "LCS" in payload["indexes"]["leagues"] and "LEC" in payload["indexes"]["leagues"]
+    assert payload["teams_draft"][0]["team"] == "Team A"
+    assert payload["teams_draft"][0]["draft_win_share"] == 0.5987
 
 
 def test_build_leaderboards_handles_missing_optional_payloads() -> None:

@@ -26,7 +26,7 @@ import {
   type CompetitionTier,
 } from "@/lib/pack";
 import { evidenceFields, evidenceInfo, formatEvidenceCell } from "@/lib/evidence";
-import type { DraftPlayerRow, DraftRankingsScope, DraftTeamRow } from "@/lib/draftRankings";
+import { filterDraftRankings, type DraftPlayerRow, type DraftRankingsScope, type DraftTeamRow } from "@/lib/draftRankings";
 import { TeamMark } from "./TeamMark";
 import styles from "./SignalRatings.module.css";
 
@@ -37,6 +37,7 @@ type Props = {
   draftPlayers: DraftPlayerRow[];
   draftScope: DraftRankingsScope;
   draftWindowDays: number | null;
+  draftEvidenceGames: number | null;
   teams: TeamRating[];
   players: PlayerRating[];
   teamRecords: Record<string, TeamRecord>;
@@ -119,6 +120,7 @@ export function SignalRatings({
   draftPlayers,
   draftScope,
   draftWindowDays,
+  draftEvidenceGames,
   teams,
   players,
   teamRecords,
@@ -141,23 +143,25 @@ export function SignalRatings({
     const parsed = parseLeagues(searchParams.get("leagues"));
     return parsed.length ? parsed : ["TIER1"];
   });
-  const [role, setRole] = useState(searchParams.get("role") ?? "");
+  const [role, setRole] = useState(searchParams.get("role") ?? searchParams.get("draftRole") ?? "");
   const [minGames, setMinGames] = useState(Math.max(5, Number(searchParams.get("min") ?? 20)));
+  const [draftMinGames, setDraftMinGames] = useState(Math.max(5, Number(searchParams.get("draftMin") ?? 5)));
   const [sort, setSort] = useState<Sort>((searchParams.get("sort") as Sort) || "rating");
   const [expanded, setExpanded] = useState(false);
   const [selected, setSelected] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams();
-    if (tab === "players") params.set("tab", "players");
+    if (tab !== "teams") params.set("tab", tab);
     if (query.trim()) params.set("q", query.trim());
     if (leagues.length) params.set("leagues", leagues.join(","));
-    if (tab === "players" && role) params.set("role", role);
+    if ((tab === "players" || tab === "draft") && role) params.set(tab === "draft" ? "draftRole" : "role", role);
     if (tab === "players" && minGames !== 20) params.set("min", String(minGames));
+    if (tab === "draft" && draftMinGames !== 5) params.set("draftMin", String(draftMinGames));
     if (sort !== "rating") params.set("sort", sort);
     const suffix = params.toString();
     router.replace(suffix ? `${pathname}?${suffix}` : pathname, { scroll: false });
-  }, [tab, query, leagues, role, minGames, sort, pathname, router]);
+  }, [tab, query, leagues, role, minGames, draftMinGames, sort, pathname, router]);
 
   const teamDelta = (team: string) => teamWeeklyRanks.by_team[team]?.delta;
   const playerDelta = (player: string) => {
@@ -201,6 +205,23 @@ export function SignalRatings({
   // Weekly rank maps are immutable inputs for this render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [players, playerRecords, teamRecords, leagues, query, role, minGames, sort, playerWeeklyRanks]);
+
+  const draftRows = useMemo(() => {
+    const rows = filterDraftRankings(
+      {
+      teams: draftTeams,
+      players: draftPlayers,
+      scope: draftScope,
+      evidenceGames: draftEvidenceGames ?? 0,
+      },
+      { leagues, role: role || undefined, minGames: draftMinGames },
+    );
+    return {
+      ...rows,
+      teams: rows.teams.filter((row) => teamMatchesQuery(row.team, query)),
+      players: rows.players.filter((row) => playerMatchesQuery(row.player, row.team ?? null, query)),
+    };
+  }, [draftTeams, draftPlayers, draftScope, draftEvidenceGames, leagues, role, draftMinGames, query]);
 
   const entities = tab === "teams" ? filteredTeams : filteredPlayers;
   const entityName = (entity: TeamRating | PlayerRating) => tab === "teams" ? (entity as TeamRating).team : (entity as PlayerRating).player;
@@ -261,7 +282,12 @@ export function SignalRatings({
   const draftScopeLabel = draftScope === "whole_archive"
     ? "Whole accepted archive"
     : draftWindowDays ? `Published ${draftWindowDays}-day window` : "Published profile window";
+  const draftEvidenceLabel = draftEvidenceGames ? `${draftEvidenceGames.toLocaleString()} games with draft evidence` : "Published draft evidence";
   const formatDraftMetric = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
+  const formatDraftWinShare = (value: number) => `${Math.round(value * 100)}%`;
+  const draftImpactMax = Math.max(...draftRows.players.map((row) => Math.abs(row.draft_score)), 0.01);
+  const draftShareBarWidth = (value: number) => Math.min(100, Math.abs(value - 0.5) * 300);
+  const draftImpactBarWidth = (value: number) => Math.min(100, Math.abs(value) / draftImpactMax * 100);
 
   return (
     <div className={styles.root}>
@@ -274,46 +300,52 @@ export function SignalRatings({
               </button>
             ))}
           </div>
-          {tab === "draft" ? null : <label className={styles.search}><span>Search</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "teams" ? "Team or alias" : "Player or team"} /></label>}
-          {tab === "players" ? (
-            <label><span>Role</span><select value={role} onChange={(event) => setRole(event.target.value)}><option value="">All roles</option>{PLAYER_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label className={styles.search}><span>Search</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "teams" ? "Team or alias" : tab === "players" ? "Player or team" : "Team or player"} /></label>
+          {tab === "players" || tab === "draft" ? (
+            <label><span>{tab === "draft" ? "Player role" : "Role"}</span><select value={role} onChange={(event) => setRole(event.target.value)}><option value="">All roles</option>{PLAYER_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           ) : null}
           {tab === "draft" ? null : <label><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="rating">Rating</option><option value="movement">Movement</option><option value="games">Games</option><option value="name">Name</option></select></label>}
           {tab === "players" ? <label className={styles.minGames}><span>Min games</span><input type="number" min={5} value={minGames} onChange={(event) => setMinGames(Math.max(5, Number(event.target.value) || 5))} /></label> : null}
+          {tab === "draft" ? <label className={styles.minGames}><span>Min games</span><input type="number" min={5} value={draftMinGames} onChange={(event) => setDraftMinGames(Math.max(5, Number(event.target.value) || 5))} /></label> : null}
         </div>
-        {tab === "draft" ? <p className={styles.draftNote}>{draftScopeLabel} · descriptive draft edge in model units, not a win probability</p> : <div className={styles.scopeRow} role="group" aria-label="Competition level">
+        <div className={styles.scopeRow} role="group" aria-label="Competition level">
           <span>Level</span>
           <button type="button" className={!selectedTiers.length ? styles.scopeActive : ""} onClick={() => setTier(null)}>All</button>
           {TIER_FILTERS.map((tier) => <button key={tier.value} type="button" className={leagues.includes(tier.value) ? styles.scopeActive : ""} onClick={() => setTier(tier.value)}>{tier.label}</button>)}
-          <details className={styles.leagueFilter}><summary>Leagues {selectedLeagues.length ? `(${selectedLeagues.length})` : ""}</summary><div data-native-scroll>{leagueGroups.map((group) => <section key={group.value}><strong>{group.label}</strong><div>{group.leagues.map((league) => <button key={league} type="button" className={leagues.includes(league) ? styles.scopeActive : ""} onClick={() => toggleLeague(league)}>{league}</button>)}</div></section>)}</div></details>
-        </div>}
+          <details className={styles.leagueFilter}><summary>Regions / leagues {selectedLeagues.length ? `(${selectedLeagues.length})` : ""}</summary><div data-native-scroll>{leagueGroups.map((group) => <section key={group.value}><strong>{group.label}</strong><div>{group.leagues.map((league) => <button key={league} type="button" className={leagues.includes(league) ? styles.scopeActive : ""} onClick={() => toggleLeague(league)}>{league}</button>)}</div></section>)}</div></details>
+        </div>
       </section>
 
       {tab === "draft" ? (
-        draftTeams.length || draftPlayers.length ? <section className={styles.draftSection} aria-label="Draft rankings">
+        draftRows.teams.length || draftRows.players.length ? <>
+          <p className={styles.draftNote}>{draftScopeLabel} · {draftEvidenceLabel}. Teams use average published draft win share. Player rows use mean pick contribution.</p>
+          <section className={styles.draftSection} aria-label="Draft rankings">
               <div className={styles.draftColumn}>
-                <header><h2>Teams by draft</h2><p>Mean descriptive draft edge · model units</p></header>
-                {draftTeams.length ? <ol className={styles.draftList}>
-                  {draftTeams.map((row, index) => <li key={row.team}>
+                <header><div><h2>Teams by draft</h2><p>Average published draft win share · per-game estimate</p></div><b>{draftRows.teams.length} teams</b></header>
+                {draftRows.teams.length ? <ol className={styles.draftList}>
+                  {(expanded ? draftRows.teams : draftRows.teams.slice(0, 18)).map((row, index) => <li key={`${row.team}-${row.league ?? "all"}-${row.tier ?? "all"}`}>
                     <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
-                    <Link className="row-link" href={`/elo/team/${teamSlug(row.team)}`}>{row.team}</Link>
-                    <b title="Descriptive draft edge in model units">{formatDraftMetric(row.draft_edge)}</b>
+                    <span className={styles.draftIdentity}><TeamMark team={row.team} /><Link className="row-link" href={`/elo/team/${teamSlug(row.team)}`}>{row.team}</Link></span>
+                    <span className={styles.draftMetric}><b title="Average published draft win share">{formatDraftWinShare(row.draft_win_share)}</b><span className={styles.draftBarTrack} aria-hidden="true"><span className={row.draft_win_share >= 0.5 ? styles.draftBarPositive : styles.draftBarNegative} style={{ width: `${draftShareBarWidth(row.draft_win_share)}%` }} /></span></span>
                     <small>{row.games} games</small>
                   </li>)}
                 </ol> : <p className={styles.empty}>No team rows meet the evidence floor.</p>}
+                {draftRows.teams.length > 18 ? <button type="button" className={styles.showAll} onClick={() => setExpanded((value) => !value)}>{expanded ? "Show fewer" : `Show all ${draftRows.teams.length} teams`}</button> : null}
               </div>
               <div className={styles.draftColumn}>
-                <header><h2>Players by draft</h2><p>Mean pick contribution · model units</p></header>
-                {draftPlayers.length ? <ol className={styles.draftList}>
-                  {draftPlayers.map((row, index) => <li key={row.player}>
+                <header><div><h2>Players by draft</h2><p>Mean pick contribution · model units</p></div><b>{draftRows.players.length} players</b></header>
+                {draftRows.players.length ? <ol className={styles.draftList}>
+                  {(expanded ? draftRows.players : draftRows.players.slice(0, 18)).map((row, index) => <li key={`${row.player}-${row.league ?? "all"}-${row.tier ?? "all"}`}>
                     <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
-                    <Link className="row-link" href={`/elo/player/${playerSlug(row.player)}`}>{row.player}</Link>
-                    <b title="Descriptive pick contribution in model units">{formatDraftMetric(row.draft_score)}</b>
+                    <span className={styles.draftIdentity}><TeamMark team={row.team} /><Link className="row-link" href={`/elo/player/${playerSlug(row.player)}`}>{row.player}</Link></span>
+                    <span className={styles.draftMetric}><b title="Mean pick contribution in model units">{formatDraftMetric(row.draft_score)}</b><span className={styles.draftBarTrack} aria-hidden="true"><span className={row.draft_score >= 0 ? styles.draftBarPositive : styles.draftBarNegative} style={{ width: `${draftImpactBarWidth(row.draft_score)}%` }} /></span></span>
                     <small>{row.games} picks{row.role ? ` · ${roleLabel(row.role)}` : ""}</small>
                   </li>)}
                 </ol> : <p className={styles.empty}>No player rows meet the evidence floor.</p>}
+                {draftRows.players.length > 18 ? <button type="button" className={styles.showAll} onClick={() => setExpanded((value) => !value)}>{expanded ? "Show fewer" : `Show all ${draftRows.players.length} players`}</button> : null}
               </div>
-        </section> : <p className={styles.empty}>Draft evidence is not included in this release.</p>
+          </section>
+        </> : <p className={styles.empty}>No published draft evidence meets these filters.</p>
       ) : featured ? (
         <>
           <section className={styles.summaryLine} aria-label="Rating summary">
