@@ -33,7 +33,7 @@ from lol_kills.etl.source_keys import canonical_source_game_key
 
 
 SCHEMA_VERSION = "scryglass:composition-signal:v1"
-MODEL_VERSION = "composition-signal-v2"
+MODEL_VERSION = "composition-signal-v3"
 REGULARIZATION_C = 0.03
 MIN_SUPPORT_GAMES = 40
 MIN_TRAINING_GAMES = 100
@@ -46,6 +46,7 @@ MODEL_TERMS = (
     "league",
     "patch",
     "role_conditioned_champion_effects",
+    "atomized_champion_effects",
 )
 EXCLUDED_TERMS = (
     "role_pair_interactions",
@@ -318,7 +319,7 @@ def _depth4_game_row(game: Mapping[str, Any]) -> np.ndarray:
 
     def mean_of(side: str, key: str) -> float:
         values = [
-            index.get(_corpus_slug(str(game[side][role].get("champion") or "")), {}).get(key, 0.0)
+            index.get(_atom_slug(str(game[side][role].get("champion") or "")), {}).get(key, 0.0)
             for role in ROLES
         ]
         return float(np.mean(values)) if values else 0.0
@@ -401,7 +402,7 @@ def _depth3_game_row(game: Mapping[str, Any]) -> np.ndarray:
 
     def mean_of(side: str, key: str) -> float:
         values = [
-            index.get(_corpus_slug(str(game[side][role].get("champion") or "")), {}).get(key, 0.0)
+            index.get(_atom_slug(str(game[side][role].get("champion") or "")), {}).get(key, 0.0)
             for role in ROLES
         ]
         return float(np.mean(values)) if values else 0.0
@@ -410,7 +411,7 @@ def _depth3_game_row(game: Mapping[str, Any]) -> np.ndarray:
 
 
 def _champion_depth2(champion: str) -> dict[str, float]:
-    return _atom_depth2_index().get(_corpus_slug(champion), {})
+    return _atom_depth2_index().get(_atom_slug(champion), {})
 
 
 def _cached_atom_vector(champion: str) -> np.ndarray | None:
@@ -788,10 +789,13 @@ def _feature_names(games: Sequence[Mapping[str, Any]]) -> list[str]:
             for role in ROLES:
                 names.add(f"draft|{role}|{_champion(game[side][role].get('champion'))}")
                 names.add(f"draft|exp|{role}")
+                for key in _atom_term_keys():
+                    names.add(f"atom|{role}|{key}")
     controls = sorted(name for name in names if name.startswith("control|"))
     context = sorted(name for name in names if name.startswith(("league|", "patch|")))
     draft = sorted(name for name in names if name.startswith("draft|"))
-    return controls + context + draft
+    atom = sorted(name for name in names if name.startswith("atom|"))
+    return controls + context + draft + atom
 
 
 def _matrix(games: Sequence[Mapping[str, Any]], names: Sequence[str], *, include_draft: bool) -> sparse.csr_matrix:
@@ -834,6 +838,10 @@ def _matrix(games: Sequence[Mapping[str, Any]], names: Sequence[str], *, include
                 for role in ROLES:
                     champion = _champion(game[side][role].get("champion"))
                     add(row_index, f"draft|{role}|{champion}", sign)
+                    for key in _atom_term_keys():
+                        descriptor = _atom_desc_value(champion, key)
+                        if descriptor:
+                            add(row_index, f"atom|{role}|{key}", sign * descriptor)
     return sparse.csr_matrix((values, (rows, cols)), shape=(len(games), len(names)), dtype=np.float64)
 
 
@@ -857,6 +865,21 @@ class FittedCompositionModel:
         except ValueError:
             return _atom_prior_coefficient(self, role, champion)
         return float(self.coefficients[index])
+
+    def pick_contribution(self, role: str, champion: str) -> float:
+        """Per-pick production contribution: the champion term plus the
+        coefficient-weighted atomized descriptors (d2/d3/d4)."""
+        value = self.coefficient(role, champion)
+        for key in _atom_term_keys():
+            name = f"atom|{role}|{key}"
+            try:
+                index = self.feature_names.index(name)
+            except ValueError:
+                continue
+            descriptor = _atom_desc_value(champion, key)
+            if descriptor:
+                value += float(self.coefficients[index]) * descriptor
+        return value
 
     def has_atom_prior(self) -> bool:
         return isinstance(self.atom_prior, dict) and bool(self.atom_prior)
@@ -1275,7 +1298,7 @@ def public_signal_for_game(
         for role in ROLES:
             champion = _champion(game[side.lower()][role].get("champion"))
             support = int(model.support.get(f"{role}|{champion}", 0))
-            coefficient = model.coefficient(role, champion)
+            coefficient = model.pick_contribution(role, champion)
             supported = support >= min_support_games
             if supported:
                 evidence_status = "available"
@@ -2044,6 +2067,68 @@ def _frontier_rows(games_list: Sequence[Mapping[str, Any]]) -> np.ndarray:
         )
     return np.asarray(rows, dtype=float)
 
+
+
+
+# Atom descriptor terms for the production linear model.  These are the
+# per-pick champion descriptors (depth-2/3/4), looked up alias-aware so
+# Wukong/Renata Glasc/Nunu & Willump resolve to their corpus keys.
+_ATOM_TERM_KEYS: tuple[str, ...] | None = None
+
+
+def _atom_term_keys() -> tuple[str, ...]:
+    global _ATOM_TERM_KEYS
+    if _ATOM_TERM_KEYS is None:
+        keys: list[str] = []
+        for key in _depth2_keys():
+            keys.append(key)
+        for key in _depth3_keys():
+            keys.append(key)
+        for key in _depth4_keys():
+            keys.append(key)
+        _ATOM_TERM_KEYS = tuple(keys)
+    return _ATOM_TERM_KEYS
+
+
+_ATOM_DESC_SCALE: dict[str, float] | None = None
+
+
+def _atom_desc_scale() -> dict[str, float]:
+    """Per-key corpus-max normalization for the production linear model.
+
+    The atom descriptors are STATIC champion knowledge (not outcome data), so
+    normalizing by the corpus maximum is strictly-prior safe.  Scaling keeps
+    liblinear convergence fast and makes every descriptor comparable; the
+    CatBoost frontier rows keep the raw values (trees handle scale natively).
+    """
+    global _ATOM_DESC_SCALE
+    if _ATOM_DESC_SCALE is None:
+        corpora = (
+            (_atom_depth2_index(), "d2_"),
+            (_atom_depth3_index(), "d3_"),
+            (_atom_depth4_index(), "d4_"),
+        )
+        scale: dict[str, float] = {}
+        for index, prefix in corpora:
+            for key in _atom_term_keys():
+                if not key.startswith(prefix):
+                    continue
+                maximum = max((abs(entry.get(key, 0.0)) for entry in index.values()), default=0.0)
+                scale[key] = maximum if maximum > 0.0 else 1.0
+        _ATOM_DESC_SCALE = scale
+    return _ATOM_DESC_SCALE
+
+
+def _atom_desc_value(champion: str, key: str) -> float:
+    """Alias-aware, scale-normalized per-champion descriptor across d2/d3/d4."""
+    slug = _atom_slug(str(champion or ""))
+    if key.startswith("d4_"):
+        raw = float(_atom_depth4_index().get(slug, {}).get(key, 0.0))
+    elif key.startswith("d3_"):
+        raw = float(_atom_depth3_index().get(slug, {}).get(key, 0.0))
+    else:
+        raw = float(_atom_depth2_index().get(slug, {}).get(key, 0.0))
+    return raw / _atom_desc_scale().get(key, 1.0)
 
 def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.ndarray]:
     """One date-ordered strictly-prior pass; every feature uses prior games only."""
