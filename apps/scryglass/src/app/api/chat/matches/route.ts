@@ -5,7 +5,7 @@ import { readPackManifest } from "@/lib/serverPack";
 
 export const runtime = "nodejs";
 
-async function get(request: Request) {
+async function get(request: Request, signal: AbortSignal) {
   const params = searchParams(request);
   const team = clean(params.get("team"));
   const league = clean(params.get("league"));
@@ -15,13 +15,13 @@ async function get(request: Request) {
     return chatError("One of team, league, or champion is required.", 422);
   }
   try {
-    const bounded = queryApiAvailable(await readPackManifest(request.signal));
+    const bounded = queryApiAvailable(await readPackManifest(signal));
     let games = await loadChatMatches({
       team: team || undefined,
       league: league || undefined,
       champion: champion || undefined,
       limit,
-    }, request.signal);
+    }, signal);
     if (!bounded && team) {
       games = filterChatMatchesByTeam(games, team);
     }

@@ -14,13 +14,13 @@ type Upcoming = {
   league?: string;
 };
 
-async function get(request: Request) {
+async function get(request: Request, signal: AbortSignal) {
   const league = clean(searchParams(request).get("league"));
   const limit = Math.min(Math.max(parseInt(searchParams(request).get("limit") ?? "10", 10) || 10, 1), 20);
   try {
     const schedule = await readChatJson<{ upcoming: Upcoming[] }>(
       "features/schedule.json",
-      request.signal,
+      signal,
     );
     let upcoming = schedule.upcoming ?? [];
     if (league) {

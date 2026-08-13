@@ -14,13 +14,13 @@ type TierRow = {
   movement?: string | null;
 };
 
-async function get(request: Request) {
+async function get(request: Request, signal: AbortSignal) {
   const params = searchParams(request);
   const role = clean(params.get("role"));
   const patch = clean(params.get("patch"));
   const limit = Math.min(Math.max(parseInt(params.get("limit") ?? "20", 10) || 20, 1), 20);
   try {
-    const manifest = await readPackManifest(request.signal);
+    const manifest = await readPackManifest(signal);
     if (queryApiAvailable(manifest)) {
       const result = await getTierRows(manifest, {
         kind: "champion",
@@ -29,7 +29,7 @@ async function get(request: Request) {
         order: "rank_asc",
         limit,
         offset: 0,
-      }, request.signal);
+      }, signal);
       const rows: TierRow[] = result.rows.map((row) => ({
         champion: row.name,
         role: row.role ?? "",
@@ -43,7 +43,7 @@ async function get(request: Request) {
     }
     const tier = await readChatJson<{ options: { patches: string[] }; rows: TierRow[] }>(
       "rankings/tierlists.json",
-      request.signal,
+      signal,
     );
     const patches = tier.options?.patches ?? [];
     const latestPatch = patch || (patches.length ? patches[patches.length - 1] : "");

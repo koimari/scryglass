@@ -146,17 +146,17 @@ async function queryBoundedChampions(question: string, signal?: AbortSignal) {
   };
 }
 
-async function get(request: Request) {
+async function get(request: Request, signal: AbortSignal) {
   const question = clean(searchParams(request).get("q"));
   if (!question) return chatError("A champion question is required.", 422);
   try {
-    const manifest = await readPackManifest(request.signal);
+    const manifest = await readPackManifest(signal);
     if (queryApiAvailable(manifest)) {
-      return chatJson(await queryBoundedChampions(question, request.signal));
+      return chatJson(await queryBoundedChampions(question, signal));
     }
     const [index, tierBoard] = await Promise.all([
-      loadSupportQueryIndex(request.signal),
-      readChatJson<PublishedTierBoard>("rankings/tierlists.json", request.signal),
+      loadSupportQueryIndex(signal),
+      readChatJson<PublishedTierBoard>("rankings/tierlists.json", signal),
     ]);
     return chatJson(queryChampions(index, question, tierBoard));
   } catch {

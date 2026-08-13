@@ -150,7 +150,6 @@ export function secureChatRoute(
     const signal = request.signal.aborted
       ? request.signal
       : AbortSignal.any([request.signal, controller.signal]);
-    const timedRequest = new Request(request, { signal });
     let didTimeout = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const timeoutResponse = () => chatError("The request exceeded its time budget.", 504);
@@ -165,7 +164,10 @@ export function secureChatRoute(
       );
     });
     try {
-      const response = await Promise.race([Promise.resolve(handler(timedRequest, signal)), timedOut]);
+      // Keep NextRequest intact. Wrapping it in the platform Request
+      // constructor breaks its private state in Node's production runtime.
+      // Handlers receive the deadline signal as a separate argument.
+      const response = await Promise.race([Promise.resolve(handler(request, signal)), timedOut]);
       if (didTimeout) return response.status === 504 ? response : timeoutResponse();
       try {
         const manifest = await readPackManifest(signal);

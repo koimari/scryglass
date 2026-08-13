@@ -2260,6 +2260,24 @@ begin
 end
 $role$;
 
+-- The migration runner owns these helper roles during the transition. This
+-- grant lets it change function ownership in a clean Supabase replay. The
+-- roles stay non-login and cannot be assumed by public callers.
+do $grant$
+begin
+  execute format(
+    'grant %I to %I',
+    'scryglass_release_transition_owner',
+    current_user
+  );
+  execute format(
+    'grant %I to %I',
+    'scryglass_release_retention_owner',
+    current_user
+  );
+end
+$grant$;
+
 grant usage on schema public to scryglass_release_transition_owner;
 grant select on public.scryglass_public_releases
   to scryglass_release_transition_owner;

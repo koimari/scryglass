@@ -3,15 +3,15 @@ import { lookupPlayer } from "@/lib/chatData";
 
 export const runtime = "nodejs";
 
-async function get(request: Request) {
+async function get(request: Request, signal: AbortSignal) {
   const params = searchParams(request);
   const firstName = clean(params.get("player1"));
   const secondName = clean(params.get("player2"));
   if (!firstName || !secondName) return chatError("Two player names are required.", 422);
 
   const [first, second] = await Promise.all([
-    lookupPlayer(firstName, request.signal),
-    lookupPlayer(secondName, request.signal),
+    lookupPlayer(firstName, signal),
+    lookupPlayer(secondName, signal),
   ]);
   if (!first || !second) return chatError("A matching player was not found.");
 
