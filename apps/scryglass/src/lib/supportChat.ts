@@ -137,8 +137,32 @@ export function fallbackRoute(text: string): RouteResult {
     const role = detectRole(text);
     return { call: { tool: "leaderboards", args: { category, ...(role ? { role } : {}) } } };
   }
-  // rating-of-<value> / with-a-rating-of lookups -> per-role leaderboard index
-  if (/(rating of|with a rating|rating is|rated)/.test(lower)) {
+  // "top N <entity>" / "best <entity>" -> leaderboards with the right category
+  const topMatch = /(?:top|best|highest)\s+(\d+)?\s*(team|teams|player|players|champion|champions)/.exec(lower);
+  if (topMatch) {
+    const limit = topMatch[1] ? Math.min(Math.max(parseInt(topMatch[1], 10) || 1, 1), 25) : 5;
+    const entity = topMatch[2];
+    const role = entity.includes("jungl") ? "jng" : entity.includes("mid") ? "mid" : entity.includes("support") ? "sup" : entity.includes("top laner") ? "top" : entity.includes("adc") || entity.includes("bot") ? "bot" : null;
+    if (entity.startsWith("team")) {
+      return { call: { tool: "leaderboards", args: { category: "teams", limit: String(limit) } } };
+    }
+    const args: Record<string, string> = { category: "rating", limit: String(limit) };
+    if (role) args.role = role;
+    return { call: { tool: "leaderboards", args } };
+  }
+
+  // "X's rating" / "rating of X" / "what is X rated" -> player profile
+  const nameRating = /(?:rating of|rated)\s+(?!\d)([a-z0-9 .'-]+?)(?:\s*\?|$)/.exec(lower)
+    ?? /([a-z0-9 .'-]+?)(?:'s|s')\s+rating/.exec(lower);
+  if (nameRating) {
+    const name = nameRating[1].trim().split(/\s+/).pop() ?? "";
+    if (name && name.length >= 2 && !/^(the|a|an)$/.test(name)) {
+      return { call: { tool: "player", args: { name } } };
+    }
+  }
+
+  // with-a-rating-of-<value> lookups -> per-role leaderboard index
+  if (/(with a rating|rating of \d|rated \d|rating is \d)/.test(lower)) {
     const category = "rating";
     const role = detectRole(text);
     return { call: { tool: "leaderboards", args: { category, ...(role ? { role } : {}) } } };
@@ -146,9 +170,8 @@ export function fallbackRoute(text: string): RouteResult {
 
   // team questions
   if (/team|show me .* recent|results/.test(lower)) {
-    const team = matchName(text, ["T1", "G2", "Fnatic", "Karmine", "Team Liquid", "Gen.G", "Hanwha", "Bilibili", "Top Esports", "DRX", "KC", "MKOI"]);
+    const team = matchName(text, ["T1", "G2", "Fnatic", "Karmine", "Team Liquid", "Gen.G", "Hanwha", "Bilibili", "Top Esports", "DRX", "KC", "MKOI", "GAM", "PSG", "FNC", "C9", "100 Thieves", "Cloud9"]);
     if (team) return { call: { tool: "team", args: { name: team } } };
-    return { call: { tool: "matches", args: { team: "", limit: "10" } } };
   }
 
   // matches by league/champion/team
@@ -158,6 +181,8 @@ export function fallbackRoute(text: string): RouteResult {
     const args: Record<string, string> = {};
     if (league) args.league = league;
     if (champion) args.champion = champion;
+    const team = matchName(text, ["T1", "G2", "Fnatic", "Karmine", "Team Liquid", "Gen.G", "Hanwha", "Bilibili", "Top Esports", "DRX", "KC", "MKOI", "GAM", "PSG", "FNC", "C9"]);
+    if (team) args.team = team;
     args.limit = "10";
     return { call: { tool: "matches", args } };
   }
