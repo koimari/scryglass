@@ -7,6 +7,7 @@ from lol_kills.export import pack_spec
 from lol_kills.export.pack_records import (
     _first_pick_value,
     build_player_champion_records,
+    build_maps_frame_from_team_games,
     build_profile_records,
     merge_accepted_profile_games,
     public_team_affiliation,
@@ -385,6 +386,34 @@ def test_published_draft_pool_uses_bans_and_fails_closed_without_them() -> None:
 def test_first_pick_falls_back_from_null_map_metadata() -> None:
     group = pd.DataFrame([{"blue_firstPick": pd.NA, "firstPick": "Blue"}])
     assert _first_pick_value(group, {"blue_first_pick": float("nan")}) is True
+
+
+def test_team_map_adapter_preserves_public_draft_metadata() -> None:
+    rows = []
+    for side, team, first_pick in (("Blue", "A", 1), ("Red", "B", 0)):
+        rows.append(
+            {
+                "game_uid": "draft-map",
+                "date": "2026-08-01",
+                "league": "LCK",
+                "side": side,
+                "position": "team",
+                "teamname": team,
+                "result": 1 if side == "Blue" else 0,
+                "patch": "16.1",
+                "firstPick": first_pick,
+                **{f"ban{slot}": f"{side}-ban-{slot}" for slot in range(1, 6)},
+                **{f"pick{slot}": f"{side}-pick-{slot}" for slot in range(1, 6)},
+            }
+        )
+
+    maps = build_maps_frame_from_team_games(pd.DataFrame(rows))
+
+    assert maps.loc[0, "patch"] == "16.1"
+    assert maps.loc[0, "blue_firstPick"] == 1
+    assert maps.loc[0, "red_firstPick"] == 0
+    assert maps.loc[0, "blue_ban4"] == "Blue-ban-4"
+    assert maps.loc[0, "red_pick5"] == "Red-pick-5"
 
 
 def test_published_draft_pool_applies_second_phase_bans_after_sixth_pick() -> None:
