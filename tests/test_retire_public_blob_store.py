@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
+import subprocess
+import sys
+
 import pytest
 
 from lol_kills.export.blob_retention import BlobIdentity
@@ -11,6 +16,20 @@ from tools.retire_public_blob_store import (
     inventory_sha256,
     retire,
 )
+
+
+def test_module_entrypoint_resolves_repository_packages() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "tools.retire_public_blob_store", "--help"],
+        cwd=Path(__file__).resolve().parents[1],
+        env={**os.environ, "PYTHONPATH": ""},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "Delete the retired Scryglass public Blob store" in result.stdout
 
 
 class FakeTransport:

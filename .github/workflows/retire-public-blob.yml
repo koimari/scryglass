@@ -78,7 +78,7 @@ jobs:
           set -euo pipefail
           umask 077
           mkdir -p retired-public-blob-receipt
-          python tools/retire_public_blob_store.py \
+          python -m tools.retire_public_blob_store \
             > retired-public-blob-receipt/plan.json
 
       - name: Validate the dry inventory receipt
@@ -173,7 +173,7 @@ jobs:
           set -euo pipefail
           umask 077
           mkdir -p retired-public-blob-receipt
-          python tools/retire_public_blob_store.py \
+          python -m tools.retire_public_blob_store \
             --execute \
             --confirmation "$CONFIRMATION" \
             --expected-inventory-sha256 "$INVENTORY_SHA256" \
@@ -184,7 +184,7 @@ jobs:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
         run: |
           set -euo pipefail
-          python tools/retire_public_blob_store.py \
+          python -m tools.retire_public_blob_store \
             > retired-public-blob-receipt/verification.json
 
       - name: Build the redacted retirement receipt
