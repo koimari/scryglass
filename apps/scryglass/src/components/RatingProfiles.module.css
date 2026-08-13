@@ -583,6 +583,7 @@
 .compositionTeam b { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
 .compositionWinShare { font-size: 1.9rem; font-weight: 700; color: var(--ink-strong, inherit); }
 .compositionSignalDetail { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: var(--text-micro); }
+.compositionEstimated { color: var(--ink-accent, #b8860b); font-weight: 600; }
 .compositionLegend { margin: 0.35rem 0 0; color: var(--ink-muted); font-size: var(--text-micro); line-height: 1.4; }
 .compositionVs { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: var(--text-micro); text-transform: uppercase; }
 .compositionPicks { display: grid; gap: 0.35rem; }

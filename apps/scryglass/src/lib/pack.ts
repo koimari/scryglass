@@ -259,7 +259,7 @@ export type DraftContribution = {
     champion: string;
     contribution: number | null;
     prior_role_games: number;
-    evidence_status: "available" | "limited" | "unavailable";
+    evidence_status: "available" | "atom_estimate" | "limited" | "unavailable";
   }>;
   note: string;
   reason?: string;

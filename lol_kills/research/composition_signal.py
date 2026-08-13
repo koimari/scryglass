@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -24,7 +25,7 @@ from typing import Any, Iterable, Mapping, Sequence
 import numpy as np
 import pandas as pd
 from scipy import sparse
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 
 from lol_kills.etl.aliases import normalize_champ, normalize_team
@@ -32,7 +33,7 @@ from lol_kills.etl.source_keys import canonical_source_game_key
 
 
 SCHEMA_VERSION = "scryglass:composition-signal:v1"
-MODEL_VERSION = "composition-signal-v1"
+MODEL_VERSION = "composition-signal-v2"
 REGULARIZATION_C = 0.03
 MIN_SUPPORT_GAMES = 40
 MIN_TRAINING_GAMES = 100
@@ -618,14 +619,18 @@ class FittedCompositionModel:
     train_games: int
     regularization_c: float = REGULARIZATION_C
     worker_commit: str | None = None
+    atom_prior: dict[str, Any] | None = None
 
     def coefficient(self, role: str, champion: str) -> float:
         key = f"draft|{role}|{_champion(champion)}"
         try:
             index = self.feature_names.index(key)
         except ValueError:
-            return 0.0
+            return _atom_prior_coefficient(self, role, champion)
         return float(self.coefficients[index])
+
+    def has_atom_prior(self) -> bool:
+        return isinstance(self.atom_prior, dict) and bool(self.atom_prior)
 
     def logit(self, game: Mapping[str, Any], *, include_draft: bool = True) -> float:
         matrix = _matrix([game], self.feature_names, include_draft=include_draft)
@@ -643,6 +648,7 @@ class FittedCompositionModel:
             "support": self.support,
             "train_games": self.train_games,
             "worker_commit": self.worker_commit,
+            "atom_prior": self.atom_prior,
         }
 
     @classmethod
@@ -659,6 +665,11 @@ class FittedCompositionModel:
             train_games=int(payload["train_games"]),
             regularization_c=float(payload.get("regularization_c") or REGULARIZATION_C),
             worker_commit=str(payload.get("worker_commit") or "") or None,
+            atom_prior=(
+                dict(payload["atom_prior"])
+                if isinstance(payload.get("atom_prior"), dict)
+                else None
+            ),
         )
 
 
@@ -692,6 +703,12 @@ def _fit_model(
                     key = f"{role}|{champion}"
                     support[key] = support.get(key, 0) + 1
     fit_through = _rfc(max(game["date"] for game in usable))
+    atom_prior = _fit_atom_prior_from_coefficients(
+        tuple(names),
+        tuple(float(value) for value in model.coef_[0]),
+        support,
+        min_support_games=ATOM_PRIOR_MIN_SUPPORT,
+    ) if include_draft else None
     return FittedCompositionModel(
         model_version=MODEL_VERSION if include_draft else f"{MODEL_VERSION}:baseline",
         fit_through=fit_through,
@@ -702,7 +719,118 @@ def _fit_model(
         train_games=len(usable),
         regularization_c=float(regularization_c),
         worker_commit=worker_commit,
+        atom_prior=atom_prior,
     )
+
+
+_ATOM_AGGREGATE_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "data"
+    / "lol"
+    / "v2"
+    / "champions"
+    / "atom-corpus-aggregate-v1.json"
+)
+
+
+def _corpus_slug(value: str) -> str:
+    """Lowercase slug matching the LCC corpus keys (Lee Sin -> leesin, K'Sante -> ksante)."""
+    return re.sub(r"[^a-z0-9]", "", str(value).casefold())
+
+
+def _atom_feature_vector(champion: str) -> np.ndarray | None:
+    """The 18-dim atom aggregate vector (6 family counts + 12 mechanic flags)."""
+    try:
+        payload = json.loads(_ATOM_AGGREGATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    entry = (payload.get("champions") or {}).get(_corpus_slug(champion))
+    if not isinstance(entry, dict):
+        return None
+    families = entry.get("families") or []
+    mechanics = entry.get("mechanics") or []
+    vector = [float(value) for value in families] + [float(value) for value in mechanics]
+    if len(vector) != 18:
+        return None
+    return np.asarray(vector, dtype=float)
+
+
+ATOM_PRIOR_MIN_SUPPORT = 10
+
+
+def _fit_atom_prior_from_coefficients(
+    feature_names: Sequence[str],
+    coefficients: Sequence[float],
+    support: Mapping[str, int],
+    *,
+    min_support_games: int = MIN_SUPPORT_GAMES,
+) -> dict[str, Any] | None:
+    """Per-role ridge mapping atom features to draft coefficients for unseen picks."""
+
+    names = tuple(feature_names)
+    role_models: dict[str, Any] = {}
+    for role in ROLES:
+        xs: list[np.ndarray] = []
+        ys: list[float] = []
+        for key in names:
+            prefix = f"draft|{role}|"
+            if not key.startswith(prefix):
+                continue
+            champion = key[len(prefix):]
+            if support.get(f"{role}|{champion}", 0) < min_support_games:
+                continue
+            vector = _atom_feature_vector(champion)
+            if vector is None:
+                continue
+            xs.append(vector)
+            ys.append(float(coefficients[names.index(key)]))
+        if len(xs) < 8:
+            continue
+        matrix = np.asarray(xs, dtype=float)
+        targets = np.asarray(ys, dtype=float)
+        mean = matrix.mean(axis=0)
+        std = matrix.std(axis=0)
+        std[std == 0] = 1.0
+        normalized = (matrix - mean) / std
+        ridge = Ridge(alpha=1.0, random_state=461)
+        ridge.fit(normalized, targets)
+        role_models[role] = {
+            "mean": [float(value) for value in mean],
+            "std": [float(value) for value in std],
+            "coef": [float(value) for value in ridge.coef_],
+            "intercept": float(ridge.intercept_),
+            "train_pairs": len(xs),
+        }
+    return role_models or None
+
+
+def _corpus_champions() -> list[str]:
+    try:
+        payload = json.loads(_ATOM_AGGREGATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return []
+    champions = payload.get("champions") or {}
+    return sorted(str(value) for value in champions)
+
+
+def _atom_prior_coefficient(model: FittedCompositionModel, role: str, champion: str) -> float:
+    """Atom-estimated draft coefficient for a pick with no historical support."""
+
+    if not model.has_atom_prior():
+        return 0.0
+    entry = model.atom_prior.get(role)
+    if not isinstance(entry, dict):
+        return 0.0
+    vector = _atom_feature_vector(champion)
+    if vector is None:
+        return 0.0
+    mean = np.asarray(entry.get("mean") or [], dtype=float)
+    std = np.asarray(entry.get("std") or [], dtype=float)
+    coef = np.asarray(entry.get("coef") or [], dtype=float)
+    if len(vector) != len(mean) or len(vector) != len(coef):
+        return 0.0
+    normalized = (vector - mean) / np.where(std == 0, 1.0, std)
+    return float(np.dot(normalized, coef) + float(entry.get("intercept") or 0.0))
 
 
 def _select_regularization(
@@ -921,18 +1049,23 @@ def public_signal_for_game(
             coefficient = model.coefficient(role, champion)
             supported = support >= min_support_games
             if supported:
+                evidence_status = "available"
                 side_signals[side] += coefficient
                 side_support[side] += support
+            elif model.has_atom_prior():
+                evidence_status = "atom_estimate"
+                side_signals[side] += coefficient
             else:
+                evidence_status = "limited"
                 limited = True
             picks.append(
                 {
                     "side": side,
                     "role": role,
                     "champion": champion,
-                    "contribution": _json_number(coefficient) if supported else None,
+                    "contribution": _json_number(coefficient) if evidence_status != "limited" else None,
                     "prior_role_games": support,
-                    "evidence_status": "available" if supported else "limited",
+                    "evidence_status": evidence_status,
                 }
             )
     status = "limited" if limited else "available"
