@@ -153,43 +153,41 @@ export async function readPackManifest(): Promise<PackManifest> {
 async function readSupabaseAsset<T>(releaseId: string, relativePath: string): Promise<T> {
   const config = supabaseConfig();
   if (!config) throw new Error("Supabase public data is not configured");
-  const release = encodeURIComponent(releaseId);
-  const assetPath = encodeURIComponent(relativePath);
-  const response = await fetch(
-    `${config.url}/rest/v1/scryglass_public_assets?release_id=eq.${release}&path=eq.${assetPath}&select=body,storage_path&limit=1`,
-    {
-      headers: { apikey: config.publishableKey },
-      cache: "force-cache",
-    },
-  );
-  if (!response.ok) throw new Error(`Supabase public asset ${response.status}`);
-  const rows = (await response.json()) as Array<{ body?: T | null; storage_path?: string | null }>;
-  const row = rows[0];
-  if (!row) throw new Error("Supabase public asset is missing");
-  if (row.body !== null && row.body !== undefined) return row.body;
-  if (!row.storage_path) throw new Error("Supabase public asset has no payload");
-  const storagePath = row.storage_path
-    .split("/")
-    .map((part) => encodeURIComponent(part))
-    .join("/");
-  // Serve storage assets through the Vercel CDN proxy so Supabase egress is
-  // one fetch per release instead of one per cache miss. Fall back to the
-  // direct Supabase URL whenever the proxy is unavailable (e.g. during the
-  // first build that introduces the route, or a transient edge failure).
   const origin = (
     process.env.SCRYGLASS_PUBLISH_ORIGIN
     || process.env.NEXT_PUBLIC_SITE_URL
     || "https://scryglass.xyz"
   ).trim().replace(/\/$/, "");
-  const direct = `${config.url}/storage/v1/object/public/scryglass-public/${storagePath}`;
-  if (process.env.NEXT_PHASE !== "phase-production-build") {
-    try {
-      return await readStorageJson<T>(`${origin}/api/assets/${storagePath}`);
-    } catch {
-      // fall through to the direct fetch
-    }
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    // During builds the proxy route is not deployed yet; read directly.
+    const release = encodeURIComponent(releaseId);
+    const assetPath = encodeURIComponent(relativePath);
+    const response = await fetch(
+      `${config.url}/rest/v1/scryglass_public_assets?release_id=eq.${release}&path=eq.${assetPath}&select=body,storage_path&limit=1`,
+      {
+        headers: { apikey: config.publishableKey },
+        cache: "force-cache",
+      },
+    );
+    if (!response.ok) throw new Error(`Supabase public asset ${response.status}`);
+    const rows = (await response.json()) as Array<{ body?: T | null; storage_path?: string | null }>;
+    const row = rows[0];
+    if (!row) throw new Error("Supabase public asset is missing");
+    if (row.body !== null && row.body !== undefined) return row.body;
+    if (!row.storage_path) throw new Error("Supabase public asset has no payload");
+    const storagePath = row.storage_path
+      .split("/")
+      .map((part) => encodeURIComponent(part))
+      .join("/");
+    return readStorageJson<T>(
+      `${config.url}/storage/v1/object/public/scryglass-public/${storagePath}`,
+    );
   }
-  return readStorageJson<T>(direct);
+  // Runtime: every asset (storage or DB-row) is served through the Vercel CDN
+  // proxy so Supabase egress is one fetch per release per cache window.
+  return readStorageJson<T>(
+    `${origin}/api/assets/${encodeURIComponent(releaseId)}/${encodeURIComponent(relativePath)}`,
+  );
 }
 
 /** Load one immutable release asset from Supabase or bundled build data. */
