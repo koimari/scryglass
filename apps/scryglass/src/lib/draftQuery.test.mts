@@ -31,6 +31,16 @@ const aliasRecords = {
   },
 } satisfies ProfileRecords;
 
+const shareRankingRecords = {
+  ...records,
+  games: {
+    rawHighOne: game("raw-high-one", "RawHigh", "Opponent One", 3, -2),
+    rawHighTwo: game("raw-high-two", "RawHigh", "Opponent Two", -2, 3),
+    shareHighOne: game("share-high-one", "ShareHigh", "Opponent Three", 0.4, 0),
+    shareHighTwo: game("share-high-two", "ShareHigh", "Opponent Four", 0.4, 0),
+  },
+} satisfies ProfileRecords;
+
 function game(
   gameId: string,
   blueTeam: string,
@@ -67,8 +77,8 @@ test("team draft scores support best, worst, and the ordered rows between", () =
   const worst = queryTeamDraftScores(records, "which team has the worst draft score");
   assert.deepEqual(best.rows.map((row) => row.team), ["T1", "Gen.G", "HLE", "KT"]);
   assert.deepEqual(worst.rows.map((row) => row.team), ["KT", "HLE", "Gen.G", "T1"]);
-  assert.match(best.answer.headline, /T1 has the highest average published draft score/);
-  assert.match(worst.answer.headline, /KT has the lowest average published draft score/);
+  assert.match(best.answer.headline, /T1 has the highest average published draft win share/);
+  assert.match(worst.answer.headline, /KT has the lowest average published draft win share/);
   assert.match(best.answer.basis, /Tier 1/);
 
   const fullOrder = queryTeamDraftScores(records, "show team draft scores from best to worst");
@@ -93,7 +103,7 @@ test("team draft scores compare two teams over their published history", () => {
   assert.equal(comparison.kind, "team_draft_comparison");
   assert.deepEqual(comparison.rows.map((row) => row.team), ["T1", "Gen.G"]);
   assert.equal(comparison.comparison?.winner, "T1");
-  assert.match(comparison.answer.headline, /T1 has the higher historical average draft score/);
+  assert.match(comparison.answer.headline, /T1 has the higher historical average draft win share/);
   assert.match(comparison.answer.headline, /67%/);
   assert.match(comparison.answer.headline, /49%/);
   assert.match(comparison.answer.headline, /18 percentage-point edge/);
@@ -112,4 +122,10 @@ test("team draft comparisons resolve common team aliases", () => {
   const comparison = queryTeamDraftScores(aliasRecords, "who has the best draft between KC and G2?");
   assert.equal(comparison.kind, "team_draft_comparison");
   assert.deepEqual(comparison.rows.map((row) => row.team), ["Karmine Corp", "G2 Esports"]);
+});
+
+test("draft rankings use the visible win-share percentage metric", () => {
+  const result = queryTeamDraftScores(shareRankingRecords, "which team has the best draft with at least 2 drafts");
+  assert.equal(result.rows[0]?.team, "ShareHigh");
+  assert.match(result.answer.headline, /ShareHigh has the highest average published draft win share at 60%/);
 });
