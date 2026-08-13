@@ -21,6 +21,16 @@ const records = {
   },
 } satisfies ProfileRecords;
 
+const aliasRecords = {
+  ...records,
+  games: {
+    ...records.games,
+    kcOne: game("kc-one", "Karmine Corp", "G2 Esports", 1.2, 0.4),
+    kcTwo: game("kc-two", "G2 Esports", "Karmine Corp", 0.9, 0.3),
+    kcThree: game("kc-three", "Karmine Corp", "G2 Esports", 1.1, 0.2),
+  },
+} satisfies ProfileRecords;
+
 function game(
   gameId: string,
   blueTeam: string,
@@ -96,4 +106,10 @@ test("team draft scores compare two teams over their published history", () => {
   assert.equal(insufficient.kind, "team_draft_comparison");
   assert.equal(insufficient.comparison, undefined);
   assert.match(insufficient.answer.headline, /do not support a complete historical comparison/);
+});
+
+test("team draft comparisons resolve common team aliases", () => {
+  const comparison = queryTeamDraftScores(aliasRecords, "who has the best draft between KC and G2?");
+  assert.equal(comparison.kind, "team_draft_comparison");
+  assert.deepEqual(comparison.rows.map((row) => row.team), ["Karmine Corp", "G2 Esports"]);
 });

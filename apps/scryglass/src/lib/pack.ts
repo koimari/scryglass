@@ -662,6 +662,16 @@ const TEAM_ALIASES: Record<string, string> = {
   vibe: "Vivo Keyd Stars",
 };
 
+/** Return the canonical team name and its known query aliases. */
+export function teamQueryAliases(team: string): string[] {
+  const canonical = TEAM_ALIASES[normKey(team)] ?? team;
+  const canonicalKey = normKey(canonical);
+  const aliases = Object.entries(TEAM_ALIASES)
+    .filter(([, value]) => normKey(value) === canonicalKey)
+    .map(([alias]) => alias);
+  return [...new Set([team, canonical, ...aliases])];
+}
+
 function normKey(name: string): string {
   return (name || "")
     .normalize("NFKC")
