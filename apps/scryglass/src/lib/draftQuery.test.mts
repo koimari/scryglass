@@ -71,7 +71,8 @@ test("team draft rankings support limits, sample floors, and named teams", () =>
 
   const named = queryTeamDraftScores(records, "what is T1's draft score?");
   assert.deepEqual(named.rows.map((row) => row.team), ["T1"]);
-  assert.match(named.answer.headline, /across 3 drafts/);
+  assert.match(named.answer.headline, /67%/);
+  assert.match(named.answer.headline, /across 3 games/);
 
   const allTiers = queryTeamDraftScores(records, "best team draft score across all tiers with at least 1 draft");
   assert.equal(allTiers.rows[0].team, "Academy");
@@ -82,7 +83,12 @@ test("team draft scores compare two teams over their published history", () => {
   assert.equal(comparison.kind, "team_draft_comparison");
   assert.deepEqual(comparison.rows.map((row) => row.team), ["T1", "Gen.G"]);
   assert.equal(comparison.comparison?.winner, "T1");
-  assert.match(comparison.answer.headline, /T1 has the higher historical average published draft score/);
+  assert.match(comparison.answer.headline, /T1 has the higher historical average draft score/);
+  assert.match(comparison.answer.headline, /67%/);
+  assert.match(comparison.answer.headline, /49%/);
+  assert.match(comparison.answer.headline, /18 percentage-point edge/);
+  assert.ok((comparison.comparison?.win_share_gap ?? 0) > 0.16);
+  assert.doesNotMatch(comparison.answer.headline, /[+-]\d+\.\d{2}/);
   assert.match(comparison.answer.basis, /active 90-day profile window/);
   assert.match(comparison.answer.basis, /not all seasons/);
 

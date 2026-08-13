@@ -119,11 +119,6 @@ function percentage(value: number | null | undefined): string {
   return value == null || !Number.isFinite(value) ? "—" : `${Math.round(value * 100)}%`;
 }
 
-function draftScore(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
-}
-
 function roleName(value: string | null | undefined): string {
   const roles: Record<string, string> = {
     bot: "Bot",
@@ -244,16 +239,13 @@ function resultTable(result: unknown, call: ToolCall): React.ReactNode {
         <p className={styles.queryCaveat}>{query.answer.caveat}</p>
         {query.rows.length ? table(
           <table className={styles.resultTable}>
-            <thead><tr><th>Team</th><th className={styles.numeric}>Avg draft pts</th><th className={styles.numeric}>Avg draft win share</th><th className={styles.numeric}>Drafts</th><th className={styles.numeric}>Best</th><th className={styles.numeric}>Worst</th></tr></thead>
+            <thead><tr><th>Team</th><th className={styles.numeric}>Draft win share</th><th className={styles.numeric}>Games</th></tr></thead>
             <tbody>
               {query.rows.map((row) => (
                 <tr key={row.team}>
                   <td><a className="row-link" href={`/elo/team/${teamSlug(row.team)}`}>{row.team}</a></td>
-                  <td className={styles.numeric}>{draftScore(row.average_score)}</td>
                   <td className={styles.numeric}>{percentage(row.average_win_share)}</td>
                   <td className={styles.numeric}>{row.games}</td>
-                  <td className={styles.numeric}>{draftScore(row.best_score)}</td>
-                  <td className={styles.numeric}>{draftScore(row.worst_score)}</td>
                 </tr>
               ))}
             </tbody>
