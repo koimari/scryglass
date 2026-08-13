@@ -51,6 +51,7 @@ from lol_kills.ratings.player_elo import (
     build_player_weekly_ranks,
 )
 from lol_kills.research.composition_signal import (
+    MODEL_VERSION,
     CompositionSignalError,
     build_composition_games,
     evaluate_composition_signal,
@@ -284,6 +285,63 @@ def _validate_public_record_tiers(records: dict[str, dict[str, Any]], *, label: 
                 f"{label} {identity} has inconsistent league tier: "
                 f"league={league} tier={tier} expected={expected}"
             )
+
+
+def _number(value: Any) -> float | None:
+    """Coerce a numeric value, tolerating None and non-numeric payloads."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def build_draft_records_payload(
+    composition_result: Any,
+    composition_games: Sequence[Mapping[str, Any]],
+    composition_evaluation: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Compact whole-archive draft evidence: per-game draft edge on the
+    model's logit scale (the coefficient-sum difference between sides)."""
+    payload: dict[str, Any] = {
+        "schema_version": "scryglass:draft-records:v1",
+        "model_version": str((composition_evaluation or {}).get("model_version") or ""),
+        "fit_through": (composition_evaluation or {}).get("fit_through"),
+        "games": {},
+    }
+    draft_game_index = {str(game["game_uid"]): game for game in composition_games}
+    signals = getattr(composition_result, "signals", None)
+    if signals is None and isinstance(composition_result, Mapping):
+        signals = composition_result
+    signals = signals or {}
+    for game_id, signal in signals.items():
+        if not isinstance(signal, Mapping):
+            continue
+        game = draft_game_index.get(str(game_id))
+        if not isinstance(game, Mapping) or signal.get("status") not in ("available", "limited"):
+            continue
+        blue_signal = _number(signal.get("blue", {}).get("signal"))
+        red_signal = _number(signal.get("red", {}).get("signal"))
+        draft_edge = (
+            round(blue_signal - red_signal, 4)
+            if blue_signal is not None and red_signal is not None
+            else None
+        )
+        payload["games"][str(game_id)] = {
+            "date": str(game.get("date") or ""),
+            "league": str(game.get("league") or ""),
+            "blue_team": str(game.get("blue_team") or ""),
+            "red_team": str(game.get("red_team") or ""),
+            "blue_signal": blue_signal,
+            "red_signal": red_signal,
+            # Descriptive draft advantage on the model's logit scale (the
+            # coefficient-sum difference). NOT a win probability: the public
+            # signal omits the model's control terms, so it is a ranked edge,
+            # not a calibrated probability.
+            "draft_edge": draft_edge,
+        }
+    return payload
 
 
 def _draft_players_from_signals(
@@ -839,7 +897,7 @@ def export_public_pack(
                 composition_evaluation_path.read_text(encoding="utf-8")
             )
             if (
-                candidate_evaluation.get("model_version") == "composition-signal-v1"
+                candidate_evaluation.get("model_version") == MODEL_VERSION
                 and candidate_evaluation.get("source_hash") == composition_source_digest
                 and candidate_evaluation.get("canonical_game_identity_sha256") == composition_source_digest
                 and candidate_evaluation.get("worker_commit") == composition_worker_commit
@@ -881,42 +939,15 @@ def export_public_pack(
         "worker_commit": composition_evaluation.get("worker_commit"),
         "promotion_gate_passed": True,
     }
-    draft_records_payload: dict[str, Any] = {
-        "schema_version": "scryglass:draft-records:v1",
-        "model_version": str(composition_evaluation.get("model_version") or ""),
-        "fit_through": composition_evaluation.get("fit_through"),
-        "games": {},
-    }
-    draft_game_index = {str(game["game_uid"]): game for game in composition_games}
+    draft_records_payload = build_draft_records_payload(
+        composition_result, composition_games, composition_evaluation
+    )
     for game_id, signal in composition_result.signals.items():
         if game_id in profile_records_payload.get("games", {}):
             profile_records_payload["games"][game_id]["draft_contribution"] = signal
         archive_candidate = profile_records_payload.get("_archive_games", {}).get(game_id)
         if isinstance(archive_candidate, dict):
             archive_candidate["draft_contribution"] = signal
-        game = draft_game_index.get(str(game_id))
-        if not isinstance(game, Mapping) or signal.get("status") not in ("available", "limited"):
-            continue
-        blue_signal = _number(signal.get("blue", {}).get("signal"))
-        red_signal = _number(signal.get("red", {}).get("signal"))
-        draft_edge = (
-            round(blue_signal - red_signal, 4)
-            if blue_signal is not None and red_signal is not None
-            else None
-        )
-        draft_records_payload["games"][str(game_id)] = {
-            "date": str(game.get("date") or ""),
-            "league": str(game.get("league") or ""),
-            "blue_team": str(game.get("blue_team") or ""),
-            "red_team": str(game.get("red_team") or ""),
-            "blue_signal": blue_signal,
-            "red_signal": red_signal,
-            # Descriptive draft advantage on the model's logit scale (the
-            # coefficient-sum difference). NOT a win probability: the public
-            # signal omits the model's control terms, so it is a ranked edge,
-            # not a calibrated probability.
-            "draft_edge": draft_edge,
-        }
     draft_records_dest = feat_dir / "draft_records.json"
     draft_records_dest.write_text(
         json.dumps(draft_records_payload, separators=(",", ":"), ensure_ascii=False),

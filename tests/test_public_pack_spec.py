@@ -18,9 +18,37 @@ from lol_kills.export.public_pack import (
     _public_player_rating_rows,
     _validate_public_composition_records,
     _validate_public_record_tiers,
+    build_draft_records_payload,
     source_identity_sha256,
 )
 from lol_kills.research.composition_signal import CompositionSignalError
+
+
+def test_build_draft_records_payload() -> None:
+    games = [
+        {
+            "game_uid": "g1", "date": "2026-08-01", "league": "LEC",
+            "blue_team": "Team A", "red_team": "Team B",
+        }
+    ]
+    signals = {
+        "g1": {
+            "status": "available",
+            "blue": {"signal": 0.25, "prior_role_games": 90},
+            "red": {"signal": -0.05, "prior_role_games": 80},
+            "picks": [],
+        }
+    }
+    payload = build_draft_records_payload(
+        signals, games, {"model_version": "composition-signal-v3", "fit_through": "2026-08-01"}
+    )
+    assert payload["games"]["g1"]["draft_edge"] == 0.3
+    assert payload["games"]["g1"]["blue_team"] == "Team A"
+    signals["g2"] = {"status": "unavailable", "blue": {"signal": None}, "red": {"signal": None}}
+    payload2 = build_draft_records_payload(
+        signals, games + [{"game_uid": "g2", "date": "2026-08-02"}], None
+    )
+    assert "g2" not in payload2["games"]
 
 
 def test_public_team_ratings_receive_evidence_fields() -> None:
