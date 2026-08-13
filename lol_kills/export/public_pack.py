@@ -742,6 +742,7 @@ def export_public_pack(
             "total cs", "minionkills", "monsterkills", "cspm", "visionscore",
             "wardsplaced", "wpm", "wcpm", "golddiffat10", "dragons",
             "heralds", "void_grubs", "barons", "atakhans", "towers", "inhibitors",
+            "ban1", "ban2", "ban3", "ban4", "ban5",
         ),
         player_available,
     )

@@ -61,6 +61,22 @@ def _games(*rows: list[dict[str, object]]) -> list[dict[str, object]]:
     return build_composition_games(frame, strength_features=strength)
 
 
+def _rows_with_extras(game_id: str, date: str, result: int) -> list[dict[str, object]]:
+    """Rows with ban columns and per-player stats (round-5 frontier inputs)."""
+    rows = _rows(game_id, date, result)
+    for index, row in enumerate(rows):
+        row["kills"] = 1 + index % 5
+        row["deaths"] = index % 3
+        row["damageshare"] = 0.1 + (index % 10) / 100
+        row["cspm"] = 6.0 + (index % 20) / 10
+        row["visionscore"] = 20.0 + (index % 40)
+    for side in ("Blue", "Red"):
+        first = next(row for row in rows if row["side"] == side)
+        for slot in range(1, 6):
+            first[f"ban{slot}"] = f"Ban{side}{slot}"
+    return rows
+
+
 def test_target_result_does_not_change_its_composition_signal() -> None:
     training = [_rows("old-1", "2026-01-01", 1), _rows("old-2", "2026-01-02", 0)]
     target = _rows("target", "2026-01-03", 1)
@@ -446,3 +462,75 @@ def test_recalibrate_history_probabilities_falls_back_on_tiny_data() -> None:
     )
     assert len(probabilities) == len(validation)
     assert all(0.0 < value < 1.0 for value in probabilities)
+
+
+def test_games_carry_bans_and_player_stats() -> None:
+    games = _games(*[_rows_with_extras(f"game-{index}", f"2026-01-{index + 1:02d}", index % 2) for index in range(3)])
+    game = games[0]
+    assert game["bans"]["blue"] == ["BanBlue1", "BanBlue2", "BanBlue3", "BanBlue4", "BanBlue5"]
+    assert game["bans"]["red"] == ["BanRed1", "BanRed2", "BanRed3", "BanRed4", "BanRed5"]
+    assert len(game["player_stats"]) == 10
+    sample = next(iter(game["player_stats"].values()))
+    assert {"kills", "deaths", "damageshare", "cspm", "visionscore"} <= set(sample)
+
+
+def test_exp_rows_log1p_are_strictly_prior() -> None:
+    from lol_kills.research.composition_signal import _exp_rows_log1p
+    games = _games(*[_rows(f"game-{index}", f"2026-01-{index + 1:02d}", index % 2) for index in range(6)])
+    rows = _exp_rows_log1p(games)
+    assert rows.shape == (6, 5)
+    assert np.allclose(rows[0], 0.0)
+
+
+def test_ban_v2_builder_shape_and_strictly_prior() -> None:
+    from lol_kills.research.composition_signal import _bans_v2_feature_builder
+    games = _games(*[_rows_with_extras(f"game-{index}", f"2026-01-{index + 1:02d}", index % 2) for index in range(6)])
+    builder = _bans_v2_feature_builder(games[:4], games[4:], None)
+    rows = builder(games)
+    assert rows.shape == (6, 8)
+    assert np.allclose(rows[0], 0.0)
+
+
+def test_frontier_is_strictly_prior_and_shaped() -> None:
+    from lol_kills.research.composition_signal import _build_frontier, _frontier_names, _frontier_rows
+    games = _games(*[_rows_with_extras(f"game-{index}", f"2026-01-{index + 1:02d}", index % 2) for index in range(6)])
+    ordered = sorted(games, key=lambda game: (game["date"], game["game_uid"]))
+    _build_frontier(ordered)
+    names = _frontier_names()
+    assert len(names) == 65
+    rows = _frontier_rows(ordered)
+    assert rows.shape == (6, 65)
+    assert np.allclose(rows[0][:16], 0.0)
+
+
+def test_corpus_game_features_shape_and_unknown_champion_zeros() -> None:
+    from lol_kills.research.composition_signal import _corpus_game_features
+    game = {
+        "blue": {role: {"champion": f"UnknownBlue{role}"} for role in ROLES},
+        "red": {role: {"champion": f"UnknownRed{role}"} for role in ROLES},
+    }
+    row = _corpus_game_features(game)
+    assert row.shape == (49,)
+    assert np.allclose(row, 0.0)
+
+
+def test_production_style_recalibrate_falls_back_on_tiny_data() -> None:
+    from lol_kills.research.composition_signal import _production_style_recalibrate
+    games = _games(*[_rows(f"game-{index}", f"2026-01-{index + 1:02d}", index % 2) for index in range(8)])
+    raw = np.asarray([0.4, 0.6, 0.5, 0.45, 0.55, 0.48, 0.52, 0.51])
+    result = _production_style_recalibrate(games[:6], games[6:], None, lambda: LogisticRegression(), raw)
+    assert np.allclose(result, np.clip(raw, 1e-5, 1 - 1e-5))
+
+
+def test_evaluator_accepts_bans_and_stats_games() -> None:
+    games = _games(*[_rows_with_extras(f"game-{index}", f"2026-01-{index + 1:02d}", index % 2) for index in range(30)])
+    report = evaluate_composition_signal(
+        games,
+        source_hash="source-hash",
+        worker_commit="worker-commit",
+        bootstrap_reps=10,
+        min_training_games=4,
+    )
+    assert len(report["holdout_windows"]) == 4
+    assert "draft_plus_team_history" in report["holdout_windows"][0]
+    assert "brier_delta" in report["team_history_bootstrap"]

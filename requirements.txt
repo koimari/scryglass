@@ -11,3 +11,4 @@ websockets>=15.0
 httpx>=0.28
 cryptography>=46.0
 jsonschema>=4.23
+catboost>=1.2
