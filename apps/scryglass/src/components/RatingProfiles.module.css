@@ -581,6 +581,9 @@
 .compositionTeam strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .compositionTeam span { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: var(--text-micro); }
 .compositionTeam b { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.compositionWinShare { font-size: 1.9rem; font-weight: 700; color: var(--ink-strong, inherit); }
+.compositionSignalDetail { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: var(--text-micro); }
+.compositionLegend { margin: 0.35rem 0 0; color: var(--ink-muted); font-size: var(--text-micro); line-height: 1.4; }
 .compositionVs { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: var(--text-micro); text-transform: uppercase; }
 .compositionPicks { display: grid; gap: 0.35rem; }
 .compositionPickRow {

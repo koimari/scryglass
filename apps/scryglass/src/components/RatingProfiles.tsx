@@ -350,6 +350,13 @@ function compositionNumber(value: number | null): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
 }
 
+function draftWinShares(blue: number | null, red: number | null): { blue: string; red: string } | null {
+  if (blue == null || red == null || !Number.isFinite(blue) || !Number.isFinite(red)) return null;
+  const p = 1 / (1 + Math.exp(-(blue - red)));
+  const bluePct = Math.round(p * 1000) / 10;
+  return { blue: bluePct.toFixed(1), red: (100 - bluePct).toFixed(1) };
+}
+
 function CompositionEvidence({
   contribution,
   blueTeam,
@@ -390,15 +397,19 @@ function CompositionEvidence({
             <div className={styles.compositionTeam}>
               <TeamMark team={blueTeam} size="small" />
               <div><strong>{blueTeam}</strong><span>Blue side</span></div>
-              <b>{compositionNumber(contribution?.blue.signal ?? null)}</b>
+              <b className={styles.compositionWinShare}>{draftWinShares(contribution?.blue.signal ?? null, contribution?.red.signal ?? null)?.blue ?? "—"}%</b>
+              <small className={styles.compositionSignalDetail}>draft win share · {compositionNumber(contribution?.blue.signal ?? null)} pts</small>
             </div>
             <span className={styles.compositionVs}>vs</span>
             <div className={`${styles.compositionTeam} ${styles.compositionTeamRight}`}>
-              <b>{compositionNumber(contribution?.red.signal ?? null)}</b>
+              <b className={styles.compositionWinShare}>{draftWinShares(contribution?.blue.signal ?? null, contribution?.red.signal ?? null)?.red ?? "—"}%</b>
               <div><strong>{redTeam}</strong><span>Red side</span></div>
               <TeamMark team={redTeam} size="small" />
             </div>
           </div>
+          <p className={styles.compositionLegend}>
+            Draft win share: the estimated probability each team wins from the draft alone (picks vs picks).
+          </p>
           <div className={styles.compositionPicks}>
             {ROLE_ORDER.map((role) => {
               const blue = pickFor("Blue", role);
@@ -414,7 +425,7 @@ function CompositionEvidence({
                       />
                       <span>{pick?.champion ?? "—"}</span>
                       <strong className={pick?.evidence_status === "available" ? styles.compositionAvailable : styles.compositionLimited}>
-                        {pick?.evidence_status === "available" ? compositionNumber(pick.contribution) : "Limited"}
+                        {pick?.evidence_status === "available" ? `${compositionNumber(pick.contribution)} pts` : "Limited"}
                       </strong>
                       <small>{pick?.evidence_status === "available" ? `${pick.prior_role_games} prior role games` : `${pick?.prior_role_games ?? 0} prior role games`}</small>
                     </div>
