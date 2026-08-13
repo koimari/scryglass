@@ -10,6 +10,7 @@ import {
   softMu,
   TEAM_SIGMA_MIN,
 } from "@/lib/pack";
+import { draftRankingsFromProfile, filterDraftRankings } from "@/lib/draftRankings";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 export const revalidate = 21_600;
@@ -123,6 +124,12 @@ export default async function TeamEloPage({ params }: Props) {
       total: peers.length,
     };
   }
+  const draftProfile = profileRecords
+    ? filterDraftRankings(draftRankingsFromProfile(profileRecords), { leagues: [], minGames: 5 })
+    : null;
+  const draftMetric = draftProfile?.teams.find(
+    (row) => row.team.toLowerCase() === team.team.toLowerCase(),
+  );
   return (
     <TeamRatingProfile
       team={team}
@@ -137,6 +144,11 @@ export default async function TeamEloPage({ params }: Props) {
       recentGames={recentGames}
       championImages={profileRecords?.champion_images ?? {}}
       manifest={man}
+      draftMetric={draftMetric && draftProfile ? {
+        draftWinShare: draftMetric.draft_win_share,
+        games: draftMetric.games,
+        scope: draftProfile.scope,
+      } : null}
     />
   );
 }
