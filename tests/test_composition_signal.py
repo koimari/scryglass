@@ -534,3 +534,52 @@ def test_evaluator_accepts_bans_and_stats_games() -> None:
     assert len(report["holdout_windows"]) == 4
     assert "draft_plus_team_history" in report["holdout_windows"][0]
     assert "brier_delta" in report["team_history_bootstrap"]
+
+
+def _real_rows(game_id: str, date: str, result: int, *, pool: list[str], rotation: int = 0) -> list[dict[str, object]]:
+    """Rows with real champion names so the atom-corpus prior can fire."""
+    rows: list[dict[str, object]] = []
+    for side, team, side_result in (("Blue", "Blue Team", result), ("Red", "Red Team", 1 - result)):
+        for index, role in enumerate(ROLES):
+            rows.append(
+                {
+                    "game_uid": game_id,
+                    "date": date,
+                    "league": "LCS",
+                    "patch": "16.15",
+                    "side": side,
+                    "teamname": team,
+                    "playername": f"{team}-{role}-{game_id}",
+                    "position": role,
+                    "champion": pool[(rotation + index) % 10 if side == "Blue" else (rotation + index + 5) % 10],
+                    "result": side_result,
+                }
+            )
+    return rows
+
+
+def test_unsupported_pick_gets_atom_estimate() -> None:
+    pool = ["Ahri", "Lux", "Zed", "Yasuo", "Jinx", "Leona", "LeeSin", "Thresh", "Azir", "Rakan"]
+    training = [
+        _real_rows(
+            f"old-{index}",
+            f"2026-{1 + index // 28:02d}-{1 + index % 28:02d}",
+            index % 2,
+            pool=pool,
+            rotation=index,
+        )
+        for index in range(160)
+    ]
+    target = _real_rows("target", "2026-07-01", 1, pool=["Syndra", "Ahri", "Lux", "Zed", "Yasuo", "Jinx", "Leona", "LeeSin", "Thresh", "Azir"])
+    result = score_games_temporally(
+        _games(*training, target),
+        target_game_ids={"target"},
+        min_training_games=4,
+        min_support_games=40,
+    )
+    signal = result.signals["target"]
+    syndra = next(pick for pick in signal["picks"] if pick["champion"] == "Syndra")
+    assert syndra["evidence_status"] == "atom_estimate"
+    assert syndra["contribution"] is not None
+    assert signal["status"] == "available"
+    assert signal["blue"]["signal"] is not None and signal["red"]["signal"] is not None

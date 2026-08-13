@@ -357,6 +357,20 @@ function draftWinShares(blue: number | null, red: number | null): { blue: string
   return { blue: bluePct.toFixed(1), red: (100 - bluePct).toFixed(1) };
 }
 
+/** Marginal contribution of one pick to the team's draft win share, in percentage points. */
+function pickWinSharePoints(pick: { side: "Blue" | "Red"; contribution: number | null }, blue: number | null, red: number | null): string | null {
+  if (pick.contribution == null || blue == null || red == null) return null;
+  const delta = pick.contribution;
+  const pWith = 1 / (1 + Math.exp(-(blue - red)));
+  const pBase = pick.side === "Blue"
+    ? 1 / (1 + Math.exp(-((blue - delta) - red)))
+    : 1 / (1 + Math.exp(-(blue - (red - delta))));
+  const points = (pWith - pBase) * 100;
+  if (!Number.isFinite(points)) return null;
+  const rounded = Math.round(points * 10) / 10;
+  return `${rounded >= 0 ? "+" : ""}${rounded.toFixed(1)}%`;
+}
+
 function CompositionEvidence({
   contribution,
   blueTeam,
@@ -396,14 +410,21 @@ function CompositionEvidence({
           <div className={styles.compositionCompare}>
             <div className={styles.compositionTeam}>
               <TeamMark team={blueTeam} size="small" />
-              <div><strong>{blueTeam}</strong><span>Blue side</span></div>
+              <div>
+                <strong>{blueTeam}</strong>
+                <span>Blue side</span>
+                <small className={styles.compositionSignalDetail}>{compositionNumber(contribution?.blue.signal ?? null)} draft pts</small>
+              </div>
               <b className={styles.compositionWinShare}>{draftWinShares(contribution?.blue.signal ?? null, contribution?.red.signal ?? null)?.blue ?? "—"}%</b>
-              <small className={styles.compositionSignalDetail}>draft win share · {compositionNumber(contribution?.blue.signal ?? null)} pts</small>
             </div>
             <span className={styles.compositionVs}>vs</span>
             <div className={`${styles.compositionTeam} ${styles.compositionTeamRight}`}>
               <b className={styles.compositionWinShare}>{draftWinShares(contribution?.blue.signal ?? null, contribution?.red.signal ?? null)?.red ?? "—"}%</b>
-              <div><strong>{redTeam}</strong><span>Red side</span></div>
+              <div>
+                <strong>{redTeam}</strong>
+                <span>Red side</span>
+                <small className={styles.compositionSignalDetail}>{compositionNumber(contribution?.red.signal ?? null)} draft pts</small>
+              </div>
               <TeamMark team={redTeam} size="small" />
             </div>
           </div>
@@ -424,10 +445,20 @@ function CompositionEvidence({
                         imageUrl={pick?.champion ? championImages[pick.champion] : null}
                       />
                       <span>{pick?.champion ?? "—"}</span>
-                      <strong className={pick?.evidence_status === "available" ? styles.compositionAvailable : styles.compositionLimited}>
-                        {pick?.evidence_status === "available" ? `${compositionNumber(pick.contribution)} pts` : "Limited"}
+                      <strong className={pick?.evidence_status === "available" ? styles.compositionAvailable : pick?.evidence_status === "atom_estimate" ? styles.compositionEstimated : styles.compositionLimited}>
+                        {pick?.evidence_status === "unavailable" || pick?.evidence_status === "limited"
+                          ? "Limited"
+                          : pick
+                            ? `${pickWinSharePoints(pick, contribution?.blue.signal ?? null, contribution?.red.signal ?? null) ?? compositionNumber(pick.contribution)}${pick.evidence_status === "atom_estimate" ? " ≈" : ""}`
+                            : "—"}
                       </strong>
-                      <small>{pick?.evidence_status === "available" ? `${pick.prior_role_games} prior role games` : `${pick?.prior_role_games ?? 0} prior role games`}</small>
+                      <small>
+                        {pick?.evidence_status === "atom_estimate"
+                          ? "atom estimate"
+                          : pick?.evidence_status === "available"
+                            ? `${pick.prior_role_games} prior role games`
+                            : `${pick?.prior_role_games ?? 0} prior role games`}
+                      </small>
                     </div>
                   ))}
                 </div>
