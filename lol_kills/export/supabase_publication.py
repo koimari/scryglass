@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 import re
 import urllib.error
 import urllib.parse
@@ -240,11 +241,15 @@ class SupabasePublicData:
             f"{self.project_url}/storage/v1/object/public/scryglass-public/{encoded}",
             method="GET",
         )
-        try:
-            with self._opener.open(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-                return response.read()
-        except Exception as error:  # noqa: BLE001
-            raise SupabasePublicationError("Supabase Storage read failed") from error
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                with self._opener.open(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                    return response.read()
+            except Exception as error:  # noqa: BLE001
+                last_error = error
+                time.sleep(0.5 * (attempt + 1))
+        raise SupabasePublicationError("Supabase Storage read failed") from last_error
 
     def storage_object_metadata(self, storage_path: str) -> dict[str, Any]:
         """Object metadata (size, etag) without downloading the body.
@@ -289,6 +294,19 @@ class SupabasePublicData:
                 raise SupabasePublicationError(
                     f"Supabase Storage upload failed with HTTP {error.code}"
                 ) from error
+        # Object already exists (x-upsert=false). Verify by metadata first so
+        # concurrent stable-path assets do not amplify full-body readbacks
+        # (egress + timeout risk). The metadata (size/etag) is the same
+        # integrity anchor the post-publish verification uses; a full-body
+        # read is only the fallback when metadata is inconclusive.
+        try:
+            metadata = self.storage_object_metadata(storage_path)
+        except SupabasePublicationError:
+            metadata = {}
+        size = metadata.get("size")
+        etag = metadata.get("etag")
+        if size == len(raw) or (isinstance(etag, str) and etag.strip()):
+            return
         existing = self.storage_object(storage_path)
         if existing != raw:
             raise SupabasePublicationError("existing Supabase Storage object has different content")
