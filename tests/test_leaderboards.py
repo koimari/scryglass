@@ -115,6 +115,10 @@ def test_build_leaderboards_aggregates_all_domains() -> None:
         player_champion_records=_player_champions(),
         match_index=_match_index(),
         draft_records=_draft_records(),
+        draft_players=[
+            {"player": "Alice", "games": 8, "draft_score": 0.12, "best_pick_rate": 0.625, "role": "mid", "team": "Team A"},
+            {"player": "Bob", "games": 10, "draft_score": 0.08, "best_pick_rate": 0.4, "role": "jng", "team": "Team B"},
+        ],
     )
 
     assert payload["schema_version"] == LEADERBOARDS_SCHEMA
@@ -149,6 +153,8 @@ def test_build_leaderboards_aggregates_all_domains() -> None:
     assert "LCS" in payload["indexes"]["leagues"] and "LEC" in payload["indexes"]["leagues"]
     assert payload["teams_draft"][0]["team"] == "Team A"
     assert payload["teams_draft"][0]["draft_win_share"] == 0.5987
+    assert payload["players_draft"][0]["player"] == "Alice"
+    assert payload["players_draft"][0]["best_pick_rate"] == 0.625
 
 
 def test_build_leaderboards_handles_missing_optional_payloads() -> None:

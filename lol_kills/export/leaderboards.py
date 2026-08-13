@@ -222,7 +222,7 @@ def _teams_draft(draft_records: Mapping[str, Any] | None) -> list[dict[str, Any]
 
 
 def _players_draft(players: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Players ranked by mean draft score (pick contribution) across the archive."""
+    """Players ranked by the share of highest-contribution picks."""
     rows = []
     for entry in players:
         if not isinstance(entry, Mapping):
@@ -230,16 +230,23 @@ def _players_draft(players: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]
         name = str(entry.get("player") or "").strip()
         games_n = int(entry.get("games") or 0)
         score = _number(entry.get("draft_score"))
+        best_pick_rate = _number(entry.get("best_pick_rate"))
         if not name or games_n < 5 or score is None:
             continue
         rows.append({
             "player": name,
             "games": games_n,
             "draft_score": round(score, 4),
+            "best_pick_rate": round(best_pick_rate, 4) if best_pick_rate is not None else None,
             "role": str(entry.get("role") or "").strip() or None,
             "team": str(entry.get("team") or "").strip() or None,
         })
-    rows.sort(key=lambda row: -row["draft_score"])
+    rows.sort(key=lambda row: (
+        -(row["best_pick_rate"] if row["best_pick_rate"] is not None else float("-inf")),
+        -row["games"],
+        -row["draft_score"],
+        row["player"],
+    ))
     return rows[:TOP_LIMIT]
 
 def build_leaderboards(

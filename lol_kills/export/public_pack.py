@@ -289,7 +289,7 @@ def _validate_public_record_tiers(records: dict[str, dict[str, Any]], *, label: 
 def _draft_players_from_signals(
     signals: Mapping[str, Any], games: Sequence[Mapping[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Per-player mean draft pick contribution across the scored archive.
+    """Per-player draft contribution and highest-pick rate across the archive.
 
     Player identity comes from the composition game roster (the public signal
     carries side/role/champion only).
@@ -299,15 +299,25 @@ def _draft_players_from_signals(
         if isinstance(game, Mapping):
             rosters[str(game.get("game_uid"))] = game
     scores: dict[str, list[float]] = {}
+    best_picks: dict[str, int] = {}
     roles: dict[str, str] = {}
     teams: dict[str, str] = {}
     for game_id, signal in signals.items():
         if not isinstance(signal, Mapping):
             continue
         game = rosters.get(str(game_id))
-        for pick in signal.get("picks") or []:
-            if not isinstance(pick, Mapping):
-                continue
+        picks = [pick for pick in signal.get("picks") or [] if isinstance(pick, Mapping)]
+        best_by_side: dict[str, float] = {}
+        for side in ("blue", "red"):
+            values = [
+                float(pick["contribution"])
+                for pick in picks
+                if str(pick.get("side") or "").strip().casefold() == side
+                and _number(pick.get("contribution")) is not None
+            ]
+            if values:
+                best_by_side[side] = max(values)
+        for pick in picks:
             side = str(pick.get("side") or "").strip().casefold()
             role = str(pick.get("role") or "").strip()
             contribution = _number(pick.get("contribution"))
@@ -325,6 +335,8 @@ def _draft_players_from_signals(
             if not name:
                 continue
             scores.setdefault(name, []).append(float(contribution))
+            if side in best_by_side and abs(float(contribution) - best_by_side[side]) <= 1e-9:
+                best_picks[name] = best_picks.get(name, 0) + 1
             if not roles.get(name):
                 roles[name] = role
             if not teams.get(name):
@@ -337,6 +349,7 @@ def _draft_players_from_signals(
             "player": name,
             "games": len(values),
             "draft_score": sum(values) / len(values),
+            "best_pick_rate": best_picks.get(name, 0) / len(values),
             "role": roles.get(name),
             "team": teams.get(name),
         })

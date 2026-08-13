@@ -10,6 +10,7 @@ import type {
   TeamRating,
 } from "@/lib/pack";
 import { compactPlayerRatings, findPlayerByRouteName, isActiveRating, PLAYER_SIGMA_MIN, softMu } from "@/lib/pack";
+import { draftRankingsFromProfile, filterDraftRankings } from "@/lib/draftRankings";
 import { playerPortrait } from "@/lib/playerPortraits";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
@@ -75,6 +76,12 @@ export default async function PlayerEloPage({ params }: Props) {
   const recentGames = gameIds
     .map((gameId) => profileRecords?.games[gameId])
     .filter((game): game is ProfileGame => Boolean(game));
+  const draftProfile = profileRecords
+    ? filterDraftRankings(draftRankingsFromProfile(profileRecords), { leagues: [], minGames: 5 })
+    : null;
+  const draftMetric = draftProfile?.players.find(
+    (row) => row.player.toLowerCase() === player.player.toLowerCase(),
+  );
 
   return (
     <PlayerRatingProfile
@@ -93,6 +100,11 @@ export default async function PlayerEloPage({ params }: Props) {
       recentGames={recentGames}
       championImages={profileRecords?.champion_images ?? {}}
       manifest={man}
+      draftMetric={draftMetric?.best_pick_rate != null && draftProfile ? {
+        bestPickRate: draftMetric.best_pick_rate,
+        games: draftMetric.games,
+        scope: draftProfile.scope,
+      } : null}
     />
   );
 }

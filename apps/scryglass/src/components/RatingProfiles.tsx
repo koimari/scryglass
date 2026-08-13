@@ -25,6 +25,7 @@ import {
 } from "@/lib/pack";
 import { playerPortrait, type PlayerVisualIdentity } from "@/lib/playerPortraits";
 import { matchTeamHref } from "@/lib/matchFilters";
+import type { DraftRankingsScope } from "@/lib/draftRankings";
 import { PlayerPortrait } from "./PlayerPortrait";
 import { RecentGames } from "./RecentGames";
 import { TeamMark } from "./TeamMark";
@@ -38,6 +39,18 @@ export type TeamRosterEntry = {
   role: string;
   rating: PlayerRating | null;
   ratingNote?: string;
+};
+
+type TeamDraftMetric = {
+  draftWinShare: number;
+  games: number;
+  scope: DraftRankingsScope;
+};
+
+type PlayerDraftMetric = {
+  bestPickRate: number;
+  games: number;
+  scope: DraftRankingsScope;
 };
 
 function roleLabel(role: string | null | undefined): string {
@@ -202,6 +215,7 @@ export function TeamRatingProfile({
   recentGames,
   championImages,
   manifest,
+  draftMetric,
 }: {
   team: TeamRating;
   roster: TeamRosterEntry[];
@@ -212,6 +226,7 @@ export function TeamRatingProfile({
   recentGames: ProfileGame[];
   championImages: Record<string, string>;
   manifest: PackManifest;
+  draftMetric?: TeamDraftMetric | null;
 }) {
   const trust = evidenceInfo(evidenceFields(team as unknown as Record<string, unknown>), team.sigma, record?.games);
   const players = [...roster].sort((a, b) => {
@@ -253,6 +268,13 @@ export function TeamRatingProfile({
         <div><dt>Win rate</dt><dd>{formatWr(record?.wr)}</dd></div>
         <div><dt>Games</dt><dd>{record?.games ?? team.n_maps ?? "—"}</dd></div>
         <div><dt>Confidence</dt><dd>{formatEvidenceCell(trust)}</dd></div>
+        <div>
+          <dt>Draft score</dt>
+          <dd title="Average published draft win share from the team's scored drafts">
+            {draftMetric ? `${Math.round(draftMetric.draftWinShare * 100)}%` : "—"}
+          </dd>
+          <small>{draftMetric ? `${draftMetric.games} games · ${draftMetric.scope === "whole_archive" ? "whole archive" : "profile window"}` : "Published draft evidence unavailable"}</small>
+        </div>
         <div><dt>Updated</dt><dd>{packUpdatedLabel(manifest)}</dd></div>
       </dl>
 
@@ -542,6 +564,7 @@ export function PlayerRatingProfile({
   recentGames,
   championImages,
   manifest,
+  draftMetric,
 }: {
   player: PlayerRating;
   portrait?: PlayerVisualIdentity | null;
@@ -553,6 +576,7 @@ export function PlayerRatingProfile({
   recentGames: ProfileGame[];
   championImages: Record<string, string>;
   manifest: PackManifest;
+  draftMetric?: PlayerDraftMetric | null;
 }) {
   const trust = evidenceInfo(evidenceFields(player as unknown as Record<string, unknown>), player.sigma, player.n_maps);
   const currentTeam = record?.current_team ?? player.last_team;
@@ -612,6 +636,13 @@ export function PlayerRatingProfile({
         <div><dt>Win rate</dt><dd>{formatWr(record?.wr)}</dd></div>
         <div><dt>Blue / Red</dt><dd>{formatWr(record?.blue_wr)} / {formatWr(record?.red_wr)}</dd></div>
         <div><dt>Confidence</dt><dd>{formatEvidenceCell(trust)}</dd></div>
+        <div>
+          <dt>Draft score</dt>
+          <dd title="Share of scored drafts where this player's pick had the highest contribution on their side">
+            {draftMetric ? `${Math.round(draftMetric.bestPickRate * 100)}%` : "—"}
+          </dd>
+          <small>{draftMetric ? `${draftMetric.games} picks · best-pick rate · ${draftMetric.scope === "whole_archive" ? "whole archive" : "profile window"}` : "Published draft evidence unavailable"}</small>
+        </div>
         <div><dt>Updated</dt><dd>{packUpdatedLabel(manifest)}</dd></div>
       </dl>
 
