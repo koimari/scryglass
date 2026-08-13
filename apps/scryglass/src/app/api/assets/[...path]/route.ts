@@ -21,12 +21,12 @@ export async function GET(
   if (!releaseId || rest.length === 0) {
     return NextResponse.json({ error: "expected /api/assets/<release_id>/<asset path>" }, { status: 400 });
   }
-  const safePath = rest.map((part) => encodeURIComponent(part)).join("/");
   const release = encodeURIComponent(releaseId);
   const assetPath = encodeURIComponent(rest.join("/"));
 
-  // 1) Storage-backed assets.
-  const storageUrl = `${config.url}/storage/v1/object/public/scryglass-public/${safePath}`;
+  // 1) Storage-backed assets (objects live under <release_id>/<path>).
+  const storagePath = [releaseId, ...rest].map((part) => encodeURIComponent(part)).join("/");
+  const storageUrl = `${config.url}/storage/v1/object/public/scryglass-public/${storagePath}`;
   let response: Response | null = null;
   try {
     const storageResponse = await fetch(storageUrl, {
