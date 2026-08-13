@@ -513,6 +513,67 @@ def test_frontier_is_strictly_prior_and_shaped() -> None:
     assert np.allclose(rows[0], 0.0)
 
 
+def test_depth4_corpus_has_no_cooldown_sentinels() -> None:
+    import json
+    from pathlib import Path
+    payload = json.loads(Path("data/lol/v2/champions/atom-corpus-aggregate-v4.json").read_text(encoding="utf-8"))
+    offenders = []
+    for slug, entry in payload["champions"].items():
+        for key, value in entry.items():
+            if not isinstance(value, (int, float)) or value < 0 or value > 600:
+                offenders.append((slug, key, value))
+    assert not offenders, f"d4 corpus sentinels: {offenders[:5]}"
+
+
+def test_production_model_uses_atomized_descriptors() -> None:
+    from lol_kills.research.composition_signal import (
+        _feature_names, _atom_term_keys, _atom_desc_value, FittedCompositionModel,
+    )
+    game = {
+        "league": "LEC", "patch": "25.9",
+        "blue": {role: {"champion": champ} for role, champ in
+                 (("top", "Wukong"), ("jng", "Lee Sin"), ("mid", "Ahri"),
+                  ("bot", "Ashe"), ("sup", "Renata Glasc"))},
+        "red": {role: {"champion": champ} for role, champ in
+                (("top", "Nunu"), ("jng", "Viego"), ("mid", "Orianna"),
+                 ("bot", "Jinx"), ("sup", "Rell"))},
+    }
+    names = _feature_names([game])
+    atom_names = [name for name in names if name.startswith("atom|")]
+    assert len(atom_names) == 5 * len(_atom_term_keys())
+    assert "atom|top|d2_ad_ratio" in names
+    # alias-aware lookups: Wukong/Renata Glasc/Nunu & Willump resolve to their
+    # corpus keys and must not silently zero every descriptor
+    assert _atom_desc_value("Wukong", "d4_chain_len") != 0.0
+    assert _atom_desc_value("Renata Glasc", "d4_cast_share") != 0.0
+    assert _atom_desc_value("Nunu", "d3_tempo_burst") != 0.0
+    # pick_contribution extends the plain champion coefficient with the
+    # coefficient-weighted descriptor terms
+    model = FittedCompositionModel(
+        model_version="composition-signal-v3",
+        fit_through="2026-08-01",
+        feature_names=tuple(names),
+        coefficients=tuple(0.0 for _ in names),
+        intercept=0.0,
+        support={},
+        train_games=100,
+    )
+    assert model.pick_contribution("top", "Ahri") == 0.0
+    idx = names.index("atom|top|d2_burst")
+    rich = FittedCompositionModel(
+        model_version="composition-signal-v3",
+        fit_through="2026-08-01",
+        feature_names=tuple(names),
+        coefficients=tuple(0.5 if i == idx else 0.0 for i in range(len(names))),
+        intercept=0.0,
+        support={},
+        train_games=100,
+    )
+    ahri_contribution = rich.pick_contribution("top", "Ahri")
+    assert ahri_contribution != 0.0
+    assert ahri_contribution == 0.5 * _atom_desc_value("Ahri", "d2_burst")
+
+
 def test_corpus_game_features_shape_and_unknown_champion_zeros() -> None:
     from lol_kills.research.composition_signal import _corpus_game_features
     game = {
