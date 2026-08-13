@@ -497,10 +497,11 @@ def test_frontier_is_strictly_prior_and_shaped() -> None:
     ordered = sorted(games, key=lambda game: (game["date"], game["game_uid"]))
     _build_frontier(ordered)
     names = _frontier_names()
-    assert len(names) == 65
+    # 65 round-5 + 2 layer-5 features (f_l5_elo_p, f_l5_elo_sigma)
+    assert len(names) == 67
     rows = _frontier_rows(ordered)
-    assert rows.shape == (6, 65)
-    assert np.allclose(rows[0][:16], 0.0)
+    assert rows.shape == (6, 67)
+    assert np.allclose(rows[0][:18], 0.0)
 
 
 def test_corpus_game_features_shape_and_unknown_champion_zeros() -> None:

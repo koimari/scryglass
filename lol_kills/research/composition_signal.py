@@ -425,8 +425,22 @@ def build_composition_games(
     players: pd.DataFrame,
     *,
     strength_features: pd.DataFrame | Mapping[str, Mapping[str, Any]] | None = None,
+    player_ratings: pd.DataFrame | None = None,
 ) -> list[dict[str, Any]]:
     """Build only exact, role-complete, ten-champion games."""
+
+    player_elo_lookup: dict[str, dict[str, float]] = {}
+    if player_ratings is not None and not player_ratings.empty:
+        columns = [c for c in ("game_uid", "player_mu_diff", "p_player_elo", "player_sigma_pair") if c in player_ratings.columns]
+        if "game_uid" in columns:
+            for _, row in player_ratings[columns].drop_duplicates("game_uid").iterrows():
+                gid = canonical_source_game_key(row.get("game_uid"))
+                if gid:
+                    player_elo_lookup[str(gid)] = {
+                        "diff": _number(row.get("player_mu_diff"), 0.0) or 0.0,
+                        "p": _number(row.get("p_player_elo"), 0.5) or 0.5,
+                        "sigma": _number(row.get("player_sigma_pair"), 0.0) or 0.0,
+                    }
 
     required = {"playername", "teamname", "side", "position", "result", "date", "champion"}
     if players is None or players.empty or not required.issubset(players.columns):
@@ -496,6 +510,9 @@ def build_composition_games(
     for game_id, group in ordered_groups:
         game = _complete_game_from_group(game_id, group, strength.get(game_id, {}))
         if game is not None:
+            elo = player_elo_lookup.get(str(game_id))
+            if elo:
+                game["player_elo"] = elo
             blue_exp = sum(
                 experience.get((str(pick.get("player") or "").casefold(), _champion(pick.get("champion"))), 0)
                 for pick in game["blue"].values()
@@ -1842,6 +1859,7 @@ def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.
         "f1_h2h", "f2_kda", "f2_ds", "f2_cspm", "f2_vis",
         "f3_roster_last", "f3_roster_last3",
         "f4_pool_overlap", "f5_ban1_meta", "f6_patch_recency", "f7_side_pref",
+        "f_l5_elo_p", "f_l5_elo_sigma",
         *[f"f8_matchup_{role}" for role in ROLES],
         *[f"corp_fam{index}" for index in range(len(ATOM_FAMILIES))],
         *[f"corp_mech{index}" for index in range(len(ATOM_MECHANIC_KEYS))],
@@ -1939,6 +1957,10 @@ def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.
         row.append(float((game_date - first).total_seconds() / 86400.0) if first is not None else 0.0)
 
         row.append((blue_wr.get(blue_team) or 0.5) - (red_wr.get(red_team) or 0.5))
+
+        elo_state = game.get("player_elo")
+        row.append((float(elo_state.get("p", 0.5)) - 0.5) if elo_state else 0.0)
+        row.append(float(elo_state.get("sigma", 0.0)) if elo_state else 0.0)
 
         for lane_index, role in enumerate(ROLES):
             key = (role, blue_champs[lane_index], red_champs[lane_index])
