@@ -497,11 +497,11 @@ def test_frontier_is_strictly_prior_and_shaped() -> None:
     ordered = sorted(games, key=lambda game: (game["date"], game["game_uid"]))
     _build_frontier(ordered)
     names = _frontier_names()
-    # 67 round-5+L5 + 23 depth-2 descriptors + 6 L7 atom-family profiles
-    assert len(names) == 96
+    # 67 round-5+L5 + 23 depth-2 descriptors + 6 L7 + 30 per-role L7 (l7r_*)
+    assert len(names) == 126
     assert len(_depth2_keys()) == 23
     rows = _frontier_rows(ordered)
-    assert rows.shape == (6, 96)
+    assert rows.shape == (6, 126)
     # Fake champion names -> no corpus/depth2/L7 data; strictly-prior features zero on game 1
     assert np.allclose(rows[0], 0.0)
 
