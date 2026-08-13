@@ -1,27 +1,32 @@
-"""Public, provenance-preserving snapshots for the live Scryglass surface.
+"""Private, provenance-preserving snapshots for live Scryglass research.
 
 The GRID transaction stream stays private to the worker.  This module selects
 the small set of fields that the public page needs, evaluates the state, and
-publishes immutable snapshots plus short-lived pointers.
+writes immutable snapshots plus short-lived pointers to an explicit private path.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
 from lol_kills.etl.aliases import fuzzy_team_match, normalize_champ, normalize_team
-from lol_kills.export.upload_pack import _blob_put
 from lol_kills.live_model import LiveEvaluation, evaluate_live_state
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_ROOT = ROOT / "apps" / "scryglass" / "public"
-DEFAULT_LOCAL_LIVE_ROOT = PUBLIC_ROOT / "live"
 SCHEMA_VERSION = "live.v1"
+
+
+def _private_live_root(value: Path) -> Path:
+    root = value.expanduser().resolve()
+    public_root = PUBLIC_ROOT.resolve()
+    if root == public_root or public_root in root.parents:
+        raise RuntimeError("live research output cannot use the public web tree")
+    return root
 
 
 def _text(value: Any, fallback: str | None = None) -> str | None:
@@ -328,31 +333,32 @@ def build_live_snapshot(
 
 @dataclass
 class LivePublisher:
-    """Publish to Blob in production or an explicit local live directory."""
+    """Write live research snapshots to an explicit private directory."""
 
     token: str | None = None
-    local_root: Path = DEFAULT_LOCAL_LIVE_ROOT
+    local_root: Path | None = None
     index_entries: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def from_environment(cls, local_root: Path | None = None) -> "LivePublisher":
+        configured = local_root
+        if configured is None:
+            raise RuntimeError("an explicit private live output path is required")
         return cls(
-            token=os.environ.get("BLOB_READ_WRITE_TOKEN") or os.environ.get("VERCEL_BLOB_READ_WRITE_TOKEN"),
-            local_root=Path(local_root or os.environ.get("LIVE_LOCAL_ROOT") or DEFAULT_LOCAL_LIVE_ROOT),
+            token=None,
+            local_root=_private_live_root(Path(configured)),
         )
 
     def _write(self, path: str, value: Mapping[str, Any], *, immutable: bool = False) -> str:
         data = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
         if self.token:
-            return _blob_put(
-                self.token,
-                path,
-                data,
-                "application/json",
-                cache_control="public, max-age=31536000, immutable" if immutable else "public, max-age=2, must-revalidate",
-                allow_overwrite=not immutable,
-            )
-        destination = self.local_root / path.removeprefix("live/")
+            raise RuntimeError("public live Blob publication is disabled")
+        if self.local_root is None:
+            raise RuntimeError("an explicit private live output path is required")
+        root = _private_live_root(self.local_root)
+        destination = (root / path.removeprefix("live/")).resolve()
+        if root not in destination.parents:
+            raise RuntimeError("live snapshot path leaves the private output directory")
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(data)
         return "/" + path

@@ -15,16 +15,16 @@ export default function SecurityPage() {
       </header>
       <div className="method-content">
         <section>
-          <h2>Report an issue</h2>
+          <h2>Report An Issue</h2>
           <p>Include the affected URL, the impact, steps to reproduce, and a minimal proof. Remove credentials and personal data from the report.</p>
           <p><a className="row-link" href="https://github.com/koimari/scryglass/security/advisories/new" target="_blank" rel="noreferrer">Open a private report</a></p>
         </section>
         <section>
-          <h2>Safe handling</h2>
+          <h2>Safe Handling</h2>
           <p>Use test data and the smallest request that proves the issue. Avoid service disruption, access to other people&apos;s data, persistence, social engineering, and public disclosure before a fix is ready.</p>
         </section>
         <section>
-          <h2>What happens next</h2>
+          <h2>What Happens Next</h2>
           <p>The report receives a private review. Confirmed issues stay on the public-release closure ledger until a regression test and deployment check pass.</p>
         </section>
       </div>

@@ -10,9 +10,9 @@ function contentSecurityPolicy(nonce: string): string {
     "object-src 'none'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https://cdn.communitydragon.org https://static.wikia.nocookie.net https://*.public.blob.vercel-storage.com",
+    "img-src 'self' data: blob: https://cdn.communitydragon.org https://static.wikia.nocookie.net",
     "font-src 'self' data:",
-    `connect-src 'self' https://*.supabase.co${development ? " ws://localhost:* ws://127.0.0.1:*" : ""}`,
+    `connect-src 'self'${development ? " ws://localhost:* ws://127.0.0.1:*" : ""}`,
     "media-src 'self'",
     "manifest-src 'self'",
     "worker-src 'self' blob:",
@@ -23,6 +23,16 @@ function contentSecurityPolicy(nonce: string): string {
 export function proxy(request: NextRequest) {
   const nonce = crypto.randomUUID().replaceAll("-", "");
   const policy = contentSecurityPolicy(nonce);
+  if (request.nextUrl.pathname === "/_global-error") {
+    return new NextResponse("Not found\n", {
+      status: 404,
+      headers: {
+        "Cache-Control": "private, no-store",
+        "Content-Security-Policy": policy,
+        "Content-Type": "text/plain; charset=utf-8",
+      },
+    });
+  }
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", policy);
@@ -34,12 +44,6 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    {
-      source: "/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.well-known/security.txt).*)",
-      missing: [
-        { type: "header", key: "next-router-prefetch" },
-        { type: "header", key: "purpose", value: "prefetch" },
-      ],
-    },
+    "/((?!_next/static(?:/|$)|_next/image(?:/|$)|favicon\\.ico$|robots\\.txt$|sitemap\\.xml$|\\.well-known/security\\.txt$).*)",
   ],
 };

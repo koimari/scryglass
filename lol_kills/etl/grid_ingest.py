@@ -37,10 +37,12 @@ import pandas as pd
 
 from lol_kills.etl.aliases import normalize_champ, normalize_team
 from lol_kills.etl.paths import PARQUET_DIR, WAREHOUSE_DIR
+from lol_kills.net import require_https_url
 
 GRAPHQL_ENDPOINT = "https://api.grid.gg/central-data/graphql"
 SERIES_ENDPOINT = "https://api.grid.gg/live-data-feed/series-state/graphql"
 FILE_LIST_BASE = "https://api.grid.gg/file-download/list"
+GRID_HOSTS = frozenset({"api.grid.gg"})
 RAW_GRID_DIR = WAREHOUSE_DIR / "raw_grid"
 
 LOL_TITLE_ID = 3
@@ -192,6 +194,7 @@ def _request_json(
     body: Mapping[str, Any] | None = None,
     timeout: float = 60,
 ) -> dict[str, Any]:
+    url = require_https_url(url, hosts=GRID_HOSTS)
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(
         url,
@@ -339,6 +342,7 @@ def _safe_filename(name: str) -> str:
 
 
 def _download(url: str, key: str, dest: Path) -> bool:
+    url = require_https_url(url, hosts=GRID_HOSTS, allow_subdomains=True)
     req = urllib.request.Request(url, headers=_headers(key))
     dest.parent.mkdir(parents=True, exist_ok=True)
     for attempt in range(GRID_429_RETRIES + 1):

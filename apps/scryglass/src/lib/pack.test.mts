@@ -8,6 +8,7 @@ import {
   findPlayerByRouteName,
   hasPromotedDraftAuthority,
   isActiveRating,
+  packUrl,
   recentProfileGames,
   scopedTeamWr,
   type PlayerRating,
@@ -31,7 +32,7 @@ test("record joins ignore source casing and harmless spacing differences", () =>
   assert.deepEqual(findRecordByName(records, "  GEN.G  "), { current_tier: "tier1" });
 });
 
-test("draft authority requires a release-bound promoted receipt", () => {
+test("draft authority stays closed until an independent receipt verifier exists", () => {
   const manifest = {
     pack_id: "v2026.08.13.1830",
     schema_version: "test",
@@ -55,7 +56,7 @@ test("draft authority requires a release-bound promoted receipt", () => {
       model_version: "draft-v1",
       receipt_sha256: "a".repeat(64),
     },
-  }), true);
+  }), false);
   assert.equal(hasPromotedDraftAuthority({
     ...manifest,
     draft_authority: {
@@ -66,6 +67,28 @@ test("draft authority requires a release-bound promoted receipt", () => {
       receipt_sha256: "a".repeat(64),
     },
   }), false);
+});
+
+test("Supabase pack URLs stay behind the active-release proxy", () => {
+  const manifest = {
+    pack_id: "v2026.08.13.183000",
+    schema_version: "test",
+    created_utc: "2026-08-13T18:31:17Z",
+    filters: { years: [2026], leagues: "all" },
+    attribution: "test",
+    excluded: [],
+    base_url: "https://legacy.example/packs/old",
+    data_backend: "supabase" as const,
+    total_bytes: 0,
+    total_files: 0,
+    files: [],
+  } satisfies PackManifest;
+
+  assert.equal(
+    packUrl(manifest, "features/team_records.json"),
+    "/api/assets/v2026.08.13.183000/features%2Fteam_records.json",
+  );
+  assert.throws(() => packUrl(manifest, "../private.json"), /invalid/);
 });
 
 function profileGame(game_id: string, date: string): ProfileGame {

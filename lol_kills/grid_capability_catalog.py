@@ -28,6 +28,7 @@ from lol_kills.etl.grid_ingest import (
     _api_key,
     _headers,
 )
+from lol_kills.net import require_https_url
 
 
 CATALOG_SCHEMA = "scryglass.grid.capability-catalog.v1"
@@ -203,6 +204,7 @@ def _request_json_with_headers(
     body: Mapping[str, Any] | None = None,
     timeout: float = 30,
 ) -> tuple[dict[str, Any], dict[str, str], int]:
+    url = require_https_url(url, hosts={"api.grid.gg"}, allow_subdomains=True)
     encoded = _canonical_bytes(body) if body is not None else None
     request = urllib.request.Request(
         url,

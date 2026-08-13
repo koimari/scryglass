@@ -47,12 +47,15 @@ SCRYGLASS_PUBLIC_RELEASE=1 python3 -m lol_kills.public_refresh \
 Copy `ops/systemd/public-refresh.env.example` to
 `/etc/scryglass/public-refresh.env`. Set the Supabase project URL, the dedicated
 worker secret key, and `SCRYGLASS_DATA_PUBLISH_TOKEN`. The alert URL is
-optional. The runner performs OE CSV refresh, ratings, tier authority,
+optional. Set a separate `SCRYGLASS_DIAGNOSTIC_TOKEN` for the private health
+projection. The runner performs OE CSV refresh, ratings, tier authority,
 publication, cache invalidation, and live smoke checks in one locked cycle.
 
 The website needs `SCRYGLASS_SUPABASE_URL` and
-`SCRYGLASS_SUPABASE_PUBLISHABLE_KEY` in Vercel. The publishable key can read
-only the active public release. It cannot upload or activate a release.
+`SCRYGLASS_SUPABASE_PUBLISHABLE_KEY` in Vercel. It also needs the same
+`SCRYGLASS_DIAGNOSTIC_TOKEN` as a protected, server-only variable. The
+publishable key can read only fixed public projections. It cannot upload or
+activate a release. The diagnostic token opens one fixed health projection.
 
 The refresh accepts a map after it has canonical identities, two teams, ten
 players, five roles per side, and complete public statistics. The current pack

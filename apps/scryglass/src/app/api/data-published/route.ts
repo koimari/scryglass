@@ -13,17 +13,13 @@ export const runtime = "nodejs";
 const REVALIDATED_PATHS = [
   "/",
   "/elo",
-  "/elo/player/[player]",
-  "/elo/team/[team]",
   "/matches",
-  "/matches/[game]",
   "/tiers",
   "/chat",
   "/methodology",
   "/packs/manifest.json",
   "/rankings/tierlists.json",
   "/rankings/tierlists-latest.json",
-  "/api/assets/[...path]",
   "/api/public-data/tierlists",
   "/api/chat/compare_players",
   "/api/chat/leaderboards",
@@ -37,6 +33,13 @@ const REVALIDATED_PATHS = [
   "/api/chat/schedule",
   "/api/chat/team",
   "/api/chat/tier",
+] as const;
+
+const REVALIDATED_PATTERNS = [
+  "/elo/player/[player]",
+  "/elo/team/[team]",
+  "/matches/[game]",
+  "/api/assets/[...path]",
 ] as const;
 
 export async function POST(request: Request) {
@@ -59,6 +62,7 @@ export async function POST(request: Request) {
   }
   revalidateTag(PACK_MANIFEST_CACHE_TAG, { expire: 0 });
   for (const path of REVALIDATED_PATHS) revalidatePath(path);
+  for (const pattern of REVALIDATED_PATTERNS) revalidatePath(pattern, "page");
   const manifest = await readRemotePackManifest();
   const servedReleaseId = manifest.pack_id;
   const matches = servedReleaseId === body.release_id;

@@ -15,6 +15,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  workflow-security:
+    name: Workflow and shell security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Lint GitHub Actions workflows
+        uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
+        with:
+          version: 1.7.7
+
+      - name: Lint shell scripts
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # v2.0.0
+        with:
+          scandir: ./ops
+          ignore_paths: ops/launchd
+          version: v0.11.0
+
+      - name: Parse zsh operator scripts
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' script; do
+            zsh -n "$script"
+          done < <(find ops/launchd -type f -name '*.sh' -print0)
+
   app:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -23,10 +50,10 @@ jobs:
         working-directory: apps/scryglass
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: npm
@@ -34,6 +61,9 @@ jobs:
 
       - name: Install app dependencies
         run: npm ci
+
+      - name: Audit app dependencies
+        run: npm audit --audit-level=low
 
       - name: Assert deterministic test command (listen EPERM regression)
         run: |
@@ -86,10 +116,19 @@ jobs:
         timeout-minutes: 12
         run: npm run build
 
+      - name: Check built public boundary
+        timeout-minutes: 2
+        run: npm run audit:public-boundary
+
+      - name: Create app SBOM
+        run: npm sbom --sbom-format cyclonedx > sbom.cdx.json
+
       - name: Record validation identity
         if: always()
         run: |
           node_version="$(node --version)"
+          commit_sha="${GITHUB_SHA}"
+          lock_sha256="$(shasum -a 256 package-lock.json | awk '{print $1}')"
           build_id="missing"
           if [ -f .next/BUILD_ID ]; then build_id="$(cat .next/BUILD_ID)"; fi
           test_status="${{ steps.tests.outputs.test_status }}"
@@ -113,6 +152,8 @@ jobs:
           fi
           {
             echo "node_version=$node_version"
+            echo "commit_sha=$commit_sha"
+            echo "lock_sha256=$lock_sha256"
             echo "test_status=$test_status"
             echo "tests_total=$tests_total"
             echo "tests_pass=$tests_pass"
@@ -126,6 +167,8 @@ jobs:
             echo "| field | value |"
             echo "| --- | --- |"
             echo "| node_version | $node_version |"
+            echo "| commit_sha | $commit_sha |"
+            echo "| lock_sha256 | $lock_sha256 |"
             echo "| test_status | $test_status |"
             echo "| tests_total | $tests_total |"
             echo "| tests_pass | $tests_pass |"
@@ -136,46 +179,303 @@ jobs:
 
       - name: Upload validation record
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: validation-record
-          path: apps/scryglass/validation-record.txt
+          path: |
+            apps/scryglass/validation-record.txt
+            apps/scryglass/sbom.cdx.json
+          if-no-files-found: error
+
+  browser:
+    name: browser
+    needs: app
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SCRYGLASS_E2E_LOCAL_PACK: "1"
+    defaults:
+      run:
+        working-directory: apps/scryglass
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/scryglass/package-lock.json
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Install the Chromium test runtime
+        run: npx playwright install --with-deps chromium
+
+      - name: Generate the deterministic browser pack
+        run: npm run e2e:pack
+
+      - name: Build the production app
+        run: npm run build
+
+      - name: Run browser, protocol-fuzz, and bounded-load checks
+        timeout-minutes: 12
+        run: |
+          set -euo pipefail
+          server_log="${RUNNER_TEMP}/scryglass-next.log"
+          npm run start -- --hostname 127.0.0.1 --port 3100 >"${server_log}" 2>&1 &
+          server_pid=$!
+          cleanup() {
+            status=$?
+            trap - EXIT
+            kill "${server_pid}" 2>/dev/null || true
+            wait "${server_pid}" 2>/dev/null || true
+            if [ "${status}" -ne 0 ]; then
+              cat "${server_log}"
+            fi
+            exit "${status}"
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:3100/chat >/dev/null; then
+              break
+            fi
+            if ! kill -0 "${server_pid}" 2>/dev/null; then
+              cat "${server_log}"
+              exit 1
+            fi
+            if [ "${attempt}" -eq 60 ]; then
+              cat "${server_log}"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          cat >"${RUNNER_TEMP}/playwright-ci.config.mjs" <<'EOF'
+          export default {
+            testDir: process.env.GITHUB_WORKSPACE + "/apps/scryglass/e2e",
+            fullyParallel: false,
+            outputDir: process.env.GITHUB_WORKSPACE + "/apps/scryglass/output/playwright/ci-results",
+            retries: 0,
+            reporter: "line",
+            workers: 1,
+            use: {
+              baseURL: "http://127.0.0.1:3100",
+              trace: "retain-on-failure",
+            },
+          };
+          EOF
+          npx playwright test --config="${RUNNER_TEMP}/playwright-ci.config.mjs"
+
+          node --input-type=module <<'NODE'
+          const assert = (condition, message) => {
+            if (!condition) throw new Error(message);
+          };
+          const base = "http://127.0.0.1:3100";
+          const request = (path, init = {}) => fetch(base + path, {
+            signal: AbortSignal.timeout(5_000),
+            ...init,
+          });
+
+          const cases = [
+            {
+              name: "unsupported method",
+              expected: 405,
+              noStore: false,
+              run: () => request("/api/chat/query_players", { method: "PUT" }),
+            },
+            {
+              name: "invalid content type",
+              expected: 415,
+              run: () => request("/api/chat/query_players", {
+                method: "POST",
+                headers: { "content-type": "text/plain", "x-forwarded-for": "192.0.2.10" },
+                body: "{}",
+              }),
+            },
+            {
+              name: "invalid JSON",
+              expected: 400,
+              run: () => request("/api/chat/query_players", {
+                method: "POST",
+                headers: { "content-type": "application/json", "x-forwarded-for": "192.0.2.11" },
+                body: "{",
+              }),
+            },
+            {
+              name: "oversize body",
+              expected: 413,
+              run: () => request("/api/chat/query_players", {
+                method: "POST",
+                headers: { "content-type": "application/json", "x-forwarded-for": "192.0.2.12" },
+                body: JSON.stringify({ plan: "x".repeat(9_000) }),
+              }),
+            },
+            {
+              name: "oversize query",
+              expected: 422,
+              run: () => request(`/api/chat/query_players?q=${"x".repeat(501)}`, {
+                headers: { "x-forwarded-for": "192.0.2.13" },
+              }),
+            },
+          ];
+          for (const testCase of cases) {
+            const response = await testCase.run();
+            assert(response.status === testCase.expected,
+              `${testCase.name}: expected ${testCase.expected}, received ${response.status}`);
+            if (testCase.noStore !== false) {
+              assert((response.headers.get("cache-control") ?? "").includes("no-store"),
+                `${testCase.name}: error response must be private and uncached`);
+            }
+          }
+
+          const rateResponses = await Promise.all(Array.from({ length: 21 }, () =>
+            request("/api/chat/query_players", {
+              headers: { "x-forwarded-for": "198.51.100.10" },
+            })));
+          assert(rateResponses.filter((response) => response.status === 429).length >= 1,
+            "chat burst budget did not return 429");
+
+          const startedAt = Date.now();
+          const loadResponses = await Promise.all(Array.from({ length: 40 }, () => request("/robots.txt")));
+          assert(loadResponses.every((response) => response.ok), "bounded load smoke returned an error");
+          const bodies = await Promise.all(loadResponses.map((response) => response.arrayBuffer()));
+          assert(bodies.every((body) => body.byteLength <= 500 * 1024), "bounded response budget exceeded");
+          assert(Date.now() - startedAt <= 5_000, "bounded load smoke exceeded five seconds");
+          NODE
+
+      - name: Upload browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-failure-evidence
+          path: apps/scryglass/output/playwright/ci-results
+          if-no-files-found: warn
+
+  elemental-drakes:
+    name: elemental-drakes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/elemental-drakes
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/elemental-drakes/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=low
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build
+
+      - name: Create dependency SBOM
+        run: npm sbom --sbom-format cyclonedx > sbom.cdx.json
+
+      - name: Upload dependency SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: elemental-drakes-sbom
+          path: apps/elemental-drakes/sbom.cdx.json
           if-no-files-found: error
 
   rankings-data:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 240
+    env:
+      CI: "true"
+      MPLBACKEND: Agg
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONHASHSEED: "0"
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: |
+            requirements-ci.lock
+            requirements.lock
 
-      - name: Install focused test dependencies
-        run: python -m pip install -r requirements.txt pytest
+      - name: Install the hashed CI environment
+        run: python -m pip install --require-hashes -r requirements-ci.lock
 
-      - name: Validate ratings and patch-wide tier contracts
-        run: >-
-          python -m pytest -q
-          tests/model_v2/tierlists/test_champion_elo.py
-          tests/model_v2/tierlists/test_joint_pooled_model.py
-          tests/model_v2/tierlists/test_production_bundle.py
-          tests/model_v2/tierlists/test_production_readiness.py
-          tests/model_v2/tierlists/test_live_refresh.py
-          tests/test_global_player_bt.py
-          tests/test_player_map_grades.py
-          tests/test_postgame_sync.py
-          tests/test_oe_database.py
-          tests/test_oe_refresh.py
-          tests/test_public_grid_isolation.py
-          tests/test_public_pack_spec.py
-          tests/test_public_refresh.py
-          tests/test_supabase_publication.py
-          tests/test_refresh_ledger.py
-          tests/test_database_backup.py
-          tests/test_competition_and_ratings.py
-          tests/test_manual_leaguepedia.py
+      - name: Audit Python dependencies
+        run: python -m pip_audit --disable-pip -r requirements.lock
+
+      - name: Scan Python security issues
+        run: python -m bandit -r lol_kills tools -x tests -lll -q
+
+      - name: Create Python SBOM
+        run: python -m pip_audit --disable-pip -r requirements.lock --format cyclonedx-json --output python-sbom.cdx.json
+
+      - name: Run the complete Python suite, pass 1
+        timeout-minutes: 110
+        run: python -m pytest -q
+
+      - name: Run the complete Python suite, pass 2
+        timeout-minutes: 110
+        run: python -m pytest -q
+
+      - name: Upload Python SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-sbom
+          path: python-sbom.cdx.json
+          if-no-files-found: error
+
+  supabase:
+    name: Supabase clean replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install pinned Supabase CLI
+        run: npm ci
+
+      - name: Start local Supabase
+        run: npx supabase start
+
+      - name: Replay migrations from zero
+        run: npx supabase db reset
+
+      - name: Lint the final schema
+        run: npx supabase db lint --level error
+
+      - name: Test final privileges and release behavior
+        run: npx supabase test db
+
+      - name: Stop local Supabase
+        if: always()
+        run: npx supabase stop --no-backup

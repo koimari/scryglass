@@ -23,6 +23,8 @@ from typing import Any, Iterable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from lol_kills.net import require_https_url
+
 
 SCHEMA_VERSION = "scryglass:cdragon-patch-packet:v1"
 SOURCE_ROOT = "https://raw.communitydragon.org"
@@ -104,7 +106,10 @@ class CDragonClient:
         self.timeout = timeout
 
     def get(self, relative_path: str, *, retries: int = 4) -> tuple[bytes, str]:
-        url = f"{SOURCE_ROOT}/{self.source_patch}/{relative_path}"
+        url = require_https_url(
+            f"{SOURCE_ROOT}/{self.source_patch}/{relative_path}",
+            hosts={"raw.communitydragon.org"},
+        )
         request = Request(
             url,
             headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
@@ -127,7 +132,10 @@ class CDragonClient:
     def probe(self, relative_path: str) -> dict[str, Any]:
         """Probe one exact-patch path without substituting another patch."""
 
-        url = f"{SOURCE_ROOT}/{self.source_patch}/{relative_path}"
+        url = require_https_url(
+            f"{SOURCE_ROOT}/{self.source_patch}/{relative_path}",
+            hosts={"raw.communitydragon.org"},
+        )
         request = Request(
             url,
             headers={"User-Agent": USER_AGENT, "Accept": "application/json"},

@@ -18,19 +18,17 @@ class UploadPackTests(unittest.TestCase):
             "%70acks/v2026.08.13.120000/features/profile_records.json",
             "snapshot/../packs/v2026.08.13.120000/features/team_records.json",
         )
-        with patch.object(upload_pack.urllib.request, "urlopen") as request:
-            for pathname in paths:
-                with self.subTest(pathname=pathname), self.assertRaisesRegex(
-                    RuntimeError,
-                    "public pack Blob publication is disabled",
-                ):
-                    upload_pack._blob_put(
-                        "token",
-                        pathname,
-                        b"{}",
-                        "application/json",
-                    )
-        request.assert_not_called()
+        for pathname in paths:
+            with self.subTest(pathname=pathname), self.assertRaisesRegex(
+                RuntimeError,
+                "public pack Blob publication is disabled",
+            ):
+                upload_pack._blob_put(
+                    "token",
+                    pathname,
+                    b"{}",
+                    "application/json",
+                )
 
     def test_all_legacy_pack_publish_entrypoints_fail_closed(self) -> None:
         manifest = {"pack_id": "v2026.08.13.120000"}

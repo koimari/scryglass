@@ -12,6 +12,7 @@ import {
   TEAM_SIGMA_MIN,
 } from "@/lib/pack";
 import { draftRankingsFromProfile, filterDraftRankings } from "@/lib/draftRankings";
+import { getTeamProfile, queryApiAvailable } from "@/lib/publicData";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 export const revalidate = 21_600;
@@ -22,27 +23,54 @@ export default async function TeamEloPage({ params }: Props) {
   const { team: raw } = await params;
   const teamName = decodeURIComponent(raw);
   const man = await readPackManifest();
-  const teams = await readPackJson<TeamRating[]>(man, "features/ratings_snapshot.json");
-  const playerRows = await readPackJson<PlayerRating[]>(man, "features/player_ratings_snapshot.json");
+  if (queryApiAvailable(man)) {
+    const profile = await getTeamProfile(man, teamName);
+    if (!profile.row) notFound();
+    const team = profile.row.payload.rating as TeamRating | undefined;
+    if (!team) throw new Error("The public team profile has no rating payload");
+    const record = profile.row.payload.record as TeamRecord | undefined;
+    const playerRecords: Record<string, PlayerRecord> = {};
+    const roster: TeamRosterEntry[] = profile.roster.map((row) => {
+      const rating = row.payload.rating as PlayerRating | undefined;
+      const playerRecord = row.payload.record as PlayerRecord | undefined;
+      if (playerRecord) playerRecords[row.name] = playerRecord;
+      return {
+        player: row.name,
+        role: row.role ?? playerRecord?.primary_role ?? "",
+        rating: rating ?? null,
+        ratingNote: rating ? undefined : "Rating unavailable",
+      };
+    });
+    const roleRanks = Object.fromEntries(profile.roster.map((row) => [
+      row.name,
+      { rank: row.role_rank, total: row.role_total },
+    ]));
+    const standing = profile.standing ?? { tier_rank: 0, tier_total: 0 };
+    return (
+      <TeamRatingProfile
+        team={team}
+        roster={roster}
+        record={record}
+        playerRecords={playerRecords}
+        standing={{ tierRank: standing.tier_rank, tierTotal: standing.tier_total }}
+        roleRanks={roleRanks}
+        recentGames={profile.recent_games.map((row) => row.payload)}
+        championImages={profile.champion_images}
+        manifest={man}
+        draftMetric={null}
+      />
+    );
+  }
+  const [teams, playerRows, teamRecords, playerRecords, profileRecords] = await Promise.all([
+    readPackJson<TeamRating[]>(man, "features/ratings_snapshot.json"),
+    readPackJson<PlayerRating[]>(man, "features/player_ratings_snapshot.json"),
+    readPackJson<Record<string, TeamRecord>>(man, "features/team_records.json")
+      .catch((): Record<string, TeamRecord> => ({})),
+    readPackJson<Record<string, PlayerRecord>>(man, "features/player_records.json")
+      .catch((): Record<string, PlayerRecord> => ({})),
+    readPackJson<ProfileRecords>(man, "features/profile_records.json").catch(() => null),
+  ]);
   const players = compactPlayerRatings(playerRows);
-  let teamRecords: Record<string, TeamRecord> = {};
-  let playerRecords: Record<string, PlayerRecord> = {};
-  let profileRecords: ProfileRecords | null = null;
-  try {
-    teamRecords = await readPackJson(man, "features/team_records.json");
-  } catch {
-    teamRecords = {};
-  }
-  try {
-    playerRecords = await readPackJson(man, "features/player_records.json");
-  } catch {
-    playerRecords = {};
-  }
-  try {
-    profileRecords = await readPackJson(man, "features/profile_records.json");
-  } catch {
-    profileRecords = null;
-  }
   const team = teams.find((t) => t.team.toLowerCase() === teamName.toLowerCase());
   if (!team) notFound();
 

@@ -1,14 +1,7 @@
-"""Persist the normalized refresh state between ephemeral CI workers.
+"""Build and restore local warehouse snapshots.
 
-The fast refresh does not need to redownload the large OE CSVs.  It needs the
-last normalized warehouse plus the generated feature tables, then layers new
-completed GRID rows on top.  This module stores that small derived state in a
-single Vercel Blob object and keeps a stable pointer in the repository.
-
-The snapshot deliberately excludes raw OE CSVs, Riot timelines, joblib
-models, and research artifacts.  The committed public pack is the first-run
-fallback; after the first successful refresh, the Blob snapshot becomes the
-source of truth for the next worker.
+Remote publication is disabled. Warehouse and feature tables are private
+research inputs and must stay on an authenticated worker volume or backup.
 """
 
 from __future__ import annotations
@@ -17,10 +10,8 @@ import argparse
 import hashlib
 import io
 import json
-import os
 import tarfile
 import tempfile
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -33,6 +24,8 @@ DEFAULT_POINTER = ROOT / "data" / "lol" / "warehouse_snapshot.json"
 DEFAULT_PACK_ROOT = ROOT / "apps" / "scryglass" / "public" / "packs"
 SNAPSHOT_SCHEMA = 1
 SNAPSHOT_PATH = "state/scryglass-warehouse-v1.tar.gz"
+MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024
+REMOTE_SNAPSHOT_DISABLED = "remote warehouse snapshots are disabled"
 
 
 def _pointer_path(value: Path | None) -> Path:
@@ -93,9 +86,27 @@ def _read_pointer(path: Path) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Invalid warehouse snapshot pointer: {path}") from exc
-    if not isinstance(payload, dict) or not payload.get("url"):
-        raise RuntimeError(f"Warehouse snapshot pointer has no URL: {path}")
+    if not isinstance(payload, dict) or payload.get("transport") != "local":
+        raise RuntimeError(REMOTE_SNAPSHOT_DISABLED)
+    snapshot_path = Path(str(payload.get("path") or ""))
+    if not snapshot_path.is_absolute() or snapshot_path != snapshot_path.resolve():
+        raise RuntimeError("Warehouse snapshot path must be an absolute local path")
+    payload["path"] = str(snapshot_path)
     return payload
+
+
+def _read_bounded_response(response: Any, limit: int = MAX_SNAPSHOT_BYTES) -> bytes:
+    declared = response.headers.get("Content-Length")
+    if declared is not None and int(declared) > limit:
+        raise RuntimeError("Warehouse snapshot exceeds the byte limit")
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := response.read(1 << 20):
+        total += len(chunk)
+        if total > limit:
+            raise RuntimeError("Warehouse snapshot exceeds the byte limit")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _latest_pack(pack_root: Path, pack_id: str | None = None) -> Path:
@@ -166,10 +177,13 @@ def restore_snapshot(
         return bootstrap_from_public_pack(pack_root, pack_id)
 
     payload = _read_pointer(pointer)
-    url = str(payload["url"])
-    request = urllib.request.Request(url, headers={"Accept": "application/gzip"})
-    with urllib.request.urlopen(request, timeout=120) as response:
-        archive_bytes = response.read()
+    snapshot_path = Path(str(payload["path"]))
+    if not snapshot_path.is_file() or snapshot_path.stat().st_size > MAX_SNAPSHOT_BYTES:
+        raise RuntimeError("Local warehouse snapshot is unavailable or too large")
+    with snapshot_path.open("rb") as source:
+        archive_bytes = source.read(MAX_SNAPSHOT_BYTES + 1)
+    if len(archive_bytes) > MAX_SNAPSHOT_BYTES:
+        raise RuntimeError("Warehouse snapshot exceeds the byte limit")
 
     with tempfile.NamedTemporaryFile(prefix="scryglass-warehouse-", suffix=".tar.gz") as temp:
         temp.write(archive_bytes)
@@ -184,10 +198,10 @@ def restore_snapshot(
                 raise RuntimeError(
                     f"Unsupported warehouse snapshot schema: {manifest.get('schema')}"
                 )
-            archive.extractall(
-                ROOT,
-                members=[member for member in members if member.name != "snapshot_manifest.json"],
-            )
+            for member in members:
+                if member.name == "snapshot_manifest.json":
+                    continue
+                archive.extract(member, ROOT, filter="data")
 
     for record in manifest.get("files", []):
         path = ROOT / str(record["path"])
@@ -200,74 +214,14 @@ def restore_snapshot(
 
     print(
         "[snapshot] restored "
-        f"{len(archive_bytes) / 1024 / 1024:.1f} MB from {payload.get('pathname', url)}"
+        f"{len(archive_bytes) / 1024 / 1024:.1f} MB from local storage"
     )
-    return "blob"
+    return "local"
 
 
 def save_snapshot(pointer: Path = DEFAULT_POINTER) -> Path:
-    """Upload the current derived state and create/update the stable pointer."""
-    token = os.environ.get("BLOB_READ_WRITE_TOKEN") or os.environ.get(
-        "VERCEL_BLOB_READ_WRITE_TOKEN"
-    )
-    if not token:
-        raise RuntimeError("BLOB_READ_WRITE_TOKEN is required to save the warehouse snapshot")
-
-    pointer = _pointer_path(pointer)
-    existing: dict[str, Any] = {}
-    if pointer.exists():
-        try:
-            candidate = json.loads(pointer.read_text(encoding="utf-8"))
-            if isinstance(candidate, dict):
-                existing = candidate
-        except json.JSONDecodeError:
-            existing = {}
-
-    files = _snapshot_files()
-    if not files:
-        raise RuntimeError("No derived warehouse files are available to snapshot")
-
-    with tempfile.NamedTemporaryFile(prefix="scryglass-warehouse-", suffix=".tar.gz") as temp:
-        manifest = {
-            "schema": SNAPSHOT_SCHEMA,
-            "created_utc": datetime.now(timezone.utc).isoformat(),
-            "files": [],
-        }
-        with tarfile.open(temp.name, mode="w:gz") as archive:
-            for path in files:
-                rel = path.relative_to(ROOT).as_posix()
-                archive.add(path, arcname=rel, recursive=False)
-                manifest["files"].append(
-                    {"path": rel, "bytes": path.stat().st_size, "sha256": _sha256(path)}
-                )
-            raw_manifest = json.dumps(manifest, indent=2).encode("utf-8")
-            info = tarfile.TarInfo("snapshot_manifest.json")
-            info.size = len(raw_manifest)
-            archive.addfile(info, fileobj=io.BytesIO(raw_manifest))
-        temp.flush()
-
-        pathname = str(existing.get("pathname") or SNAPSHOT_PATH)
-        from lol_kills.export.upload_pack import _blob_put
-
-        url = _blob_put(
-            token,
-            pathname,
-            Path(temp.name).read_bytes(),
-            "application/gzip",
-            cache_control="no-cache, max-age=0",
-            allow_overwrite=True,
-        )
-
-    pointer_payload = {
-        "schema": SNAPSHOT_SCHEMA,
-        "pathname": pathname,
-        "url": url,
-        "description": "Derived warehouse state for the Scryglass GRID freshness worker",
-    }
-    pointer.parent.mkdir(parents=True, exist_ok=True)
-    pointer.write_text(json.dumps(pointer_payload, indent=2) + "\n", encoding="utf-8")
-    print(f"[snapshot] uploaded {len(files)} files to {pathname}")
-    return pointer
+    del pointer
+    raise RuntimeError(REMOTE_SNAPSHOT_DISABLED)
 
 
 def main(argv: list[str] | None = None) -> int:

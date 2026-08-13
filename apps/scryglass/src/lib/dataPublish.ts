@@ -16,7 +16,6 @@ export function validPublishSecret(received: string | null, expected: string | u
 export function validDiagnosticSecret(
   received: string | null,
   diagnosticSecret: string | undefined,
-  publishSecret: string | undefined,
 ): boolean {
-  return validPublishSecret(received, diagnosticSecret || publishSecret);
+  return validPublishSecret(received, diagnosticSecret);
 }

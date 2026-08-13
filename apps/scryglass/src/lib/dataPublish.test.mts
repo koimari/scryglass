@@ -16,8 +16,8 @@ test("publish secret requires an exact bearer token", () => {
   assert.equal(validPublishSecret("Bearer known", undefined), false);
 });
 
-test("diagnostics use their own token and can fall back to the publisher token", () => {
-  assert.equal(validDiagnosticSecret("Bearer diagnostics", "diagnostics", "publisher"), true);
-  assert.equal(validDiagnosticSecret("Bearer publisher", "diagnostics", "publisher"), false);
-  assert.equal(validDiagnosticSecret("Bearer publisher", undefined, "publisher"), true);
+test("diagnostics require their separate bearer token", () => {
+  assert.equal(validDiagnosticSecret("Bearer diagnostics", "diagnostics"), true);
+  assert.equal(validDiagnosticSecret("Bearer publisher", "diagnostics"), false);
+  assert.equal(validDiagnosticSecret("Bearer publisher", undefined), false);
 });

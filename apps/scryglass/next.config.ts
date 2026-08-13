@@ -10,9 +10,9 @@ const contentSecurityPolicy = [
   "object-src 'none'",
   `script-src 'self'${isProduction ? "" : " 'unsafe-eval'"}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://cdn.communitydragon.org https://static.wikia.nocookie.net https://*.public.blob.vercel-storage.com",
+  "img-src 'self' data: blob: https://cdn.communitydragon.org https://static.wikia.nocookie.net",
   "font-src 'self' data:",
-  `connect-src 'self' https://*.supabase.co${isProduction ? "" : " ws://localhost:* ws://127.0.0.1:*"}`,
+  `connect-src 'self'${isProduction ? "" : " ws://localhost:* ws://127.0.0.1:*"}`,
   "media-src 'self'",
   "manifest-src 'self'",
   "worker-src 'self' blob:",
@@ -52,7 +52,7 @@ const nextConfig: NextConfig = {
       {
         source: "/packs/manifest.json",
         headers: [
-          { key: "Cache-Control", value: "public, max-age=0, s-maxage=21600, stale-while-revalidate=3600" },
+          { key: "Cache-Control", value: "public, max-age=0, must-revalidate" },
         ],
       },
     ];

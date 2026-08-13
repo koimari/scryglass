@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildSupportQueryIndex,
+  boundedChampionOrder,
+  boundedRatingsOrder,
   executeQueryPlan,
   parseQueryPlan,
   planPlayerQuestion,
@@ -75,6 +77,34 @@ test("query-plan parser rejects arbitrary fields and operators", () => {
   assert.equal(arbitraryKey.ok, false);
 });
 
+test("bounded RPC orders preserve every supported query direction", () => {
+  const ratingPlan = (field: "rating" | "games" | "wins" | "win_rate" | "grade_a_games", direction: "asc" | "desc") => ({
+    version: 1 as const,
+    dataset: "players" as const,
+    operation: "rank" as const,
+    filters: [],
+    orderBy: [{ field, direction }],
+    limit: 5,
+  });
+  assert.equal(boundedRatingsOrder(ratingPlan("rating", "asc")), "rating_asc");
+  assert.equal(boundedRatingsOrder(ratingPlan("win_rate", "desc")), "win_rate_desc");
+  assert.equal(boundedRatingsOrder(ratingPlan("grade_a_games", "asc")), "grade_a_asc");
+
+  const championPlan = (field: "champion_score" | "champion_win_rate" | "champion_median_distance" | "champion_mean_distance", direction: "asc" | "desc") => ({
+    version: 1 as const,
+    dataset: "player_champions" as const,
+    operation: "rank" as const,
+    filters: [],
+    orderBy: [{ field, direction }],
+    limit: 5,
+  });
+  assert.equal(boundedChampionOrder(championPlan("champion_score", "asc")), "worst");
+  assert.equal(boundedChampionOrder(championPlan("champion_score", "desc")), "best");
+  assert.equal(boundedChampionOrder(championPlan("champion_win_rate", "asc")), "win_rate_asc");
+  assert.equal(boundedChampionOrder(championPlan("champion_median_distance", "asc")), "median");
+  assert.equal(boundedChampionOrder(championPlan("champion_mean_distance", "asc")), "mean");
+});
+
 test("dynamic entity resolution compares any published player names", () => {
   const planned = planPlayerQuestion("which player is the best rated between faker and chovy", index);
   assert.ok(planned.ok);
@@ -139,15 +169,15 @@ test("best-rated champion question orders overall rating within champion evidenc
   assert.equal(result.plan.orderBy[0].field, "rating");
 });
 
-test("a named player's worst champion returns the ordered record set", () => {
+test("a named player's worst champion follows published champion evidence", () => {
   const planned = planPlayerQuestion("what is Faker's worst champion?", index);
   assert.ok(planned.ok);
   assert.equal(planned.plan.dataset, "player_champions");
-  assert.deepEqual(planned.plan.orderBy[0], { field: "champion_win_rate", direction: "asc" });
+  assert.deepEqual(planned.plan.orderBy[0], { field: "champion_score", direction: "asc" });
   assert.equal(planned.plan.limit, 20);
   const result = executeQueryPlan(planned.plan, index);
   assert.deepEqual(result.rows.map((row) => row.champion), ["Azir", "Orianna", "Galio"]);
-  assert.match(result.answer.headline, /Faker's lowest published champion win rate is 50% on Azir across 40 games/);
+  assert.match(result.answer.headline, /Faker's lowest matching champion score is on Azir/);
 });
 
 test("best and bottom N champion questions use the same bidirectional ranking", () => {

@@ -28,6 +28,7 @@ from lol_kills.etl.paths import (
     RAW_OE_DIR,
     ROOT,
 )
+from lol_kills.net import require_https_url
 
 
 OE_MIN_DOWNLOAD_BYTES = 10_000
@@ -303,6 +304,7 @@ def _write_remote_state(state: dict[str, dict[str, Any]]) -> None:
 def _remote_file_signature(url: str) -> dict[str, Any]:
     """Read public Drive metadata without downloading the annual CSV."""
 
+    url = require_https_url(url, hosts={"drive.google.com"})
     request = urllib.request.Request(
         url,
         headers={

@@ -286,6 +286,22 @@ function leaderboardTable(rows: LeaderboardRow[], category: string): React.React
 function resultTable(result: unknown, call: ToolCall): React.ReactNode {
   const data = result as Record<string, unknown> | null;
 
+  if (
+    data?.authority === "unavailable"
+    && (call.tool === "query_drafts" || (
+      call.tool === "leaderboards"
+      && (call.args.category === "teams_draft" || call.args.category === "players_draft")
+    ))
+  ) {
+    return (
+      <div className={styles.queryResult} data-testid="draft-unavailable-result">
+        <p className={styles.queryHeadline}>Draft Score is unavailable for this release.</p>
+        <p className={styles.queryBasis}>An independent, release-bound promotion receipt is required before Scryglass can publish draft results.</p>
+        <p className={styles.queryCaveat}><a className="row-link" href="/methodology#composition-signal">View Methodology</a></p>
+      </div>
+    );
+  }
+
   if (call.tool === "query_champions" && data?.kind === "champion_query" && Array.isArray(data.rows)) {
     const query = data as unknown as ChampionQueryResult;
     return (
@@ -736,7 +752,7 @@ export default function SupportChat({ floating = false }: { floating?: boolean }
       >
         {messages.length === 0 && (
           <div className={styles.empty}>
-            <p>Ask about players, champions, teams, matches, ratings, draft scores, tier lists, schedules, or methodology.</p>
+            <p>Ask about players, champions, teams, matches, ratings, tier lists, schedules, methodology, or Draft Score availability.</p>
             <div className={styles.suggestions}>
               {suggested.map((suggestion) => (
                 <button key={suggestion} type="button" onClick={() => setInput(suggestion)}>{suggestion}</button>

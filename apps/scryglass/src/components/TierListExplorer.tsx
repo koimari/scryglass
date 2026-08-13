@@ -9,6 +9,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   filterRowsByMinimumGames,
   filterRowsByRegion,
@@ -64,16 +65,33 @@ type MatchupTooltip = {
   basis: MatchupBasis | undefined;
 };
 
-type TierResponse = {
+export type TierResponse = {
   status: string;
   reason?: string;
   generated_at?: string;
   as_of?: string;
   source_freshness?: "oe_daily_export" | "oe_with_same_day_grid_bridge";
-  options?: { roles: string[]; patches: string[]; tier_buckets?: TierBucket[] };
+  options?: {
+    roles: string[];
+    patches: string[];
+    regions?: string[];
+    leagues?: string[];
+    tiers?: string[];
+    tier_buckets?: TierBucket[];
+  };
   scopes?: TierScope[];
   rows?: TierRow[];
   structural_similarity?: StructuralSimilarity;
+  champion_images?: Record<string, string>;
+};
+
+export type TierFilterState = {
+  patch: string;
+  role: string;
+  region: string;
+  league: string;
+  tier: string;
+  minimumGames: number;
 };
 
 const EMPTY: TierResponse = { status: "unavailable" };
@@ -795,16 +813,29 @@ function ResponseBoard({
   );
 }
 
-export function TierListExplorer() {
-  const [role, setRole] = useState("");
-  const [patch, setPatch] = useState("");
-  const [minimumGames, setMinimumGames] = useState(5);
+export function TierListExplorer({
+  initialData,
+  initialFilters,
+  serverFiltered = false,
+}: {
+  initialData?: TierResponse;
+  initialFilters?: TierFilterState;
+  serverFiltered?: boolean;
+} = {}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [role, setRole] = useState(initialFilters?.role ?? "");
+  const [patch, setPatch] = useState(initialFilters?.patch ?? "");
+  const [minimumGames, setMinimumGames] = useState(initialFilters?.minimumGames ?? 5);
   const [mode, setMode] = useState<BoardMode>("first_pick");
   const [responseChampion, setResponseChampion] = useState("");
-  const [region, setRegion] = useState("");
-  const [data, setData] = useState<TierResponse>(EMPTY);
-  const [loading, setLoading] = useState(true);
-  const [fullHistoryLoaded, setFullHistoryLoaded] = useState(false);
+  const [region, setRegion] = useState(initialFilters?.region ?? "");
+  const [league, setLeague] = useState(initialFilters?.league ?? "");
+  const [tier, setTier] = useState(initialFilters?.tier ?? "");
+  const [data, setData] = useState<TierResponse>(initialData ?? EMPTY);
+  const [loading, setLoading] = useState(!initialData);
+  const [fullHistoryLoaded, setFullHistoryLoaded] = useState(serverFiltered);
 
   const commitData = useCallback((payload: TierResponse, fullHistory: boolean) => {
     setData(payload);
@@ -825,6 +856,7 @@ export function TierListExplorer() {
   }, [commitData]);
 
   useEffect(() => {
+    if (serverFiltered) return;
     const controller = new AbortController();
     fetch(LATEST_TIER_LIST_URL, { signal: controller.signal })
       .then((response) => {
@@ -841,7 +873,22 @@ export function TierListExplorer() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [commitData]);
+  }, [commitData, serverFiltered]);
+
+  useEffect(() => {
+    if (!serverFiltered) return;
+    const params = new URLSearchParams(searchParams.toString());
+    if (patch) params.set("patch", patch); else params.delete("patch");
+    if (role) params.set("role", role); else params.delete("role");
+    if (region) params.set("region", region); else params.delete("region");
+    if (league) params.set("league", league); else params.delete("league");
+    if (tier) params.set("tier", tier); else params.delete("tier");
+    if (minimumGames !== 5) params.set("min", String(minimumGames)); else params.delete("min");
+    const suffix = params.toString();
+    const next = `${pathname}${suffix ? `?${suffix}` : ""}`;
+    const current = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+    if (next !== current) router.replace(next, { scroll: false });
+  }, [league, minimumGames, patch, pathname, region, role, router, searchParams, serverFiltered, tier]);
 
   if (loading && data.status !== "available") return <TierLoadingState />;
   if (data.status !== "available") {
@@ -859,10 +906,25 @@ export function TierListExplorer() {
   const activePatch = patch || patchOptions[0] || "";
   const latestPatch = patchOptions[0] || "";
   const roleOptions = (data.options?.roles ?? [...ROLE_ORDER]).map((value) => ({ value, label: roleLabel(value) }));
-  const rows = (data.rows ?? []).filter((row) => row.patch === activePatch);
-  const regionOptions = regionalOptions(scopes, activePatch);
+  const rows = (data.rows ?? [])
+    .filter((row) => row.patch === activePatch)
+    .map((row) => ({
+      ...row,
+      champion_image_url: row.champion_image_url ?? data.champion_images?.[row.champion] ?? null,
+    }));
+  const scopeRegionOptions = regionalOptions(scopes, activePatch);
+  const regionLabels = new Map(scopeRegionOptions.map((option) => [option.id, option.label]));
+  const serverRegionIds = scopeRegionOptions.length
+    ? scopeRegionOptions.map((option) => option.id)
+    : data.options?.regions ?? [];
+  const regionOptions = serverFiltered
+    ? serverRegionIds.map((value) => ({
+        id: value,
+        label: regionLabels.get(value) ?? value,
+      }))
+    : scopeRegionOptions;
   const activeRegion = regionOptions.some((candidate) => candidate.id === region) ? region : "";
-  const regionalRows = filterRowsByRegion(rows, scopes, activePatch, activeRegion);
+  const regionalRows = serverFiltered ? rows : filterRowsByRegion(rows, scopes, activePatch, activeRegion);
   const visibleRows = filterRowsByMinimumGames(regionalRows, minimumGames);
   const selectedRows = role ? visibleRows.filter((row) => row.role === role) : [];
   const selectedScope = role
@@ -897,6 +959,8 @@ export function TierListExplorer() {
             setPatch(value);
             setResponseChampion("");
             setRegion("");
+            setLeague("");
+            setTier("");
             if (value && value !== latestPatch && !fullHistoryLoaded) {
               void load(TIER_LIST_URL, undefined, true);
             }
@@ -919,10 +983,36 @@ export function TierListExplorer() {
           options={regionOptions.map((candidate) => ({ value: candidate.id, label: candidate.label }))}
           onChange={(value) => {
             setRegion(value);
+            setLeague("");
             setResponseChampion("");
           }}
           emptyLabel={regionOptions.length ? "all regions" : "regional refresh pending"}
         />
+        {serverFiltered && data.options?.leagues?.length ? (
+          <Select
+            label="League"
+            value={league}
+            options={data.options.leagues.map((value) => ({ value, label: value }))}
+            onChange={(value) => {
+              setLeague(value);
+              setRegion("");
+              setResponseChampion("");
+            }}
+            emptyLabel="all leagues"
+          />
+        ) : null}
+        {serverFiltered && data.options?.tiers?.length ? (
+          <Select
+            label="Tier"
+            value={tier}
+            options={data.options.tiers.map((value) => ({ value, label: value.replace(/^tier/, "Tier ") }))}
+            onChange={(value) => {
+              setTier(value);
+              setResponseChampion("");
+            }}
+            emptyLabel="all tiers"
+          />
+        ) : null}
         <label className={styles.field}>
           <span>Minimum games</span>
           <select value={minimumGames} onChange={(event) => setMinimumGames(Number(event.target.value))}>
@@ -933,7 +1023,10 @@ export function TierListExplorer() {
         </label>
         <button
           className={styles.button}
-          onClick={() => void load(activePatch === latestPatch ? LATEST_TIER_LIST_URL : TIER_LIST_URL, undefined, true)}
+          onClick={() => {
+            if (serverFiltered) router.refresh();
+            else void load(activePatch === latestPatch ? LATEST_TIER_LIST_URL : TIER_LIST_URL, undefined, true);
+          }}
           disabled={loading}
         >
           {loading ? "Loading…" : "Refresh"}

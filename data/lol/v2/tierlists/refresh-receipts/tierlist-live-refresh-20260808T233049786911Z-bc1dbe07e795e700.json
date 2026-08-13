@@ -67,9 +67,9 @@
       "command": [],
       "completed": true,
       "publication": {
-        "blob_store_id": "97gks2fobqkgppwx",
+        "blob_store_id": null,
         "cell_count": 285,
-        "index_url": "https://97gks2fobqkgppwx.public.blob.vercel-storage.com/tierlists/index-v1.json",
+        "index_url": null,
         "pointer_artifact_sha256": "a2fa70ddf355d0e2a30b1675babf682038ffbfad7516fdf6f991a162d494eb72",
         "pointer_mode": "OVERWRITE",
         "pointer_path": "tierlists/index-v1.json",

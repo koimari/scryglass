@@ -66,21 +66,19 @@ test("reported player questions return constrained answers and proof rows", asyn
   await page.getByRole("button", { name: "Ask", exact: true }).click();
   const championRanking = page.getByTestId("champion-query-result");
   await expect(championRanking).toHaveCount(1);
-  await expect(championRanking.getByTestId("champion-query-headline")).toContainText("lowest");
+  await expect(championRanking.getByTestId("champion-query-headline")).toContainText("Zed (mid) ranks last");
   await expect(championRanking.locator("thead")).toContainText("Champion");
 
   await page.getByLabel("Ask a question").fill("which team has the best draft score");
   await page.getByRole("button", { name: "Ask", exact: true }).click();
-  const draftRanking = page.getByTestId("team-draft-query-result");
+  const draftRanking = page.getByTestId("draft-unavailable-result");
   await expect(draftRanking).toHaveCount(1);
-  await expect(draftRanking.getByTestId("team-draft-query-headline")).toContainText(/draft score/i);
+  await expect(draftRanking).toContainText("Draft Score is unavailable");
+  await expect(draftRanking).toContainText("promotion receipt");
 
   await page.getByLabel("Ask a question").fill("which team has better draft score historically between T1 and Gen.G?");
   await page.getByRole("button", { name: "Ask", exact: true }).click();
-  const draftComparison = page.getByTestId("team-draft-comparison-result");
-  await expect(draftComparison).toHaveCount(1);
-  await expect(draftComparison.getByTestId("team-draft-query-headline")).toContainText(/T1|Gen\.G/);
-  await expect(draftComparison.getByTestId("team-draft-query-headline")).toContainText(/historical/i);
+  await expect(page.getByTestId("draft-unavailable-result")).toHaveCount(2);
 
   const filtered = await ask(page, "best Tier 1 LCK mid with at least 100 games");
   await expect(filtered.getByTestId("player-query-basis")).toContainText("mid role, LCK, Tier 1, at least 100 games");

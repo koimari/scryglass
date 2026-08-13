@@ -100,17 +100,32 @@ def worker_commit(root: Path, *, require_clean: bool = False) -> str:
     return value
 
 
+def requirements_lock_sha256(root: Path) -> str:
+    """Bind each release receipt to the exact hashed worker environment lock."""
+
+    lock_path = root.expanduser().resolve() / "requirements.lock"
+    try:
+        raw = lock_path.read_bytes()
+    except OSError as error:
+        raise RuntimeError("worker requirements lock cannot be read") from error
+    if not raw:
+        raise RuntimeError("worker requirements lock is empty")
+    return hashlib.sha256(raw).hexdigest()
+
+
 def input_fingerprint(
     *,
     source_file_sha256: str,
     transform_version: str,
     worker_git_commit: str,
+    requirements_lock_sha256: str,
 ) -> str:
     return canonical_sha256(
         {
             "source_file_sha256": source_file_sha256,
             "transform_version": transform_version,
             "worker_commit": worker_git_commit,
+            "requirements_lock_sha256": requirements_lock_sha256,
         }
     )
 
@@ -137,6 +152,7 @@ def reusable_stage_receipt(
     fingerprint: str,
     transform_version: str,
     worker_git_commit: str,
+    requirements_lock_sha256: str,
 ) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -151,6 +167,7 @@ def reusable_stage_receipt(
         "input_fingerprint": fingerprint,
         "transform_version": transform_version,
         "worker_commit": worker_git_commit,
+        "requirements_lock_sha256": requirements_lock_sha256,
     }
     return payload if all(payload.get(key) == value for key, value in expected.items()) else None
 
@@ -185,17 +202,27 @@ class RefreshRunLedger:
     transform_version: str
     source_file_sha256: str
     source_observed_through: str | None
+    requirements_lock_sha256: str
     counts: dict[str, int] = field(default_factory=dict)
     remote_write: Callable[[dict[str, Any]], None] | None = None
     retry_of: str | None = None
 
     def __post_init__(self) -> None:
+        if (
+            len(self.requirements_lock_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.requirements_lock_sha256
+            )
+        ):
+            raise ValueError("requirements lock digest is malformed")
         stamp = self.scheduled_for.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         self.run_id = f"refresh-{stamp}-{uuid.uuid4().hex[:12]}"
         self.fingerprint = input_fingerprint(
             source_file_sha256=self.source_file_sha256,
             transform_version=self.transform_version,
             worker_git_commit=self.worker_git_commit,
+            requirements_lock_sha256=self.requirements_lock_sha256,
         )
         if self.retry_of is None:
             self.retry_of = latest_failed_run(self.runtime_root, self.fingerprint)
@@ -222,6 +249,7 @@ class RefreshRunLedger:
             "stage": self.stage,
             "input_fingerprint": self.fingerprint,
             "worker_commit": self.worker_git_commit,
+            "requirements_lock_sha256": self.requirements_lock_sha256,
             "transform_version": self.transform_version,
             "source_file_sha256": self.source_file_sha256,
             "source_observed_through": self.source_observed_through,

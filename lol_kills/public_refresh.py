@@ -34,7 +34,11 @@ from lol_kills.postgame_sync import (
     validate_live_source,
 )
 from lol_kills.v2.tierlists import live_refresh
-from lol_kills.refresh_ledger import RefreshRunLedger, worker_commit
+from lol_kills.refresh_ledger import (
+    RefreshRunLedger,
+    requirements_lock_sha256,
+    worker_commit,
+)
 
 
 SCHEMA_VERSION = "scryglass:public-refresh:v1"
@@ -48,13 +52,31 @@ DEFAULT_STEP_TIMEOUT_MINUTES = 30
 RETRYABLE_ERRORS = (OeDownloadError, TimeoutError, urllib.error.URLError)
 RETRYABLE_HTTP_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 PUBLIC_RELEASE_PROBES = (
+    "/",
     "/elo",
     "/matches",
     "/tiers",
     "/chat",
-    "/api/public-data/tierlists",
+    "/support",
+    "/methodology",
+    "/sources",
+    "/privacy",
+    "/legal",
+    "/security",
+    "/packs/manifest.json",
+    "/api/public-data/tierlists?view=latest",
+    "/api/chat/navigation",
     "/api/chat/leaderboards?category=rating&limit=1",
+    "/api/chat/leaderboards?category=teams&limit=1",
     "/api/chat/leaderboards?category=teams_draft&limit=1",
+    "/api/chat/player?name=Faker",
+    "/api/chat/team?name=T1",
+    "/api/chat/compare_players?player1=Faker&player2=Chovy",
+    "/api/chat/matches?team=T1&limit=1",
+    "/api/chat/query_players?q=who+has+the+better+rating+between+Faker+and+Chovy",
+    "/api/chat/query_champions?q=who+is+the+best+Galio+player",
+    "/api/chat/query_drafts?q=which+team+has+the+best+draft",
+    "/api/chat/schedule?limit=1",
     "/api/chat/tier?limit=1",
     "/api/chat/methodology?topic=ratings",
 )
@@ -196,7 +218,10 @@ def _preflight(config: RefreshConfig) -> None:
         return
     if config.publication_backend != "supabase":
         raise PublicRefreshError("production refresh requires the Supabase publication backend")
-    required = {"SCRYGLASS_DATA_PUBLISH_TOKEN": _read_env("SCRYGLASS_DATA_PUBLISH_TOKEN")}
+    required = {
+        "SCRYGLASS_DATA_PUBLISH_TOKEN": _read_env("SCRYGLASS_DATA_PUBLISH_TOKEN"),
+        "SCRYGLASS_DIAGNOSTIC_TOKEN": _read_env("SCRYGLASS_DIAGNOSTIC_TOKEN"),
+    }
     required.update(
         {
             "SCRYGLASS_SUPABASE_URL": config.supabase_url,
@@ -316,6 +341,7 @@ def _start_run_ledger(
             if accepted.get("source_observed_through")
             else None
         ),
+        requirements_lock_sha256=requirements_lock_sha256(config.root),
         counts=counts,
         remote_write=remote_write,
     )
@@ -337,6 +363,10 @@ def _write_remote_health(
         config.supabase_url or "",
         config.supabase_secret_key or "",
     )
+    diagnostic_token = _read_env("SCRYGLASS_DIAGNOSTIC_TOKEN")
+    if not diagnostic_token:
+        raise PublicRefreshError("SCRYGLASS_DIAGNOSTIC_TOKEN is required")
+    client.write_diagnostic_credential(diagnostic_token)
     if not release_id:
         active = client.active_release()
         if isinstance(active, dict):
@@ -559,6 +589,7 @@ def _http_bytes(
     body: bytes | None = None,
     headers: dict[str, str] | None = None,
     attempts: int = 1,
+    expected_release_id: str | None = None,
 ) -> bytes:
     if attempts < 1 or attempts > 5:
         raise PublicRefreshError("HTTP attempts must be between one and five")
@@ -566,6 +597,13 @@ def _http_bytes(
     for attempt in range(attempts):
         try:
             with urllib.request.urlopen(request, timeout=45) as response:
+                if expected_release_id is not None:
+                    served_release_id = response.headers.get("X-Scryglass-Release", "")
+                    if served_release_id != expected_release_id:
+                        raise PublicRefreshError(
+                            f"HTTP response has release {served_release_id or 'missing'}, "
+                            f"expected {expected_release_id}: {url}"
+                        )
                 return response.read()
         except urllib.error.HTTPError as error:
             if error.code not in RETRYABLE_HTTP_STATUS or attempt + 1 >= attempts:
@@ -614,9 +652,7 @@ def _load_remote_manifest(config: RefreshConfig) -> tuple[dict[str, Any], str]:
 
 
 def _diagnostic_headers() -> dict[str, str]:
-    token = _read_env("SCRYGLASS_DIAGNOSTIC_TOKEN") or _read_env(
-        "SCRYGLASS_DATA_PUBLISH_TOKEN"
-    )
+    token = _read_env("SCRYGLASS_DIAGNOSTIC_TOKEN")
     return {"authorization": f"Bearer {token}"} if token else {}
 
 
@@ -867,19 +903,56 @@ def probe_public_release_families(
     if health_watermark() != release_id:
         raise PublicRefreshError("public probes started on a different release")
     checked: list[str] = []
+    payloads: dict[str, Any] = {}
     for path in PUBLIC_RELEASE_PROBES:
         raw = _http_bytes(
             f"{config.site}{path}",
             headers={"Cache-Control": "no-cache"},
             attempts=config.attempts,
+            expected_release_id=(
+                release_id
+                if path.startswith("/api/chat/")
+                or path.startswith("/api/public-data/")
+                or path == "/packs/manifest.json"
+                else None
+            ),
         )
-        if path.startswith("/api/"):
+        if path.startswith("/api/") or path == "/packs/manifest.json":
             try:
                 payload = json.loads(raw.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as error:
                 raise PublicRefreshError(f"public probe returned invalid JSON: {path}") from error
             if not isinstance(payload, (dict, list)):
                 raise PublicRefreshError(f"public probe returned an invalid payload: {path}")
+            payloads[path] = payload
+        checked.append(path)
+
+    manifest_payload = payloads.get("/packs/manifest.json")
+    if (
+        not isinstance(manifest_payload, dict)
+        or manifest_payload.get("release_id") != release_id
+    ):
+        raise PublicRefreshError("public manifest probe has a different release")
+
+    match_payload = payloads.get("/api/chat/matches?team=T1&limit=1")
+    match_data = match_payload.get("data") if isinstance(match_payload, dict) else None
+    matches = match_data.get("matches") if isinstance(match_data, dict) else None
+    if not isinstance(matches, list) or not matches:
+        raise PublicRefreshError("public match probe could not resolve a current match")
+    match_id = matches[0].get("game_id") if isinstance(matches[0], dict) else None
+    if not isinstance(match_id, str) or not match_id.strip():
+        raise PublicRefreshError("public match probe returned an invalid game ID")
+    dynamic_paths = (
+        "/elo/player/Faker",
+        "/elo/team/T1",
+        f"/matches/{urllib.parse.quote(match_id, safe='')}",
+    )
+    for path in dynamic_paths:
+        _http_bytes(
+            f"{config.site}{path}",
+            headers={"Cache-Control": "no-cache"},
+            attempts=config.attempts,
+        )
         checked.append(path)
     if health_watermark() != release_id:
         raise PublicRefreshError("public probes ended on a different release")
@@ -1227,6 +1300,7 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
         if should_rollback:
             rollback = {"status": "restoring"}
             rollback_errors: list[str] = []
+            restored_release_id: str | None = None
             if publication is not None:
                 try:
                     rollback["ratings"] = rollback_public_pack(publication, config.public_root)
@@ -1251,12 +1325,17 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
                             project_url=config.supabase_url or "",
                             secret_key=config.supabase_secret_key or "",
                         )
+                        restored_release_id = str(
+                            rollback["supabase"].get("release_id") or previous_release_id
+                        )
                     except Exception as rollback_error:  # noqa: BLE001
                         rollback_errors.append(
                             f"supabase: {type(rollback_error).__name__}: {rollback_error}"
                         )
             try:
-                rollback_release_id = str(previous_state.get("pack_id") or "")
+                rollback_release_id = restored_release_id or str(
+                    previous_state.get("pack_id") or ""
+                )
                 rollback["cache_invalidation"] = invalidate_public_cache(
                     config,
                     rollback_release_id,

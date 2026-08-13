@@ -61,6 +61,10 @@ type Props = {
   playerRecords: Record<string, PlayerRecordView>;
   movementByName: Record<string, number | null>;
   availableLeaguesByTier: Record<CompetitionTier, string[]>;
+  total: number;
+  initialPage: number;
+  pageSize: number;
+  serverFiltered: boolean;
 };
 
 export type RatingsTab = "teams" | "players" | "draft";
@@ -115,6 +119,10 @@ export function SignalRatings({
   playerRecords,
   movementByName,
   availableLeaguesByTier,
+  total,
+  initialPage,
+  pageSize,
+  serverFiltered,
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -132,6 +140,7 @@ export function SignalRatings({
   const [sort, setSort] = useState<Sort>((searchParams.get("sort") as Sort) || "rating");
   const [expanded, setExpanded] = useState(false);
   const [selected, setSelected] = useState("");
+  const [page, setPage] = useState(initialPage);
 
   useEffect(() => {
     if (tab !== loadedTab) return;
@@ -144,11 +153,12 @@ export function SignalRatings({
     if (tab === "players" && minGames !== 20) params.set("min", String(minGames));
     if (tab === "draft" && draftMinGames !== 5) params.set("draftMin", String(draftMinGames));
     if (sort !== "rating") params.set("sort", sort);
+    if (serverFiltered && page > 1) params.set("page", String(page));
     const suffix = params.toString();
     const next = suffix ? `${pathname}?${suffix}` : pathname;
     const current = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
     if (next !== current) router.replace(next, { scroll: false });
-  }, [tab, loadedTab, query, leagues, role, minGames, draftMinGames, sort, pathname, router, searchParams]);
+  }, [tab, loadedTab, query, leagues, role, minGames, draftMinGames, sort, page, serverFiltered, pathname, router, searchParams]);
 
   const teamDelta = (team: string) => movementByName[team];
   const playerDelta = (player: string) => movementByName[player];
@@ -246,11 +256,13 @@ export function SignalRatings({
       const allowed = new Set(availableLeaguesByTier[tier.toLowerCase() as CompetitionTier]);
       return [...selectedCurrentLeagues.filter((league) => allowed.has(league)), tier];
     });
+    setPage(1);
     setExpanded(false);
   };
 
   const toggleLeague = (league: string) => {
     setLeagues((current) => current.includes(league) ? current.filter((item) => item !== league) : [...current, league]);
+    setPage(1);
     setExpanded(false);
   };
 
@@ -259,6 +271,7 @@ export function SignalRatings({
     setTab(value);
     setExpanded(false);
     setSelected("");
+    setPage(1);
     const params = new URLSearchParams(searchParams.toString());
     if (value === "teams") params.delete("tab");
     else params.set("tab", value);
@@ -290,6 +303,7 @@ export function SignalRatings({
     setSort("rating");
     setExpanded(false);
     setSelected("");
+    setPage(1);
   };
 
   const draftScopeLabel = draftScope === "whole_archive"
@@ -371,12 +385,12 @@ export function SignalRatings({
               </button>
             ))}
           </div>
-          {tab === "draft" && !draftAuthorized ? null : <label className={styles.search}><span>Search</span><input type="search" maxLength={100} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "teams" ? "Team or alias" : tab === "players" ? "Player or team" : "Team or player"} /></label>}
+          {tab === "draft" && !draftAuthorized ? null : <label className={styles.search}><span>Search</span><input type="search" maxLength={100} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={tab === "teams" ? "Team or alias" : tab === "players" ? "Player or team" : "Team or player"} /></label>}
           {(tab === "players" || tab === "draft") && (tab !== "draft" || draftAuthorized) ? (
-            <label><span>{tab === "draft" ? "Player role" : "Role"}</span><select value={role} onChange={(event) => setRole(event.target.value)}><option value="">All roles</option>{PLAYER_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label><span>{tab === "draft" ? "Player role" : "Role"}</span><select value={role} onChange={(event) => { setRole(event.target.value); setPage(1); }}><option value="">All roles</option>{PLAYER_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           ) : null}
-          {tab === "draft" ? null : <label><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="rating">Rating</option><option value="movement">Movement</option><option value="games">Games</option><option value="name">Name</option></select></label>}
-          {tab === "players" ? <label className={styles.minGames}><span>Min games</span><input type="number" min={5} max={10000} value={minGames} onChange={(event) => setMinGames(Math.min(10000, Math.max(5, Number(event.target.value) || 5)))} /></label> : null}
+          {tab === "draft" ? null : <label><span>Sort</span><select value={sort} onChange={(event) => { setSort(event.target.value as Sort); setPage(1); }}><option value="rating">Rating</option><option value="movement">Movement</option><option value="games">Games</option><option value="name">Name</option></select></label>}
+          {tab === "players" ? <label className={styles.minGames}><span>Min games</span><input type="number" min={5} max={10000} value={minGames} onChange={(event) => { setMinGames(Math.min(10000, Math.max(5, Number(event.target.value) || 5))); setPage(1); }} /></label> : null}
           {tab === "draft" && draftAuthorized ? <label className={styles.minGames}><span>Min games / picks</span><input type="number" min={5} max={10000} value={draftMinGames} onChange={(event) => setDraftMinGames(Math.min(10000, Math.max(5, Number(event.target.value) || 5)))} /></label> : null}
         </div>
         {tab === "draft" && !draftAuthorized ? null : <div className={styles.scopeRow} role="group" aria-label="Competition level">
@@ -458,7 +472,7 @@ export function SignalRatings({
       ) : featured ? (
         <>
           <section className={styles.summaryLine} aria-label="Rating summary" aria-live="polite">
-            <p><span>Ranked</span><strong>{entities.length} {tab}</strong></p>
+            <p><span>Ranked</span><strong>{serverFiltered ? total : entities.length} {tab}</strong></p>
             <p><span>Leader</span><strong>{entityName(entities[0])}</strong><small>{topScore?.toFixed(0)}</small></p>
             <p><span>Scope</span><strong>{scope}</strong></p>
           </section>
@@ -529,6 +543,7 @@ export function SignalRatings({
               })}
             </div>
             {entities.length > 18 ? <button type="button" className={styles.showAll} onClick={() => setExpanded((current) => !current)}>{expanded ? "Show first 18" : `Show all ${entities.length}`}</button> : null}
+            {serverFiltered && total > pageSize ? <nav className={styles.pagination} aria-label="Rating pages"><button type="button" disabled={page <= 1} onClick={() => { setPage((value) => Math.max(1, value - 1)); setExpanded(false); }}>Previous</button><span>Page {page} of {Math.ceil(total / pageSize)}</span><button type="button" disabled={page * pageSize >= total} onClick={() => { setPage((value) => value + 1); setExpanded(false); }}>Next</button></nav> : null}
           </section>
         </>
       ) : <section className={styles.statusState}>

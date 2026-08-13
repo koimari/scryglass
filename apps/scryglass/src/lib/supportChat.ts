@@ -285,7 +285,7 @@ export function fallbackRoute(text: string): RouteResult {
     return name ? { call: { tool: "player", args: { name } } } : { call: { tool: "leaderboards", args: { category: "rating" } } };
   }
 
-  return { explanation: "I can help with players, champions, teams, matches, ratings, draft scores, tier lists, schedules, and methodology. Try: \"what is the worst champion in general?\", \"show me T1's recent matches\", or \"how does the draft win share work?\"." };
+  return { explanation: "I can help with players, champions, teams, matches, ratings, tier lists, schedules, methodology, and Draft Score availability. Try: \"what is the worst champion in general?\", \"show me T1's recent matches\", or \"is Draft Score available?\"." };
 }
 
 /** Route a question through the deterministic, auditable query router. */

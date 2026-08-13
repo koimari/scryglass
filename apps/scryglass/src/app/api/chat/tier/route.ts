@@ -1,4 +1,6 @@
 import { chatError, chatJson, clean, readChatJson, searchParams, secureChatRoute } from "@/lib/chatApi";
+import { getTierRows, queryApiAvailable } from "@/lib/publicData";
+import { readPackManifest } from "@/lib/serverPack";
 
 export const runtime = "nodejs";
 
@@ -16,10 +18,32 @@ async function get(request: Request) {
   const params = searchParams(request);
   const role = clean(params.get("role"));
   const patch = clean(params.get("patch"));
-  const limit = Math.min(Math.max(parseInt(params.get("limit") ?? "20", 10) || 20, 1), 100);
+  const limit = Math.min(Math.max(parseInt(params.get("limit") ?? "20", 10) || 20, 1), 20);
   try {
+    const manifest = await readPackManifest(request.signal);
+    if (queryApiAvailable(manifest)) {
+      const result = await getTierRows(manifest, {
+        kind: "champion",
+        patches: patch ? [patch] : [],
+        roles: role ? [role.toLowerCase()] : [],
+        order: "rank_asc",
+        limit,
+        offset: 0,
+      }, request.signal);
+      const rows: TierRow[] = result.rows.map((row) => ({
+        champion: row.name,
+        role: row.role ?? "",
+        patch: row.patch ?? "",
+        rank: row.rank,
+        tier_bucket: typeof row.payload.tier_bucket === "string" ? row.payload.tier_bucket : "",
+        played_maps: row.played_maps,
+        movement: typeof row.payload.movement === "string" ? row.payload.movement : null,
+      }));
+      return chatJson({ patch: rows[0]?.patch ?? patch, role: role || "all", rows });
+    }
     const tier = await readChatJson<{ options: { patches: string[] }; rows: TierRow[] }>(
       "rankings/tierlists.json",
+      request.signal,
     );
     const patches = tier.options?.patches ?? [];
     const latestPatch = patch || (patches.length ? patches[patches.length - 1] : "");

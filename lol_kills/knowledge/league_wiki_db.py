@@ -265,20 +265,24 @@ _PAGE_COLUMNS = (
     "document_path, revision_path, revision_id, revision_timestamp, parent_revision_id, "
     "api_sha1, content_sha256, document_sha256, content_model, content_format"
 )
+_PAGE_VALUE_MARKERS = ",".join("?" for _ in range(17))
+_UPSERT_PAGE_SQL = (
+    f"INSERT INTO pages ({_PAGE_COLUMNS}) VALUES ({_PAGE_VALUE_MARKERS}) "  # nosec B608
+    "ON CONFLICT(page_id) DO UPDATE SET "
+    "namespace=excluded.namespace, title=excluded.title, source_url=excluded.source_url, "
+    "retrieved_at=excluded.retrieved_at, cataloged=MAX(pages.cataloged, excluded.cataloged), "
+    "has_text=MAX(pages.has_text, excluded.has_text), document_path=COALESCE(excluded.document_path, pages.document_path), "
+    "revision_path=COALESCE(excluded.revision_path, pages.revision_path), revision_id=COALESCE(excluded.revision_id, pages.revision_id), "
+    "revision_timestamp=COALESCE(excluded.revision_timestamp, pages.revision_timestamp), parent_revision_id=COALESCE(excluded.parent_revision_id, pages.parent_revision_id), "
+    "api_sha1=COALESCE(excluded.api_sha1, pages.api_sha1), content_sha256=COALESCE(excluded.content_sha256, pages.content_sha256), "
+    "document_sha256=COALESCE(excluded.document_sha256, pages.document_sha256), content_model=COALESCE(excluded.content_model, pages.content_model), "
+    "content_format=COALESCE(excluded.content_format, pages.content_format)"
+)
 
 
 def _upsert_page(connection: sqlite3.Connection, row: dict[str, Any], *, cataloged: bool, has_text: bool) -> None:
     connection.execute(
-        f"INSERT INTO pages ({_PAGE_COLUMNS}) VALUES ({','.join('?' for _ in range(17))}) "
-        "ON CONFLICT(page_id) DO UPDATE SET "
-        "namespace=excluded.namespace, title=excluded.title, source_url=excluded.source_url, "
-        "retrieved_at=excluded.retrieved_at, cataloged=MAX(pages.cataloged, excluded.cataloged), "
-        "has_text=MAX(pages.has_text, excluded.has_text), document_path=COALESCE(excluded.document_path, pages.document_path), "
-        "revision_path=COALESCE(excluded.revision_path, pages.revision_path), revision_id=COALESCE(excluded.revision_id, pages.revision_id), "
-        "revision_timestamp=COALESCE(excluded.revision_timestamp, pages.revision_timestamp), parent_revision_id=COALESCE(excluded.parent_revision_id, pages.parent_revision_id), "
-        "api_sha1=COALESCE(excluded.api_sha1, pages.api_sha1), content_sha256=COALESCE(excluded.content_sha256, pages.content_sha256), "
-        "document_sha256=COALESCE(excluded.document_sha256, pages.document_sha256), content_model=COALESCE(excluded.content_model, pages.content_model), "
-        "content_format=COALESCE(excluded.content_format, pages.content_format)",
+        _UPSERT_PAGE_SQL,
         _page_values(row, cataloged=cataloged, has_text=has_text),
     )
 

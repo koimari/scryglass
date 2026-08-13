@@ -10,7 +10,7 @@ export const CHAT_BODY_MAX_BYTES = 8 * 1024;
 export const CHAT_HANDLER_TIMEOUT_MS = 5_000;
 
 export const CHAT_CACHE_HEADERS = {
-  "Cache-Control": "public, max-age=0, s-maxage=21600, stale-while-revalidate=3600",
+  "Cache-Control": "public, max-age=0, must-revalidate",
 } as const;
 
 const NO_STORE_HEADERS = { "Cache-Control": "private, no-store" } as const;
@@ -137,7 +137,8 @@ function validateChatUrl(request: Request): NextResponse | null {
 }
 
 export function secureChatRoute(
-  handler: (request: Request) => Response | Promise<Response>,
+  handler: (request: Request, signal: AbortSignal) => Response | Promise<Response>,
+  timeoutMs = CHAT_HANDLER_TIMEOUT_MS,
 ): (request: Request) => Promise<Response> {
   return async (request: Request) => {
     const invalid = validateChatUrl(request);
@@ -145,15 +146,34 @@ export function secureChatRoute(
     const limited = rateLimitResponse(request, "chat", CHAT_RATE_LIMIT);
     if (limited) return limited;
 
+    const controller = new AbortController();
+    const signal = request.signal.aborted
+      ? request.signal
+      : AbortSignal.any([request.signal, controller.signal]);
+    const timedRequest = new Request(request, { signal });
+    let didTimeout = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    const timeoutResponse = () => chatError("The request exceeded its time budget.", 504);
     const timedOut = new Promise<Response>((resolve) => {
       timeout = setTimeout(
-        () => resolve(chatError("The request exceeded its time budget.", 504)),
-        CHAT_HANDLER_TIMEOUT_MS,
+        () => {
+          didTimeout = true;
+          controller.abort(new DOMException("Chat request time budget exceeded", "TimeoutError"));
+          resolve(timeoutResponse());
+        },
+        timeoutMs,
       );
     });
     try {
-      return await Promise.race([Promise.resolve(handler(request)), timedOut]);
+      const response = await Promise.race([Promise.resolve(handler(timedRequest, signal)), timedOut]);
+      if (didTimeout) return response.status === 504 ? response : timeoutResponse();
+      try {
+        const manifest = await readPackManifest(signal);
+        response.headers.set("X-Scryglass-Release", manifest.pack_id);
+      } catch {
+        // Preserve the route response. Readiness probes reject a missing release header.
+      }
+      return didTimeout ? timeoutResponse() : response;
     } catch {
       return chatError("The request could not be completed.", 503);
     } finally {
@@ -206,9 +226,9 @@ export async function readJsonBody(
   }
 }
 
-export async function readChatJson<T>(relativePath: string): Promise<T> {
-  const manifest = await readPackManifest();
-  return readPackJson<T>(manifest, relativePath);
+export async function readChatJson<T>(relativePath: string, signal?: AbortSignal): Promise<T> {
+  const manifest = await readPackManifest(signal);
+  return readPackJson<T>(manifest, relativePath, signal);
 }
 
 export function searchParams(request: Request): URLSearchParams {

@@ -27,6 +27,12 @@ import {
   recordMatchesLeagues,
 } from "@/lib/pack";
 import type { DraftPlayerRow, DraftRankingsScope, DraftTeamRow } from "@/lib/draftRankings";
+import {
+  getRatingFacets,
+  getRatings,
+  queryApiAvailable,
+  type RatingQueryRow,
+} from "@/lib/publicData";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 import styles from "./EloPage.module.css";
 
@@ -53,6 +59,24 @@ function selectedScopes(value: string | undefined): string[] {
   if (value === "ALL") return [];
   const scopes = value?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
   return scopes.length ? scopes : ["TIER1"];
+}
+
+function integer(value: string | undefined, fallback: number, minimum: number, maximum: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isInteger(parsed) ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
+}
+
+function querySort(value: string | undefined): "rating_desc" | "movement_desc" | "games_desc" | "name_asc" {
+  if (value === "movement") return "movement_desc";
+  if (value === "games") return "games_desc";
+  if (value === "name") return "name_asc";
+  return "rating_desc";
+}
+
+function ratingFromQuery(row: RatingQueryRow): PlayerRating | TeamRating {
+  const rating = row.payload.rating;
+  if (!rating || typeof rating !== "object") throw new Error("The public rating row has no rating payload");
+  return rating;
 }
 
 function compactTeamRating(row: TeamRating): TeamRatingView {
@@ -140,6 +164,10 @@ export default async function EloPage({ searchParams }: PageProps) {
   const manifest = await readPackManifest();
   const sourceUpdated = packSourceUpdatedLabel(manifest);
   const draftAuthorized = hasPromotedDraftAuthority(manifest);
+  const boundedQueries = queryApiAvailable(manifest);
+  const page = integer(first(query.page), 1, 1, 101);
+  const pageSize = 100;
+  let total = 0;
 
   let teams: TeamRatingView[] = [];
   let players: PlayerRatingView[] = [];
@@ -152,11 +180,46 @@ export default async function EloPage({ searchParams }: PageProps) {
   let draftEvidenceGames: number | null = null;
 
   let allTeamRecords: Record<string, TeamRecord> = {};
+  let availableLeaguesByTier: Record<CompetitionTier, string[]> | null = null;
 
-  if (tab === "teams") {
+  if (tab === "teams" && boundedQueries) {
+    const selectedTiers = scopes.filter((scope) => scope.startsWith("TIER"));
+    const selectedLeagues = scopes.filter((scope) => !scope.startsWith("TIER"));
+    const [result, tier1, tier2, tier3] = await Promise.all([
+      getRatings(manifest, {
+        kind: "teams",
+        leagues: selectedLeagues,
+        tiers: selectedTiers.map((tier) => tier.toLowerCase()),
+        active: true,
+        search: first(query.q),
+        order: querySort(first(query.sort)),
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+      }),
+      getRatingFacets(manifest, "teams", ["tier1"]),
+      getRatingFacets(manifest, "teams", ["tier2"]),
+      getRatingFacets(manifest, "teams", ["tier3"]),
+    ]);
+    total = result.total;
+    teams = result.rows.map((row) => compactTeamRating(ratingFromQuery(row) as TeamRating));
+    teamRecords = Object.fromEntries(result.rows.flatMap((row) => {
+      const record = row.payload.record as TeamRecord | undefined;
+      return record ? [[row.name, compactTeamRecord(record)] as const] : [];
+    }));
+    movementByName = Object.fromEntries(result.rows.map((row) => [row.name, row.movement]));
+    allTeamRecords = Object.fromEntries(result.rows.flatMap((row) => {
+      const record = row.payload.record as TeamRecord | undefined;
+      return record ? [[row.name, record] as const] : [];
+    }));
+    availableLeaguesByTier = {
+      tier1: tier1.leagues,
+      tier2: tier2.leagues,
+      tier3: tier3.leagues,
+    };
+  } else if (tab === "teams") {
     const [ratingRows, records, ranks] = await Promise.all([
       readPackJson<TeamRating[]>(manifest, "features/ratings_snapshot.json"),
-      readPackJson<Record<string, TeamRecord>>(manifest, "features/team_records.json").catch(() => ({})),
+      readPackJson<Record<string, TeamRecord>>(manifest, "features/team_records.json"),
       readPackJson<TeamWeeklyRanks>(manifest, "features/team_weekly_ranks.json").catch(() => null),
     ]);
     allTeamRecords = records;
@@ -171,13 +234,46 @@ export default async function EloPage({ searchParams }: PageProps) {
         return delta == null ? [] : [[team.team, delta] as const];
       }));
     }
+    total = teams.length;
   }
 
-  if (tab === "players") {
+  if (tab === "players" && boundedQueries) {
+    const selectedTiers = scopes.filter((scope) => scope.startsWith("TIER"));
+    const selectedLeagues = scopes.filter((scope) => !scope.startsWith("TIER"));
+    const [result, tier1, tier2, tier3] = await Promise.all([
+      getRatings(manifest, {
+        kind: "players",
+        leagues: selectedLeagues,
+        tiers: selectedTiers.map((tier) => tier.toLowerCase()),
+        roles: first(query.role) ? [first(query.role)!] : [],
+        active: true,
+        search: first(query.q),
+        order: querySort(first(query.sort)),
+        minGames: integer(first(query.min), 20, 5, 10_000),
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+      }),
+      getRatingFacets(manifest, "players", ["tier1"]),
+      getRatingFacets(manifest, "players", ["tier2"]),
+      getRatingFacets(manifest, "players", ["tier3"]),
+    ]);
+    total = result.total;
+    players = result.rows.map((row) => compactPlayerRating(ratingFromQuery(row) as PlayerRating));
+    playerRecords = Object.fromEntries(result.rows.flatMap((row) => {
+      const record = row.payload.record as PlayerRecord | undefined;
+      return record ? [[row.name, compactPlayerRecord(record)] as const] : [];
+    }));
+    movementByName = Object.fromEntries(result.rows.map((row) => [row.name, row.movement]));
+    availableLeaguesByTier = {
+      tier1: tier1.leagues,
+      tier2: tier2.leagues,
+      tier3: tier3.leagues,
+    };
+  } else if (tab === "players") {
     const [ratingRows, allPlayerRecords, records, ranks] = await Promise.all([
       readPackJson<PlayerRating[]>(manifest, "features/player_ratings_snapshot.json"),
-      readPackJson<Record<string, PlayerRecord>>(manifest, "features/player_records.json").catch(() => ({})),
-      readPackJson<Record<string, TeamRecord>>(manifest, "features/team_records.json").catch(() => ({})),
+      readPackJson<Record<string, PlayerRecord>>(manifest, "features/player_records.json"),
+      readPackJson<Record<string, TeamRecord>>(manifest, "features/team_records.json"),
       readPackJson<PlayerWeeklyRanks>(manifest, "features/player_weekly_ranks.json").catch(() => null),
     ]);
     allTeamRecords = records;
@@ -193,6 +289,7 @@ export default async function EloPage({ searchParams }: PageProps) {
         return rank?.delta == null ? [] : [[player.player, rank.delta] as const];
       }));
     }
+    total = players.length;
   }
 
   if (tab === "draft" && draftAuthorized) {
@@ -202,7 +299,7 @@ export default async function EloPage({ searchParams }: PageProps) {
           manifest,
           "features/leaderboards.json",
         ),
-        readPackJson<Record<string, TeamRecord>>(manifest, "features/team_records.json").catch(() => ({})),
+        readPackJson<Record<string, TeamRecord>>(manifest, "features/team_records.json"),
       ]);
       allTeamRecords = records;
       draftTeams = leaderboards.teams_draft ?? [];
@@ -256,7 +353,11 @@ export default async function EloPage({ searchParams }: PageProps) {
         teamRecords={teamRecords}
         playerRecords={playerRecords}
         movementByName={movementByName}
-        availableLeaguesByTier={availableLeagues(allTeamRecords)}
+        availableLeaguesByTier={availableLeaguesByTier ?? availableLeagues(allTeamRecords)}
+        total={total}
+        initialPage={page}
+        pageSize={pageSize}
+        serverFiltered={boundedQueries && tab !== "draft"}
       />
     </div>
   );

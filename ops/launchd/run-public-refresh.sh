@@ -16,6 +16,7 @@ repo_root="${worker_root}/repo"
 public_root="${worker_root}/public-packs"
 runtime_root="${worker_root}/runtime"
 python="${worker_root}/venv/bin/python"
+"${repo_root}/ops/verify-public-refresh-env.sh" "${repo_root}" "${worker_root}/venv"
 oe_inbox="${worker_root}/oe-inbox"
 cycle_id="$("${python}" -c 'from datetime import datetime; now=datetime.now(); print(f"{now:%Y%m%d}T{now.hour // 6 * 6:02d}0000")')"
 run_root="${runtime_root}/data/lol/runtime/cycles/${cycle_id}"
@@ -62,6 +63,12 @@ export SCRYGLASS_DATA_PUBLISH_TOKEN="$(
     -s scryglass-data-publish-token \
     -w
 )"
+export SCRYGLASS_DIAGNOSTIC_TOKEN="$(
+  /usr/bin/security find-generic-password \
+    -a scryglass-public-worker \
+    -s scryglass-diagnostic-token \
+    -w
+)"
 
 mkdir -p "${public_root}" "${worker_root}/logs" "${oe_inbox}" "${run_root}"
 if ! /usr/bin/shlock -p "$$" -f "${worker_lock}"; then
@@ -77,7 +84,6 @@ export SCRYGLASS_ACCEPTED_IMPORT_RECEIPT="${import_receipt}"
 
 /usr/bin/git -C "${repo_root}" archive HEAD \
   data/lol/v2 \
-  apps/scryglass/public/rankings/tierlists.json \
   | /usr/bin/tar -x -C "${runtime_root}"
 
 resume_cycle=0

@@ -38,6 +38,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
+from lol_kills.net import require_https_url
+
 
 API_URL = "https://wiki.leagueoflegends.com/en-us/api.php"
 SOURCE_URL = "https://wiki.leagueoflegends.com/en-us/"
@@ -121,8 +123,11 @@ def _append_jsonl(path: Path, value: Any) -> None:
 
 def _api_request(params: dict[str, Any], *, retries: int = 4) -> dict[str, Any]:
     query = urlencode({key: str(value) for key, value in params.items()})
+    url = require_https_url(
+        f"{API_URL}?{query}", hosts={"wiki.leagueoflegends.com"}
+    )
     request = Request(
-        f"{API_URL}?{query}",
+        url,
         headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
     )
     last_error: Exception | None = None

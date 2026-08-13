@@ -41,6 +41,10 @@ from lol_kills.export.public_schedule import (
     build_public_schedule,
     validate_public_schedule,
 )
+from lol_kills.export.public_query_projection import (
+    build_public_query_projection,
+    write_public_query_projection,
+)
 from lol_kills.etl.competition import TAXONOMY_VERSION, canonicalize_competition_frame, competition_tier
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.refresh_ledger import worker_commit as resolve_worker_commit
@@ -1518,38 +1522,28 @@ def export_public_pack(
             "year": archive_year,
             "games": year_games,
         }
-        # Whole-archive match records are split into calendar quarters so
-        # every published object stays under the Supabase storage size limit
-        # (~50 MiB); the site resolves the quarter from the game date.
         quarters: dict[int, dict[str, Any]] = {}
         for game_id, game in year_games.items():
             month = int(str(game.get("date") or "")[5:7] or 0)
             quarter = ((month - 1) // 3) + 1
             bucket = quarters.setdefault(
                 quarter,
-                {
-                    "schema_version": archive_payload["schema_version"],
-                    "year": archive_year,
-                    "games": {},
-                },
+                {"schema_version": archive_payload["schema_version"], "year": archive_year, "games": {}},
             )
             bucket["games"][game_id] = game
         for quarter in (1, 2, 3, 4):
-            if quarter not in quarters:
-                quarters[quarter] = {
-                    "schema_version": archive_payload["schema_version"],
-                    "year": archive_year,
-                    "games": {},
-                }
-        for quarter in sorted(quarters):
+            bucket = quarters.setdefault(
+                quarter,
+                {"schema_version": archive_payload["schema_version"], "year": archive_year, "games": {}},
+            )
             archive_dest = feat_dir / f"match_records_{archive_year}_q{quarter}.json"
             archive_dest.write_text(
-                json.dumps(quarters[quarter], separators=(",", ":"), ensure_ascii=False),
+                json.dumps(bucket, separators=(",", ":"), ensure_ascii=False),
                 encoding="utf-8",
             )
             register(
                 {
-                    "rows": len(quarters[quarter]["games"]),
+                    "rows": len(bucket["games"]),
                     "cols": None,
                     "bytes": archive_dest.stat().st_size,
                     "sha256": _sha256(archive_dest),
@@ -1557,8 +1551,6 @@ def export_public_pack(
                 },
                 f"features/match_records_{archive_year}_q{quarter}.json",
             )
-    del archive_games
-
     for src_name, cols, out_name in (
         ("ratings_snapshot.parquet", spec.RATINGS_SNAPSHOT_COLS, "ratings_snapshot.json"),
         (
@@ -1635,6 +1627,24 @@ def export_public_pack(
     except (OSError, ValueError, TypeError, KeyError) as error:
         raise RuntimeError("support-chat leaderboards could not be built") from error
 
+    progress("building bounded public query projection")
+    query_projection = build_public_query_projection(
+        release_id=pack_id,
+        player_ratings=player_rating_rows,
+        team_ratings=team_rating_rows,
+        player_records=player_records_payload,
+        team_records=team_records_payload,
+        player_champion_records=player_champions_payload,
+        profile_records=profile_records_payload,
+        archive_games=archive_games,
+        player_weekly_ranks=weekly_ranks,
+        team_weekly_ranks=team_weekly_ranks,
+        player_metadata=player_metadata,
+        leaderboards=leaderboards,
+    )
+    query_api_manifest = write_public_query_projection(query_projection, pack_dir)
+    del archive_games, query_projection
+
     present_paths = {str(item["path"]) for item in files_meta}
     missing_public_files = sorted(
         set(spec.PUBLIC_RATING_REQUIRED_FILES) - present_paths
@@ -1706,6 +1716,7 @@ def export_public_pack(
             "issued_utc": None,
             "reason": "model_not_promoted",
         },
+        "query_api": query_api_manifest,
         "excluded": [
             "raw game rows",
             "research studies",

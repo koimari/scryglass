@@ -3,6 +3,7 @@ import { evidenceFields, evidenceInfo, formatEvidenceCell } from "@/lib/evidence
 import {
   adjustedRating,
   formatWr,
+  hasPromotedDraftAuthority,
   packUpdatedLabel,
   PLAYER_SIGMA_MIN,
   playerSlug,
@@ -229,6 +230,7 @@ export function TeamRatingProfile({
   manifest: PackManifest;
   draftMetric?: TeamDraftMetric | null;
 }) {
+  const draftAuthorized = hasPromotedDraftAuthority(manifest);
   const trust = evidenceInfo(evidenceFields(team as unknown as Record<string, unknown>), team.sigma, record?.games);
   const players = [...roster].sort((a, b) => {
     return ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role);
@@ -272,9 +274,9 @@ export function TeamRatingProfile({
         <div>
           <dt>Draft score</dt>
           <dd title="Average published draft win share from the team's scored drafts">
-            {draftMetric ? `${Math.round(draftMetric.draftWinShare * 100)}%` : "—"}
+            {draftAuthorized ? (draftMetric ? `${Math.round(draftMetric.draftWinShare * 100)}%` : "—") : "Unavailable"}
+            <small>{draftAuthorized ? (draftMetric ? `${draftMetric.games} games · ${draftMetric.scope === "whole_archive" ? "whole archive" : "profile window"}` : "Published draft evidence unavailable") : "Promotion receipt required"}</small>
           </dd>
-          <small>{draftMetric ? `${draftMetric.games} games · ${draftMetric.scope === "whole_archive" ? "whole archive" : "profile window"}` : "Published draft evidence unavailable"}</small>
         </div>
         <div><dt>Updated</dt><dd>{packUpdatedLabel(manifest)}</dd></div>
       </dl>
@@ -599,6 +601,7 @@ export function PlayerRatingProfile({
   manifest: PackManifest;
   draftMetric?: PlayerDraftMetric | null;
 }) {
+  const draftAuthorized = hasPromotedDraftAuthority(manifest);
   const trust = evidenceInfo(evidenceFields(player as unknown as Record<string, unknown>), player.sigma, player.n_maps);
   const currentTeam = record?.current_team ?? player.last_team;
   const role = roleLabel(record?.primary_role);
@@ -660,9 +663,9 @@ export function PlayerRatingProfile({
         <div>
           <dt>Draft score</dt>
           <dd title="Best-available rate: share of evaluated picks that were the highest-ranked unbanned champion available for the role">
-            {draftMetric ? `${Math.round(draftMetric.bestAvailableRate * 100)}%` : "—"}
+            {draftAuthorized ? (draftMetric ? `${Math.round(draftMetric.bestAvailableRate * 100)}%` : "—") : "Unavailable"}
+            <small>{draftAuthorized ? (draftMetric ? `${draftMetric.games} evaluated picks · best-available rate · ${draftMetric.scope === "whole_archive" ? "whole archive" : "profile window"}` : "Published best-available evidence unavailable") : "Promotion receipt required"}</small>
           </dd>
-          <small>{draftMetric ? `${draftMetric.games} evaluated picks · best-available rate · ${draftMetric.scope === "whole_archive" ? "whole archive" : "profile window"}` : "Published best-available evidence unavailable"}</small>
         </div>
         <div><dt>Updated</dt><dd>{packUpdatedLabel(manifest)}</dd></div>
       </dl>

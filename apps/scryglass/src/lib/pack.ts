@@ -82,6 +82,22 @@ export type PackManifest = {
     issued_utc?: string | null;
     reason?: string | null;
   };
+  query_api?: {
+    schema_version?: "scryglass:query-api:v1";
+    status?: "available" | "unavailable";
+    projection?: {
+      path?: string;
+      bytes?: number;
+      sha256?: string;
+    };
+    datasets?: Record<string, {
+      schema_version?: string;
+      dataset?: string;
+      rows?: number;
+      bytes?: number;
+      sha256?: string;
+    }>;
+  };
   ratings?: {
     source_mode?: string;
     source_as_of?: string;
@@ -513,8 +529,14 @@ export async function loadManifest(origin = ""): Promise<PackManifest> {
 }
 
 export function packUrl(manifest: PackManifest, relativePath: string): string {
-  const base = (manifest.base_url || `/packs/${manifest.pack_id}`).replace(/\/$/, "");
-  return `${base}/${relativePath.replace(/^\//, "")}`;
+  const clean = relativePath.replace(/^\/+/, "");
+  if (!clean || clean.split("/").some((part) => !part || part === "." || part === "..")) {
+    throw new Error("pack path is invalid");
+  }
+  if (manifest.data_backend === "supabase") {
+    return `/api/assets/${encodeURIComponent(manifest.pack_id)}/${encodeURIComponent(clean)}`;
+  }
+  return `/packs/${encodeURIComponent(manifest.pack_id)}/${clean}`;
 }
 
 /** logit = a + b*(mu_diff/400); p = sigmoid(logit) for favorite when mu_diff>0 vs even foe */
@@ -563,14 +585,10 @@ export function findRecordByName<T>(
 
 /** Draft results stay private until an independent, release-bound receipt is published. */
 export function hasPromotedDraftAuthority(manifest: PackManifest): boolean {
-  const authority = manifest.draft_authority;
-  return authority?.schema_version === "scryglass:draft-authority:v1"
-    && authority.status === "promoted"
-    && authority.release_id === manifest.pack_id
-    && typeof authority.model_version === "string"
-    && authority.model_version.trim().length > 0
-    && typeof authority.receipt_sha256 === "string"
-    && /^[a-f0-9]{64}$/i.test(authority.receipt_sha256);
+  // The current release contract has no independent receipt verifier. Keep
+  // every draft surface closed until that verifier and its issuer exist.
+  void manifest;
+  return false;
 }
 
 export function packUpdatedLabel(manifest: PackManifest): string {

@@ -31,6 +31,7 @@ from lol_kills.etl.manual_leaguepedia import (
     score_frozen,
     verify_run,
 )
+from lol_kills.net import require_https_url
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -103,6 +104,7 @@ def _cargo_url(tables: str, fields: str, where: str, *, limit: int = 500) -> str
 
 
 def _fetch(url: str) -> bytes:
+    url = require_https_url(url, hosts={"lol.fandom.com"})
     request = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(request, timeout=120) as response:
         return response.read()

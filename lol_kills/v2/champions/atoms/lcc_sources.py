@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -93,11 +94,17 @@ class LccSources:
 
     def _git_head(self) -> str | None:
         try:
-            proc = os.popen(f"git -C {self.repo} rev-parse HEAD 2>/dev/null")
-            out = proc.read().strip()
-            proc.close()
-            return out or None
-        except Exception:  # noqa: BLE001
+            completed = subprocess.run(
+                ["git", "-C", str(self.repo), "rev-parse", "HEAD"],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=5,
+            )
+            out = completed.stdout.strip()
+            return out if completed.returncode == 0 and out else None
+        except (OSError, subprocess.SubprocessError):
             return None
 
     def source_provenance(self) -> dict[str, Any]:

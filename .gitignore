@@ -47,6 +47,8 @@ data/lol/odds_journal.parquet
 **/*.joblib
 **/*.parquet
 !apps/scryglass/public/packs/**/*.parquet
+apps/scryglass/public/packs/v*/
+apps/scryglass/public/live/
 
 # Local scratch
 tmp/

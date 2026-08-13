@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(url, {
       status: 307,
       headers: {
-        "Cache-Control": "public, max-age=0, s-maxage=21600, stale-while-revalidate=3600",
+        "Cache-Control": "public, max-age=0, must-revalidate",
       },
     });
   } catch {

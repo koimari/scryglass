@@ -211,6 +211,8 @@
 }
 .statBand dd { font-size: 1.05rem; }
 .statBand small {
+  display: block;
+  margin-top: 0.25rem;
   color: var(--ink-muted);
   font-size: 0.72rem;
   line-height: 1.35;

@@ -9,7 +9,10 @@ async function get(request: Request) {
   const secondName = clean(params.get("player2"));
   if (!firstName || !secondName) return chatError("Two player names are required.", 422);
 
-  const [first, second] = await Promise.all([lookupPlayer(firstName), lookupPlayer(secondName)]);
+  const [first, second] = await Promise.all([
+    lookupPlayer(firstName, request.signal),
+    lookupPlayer(secondName, request.signal),
+  ]);
   if (!first || !second) return chatError("A matching player was not found.");
 
   const comparable = first.rating != null && second.rating != null;

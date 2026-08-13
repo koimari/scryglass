@@ -1,11 +1,16 @@
-/** Support-chat data layer: resolves leaderboards/player/team lookups from the
- * ACTIVE release with graceful fallbacks. The precomputed leaderboards.json
- * artifact is preferred; when it is absent (older releases), the data is
- * computed on the fly from the always-present public assets
- * (profile_records, player_ratings_snapshot, player_records, team_records,
- * ratings_snapshot, match_index). */
+/** Support-chat data layer. Active query-API releases use bounded RPCs. Older
+ * rollout releases keep the immutable asset reader as a temporary fallback. */
 
 import { readChatJson } from "@/lib/chatApi";
+import {
+  getMatches,
+  getRatings,
+  getTeamProfile,
+  queryApiAvailable,
+  type MatchQueryRow,
+  type RatingQueryRow,
+} from "@/lib/publicData";
+import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 export type LeaderboardRow = {
   name: string;
@@ -30,7 +35,15 @@ type ProfileStats = {
   leagueByPlayer: Map<string, string>;
 };
 
-let profileStatsPromise: Promise<ProfileStats> | null = null;
+type ProfileStatsGame = {
+  players: Array<{
+    player?: string;
+    role?: string;
+    grade?: { status?: string; grade?: string };
+  }>;
+};
+
+let profileStatsCache: { releaseId: string; promise: Promise<ProfileStats> } | null = null;
 
 function roleKey(role: string | null | undefined): string | null {
   const value = String(role ?? "").trim().toLowerCase();
@@ -42,52 +55,96 @@ function roleKey(role: string | null | undefined): string | null {
   return value || null;
 }
 
-async function scanProfileStats(): Promise<ProfileStats> {
-  if (!profileStatsPromise) {
-    type ProfileGame = { players: Array<{ player?: string; role?: string; grade?: { status?: string; grade?: string } }> };
-    profileStatsPromise = readChatJson<{ games: Record<string, ProfileGame> }>("features/profile_records.json")
-      .then((payload) => {
-        const roleByPlayer = new Map<string, string>();
-        const gradeAByPlayer = new Map<string, number>();
-        const gradeGamesByPlayer = new Map<string, number>();
-        const teamByPlayer = new Map<string, string>();
-        const leagueByPlayer = new Map<string, string>();
-        const roleCounts = new Map<string, Map<string, number>>();
-        for (const game of Object.values(payload.games ?? {})) {
-          for (const player of game.players ?? []) {
-            const name = String(player.player ?? "").trim();
-            if (!name) continue;
-            const role = roleKey(player.role);
-            if (role) {
-              const counts = roleCounts.get(name) ?? new Map<string, number>();
-              counts.set(role, (counts.get(role) ?? 0) + 1);
-              roleCounts.set(name, counts);
-            }
-            const grade = player.grade;
-            if (grade?.status === "available" && typeof grade.grade === "string") {
-              gradeGamesByPlayer.set(name, (gradeGamesByPlayer.get(name) ?? 0) + 1);
-              if (grade.grade.toUpperCase() === "A") {
-                gradeAByPlayer.set(name, (gradeAByPlayer.get(name) ?? 0) + 1);
-              }
-            }
-          }
+function boundedLimit(limit: number): number {
+  return Math.min(Math.max(Number.isInteger(limit) ? limit : 10, 1), 20);
+}
+
+function rowFromQueryApi(row: RatingQueryRow): LeaderboardRow {
+  return {
+    name: row.name,
+    rating: typeof row.rating === "number" ? row.rating : null,
+    role: roleKey(row.role),
+    team: row.team,
+    league: row.league,
+    tier: row.tier,
+    games: Number(row.games) || 0,
+    wins: typeof row.wins === "number" ? row.wins : null,
+    win_rate: typeof row.win_rate === "number" ? row.win_rate : null,
+    grade_a_games: Number(row.grade_a_games ?? row.payload?.grade_a_games ?? 0) || 0,
+    grade_games: Number(row.grade_games ?? row.payload?.grade_games ?? 0) || 0,
+    recent_form: typeof row.payload?.recent_form === "number" ? row.payload.recent_form : null,
+  };
+}
+
+function matchFromQueryApi(row: MatchQueryRow): ChatMatch {
+  return {
+    game_id: row.game_id,
+    date: row.played_at,
+    league: row.league ?? "",
+    blue_team: row.blue_team,
+    red_team: row.red_team,
+    blue_win: row.blue_win,
+    champions: row.champions,
+  };
+}
+
+function profileStatsFromPayload(payload: { games: Record<string, ProfileStatsGame> }): ProfileStats {
+  const roleByPlayer = new Map<string, string>();
+  const gradeAByPlayer = new Map<string, number>();
+  const gradeGamesByPlayer = new Map<string, number>();
+  const teamByPlayer = new Map<string, string>();
+  const leagueByPlayer = new Map<string, string>();
+  const roleCounts = new Map<string, Map<string, number>>();
+  for (const game of Object.values(payload.games ?? {})) {
+    for (const player of game.players ?? []) {
+      const name = String(player.player ?? "").trim();
+      if (!name) continue;
+      const role = roleKey(player.role);
+      if (role) {
+        const counts = roleCounts.get(name) ?? new Map<string, number>();
+        counts.set(role, (counts.get(role) ?? 0) + 1);
+        roleCounts.set(name, counts);
+      }
+      const grade = player.grade;
+      if (grade?.status === "available" && typeof grade.grade === "string") {
+        gradeGamesByPlayer.set(name, (gradeGamesByPlayer.get(name) ?? 0) + 1);
+        if (grade.grade.toUpperCase() === "A") {
+          gradeAByPlayer.set(name, (gradeAByPlayer.get(name) ?? 0) + 1);
         }
-        for (const [name, counts] of roleCounts) {
-          let best = "";
-          let bestCount = 0;
-          for (const [role, count] of counts) {
-            if (count > bestCount) {
-              best = role;
-              bestCount = count;
-            }
-          }
-          if (best) roleByPlayer.set(name, best);
-        }
-        return { roleByPlayer, gradeAByPlayer, gradeGamesByPlayer, teamByPlayer, leagueByPlayer };
-      })
-      .catch(() => ({ roleByPlayer: new Map(), gradeAByPlayer: new Map(), gradeGamesByPlayer: new Map(), teamByPlayer: new Map(), leagueByPlayer: new Map() }));
+      }
+    }
   }
-  return profileStatsPromise;
+  for (const [name, counts] of roleCounts) {
+    let best = "";
+    let bestCount = 0;
+    for (const [role, count] of counts) {
+      if (count > bestCount) {
+        best = role;
+        bestCount = count;
+      }
+    }
+    if (best) roleByPlayer.set(name, best);
+  }
+  return { roleByPlayer, gradeAByPlayer, gradeGamesByPlayer, teamByPlayer, leagueByPlayer };
+}
+
+async function scanProfileStats(signal?: AbortSignal): Promise<ProfileStats> {
+  const manifest = await readPackManifest(signal);
+  const load = () => readPackJson<{ games: Record<string, ProfileStatsGame> }>(
+    manifest,
+    "features/profile_records.json",
+    signal,
+  ).then(profileStatsFromPayload);
+  if (signal) return load();
+  if (profileStatsCache?.releaseId !== manifest.pack_id) {
+    const releaseId = manifest.pack_id;
+    const promise = load().catch((error) => {
+      if (profileStatsCache?.releaseId === releaseId) profileStatsCache = null;
+      throw error;
+    });
+    profileStatsCache = { releaseId, promise };
+  }
+  return profileStatsCache.promise;
 }
 
 type RatingsSnapshot = Array<{
@@ -117,22 +174,47 @@ export function findPlayerRecord(records: PlayerRecords, name: string): PlayerRe
   return matchingKey ? records[matchingKey] : {};
 }
 
-async function loadPlayerRatings(): Promise<RatingsSnapshot> {
-  return readChatJson<RatingsSnapshot>("features/player_ratings_snapshot.json").catch(() => []);
+async function loadPlayerRatings(signal?: AbortSignal): Promise<RatingsSnapshot> {
+  return readChatJson<RatingsSnapshot>("features/player_ratings_snapshot.json", signal);
 }
 
-async function loadPlayerRecords(): Promise<PlayerRecords> {
-  return readChatJson<PlayerRecords>("features/player_records.json").catch(() => ({}));
+async function loadPlayerRecords(signal?: AbortSignal): Promise<PlayerRecords> {
+  return readChatJson<PlayerRecords>("features/player_records.json", signal);
 }
 
-export async function leaderboardRows(category: string, role: string | null, limit: number, tier: string | null = null): Promise<LeaderboardRow[]> {
+export async function leaderboardRows(
+  category: string,
+  role: string | null,
+  limit: number,
+  tier: string | null = null,
+  signal?: AbortSignal,
+): Promise<LeaderboardRow[]> {
+  const manifest = await readPackManifest(signal);
+  if (queryApiAvailable(manifest)) {
+    const safeLimit = boundedLimit(limit);
+    const response = await getRatings(manifest, {
+      kind: category === "teams" ? "teams" : "players",
+      tiers: tier ? [tier.toLowerCase()] : [],
+      roles: role && category !== "teams" ? [roleKey(role) ?? role] : [],
+      active: true,
+      order: category === "a_grades"
+        ? "grade_a_desc"
+        : category === "win_rate"
+          ? "win_rate_desc"
+          : "rating_desc",
+      minGames: category === "win_rate" ? 10 : 0,
+      limit: safeLimit,
+      offset: 0,
+    }, signal);
+    return response.rows.map(rowFromQueryApi).slice(0, safeLimit);
+  }
   // Preferred: the precomputed artifact.
   try {
     const payload = await readChatJson<{
       top?: Record<string, unknown[]>;
       teams?: Array<Record<string, unknown>>;
       indexes?: { players?: Record<string, unknown>; teams?: Record<string, unknown> };
-    }>("features/leaderboards.json");
+    }>("features/leaderboards.json", signal);
     const rows = category === "teams"
       ? (payload.teams ?? [])
       : category === "a_grades"
@@ -161,8 +243,8 @@ export async function leaderboardRows(category: string, role: string | null, lim
     // Fallback: compute from the always-present assets.
     if (category === "teams") {
       const [ratings, records] = await Promise.all([
-        readChatJson<TeamRatingsSnapshot>("features/ratings_snapshot.json").catch(() => []),
-        readChatJson<TeamRecords>("features/team_records.json").catch(() => ({}) as TeamRecords),
+        readChatJson<TeamRatingsSnapshot>("features/ratings_snapshot.json", signal),
+        readChatJson<TeamRecords>("features/team_records.json", signal),
       ]);
       return ratings
         .map((entry) => {
@@ -188,9 +270,9 @@ export async function leaderboardRows(category: string, role: string | null, lim
         .slice(0, limit);
     }
     const [ratings, records, stats] = await Promise.all([
-      loadPlayerRatings(),
-      loadPlayerRecords(),
-      scanProfileStats(),
+      loadPlayerRatings(signal),
+      loadPlayerRecords(signal),
+      scanProfileStats(signal),
     ]);
     const rows: LeaderboardRow[] = ratings.map((entry) => {
       const name = String(entry.player ?? "");
@@ -224,10 +306,20 @@ export async function leaderboardRows(category: string, role: string | null, lim
   }
 }
 
-export async function lookupPlayer(name: string): Promise<LeaderboardRow | null> {
+export async function lookupPlayer(name: string, signal?: AbortSignal): Promise<LeaderboardRow | null> {
+  const manifest = await readPackManifest(signal);
+  if (queryApiAvailable(manifest)) {
+    const result = await getRatings(manifest, {
+      kind: "players",
+      names: [name],
+      limit: 1,
+      offset: 0,
+    }, signal);
+    return result.rows[0] ? rowFromQueryApi(result.rows[0]) : null;
+  }
   const lower = name.trim().toLowerCase();
   try {
-    const payload = await readChatJson<{ players?: Record<string, LeaderboardRow & { player?: string }> }>("features/leaderboards.json");
+    const payload = await readChatJson<{ players?: Record<string, LeaderboardRow & { player?: string }> }>("features/leaderboards.json", signal);
     const players = payload.players ?? {};
     const key = Object.keys(players).find((candidate) => candidate.toLowerCase() === lower)
       ?? Object.keys(players).find((candidate) => candidate.toLowerCase().includes(lower));
@@ -237,7 +329,11 @@ export async function lookupPlayer(name: string): Promise<LeaderboardRow | null>
     }
     return null;
   } catch {
-    const [ratings, records, stats] = await Promise.all([loadPlayerRatings(), loadPlayerRecords(), scanProfileStats()]);
+    const [ratings, records, stats] = await Promise.all([
+      loadPlayerRatings(signal),
+      loadPlayerRecords(signal),
+      scanProfileStats(signal),
+    ]);
     const entry = ratings.find((item) => String(item.player ?? "").toLowerCase() === lower)
       ?? ratings.find((item) => String(item.player ?? "").toLowerCase().includes(lower));
     if (!entry) return null;
@@ -282,13 +378,29 @@ export type ChatMatch = {
   champions: string[];
 };
 
-export async function loadChatMatches(): Promise<ChatMatch[]> {
+export async function loadChatMatches(input: {
+  team?: string;
+  league?: string;
+  champion?: string;
+  limit?: number;
+} = {}, signal?: AbortSignal): Promise<ChatMatch[]> {
+  const manifest = await readPackManifest(signal);
+  if (queryApiAvailable(manifest)) {
+    const response = await getMatches(manifest, {
+      team: input.team,
+      champion: input.champion,
+      leagues: input.league ? [input.league] : [],
+      limit: boundedLimit(input.limit ?? 20),
+      offset: 0,
+    }, signal);
+    return response.rows.map(matchFromQueryApi);
+  }
   try {
-    const index = await readChatJson<{ games: ChatMatch[] }>("features/match_index.json");
+    const index = await readChatJson<{ games: ChatMatch[] }>("features/match_index.json", signal);
     return index.games ?? [];
   } catch {
     type ProfileGame = Omit<ChatMatch, "champions"> & { players?: Array<{ champion?: string }> };
-    const profiles = await readChatJson<{ games: Record<string, ProfileGame> }>("features/profile_records.json");
+    const profiles = await readChatJson<{ games: Record<string, ProfileGame> }>("features/profile_records.json", signal);
     return Object.values(profiles.games ?? {}).map((game) => ({
       game_id: String(game.game_id ?? ""),
       date: String(game.date ?? ""),
@@ -312,10 +424,36 @@ export function filterChatMatchesByTeam(games: ChatMatch[], query: string): Chat
   );
 }
 
-export async function lookupTeam(name: string): Promise<TeamLookup | null> {
+export async function lookupTeam(name: string, signal?: AbortSignal): Promise<TeamLookup | null> {
+  const manifest = await readPackManifest(signal);
+  if (queryApiAvailable(manifest)) {
+    const profile = await getTeamProfile(manifest, name, signal);
+    if (!profile.row) return null;
+    const row = profile.row;
+    const team = row.name;
+    const recent = profile.recent_games.slice(0, 5).map((game) => {
+      const isBlue = game.blue_team.toLowerCase() === team.toLowerCase();
+      return {
+        date: game.played_at,
+        opponent: isBlue ? game.red_team : game.blue_team,
+        side: isBlue ? "Blue" : "Red",
+        won: isBlue ? game.blue_win === 1 : game.blue_win === 0,
+        game_id: game.game_id,
+      };
+    });
+    return {
+      team,
+      rating: typeof row.rating === "number" ? row.rating : null,
+      league: row.league,
+      games: Number(row.games) || 0,
+      wins: typeof row.wins === "number" ? row.wins : null,
+      win_rate: typeof row.win_rate === "number" ? row.win_rate : null,
+      recent,
+    };
+  }
   const lower = name.trim().toLowerCase();
   try {
-    const payload = await readChatJson<{ teams?: Array<Record<string, unknown>> }>("features/leaderboards.json");
+    const payload = await readChatJson<{ teams?: Array<Record<string, unknown>> }>("features/leaderboards.json", signal);
     const team = (payload.teams ?? []).find((entry) => String(entry.team ?? "").toLowerCase() === lower)
       ?? (payload.teams ?? []).find((entry) => String(entry.team ?? "").toLowerCase().includes(lower));
     if (team) {
@@ -332,9 +470,9 @@ export async function lookupTeam(name: string): Promise<TeamLookup | null> {
     return null;
   } catch {
     const [ratings, records, matchGames] = await Promise.all([
-      readChatJson<TeamRatingsSnapshot>("features/ratings_snapshot.json").catch(() => []),
-      readChatJson<TeamRecords>("features/team_records.json").catch(() => ({}) as TeamRecords),
-      loadChatMatches().catch(() => []),
+      readChatJson<TeamRatingsSnapshot>("features/ratings_snapshot.json", signal),
+      readChatJson<TeamRecords>("features/team_records.json", signal),
+      loadChatMatches({}, signal),
     ]);
     const ratingEntry = ratings.find((entry) => String(entry.team ?? "").toLowerCase() === lower)
       ?? ratings.find((entry) => String(entry.team ?? "").toLowerCase().includes(lower));

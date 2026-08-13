@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --import tsx --test src/lib/*.test.mts",
+    "e2e:pack": "node e2e/fixtures/generate-pack.mjs",
     "test:e2e": "playwright test",
     "identities:build": "node scripts/build-visual-identities.mjs",
     "audit:public-boundary": "node scripts/audit-public-boundary.mjs"
@@ -19,6 +20,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@playwright/test": "^1.62.1",
     "@types/node": "^20",
     "@types/react": "^19",

@@ -3,10 +3,28 @@ import test from "node:test";
 
 import {
   CHAT_BODY_MAX_BYTES,
+  readChatJson,
   readJsonBody,
   secureChatRoute,
   takeRateLimit,
 } from "./chatApi";
+import { getRatings } from "./publicData";
+import type { PackManifest } from "./pack";
+
+const QUERY_MANIFEST = {
+  pack_id: "v2026.08.13.183000",
+  schema_version: "2.0.0",
+  created_utc: "2026-08-13T18:30:00Z",
+  filters: { years: [2026], leagues: "all" },
+  attribution: "Scryglass",
+  excluded: [],
+  base_url: null,
+  data_backend: "supabase",
+  query_api: { schema_version: "scryglass:query-api:v1", status: "available" },
+  total_bytes: 0,
+  total_files: 0,
+  files: [],
+} satisfies PackManifest;
 
 test("token bucket enforces a burst and refills over the policy window", () => {
   const buckets = new Map();
@@ -69,4 +87,80 @@ test("secure chat routes reject long parameters without reflecting them", async 
   assert.equal(response.status, 422);
   assert.equal(called, false);
   assert.doesNotMatch(await response.text(), /x{20}/);
+});
+
+test("secure chat timeout aborts its bounded RPC fetch", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
+  const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+  process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
+  process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
+  let fetchSawAbort = false;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => (
+    new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      assert.ok(signal);
+      const onAbort = () => {
+        fetchSawAbort = true;
+        reject(signal.reason);
+      };
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    })
+  )) as typeof fetch;
+  const route = secureChatRoute(async (_request, signal) => {
+    await getRatings(QUERY_MANIFEST, { kind: "players", limit: 1 }, signal);
+    return Response.json({ ok: true });
+  }, 10);
+  try {
+    const response = await route(new Request("https://scryglass.xyz/api/chat/leaderboards", {
+      headers: { "x-vercel-forwarded-for": "192.0.2.12" },
+    }));
+    assert.equal(response.status, 504);
+    assert.equal(fetchSawAbort, true);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;
+    else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+    else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
+  }
+});
+
+test("secure chat timeout aborts its active-release fetch", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
+  const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+  process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
+  process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
+  let fetchSawAbort = false;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => (
+    new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      assert.ok(signal);
+      const onAbort = () => {
+        fetchSawAbort = true;
+        reject(signal.reason);
+      };
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    })
+  )) as typeof fetch;
+  const route = secureChatRoute(async (_request, signal) => {
+    await readChatJson<Record<string, unknown>>("features/team_records.json", signal);
+    return Response.json({ ok: true });
+  }, 10);
+  try {
+    const response = await route(new Request("https://scryglass.xyz/api/chat/team?name=T1", {
+      headers: { "x-vercel-forwarded-for": "192.0.2.13" },
+    }));
+    assert.equal(response.status, 504);
+    assert.equal(fetchSawAbort, true);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;
+    else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+    else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
+  }
 });

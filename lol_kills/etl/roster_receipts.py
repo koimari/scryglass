@@ -27,6 +27,7 @@ from typing import Any, Iterable, Mapping
 from urllib.error import HTTPError, URLError
 
 from lol_kills.etl.aliases import normalize_team
+from lol_kills.net import require_https_url
 from lol_kills.v2.data.common import parse_rfc3339, to_rfc3339
 
 
@@ -126,6 +127,7 @@ def _api_url(params: Mapping[str, Any]) -> str:
 
 
 def _fetch_json(url: str, *, timeout: float) -> tuple[bytes, dict[str, Any]]:
+    url = require_https_url(url, hosts={"lol.fandom.com"})
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:

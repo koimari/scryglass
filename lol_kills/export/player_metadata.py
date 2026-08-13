@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from lol_kills.etl.paths import PARQUET_DIR
+from lol_kills.net import require_https_url
 
 
 LEAGUEPEDIA_COUNTRY_URL = "https://lol.fandom.com/wiki/Special:CargoExport"
@@ -77,8 +78,11 @@ def _fetch_rows(cache_path: Path) -> list[dict[str, Any]]:
                 "offset": str(offset),
             }
         )
+        url = require_https_url(
+            f"{LEAGUEPEDIA_COUNTRY_URL}?{query}", hosts={"lol.fandom.com"}
+        )
         request = urllib.request.Request(
-            f"{LEAGUEPEDIA_COUNTRY_URL}?{query}",
+            url,
             headers={"User-Agent": "Scryglass public pack/1.0"},
         )
         try:

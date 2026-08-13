@@ -3,3 +3,8 @@ public/packs/v2026.08.09.1907/
 public/packs/v2026.08.09.1944/
 public/packs/v2026.08.09.2048/
 public/packs/v2026.08.09.2116/
+public/packs/v2026.08.09.2229/
+public/live/
+e2e/
+output/playwright/
+playwright.config.ts

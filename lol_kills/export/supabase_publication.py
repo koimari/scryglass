@@ -19,7 +19,23 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from lol_kills.export.pack_spec import OPTIONAL_PUBLIC_FILES, PUBLIC_RATING_REQUIRED_FILES
+from lol_kills.export.pack_spec import (
+    OPTIONAL_PUBLIC_FILES,
+    PUBLIC_ASSET_PATHS,
+    PUBLIC_RATING_REQUIRED_FILES,
+)
+from lol_kills.export.public_query_projection import (
+    QUERY_API_SCHEMA,
+    QUERY_DATASETS,
+    QUERY_PROJECTION_PATH,
+    TIER_QUERY_DATASET,
+    TIER_QUERY_DATASETS,
+    PublicQueryProjectionError,
+    build_tier_query_datasets,
+    canonical_query_bytes,
+    query_dataset_receipt,
+    validate_public_query_projection,
+)
 
 
 TIER_ASSET_PATH = "rankings/tierlists.json"
@@ -27,18 +43,63 @@ TIER_LATEST_ASSET_PATH = "rankings/tierlists-latest.json"
 DRAFT_ASSET_PATH = "features/draft_records.json"
 DRAFT_AUTHORITY_SCHEMA = "scryglass:draft-authority:v1"
 DRAFT_RECORDS_SCHEMA = "scryglass:draft-records:v1"
-PUBLIC_ASSET_PATHS = (
-    *PUBLIC_RATING_REQUIRED_FILES,
-    *OPTIONAL_PUBLIC_FILES,
-    TIER_ASSET_PATH,
-    TIER_LATEST_ASSET_PATH,
-)
 PUBLIC_ASSET_PATH_SET = frozenset(PUBLIC_ASSET_PATHS)
 PACK_ID_RE = re.compile(r"^v\d{4}\.\d{2}\.\d{2}\.\d{6}$")
-LEGACY_PACK_ID_RE = re.compile(r"^v\d{4}\.\d{2}\.\d{2}\.\d{4}$")
 REQUEST_TIMEOUT_SECONDS = 60.0
 PUBLIC_ASSET_CONTENT_TYPE = "application/json"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+QUERY_TABLE = "scryglass_public_query_rows"
+QUERY_RECEIPT_TABLE = "scryglass_public_query_receipts"
+QUERY_ROW_FIELDS = frozenset(
+    {
+        "row_key",
+        "player_id",
+        "team_id",
+        "champion_id",
+        "identity_id",
+        "name",
+        "search_key",
+        "kind",
+        "alias_key",
+        "role",
+        "team",
+        "league",
+        "tier",
+        "active",
+        "rating",
+        "adjusted_rating",
+        "movement",
+        "games",
+        "wins",
+        "win_rate",
+        "grade_a_games",
+        "grade_games",
+        "champion",
+        "champion_key",
+        "score",
+        "game_id",
+        "played_at",
+        "year",
+        "blue_team",
+        "red_team",
+        "blue_team_id",
+        "red_team_id",
+        "blue_win",
+        "champions",
+        "ordinal",
+        "image_url",
+        "patch",
+        "region",
+        "rank",
+        "played_maps",
+        "scope_id",
+        "reference_id",
+        "payload",
+        "source_bytes",
+        "source_sha256",
+        "row_sha256",
+    }
+)
 
 
 class SupabasePublicationError(RuntimeError):
@@ -57,10 +118,10 @@ def _release_id(value: object) -> str:
 
 
 def _rollback_release_id(value: object) -> str:
-    release_id = str(value or "")
-    if not (PACK_ID_RE.fullmatch(release_id) or LEGACY_PACK_ID_RE.fullmatch(release_id)):
-        raise SupabasePublicationError("rollback release ID is invalid")
-    return release_id
+    try:
+        return _release_id(value)
+    except SupabasePublicationError as error:
+        raise SupabasePublicationError("rollback release ID is invalid") from error
 
 
 def _public_asset_path(value: object) -> str:
@@ -85,7 +146,6 @@ def _retention_storage_path(value: object) -> str:
         not separator
         or not (
             PACK_ID_RE.fullmatch(release_id)
-            or LEGACY_PACK_ID_RE.fullmatch(release_id)
         )
         or f"{release_id}/{_public_asset_path(path)}" != storage_path
     ):
@@ -94,61 +154,23 @@ def _retention_storage_path(value: object) -> str:
 
 
 def _draft_authority(manifest: dict[str, Any], release_id: str) -> dict[str, Any]:
-    """Return one explicit, release-bound public Draft Score authority."""
+    """Keep Draft Score unavailable until an independent verifier exists."""
 
     candidate = manifest.get("draft_authority")
-    if not isinstance(candidate, dict) or candidate.get("status") != "promoted":
-        reason = candidate.get("reason") if isinstance(candidate, dict) else None
-        return {
-            "schema_version": DRAFT_AUTHORITY_SCHEMA,
-            "status": "unavailable",
-            "release_id": release_id,
-            "model_version": None,
-            "receipt_sha256": None,
-            "issued_utc": None,
-            "reason": str(reason or "model_not_promoted"),
-        }
-    model_version = candidate.get("model_version")
-    receipt_sha256 = str(candidate.get("receipt_sha256") or "").lower()
-    if (
-        candidate.get("schema_version") != DRAFT_AUTHORITY_SCHEMA
-        or candidate.get("release_id") != release_id
-        or not isinstance(model_version, str)
-        or not model_version.strip()
-        or not SHA256_RE.fullmatch(receipt_sha256)
-    ):
-        raise SupabasePublicationError("promoted draft authority is not release-bound")
+    if isinstance(candidate, dict) and candidate.get("status") == "promoted":
+        raise SupabasePublicationError(
+            "Draft Score promotion requires an independent receipt verifier"
+        )
+    reason = candidate.get("reason") if isinstance(candidate, dict) else None
     return {
         "schema_version": DRAFT_AUTHORITY_SCHEMA,
-        "status": "promoted",
+        "status": "unavailable",
         "release_id": release_id,
-        "model_version": model_version.strip(),
-        "receipt_sha256": receipt_sha256,
-        "issued_utc": candidate.get("issued_utc"),
-        "reason": None,
+        "model_version": None,
+        "receipt_sha256": None,
+        "issued_utc": None,
+        "reason": str(reason or "model_not_promoted"),
     }
-
-
-def _bind_promoted_draft_asset(
-    raw: bytes,
-    *,
-    release_id: str,
-    authority: dict[str, Any],
-) -> bytes:
-    try:
-        payload = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise SupabasePublicationError("promoted draft asset is invalid JSON") from error
-    if not isinstance(payload, dict) or payload.get("schema_version") != DRAFT_RECORDS_SCHEMA:
-        raise SupabasePublicationError("promoted draft asset schema is invalid")
-    if payload.get("model_version") != authority["model_version"]:
-        raise SupabasePublicationError("promoted draft asset model does not match its authority")
-    payload["release_id"] = release_id
-    payload["authority"] = "promoted"
-    payload["authority_receipt_sha256"] = authority["receipt_sha256"]
-    return (
-        json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
-    ).encode("utf-8")
 
 
 def _pack_asset_path(pack_dir: Path, path: str) -> Path:
@@ -161,6 +183,71 @@ def _pack_asset_path(pack_dir: Path, path: str) -> Path:
     if not candidate.is_file():
         raise SupabasePublicationError(f"public asset is not a file: {path}")
     return candidate
+
+
+def _query_projection_path(pack_dir: Path) -> Path:
+    root = pack_dir.resolve(strict=True)
+    candidate = (root / QUERY_PROJECTION_PATH).resolve(strict=True)
+    try:
+        candidate.relative_to(root)
+    except ValueError as error:
+        raise SupabasePublicationError("query projection path leaves the pack") from error
+    if not candidate.is_file():
+        raise SupabasePublicationError("query projection is missing")
+    return candidate
+
+
+def _prepare_query_datasets(
+    pack_dir: Path,
+    manifest: dict[str, Any],
+    tier_body: dict[str, Any],
+    release_id: str,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any] | None]:
+    """Read the internal projection and bind its receipts to publication."""
+
+    query_api = manifest.get("query_api")
+    if query_api is None:
+        return {}, None
+    projection_metadata = query_api.get("projection") if isinstance(query_api, dict) else None
+    if (
+        not isinstance(query_api, dict)
+        or query_api.get("schema_version") != QUERY_API_SCHEMA
+        or query_api.get("status") != "available"
+        or not isinstance(projection_metadata, dict)
+        or projection_metadata.get("path") != QUERY_PROJECTION_PATH
+    ):
+        raise SupabasePublicationError("query API manifest is invalid")
+    path = _query_projection_path(pack_dir)
+    raw = path.read_bytes()
+    if (
+        projection_metadata.get("bytes") != len(raw)
+        or projection_metadata.get("sha256") != _sha256(raw)
+    ):
+        raise SupabasePublicationError("query projection checksum failed")
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SupabasePublicationError("query projection is invalid JSON") from error
+    if not isinstance(parsed, dict):
+        raise SupabasePublicationError("query projection is malformed")
+    try:
+        datasets = validate_public_query_projection(parsed, release_id=release_id)
+        tier_datasets = build_tier_query_datasets(tier_body)
+    except PublicQueryProjectionError as error:
+        raise SupabasePublicationError(str(error)) from error
+    datasets.update(tier_datasets)
+    receipts = {
+        dataset: query_dataset_receipt(dataset, rows)
+        for dataset, rows in datasets.items()
+    }
+    if set(receipts) != {*QUERY_DATASETS, *TIER_QUERY_DATASETS}:
+        raise SupabasePublicationError("query dataset inventory is not exact")
+    return datasets, {
+        "schema_version": QUERY_API_SCHEMA,
+        "status": "available",
+        "projection_sha256": _sha256(raw),
+        "datasets": receipts,
+    }
 
 
 def _project_url(value: str) -> str:
@@ -215,7 +302,6 @@ class SupabasePublicData:
         body = None
         headers = {
             "apikey": self._api_key,
-            "Authorization": f"Bearer {self._api_key}",
             "Accept": "application/json",
         }
         if payload is not None:
@@ -307,6 +393,22 @@ class SupabasePublicData:
             if isinstance(row.get("path"), str)
         }
 
+    def query_receipts(self, release_id: str) -> dict[str, dict[str, Any]]:
+        release_id = _release_id(release_id)
+        encoded = urllib.parse.quote(release_id, safe="")
+        rows = self._request(
+            "GET",
+            f"{QUERY_RECEIPT_TABLE}?release_id=eq.{encoded}"
+            "&select=dataset,row_count,source_bytes,source_sha256,row_digest_sha256,storage_bytes,storage_sha256",
+        )
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise SupabasePublicationError("Supabase query receipt response is malformed")
+        return {
+            str(row["dataset"]): row
+            for row in rows
+            if isinstance(row.get("dataset"), str)
+        }
+
     def write_refresh_run(self, payload: dict[str, Any]) -> None:
         fields = {
             key: payload.get(key)
@@ -318,6 +420,7 @@ class SupabasePublicData:
                 "stage",
                 "input_fingerprint",
                 "worker_commit",
+                "requirements_lock_sha256",
                 "source_file_sha256",
                 "source_observed_through",
                 "release_id",
@@ -362,6 +465,22 @@ class SupabasePublicData:
             prefer="resolution=merge-duplicates,return=minimal",
         )
 
+    def write_diagnostic_credential(self, token: str) -> None:
+        if not 32 <= len(token) <= 512 or any(character.isspace() for character in token):
+            raise SupabasePublicationError("diagnostic token is malformed")
+        self._request(
+            "POST",
+            "scryglass_diagnostic_credentials?on_conflict=credential_id",
+            [
+                {
+                    "credential_id": "public-health",
+                    "token_sha256": _sha256(token.encode("utf-8")),
+                    "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+            ],
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+
     def storage_object(self, storage_path: str) -> bytes:
         storage_path = _storage_path(storage_path)
         encoded = "/".join(urllib.parse.quote(part, safe="") for part in storage_path.split("/"))
@@ -370,7 +489,6 @@ class SupabasePublicData:
             method="GET",
             headers={
                 "apikey": self._api_key,
-                "Authorization": f"Bearer {self._api_key}",
             },
         )
         last_error: Exception | None = None
@@ -396,7 +514,6 @@ class SupabasePublicData:
             method="GET",
             headers={
                 "apikey": self._api_key,
-                "Authorization": f"Bearer {self._api_key}",
             },
         )
         try:
@@ -436,7 +553,6 @@ class SupabasePublicData:
             method="POST",
             headers={
                 "apikey": self._api_key,
-                "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
                 "Cache-Control": "public, max-age=31536000, immutable",
                 "x-upsert": "false",
@@ -482,7 +598,6 @@ class SupabasePublicData:
             method="DELETE",
             headers={
                 "apikey": self._api_key,
-                "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
             },
         )
@@ -592,6 +707,91 @@ class SupabasePublicData:
             )
         return reused
 
+    def stage_query_datasets(
+        self,
+        release_id: str,
+        datasets: dict[str, list[dict[str, Any]]],
+        receipts: dict[str, Any],
+    ) -> int:
+        """Insert immutable bounded rows, then seal each dataset receipt."""
+
+        release_id = _release_id(release_id)
+        reused = 0
+        existing = self.query_receipts(release_id)
+        for dataset in (*QUERY_DATASETS, *TIER_QUERY_DATASETS):
+            rows = datasets.get(dataset)
+            receipt = receipts.get(dataset)
+            if not isinstance(rows, list) or not isinstance(receipt, dict):
+                raise SupabasePublicationError(f"query dataset is missing: {dataset}")
+            prior = existing.get(dataset)
+            if prior:
+                if (
+                    prior.get("row_count") != receipt.get("rows")
+                    or prior.get("source_bytes") != receipt.get("bytes")
+                    or prior.get("source_sha256") != receipt.get("sha256")
+                ):
+                    raise SupabasePublicationError(
+                        f"existing query receipt has different content: {dataset}"
+                    )
+                reused += len(rows)
+                continue
+            pending: list[dict[str, Any]] = []
+            pending_bytes = 0
+            for source in rows:
+                unknown = set(source) - QUERY_ROW_FIELDS
+                if unknown:
+                    raise SupabasePublicationError(
+                        f"query row has unsupported fields: {dataset}"
+                    )
+                source_without_digest = {
+                    key: value for key, value in source.items() if key != "row_sha256"
+                }
+                row = {
+                    "release_id": release_id,
+                    "dataset": dataset,
+                    "row_sha256": source.get("row_sha256"),
+                    "source_json": canonical_query_bytes(source_without_digest).decode("utf-8"),
+                    "payload_json": canonical_query_bytes(source.get("payload")).decode("utf-8"),
+                }
+                row_bytes = len(canonical_query_bytes(row))
+                if pending and (len(pending) >= 100 or pending_bytes + row_bytes > 400_000):
+                    staged = self._request(
+                        "POST",
+                        "rpc/stage_scryglass_query_rows",
+                        {"p_release_id": release_id, "p_dataset": dataset, "p_rows": pending},
+                    )
+                    if type(staged) is not int:
+                        raise SupabasePublicationError("Supabase query row staging is malformed")
+                    pending = []
+                    pending_bytes = 0
+                pending.append(row)
+                pending_bytes += row_bytes
+            if pending:
+                staged = self._request(
+                    "POST",
+                    "rpc/stage_scryglass_query_rows",
+                    {"p_release_id": release_id, "p_dataset": dataset, "p_rows": pending},
+                )
+                if type(staged) is not int:
+                    raise SupabasePublicationError("Supabase query row staging is malformed")
+            sealed = self._request(
+                "POST",
+                "rpc/seal_scryglass_query_dataset",
+                {
+                    "p_release_id": release_id,
+                    "p_dataset": dataset,
+                    "p_source_rows": receipt.get("rows"),
+                    "p_source_bytes": receipt.get("bytes"),
+                    "p_source_sha256": receipt.get("sha256"),
+                    "p_row_digest_sha256": receipt.get("row_digest_sha256"),
+                },
+            )
+            if not isinstance(sealed, dict) or sealed.get("dataset") != dataset:
+                raise SupabasePublicationError(
+                    f"Supabase query receipt seal failed: {dataset}"
+                )
+        return reused
+
     def activate(self, release_id: str) -> dict[str, Any]:
         release_id = _release_id(release_id)
         result = self._request(
@@ -605,6 +805,76 @@ class SupabasePublicData:
 
     def restore(self, release_id: str) -> dict[str, Any]:
         release_id = _rollback_release_id(release_id)
+        candidate = self.release(release_id)
+        manifest = candidate.get("manifest") if isinstance(candidate, dict) else None
+        release_metadata = manifest.get("release") if isinstance(manifest, dict) else None
+        draft_authority = manifest.get("draft_authority") if isinstance(manifest, dict) else None
+        query_api = manifest.get("query_api") if isinstance(manifest, dict) else None
+        raw_files = manifest.get("files") if isinstance(manifest, dict) else None
+        artifact_hashes = (
+            release_metadata.get("artifact_hashes")
+            if isinstance(release_metadata, dict)
+            else None
+        )
+        if (
+            not isinstance(candidate, dict)
+            or candidate.get("status") not in {"active", "superseded"}
+            or not isinstance(manifest, dict)
+            or manifest.get("pack_id") != release_id
+            or not isinstance(release_metadata, dict)
+            or release_metadata.get("release_id") != release_id
+            or not isinstance(draft_authority, dict)
+            or draft_authority.get("schema_version") != DRAFT_AUTHORITY_SCHEMA
+            or draft_authority.get("status") != "unavailable"
+            or draft_authority.get("release_id") != release_id
+            or not isinstance(raw_files, list)
+            or not isinstance(artifact_hashes, dict)
+        ):
+            raise SupabasePublicationError("Supabase rollback release binding is invalid")
+        inventory = self.asset_metadata(release_id)
+        expected_assets: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in raw_files:
+            if not isinstance(item, dict):
+                raise SupabasePublicationError("Supabase rollback manifest inventory is invalid")
+            path = _public_asset_path(item.get("path"))
+            if path in seen or path == DRAFT_ASSET_PATH:
+                raise SupabasePublicationError("Supabase rollback manifest inventory is invalid")
+            seen.add(path)
+            raw_bytes = item.get("bytes")
+            sha256 = item.get("sha256")
+            if (
+                type(raw_bytes) is not int
+                or raw_bytes < 0
+                or not isinstance(sha256, str)
+                or not SHA256_RE.fullmatch(sha256)
+                or artifact_hashes.get(path) != sha256
+            ):
+                raise SupabasePublicationError("Supabase rollback manifest inventory is invalid")
+            expected_assets.append(
+                {
+                    "release_id": release_id,
+                    "path": path,
+                    "body": None,
+                    "storage_path": f"{release_id}/{path}",
+                    "bytes": raw_bytes,
+                    "sha256": sha256,
+                    "content_type": PUBLIC_ASSET_CONTENT_TYPE,
+                }
+            )
+        if set(inventory) != seen or set(artifact_hashes) != seen:
+            raise SupabasePublicationError("Supabase rollback manifest inventory is not exact")
+        _verify_release_assets(
+            self,
+            release_id,
+            expected_assets,
+            verify_storage_content=True,
+        )
+        _verify_query_receipts(
+            self,
+            release_id,
+            query_api if isinstance(query_api, dict) else None,
+        )
         result = self._request(
             "POST",
             "rpc/restore_scryglass_public_release",
@@ -612,6 +882,17 @@ class SupabasePublicData:
         )
         if not isinstance(result, dict) or result.get("release_id") != release_id:
             raise SupabasePublicationError("Supabase rollback response is malformed")
+        _verify_active_release(
+            self,
+            release_id,
+            expected_assets,
+            verify_storage_content=False,
+        )
+        _verify_query_receipts(
+            self,
+            release_id,
+            query_api if isinstance(query_api, dict) else None,
+        )
         return result
 
     def prune(self, keep: int = 3) -> int:
@@ -745,19 +1026,13 @@ def prepare_release(
         metadata = manifest_files.get(path)
         if not isinstance(metadata, dict):
             continue
-        if path == DRAFT_ASSET_PATH and draft_authority["status"] != "promoted":
+        if path == DRAFT_ASSET_PATH:
             continue
         raw = _pack_asset_path(pack_dir, path).read_bytes()
         if len(raw) != metadata.get("bytes") or _sha256(raw) != metadata.get("sha256"):
             raise SupabasePublicationError(f"optional public asset checksum failed: {path}")
         if isinstance(bound_hashes, dict) and bound_hashes.get(path) != _sha256(raw):
             raise SupabasePublicationError(f"manifest release hash conflicts with file: {path}")
-        if path == DRAFT_ASSET_PATH:
-            raw = _bind_promoted_draft_asset(
-                raw,
-                release_id=release_id,
-                authority=draft_authority,
-            )
         asset = _asset(path, raw, release_id)
         storage_path = f"{release_id}/{path}"
         asset["body"] = None
@@ -765,15 +1040,17 @@ def prepare_release(
         storage_objects[storage_path] = raw
         assets.append(asset)
 
-    has_draft_asset = any(asset["path"] == DRAFT_ASSET_PATH for asset in assets)
-    if draft_authority["status"] == "promoted" and not has_draft_asset:
-        raise SupabasePublicationError("promoted draft authority has no draft asset")
-
     tier_raw = tier_path.read_bytes()
     tier_asset = _asset(TIER_ASSET_PATH, tier_raw, release_id)
     tier_body = tier_asset["body"]
     if not isinstance(tier_body, dict) or tier_body.get("status") != "available":
         raise SupabasePublicationError("tier-list asset is unavailable")
+    _query_datasets, published_query_api = _prepare_query_datasets(
+        pack_dir,
+        manifest,
+        tier_body,
+        release_id,
+    )
     tier_storage_path = f"{release_id}/{TIER_ASSET_PATH}"
     tier_asset["body"] = None
     tier_asset["storage_path"] = tier_storage_path
@@ -804,6 +1081,10 @@ def prepare_release(
         "as_of": tier_body.get("as_of"),
         "latest_path": TIER_LATEST_ASSET_PATH,
     }
+    if published_query_api is not None:
+        published_manifest["query_api"] = published_query_api
+    else:
+        published_manifest.pop("query_api", None)
     artifact_hashes = {
         str(asset["path"]): str(asset["sha256"])
         for asset in assets
@@ -882,6 +1163,37 @@ def _verify_release_assets(
             )
 
 
+def _verify_query_receipts(
+    client: SupabasePublicData,
+    release_id: str,
+    query_api: dict[str, Any] | None,
+) -> None:
+    if query_api is None:
+        return
+    expected = query_api.get("datasets")
+    if not isinstance(expected, dict):
+        raise SupabasePublicationError("query API receipt inventory is missing")
+    actual = client.query_receipts(release_id)
+    if set(actual) != set(expected):
+        raise SupabasePublicationError("Supabase query receipt inventory is not exact")
+    for dataset, receipt in expected.items():
+        row = actual.get(dataset)
+        if (
+            not isinstance(receipt, dict)
+            or not isinstance(row, dict)
+            or row.get("row_count") != receipt.get("rows")
+            or row.get("source_bytes") != receipt.get("bytes")
+            or row.get("source_sha256") != receipt.get("sha256")
+            or row.get("row_digest_sha256") != receipt.get("row_digest_sha256")
+            or type(row.get("storage_bytes")) is not int
+            or not isinstance(row.get("storage_sha256"), str)
+            or not SHA256_RE.fullmatch(str(row.get("storage_sha256")))
+        ):
+            raise SupabasePublicationError(
+                f"Supabase query receipt readback failed: {dataset}"
+            )
+
+
 def _verify_active_release(
     client: SupabasePublicData,
     release_id: str,
@@ -929,29 +1241,39 @@ def publish_release(
         project_url=database.project_url,
     )
     release_id = str(release["release_id"])
+    try:
+        raw_tier = json.loads(tier_path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SupabasePublicationError("tier-list asset is invalid JSON") from error
+    if not isinstance(raw_tier, dict):
+        raise SupabasePublicationError("tier-list asset is malformed")
+    query_datasets, query_api = _prepare_query_datasets(
+        pack_dir,
+        manifest,
+        raw_tier,
+        release_id,
+    )
     existing = database.release(release_id)
     if existing and existing.get("manifest") != release["manifest"]:
         raise SupabasePublicationError("existing release has a different manifest")
     if existing and existing.get("status") == "superseded":
         raise SupabasePublicationError("a superseded release ID cannot be changed")
     if existing and existing.get("status") == "active":
-        reused_assets = database.stage_assets(
-            release_id,
-            assets,
-            storage_objects=storage_objects,
-        )
         _verify_active_release(
             database,
             release_id,
             assets,
             verify_storage_content=True,
         )
+        _verify_query_receipts(database, release_id, query_api)
         return {
             "status": "already_active",
             "release_id": release_id,
             "previous_release_id": None,
             "assets": len(assets),
-            "reused_assets": reused_assets,
+            "reused_assets": len(assets),
+            "query_rows": sum(len(rows) for rows in query_datasets.values()),
+            "reused_query_rows": sum(len(rows) for rows in query_datasets.values()),
             "bytes": sum(int(asset["bytes"]) for asset in assets),
             "retained_releases": retention,
         }
@@ -971,6 +1293,17 @@ def publish_release(
     staged = database.release(release_id)
     if not staged or staged.get("status") != "staging":
         raise SupabasePublicationError("Supabase staged release readback failed")
+    reused_query_rows = 0
+    if query_api is not None:
+        receipts = query_api.get("datasets")
+        if not isinstance(receipts, dict):
+            raise SupabasePublicationError("query API receipt inventory is missing")
+        reused_query_rows = database.stage_query_datasets(
+            release_id,
+            query_datasets,
+            receipts,
+        )
+        _verify_query_receipts(database, release_id, query_api)
     _verify_release_assets(
         database,
         release_id,
@@ -1013,6 +1346,8 @@ def publish_release(
         "previous_release_id": activation.get("previous_release_id"),
         "assets": len(assets),
         "reused_assets": reused_assets,
+        "query_rows": sum(len(rows) for rows in query_datasets.values()),
+        "reused_query_rows": reused_query_rows,
         "bytes": sum(int(asset["bytes"]) for asset in assets),
         "pruned_releases": pruned,
         "retained_releases": retention,

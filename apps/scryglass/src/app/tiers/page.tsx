@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { TierListExplorer } from "@/components/TierListExplorer";
+import {
+  TierListExplorer,
+  type TierFilterState,
+  type TierResponse,
+} from "@/components/TierListExplorer";
+import { getTierFacets, getTierScope, queryApiAvailable } from "@/lib/publicData";
+import { readPackManifest } from "@/lib/serverPack";
+import type { TierScope } from "@/lib/tierBoard";
 import styles from "./TiersPage.module.css";
 
 export const metadata = {
@@ -8,9 +15,81 @@ export const metadata = {
     "Patch-wide champion strength, matchup shape, and unpicked structural alternatives.",
 };
 
-export default function TiersPage() {
+type PageProps = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
+
+function first(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function oneOf(value: string | undefined, options: string[]): string {
+  return value && options.includes(value) ? value : "";
+}
+
+function minimumGames(value: string | undefined): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return [1, 3, 5, 10, 20].includes(parsed) ? parsed : 5;
+}
+
+function latestPatch(options: string[]): string {
+  return [...options].sort((left, right) => {
+    const [leftMajor, leftMinor] = left.split(".").map(Number);
+    const [rightMajor, rightMinor] = right.split(".").map(Number);
+    return rightMajor - leftMajor || rightMinor - leftMinor;
+  })[0] ?? "";
+}
+
+export default async function TiersPage({ searchParams }: PageProps) {
+  const query = await searchParams;
+  const manifest = await readPackManifest();
+  const boundedQueries = queryApiAvailable(manifest);
+  let initialData: TierResponse | undefined;
+  let initialFilters: TierFilterState | undefined;
+
+  if (boundedQueries) {
+    const facets = await getTierFacets(manifest);
+    const patch = oneOf(first(query.patch), facets.options.patches) || latestPatch(facets.options.patches);
+    const role = oneOf(first(query.role), facets.options.roles);
+    const region = oneOf(first(query.region), facets.options.regions);
+    const league = oneOf(first(query.league), facets.options.leagues);
+    const tier = oneOf(first(query.tier), facets.options.tiers);
+    const min = minimumGames(first(query.min));
+    const scope = patch
+      ? await getTierScope(manifest, { patch, role, region, league, tier, similarityLimit: 100 })
+      : null;
+    const scopedRows = scope?.rows ?? [];
+    const selectedScope = scope?.scope ?? null;
+    const scopes: TierScope[] = selectedScope
+      ? [selectedScope]
+      : facets.scopes
+          .filter((item) => item.patch === patch)
+          .map((item) => ({
+            scope_id: item.scope_id,
+            scope_kind: "patch" as const,
+            role: item.role,
+            patch: item.patch,
+            as_of: manifest.created_utc,
+            status: "production" as const,
+            row_count: item.row_count,
+            regional_views: item.regions,
+          }));
+    initialData = {
+      status: patch ? "available" : "unavailable",
+      reason: patch ? undefined : "The current release has no published tier scope.",
+      generated_at: manifest.created_utc,
+      as_of: selectedScope?.as_of ?? manifest.created_utc,
+      options: facets.options,
+      scopes,
+      rows: scopedRows,
+      structural_similarity: role ? scope?.structural_similarity ?? undefined : undefined,
+      champion_images: scope?.champion_images ?? {},
+    };
+    initialFilters = { patch, role, region, league, tier, minimumGames: min };
+  }
+
   return (
-    <main className={styles.page}>
+    <div className={styles.page}>
       <header className={styles.header}>
         <div>
           <h1>Tier Lists</h1>
@@ -26,7 +105,12 @@ export default function TiersPage() {
           <span>OE source</span>
         </div>
       </header>
-      <TierListExplorer />
+      <TierListExplorer
+        key={initialFilters ? `${initialFilters.patch}|${initialFilters.role}|${initialFilters.region}|${initialFilters.league}|${initialFilters.tier}|${initialFilters.minimumGames}` : "legacy"}
+        initialData={initialData}
+        initialFilters={initialFilters}
+        serverFiltered={boundedQueries}
+      />
       <footer className={styles.footer}>
         <p>
           Method:{" "}
@@ -36,6 +120,6 @@ export default function TiersPage() {
           strength or recommend a draft pick.
         </p>
       </footer>
-    </main>
+    </div>
   );
 }

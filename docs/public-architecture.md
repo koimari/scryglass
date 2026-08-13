@@ -50,11 +50,12 @@ path.
 | --- | --- | --- | --- |
 | Supabase secret key | Mac worker | macOS Keychain | Ingest, stage, activate, restore, and write health |
 | Data publication token | Mac worker and Vercel | Keychain on the Mac; protected Vercel variable | Invalidate the active manifest cache after activation |
+| Diagnostic token | Mac worker and Vercel | Keychain on the Mac; protected server-only Vercel variable | Read the fixed private health projection |
 | Supabase publishable key | Vercel | Protected project variable | Read active public rows and assets |
 | GitHub credential | Developer workstation | GitHub CLI credential store | Push branches, open pull requests, and merge after checks pass |
 | Vercel credential | Developer workstation | Vercel CLI credential store | Inspect previews, deployments, and runtime errors |
 
-Vercel does not need a database password, a service-role key, or an OE key for normal public requests.
+Vercel does not need a database password, a service-role key, or an OE key.
 
 ## Schedule and failure policy
 

@@ -172,7 +172,7 @@ async function currentPack() {
   }
   const headers = { apikey: publishableKey };
   const releases = await fetchJson(
-    `${supabaseUrl}/rest/v1/scryglass_public_releases?status=eq.active&select=release_id&limit=1`,
+    `${supabaseUrl}/rest/v1/rpc/get_scryglass_active_release`,
     3,
     headers,
   );
@@ -186,19 +186,23 @@ async function currentPack() {
       const release = encodeURIComponent(releaseId);
       const assetPath = encodeURIComponent(relativePath);
       const rows = await fetchJson(
-        `${supabaseUrl}/rest/v1/scryglass_public_assets?release_id=eq.${release}&path=eq.${assetPath}&select=body,storage_path&limit=1`,
+        `${supabaseUrl}/rest/v1/rpc/get_scryglass_active_asset?p_release_id=${release}&p_path=${assetPath}`,
         3,
         headers,
       );
       const asset = rows[0];
-      if (asset?.body !== null && asset?.body !== undefined) return asset.body;
-      const storagePath = text(asset?.storage_path)
+      const rawStoragePath = text(asset?.storage_path);
+      if (rawStoragePath !== `${releaseId}/${relativePath}`) {
+        throw new Error(`Supabase asset is missing: ${relativePath}`);
+      }
+      const storagePath = rawStoragePath
         .split("/")
         .map((part) => encodeURIComponent(part))
         .join("/");
-      if (!storagePath) throw new Error(`Supabase asset is missing: ${relativePath}`);
       return fetchJson(
-        `${supabaseUrl}/storage/v1/object/public/scryglass-public/${storagePath}`,
+        `${supabaseUrl}/storage/v1/object/authenticated/scryglass-public/${storagePath}`,
+        3,
+        headers,
       );
     },
   };

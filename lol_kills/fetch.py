@@ -11,6 +11,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from lol_kills.net import require_https_url
+
 DEFAULT_SINCE = "2024-01-01 00:00:00"
 DEFAULT_OUT = Path(__file__).resolve().parents[1] / "data" / "lol" / "games_raw.json"
 UA = "parlay-risk-sim/lol-kills (local research)"
@@ -32,6 +34,7 @@ def cargo_export(where: str, offset: int = 0, limit: int = 500) -> list[dict]:
         "format": "json",
     }
     url = "https://lol.fandom.com/wiki/Special:CargoExport?" + urllib.parse.urlencode(params)
+    url = require_https_url(url, hosts={"lol.fandom.com"})
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=90) as resp:
         return json.loads(resp.read().decode())

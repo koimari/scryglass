@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 async function get(request: Request) {
   const name = clean(searchParams(request).get("name"));
   if (!name) return chatError("A player name is required.", 422);
-  const player = await lookupPlayer(name);
+  const player = await lookupPlayer(name, request.signal);
   if (!player) return chatError("A matching player was not found.");
   return chatJson(player);
 }

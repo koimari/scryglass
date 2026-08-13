@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -159,3 +160,20 @@ def test_builder_is_reproducible_from_pinned_sources():
     assert rebuilt == existing
     # provenance sanity: the recorded commit must look like a git SHA-1
     assert len(unsigned["provenance"]["lcc_commit"]) == 40
+
+
+def test_git_head_passes_repo_as_one_subprocess_argument(monkeypatch, tmp_path):
+    repo = tmp_path / "repo; printf unsafe"
+    (repo / "data").mkdir(parents=True)
+    observed: dict[str, object] = {}
+
+    def fake_run(args, **kwargs):
+        observed["args"] = args
+        observed["kwargs"] = kwargs
+        return subprocess.CompletedProcess(args, 0, stdout="a" * 40 + "\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert LccSources(repo)._git_head() == "a" * 40
+    assert observed["args"] == ["git", "-C", str(repo.resolve()), "rev-parse", "HEAD"]
+    assert observed["kwargs"]["check"] is False

@@ -9,6 +9,7 @@ const PACK_CACHE_SECONDS = 21_600;
 export const PACK_MANIFEST_CACHE_TAG = "scryglass-pack-manifest";
 export const MAX_STORAGE_ASSET_BYTES = 120 * 1024 * 1024;
 export const PUBLIC_ASSET_CONTENT_TYPE = "application/json";
+const MAX_INLINE_RPC_BODY_BYTES = 500 * 1024;
 
 export const PUBLIC_ASSET_PATHS = new Set([
   "features/ratings_snapshot.json",
@@ -20,7 +21,15 @@ export const PUBLIC_ASSET_PATHS = new Set([
   "features/profile_records.json",
   "features/match_index.json",
   "features/match_records_2025.json",
+  "features/match_records_2025_q1.json",
+  "features/match_records_2025_q2.json",
+  "features/match_records_2025_q3.json",
+  "features/match_records_2025_q4.json",
   "features/match_records_2026.json",
+  "features/match_records_2026_q1.json",
+  "features/match_records_2026_q2.json",
+  "features/match_records_2026_q3.json",
+  "features/match_records_2026_q4.json",
   "features/player_weekly_ranks.json",
   "features/player_metadata.json",
   "features/schedule.json",
@@ -32,6 +41,10 @@ export const PUBLIC_ASSET_PATHS = new Set([
 
 const RELEASE_ID = /^v\d{4}\.\d{2}\.\d{2}\.\d{6}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
+const INLINE_ARRAY_ASSET_PATHS = new Set([
+  "features/ratings_snapshot.json",
+  "features/player_ratings_snapshot.json",
+]);
 
 type SupabaseConfig = {
   url: string;
@@ -56,14 +69,25 @@ export function supabaseConfig(): SupabaseConfig | null {
   return { url, publishableKey };
 }
 
-function localPackRoot(): string {
-  const configured = process.env.SCRYGLASS_PACK_ROOT?.trim();
-  return configured ? path.resolve(configured) : path.join(process.cwd(), "public", "packs");
+const E2E_LOCAL_PACK_FLAG = "SCRYGLASS_E2E_LOCAL_PACK";
+const VERCEL_RUNTIME_KEYS = ["VERCEL", "VERCEL_ENV", "VERCEL_URL", "VERCEL_REGION"] as const;
+
+/** Resolve the generated browser fixture only for an explicit, non-Vercel E2E run. */
+export function e2eLocalPackRoot(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  cwd = process.cwd(),
+): string | null {
+  if (env[E2E_LOCAL_PACK_FLAG] !== "1") return null;
+  if (VERCEL_RUNTIME_KEYS.some((key) => Boolean(env[key]?.trim()))) {
+    throw new Error("The local E2E pack is disabled on Vercel");
+  }
+  return path.join(path.resolve(cwd), "output", "playwright", "e2e-pack");
 }
 
-function bundledDataAllowed(): boolean {
-  return process.env.NODE_ENV !== "production"
-    || process.env.NEXT_PHASE === "phase-production-build";
+function localPackRoot(): string {
+  const e2eRoot = e2eLocalPackRoot();
+  if (!e2eRoot) throw new Error("Local public packs are available only to the E2E fixture");
+  return e2eRoot;
 }
 
 export function safeRelativePath(relativePath: string): string {
@@ -84,62 +108,10 @@ function assetAuthorized(manifest: PackManifest, relativePath: string): boolean 
 }
 
 async function readLocalManifest(): Promise<PackManifest> {
-  // Minimal secretless build fallback. Runtime production never uses it.
+  const manifestPath = path.join(localPackRoot(), "manifest.json");
   return JSON.parse(
-    await fs.readFile(path.join(process.cwd(), "src", "lib", "bundledPackManifest.json"), "utf8"),
+    await fs.readFile(manifestPath, "utf8"),
   ) as PackManifest;
-}
-
-async function readStorageJson<T>(
-  url: string,
-  expected?: { bytes: number; sha256: string },
-): Promise<T> {
-  const response = await fetch(url, {
-    headers: { Accept: PUBLIC_ASSET_CONTENT_TYPE },
-    // Next's data cache rejects entries over 2 MB. Large immutable files use
-    // the CDN response cache and the per-process promise cache instead.
-    cache: expected && expected.bytes <= 1_900_000 ? "force-cache" : "no-store",
-    signal: AbortSignal.timeout(60_000),
-  });
-  if (!response.ok) throw new Error(`Public pack asset ${response.status}`);
-  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
-  if (contentType !== PUBLIC_ASSET_CONTENT_TYPE) {
-    throw new Error("Public pack asset has an invalid content type");
-  }
-  const raw = new Uint8Array(await response.arrayBuffer());
-  if (raw.byteLength > MAX_STORAGE_ASSET_BYTES) {
-    throw new Error("Public pack asset is too large");
-  }
-  if (expected) {
-    const digest = createHash("sha256").update(raw).digest("hex");
-    if (raw.byteLength !== expected.bytes || digest !== expected.sha256) {
-      throw new Error("Public pack asset integrity check failed");
-    }
-  }
-  try {
-    return JSON.parse(new TextDecoder().decode(raw)) as T;
-  } catch {
-    throw new Error("Public pack asset is invalid JSON");
-  }
-}
-
-function blobPackBase(manifest: PackManifest): string | null {
-  const base = manifest.base_url?.trim().replace(/\/$/, "");
-  if (!base) return null;
-  try {
-    const url = new URL(base);
-    return url.protocol === "https:"
-      && url.port === ""
-      && url.hostname.endsWith(".public.blob.vercel-storage.com")
-      && !url.username
-      && !url.password
-      && !url.search
-      && !url.hash
-      ? url.toString().replace(/\/$/, "")
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 type ManifestWithRelease = PackManifest & {
@@ -193,10 +165,18 @@ export function validatePublicManifest(
 }
 
 type PublicAssetRow = {
-  body?: unknown | null;
   storage_path?: string | null;
   bytes?: number;
   sha256?: string;
+  content_type?: string;
+};
+
+type InlinePublicAssetRow = {
+  release_id?: string;
+  path?: string;
+  body?: unknown;
+  source_bytes?: number;
+  source_sha256?: string;
   content_type?: string;
 };
 
@@ -206,9 +186,35 @@ export type ActivePublicAsset = {
   bytes: number;
   sha256: string;
   contentType: typeof PUBLIC_ASSET_CONTENT_TYPE;
-  storagePath: string | null;
-  body: unknown | null;
+  storagePath: string;
 };
+
+export type ActiveInlineAssetJson<T = unknown> = {
+  releaseId: string;
+  path: string;
+  sourceBytes: number;
+  sourceSha256: string;
+  contentType: typeof PUBLIC_ASSET_CONTENT_TYPE;
+  body: T;
+};
+
+function validInlineJsonBody(relativePath: string, body: unknown): boolean {
+  const expectsArray = INLINE_ARRAY_ASSET_PATHS.has(relativePath);
+  if (expectsArray !== Array.isArray(body)) return false;
+  if (!expectsArray && (typeof body !== "object" || body === null)) return false;
+  const objectBody = body as Record<string, unknown>;
+  if (!Array.isArray(body) && "schema_version" in objectBody) {
+    const version = objectBody.schema_version;
+    if (typeof version !== "string" || version.length < 1 || version.length > 100) return false;
+  }
+  try {
+    const serialized = JSON.stringify(body);
+    return serialized !== undefined
+      && new TextEncoder().encode(serialized).byteLength <= MAX_INLINE_RPC_BODY_BYTES;
+  } catch {
+    return false;
+  }
+}
 
 function manifestAsset(
   manifest: ManifestWithRelease,
@@ -232,11 +238,17 @@ function manifestAsset(
   return { bytes: file.bytes, sha256: file.sha256 };
 }
 
+function boundedSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 async function supabaseJson<T>(
   url: string,
   config: SupabaseConfig,
   cache: RequestCache = "no-store",
   extraHeaders: HeadersInit = {},
+  signal?: AbortSignal,
 ): Promise<T> {
   const response = await fetch(url, {
     headers: {
@@ -245,7 +257,7 @@ async function supabaseJson<T>(
       ...Object.fromEntries(new Headers(extraHeaders)),
     },
     cache,
-    signal: AbortSignal.timeout(10_000),
+    signal: boundedSignal(signal, 10_000),
   });
   if (!response.ok) throw new Error(`Supabase public data ${response.status}`);
   return response.json() as Promise<T>;
@@ -254,6 +266,7 @@ async function supabaseJson<T>(
 export async function readActivePublicAsset(
   releaseId: string,
   relativePath: string,
+  signal?: AbortSignal,
 ): Promise<ActivePublicAsset | null> {
   const clean = safeRelativePath(relativePath);
   if (!RELEASE_ID.test(releaseId)) return null;
@@ -266,8 +279,11 @@ export async function readActivePublicAsset(
     status?: string;
     manifest?: ManifestWithRelease;
   }>>(
-    `${config.url}/rest/v1/scryglass_public_releases?release_id=eq.${release}&status=eq.active&select=release_id,status,manifest&limit=1`,
+    `${config.url}/rest/v1/rpc/get_scryglass_active_release?p_release_id=${release}`,
     config,
+    "no-store",
+    {},
+    signal,
   );
   const active = releases[0];
   if (active?.manifest) {
@@ -287,8 +303,11 @@ export async function readActivePublicAsset(
     return null;
   }
   const assets = await supabaseJson<PublicAssetRow[]>(
-    `${config.url}/rest/v1/scryglass_public_assets?release_id=eq.${release}&path=eq.${assetPath}&select=body,storage_path,bytes,sha256,content_type&limit=1`,
+    `${config.url}/rest/v1/rpc/get_scryglass_active_asset?p_release_id=${release}&p_path=${assetPath}`,
     config,
+    "no-store",
+    {},
+    signal,
   );
   const row = assets[0];
   const bytes = Number(row?.bytes);
@@ -302,8 +321,7 @@ export async function readActivePublicAsset(
     || sha256 !== expected.sha256
     || !SHA256.test(sha256)
     || contentType !== PUBLIC_ASSET_CONTENT_TYPE
-    || (storagePath !== null && storagePath !== `${releaseId}/${clean}`)
-    || (storagePath === null && (row.body === undefined || row.body === null))
+    || storagePath !== `${releaseId}/${clean}`
   ) {
     return null;
   }
@@ -314,7 +332,89 @@ export async function readActivePublicAsset(
     sha256,
     contentType: PUBLIC_ASSET_CONTENT_TYPE,
     storagePath,
-    body: row.body ?? null,
+  };
+}
+
+/**
+ * TEMPORARY ROLLOUT SEAM: remove after the final Storage-only cutover.
+ *
+ * This returns parsed JSON for server use only. A jsonb value cannot reproduce
+ * the original file bytes, so callers must not expose it through the asset
+ * route or claim the source digest as a response ETag. The RPC and this caller
+ * both require an exact active release and manifest-bound source metadata.
+ */
+export async function readActiveInlineAssetJson<T = unknown>(
+  releaseId: string,
+  relativePath: string,
+  signal?: AbortSignal,
+): Promise<ActiveInlineAssetJson<T> | null> {
+  const clean = safeRelativePath(relativePath);
+  if (!RELEASE_ID.test(releaseId)) return null;
+  const config = supabaseConfig();
+  if (!config) throw new Error("Supabase public data is not configured");
+  const release = encodeURIComponent(releaseId);
+  const assetPath = encodeURIComponent(clean);
+  const releases = await supabaseJson<Array<{
+    release_id?: string;
+    status?: string;
+    manifest?: ManifestWithRelease;
+  }>>(
+    `${config.url}/rest/v1/rpc/get_scryglass_active_release?p_release_id=${release}`,
+    config,
+    "no-store",
+    {},
+    signal,
+  );
+  const active = releases[0];
+  if (active?.manifest) {
+    try {
+      validatePublicManifest(active.manifest, releaseId);
+    } catch {
+      return null;
+    }
+  }
+  const expected = active?.manifest ? manifestAsset(active.manifest, clean) : null;
+  if (
+    active?.release_id !== releaseId
+    || active.status !== "active"
+    || active.manifest?.pack_id !== releaseId
+    || !expected
+  ) {
+    return null;
+  }
+  const rows = await supabaseJson<InlinePublicAssetRow[]>(
+    `${config.url}/rest/v1/rpc/get_scryglass_active_inline_asset?p_release_id=${release}&p_path=${assetPath}`,
+    config,
+    "no-store",
+    {},
+    signal,
+  );
+  const row = rows[0];
+  const bytes = Number(row?.source_bytes);
+  const sha256 = row?.source_sha256 ?? "";
+  const contentType = row?.content_type?.split(";", 1)[0]?.trim().toLowerCase();
+  if (
+    rows.length !== 1
+    || row?.release_id !== releaseId
+    || row.path !== clean
+    || row.body === undefined
+    || row.body === null
+    || !validInlineJsonBody(clean, row.body)
+    || !Number.isSafeInteger(bytes)
+    || bytes !== expected.bytes
+    || sha256 !== expected.sha256
+    || !SHA256.test(sha256)
+    || contentType !== PUBLIC_ASSET_CONTENT_TYPE
+  ) {
+    return null;
+  }
+  return {
+    releaseId,
+    path: clean,
+    sourceBytes: bytes,
+    sourceSha256: sha256,
+    contentType: PUBLIC_ASSET_CONTENT_TYPE,
+    body: row.body as T,
   };
 }
 
@@ -322,7 +422,6 @@ function privateStorageHeaders(config: SupabaseConfig): HeadersInit {
   return {
     Accept: PUBLIC_ASSET_CONTENT_TYPE,
     apikey: config.publishableKey,
-    Authorization: `Bearer ${config.publishableKey}`,
   };
 }
 
@@ -348,8 +447,8 @@ function customObjectMetadata(payload: unknown): Record<string, unknown> {
 
 export async function fetchVerifiedStorageAsset(
   asset: ActivePublicAsset,
+  signal?: AbortSignal,
 ): Promise<Response> {
-  if (!asset.storagePath) throw new Error("Public asset is not storage-backed");
   const config = supabaseConfig();
   if (!config) throw new Error("Supabase public data is not configured");
   const stored = encodedStoragePath(asset.storagePath);
@@ -359,6 +458,7 @@ export async function fetchVerifiedStorageAsset(
     config,
     "no-store",
     headers,
+    signal,
   );
   const custom = customObjectMetadata(info);
   if (
@@ -375,31 +475,30 @@ export async function fetchVerifiedStorageAsset(
     {
       headers,
       cache: "force-cache",
-      signal: AbortSignal.timeout(60_000),
+      signal: boundedSignal(signal, 60_000),
     },
   );
   if (!response.ok || !response.body) throw new Error(`Public Storage asset ${response.status}`);
   const responseType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
-  const responseBytes = Number(response.headers.get("content-length"));
+  const responseLength = response.headers.get("content-length");
+  const responseBytes = responseLength && /^\d+$/.test(responseLength)
+    ? Number(responseLength)
+    : Number.NaN;
   if (
     responseType !== asset.contentType
-    || (Number.isFinite(responseBytes) && responseBytes !== asset.bytes)
+    || !Number.isSafeInteger(responseBytes)
+    || responseBytes !== asset.bytes
   ) {
     throw new Error("Public Storage response metadata is invalid");
   }
   return response;
 }
 
-export async function readVerifiedAssetBytes(asset: ActivePublicAsset): Promise<Uint8Array> {
-  if (!asset.storagePath) {
-    const raw = new TextEncoder().encode(JSON.stringify(asset.body));
-    const digest = createHash("sha256").update(raw).digest("hex");
-    if (raw.byteLength !== asset.bytes || digest !== asset.sha256) {
-      throw new Error("Inline public asset integrity check failed");
-    }
-    return raw;
-  }
-  const response = await fetchVerifiedStorageAsset(asset);
+export async function readVerifiedAssetBytes(
+  asset: ActivePublicAsset,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  const response = await fetchVerifiedStorageAsset(asset, signal);
   const raw = new Uint8Array(await response.arrayBuffer());
   const digest = createHash("sha256").update(raw).digest("hex");
   if (raw.byteLength !== asset.bytes || digest !== asset.sha256) {
@@ -408,16 +507,20 @@ export async function readVerifiedAssetBytes(asset: ActivePublicAsset): Promise<
   return raw;
 }
 
-async function readSupabaseManifest(cache: "no-store" | "cached"): Promise<PackManifest> {
+async function readSupabaseManifest(
+  cache: "no-store" | "cached",
+  signal?: AbortSignal,
+): Promise<PackManifest> {
   const config = supabaseConfig();
   if (!config) throw new Error("Supabase public data is not configured");
   const response = await fetch(
-    `${config.url}/rest/v1/scryglass_public_releases?status=eq.active&select=release_id,manifest&limit=1`,
+    `${config.url}/rest/v1/rpc/get_scryglass_active_release`,
     {
       headers: { apikey: config.publishableKey },
       ...(cache === "no-store"
         ? { cache: "no-store" as const }
         : { next: { revalidate: PACK_CACHE_SECONDS, tags: [PACK_MANIFEST_CACHE_TAG] } }),
+      signal: boundedSignal(signal, 10_000),
     },
   );
   if (!response.ok) throw new Error(`Supabase release ${response.status}`);
@@ -438,16 +541,19 @@ export type PublicRefreshHealth = {
   last_success_at: string | null;
   source_as_of: string | null;
   active_release_id: string | null;
+  stale: boolean;
+};
+
+export type PrivateRefreshHealth = PublicRefreshHealth & {
   last_run_id: string | null;
   worker_commit: string | null;
-  stale: boolean;
 };
 
 export async function readPublicRefreshHealth(): Promise<PublicRefreshHealth | null> {
   const config = supabaseConfig();
   if (!config) throw new Error("Supabase public data is not configured");
   const response = await fetch(
-    `${config.url}/rest/v1/scryglass_public_health?health_id=eq.public-refresh&select=status,refresh_status,checked_at,last_success_at,source_as_of,active_release_id,last_run_id,worker_commit,stale&limit=1`,
+    `${config.url}/rest/v1/rpc/get_scryglass_public_health`,
     {
       headers: { apikey: config.publishableKey },
       cache: "no-store",
@@ -455,6 +561,30 @@ export async function readPublicRefreshHealth(): Promise<PublicRefreshHealth | n
   );
   if (!response.ok) throw new Error(`Supabase public health ${response.status}`);
   const rows = (await response.json()) as PublicRefreshHealth[];
+  return rows[0] ?? null;
+}
+
+export async function readPrivateRefreshHealth(): Promise<PrivateRefreshHealth | null> {
+  const config = supabaseConfig();
+  const token = (process.env.SCRYGLASS_DIAGNOSTIC_TOKEN || "").trim();
+  if (!config || token.length < 32 || token.length > 512) {
+    throw new Error("Supabase diagnostics are not configured");
+  }
+  const response = await fetch(
+    `${config.url}/rest/v1/rpc/get_scryglass_private_health`,
+    {
+      method: "POST",
+      headers: {
+        apikey: config.publishableKey,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ p_token: token }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
+  if (!response.ok) throw new Error(`Supabase diagnostic health ${response.status}`);
+  const rows = (await response.json()) as PrivateRefreshHealth[];
   return rows[0] ?? null;
 }
 
@@ -495,92 +625,62 @@ export function publicPackManifest(manifest: PackManifest) {
   };
 }
 
-/** Use bundled data only during builds and local development. */
-export async function readPackManifest(): Promise<PackManifest> {
-  try {
-    return await readSupabaseManifest("cached");
-  } catch (error) {
-    if (bundledDataAllowed()) return readLocalManifest();
-    throw error;
-  }
+/** Read the active remote release, except for the explicit local E2E fixture. */
+export async function readPackManifest(signal?: AbortSignal): Promise<PackManifest> {
+  if (e2eLocalPackRoot()) return readLocalManifest();
+  return readSupabaseManifest("cached", signal);
 }
 
-function publicOrigin(): string {
-  if (process.env.NODE_ENV === "production") {
-    const previewHost = process.env.VERCEL_ENV === "preview"
-      && /^[a-z0-9-]+\.vercel\.app$/.test(process.env.VERCEL_URL ?? "")
-      ? process.env.VERCEL_URL
-      : null;
-    const raw = previewHost
-      ? `https://${previewHost}`
-      : (process.env.SCRYGLASS_PUBLISH_ORIGIN || "https://scryglass.xyz").trim();
-    const url = new URL(raw);
-    if (
-      url.protocol !== "https:"
-      || (previewHost ? url.hostname !== previewHost : url.hostname !== "scryglass.xyz")
-      || url.port
-      || url.pathname !== "/"
-      || url.search
-      || url.hash
-      || url.username
-      || url.password
-    ) {
-      throw new Error("The public origin is invalid");
-    }
-    return url.origin;
-  }
-  const raw = (process.env.SCRYGLASS_PUBLISH_ORIGIN || "http://127.0.0.1:3000").trim();
-  const url = new URL(raw);
-  if (
-    url.protocol !== "http:"
-    || !["127.0.0.1", "localhost"].includes(url.hostname)
-    || url.pathname !== "/"
-    || url.search
-    || url.hash
-    || url.username
-    || url.password
-  ) {
-    throw new Error("The local public origin is invalid");
-  }
-  return url.origin;
-}
-
-async function readSupabaseAsset<T>(manifest: PackManifest, relativePath: string): Promise<T> {
+async function readSupabaseAsset<T>(
+  manifest: PackManifest,
+  relativePath: string,
+  signal?: AbortSignal,
+): Promise<T> {
   const releaseId = manifest.pack_id;
   const expected = manifestAsset(manifest, relativePath);
   if (!expected) throw new Error("The active manifest does not contain the public asset");
-  if (process.env.NEXT_PHASE === "phase-production-build") {
-    const asset = await readActivePublicAsset(releaseId, relativePath);
-    if (!asset) throw new Error("Supabase public asset is unavailable");
-    const raw = await readVerifiedAssetBytes(asset);
+  const asset = await readActivePublicAsset(releaseId, relativePath, signal);
+  if (asset && asset.bytes === expected.bytes && asset.sha256 === expected.sha256) {
+    const raw = await readVerifiedAssetBytes(asset, signal);
     return JSON.parse(new TextDecoder().decode(raw)) as T;
   }
-  // Runtime: every asset (storage or DB-row) is served through the Vercel CDN
-  // proxy so Supabase egress is one fetch per release per cache window.
-  return readStorageJson<T>(
-    `${publicOrigin()}/api/assets/${encodeURIComponent(releaseId)}/${encodeURIComponent(relativePath)}`,
-    expected,
-  );
+  const inline = await readActiveInlineAssetJson<T>(releaseId, relativePath, signal);
+  if (
+    !inline
+    || inline.sourceBytes !== expected.bytes
+    || inline.sourceSha256 !== expected.sha256
+  ) {
+    throw new Error("Supabase public asset is unavailable");
+  }
+  return inline.body;
 }
 
-/** Load one immutable release asset from Supabase or bundled build data. */
-export async function readPackJson<T>(manifest: PackManifest, relativePath: string): Promise<T> {
+/** Load one immutable release asset from private Storage or the E2E fixture. */
+export async function readPackJson<T>(
+  manifest: PackManifest,
+  relativePath: string,
+  signal?: AbortSignal,
+): Promise<T> {
   const clean = safeRelativePath(relativePath);
-  const localPath = path.join(localPackRoot(), manifest.pack_id, clean);
   const supabase = manifest.data_backend === "supabase" && supabaseConfig();
-  const blobBase = supabase ? null : blobPackBase(manifest);
-  const cacheKey = supabase
-    ? `supabase:${manifest.pack_id}:${clean}`
-    : blobBase
-      ? `blob:${blobBase}:${clean}`
-      : localPath;
+  const localPath = supabase
+    ? null
+    : path.join(
+        /* turbopackIgnore: true */ localPackRoot(),
+        manifest.pack_id,
+        clean,
+      );
+  const cacheKey = supabase ? `supabase:${manifest.pack_id}:${clean}` : localPath!;
+  if (signal) {
+    return supabase
+      ? readSupabaseAsset<T>(manifest, clean, signal)
+      : fs.readFile(/* turbopackIgnore: true */ localPath!, "utf8").then((raw) => JSON.parse(raw) as T);
+  }
   let pending = packJsonCache.get(cacheKey);
   if (!pending) {
     pending = supabase
       ? readSupabaseAsset(manifest, clean)
-      : blobBase
-        ? readStorageJson<unknown>(`${blobBase}/${clean}`, manifestAsset(manifest, clean) ?? undefined)
-        : fs.readFile(localPath, "utf8").then((raw) => JSON.parse(raw) as unknown);
+      : fs.readFile(/* turbopackIgnore: true */ localPath!, "utf8").then((raw) => JSON.parse(raw) as unknown);
     packJsonCache.set(cacheKey, pending);
     pending.catch(() => packJsonCache.delete(cacheKey));
   }
@@ -588,6 +688,10 @@ export async function readPackJson<T>(manifest: PackManifest, relativePath: stri
 }
 
 export async function readPublicTierList<T>(): Promise<T> {
+  if (e2eLocalPackRoot()) {
+    const manifest = await readLocalManifest();
+    return readPackJson<T>(manifest, "rankings/tierlists.json");
+  }
   const manifest = await readSupabaseManifest("no-store");
   return readSupabaseAsset<T>(manifest, "rankings/tierlists.json");
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   currentMatchDefaults,
   filterMatchResults,
@@ -16,11 +16,20 @@ import {
   type ScheduleSeries,
   type ScheduleTournament,
 } from "@/lib/pack";
+import type { MatchFacets } from "@/lib/publicData";
 import { TeamMark } from "./TeamMark";
 import styles from "./SignalMatches.module.css";
 
 type MainView = "upcoming" | "results" | "tournaments";
 type ResultView = "gallery" | "timeline";
+
+export type MatchResultState = {
+  level: string;
+  year: string;
+  month: string;
+  team: string;
+  league: string;
+};
 
 const DAY_FORMATTER = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "2-digit", month: "long", timeZone: "UTC" });
 const SHORT_DAY_FORMATTER = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
@@ -163,7 +172,7 @@ function gameCount(value: number): string {
 function ChampionLine({ game, images, limit = 10 }: { game: MatchSummary; images: Record<string, string>; limit?: number }) {
   const champions = gameChampions(game, limit);
   return (
-    <span className={styles.championLine} aria-label={champions.map((item) => item.champion).join(", ")}>
+    <span className={styles.championLine} role="group" aria-label={`Champions: ${champions.map((item) => item.champion).join(", ")}`}>
       {champions.map((item) => images[item.champion] ? (
         // CommunityDragon supplies these portraits through the published pack.
         // eslint-disable-next-line @next/next/no-img-element
@@ -188,49 +197,95 @@ function MatchCard({ game, images, featured = false }: { game: MatchSummary; ima
   );
 }
 
-function ResultsView({ games, championImages }: { games: MatchSummary[]; championImages: Record<string, string> }) {
+function ResultsView({
+  games,
+  championImages,
+  facets,
+  filters: initialFilters,
+  page,
+  pageSize,
+  serverFiltered,
+  total,
+}: {
+  games: MatchSummary[];
+  championImages: Record<string, string>;
+  facets: MatchFacets | null;
+  filters: MatchResultState | null;
+  page: number;
+  pageSize: number;
+  serverFiltered: boolean;
+  total: number;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const defaults = useMemo(() => currentMatchDefaults(), []);
   const [view, setView] = useState<ResultView>(searchParams.get("layout") === "timeline" ? "timeline" : "gallery");
-  const [level, setLevel] = useState(searchParams.get("level") ?? defaults.level);
-  const [league, setLeague] = useState(searchParams.get("tournament") ?? "");
-  const [year, setYear] = useState(searchParams.get("year") ?? defaults.year);
-  const [month, setMonth] = useState(searchParams.get("month") ?? defaults.month);
-  const [team, setTeam] = useState(searchParams.get("team") ?? "");
+  const [level, setLevel] = useState(initialFilters?.level ?? searchParams.get("level") ?? defaults.level);
+  const [league, setLeague] = useState(initialFilters?.league ?? searchParams.get("tournament") ?? "");
+  const [year, setYear] = useState(initialFilters?.year ?? searchParams.get("year") ?? defaults.year);
+  const [month, setMonth] = useState(initialFilters?.month ?? searchParams.get("month") ?? defaults.month);
+  const [team, setTeam] = useState(initialFilters?.team ?? searchParams.get("team") ?? "");
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
-  const levels = useMemo(() => [...new Set(games.map(matchCompetitionLevel))].sort((left, right) => {
+  const [requestedPage, setRequestedPage] = useState(page);
+  const localLevels = useMemo(() => [...new Set(games.map(matchCompetitionLevel))].sort((left, right) => {
     const leftIndex = LEVEL_ORDER.indexOf(left);
     const rightIndex = LEVEL_ORDER.indexOf(right);
     return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex);
   }), [games]);
+  const levels = serverFiltered ? facets?.tiers ?? [] : localLevels;
   const levelGames = useMemo(() => level ? games.filter((game) => matchCompetitionLevel(game) === level) : games, [games, level]);
-  const years = useMemo(() => [...new Set(levelGames.map((game) => game.date.slice(0, 4)))].sort().reverse(), [levelGames]);
+  const localYears = useMemo(() => [...new Set(levelGames.map((game) => game.date.slice(0, 4)))].sort().reverse(), [levelGames]);
+  const years = serverFiltered ? (facets?.years ?? []).map(String).sort().reverse() : localYears;
   const yearGames = useMemo(() => year ? levelGames.filter((game) => game.date.startsWith(`${year}-`)) : levelGames, [levelGames, year]);
-  const months = useMemo(() => [...new Set(yearGames.map((game) => game.date.slice(0, 7)))].sort().reverse(), [yearGames]);
+  const localMonths = useMemo(() => [...new Set(yearGames.map((game) => game.date.slice(0, 7)))].sort().reverse(), [yearGames]);
+  const months = serverFiltered
+    ? (facets?.months ?? []).filter((item) => !year || item.startsWith(`${year}-`)).sort().reverse()
+    : localMonths;
   const monthGames = useMemo(() => month ? yearGames.filter((game) => game.date.startsWith(`${month}-`)) : yearGames, [yearGames, month]);
-  const teams = useMemo(() => [...new Set(monthGames.flatMap((game) => [game.blue_team, game.red_team]))].sort(), [monthGames]);
+  const localTeams = useMemo(() => [...new Set(monthGames.flatMap((game) => [game.blue_team, game.red_team]))].sort(), [monthGames]);
+  const teams = serverFiltered ? facets?.teams ?? [] : localTeams;
   const teamGames = useMemo(() => team ? monthGames.filter((game) => matchIncludesTeam(game, team)) : monthGames, [monthGames, team]);
-  const leagues = useMemo(() => [...new Set(teamGames.map((game) => game.league))].sort(), [teamGames]);
-  const filtered = useMemo(() => filterMatchResults(games, { level, year, month, team, league }), [games, level, year, month, team, league]);
-  const visibleGames = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+  const localLeagues = useMemo(() => [...new Set(teamGames.map((game) => game.league))].sort(), [teamGames]);
+  const leagues = serverFiltered ? facets?.leagues ?? [] : localLeagues;
+  const filtered = useMemo(
+    () => serverFiltered ? games : filterMatchResults(games, { level, year, month, team, league }),
+    [games, level, year, month, team, league, serverFiltered],
+  );
+  const visibleGames = useMemo(
+    () => serverFiltered ? filtered : filtered.slice(0, visibleCount),
+    [filtered, serverFiltered, visibleCount],
+  );
   const byDay = useMemo(() => {
     const groups = new Map<string, MatchSummary[]>();
     for (const game of visibleGames) groups.set(game.date.slice(0, 10), [...(groups.get(game.date.slice(0, 10)) ?? []), game]);
     return [...groups.entries()];
   }, [visibleGames]);
-  const resetVisible = () => setVisibleCount(INITIAL_VISIBLE);
+  const resetVisible = () => {
+    setVisibleCount(INITIAL_VISIBLE);
+    setRequestedPage(1);
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     params.set("section", "results");
     params.set("layout", view);
-    if (level) params.set("level", level); else params.delete("level");
-    if (year) params.set("year", year); else params.delete("year");
-    if (month) params.set("month", month); else params.delete("month");
+    if (level) params.set("level", level); else if (serverFiltered) params.set("level", "ALL"); else params.delete("level");
+    if (year) params.set("year", year); else if (serverFiltered) params.set("year", "ALL"); else params.delete("year");
+    if (month) params.set("month", month); else if (serverFiltered) params.set("month", "ALL"); else params.delete("month");
     if (team) params.set("team", team); else params.delete("team");
     if (league) params.set("tournament", league); else params.delete("tournament");
-    window.history.replaceState(window.history.state, "", `${window.location.pathname}?${params.toString()}`);
-  }, [league, level, month, team, view, year]);
+    if (serverFiltered && requestedPage > 1) params.set("page", String(requestedPage)); else params.delete("page");
+    const suffix = params.toString();
+    const next = `${pathname}${suffix ? `?${suffix}` : ""}`;
+    const current = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+    if (next === current) return;
+    if (serverFiltered) router.replace(next, { scroll: false });
+    else window.history.replaceState(window.history.state, "", next);
+  }, [league, level, month, pathname, requestedPage, router, searchParams, serverFiltered, team, view, year]);
+
+  const resultCount = serverFiltered ? total : filtered.length;
+  const pageCount = Math.max(1, Math.ceil(resultCount / pageSize));
 
   return (
     <section className={styles.resultsSurface} aria-label="Completed match results">
@@ -249,14 +304,21 @@ function ResultsView({ games, championImages }: { games: MatchSummary[]; champio
       {filtered.length ? (
         <>
           <section className={styles.summaryLine} aria-label="Match summary">
-            <p><span>Accepted games</span><strong>{filtered.length}</strong></p>
+            <p><span>Accepted games</span><strong>{resultCount}</strong></p>
             <p><span>Latest result</span><strong>{dayLabel(filtered[0].date)}</strong></p>
             <p><span>Tournament</span><strong>{filtered[0].league}</strong></p>
           </section>
           {view === "gallery" ? <section className={styles.gallery} aria-label="Latest match gallery"><MatchCard game={visibleGames[0]} images={championImages} featured />{visibleGames.slice(1).map((game) => <MatchCard key={game.game_id} game={game} images={championImages} />)}</section> : null}
           {view === "timeline" ? <div className={styles.timeline}>{byDay.map(([day, dayGames]) => <section key={day} className={styles.resultDay}><header><time dateTime={day}>{dayLabel(`${day}T12:00:00Z`)}</time><span>{gameCount(dayGames.length)}</span></header><div>{dayGames.map((game) => <MatchCard key={game.game_id} game={game} images={championImages} />)}</div></section>)}</div> : null}
-          {filtered.length > visibleGames.length ? <button className={styles.more} type="button" onClick={() => setVisibleCount((current) => Math.min(filtered.length, current + LOAD_STEP))}>Show next {Math.min(LOAD_STEP, filtered.length - visibleGames.length)} games</button> : null}
-          {visibleGames.length > INITIAL_VISIBLE ? <button className={styles.more} type="button" onClick={resetVisible}>Back to latest {INITIAL_VISIBLE}</button> : null}
+          {!serverFiltered && filtered.length > visibleGames.length ? <button className={styles.more} type="button" onClick={() => setVisibleCount((current) => Math.min(filtered.length, current + LOAD_STEP))}>Show next {Math.min(LOAD_STEP, filtered.length - visibleGames.length)} games</button> : null}
+          {!serverFiltered && visibleGames.length > INITIAL_VISIBLE ? <button className={styles.more} type="button" onClick={resetVisible}>Back to latest {INITIAL_VISIBLE}</button> : null}
+          {serverFiltered && pageCount > 1 ? (
+            <nav className={styles.pagination} aria-label="Match result pages">
+              <button type="button" disabled={requestedPage <= 1} onClick={() => setRequestedPage((current) => Math.max(1, current - 1))}>Previous</button>
+              <span>Page {requestedPage} of {pageCount}</span>
+              <button type="button" disabled={requestedPage >= pageCount} onClick={() => setRequestedPage((current) => Math.min(pageCount, current + 1))}>Next</button>
+            </nav>
+          ) : null}
         </>
       ) : <p className={styles.empty}>No accepted games match these filters.</p>}
     </section>
@@ -293,14 +355,34 @@ function TournamentsView({ schedule }: { schedule: PublicSchedule }) {
   );
 }
 
-export function SignalMatches({ games, championImages, schedule }: { games: MatchSummary[]; championImages: Record<string, string>; schedule: PublicSchedule | null }) {
+export function SignalMatches({
+  games,
+  championImages,
+  schedule,
+  facets = null,
+  filters = null,
+  page = 1,
+  pageSize = INITIAL_VISIBLE,
+  serverFiltered = false,
+  total = games.length,
+}: {
+  games: MatchSummary[];
+  championImages: Record<string, string>;
+  schedule: PublicSchedule | null;
+  facets?: MatchFacets | null;
+  filters?: MatchResultState | null;
+  page?: number;
+  pageSize?: number;
+  serverFiltered?: boolean;
+  total?: number;
+}) {
   const hasSchedule = Boolean(schedule?.upcoming.length || schedule?.tournaments.length);
   const searchParams = useSearchParams();
   const requestedView = searchParams.get("section");
   const [view, setView] = useState<MainView>(requestedView === "upcoming" || requestedView === "tournaments" ? requestedView : "results");
   const tabs: Array<{ value: MainView; label: string; count: number }> = [
     { value: "upcoming", label: "Upcoming", count: schedule?.upcoming.length ?? 0 },
-    { value: "results", label: "Results", count: games.length },
+    { value: "results", label: "Results", count: serverFiltered ? total : games.length },
     { value: "tournaments", label: "Tournaments", count: schedule?.tournaments.filter((item) => item.status !== "past").length ?? 0 },
   ];
 
@@ -321,7 +403,7 @@ export function SignalMatches({ games, championImages, schedule }: { games: Matc
         {tabs.map((tab) => <button key={tab.value} type="button" disabled={tab.value !== "results" && !hasSchedule} className={view === tab.value ? styles.active : ""} aria-pressed={view === tab.value} onClick={() => changeView(tab.value)}><span>{tab.label}</span><b>{tab.count}</b></button>)}
       </nav>
       {view === "upcoming" && schedule ? <UpcomingView schedule={schedule} /> : null}
-      {view === "results" ? <ResultsView games={games} championImages={championImages} /> : null}
+      {view === "results" ? <ResultsView games={games} championImages={championImages} facets={facets} filters={filters} page={page} pageSize={pageSize} serverFiltered={serverFiltered} total={total} /> : null}
       {view === "tournaments" && schedule ? <TournamentsView schedule={schedule} /> : null}
       {!hasSchedule && view !== "results" ? <p className={styles.empty}>The next schedule refresh will restore this view.</p> : null}
     </div>
