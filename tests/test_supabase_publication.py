@@ -455,7 +455,12 @@ def test_database_allowlist_matches_publication_contract() -> None:
     sql = "\n".join(path.read_text(encoding="utf-8") for path in migrations)
     for path in supabase_publication.PUBLIC_ASSET_PATHS:
         assert f"'{path}'" in sql
-    activation = (root / "supabase" / "migrations" / "20260811121932_public_match_assets.sql").read_text(encoding="utf-8")
+    activation_migrations = [
+        path for path in migrations
+        if "activate_scryglass_public_release" in path.read_text(encoding="utf-8")
+    ]
+    assert activation_migrations, "no activation migration found"
+    activation = activation_migrations[-1].read_text(encoding="utf-8")
     required_section = activation.split("required_assets constant text[] := array[", 1)[1].split("];", 1)[0]
     for path in (*supabase_publication.PUBLIC_RATING_REQUIRED_FILES, supabase_publication.TIER_ASSET_PATH):
         assert f"'{path}'" in required_section
