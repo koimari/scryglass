@@ -13,7 +13,7 @@ type SupabaseConfig = {
   publishableKey: string;
 };
 
-function supabaseConfig(): SupabaseConfig | null {
+export function supabaseConfig(): SupabaseConfig | null {
   const url = (
     process.env.SCRYGLASS_SUPABASE_URL
     || process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -172,9 +172,14 @@ async function readSupabaseAsset<T>(releaseId: string, relativePath: string): Pr
     .split("/")
     .map((part) => encodeURIComponent(part))
     .join("/");
-  return readStorageJson<T>(
-    `${config.url}/storage/v1/object/public/scryglass-public/${storagePath}`,
-  );
+  // Serve storage assets through the Vercel CDN proxy so Supabase egress is
+  // one fetch per release instead of one per cache miss.
+  const origin = (
+    process.env.SCRYGLASS_PUBLISH_ORIGIN
+    || process.env.NEXT_PUBLIC_SITE_URL
+    || "https://scryglass.xyz"
+  ).trim().replace(/\/$/, "");
+  return readStorageJson<T>(`${origin}/api/assets/${storagePath}`);
 }
 
 /** Load one immutable release asset from Supabase or bundled build data. */
