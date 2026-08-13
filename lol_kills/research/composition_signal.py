@@ -258,6 +258,56 @@ def _depth2_keys() -> list[str]:
     return sorted(keys)
 
 
+_ATOM_DEPTH3_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "data"
+    / "lol"
+    / "v2"
+    / "champions"
+    / "atom-corpus-aggregate-v3.json"
+)
+_ATOM_DEPTH3_CACHE: dict[str, dict[str, float]] | None = None
+
+
+def _atom_depth3_index() -> dict[str, dict[str, float]]:
+    """The depth-3 atom index (per-champion d3_* state/cycle descriptors)."""
+    global _ATOM_DEPTH3_CACHE
+    if _ATOM_DEPTH3_CACHE is None:
+        try:
+            payload = json.loads(_ATOM_DEPTH3_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            payload = {}
+        _ATOM_DEPTH3_CACHE = {
+            str(key): {str(k): float(v) for k, v in dict(entry).items()}
+            for key, entry in (payload.get("champions") or {}).items()
+            if isinstance(entry, dict)
+        }
+    return _ATOM_DEPTH3_CACHE
+
+
+def _depth3_keys() -> list[str]:
+    index = _atom_depth3_index()
+    keys: list[str] = []
+    for entry in index.values():
+        for key in entry:
+            if key not in keys:
+                keys.append(key)
+    return sorted(keys)
+
+
+def _depth3_game_row(game: Mapping[str, Any]) -> np.ndarray:
+    index = _atom_depth3_index()
+
+    def mean_of(side: str, key: str) -> float:
+        values = [
+            index.get(_corpus_slug(str(game[side][role].get("champion") or "")), {}).get(key, 0.0)
+            for role in ROLES
+        ]
+        return float(np.mean(values)) if values else 0.0
+
+    return np.asarray([mean_of("blue", key) - mean_of("red", key) for key in _depth3_keys()], dtype=float)
+
+
 def _champion_depth2(champion: str) -> dict[str, float]:
     return _atom_depth2_index().get(_corpus_slug(champion), {})
 
@@ -1932,6 +1982,7 @@ def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.
         *[f"corp_role{role}_{index}" for role in ROLES for index in range(len(ATOM_FAMILIES))],
         "corp_counters",
         *[f"d2_{key}" for key in _depth2_keys()],
+        *[f"d3_{key}" for key in _depth3_keys()],
         *[f"l7_{name}" for name in ("ccm", "dmg", "heal", "int", "stack", "vision")],
         *[f"l7r_{role}_{name}" for role in ROLES for name in ("ccm", "dmg", "heal", "int", "stack", "vision")],
     ]
@@ -2039,6 +2090,7 @@ def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.
 
         row.extend(_corpus_game_features(game))
         row.extend(_depth2_game_row(game))
+        row.extend(_depth3_game_row(game))
 
         # L7 row from PRIOR player profiles (strictly prior: read before update)
         def l7_team(players: Sequence[str], champs: Sequence[str], team_outcome: float) -> list[np.ndarray]:
