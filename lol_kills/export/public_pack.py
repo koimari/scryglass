@@ -24,6 +24,7 @@ from lol_kills.etl.aliases import normalize_champ
 from lol_kills.export import pack_spec as spec
 from lol_kills.export.leaderboards import build_leaderboards
 from lol_kills.export.pack_records import (
+    _draft_text,
     build_maps_frame_from_team_games,
     build_player_champion_records,
     build_profile_records,
