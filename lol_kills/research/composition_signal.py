@@ -66,7 +66,7 @@ ROLE_ALIASES = {
     "utility": "sup",
 }
 PUBLIC_STATUS = ("available", "limited", "unavailable")
-PUBLIC_EVIDENCE = ("available", "limited", "unavailable")
+PUBLIC_EVIDENCE = ("available", "atom_estimate", "limited", "unavailable")
 PUBLIC_PRIVATE_FIELDS = frozenset(
     {
         "coefficients",
