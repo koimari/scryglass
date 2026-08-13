@@ -357,7 +357,8 @@ function draftWinShares(blue: number | null, red: number | null): { blue: string
   return { blue: bluePct.toFixed(1), red: (100 - bluePct).toFixed(1) };
 }
 
-/** Marginal contribution of one pick to the team's draft win share, in percentage points. */
+/** Marginal contribution of one pick to ITS OWN team's draft win share, in percentage points.
+ * A positive value always means "better for the team that made the pick". */
 function pickWinSharePoints(pick: { side: "Blue" | "Red"; contribution: number | null }, blue: number | null, red: number | null): string | null {
   if (pick.contribution == null || blue == null || red == null) return null;
   const delta = pick.contribution;
@@ -365,7 +366,8 @@ function pickWinSharePoints(pick: { side: "Blue" | "Red"; contribution: number |
   const pBase = pick.side === "Blue"
     ? 1 / (1 + Math.exp(-((blue - delta) - red)))
     : 1 / (1 + Math.exp(-(blue - (red - delta))));
-  const points = (pWith - pBase) * 100;
+  // blue-team delta; flip the sign for red picks so +% is always the pick's own team gain
+  const points = ((pWith - pBase) * 100) * (pick.side === "Blue" ? 1 : -1);
   if (!Number.isFinite(points)) return null;
   const rounded = Math.round(points * 10) / 10;
   return `${rounded >= 0 ? "+" : ""}${rounded.toFixed(1)}%`;
