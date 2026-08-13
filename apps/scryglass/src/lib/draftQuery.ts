@@ -14,6 +14,7 @@ export type TeamDraftComparison = {
   winner: string | null;
   direction: "higher" | "lower";
   difference: number;
+  win_share_gap: number;
 };
 
 export type TeamDraftQueryResult = {
@@ -110,6 +111,14 @@ function average(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function percent(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function percentagePointGap(first: number, second: number): string {
+  return `${Math.abs(Math.round(first * 100) - Math.round(second * 100))} percentage-point`;
+}
+
 function toDraftRow(team: string, aggregate: DraftAggregate): TeamDraftRow {
   return {
     team,
@@ -152,7 +161,7 @@ function comparisonAnswer(
 ): TeamDraftQueryResult {
   const tierLabel = tier === "all" ? "all tiers" : tier.replace("tier", "Tier ");
   const basis = `Compared ${firstTeam} and ${secondTeam} in ${tierLabel} using published drafts with at least ${minimumGames} available ${minimumGames === 1 ? "draft" : "drafts"} in the active ${windowDays}-day profile window. “Historical” here means this profile window, not all seasons.`;
-  const caveat = "This is a descriptive average of published per-game composition signals. It is not a stable team rating, a causal estimate, or a prediction.";
+  const caveat = "Draft win share is the estimated pre-game probability from the picks. It is not the team's match win rate, a stable team rating, or a prediction guarantee.";
 
   if (!first || !second) {
     return {
@@ -173,19 +182,38 @@ function comparisonAnswer(
   const winner = direction === "higher"
     ? difference === 0 ? null : difference > 0 ? first.team : second.team
     : difference === 0 ? null : difference < 0 ? first.team : second.team;
-  const relation = winner
-    ? `${winner} has the ${direction} historical average published draft score`
-    : `${first.team} and ${second.team} have the same historical average published draft score`;
-  const versus = `${first.team} ${first.average_score >= 0 ? "+" : ""}${first.average_score.toFixed(2)} versus ${second.team} ${second.average_score >= 0 ? "+" : ""}${second.average_score.toFixed(2)}`;
-  const counts = `across ${first.games} and ${second.games} drafts`;
+  const winShareDifference = first.average_win_share - second.average_win_share;
+  const shareWinner = winShareDifference === 0
+    ? null
+    : direction === "higher"
+      ? winShareDifference > 0 ? first.team : second.team
+      : winShareDifference < 0 ? first.team : second.team;
+  const shareLeader = shareWinner ? (shareWinner === first.team ? first : second) : null;
+  const shareOther = shareWinner ? (shareWinner === first.team ? second : first) : null;
+  const scoreLeader = winner ? (winner === first.team ? first : second) : null;
+  const scoreOther = winner ? (winner === first.team ? second : first) : null;
+  const shareDirection = direction === "higher" ? "higher" : "lower";
+  const relation = scoreLeader && scoreOther && shareLeader && shareOther && winner === shareWinner
+    ? `${scoreLeader.team} has the ${direction} historical average draft score. Its draft win share is ${percent(scoreLeader.average_win_share)} across ${scoreLeader.games} games, versus ${percent(scoreOther.average_win_share)} for ${scoreOther.team} across ${scoreOther.games} games. That is a ${percentagePointGap(scoreLeader.average_win_share, scoreOther.average_win_share)} edge for ${scoreLeader.team}.`
+    : scoreLeader && scoreOther && shareLeader && shareOther
+      ? `${scoreLeader.team} has the ${direction} historical average draft score. ${shareLeader.team} has the ${shareDirection} draft win share at ${percent(shareLeader.average_win_share)} across ${shareLeader.games} games, versus ${percent(shareOther.average_win_share)} for ${shareOther.team} across ${shareOther.games} games.`
+      : scoreLeader && scoreOther
+        ? `${scoreLeader.team} has the ${direction} historical average draft score. Draft win share is tied at ${percent(first.average_win_share)} across ${first.games} and ${second.games} games.`
+        : `${first.team} and ${second.team} have the same historical average draft score and draft win share at ${percent(first.average_win_share)} across ${first.games} and ${second.games} games.`;
 
   return {
     kind: "team_draft_comparison",
     direction: direction === "higher" ? "desc" : "asc",
     tier,
-    answer: { headline: `${relation}: ${versus} ${counts}.`, basis, caveat },
+    answer: { headline: relation, basis, caveat },
     rows: [first, second],
-    comparison: { teams: [first, second], winner, direction, difference: Math.abs(difference) },
+    comparison: {
+      teams: [first, second],
+      winner,
+      direction,
+      difference: Math.abs(difference),
+      win_share_gap: Math.abs(winShareDifference),
+    },
     proof: { sources: [SOURCE], resultCount: 2 },
   };
 }
@@ -235,8 +263,8 @@ export function queryTeamDraftScores(records: ProfileRecords, question: string):
   const rankWord = direction === "asc" ? "lowest" : "highest";
   const headline = first
     ? team
-      ? `${first.team}'s average published draft score is ${first.average_score.toFixed(2)} points across ${first.games} drafts.`
-      : `${first.team} has the ${rankWord} average published draft score at ${first.average_score.toFixed(2)} points.`
+      ? `${first.team}'s average published draft win share is ${percent(first.average_win_share)} across ${first.games} games.`
+      : `${first.team} has the ${rankWord} average published draft score. Its draft win share is ${percent(first.average_win_share)} across ${first.games} games.`
     : team
       ? `No available draft scores meet the requested sample for ${team}.`
       : "Team draft score rankings are unavailable for the active release.";
@@ -247,8 +275,8 @@ export function queryTeamDraftScores(records: ProfileRecords, question: string):
     tier,
     answer: {
       headline,
-      basis: `Ranked ${rows.length} ${rows.length === 1 ? "team" : "teams"} in ${tier === "all" ? "all tiers" : tier.replace("tier", "Tier ")} with at least ${minimumGames} available ${minimumGames === 1 ? "draft" : "drafts"} in the active ${records.window_days}-day profile window.`,
-      caveat: "Draft score is calculated for each game. This ranking averages published composition signals and is a descriptive record, not a stable team rating.",
+      basis: `Ranked ${rows.length} ${rows.length === 1 ? "team" : "teams"} by average published draft score in ${tier === "all" ? "all tiers" : tier.replace("tier", "Tier ")} with at least ${minimumGames} available ${minimumGames === 1 ? "draft" : "drafts"} in the active ${records.window_days}-day profile window.`,
+      caveat: "Draft win share is the estimated pre-game probability from the picks. It is not the team's match win rate or a stable team rating.",
     },
     rows: visibleRows,
     proof: { sources: [SOURCE], resultCount: rows.length },
