@@ -173,21 +173,23 @@ async function readSupabaseAsset<T>(releaseId: string, relativePath: string): Pr
     .map((part) => encodeURIComponent(part))
     .join("/");
   // Serve storage assets through the Vercel CDN proxy so Supabase egress is
-  // one fetch per release instead of one per cache miss. During the Next
-  // build the proxy route does not exist yet, so prerenders fetch Supabase
-  // directly (builds are rare; the egress cost is one fetch per deploy).
-  const building = process.env.NEXT_PHASE === "phase-production-build";
-  if (!building) {
-    const origin = (
-      process.env.SCRYGLASS_PUBLISH_ORIGIN
-      || process.env.NEXT_PUBLIC_SITE_URL
-      || "https://scryglass.xyz"
-    ).trim().replace(/\/$/, "");
-    return readStorageJson<T>(`${origin}/api/assets/${storagePath}`);
+  // one fetch per release instead of one per cache miss. Fall back to the
+  // direct Supabase URL whenever the proxy is unavailable (e.g. during the
+  // first build that introduces the route, or a transient edge failure).
+  const origin = (
+    process.env.SCRYGLASS_PUBLISH_ORIGIN
+    || process.env.NEXT_PUBLIC_SITE_URL
+    || "https://scryglass.xyz"
+  ).trim().replace(/\/$/, "");
+  const direct = `${config.url}/storage/v1/object/public/scryglass-public/${storagePath}`;
+  if (process.env.NEXT_PHASE !== "phase-production-build") {
+    try {
+      return await readStorageJson<T>(`${origin}/api/assets/${storagePath}`);
+    } catch {
+      // fall through to the direct fetch
+    }
   }
-  return readStorageJson<T>(
-    `${config.url}/storage/v1/object/public/scryglass-public/${storagePath}`,
-  );
+  return readStorageJson<T>(direct);
 }
 
 /** Load one immutable release asset from Supabase or bundled build data. */

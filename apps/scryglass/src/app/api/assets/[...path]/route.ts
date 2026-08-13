@@ -32,8 +32,9 @@ export async function GET(
   if (!response.ok) {
     return NextResponse.json({ error: `asset ${response.status}` }, { status: response.status });
   }
-  const body = await response.arrayBuffer();
-  return new NextResponse(body, {
+  // Stream the body: Vercel Functions cap buffered responses at 4.5MB and
+  // the pack assets are 20-47MB.
+  return new NextResponse(response.body, {
     headers: {
       "Content-Type": "application/json",
       "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
