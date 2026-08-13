@@ -223,6 +223,21 @@ function Select({
   );
 }
 
+function TierLoadingState() {
+  return (
+    <div className={styles.loadingState} role="status" aria-live="polite">
+      <div className={styles.loadingHeader}>
+        <span>Loading accepted tier artifact</span>
+        <i aria-hidden="true" />
+      </div>
+      <div className={styles.loadingRows} aria-hidden="true">
+        {Array.from({ length: 5 }, (_, index) => <span key={index} style={{ "--loading-width": `${62 + index * 7}%` } as CSSProperties} />)}
+      </div>
+      <small>Preparing the patch, role, and evidence controls.</small>
+    </div>
+  );
+}
+
 function ChampionThumb({ name, imageUrl }: { name: string; imageUrl?: string | null }) {
   const [imageFailed, setImageFailed] = useState(false);
   return (
@@ -791,19 +806,23 @@ export function TierListExplorer() {
   const [loading, setLoading] = useState(true);
   const [fullHistoryLoaded, setFullHistoryLoaded] = useState(false);
 
+  const commitData = useCallback((payload: TierResponse, fullHistory: boolean) => {
+    setData(payload);
+    setFullHistoryLoaded(fullHistory);
+  }, []);
+
   const load = useCallback(async (url: string, signal?: AbortSignal, showLoading = false) => {
     if (showLoading) setLoading(true);
     try {
       const response = await fetch(url, { signal });
       if (!response.ok) throw new Error("tier-list file is unavailable");
-      setData((await response.json()) as TierResponse);
-      setFullHistoryLoaded(url === TIER_LIST_URL);
+      commitData((await response.json()) as TierResponse, url === TIER_LIST_URL);
     } catch {
       if (!signal?.aborted) setData(EMPTY);
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, []);
+  }, [commitData]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -813,8 +832,7 @@ export function TierListExplorer() {
         return response.json() as Promise<TierResponse>;
       })
       .then((payload) => {
-        setData(payload);
-        setFullHistoryLoaded(false);
+        commitData(payload, false);
       })
       .catch(() => {
         if (!controller.signal.aborted) setData(EMPTY);
@@ -823,8 +841,9 @@ export function TierListExplorer() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, []);
+  }, [commitData]);
 
+  if (loading && data.status !== "available") return <TierLoadingState />;
   if (data.status !== "available") {
     return (
       <div className={styles.unavailable}>
@@ -862,8 +881,13 @@ export function TierListExplorer() {
   const boardRows = rowsForMode(selectedRows, rankedMode);
   const patchRoleRows = role ? rows.filter((row) => row.role === role) : [];
 
+  const changeMode = (value: BoardMode) => {
+    if (value === mode) return;
+    setMode(value);
+  };
+
   return (
-    <section className={styles.section}>
+    <section className={styles.section} aria-busy={loading}>
       <div className={styles.filters}>
         <Select
           label="Patch"
@@ -929,7 +953,7 @@ export function TierListExplorer() {
             className={mode === item.value ? styles.questionTabActive : styles.questionTab}
             aria-pressed={mode === item.value}
             aria-current={mode === item.value ? "page" : undefined}
-            onClick={() => setMode(item.value)}
+            onClick={() => changeMode(item.value)}
           >
             <strong>{item.label}</strong>
             <span>{item.note}</span>

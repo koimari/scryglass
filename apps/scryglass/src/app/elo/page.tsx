@@ -25,6 +25,32 @@ import { draftRankingsFromProfile, type DraftPlayerRow, type DraftRankingsScope,
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 import styles from "./EloPage.module.css";
 
+function RatingsLoadingState() {
+  return (
+    <div className={styles.loadingState} role="status" aria-live="polite">
+      <div className={styles.loadingHeader}>
+        <i aria-hidden="true" />
+        <div>
+          <strong>Loading ratings</strong>
+          <span>Reading the accepted team and player snapshot</span>
+        </div>
+      </div>
+      <div className={styles.loadingGrid} aria-hidden="true">
+        {["teams", "players"].map((label) => (
+          <div className={styles.loadingPanel} key={label}>
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
+        ))}
+      </div>
+      <small>Filters and evidence fields appear when the snapshot is ready.</small>
+    </div>
+  );
+}
+
 // Ratings use the current validated local pack. A local sync can replace this
 // pack without rebuilding the application.
 // The active release is a runtime dependency. A build must stay independent
@@ -234,7 +260,7 @@ export default async function EloPage() {
           <Link href="/methodology#player-ratings">Read the full method →</Link>
         </div>
       </details>
-      <Suspense fallback={<div className="skeleton-block" aria-hidden />}>
+      <Suspense fallback={<RatingsLoadingState />}>
         <SignalRatings
           draftTeams={draftTeams}
           draftPlayers={draftPlayers}

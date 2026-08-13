@@ -148,6 +148,39 @@
   background: var(--surface);
 }
 
+.thinking {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: var(--text-micro);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.thinkingDots {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.thinkingDots i {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 50%;
+  background: var(--signal-positive);
+  animation: thinking-pulse 1.05s ease-in-out infinite;
+}
+
+.thinkingDots i:nth-child(2) { animation-delay: 120ms; }
+.thinkingDots i:nth-child(3) { animation-delay: 240ms; }
+
+@keyframes thinking-pulse {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-0.15rem); }
+}
+
 .error {
   color: var(--danger);
 }
@@ -218,6 +251,12 @@
 .queryResult {
   display: grid;
   gap: 0.55rem;
+}
+
+.chatChart {
+  margin-top: 0.35rem;
+  border-color: var(--line);
+  border-radius: var(--radius-md);
 }
 
 .queryHeadline {
@@ -444,5 +483,9 @@
   .floatingButton,
   .suggestions button {
     transition: none;
+  }
+
+  .thinkingDots i {
+    animation: none;
   }
 }

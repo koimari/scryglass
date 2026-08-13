@@ -310,10 +310,15 @@ export function SignalMatches({ games, championImages, schedule }: { games: Matc
     window.history.replaceState(window.history.state, "", `${window.location.pathname}?${params.toString()}`);
   }, [view]);
 
+  const changeView = (value: MainView) => {
+    if (value === view) return;
+    setView(value);
+  };
+
   return (
     <div className={styles.root}>
       <nav className={styles.mainTabs} aria-label="Match sections">
-        {tabs.map((tab) => <button key={tab.value} type="button" disabled={tab.value !== "results" && !hasSchedule} className={view === tab.value ? styles.active : ""} aria-pressed={view === tab.value} onClick={() => setView(tab.value)}><span>{tab.label}</span><b>{tab.count}</b></button>)}
+        {tabs.map((tab) => <button key={tab.value} type="button" disabled={tab.value !== "results" && !hasSchedule} className={view === tab.value ? styles.active : ""} aria-pressed={view === tab.value} onClick={() => changeView(tab.value)}><span>{tab.label}</span><b>{tab.count}</b></button>)}
       </nav>
       {view === "upcoming" && schedule ? <UpcomingView schedule={schedule} /> : null}
       {view === "results" ? <ResultsView games={games} championImages={championImages} /> : null}

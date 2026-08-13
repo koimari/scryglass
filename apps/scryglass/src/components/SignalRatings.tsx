@@ -27,6 +27,7 @@ import {
 } from "@/lib/pack";
 import { evidenceFields, evidenceInfo, formatEvidenceCell } from "@/lib/evidence";
 import { filterDraftRankings, type DraftPlayerRow, type DraftRankingsScope, type DraftTeamRow } from "@/lib/draftRankings";
+import { DataBars, type DataBarRow } from "./DataBars";
 import { TeamMark } from "./TeamMark";
 import styles from "./SignalRatings.module.css";
 
@@ -279,6 +280,13 @@ export function SignalRatings({
     setExpanded(false);
   };
 
+  const changeTab = (value: Tab) => {
+    if (value === tab) return;
+    setTab(value);
+    setExpanded(false);
+    setSelected("");
+  };
+
   const draftScopeLabel = draftScope === "whole_archive"
     ? "Whole accepted archive"
     : draftWindowDays ? `Published ${draftWindowDays}-day window` : "Published profile window";
@@ -288,13 +296,61 @@ export function SignalRatings({
   const draftShareBarWidth = (value: number) => Math.min(100, Math.abs(value - 0.5) * 300);
   const bestAvailableRateBarWidth = (value: number | null | undefined) => value == null ? 0 : Math.min(100, value * 100);
 
+  const ratingChartRows: DataBarRow[] = entities.slice(0, 8).map((entity) => {
+    const name = entityName(entity);
+    const record = tab === "teams" ? teamRecords[name] : playerRecords[name];
+    const team = tab === "teams" ? name : (record as PlayerRecord | undefined)?.current_team ?? (entity as PlayerRating).last_team;
+    const value = ratingOf(entity);
+    const detail = tab === "teams"
+      ? `${(record as TeamRecord | undefined)?.games ?? entity.n_maps ?? 0} games · ${formatAffiliation((record as TeamRecord | undefined)?.current_tier, (record as TeamRecord | undefined)?.current_league ?? (record as TeamRecord | undefined)?.primary)}`
+      : `${(entity as PlayerRating).n_maps} games · ${roleLabel((record as PlayerRecord | undefined)?.primary_role)}`;
+    return {
+      id: name,
+      label: name,
+      href: tab === "teams" ? `/elo/team/${teamSlug(name)}` : `/elo/player/${playerSlug(name)}`,
+      value,
+      valueLabel: value.toFixed(0),
+      detail,
+      mark: <TeamMark team={team} />,
+      tone: "neutral",
+    };
+  });
+  const ratingValues = ratingChartRows.map((row) => row.value);
+  const ratingDomain = ratingValues.length ? {
+    min: Math.floor((Math.min(...ratingValues) - 25) / 50) * 50,
+    max: Math.ceil((Math.max(...ratingValues) + 25) / 50) * 50,
+  } : undefined;
+  const draftTeamChartRows: DataBarRow[] = draftRows.teams.slice(0, 8).map((row) => ({
+    id: `team-${row.team}-${row.league ?? "all"}-${row.tier ?? "all"}`,
+    label: row.team,
+    href: `/elo/team/${teamSlug(row.team)}`,
+    value: row.draft_win_share,
+    valueLabel: formatDraftWinShare(row.draft_win_share),
+    detail: `${row.games} games${row.league ? ` · ${row.league}` : ""}`,
+    mark: <TeamMark team={row.team} />,
+    tone: row.draft_win_share >= 0.5 ? "positive" : "negative",
+  }));
+  const draftPlayerChartRows: DataBarRow[] = draftRows.players
+    .slice(0, 8)
+    .filter((row): row is typeof row & { best_available_rate: number } => row.best_available_rate != null)
+    .map((row) => ({
+      id: `player-${row.player}-${row.league ?? "all"}-${row.tier ?? "all"}`,
+      label: row.player,
+      href: `/elo/player/${playerSlug(row.player)}`,
+      value: row.best_available_rate,
+      valueLabel: formatBestAvailableRate(row.best_available_rate),
+      detail: `${row.games} picks${row.role ? ` · ${roleLabel(row.role)}` : ""}`,
+      mark: <TeamMark team={row.team} />,
+      tone: "positive" as const,
+    }));
+
   return (
     <div className={styles.root}>
       <section className={styles.controls} aria-label="Rating controls">
         <div className={styles.controlMain}>
           <div className={styles.tabs} aria-label="Rating type">
             {(["teams", "players", "draft"] as const).map((value) => (
-              <button key={value} type="button" className={tab === value ? styles.tabActive : ""} aria-pressed={tab === value} onClick={() => { setTab(value); setExpanded(false); setSelected(""); }}>
+              <button key={value} type="button" className={tab === value ? styles.tabActive : ""} aria-pressed={tab === value} onClick={() => changeTab(value)}>
                 {value === "teams" ? "Teams" : value === "players" ? "Players" : "Draft"}
               </button>
             ))}
@@ -318,6 +374,27 @@ export function SignalRatings({
       {tab === "draft" ? (
         draftRows.teams.length || draftRows.players.length ? <>
           <p className={styles.draftNote}>{draftScopeLabel} · {draftEvidenceLabel}. Teams use average published draft win share. Player rows use the best-available rate: the share of evaluated picks that were the highest-ranked unbanned champion available for the role.</p>
+          <section className={styles.draftVisuals} aria-label="Draft visualizations">
+            <DataBars
+              title="Team draft win share"
+              description="Average published estimate from the scored draft"
+              rows={draftTeamChartRows}
+              domain={{ min: 0, max: 1 }}
+              baseline={0.5}
+              baselineLabel="50% even"
+              axisLeft="0%"
+              axisRight="100%"
+            />
+            <DataBars
+              title="Player best-available rate"
+              description="Share of picks that matched the highest-ranked unbanned option"
+              rows={draftPlayerChartRows}
+              domain={{ min: 0, max: 1 }}
+              axisMiddle="50%"
+              axisLeft="0%"
+              axisRight="100%"
+            />
+          </section>
           <section className={styles.draftSection} aria-label="Draft rankings">
               <div className={styles.draftColumn}>
                 <header><div><h2>Teams by draft</h2><p>Average published draft win share · per-game estimate</p></div><b>{draftRows.teams.length} teams</b></header>
@@ -387,6 +464,15 @@ export function SignalRatings({
               })}
             </aside>
           </section>
+
+          <DataBars
+            title={`${tab === "teams" ? "Team" : "Player"} rating field`}
+            description={`Top ${ratingChartRows.length} ${tab} in ${scope.toLowerCase()} by adjusted rating`}
+            rows={ratingChartRows}
+            domain={ratingDomain}
+            axisLeft={ratingDomain ? `${ratingDomain.min}` : "—"}
+            axisRight={ratingDomain ? `${ratingDomain.max}` : "—"}
+          />
 
           <section className={styles.gallerySection}>
             <header><h2>{tab === "teams" ? "Team ratings" : "Player ratings"}</h2><p>{entities.length} shown · {scope}</p></header>

@@ -1426,6 +1426,63 @@
   line-height: 1.4;
 }
 
+.loadingState {
+  display: grid;
+  gap: 0.9rem;
+  min-height: 19rem;
+  align-content: center;
+  padding: 1rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.loadingHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--ink);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: var(--text-micro);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.loadingHeader i {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--signal-positive);
+  animation: loading-pulse 1.25s ease-in-out infinite;
+}
+
+.loadingRows {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.8rem 0;
+  border-block: 1px solid var(--line);
+}
+
+.loadingRows span {
+  display: block;
+  width: var(--loading-width);
+  height: 1.15rem;
+  border: 1px solid var(--line);
+  background: var(--surface-subtle);
+  animation: loading-pulse 1.25s ease-in-out infinite;
+}
+
+.loadingState small {
+  color: var(--ink-muted);
+  font-size: var(--text-small);
+}
+
+@keyframes loading-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
 .unavailable p,
 .unavailable span {
   margin: 0;
@@ -1435,6 +1492,13 @@
 .movementDown { color: #b13d31; }
 .movementFlat { color: var(--ink-faint); }
 .movementNew { color: var(--accent-ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  .loadingHeader i,
+  .loadingRows span {
+    animation: none;
+  }
+}
 
 @media (max-width: 980px) {
   .roleGrid {

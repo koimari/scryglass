@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { executeTool, routeQuestion, type RouteResult, type ToolCall } from "@/lib/supportChat";
 import { playerSlug, teamSlug } from "@/lib/pack";
+import { DataBars, type DataBarRow } from "./DataBars";
 import styles from "./SupportChat.module.css";
 
 type Message = {
@@ -168,61 +169,117 @@ function table(children: React.ReactNode): React.ReactNode {
 function leaderboardTable(rows: LeaderboardRow[], category: string): React.ReactNode {
   if (category === "teams_draft" || category === "players_draft") {
     const teamsDraft = category === "teams_draft";
-    return table(
-      <table className={styles.resultTable}>
-        <thead><tr>{teamsDraft ? <th>Team</th> : <th>Player</th>}{teamsDraft ? null : <th>Role</th>}<th className={styles.numeric}>Games</th><th className={styles.numeric}>{teamsDraft ? "Draft win share" : "Best-available rate"}</th></tr></thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.name}>
-              <td><a className="row-link" href={teamsDraft ? `/elo/team/${teamSlug(row.name)}` : `/elo/player/${playerSlug(row.name)}`}>{present(row.name)}</a></td>
-              {teamsDraft ? null : <td>{roleName(row.role)}</td>}
-              <td className={styles.numeric}>{present(row.games)}</td>
-              <td className={styles.numeric}>{row.recent_form != null ? `${Math.round(row.recent_form * 100)}%` : "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>,
+    const chartRows: DataBarRow[] = rows.flatMap((row) => row.recent_form == null ? [] : [{
+      id: row.name,
+      label: row.name,
+      href: teamsDraft ? `/elo/team/${teamSlug(row.name)}` : `/elo/player/${playerSlug(row.name)}`,
+      value: row.recent_form,
+      valueLabel: `${Math.round(row.recent_form * 100)}%`,
+      detail: `${row.games} ${teamsDraft ? "games" : "picks"}${row.role ? ` · ${roleName(row.role)}` : ""}`,
+      tone: teamsDraft ? (row.recent_form >= 0.5 ? "positive" : "negative") : "positive",
+    }]);
+    return (
+      <>
+        <DataBars
+          className={styles.chatChart}
+          title={teamsDraft ? "Team draft win share" : "Player best-available rate"}
+          description={teamsDraft ? "Published per-game draft estimate" : "Published pick evidence"}
+          rows={chartRows}
+          domain={{ min: 0, max: 1 }}
+          baseline={teamsDraft ? 0.5 : undefined}
+          baselineLabel={teamsDraft ? "50% even" : undefined}
+          axisLeft="0%"
+          axisRight="100%"
+        />
+        {table(
+          <table className={styles.resultTable}>
+            <thead><tr>{teamsDraft ? <th>Team</th> : <th>Player</th>}{teamsDraft ? null : <th>Role</th>}<th className={styles.numeric}>Games</th><th className={styles.numeric}>{teamsDraft ? "Draft win share" : "Best-available rate"}</th></tr></thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.name}>
+                  <td><a className="row-link" href={teamsDraft ? `/elo/team/${teamSlug(row.name)}` : `/elo/player/${playerSlug(row.name)}`}>{present(row.name)}</a></td>
+                  {teamsDraft ? null : <td>{roleName(row.role)}</td>}
+                  <td className={styles.numeric}>{present(row.games)}</td>
+                  <td className={styles.numeric}>{row.recent_form != null ? `${Math.round(row.recent_form * 100)}%` : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>,
+        )}
+      </>
     );
   }
 
   if (category === "teams") {
-    return table(
-      <table className={styles.resultTable}>
-        <thead><tr><th>Team</th><th>Level</th><th className={styles.numeric}>Rating</th><th>League</th><th className={styles.numeric}>Wins</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>WR</th></tr></thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.name}>
-              <td><a className="row-link" href={`/elo/team/${teamSlug(row.name)}`}>{present(row.name)}</a></td>
-              <td>{tierName(row.tier)}</td>
-              <td className={styles.numeric}>{rating(row.rating)}</td>
-              <td>{present(row.league)}</td>
-              <td className={styles.numeric}>{present(row.wins)}</td>
-              <td className={styles.numeric}>{present(row.games)}</td>
-              <td className={styles.numeric}>{percentage(row.win_rate)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>,
+    const chartRows: DataBarRow[] = rows
+      .filter((row): row is LeaderboardRow & { rating: number } => row.rating != null)
+      .map((row) => ({
+        id: row.name,
+        label: row.name,
+        href: `/elo/team/${teamSlug(row.name)}`,
+        value: row.rating,
+        valueLabel: rating(row.rating).toString(),
+        detail: `${row.games} games · ${tierName(row.tier)}`,
+        tone: "neutral" as const,
+      }));
+    return (
+      <>
+        {chartRows.length ? <DataBars className={styles.chatChart} title="Team rating field" description="Adjusted published rating" rows={chartRows} axisLeft="lower" axisRight="higher" /> : null}
+        {table(
+          <table className={styles.resultTable}>
+            <thead><tr><th>Team</th><th>Level</th><th className={styles.numeric}>Rating</th><th>League</th><th className={styles.numeric}>Wins</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>WR</th></tr></thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.name}>
+                  <td><a className="row-link" href={`/elo/team/${teamSlug(row.name)}`}>{present(row.name)}</a></td>
+                  <td>{tierName(row.tier)}</td>
+                  <td className={styles.numeric}>{rating(row.rating)}</td>
+                  <td>{present(row.league)}</td>
+                  <td className={styles.numeric}>{present(row.wins)}</td>
+                  <td className={styles.numeric}>{present(row.games)}</td>
+                  <td className={styles.numeric}>{percentage(row.win_rate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>,
+        )}
+      </>
     );
   }
 
-  return table(
-    <table className={styles.resultTable}>
-      <thead><tr><th>Player</th><th>Role</th><th>Level</th><th className={styles.numeric}>Rating</th><th className={styles.numeric}>A grades</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>WR</th></tr></thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.name}>
-            <td><a className="row-link" href={`/elo/player/${playerSlug(row.name)}`}>{present(row.name)}</a></td>
-            <td>{roleName(row.role)}</td>
-            <td>{tierName(row.tier)}</td>
-            <td className={styles.numeric}>{rating(row.rating)}</td>
-            <td className={styles.numeric}>{present(row.grade_a_games)}</td>
-            <td className={styles.numeric}>{present(row.games)}</td>
-            <td className={styles.numeric}>{percentage(row.win_rate)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>,
+  const chartRows: DataBarRow[] = rows
+    .filter((row): row is LeaderboardRow & { rating: number } => row.rating != null)
+    .map((row) => ({
+      id: row.name,
+      label: row.name,
+      href: `/elo/player/${playerSlug(row.name)}`,
+      value: row.rating,
+      valueLabel: rating(row.rating).toString(),
+      detail: `${roleName(row.role)} · ${row.games} games`,
+      tone: "neutral" as const,
+    }));
+  return (
+    <>
+      {chartRows.length ? <DataBars className={styles.chatChart} title="Player rating field" description="Adjusted published rating" rows={chartRows} axisLeft="lower" axisRight="higher" /> : null}
+      {table(
+        <table className={styles.resultTable}>
+          <thead><tr><th>Player</th><th>Role</th><th>Level</th><th className={styles.numeric}>Rating</th><th className={styles.numeric}>A grades</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>WR</th></tr></thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.name}>
+                <td><a className="row-link" href={`/elo/player/${playerSlug(row.name)}`}>{present(row.name)}</a></td>
+                <td>{roleName(row.role)}</td>
+                <td>{tierName(row.tier)}</td>
+                <td className={styles.numeric}>{rating(row.rating)}</td>
+                <td className={styles.numeric}>{present(row.grade_a_games)}</td>
+                <td className={styles.numeric}>{present(row.games)}</td>
+                <td className={styles.numeric}>{percentage(row.win_rate)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>,
+      )}
+    </>
   );
 }
 
@@ -273,11 +330,21 @@ function resultTable(result: unknown, call: ToolCall): React.ReactNode {
 
   if (call.tool === "query_drafts" && (data?.kind === "team_draft_query" || data?.kind === "team_draft_comparison") && Array.isArray(data.rows)) {
     const query = data as unknown as TeamDraftQueryResult;
+    const chartRows: DataBarRow[] = query.rows.map((row) => ({
+      id: row.team,
+      label: row.team,
+      href: `/elo/team/${teamSlug(row.team)}`,
+      value: row.average_win_share,
+      valueLabel: percentage(row.average_win_share),
+      detail: `${row.games} games`,
+      tone: row.average_win_share >= 0.5 ? "positive" : "negative",
+    }));
     return (
       <div className={styles.queryResult} data-testid={query.kind === "team_draft_comparison" ? "team-draft-comparison-result" : "team-draft-query-result"}>
         <p className={styles.queryHeadline} data-testid="team-draft-query-headline">{query.answer.headline}</p>
         <p className={styles.queryBasis}>{query.answer.basis}</p>
         <p className={styles.queryCaveat}>{query.answer.caveat}</p>
+        {query.rows.length ? <DataBars className={styles.chatChart} title="Draft win share" description="Published per-game estimate" rows={chartRows} domain={{ min: 0, max: 1 }} baseline={0.5} baselineLabel="50% even" axisLeft="0%" axisRight="100%" /> : null}
         {query.rows.length ? table(
           <table className={styles.resultTable}>
             <thead><tr><th>Team</th><th className={styles.numeric}>Draft win share</th><th className={styles.numeric}>Games</th></tr></thead>
@@ -363,13 +430,25 @@ function resultTable(result: unknown, call: ToolCall): React.ReactNode {
     const players = data.players as LeaderboardRow[];
     const better = typeof data.better === "string" ? data.better : null;
     const difference = typeof data.difference === "number" ? Math.round(data.difference) : null;
+    const chartRows: DataBarRow[] = players
+      .filter((player): player is LeaderboardRow & { rating: number } => player.rating != null)
+      .map((player) => ({
+        id: player.name,
+        label: player.name,
+        href: `/elo/player/${playerSlug(player.name)}`,
+        value: player.rating,
+        valueLabel: rating(player.rating).toString(),
+        detail: `${roleName(player.role)} · ${player.games} games`,
+        tone: "neutral" as const,
+      }));
     return (
       <div className={styles.comparison}>
         <p className={styles.comparisonAnswer}>
-          {better && difference != null
+        {better && difference != null
             ? <><strong>{better}</strong> has the higher rating by {difference} {difference === 1 ? "point" : "points"}.</>
             : "The published ratings do not support a winner."}
         </p>
+        {chartRows.length ? <DataBars className={styles.chatChart} title="Rating comparison" description="Adjusted published rating" rows={chartRows} axisLeft="lower" axisRight="higher" /> : null}
         {table(
           <table className={styles.resultTable}>
             <thead><tr><th>Player</th><th>Role</th><th>Level</th><th className={styles.numeric}>Rating</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>WR</th></tr></thead>
@@ -546,6 +625,15 @@ function CloseIcon() {
   );
 }
 
+function ChatThinking() {
+  return (
+    <div className={styles.thinking} role="status" aria-label="Scryglass is reading the published data">
+      <span>Reading published data</span>
+      <span className={styles.thinkingDots} aria-hidden="true"><i /><i /><i /></span>
+    </div>
+  );
+}
+
 export default function SupportChat({ floating = false }: { floating?: boolean }) {
   const pathname = usePathname();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -663,7 +751,7 @@ export default function SupportChat({ floating = false }: { floating?: boolean }
             {message.call && message.result !== undefined && resultTable(message.result, message.call)}
           </div>
         ))}
-        {busy && <div className={`${styles.message} ${styles.assistant}`}><p>…</p></div>}
+        {busy && <div className={`${styles.message} ${styles.assistant}`}><ChatThinking /></div>}
       </div>
       <form
         className={styles.form}
