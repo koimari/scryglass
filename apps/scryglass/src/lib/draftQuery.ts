@@ -1,4 +1,4 @@
-import type { ProfileRecords } from "@/lib/pack";
+import { teamQueryAliases, type ProfileRecords } from "@/lib/pack";
 
 export type TeamDraftRow = {
   team: string;
@@ -75,21 +75,42 @@ function detectTier(question: string): TeamDraftQueryResult["tier"] {
   return match ? `tier${match[1]}` as "tier1" | "tier2" | "tier3" : "tier1";
 }
 
-function namedTeam(question: string, teams: string[]): string | null {
+type TeamMention = {
+  position: number;
+  specificity: number;
+};
+
+function teamMention(question: string, team: string): TeamMention | null {
   const normalizedQuestion = ` ${normalize(question)} `;
+  const canonicalKey = normalize(team);
+  if (canonicalKey.length >= 2) {
+    const position = normalizedQuestion.indexOf(` ${canonicalKey} `);
+    if (position >= 0) return { position, specificity: canonicalKey.length + 1000 };
+  }
+  const aliases = teamQueryAliases(team)
+    .map((alias) => normalize(alias))
+    .filter((alias) => alias.length >= 2 && alias !== canonicalKey);
+  const matches = aliases
+    .map((alias) => ({ alias, position: normalizedQuestion.indexOf(` ${alias} `) }))
+    .filter(({ position }) => position >= 0)
+    .sort((left, right) => right.alias.length - left.alias.length);
+  const match = matches[0];
+  return match ? { position: match.position, specificity: match.alias.length } : null;
+}
+
+function namedTeam(question: string, teams: string[]): string | null {
   const matches = teams
-    .map((team) => ({ team, key: normalize(team) }))
-    .filter(({ key }) => key.length >= 2 && normalizedQuestion.includes(` ${key} `))
-    .sort((left, right) => right.key.length - left.key.length);
+    .map((team) => ({ team, mention: teamMention(question, team) }))
+    .filter((entry): entry is { team: string; mention: TeamMention } => Boolean(entry.mention))
+    .sort((left, right) => left.mention.position - right.mention.position || right.mention.specificity - left.mention.specificity);
   return matches[0]?.team ?? null;
 }
 
 function namedTeams(question: string, teams: string[]): string[] {
-  const normalizedQuestion = ` ${normalize(question)} `;
   return teams
-    .map((team) => ({ team, key: normalize(team), position: normalizedQuestion.indexOf(` ${normalize(team)} `) }))
-    .filter(({ key, position }) => key.length >= 2 && position >= 0)
-    .sort((left, right) => left.position - right.position || right.key.length - left.key.length)
+    .map((team) => ({ team, mention: teamMention(question, team) }))
+    .filter((entry): entry is { team: string; mention: TeamMention } => Boolean(entry.mention))
+    .sort((left, right) => left.mention.position - right.mention.position || right.mention.specificity - left.mention.specificity)
     .map(({ team }) => team)
     .filter((team, index, matches) => matches.indexOf(team) === index)
     .slice(0, 2);

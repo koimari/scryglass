@@ -120,7 +120,10 @@ function ratingTarget(text: string): string | null {
 
 function deterministicDataRoute(text: string): RouteResult | null {
   const lower = text.toLowerCase();
-  if (/\bdraft\s+(?:score|scores|points?|pts|ranking|rankings)\b/.test(lower)) {
+  const draftRanking = /\bdraft\b/.test(lower)
+    && /\b(?:best|worst|better|worse|highest|lowest|top|bottom|score|scores|points?|pts|rank|ranking|rankings|between|compare|versus|vs\.?|team|teams)\b/.test(lower)
+    && !/\b(?:how does|how is|what does|explain|methodology|work|computed|mean)\b/.test(lower);
+  if (draftRanking) {
     return { call: { tool: "query_drafts", args: { q: text.trim() } } };
   }
   if (
