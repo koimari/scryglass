@@ -107,6 +107,16 @@ type TeamRatingsSnapshot = Array<{
 type PlayerRecords = Record<string, { wins?: number; games?: number; wr?: number; current_team?: string; current_league?: string }>;
 type TeamRecords = Record<string, { wins?: number; games?: number; wr?: number; leagues?: string[] }>;
 
+export function findPlayerRecord(records: PlayerRecords, name: string): PlayerRecords[string] {
+  const exact = records[name];
+  if (exact) return exact;
+  const lower = name.toLowerCase();
+  const directLower = records[lower];
+  if (directLower) return directLower;
+  const matchingKey = Object.keys(records).find((key) => key.toLowerCase() === lower);
+  return matchingKey ? records[matchingKey] : {};
+}
+
 async function loadPlayerRatings(): Promise<RatingsSnapshot> {
   return readChatJson<RatingsSnapshot>("features/player_ratings_snapshot.json").catch(() => []);
 }
@@ -181,8 +191,7 @@ export async function leaderboardRows(category: string, role: string | null, lim
     const byName = new Map(ratings.map((entry) => [String(entry.player ?? "").toLowerCase(), entry]));
     const rows: LeaderboardRow[] = ratings.map((entry) => {
       const name = String(entry.player ?? "");
-      const lower = name.toLowerCase();
-      const record = records[lower] ?? records[name] ?? {};
+      const record = findPlayerRecord(records, name);
       const role = stats.roleByPlayer.get(name) ?? null;
       const wins = typeof record.wins === "number" ? record.wins : null;
       const games = Number(record.games ?? entry.n_maps ?? 0) || 0;
@@ -229,7 +238,7 @@ export async function lookupPlayer(name: string): Promise<LeaderboardRow | null>
       ?? ratings.find((item) => String(item.player ?? "").toLowerCase().includes(lower));
     if (!entry) return null;
     const name = String(entry.player ?? "");
-    const record = records[lower] ?? {};
+    const record = findPlayerRecord(records, name);
     const games = Number(record.games ?? entry.n_maps ?? 0) || 0;
     const wins = typeof record.wins === "number" ? record.wins : null;
     return {
