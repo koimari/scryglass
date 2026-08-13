@@ -270,6 +270,34 @@ def test_sync_accepts_reviewed_removed_games_and_drops_them_from_cache(
     assert "game-3" not in set(teams["gameid"].astype(str))
 
 
+def test_sync_concurrent_upload_stores_all_games(tmp_path: Path) -> None:
+    """The parallel upload path (>WRITE_BATCH_SIZE changed games) stores everything."""
+    path = tmp_path / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+    rows = []
+    for index in range(120):
+        rows.extend(
+            _game_rows(
+                f"game-{index}",
+                f"2026-08-11T{10 + index // 60:02d}:{index % 60:02d}:00Z",
+            )
+        )
+    pd.DataFrame(rows).to_csv(path, index=False)
+    assert path.stat().st_size >= 10_000
+    database = FakeDatabase()
+    result = oe_database.sync_csv(
+        path,
+        2026,
+        project_url="https://example.supabase.co",
+        secret_key="sb_secret_unused_in_fake_database",
+        parquet_dir=tmp_path / "parquet",
+        client=database,
+    )
+    assert result["new_games"] == 120
+    assert result["accepted_games"] == 120
+    assert len(database.current) == 120
+    assert len(database.versions) == 120
+
+
 def test_database_migration_keeps_oe_tables_private() -> None:
     migration_dir = (
         Path(__file__).resolve().parents[1]

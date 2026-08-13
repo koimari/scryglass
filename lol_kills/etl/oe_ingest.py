@@ -719,7 +719,12 @@ def _normalize_identity(frame: pd.DataFrame, *, players: bool) -> pd.DataFrame:
 def parse_oe_csv(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return (team_games, player_games) with the full OE schema on each."""
     print(f"[oe] parsing {path.name}")
-    df = _strip_columns(pd.read_csv(path, low_memory=False))
+    try:
+        # pyarrow engine is ~12x faster; keep date as str so payload bytes are
+        # identical to the default-engine output (ISO dates stay verbatim).
+        df = _strip_columns(pd.read_csv(path, low_memory=False, engine="pyarrow", dtype={"date": str}))
+    except (ValueError, TypeError):
+        df = _strip_columns(pd.read_csv(path, low_memory=False))
     # position/participant: team rows have position == 'team'
     pos_col = next((c for c in df.columns if c.lower() == "position"), None)
     if pos_col is None:
