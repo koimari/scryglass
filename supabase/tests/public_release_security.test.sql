@@ -3,8 +3,8 @@ select plan(43);
 
 select is(
   (select public from storage.buckets where id = 'scryglass-public'),
-  false,
-  'public asset bucket is private'
+  true,
+  'phase 1 keeps the public asset bucket during the compatibility window'
 );
 select is(
   (select file_size_limit from storage.buckets where id = 'scryglass-public'),
@@ -49,8 +49,8 @@ select ok(
   'service role can stage asset metadata'
 );
 select ok(
-  has_table_privilege('service_role', 'public.scryglass_storage_cleanup', 'delete'),
-  'service role can acknowledge Storage cleanup'
+  not has_table_privilege('service_role', 'public.scryglass_storage_cleanup', 'delete'),
+  'service role cannot delete the Storage cleanup queue directly'
 );
 
 select ok(
@@ -116,8 +116,8 @@ select is(
     from pg_proc
     where oid = 'public.activate_scryglass_public_release(text)'::regprocedure
   ),
-  false,
-  'activation is security invoker'
+  true,
+  'activation is security definer'
 );
 select is(
   (
@@ -125,8 +125,8 @@ select is(
     from pg_proc
     where oid = 'public.restore_scryglass_public_release(text)'::regprocedure
   ),
-  false,
-  'restore is security invoker'
+  true,
+  'restore is security definer'
 );
 select is(
   (
@@ -134,8 +134,8 @@ select is(
     from pg_proc
     where oid = 'public.prune_scryglass_public_releases_v2(integer)'::regprocedure
   ),
-  false,
-  'retention is security invoker'
+  true,
+  'retention is security definer'
 );
 select is(
   (
@@ -143,8 +143,8 @@ select is(
     from pg_proc
     where oid = 'public.ack_scryglass_storage_cleanup(text[])'::regprocedure
   ),
-  false,
-  'Storage cleanup acknowledgement is security invoker'
+  true,
+  'Storage cleanup acknowledgement is security definer'
 );
 
 select policies_are(
@@ -229,8 +229,14 @@ with paths(path) as (
     'features/player_champion_records.json',
     'features/profile_records.json',
     'features/match_index.json',
-    'features/match_records_2025.json',
-    'features/match_records_2026.json',
+    'features/match_records_2025_q1.json',
+    'features/match_records_2025_q2.json',
+    'features/match_records_2025_q3.json',
+    'features/match_records_2025_q4.json',
+    'features/match_records_2026_q1.json',
+    'features/match_records_2026_q2.json',
+    'features/match_records_2026_q3.json',
+    'features/match_records_2026_q4.json',
     'features/player_weekly_ranks.json',
     'features/player_metadata.json',
     'rankings/tierlists.json',
@@ -285,8 +291,14 @@ from unnest(array[
   'features/player_champion_records.json',
   'features/profile_records.json',
   'features/match_index.json',
-  'features/match_records_2025.json',
-  'features/match_records_2026.json',
+  'features/match_records_2025_q1.json',
+  'features/match_records_2025_q2.json',
+  'features/match_records_2025_q3.json',
+  'features/match_records_2025_q4.json',
+  'features/match_records_2026_q1.json',
+  'features/match_records_2026_q2.json',
+  'features/match_records_2026_q3.json',
+  'features/match_records_2026_q4.json',
   'features/player_weekly_ranks.json',
   'features/player_metadata.json',
   'rankings/tierlists.json',
