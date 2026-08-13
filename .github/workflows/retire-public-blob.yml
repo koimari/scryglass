@@ -1,0 +1,260 @@
+name: Retire public Blob store
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Inventory first. Select retire only after review of the plan receipt.
+        required: true
+        default: inventory
+        type: choice
+        options:
+          - inventory
+          - retire
+      confirmation:
+        description: Enter RETIRE-97gks2fobqkgppwx for a retire run.
+        required: false
+        type: string
+      expected_inventory_sha256:
+        description: Enter the SHA-256 from the reviewed inventory run.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: retire-public-blob-97gks2fobqkgppwx
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    name: Inventory retired store
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      bytes: ${{ steps.validate.outputs.bytes }}
+      execute: ${{ steps.validate.outputs.execute }}
+      inventory_sha256: ${{ steps.validate.outputs.inventory_sha256 }}
+      objects: ${{ steps.validate.outputs.objects }}
+    steps:
+      - name: Check out the protected source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate the manual target
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          EXPECTED_CONFIRMATION: RETIRE-97gks2fobqkgppwx
+          MODE: ${{ inputs.mode }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$REPOSITORY" != "koimari/scryglass" ]; then
+            echo "This workflow can run only in koimari/scryglass." >&2
+            exit 64
+          fi
+          if [ "$SOURCE_REF" != "refs/heads/main" ]; then
+            echo "This workflow can run only from main." >&2
+            exit 64
+          fi
+          if [ "$MODE" = "retire" ] && [ "$CONFIRMATION" != "$EXPECTED_CONFIRMATION" ]; then
+            echo "The exact retired-store confirmation is required." >&2
+            exit 64
+          fi
+
+      - name: Compile the retirement lane
+        run: python -m compileall -q tools/retire_public_blob_store.py lol_kills/export
+
+      - name: Create the dry inventory receipt
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p retired-public-blob-receipt
+          python tools/retire_public_blob_store.py \
+            > retired-public-blob-receipt/plan.json
+
+      - name: Validate the dry inventory receipt
+        id: validate
+        env:
+          EXPECTED_INVENTORY_SHA256: ${{ inputs.expected_inventory_sha256 }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          receipt = json.loads(
+              Path("retired-public-blob-receipt/plan.json").read_text(encoding="utf-8")
+          )
+          expected_keys = {
+              "bytes",
+              "inventory_sha256",
+              "mode",
+              "objects",
+              "prefixes",
+              "schema_version",
+              "store_id",
+          }
+          expected_prefixes = ["packs/", "rankings/", "state/", "tierlists/"]
+          digest = receipt.get("inventory_sha256")
+          if (
+              set(receipt) != expected_keys
+              or receipt.get("schema_version") != "scryglass:retired-public-blob:v1"
+              or receipt.get("store_id") != "97gks2fobqkgppwx"
+              or receipt.get("mode") != "plan"
+              or receipt.get("prefixes") != expected_prefixes
+              or type(receipt.get("objects")) is not int
+              or receipt["objects"] < 0
+              or type(receipt.get("bytes")) is not int
+              or receipt["bytes"] < 0
+              or type(digest) is not str
+              or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+          ):
+              raise SystemExit("The dry inventory receipt is invalid.")
+
+          mode = os.environ["MODE"]
+          expected_digest = os.environ.get("EXPECTED_INVENTORY_SHA256", "")
+          if mode == "retire" and expected_digest != digest:
+              raise SystemExit("The reviewed inventory digest does not match this dry run.")
+
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"bytes={receipt['bytes']}\n")
+              output.write(f"execute={str(mode == 'retire').lower()}\n")
+              output.write(f"inventory_sha256={digest}\n")
+              output.write(f"objects={receipt['objects']}\n")
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
+              summary.write("## Retired Blob inventory\n\n")
+              summary.write(f"- Store: `{receipt['store_id']}`\n")
+              summary.write(f"- Objects: `{receipt['objects']}`\n")
+              summary.write(f"- Bytes: `{receipt['bytes']}`\n")
+              summary.write(f"- Inventory SHA-256: `{digest}`\n")
+          PY
+
+      - name: Upload the redacted inventory receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: retired-public-blob-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retired-public-blob-receipt/plan.json
+          if-no-files-found: error
+          retention-days: 90
+
+  retire:
+    name: Delete and verify retired store
+    needs: inventory
+    if: needs.inventory.outputs.execute == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: Production
+    steps:
+      - name: Check out the protected source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Delete the bound inventory
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          INVENTORY_SHA256: ${{ needs.inventory.outputs.inventory_sha256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p retired-public-blob-receipt
+          python tools/retire_public_blob_store.py \
+            --execute \
+            --confirmation "$CONFIRMATION" \
+            --expected-inventory-sha256 "$INVENTORY_SHA256" \
+            > retired-public-blob-receipt/execution.json
+
+      - name: Verify the retired store is empty
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+        run: |
+          set -euo pipefail
+          python tools/retire_public_blob_store.py \
+            > retired-public-blob-receipt/verification.json
+
+      - name: Build the redacted retirement receipt
+        env:
+          EXPECTED_BYTES: ${{ needs.inventory.outputs.bytes }}
+          EXPECTED_INVENTORY_SHA256: ${{ needs.inventory.outputs.inventory_sha256 }}
+          EXPECTED_OBJECTS: ${{ needs.inventory.outputs.objects }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("retired-public-blob-receipt")
+          execution = json.loads((root / "execution.json").read_text(encoding="utf-8"))
+          verification = json.loads((root / "verification.json").read_text(encoding="utf-8"))
+          expected_prefixes = ["packs/", "rankings/", "state/", "tierlists/"]
+          expected_objects = int(os.environ["EXPECTED_OBJECTS"])
+          expected_bytes = int(os.environ["EXPECTED_BYTES"])
+          expected_digest = os.environ["EXPECTED_INVENTORY_SHA256"]
+          if (
+              execution.get("schema_version") != "scryglass:retired-public-blob:v1"
+              or execution.get("store_id") != "97gks2fobqkgppwx"
+              or execution.get("mode") != "execute"
+              or execution.get("prefixes") != expected_prefixes
+              or execution.get("objects") != expected_objects
+              or execution.get("bytes") != expected_bytes
+              or execution.get("inventory_sha256") != expected_digest
+              or execution.get("deleted") != expected_objects
+              or execution.get("verified_empty") is not True
+              or verification.get("mode") != "plan"
+              or verification.get("store_id") != "97gks2fobqkgppwx"
+              or verification.get("prefixes") != expected_prefixes
+              or verification.get("objects") != 0
+              or verification.get("bytes") != 0
+              or verification.get("inventory_sha256")
+                 != execution.get("post_inventory_sha256")
+          ):
+              raise SystemExit("The Blob retirement result is invalid.")
+
+          receipt = {
+              "allowed_prefixes": expected_prefixes,
+              "bytes": expected_bytes,
+              "commit_sha": os.environ["GITHUB_SHA"],
+              "deleted": execution["deleted"],
+              "inventory_sha256": expected_digest,
+              "objects": expected_objects,
+              "post_inventory_sha256": execution["post_inventory_sha256"],
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "schema_version": "scryglass:retired-public-blob-receipt:v1",
+              "store_id": "97gks2fobqkgppwx",
+              "verified_empty": True,
+          }
+          serialized = json.dumps(receipt, sort_keys=True, separators=(",", ":"))
+          if "vercel_blob_rw_" in serialized or "pathname" in serialized or "etag" in serialized:
+              raise SystemExit("The retirement receipt contains a private field.")
+          (root / "receipt.json").write_text(serialized + "\n", encoding="utf-8")
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
+              summary.write("## Public Blob retirement\n\n")
+              summary.write(f"- Deleted objects: `{receipt['deleted']}`\n")
+              summary.write("- Empty-store verification: `passed`\n")
+              summary.write(f"- Inventory SHA-256: `{expected_digest}`\n")
+          PY
+
+      - name: Upload the redacted retirement receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: retired-public-blob-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: retired-public-blob-receipt/receipt.json
+          if-no-files-found: error
+          retention-days: 90
