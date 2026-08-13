@@ -150,6 +150,34 @@ test("filters scoped rows and aggregates teams across selected leagues", () => {
   assert.equal(all.teams[0]?.team, "Team A");
 });
 
+test("player totals stay aggregated across scoped profile evidence", () => {
+  const games = Object.fromEntries(
+    Array.from({ length: 10 }, (_, index) => {
+      const value = game(`player-scope-${index}`, "Team A", "Team B", 0.5, 0.1);
+      value.league = index < 5 ? "LCK" : "LEC";
+      value.players[0].player = "ScopedPlayer";
+      value.draft_contribution!.picks[0].best_available = index < 6;
+      return [`player-scope-${index}`, value];
+    }),
+  );
+  const records = {
+    schema_version: "scryglass:profile-records:v2",
+    window_days: 120,
+    champion_images: {},
+    players: {},
+    teams: {},
+    games,
+  } satisfies ProfileRecords;
+
+  const result = draftRankingsFromProfile(records);
+  const player = filterDraftRankings(result, { leagues: [], minGames: 5 }).players.find(
+    (row) => row.player === "ScopedPlayer",
+  );
+  assert.equal(player?.games, 10);
+  assert.equal(player?.best_available_rate, 0.6);
+  assert.equal(filterDraftRankings(result, { leagues: ["LCK"], minGames: 5 }).players[0]?.games, 5);
+});
+
 test("marks a profile payload as whole archive when it contains older games", () => {
   const games = Object.fromEntries(Array.from({ length: 5 }, (_, index) => {
     const value = game(`archive-${index}`, "Team A", "Team B", 0.5, 0.1);
