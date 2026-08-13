@@ -29,7 +29,7 @@ import { evidenceFields, evidenceInfo, formatEvidenceCell } from "@/lib/evidence
 import { TeamMark } from "./TeamMark";
 import styles from "./SignalRatings.module.css";
 
-export type DraftTeamRow = { team: string; games: number; draft_win_share: number };
+export type DraftTeamRow = { team: string; games: number; draft_edge: number };
 export type DraftPlayerRow = { player: string; games: number; draft_score: number; role?: string | null; team?: string | null };
 
 type Props = {
@@ -208,7 +208,7 @@ export function SignalRatings({
   const featured = entities.find((entity) => entityName(entity) === selected) ?? entities[0];
   const featuredName = featured ? entityName(featured) : "";
   const featuredRecord = featuredName ? (tab === "teams" ? teamRecords[featuredName] : playerRecords[featuredName]) : undefined;
-  const featuredForm = (tab === "draft" ? [] : recentForms[tab][featuredName] ?? []);
+  const featuredForm = recentForms[tab === "draft" ? "players" : tab][featuredName] ?? [];
   const featuredTrust = featured
     ? evidenceInfo(
         evidenceFields(featured as unknown as Record<string, unknown>),
@@ -265,22 +265,51 @@ export function SignalRatings({
               </button>
             ))}
           </div>
-          <label className={styles.search}><span>Search</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "teams" ? "Team or alias" : "Player or team"} /></label>
+          {tab === "draft" ? null : <label className={styles.search}><span>Search</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tab === "teams" ? "Team or alias" : "Player or team"} /></label>}
           {tab === "players" ? (
             <label><span>Role</span><select value={role} onChange={(event) => setRole(event.target.value)}><option value="">All roles</option>{PLAYER_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           ) : null}
-          <label><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="rating">Rating</option><option value="movement">Movement</option><option value="games">Games</option><option value="name">Name</option></select></label>
+          {tab === "draft" ? null : <label><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="rating">Rating</option><option value="movement">Movement</option><option value="games">Games</option><option value="name">Name</option></select></label>}
           {tab === "players" ? <label className={styles.minGames}><span>Min games</span><input type="number" min={5} value={minGames} onChange={(event) => setMinGames(Math.max(5, Number(event.target.value) || 5))} /></label> : null}
         </div>
-        <div className={styles.scopeRow} role="group" aria-label="Competition level">
+        {tab === "draft" ? <p className={styles.draftNote}>Whole accepted archive · descriptive draft edge (not a win probability)</p> : <div className={styles.scopeRow} role="group" aria-label="Competition level">
           <span>Level</span>
           <button type="button" className={!selectedTiers.length ? styles.scopeActive : ""} onClick={() => setTier(null)}>All</button>
           {TIER_FILTERS.map((tier) => <button key={tier.value} type="button" className={leagues.includes(tier.value) ? styles.scopeActive : ""} onClick={() => setTier(tier.value)}>{tier.label}</button>)}
           <details className={styles.leagueFilter}><summary>Leagues {selectedLeagues.length ? `(${selectedLeagues.length})` : ""}</summary><div data-native-scroll>{leagueGroups.map((group) => <section key={group.value}><strong>{group.label}</strong><div>{group.leagues.map((league) => <button key={league} type="button" className={leagues.includes(league) ? styles.scopeActive : ""} onClick={() => toggleLeague(league)}>{league}</button>)}</div></section>)}</div></details>
-        </div>
+        </div>}
       </section>
 
-      {featured ? (
+      {tab === "draft" ? (
+        <section className={styles.draftSection} aria-label="Draft rankings">
+              <div className={styles.draftColumn}>
+                <header><h2>Teams by draft</h2><p>Mean draft edge across the whole accepted archive</p></header>
+                <ol className={styles.draftList}>
+                  {draftTeams.map((row, index) => (
+                    <li key={row.team}>
+                      <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
+                      <Link className="row-link" href={`/elo/team/${teamSlug(row.team)}`}>{row.team}</Link>
+                      <b>{row.draft_edge >= 0 ? "+" : ""}{row.draft_edge.toFixed(3)}</b>
+                      <small>{row.games} games</small>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+              <div className={styles.draftColumn}>
+                <header><h2>Players by draft</h2><p>Mean draft score of their picks across the whole accepted archive</p></header>
+                <ol className={styles.draftList}>
+                  {draftPlayers.map((row, index) => (
+                    <li key={row.player}>
+                      <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
+                      <Link className="row-link" href={`/elo/player/${playerSlug(row.player)}`}>{row.player}</Link>
+                      <b>{row.draft_score >= 0 ? "+" : ""}{row.draft_score.toFixed(3)}</b>
+                      <small>{row.games} picks{row.role ? ` · ${roleLabel({ jng: "jungle", sup: "support" }[row.role] ?? row.role)}` : ""}</small>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+        </section>
+      ) : featured ? (
         <>
           <section className={styles.summaryLine} aria-label="Rating summary">
             <p><span>Ranked</span><strong>{entities.length} {tab}</strong></p>
@@ -323,44 +352,13 @@ export function SignalRatings({
             </aside>
           </section>
 
-          {tab === "draft" ? (
-            <section className={styles.draftSection} aria-label="Draft rankings">
-              <div className={styles.draftColumn}>
-                <header><h2>Teams by draft</h2><p>Mean draft win share across the whole accepted archive</p></header>
-                <ol className={styles.draftList}>
-                  {draftTeams.map((row, index) => (
-                    <li key={row.team}>
-                      <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
-                      <Link className="row-link" href={`/elo/team/${teamSlug(row.team)}`}>{row.team}</Link>
-                      <b>{(row.draft_win_share * 100).toFixed(1)}%</b>
-                      <small>{row.games} games</small>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-              <div className={styles.draftColumn}>
-                <header><h2>Players by draft</h2><p>Mean draft score of their picks across the whole accepted archive</p></header>
-                <ol className={styles.draftList}>
-                  {draftPlayers.map((row, index) => (
-                    <li key={row.player}>
-                      <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
-                      <Link className="row-link" href={`/elo/player/${playerSlug(row.player)}`}>{row.player}</Link>
-                      <b>{row.draft_score >= 0 ? "+" : ""}{row.draft_score.toFixed(3)}</b>
-                      <small>{row.games} picks{row.role ? ` · ${roleLabel(row.role)}` : ""}</small>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            </section>
-          ) : null}
-
           <section className={styles.gallerySection}>
             <header><h2>{tab === "teams" ? "Team ratings" : "Player ratings"}</h2><p>{entities.length} shown · {scope}</p></header>
             <div className={styles.gallery}>
               {visible.map((entity, index) => {
                 const name = entityName(entity);
                 const record = tab === "teams" ? teamRecords[name] : playerRecords[name];
-                const form = (tab === "draft" ? [] : recentForms[tab][name] ?? []);
+                const form = recentForms[tab][name] ?? [];
                 const entityTeam = tab === "teams" ? name : (record as PlayerRecord | undefined)?.current_team ?? (entity as PlayerRating).last_team;
                 return (
                   <Link className={styles.ratingCard} href={tab === "teams" ? `/elo/team/${teamSlug(name)}` : `/elo/player/${playerSlug(name)}`} key={name}>

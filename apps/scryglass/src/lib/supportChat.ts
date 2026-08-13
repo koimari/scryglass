@@ -35,7 +35,7 @@ export const TOOLS: ToolSpec[] = [
   { name: "query_players", description: "General player-data query. Use for named player comparisons, filtered player rankings, ratings, win rates, experience, A grades, and best-player-on-champion questions. The server resolves entities and executes a validated query plan against published data.", args: [{ name: "q", description: "the complete original player question" }] },
   { name: "query_champions", description: "Aggregate champion rankings across active published player-champion records. Use for general best, worst, top, bottom, most played, or role-filtered champion questions. The response states its tier and sample floor.", args: [{ name: "q", description: "the complete original champion question" }] },
   { name: "query_drafts", description: "Rank team draft scores in either direction or compare two named teams over their published draft history. Use for best, worst, top, bottom, named-team, between-team, or versus-team draft-score questions. The response states the active profile window and sample floor.", args: [{ name: "q", description: "the complete original team draft-score question" }] },
-  { name: "leaderboards", description: "Top players by A-grade games, rating, or win rate; optionally filtered by role and competitive tier.", args: [{ name: "category", description: "a_grades | rating | win_rate | teams" }, { name: "role", description: "top | jng | mid | bot | sup (optional)" }, { name: "tier", description: "tier1 | tier2 | tier3 (optional; use tier1 by default)" }, { name: "limit", description: "number of results (optional)" }] },
+  { name: "leaderboards", description: "Top players by A-grade games, rating, or win rate; top teams; or whole-archive draft rankings (teams by mean draft edge, players by mean pick draft score); optionally filtered by role and competitive tier.", args: [{ name: "category", description: "a_grades | rating | win_rate | teams | teams_draft | players_draft" }, { name: "role", description: "top | jng | mid | bot | sup (optional)" }, { name: "tier", description: "tier1 | tier2 | tier3 (optional; use tier1 by default)" }, { name: "limit", description: "number of results (optional)" }] },
   { name: "player", description: "Player profile: rating, role, team, grades, win rate, recent form.", args: [{ name: "name", description: "player name" }] },
   { name: "compare_players", description: "Compare the ratings of two named players and answer which rating is higher.", args: [{ name: "player1", description: "first player name" }, { name: "player2", description: "second player name" }] },
   { name: "team", description: "Team profile: rating, record, recent results.", args: [{ name: "name", description: "team name" }] },
@@ -124,6 +124,12 @@ function deterministicDataRoute(text: string): RouteResult | null {
     && /\b(?:best|worst|better|worse|highest|lowest|top|bottom|score|scores|points?|pts|rank|ranking|rankings|between|compare|versus|vs\.?|team|teams)\b/.test(lower)
     && !/\b(?:how does|how is|what does|explain|methodology|work|computed|mean)\b/.test(lower);
   if (draftRanking) {
+    const archiveList = /\b(?:best|worst|highest|lowest|top|bottom|rank|ranking|rankings|leaderboard|list|strongest|weakest)\b/.test(lower)
+      && !/\b(?:between|compare|versus|vs\.?|vs |against)\b/.test(lower);
+    if (archiveList) {
+      const teamsOnly = /\bteams?\b/.test(lower) && !/\bplayers?\b/.test(lower);
+      return { call: { tool: "leaderboards", args: { category: teamsOnly ? "teams_draft" : "players_draft", tier: "tier1", limit: "10" } } };
+    }
     return { call: { tool: "query_drafts", args: { q: text.trim() } } };
   }
   if (

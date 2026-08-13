@@ -286,26 +286,49 @@ def _validate_public_record_tiers(records: dict[str, dict[str, Any]], *, label: 
             )
 
 
-def _draft_players_from_signals(signals: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Per-player mean draft pick contribution across the scored archive."""
+def _draft_players_from_signals(
+    signals: Mapping[str, Any], games: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Per-player mean draft pick contribution across the scored archive.
+
+    Player identity comes from the composition game roster (the public signal
+    carries side/role/champion only).
+    """
+    rosters: dict[str, Mapping[str, Any]] = {}
+    for game in games:
+        if isinstance(game, Mapping):
+            rosters[str(game.get("game_uid"))] = game
     scores: dict[str, list[float]] = {}
     roles: dict[str, str] = {}
     teams: dict[str, str] = {}
-    for signal in signals.values():
+    for game_id, signal in signals.items():
         if not isinstance(signal, Mapping):
             continue
+        game = rosters.get(str(game_id))
         for pick in signal.get("picks") or []:
             if not isinstance(pick, Mapping):
                 continue
-            name = str(pick.get("player") or "").strip()
+            side = str(pick.get("side") or "").strip().casefold()
+            role = str(pick.get("role") or "").strip()
             contribution = _number(pick.get("contribution"))
-            if not name or contribution is None:
+            if contribution is None or not side or not role:
+                continue
+            name = ""
+            team = ""
+            if isinstance(game, Mapping):
+                side_roster = game.get(side)
+                if isinstance(side_roster, Mapping):
+                    slot = side_roster.get(role)
+                    if isinstance(slot, Mapping):
+                        name = str(slot.get("player") or "").strip()
+                        team = str(slot.get("team") or "").strip()
+            if not name:
                 continue
             scores.setdefault(name, []).append(float(contribution))
             if not roles.get(name):
-                roles[name] = str(pick.get("role") or "").strip()
+                roles[name] = role
             if not teams.get(name):
-                teams[name] = ""
+                teams[name] = team
     rows = []
     for name, values in scores.items():
         if len(values) < 5:
@@ -318,11 +341,6 @@ def _draft_players_from_signals(signals: Mapping[str, Any]) -> list[dict[str, An
             "team": teams.get(name),
         })
     return rows
-
-
-def _sigmoid(blue: float, red: float) -> float:
-    import math
-    return 1.0 / (1.0 + math.exp(-(blue - red)))
 
 
 def _validate_public_composition_records(
@@ -881,6 +899,11 @@ def export_public_pack(
             continue
         blue_signal = _number(signal.get("blue", {}).get("signal"))
         red_signal = _number(signal.get("red", {}).get("signal"))
+        draft_edge = (
+            round(blue_signal - red_signal, 4)
+            if blue_signal is not None and red_signal is not None
+            else None
+        )
         draft_records_payload["games"][str(game_id)] = {
             "date": str(game.get("date") or ""),
             "league": str(game.get("league") or ""),
@@ -888,8 +911,11 @@ def export_public_pack(
             "red_team": str(game.get("red_team") or ""),
             "blue_signal": blue_signal,
             "red_signal": red_signal,
-            "blue_draft_win": round(_sigmoid(blue_signal, red_signal), 4) if blue_signal is not None and red_signal is not None else None,
-            "red_draft_win": round(1.0 - _sigmoid(blue_signal, red_signal), 4) if blue_signal is not None and red_signal is not None else None,
+            # Descriptive draft advantage on the model's logit scale (the
+            # coefficient-sum difference). NOT a win probability: the public
+            # signal omits the model's control terms, so it is a ranked edge,
+            # not a calibrated probability.
+            "draft_edge": draft_edge,
         }
     draft_records_dest = feat_dir / "draft_records.json"
     draft_records_dest.write_text(
@@ -1150,7 +1176,9 @@ def export_public_pack(
         team_records_payload_raw = dict(team_records_payload)
         player_champion_records_raw = dict(player_champions_payload)
         match_index_raw = dict(match_index_payload)
-        draft_players_rows = _draft_players_from_signals(composition_result.signals)
+        draft_players_rows = _draft_players_from_signals(
+            composition_result.signals, composition_games
+        )
         leaderboards = build_leaderboards(
             player_records_payload,
             profile_records_payload,

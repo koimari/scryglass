@@ -191,23 +191,24 @@ def _teams_draft(draft_records: Mapping[str, Any] | None) -> list[dict[str, Any]
             continue
         blue = str(game.get("blue_team") or "").strip()
         red = str(game.get("red_team") or "").strip()
-        blue_win = game.get("blue_draft_win")
-        red_win = game.get("red_draft_win")
-        if blue and isinstance(blue_win, (int, float)):
-            by_team.setdefault(blue, []).append(float(blue_win))
-        if red and isinstance(red_win, (int, float)):
-            by_team.setdefault(red, []).append(float(red_win))
+        edge = game.get("draft_edge")
+        if not isinstance(edge, (int, float)):
+            continue
+        if blue:
+            by_team.setdefault(blue, []).append(float(edge))
+        if red:
+            by_team.setdefault(red, []).append(-float(edge))
     rows = []
-    for team, shares in by_team.items():
-        games_n = len(shares)
+    for team, edges in by_team.items():
+        games_n = len(edges)
         if games_n < 5:
             continue
         rows.append({
             "team": team,
             "games": games_n,
-            "draft_win_share": round(sum(shares) / games_n, 4),
+            "draft_edge": round(sum(edges) / games_n, 4),
         })
-    rows.sort(key=lambda row: -row["draft_win_share"])
+    rows.sort(key=lambda row: -row["draft_edge"])
     return rows[:TOP_LIMIT]
 
 
@@ -348,9 +349,7 @@ def build_leaderboards(
         "players": {name: {"role": payload.get("role"), "team": payload.get("team")} for name, payload in players.items()},
         "teams": {entry["team"]: {"team_key": entry.get("team_key")} for entry in teams},
         "champions": sorted(champions.keys()),
-        "teams_draft": _teams_draft(draft_records),
-    "players_draft": _players_draft(draft_players or []),
-}
+    }
     leagues: set[str] = set()
     for name, payload in players.items():
         if payload.get("league"):
@@ -372,6 +371,8 @@ def build_leaderboards(
         "teams": teams,
         "champions": champions,
         "indexes": indexes,
+        "teams_draft": _teams_draft(draft_records),
+        "players_draft": _players_draft(draft_players or []),
     }
 
 

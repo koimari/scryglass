@@ -25,10 +25,10 @@ const EXAMPLES: Array<{ question: string; tool: ToolName; args: Record<string, s
   { question: "what is the median performance champion for Faker?", tool: "query_players", args: { q: "what is the median performance champion for Faker?" } },
   { question: "what is Faker's average performance champion?", tool: "query_players", args: { q: "what is Faker's average performance champion?" } },
   { question: "what is the worst champion in general?", tool: "query_champions", args: { q: "what is the worst champion in general?" } },
-  { question: "which team has the best draft score", tool: "query_drafts", args: { q: "which team has the best draft score" } },
-  { question: "which team has the best draft", tool: "query_drafts", args: { q: "which team has the best draft" } },
+  { question: "which team has the best draft score", tool: "leaderboards", args: { category: "teams_draft", tier: "tier1", limit: "10" } },
+  { question: "which team has the best draft", tool: "leaderboards", args: { category: "teams_draft", tier: "tier1", limit: "10" } },
   { question: "who has the best draft between KC and G2?", tool: "query_drafts", args: { q: "who has the best draft between KC and G2?" } },
-  { question: "bottom 5 team draft scores", tool: "query_drafts", args: { q: "bottom 5 team draft scores" } },
+  { question: "bottom 5 team draft scores", tool: "leaderboards", args: { category: "teams_draft", tier: "tier1", limit: "10" } },
   { question: "best Tier 1 LCK mid with at least 100 games", tool: "query_players", args: { q: "best Tier 1 LCK mid with at least 100 games" } },
   { question: "what is the best mid champion this patch", tool: "tier", args: { role: "mid" } },
 ];
@@ -77,10 +77,13 @@ test("the tool schema covers each supported domain with unique names", () => {
 
 test("high-confidence ranking routes bypass model inference", async () => {
   assert.deepEqual(await routeQuestion("which team has the best draft score"), {
-    call: { tool: "query_drafts", args: { q: "which team has the best draft score" } },
+    call: { tool: "leaderboards", args: { category: "teams_draft", tier: "tier1", limit: "10" } },
   });
   assert.deepEqual(await routeQuestion("which team has the best draft"), {
-    call: { tool: "query_drafts", args: { q: "which team has the best draft" } },
+    call: { tool: "leaderboards", args: { category: "teams_draft", tier: "tier1", limit: "10" } },
+  });
+  assert.deepEqual(await routeQuestion("who are the best players by draft"), {
+    call: { tool: "leaderboards", args: { category: "players_draft", tier: "tier1", limit: "10" } },
   });
   assert.deepEqual(await routeQuestion("who has the best draft between KC and G2?"), {
     call: { tool: "query_drafts", args: { q: "who has the best draft between KC and G2?" } },
