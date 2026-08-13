@@ -11,6 +11,7 @@
 export type ToolName =
   | "leaderboards"
   | "player"
+  | "compare_players"
   | "team"
   | "matches"
   | "tier"
@@ -28,8 +29,9 @@ export type ToolSpec = {
 };
 
 export const TOOLS: ToolSpec[] = [
-  { name: "leaderboards", description: "Top players by A-grade games, rating, or win rate; optionally filtered by role.", args: [{ name: "category", description: "a_grades | rating | win_rate | teams" }, { name: "role", description: "top | jng | mid | bot | sup (optional)" }, { name: "limit", description: "number of results (optional)" }] },
+  { name: "leaderboards", description: "Top players by A-grade games, rating, or win rate; optionally filtered by role and competitive tier.", args: [{ name: "category", description: "a_grades | rating | win_rate | teams" }, { name: "role", description: "top | jng | mid | bot | sup (optional)" }, { name: "tier", description: "tier1 | tier2 | tier3 (optional; use tier1 by default)" }, { name: "limit", description: "number of results (optional)" }] },
   { name: "player", description: "Player profile: rating, role, team, grades, win rate, recent form.", args: [{ name: "name", description: "player name" }] },
+  { name: "compare_players", description: "Compare the ratings of two named players and answer which rating is higher.", args: [{ name: "player1", description: "first player name" }, { name: "player2", description: "second player name" }] },
   { name: "team", description: "Team profile: rating, record, recent results.", args: [{ name: "name", description: "team name" }] },
   { name: "matches", description: "Recent completed matches, optionally filtered by team, league, or champion.", args: [{ name: "team", description: "team name (optional)" }, { name: "league", description: "league code such as LEC or LCK (optional)" }, { name: "champion", description: "champion name (optional)" }, { name: "limit", description: "number of matches (optional)" }] },
   { name: "tier", description: "Patch-wide champion tier list, optionally per role.", args: [{ name: "role", description: "top | jng | mid | bot | sup (optional)" }, { name: "patch", description: "patch such as 16.15 (optional)" }] },
@@ -57,6 +59,7 @@ function matchName(text: string, candidates: string[]): string | null {
 
 const COMMON_LEAGUES = ["LEC", "LCK", "LPL", "LCS", "CBLOL", "PCS", "VCS", "LJL", "LTA", "EMEA", "WORLDS", "MSI", "EWC", "AMERICAS"];
 const COMMON_CHAMPIONS = ["akali", "syndra", "ori", "yasuo", "jinx", "thresh", "leona", "ahri", "zed", "lux", "kaisa", "ezreal", "renekton", "wukong", "vi", "viego", "skarner", "naafiri"];
+const COMMON_TEAMS = ["T1", "G2", "Fnatic", "Karmine", "Team Liquid", "Gen.G", "Hanwha", "Bilibili", "Top Esports", "DRX", "KC", "MKOI", "GAM", "PSG", "FNC", "C9", "100 Thieves", "Cloud9"];
 
 function detectLeague(text: string): string | null {
   const lower = text.toUpperCase();
@@ -89,8 +92,56 @@ function looksLikePlayerQuestion(text: string): boolean {
   return /(who is|player|profile|rating of|most|best|top player)/.test(normalized);
 }
 
+function cleanRatingTarget(value: string): string | null {
+  const target = value.trim().replace(/(?:'s|s')$/i, "").trim();
+  if (target.length < 2 || /\d/.test(target) || /^(the|a|an|player|rating)$/.test(target)) return null;
+  return target;
+}
+
+function ratingTarget(text: string): string | null {
+  const patterns = [
+    /^(?:what(?:'s| is)\s+)?(.+?)\s+rating\s*\??$/i,
+    /^(?:what(?:'s| is)|how is)\s+(.+?)\s+rated\s*\??$/i,
+    /^rating\s+of\s+(.+?)\s*\??$/i,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text.trim());
+    const target = match ? cleanRatingTarget(match[1]) : null;
+    if (target) return target;
+  }
+  return null;
+}
+
+function comparisonTargets(text: string): [string, string] | null {
+  const patterns = [
+    /better\s+rating\s*[,;:]?\s*(.+?)\s+(?:or|vs\.?|versus)\s+(.+?)\s*\??$/i,
+    /compare\s+(.+?)\s+(?:and|vs\.?|versus)\s+(.+?)(?:\s+ratings?)?\s*\??$/i,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text.trim());
+    if (!match) continue;
+    const first = cleanRatingTarget(match[1]);
+    const second = cleanRatingTarget(match[2]);
+    if (first && second) return [first, second];
+  }
+  return null;
+}
+
 export function fallbackRoute(text: string): RouteResult {
   const lower = text.toLowerCase();
+
+  const comparedPlayers = comparisonTargets(text);
+  if (comparedPlayers) {
+    return { call: { tool: "compare_players", args: { player1: comparedPlayers[0], player2: comparedPlayers[1] } } };
+  }
+
+  const namedRating = ratingTarget(text);
+  if (namedRating) {
+    const team = matchName(namedRating, COMMON_TEAMS);
+    return team
+      ? { call: { tool: "team", args: { name: team } } }
+      : { call: { tool: "player", args: { name: namedRating } } };
+  }
 
   // methodology / explanation questions
   if (/(how does|how is|what does|explain|how do|methodology|work\b)/.test(lower)) {
@@ -121,8 +172,14 @@ export function fallbackRoute(text: string): RouteResult {
     return { call: { tool: "schedule", args: league ? { league } : {} } };
   }
 
-  // tier lists
-  if (/(tier|tier list|best .* (this patch|in patch)|patch .* best|rankings)/.test(lower)) {
+  // Player-role rankings. "Mid laner" and similar phrases refer to players.
+  if (/(best|top|highest|ranked)/.test(lower) && /(laner|player|jungler|support|adc)/.test(lower)) {
+    const role = detectRole(text);
+    return { call: { tool: "leaderboards", args: { category: "rating", tier: "tier1", limit: "5", ...(role ? { role } : {}) } } };
+  }
+
+  // Champion tier lists.
+  if (/(tier|tier list|best .* (champion|pick).* (this patch|in patch)|patch .* best .* (champion|pick))/.test(lower)) {
     const role = detectRole(text);
     return { call: { tool: "tier", args: role ? { role } : {} } };
   }
@@ -135,7 +192,7 @@ export function fallbackRoute(text: string): RouteResult {
         ? "win_rate"
         : "rating";
     const role = detectRole(text);
-    return { call: { tool: "leaderboards", args: { category, ...(role ? { role } : {}) } } };
+    return { call: { tool: "leaderboards", args: { category, tier: "tier1", ...(role ? { role } : {}) } } };
   }
   // "top N <entity>" / "best <entity>" -> leaderboards with the right category
   const topMatch = /(?:top|best|highest)\s+(\d+)?\s*(team|teams|player|players|champion|champions)/.exec(lower);
@@ -144,34 +201,18 @@ export function fallbackRoute(text: string): RouteResult {
     const entity = topMatch[2];
     const role = entity.includes("jungl") ? "jng" : entity.includes("mid") ? "mid" : entity.includes("support") ? "sup" : entity.includes("top laner") ? "top" : entity.includes("adc") || entity.includes("bot") ? "bot" : null;
     if (entity.startsWith("team")) {
-      return { call: { tool: "leaderboards", args: { category: "teams", limit: String(limit) } } };
+      return { call: { tool: "leaderboards", args: { category: "teams", tier: "tier1", limit: String(limit) } } };
     }
-    const args: Record<string, string> = { category: "rating", limit: String(limit) };
+    const args: Record<string, string> = { category: "rating", tier: "tier1", limit: String(limit) };
     if (role) args.role = role;
     return { call: { tool: "leaderboards", args } };
-  }
-
-  // "X's rating" / "rating of X" / "what is X rated" -> player profile
-  const nameRating = /(?:rating of|rated)\s+(?!\d)([a-z0-9 .'-]+?)(?:\s*\?|$)/.exec(lower)
-    ?? /([a-z0-9 .'-]+?)(?:'s|s')\s+rating/.exec(lower);
-  if (nameRating) {
-    const name = nameRating[1].trim().split(/\s+/).pop() ?? "";
-    if (name && name.length >= 2 && !/^(the|a|an)$/.test(name)) {
-      return { call: { tool: "player", args: { name } } };
-    }
   }
 
   // with-a-rating-of-<value> lookups -> per-role leaderboard index
   if (/(with a rating|rating of \d|rated \d|rating is \d)/.test(lower)) {
     const category = "rating";
     const role = detectRole(text);
-    return { call: { tool: "leaderboards", args: { category, ...(role ? { role } : {}) } } };
-  }
-
-  // team questions
-  if (/team|show me .* recent|results/.test(lower)) {
-    const team = matchName(text, ["T1", "G2", "Fnatic", "Karmine", "Team Liquid", "Gen.G", "Hanwha", "Bilibili", "Top Esports", "DRX", "KC", "MKOI", "GAM", "PSG", "FNC", "C9", "100 Thieves", "Cloud9"]);
-    if (team) return { call: { tool: "team", args: { name: team } } };
+    return { call: { tool: "leaderboards", args: { category, tier: "tier1", ...(role ? { role } : {}) } } };
   }
 
   // matches by league/champion/team
@@ -181,10 +222,16 @@ export function fallbackRoute(text: string): RouteResult {
     const args: Record<string, string> = {};
     if (league) args.league = league;
     if (champion) args.champion = champion;
-    const team = matchName(text, ["T1", "G2", "Fnatic", "Karmine", "Team Liquid", "Gen.G", "Hanwha", "Bilibili", "Top Esports", "DRX", "KC", "MKOI", "GAM", "PSG", "FNC", "C9"]);
+    const team = matchName(text, COMMON_TEAMS);
     if (team) args.team = team;
     args.limit = "10";
     return { call: { tool: "matches", args } };
+  }
+
+  // team profile questions
+  if (/team|profile|tell me about/.test(lower)) {
+    const team = matchName(text, COMMON_TEAMS);
+    if (team) return { call: { tool: "team", args: { name: team } } };
   }
 
   // player questions (fallback default for identity questions)

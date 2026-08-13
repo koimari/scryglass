@@ -1,17 +1,7 @@
-import { chatError, chatJson, clean, readChatJson, searchParams } from "@/lib/chatApi";
+import { chatError, chatJson, clean, searchParams } from "@/lib/chatApi";
+import { filterChatMatchesByTeam, loadChatMatches } from "@/lib/chatData";
 
 export const runtime = "nodejs";
-
-type MatchIndexGame = {
-  game_id: string;
-  date: string;
-  league: string;
-  competition_tier?: string | null;
-  blue_team: string;
-  red_team: string;
-  blue_win: number;
-  champions: string[];
-};
 
 export async function GET(request: Request) {
   const params = searchParams(request);
@@ -23,14 +13,9 @@ export async function GET(request: Request) {
     return chatError("One of team, league, or champion is required.", 400);
   }
   try {
-    const index = await readChatJson<{ games: MatchIndexGame[] }>("features/match_index.json");
-    let games = index.games;
+    let games = await loadChatMatches();
     if (team) {
-      const lower = team.toLowerCase();
-      games = games.filter(
-        (game) =>
-          game.blue_team.toLowerCase().includes(lower) || game.red_team.toLowerCase().includes(lower),
-      );
+      games = filterChatMatchesByTeam(games, team);
     }
     if (league) {
       const lower = league.toLowerCase();
