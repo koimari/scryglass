@@ -187,6 +187,30 @@
   gap: 0.65rem;
 }
 
+.queryResult {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.queryHeadline {
+  color: var(--ink);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.queryBasis,
+.queryCaveat {
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: var(--text-micro);
+  line-height: 1.45;
+}
+
+.queryCaveat {
+  padding-left: 0.65rem;
+  border-left: 2px solid var(--line-strong);
+}
+
 .comparisonAnswer {
   color: var(--ink);
   font-size: 0.9rem;

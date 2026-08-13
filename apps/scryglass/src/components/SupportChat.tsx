@@ -26,6 +26,24 @@ type LeaderboardRow = {
   grade_a_games: number;
 };
 
+type PlayerQueryRow = LeaderboardRow & {
+  champion: string | null;
+  champion_games: number | null;
+  champion_wins: number | null;
+  champion_win_rate: number | null;
+  champion_score: number | null;
+};
+
+type PlayerQueryResult = {
+  kind: "player_query";
+  answer: {
+    headline: string;
+    basis: string;
+    caveat: string | null;
+  };
+  rows: PlayerQueryRow[];
+};
+
 type TierRow = {
   champion: string;
   role: string;
@@ -146,6 +164,56 @@ function leaderboardTable(rows: LeaderboardRow[], category: string): React.React
 
 function resultTable(result: unknown, call: ToolCall): React.ReactNode {
   const data = result as Record<string, unknown> | null;
+
+  if (call.tool === "query_players" && data?.kind === "player_query" && Array.isArray(data.rows)) {
+    const query = data as unknown as PlayerQueryResult;
+    const hasChampion = query.rows.some((row) => Boolean(row.champion));
+    return (
+      <div className={styles.queryResult} data-testid="player-query-result">
+        <p className={styles.queryHeadline} data-testid="player-query-headline">{query.answer.headline}</p>
+        <p className={styles.queryBasis} data-testid="player-query-basis">{query.answer.basis}</p>
+        {query.answer.caveat ? <p className={styles.queryCaveat} data-testid="player-query-caveat">{query.answer.caveat}</p> : null}
+        {query.rows.length ? table(
+          <table className={styles.resultTable}>
+            <thead>
+              {hasChampion ? (
+                <tr><th>Player</th><th>Champion</th><th>Role</th><th>Level</th><th className={styles.numeric}>Champion games</th><th className={styles.numeric}>Champion WR</th><th className={styles.numeric}>Rating</th></tr>
+              ) : (
+                <tr><th>Player</th><th>Role</th><th>Team</th><th>League</th><th>Level</th><th className={styles.numeric}>Rating</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>WR</th></tr>
+              )}
+            </thead>
+            <tbody>
+              {query.rows.map((row) => (
+                <tr key={`${row.name}-${row.champion ?? "player"}`}>
+                  <td><a className="row-link" href={`/elo/player/${playerSlug(row.name)}`}>{row.name}</a></td>
+                  {hasChampion ? (
+                    <>
+                      <td>{present(row.champion)}</td>
+                      <td>{roleName(row.role)}</td>
+                      <td>{tierName(row.tier)}</td>
+                      <td className={styles.numeric}>{present(row.champion_games)}</td>
+                      <td className={styles.numeric}>{percentage(row.champion_win_rate)}</td>
+                      <td className={styles.numeric}>{rating(row.rating)}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td>{roleName(row.role)}</td>
+                      <td>{row.team ? <a className="row-link" href={`/elo/team/${teamSlug(row.team)}`}>{row.team}</a> : "—"}</td>
+                      <td>{present(row.league)}</td>
+                      <td>{tierName(row.tier)}</td>
+                      <td className={styles.numeric}>{rating(row.rating)}</td>
+                      <td className={styles.numeric}>{present(row.games)}</td>
+                      <td className={styles.numeric}>{percentage(row.win_rate)}</td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>,
+        ) : null}
+      </div>
+    );
+  }
 
   if (call.tool === "compare_players" && Array.isArray(data?.players)) {
     const players = data.players as LeaderboardRow[];
@@ -347,10 +415,10 @@ export default function SupportChat({ floating = false }: { floating?: boolean }
   }
 
   const suggested = [
-    "who is the player with most A grade games",
-    "what is the jungler with a rating of 1643",
+    "who is best rated between Faker and Chovy",
+    "who is the best Galio player",
     "show me T1's recent matches",
-    "what is the best mid laner this patch",
+    "best Tier 1 LCK mid with at least 100 games",
     "when does the next LEC game happen",
     "how does the draft win share work",
   ];
