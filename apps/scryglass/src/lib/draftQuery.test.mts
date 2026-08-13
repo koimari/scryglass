@@ -103,7 +103,7 @@ test("team draft scores compare two teams over their published history", () => {
   assert.equal(comparison.kind, "team_draft_comparison");
   assert.deepEqual(comparison.rows.map((row) => row.team), ["T1", "Gen.G"]);
   assert.equal(comparison.comparison?.winner, "T1");
-  assert.match(comparison.answer.headline, /T1 has the higher historical average draft win share/);
+  assert.match(comparison.answer.headline, /T1 has the higher average published draft win share in the active 90-day profile window/);
   assert.match(comparison.answer.headline, /67%/);
   assert.match(comparison.answer.headline, /49%/);
   assert.match(comparison.answer.headline, /18 percentage-point edge/);
