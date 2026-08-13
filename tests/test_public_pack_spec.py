@@ -12,6 +12,7 @@ from lol_kills.export.pack_records import (
 )
 from lol_kills.export.public_pack import (
     _attach_public_team_evidence,
+    _attach_published_draft_pools,
     _complete_player_game_ids,
     _ensure_year_column,
     _filter_years,
@@ -177,7 +178,7 @@ def test_profile_records_normalize_recent_games_without_raw_tables() -> None:
         champion_image_urls={"Ivern": "https://example.test/ivern.png"},
     )
 
-    assert payload["schema_version"] == "scryglass:profile-records:v2"
+    assert payload["schema_version"] == "scryglass:profile-records:v3"
     assert payload["grade_contract"] == "scryglass:player-map-grade:v2"
     assert payload["players"]["Inspired"] == ["game-1"]
     assert payload["teams"]["LYON"] == ["game-1"]
@@ -293,6 +294,62 @@ def test_public_composition_evidence_matches_the_published_picks() -> None:
     same_fit["fit_through"] = game["date"]
     with pytest.raises(CompositionSignalError, match="fit watermark"):
         _validate_public_composition_records({"games": {"game-1": {**game, "draft_contribution": same_fit}}})
+
+
+def test_published_draft_pool_uses_bans_and_fails_closed_without_them() -> None:
+    roles = ("top", "jungle", "mid", "bot", "support")
+    picked = []
+    players = []
+    picks = []
+    order = 1
+    for side, team in (("Blue", "A"), ("Red", "B")):
+        for role in roles:
+            champion = f"{side}-{role}"
+            players.append({"player": f"{team}-{role}", "side": side, "role": role, "champion": champion})
+            picked.append({"side": side, "role": role, "champion": champion, "order": order})
+            picks.append({"side": side, "role": {"jungle": "jng", "support": "sup"}.get(role, role), "champion": champion, "contribution": 0.1, "prior_role_games": 40, "evidence_status": "available"})
+            order += 1
+    game = {
+        "game_id": "game-1",
+        "patch": "16.15",
+        "players": players,
+        "draft_pool": {
+            "schema_version": "scryglass:draft-pool:v1",
+            "status": "limited",
+            "source": "oracle-elixir",
+            "patch": "16.15",
+            "bans": {"Blue": ["Ban Blue 1", "Ban Blue 2", "Ban Blue 3", "Ban Blue 4", "Ban Blue 5"], "Red": ["Ban Red 1", "Ban Red 2", "Ban Red 3", "Ban Red 4", "Ban Red 5"]},
+            "picked": picked,
+            "unpicked": [],
+        },
+        "draft_contribution": {
+            "schema_version": "scryglass:composition-signal:v1",
+            "status": "available",
+            "model_version": "test",
+            "fit_through": "2026-08-01T00:00:00Z",
+            "blue": {"signal": 0.5, "prior_role_games": 200},
+            "red": {"signal": 0.5, "prior_role_games": 200},
+            "picks": picks,
+            "note": "test",
+        },
+    }
+    tier_rows = []
+    for role in roles:
+        selected = f"Blue-{role}"
+        tier_rows.extend([
+            {"patch": "16.15", "role": role, "champion": selected, "rank": 2},
+            {"patch": "16.15", "role": role, "champion": "Red-" + role, "rank": 1},
+            {"patch": "16.15", "role": role, "champion": "Best-" + role, "rank": 3},
+        ])
+    payload = {"games": {"game-1": game}}
+    audit = _attach_published_draft_pools(payload, {"rows": tier_rows})
+    assert audit["quality_games"] == 1
+    assert game["draft_pool"]["evaluated_picks"] == 10
+    assert game["draft_contribution"]["picks"][0]["best_available"] is False
+    assert game["draft_contribution"]["picks"][5]["best_available"] is True
+    game["draft_pool"]["bans"]["Red"] = []
+    _attach_published_draft_pools(payload, {"rows": tier_rows})
+    assert game["draft_contribution"]["picks"][0]["best_available"] is None
 
 
 def test_profile_records_keep_old_maps_in_the_archive_only() -> None:

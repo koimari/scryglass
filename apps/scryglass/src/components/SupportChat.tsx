@@ -170,7 +170,7 @@ function leaderboardTable(rows: LeaderboardRow[], category: string): React.React
     const teamsDraft = category === "teams_draft";
     return table(
       <table className={styles.resultTable}>
-        <thead><tr>{teamsDraft ? <th>Team</th> : <th>Player</th>}{teamsDraft ? null : <th>Role</th>}<th className={styles.numeric}>Games</th><th className={styles.numeric}>{teamsDraft ? "Draft win share" : "Best-pick rate"}</th></tr></thead>
+        <thead><tr>{teamsDraft ? <th>Team</th> : <th>Player</th>}{teamsDraft ? null : <th>Role</th>}<th className={styles.numeric}>Games</th><th className={styles.numeric}>{teamsDraft ? "Draft win share" : "Best-available rate"}</th></tr></thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.name}>

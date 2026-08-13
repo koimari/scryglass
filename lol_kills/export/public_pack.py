@@ -20,6 +20,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
+from lol_kills.etl.aliases import normalize_champ
 from lol_kills.export import pack_spec as spec
 from lol_kills.export.leaderboards import build_leaderboards
 from lol_kills.export.pack_records import (
@@ -287,69 +288,96 @@ def _validate_public_record_tiers(records: dict[str, dict[str, Any]], *, label: 
 
 
 def _draft_players_from_signals(
-    signals: Mapping[str, Any], games: Sequence[Mapping[str, Any]]
+    signals: Mapping[str, Any], games: Mapping[str, Any] | Sequence[Mapping[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Per-player draft contribution and highest-pick rate across the archive.
+    """Build player rows from the same enriched profile records as profiles.
 
-    Player identity comes from the composition game roster (the public signal
-    carries side/role/champion only).
+    ``best_available`` is attached to each public composition pick after the
+    ban, pick-order, patch, and tier evidence checks. Missing quality facts do
+    not enter the denominator.
     """
-    rosters: dict[str, Mapping[str, Any]] = {}
-    for game in games:
-        if isinstance(game, Mapping):
-            rosters[str(game.get("game_uid"))] = game
+    profile_games = games.get("games") if isinstance(games, Mapping) else None
+    if isinstance(profile_games, Mapping):
+        iterable = [game for game in profile_games.values() if isinstance(game, Mapping)]
+    else:
+        iterable = [game for game in games if isinstance(game, Mapping)]
     scores: dict[str, list[float]] = {}
     best_picks: dict[str, int] = {}
+    evaluated_picks: dict[str, int] = {}
     roles: dict[str, str] = {}
     teams: dict[str, str] = {}
-    for game_id, signal in signals.items():
-        if not isinstance(signal, Mapping):
+    for game in iterable:
+        game_id = str(game.get("game_id") or game.get("game_uid") or "")
+        signal = game.get("draft_contribution") if isinstance(profile_games, Mapping) else signals.get(game_id)
+        signal_picks = [pick for pick in (signal.get("picks") if isinstance(signal, Mapping) else []) or [] if isinstance(pick, Mapping)]
+        pool = game.get("draft_pool") if isinstance(game.get("draft_pool"), Mapping) else {}
+        pool_picks = [pick for pick in pool.get("picked", []) if isinstance(pick, Mapping)]
+        picks = [pick for pick in pool_picks if pick.get("best_available") in (True, False)] or [
+            pick for pick in signal_picks if pick.get("best_available") in (True, False)
+        ]
+        if not picks:
             continue
-        game = rosters.get(str(game_id))
-        picks = [pick for pick in signal.get("picks") or [] if isinstance(pick, Mapping)]
-        best_by_side: dict[str, float] = {}
-        for side in ("blue", "red"):
-            values = [
-                float(pick["contribution"])
-                for pick in picks
-                if str(pick.get("side") or "").strip().casefold() == side
-                and _number(pick.get("contribution")) is not None
-            ]
-            if values:
-                best_by_side[side] = max(values)
+        profile_roster = {
+            (str(row.get("side") or "").title(), _draft_role(row.get("role"))): row
+            for row in game.get("players", [])
+            if isinstance(row, Mapping)
+        }
         for pick in picks:
-            side = str(pick.get("side") or "").strip().casefold()
-            role = str(pick.get("role") or "").strip()
+            side = str(pick.get("side") or "").strip().title()
+            role = _draft_role(pick.get("role"))
             contribution = _number(pick.get("contribution"))
-            if contribution is None or not side or not role:
+            if contribution is None:
+                matching_signal = next(
+                    (
+                        candidate
+                        for candidate in signal_picks
+                        if str(candidate.get("side") or "").strip().title() == side
+                        and _draft_role(candidate.get("role")) == role
+                        and _draft_key(candidate.get("champion")) == _draft_key(pick.get("champion"))
+                    ),
+                    None,
+                )
+                contribution = _number(matching_signal.get("contribution")) if isinstance(matching_signal, Mapping) else None
+            quality = pick.get("best_available")
+            if quality not in (True, False) or not side or not role:
                 continue
             name = ""
             team = ""
-            if isinstance(game, Mapping):
-                side_roster = game.get(side)
+            slot = profile_roster.get((side, role))
+            if isinstance(slot, Mapping):
+                name = str(slot.get("player") or "").strip()
+                team = str((game.get("blue_team") if side == "Blue" else game.get("red_team")) or "").strip()
+            else:
+                side_roster = game.get(side.casefold())
                 if isinstance(side_roster, Mapping):
-                    slot = side_roster.get(role)
-                    if isinstance(slot, Mapping):
-                        name = str(slot.get("player") or "").strip()
-                        team = str(slot.get("team") or "").strip()
+                    source_role = {"jungle": "jng", "support": "sup"}.get(role, role)
+                    source = side_roster.get(source_role)
+                    if isinstance(source, Mapping):
+                        name = str(source.get("player") or "").strip()
+                        team = str(source.get("team") or "").strip()
             if not name:
                 continue
-            scores.setdefault(name, []).append(float(contribution))
-            if side in best_by_side and abs(float(contribution) - best_by_side[side]) <= 1e-9:
+            evaluated_picks[name] = evaluated_picks.get(name, 0) + 1
+            if quality:
                 best_picks[name] = best_picks.get(name, 0) + 1
+            if contribution is not None:
+                scores.setdefault(name, []).append(float(contribution))
             if not roles.get(name):
                 roles[name] = role
             if not teams.get(name):
                 teams[name] = team
     rows = []
-    for name, values in scores.items():
-        if len(values) < 5:
+    for name, evaluated in evaluated_picks.items():
+        if evaluated < 5:
+            continue
+        values = scores.get(name, [])
+        if not values:
             continue
         rows.append({
             "player": name,
-            "games": len(values),
+            "games": evaluated,
             "draft_score": sum(values) / len(values),
-            "best_pick_rate": best_picks.get(name, 0) / len(values),
+            "best_available_rate": best_picks.get(name, 0) / evaluated,
             "role": roles.get(name),
             "team": teams.get(name),
         })
@@ -406,6 +434,205 @@ def _canonicalize_game_ids(frame: pd.DataFrame) -> pd.DataFrame:
         if column in frame.columns:
             frame[column] = normalized
     return frame
+
+
+def _draft_metadata_from_maps(frame: pd.DataFrame) -> dict[str, dict[str, Any]]:
+    """Extract source pick order and patch identity without publishing raw maps."""
+
+    if frame is None or frame.empty:
+        return {}
+    def clean(value: Any) -> str:
+        if value is None:
+            return ""
+        try:
+            if bool(pd.isna(value)):
+                return ""
+        except (TypeError, ValueError):
+            pass
+        return str(value).strip()
+
+    output: dict[str, dict[str, Any]] = {}
+    for _, row in frame.iterrows():
+        game_id = canonical_source_game_key(
+            clean(row.get("game_uid")) or clean(row.get("oe_gameid")) or clean(row.get("gameid"))
+        )
+        if not game_id:
+            continue
+        value: dict[str, Any] = {
+            "patch": clean(row.get("patch")) or None,
+            "blue_picks": [
+                clean(row.get(f"blue_pick{slot}"))
+                for slot in range(1, 6)
+                if clean(row.get(f"blue_pick{slot}"))
+            ],
+            "red_picks": [
+                clean(row.get(f"red_pick{slot}"))
+                for slot in range(1, 6)
+                if clean(row.get(f"red_pick{slot}"))
+            ],
+            "blue_first_pick": row.get("blue_firstPick"),
+        }
+        output[game_id] = value
+    return output
+
+
+def _draft_key(value: Any) -> str:
+    return normalize_champ(str(value or "").strip()).casefold()
+
+
+def _draft_role(value: Any) -> str:
+    return {
+        "jng": "jungle",
+        "jungle": "jungle",
+        "sup": "support",
+        "support": "support",
+        "adc": "bot",
+        "bot": "bot",
+        "top": "top",
+        "mid": "mid",
+    }.get(str(value or "").strip().casefold(), str(value or "").strip().casefold())
+
+
+def _attach_published_draft_pools(
+    profile_records: dict[str, Any],
+    tier_payload: Mapping[str, Any] | None,
+) -> dict[str, int | float]:
+    """Attach ban/unpicked pools and best-available pick facts to each game.
+
+    The published tier board is the champion-quality source. A pick is
+    evaluable only when the game has an exact patch, complete bans, and a
+    source pick order. Unknown rows stay null instead of becoming a loss.
+    """
+
+    rows = tier_payload.get("rows") if isinstance(tier_payload, Mapping) else None
+    rows_by_scope: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            patch = str(row.get("patch") or "").strip()
+            role = _draft_role(row.get("role"))
+            champion = str(row.get("champion") or "").strip()
+            rank = row.get("rank")
+            if not patch or role not in {"top", "jungle", "mid", "bot", "support"} or not champion:
+                continue
+            try:
+                rank_value = int(rank)
+            except (TypeError, ValueError):
+                continue
+            rows_by_scope.setdefault((patch, role), []).append(
+                {"champion": champion, "key": _draft_key(champion), "rank": rank_value}
+            )
+    for values in rows_by_scope.values():
+        values.sort(key=lambda row: (row["rank"], row["champion"].casefold()))
+
+    games = profile_records.get("games") if isinstance(profile_records, Mapping) else None
+    if not isinstance(games, Mapping):
+        return {"games": 0, "complete_bans": 0, "complete_pick_order": 0, "quality_games": 0, "quality_picks": 0, "coverage": 0.0}
+
+    total = complete_bans = complete_order = quality_games = quality_picks = 0
+    for game in games.values():
+        if not isinstance(game, dict):
+            continue
+        total += 1
+        pool = game.get("draft_pool")
+        if not isinstance(pool, dict):
+            pool = {
+                "schema_version": "scryglass:draft-pool:v1",
+                "status": "unavailable",
+                "source": "oracle-elixir",
+                "patch": game.get("patch"),
+                "bans": {"Blue": [], "Red": []},
+                "picked": [],
+                "unpicked": [],
+            }
+            game["draft_pool"] = pool
+        bans = pool.get("bans") if isinstance(pool.get("bans"), Mapping) else {}
+        blue_bans = [str(value).strip() for value in bans.get("Blue", []) if str(value).strip()]
+        red_bans = [str(value).strip() for value in bans.get("Red", []) if str(value).strip()]
+        banned = {_draft_key(value) for value in (*blue_bans, *red_bans)}
+        bans_complete = len(blue_bans) == 5 and len(red_bans) == 5 and len(banned) == 10
+        complete_bans += int(bans_complete)
+        picked = pool.get("picked") if isinstance(pool.get("picked"), list) else []
+        picked = [dict(item) for item in picked if isinstance(item, Mapping)]
+        order_complete = (
+            len(picked) == 10
+            and len({_draft_key(item.get("champion")) for item in picked}) == 10
+            and all(item.get("order") is not None for item in picked)
+        )
+        complete_order += int(order_complete)
+        patch = str(pool.get("patch") or game.get("patch") or "").strip()
+        picked_keys = {_draft_key(item.get("champion")) for item in picked if item.get("champion")}
+        universe = {
+            row["key"]: row["champion"]
+            for (row_patch, _role), scoped in rows_by_scope.items()
+            if row_patch == patch
+            for row in scoped
+        }
+        pool["bans"] = {"Blue": blue_bans, "Red": red_bans}
+        pool["patch"] = patch or None
+        pool["picked"] = picked
+        pool["unpicked"] = sorted(
+            (champion for key, champion in universe.items() if key not in banned and key not in picked_keys),
+            key=str.casefold,
+        )
+        evaluated = 0
+        for item in picked:
+            role = _draft_role(item.get("role"))
+            champion_key = _draft_key(item.get("champion"))
+            item["best_available"] = None
+            item["tier_rank"] = None
+            item["available_count"] = None
+            if not (bans_complete and order_complete and patch and role and champion_key):
+                continue
+            scoped = rows_by_scope.get((patch, role), [])
+            prior = {
+                _draft_key(previous.get("champion"))
+                for previous in picked
+                if isinstance(previous, Mapping)
+                and previous.get("order") is not None
+                and int(previous.get("order")) < int(item.get("order"))
+            }
+            available = [row for row in scoped if row["key"] not in banned and row["key"] not in prior]
+            chosen = next((row for row in scoped if row["key"] == champion_key), None)
+            if not chosen or not available:
+                continue
+            item["tier_rank"] = chosen["rank"]
+            item["available_count"] = len(available)
+            item["best_available"] = bool(chosen["rank"] == min(row["rank"] for row in available))
+            evaluated += 1
+        quality_picks += evaluated
+        quality_games += int(evaluated == 10)
+        pool["status"] = "complete" if evaluated == 10 else "limited" if bans_complete or picked else "unavailable"
+        pool["source"] = "published-tier-list"
+        pool["basis"] = "lowest published role rank among champions not banned or picked earlier"
+        pool["evaluated_picks"] = evaluated
+        pool["reason"] = None if evaluated == 10 else "Best-available rate excludes picks without complete ban, order, patch, or tier evidence."
+
+        signal = game.get("draft_contribution")
+        if isinstance(signal, dict) and isinstance(signal.get("picks"), list):
+            by_identity = {
+                (_draft_role(pick.get("role")), str(pick.get("side") or "").title(), _draft_key(pick.get("champion"))): pick
+                for pick in picked
+            }
+            for pick in signal["picks"]:
+                if not isinstance(pick, dict):
+                    continue
+                source = by_identity.get(
+                    (_draft_role(pick.get("role")), str(pick.get("side") or "").title(), _draft_key(pick.get("champion")))
+                )
+                pick["best_available"] = source.get("best_available") if source else None
+                pick["tier_rank"] = source.get("tier_rank") if source else None
+                pick["available_count"] = source.get("available_count") if source else None
+
+    return {
+        "games": total,
+        "complete_bans": complete_bans,
+        "complete_pick_order": complete_order,
+        "quality_games": quality_games,
+        "quality_picks": quality_picks,
+        "coverage": round(quality_games / total, 4) if total else 0.0,
+    }
 
 
 def export_public_pack(
@@ -814,6 +1041,8 @@ def export_public_pack(
             "wardsplaced", "wpm", "wcpm", "golddiffat10", "dragons",
             "heralds", "void_grubs", "barons", "atakhans", "towers", "inhibitors",
             "ban1", "ban2", "ban3", "ban4", "ban5",
+            "pick1", "pick2", "pick3", "pick4", "pick5", "firstPick",
+            "blue_firstPick",
         ),
         player_available,
     )
@@ -834,6 +1063,7 @@ def export_public_pack(
     profile_records_payload = build_profile_records(
         player_profile_frame,
         champion_image_urls=champion_image_urls,
+        draft_metadata=_draft_metadata_from_maps(maps_for_records),
         include_archive=True,
     )
     progress("building composition evidence")
@@ -931,6 +1161,29 @@ def export_public_pack(
             # not a calibrated probability.
             "draft_edge": draft_edge,
         }
+    tier_payload: Mapping[str, Any] | None = None
+    tier_path = project / "apps" / "scryglass" / "public" / "rankings" / "tierlists.json"
+    try:
+        candidate_tier_payload = json.loads(tier_path.read_text(encoding="utf-8"))
+        if isinstance(candidate_tier_payload, Mapping):
+            tier_payload = candidate_tier_payload
+    except (OSError, UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError):
+        tier_payload = None
+    draft_pool_audit = _attach_published_draft_pools(profile_records_payload, tier_payload)
+    archive_payload = profile_records_payload.get("_archive_games")
+    if isinstance(archive_payload, dict):
+        draft_pool_audit = _attach_published_draft_pools({"games": archive_payload}, tier_payload)
+    for game_id, entry in draft_records_payload.get("games", {}).items():
+        profile_game = profile_records_payload.get("games", {}).get(game_id)
+        if not isinstance(profile_game, Mapping) and isinstance(archive_payload, Mapping):
+            profile_game = archive_payload.get(game_id)
+        if isinstance(profile_game, Mapping) and isinstance(profile_game.get("draft_pool"), Mapping):
+            entry["draft_pool"] = profile_game["draft_pool"]
+    profile_records_payload["draft_pool_audit"] = {
+        "schema_version": "scryglass:draft-pool-audit:v1",
+        "source": "Oracle's Elixir bans and pick order plus published patch tier list",
+        **draft_pool_audit,
+    }
     draft_records_dest = feat_dir / "draft_records.json"
     draft_records_dest.write_text(
         json.dumps(draft_records_payload, separators=(",", ":"), ensure_ascii=False),
@@ -1191,7 +1444,7 @@ def export_public_pack(
         player_champion_records_raw = dict(player_champions_payload)
         match_index_raw = dict(match_index_payload)
         draft_players_rows = _draft_players_from_signals(
-            composition_result.signals, composition_games
+            composition_result.signals, profile_records_payload
         )
         leaderboards = build_leaderboards(
             player_records_payload,
@@ -1203,6 +1456,7 @@ def export_public_pack(
             match_index=match_index_raw,
             draft_records=draft_records_payload,
             draft_players=draft_players_rows,
+            draft_profile_records=profile_records_payload,
         )
         leaderboards_dest = feat_dir / "leaderboards.json"
         leaderboards_dest.write_text(
@@ -1283,6 +1537,7 @@ def export_public_pack(
         },
         "attribution": spec.ATTRIBUTION,
         "composition_signal": composition_audit,
+        "draft_pool": draft_pool_audit,
         "excluded": [
             "raw game rows",
             "research studies",

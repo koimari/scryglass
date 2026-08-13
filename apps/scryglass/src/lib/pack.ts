@@ -64,6 +64,14 @@ export type PackManifest = {
     as_of?: string | null;
   };
   composition_signal?: CompositionSignalAudit;
+  draft_pool?: {
+    games?: number;
+    complete_bans?: number;
+    complete_pick_order?: number;
+    quality_games?: number;
+    quality_picks?: number;
+    coverage?: number;
+  };
   ratings?: {
     source_mode?: string;
     source_as_of?: string;
@@ -260,9 +268,33 @@ export type DraftContribution = {
     contribution: number | null;
     prior_role_games: number;
     evidence_status: "available" | "atom_estimate" | "limited" | "unavailable";
+    best_available?: boolean | null;
+    tier_rank?: number | null;
+    available_count?: number | null;
   }>;
   note: string;
   reason?: string;
+};
+
+export type DraftPool = {
+  schema_version: "scryglass:draft-pool:v1";
+  status: "complete" | "limited" | "unavailable";
+  source: "oracle-elixir" | "published-tier-list" | string;
+  basis?: string;
+  patch: string | null;
+  bans: { Blue: string[]; Red: string[] };
+  picked: Array<{
+    side: "Blue" | "Red";
+    role: string | null;
+    champion: string;
+    order: number | null;
+    best_available?: boolean | null;
+    tier_rank?: number | null;
+    available_count?: number | null;
+  }>;
+  unpicked: string[];
+  evaluated_picks?: number;
+  reason?: string | null;
 };
 
 export type ProfileGame = {
@@ -270,23 +302,35 @@ export type ProfileGame = {
   date: string;
   league: string;
   competition_tier?: string | null;
+  patch?: string | null;
   blue_team: string;
   red_team: string;
   blue_win: 0 | 1;
   duration_seconds?: number | null;
   team_stats?: Partial<Record<"Blue" | "Red", ProfileTeamStats>>;
   players: ProfileParticipant[];
+  draft_pool?: DraftPool;
   draft_contribution?: DraftContribution;
 };
 
 export type ProfileRecords = {
-  schema_version: "scryglass:profile-records:v1" | "scryglass:profile-records:v2";
+  schema_version: "scryglass:profile-records:v1" | "scryglass:profile-records:v2" | "scryglass:profile-records:v3";
   grade_contract?: "scryglass:player-map-grade:v1" | "scryglass:player-map-grade:v2";
   window_days: number;
   champion_images: Record<string, string>;
   games: Record<string, ProfileGame>;
   players: Record<string, string[]>;
   teams: Record<string, string[]>;
+  draft_pool_audit?: {
+    schema_version?: string;
+    source?: string;
+    games?: number;
+    complete_bans?: number;
+    complete_pick_order?: number;
+    quality_games?: number;
+    quality_picks?: number;
+    coverage?: number;
+  };
 };
 
 export type MatchSummary = {
