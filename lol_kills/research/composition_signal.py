@@ -86,6 +86,138 @@ NOTE = (
     "execution, change team ratings, or provide a betting probability."
 )
 
+# Round-5 frontier: mechanic corpus + strictly-prior features. The champion
+# mechanic corpus is embedded (aggregate families/mechanics/relations per
+# champion) so production never depends on the LCC repository at runtime.
+ATOM_CORPUS_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "data"
+    / "lol"
+    / "v2"
+    / "champions"
+    / "atom-corpus-aggregate-v1.json"
+)
+ATOM_FAMILIES = (
+    "crowd-control-mobility",
+    "damage",
+    "heal-shield",
+    "interaction",
+    "stack-transform-summon-resource",
+    "vision-economy",
+)
+ATOM_MECHANIC_KEYS = (
+    "execute", "revive", "transform", "summon", "stealth", "ward",
+    "dash", "hook", "global", "shield", "heal", "cc",
+)
+_ATOM_SLUG_ALIASES = {
+    "wukong": "monkeyking",
+    "nunu & willump": "nunu",
+    "renata glasc": "renata",
+}
+
+
+def _atom_slug(champion: Any) -> str:
+    """Compact corpus slug for a champion display name."""
+    name = str(champion or "").strip().casefold()
+    if name in _ATOM_SLUG_ALIASES:
+        return _ATOM_SLUG_ALIASES[name]
+    return "".join(character for character in name if character.isalnum())
+
+
+_ATOM_CORPUS: dict[str, dict[str, Any]] | None = None
+
+
+def _atom_corpus() -> dict[str, dict[str, Any]]:
+    """Per-champion aggregate corpus rows (families, mechanics, relations)."""
+    global _ATOM_CORPUS
+    if _ATOM_CORPUS is not None:
+        return _ATOM_CORPUS
+    payload: dict[str, Any] = {}
+    try:
+        raw = json.loads(ATOM_CORPUS_PATH.read_text(encoding="utf-8"))
+        if isinstance(raw, dict) and isinstance(raw.get("champions"), dict):
+            payload = raw
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        payload = {}
+    _ATOM_CORPUS = payload
+    return payload
+
+
+def _atom_zero_families() -> np.ndarray:
+    return np.zeros(len(ATOM_FAMILIES))
+
+
+def _atom_zero_mechanics() -> np.ndarray:
+    return np.zeros(len(ATOM_MECHANIC_KEYS))
+
+
+def _corpus_family_counts(champion: Any) -> np.ndarray:
+    row = _atom_corpus().get("champions", {}).get(_atom_slug(champion))
+    if not row:
+        return _atom_zero_families()
+    counts = row.get("families")
+    if not isinstance(counts, list) or len(counts) != len(ATOM_FAMILIES):
+        return _atom_zero_families()
+    return np.asarray([float(value) for value in counts], dtype=float) / 5.0
+
+
+def _corpus_mechanic_flags(champion: Any) -> np.ndarray:
+    row = _atom_corpus().get("champions", {}).get(_atom_slug(champion))
+    if not row:
+        return _atom_zero_mechanics()
+    flags = row.get("mechanics")
+    if not isinstance(flags, list) or len(flags) != len(ATOM_MECHANIC_KEYS):
+        return _atom_zero_mechanics()
+    return np.asarray([float(value) for value in flags], dtype=float)
+
+
+def _corpus_relation_targets(champion: Any) -> set[str]:
+    row = _atom_corpus().get("champions", {}).get(_atom_slug(champion))
+    if not row:
+        return set()
+    targets = row.get("relations")
+    if not isinstance(targets, list):
+        return set()
+    return {str(value) for value in targets}
+
+
+def _corpus_game_features(game: Mapping[str, Any]) -> np.ndarray:
+    """Per-game corpus features: family diff (6), mechanic diff (12),
+    per-role family diff (30), relations counter-coverage (1)."""
+    blue_fam = _atom_zero_families()
+    red_fam = _atom_zero_families()
+    blue_mech = _atom_zero_mechanics()
+    red_mech = _atom_zero_mechanics()
+    blue_rel: set[str] = set()
+    red_rel: set[str] = set()
+    role_fam: list[np.ndarray] = []
+    for role in ROLES:
+        bf = _atom_zero_families()
+        rf = _atom_zero_families()
+        blue_champion = _champion(game.get("blue", {}).get(role, {}).get("champion"))
+        red_champion = _champion(game.get("red", {}).get(role, {}).get("champion"))
+        bf += _corpus_family_counts(blue_champion)
+        rf += _corpus_family_counts(red_champion)
+        blue_mech += _corpus_mechanic_flags(blue_champion)
+        red_mech += _corpus_mechanic_flags(red_champion)
+        blue_rel |= _corpus_relation_targets(blue_champion)
+        red_rel |= _corpus_relation_targets(red_champion)
+        role_fam.append(bf - rf)
+        blue_fam += bf
+        red_fam += rf
+    blue_fam_keys = {ATOM_FAMILIES[i] for i, value in enumerate(blue_fam) if value > 0}
+    red_fam_keys = {ATOM_FAMILIES[i] for i, value in enumerate(red_fam) if value > 0}
+    blue_counters = float(len(blue_rel & red_fam_keys) / max(len(blue_rel), 1))
+    red_counters = float(len(red_rel & blue_fam_keys) / max(len(red_rel), 1))
+    return np.concatenate(
+        [
+            blue_fam - red_fam,
+            blue_mech - red_mech,
+            np.concatenate(role_fam),
+            [blue_counters - red_counters],
+        ]
+    )
+
 
 class CompositionSignalError(RuntimeError):
     """Raised when a composition signal cannot be built safely."""
@@ -190,6 +322,7 @@ def _complete_game_from_group(game_id: str, group: pd.DataFrame, strength: Mappi
     sides: dict[str, dict[str, dict[str, str]]] = {}
     teams: dict[str, str] = {}
     champions: list[str] = []
+    bans: dict[str, list[str]] = {}
     for side in ("Blue", "Red"):
         side_rows = group[group["_side"] == side]
         if len(side_rows) != 5:
@@ -198,6 +331,14 @@ def _complete_game_from_group(game_id: str, group: pd.DataFrame, strength: Mappi
             return None
         if side_rows["_team"].nunique() != 1:
             return None
+        ban_slots = [f"ban{index}" for index in range(1, 6)]
+        if all(column in side_rows.columns for column in ban_slots):
+            first = side_rows.iloc[0]
+            bans[side.lower()] = [
+                _text(first.get(column))
+                for column in ban_slots
+                if _text(first.get(column))
+            ]
         picks: dict[str, dict[str, str]] = {}
         for role in ROLES:
             hit = side_rows[side_rows["_role"] == role]
@@ -209,10 +350,27 @@ def _complete_game_from_group(game_id: str, group: pd.DataFrame, strength: Mappi
             team = str(row.get("_team") or "").strip()
             if not champion or not player or not team:
                 return None
-            picks[role] = {"champion": champion, "player": player}
+            stats: dict[str, float] = {}
+            for column in ("kills", "deaths", "damageshare", "cspm", "visionscore"):
+                if column in group.columns:
+                    stats[column] = _number(row.get(column), 0.0) or 0.0
+            picks[role] = {"champion": champion, "player": player, "stats": stats}
             champions.append(champion)
             teams[side] = team
         sides[side] = picks
+    player_stats: dict[str, dict[str, float]] = {}
+    for side in ("Blue", "Red"):
+        for role in ROLES:
+            stats = sides[side][role].get("stats") or {}
+            player_key = str(sides[side][role].get("player") or "").casefold()
+            if player_key:
+                player_stats[player_key] = {
+                    "kills": float(stats.get("kills", 0.0)),
+                    "deaths": float(stats.get("deaths", 0.0)),
+                    "damageshare": float(stats.get("damageshare", 0.0)),
+                    "cspm": float(stats.get("cspm", 0.0)),
+                    "visionscore": float(stats.get("visionscore", 0.0)),
+                }
     if len(set(champions)) != 10 or not teams.get("Blue") or not teams.get("Red"):
         return None
     if teams["Blue"] == teams["Red"]:
@@ -248,6 +406,8 @@ def _complete_game_from_group(game_id: str, group: pd.DataFrame, strength: Mappi
         "y": int(blue_results[0]),
         "blue": sides["Blue"],
         "red": sides["Red"],
+        "bans": bans,
+        "player_stats": player_stats,
         "mu_diff": mu_diff,
         "sigma_pair": sigma_pair,
         "controls_available": mu_diff is not None and sigma_pair is not None,
@@ -287,6 +447,8 @@ def build_composition_games(
             "patch",
             "grid_series_id",
             "tournament",
+            "ban1", "ban2", "ban3", "ban4", "ban5",
+            "kills", "deaths", "damageshare", "cspm", "visionscore",
         )
         if column in players.columns
     ]
@@ -1354,6 +1516,436 @@ def _match_delta_intervals(
     }
 
 
+# ---------------------------------------------------------------------------
+# Round-5 frontier: bans, mastery rows, strictly-prior features, corpus, CatBoost
+# ---------------------------------------------------------------------------
+
+
+def _ban_table(games: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, list[str]]]:
+    """game_uid -> {'blue': [...], 'red': [...]} raw ban names from the games."""
+    table: dict[str, dict[str, list[str]]] = {}
+    for game in games:
+        bans = game.get("bans")
+        if isinstance(bans, dict) and bans.get("blue") and bans.get("red"):
+            table[str(game["game_uid"])] = {
+                "blue": [str(value) for value in bans.get("blue", [])],
+                "red": [str(value) for value in bans.get("red", [])],
+            }
+    return table
+
+
+def _exp_rows_log1p(games: Sequence[Mapping[str, Any]]) -> np.ndarray:
+    """Strictly-prior per-role player-champion mastery, log1p scaled."""
+    prior: dict[tuple[str, str], int] = {}
+    rows: list[list[float]] = []
+    for game in games:
+        blue = [
+            prior.get(
+                (str(game["blue"][role]["player"]).casefold(),
+                 _champion(game["blue"][role]["champion"])), 0
+            )
+            for role in ROLES
+        ]
+        red = [
+            prior.get(
+                (str(game["red"][role]["player"]).casefold(),
+                 _champion(game["red"][role]["champion"])), 0
+            )
+            for role in ROLES
+        ]
+        rows.append([
+            (np.log1p(blue[index]) - np.log1p(red[index])) / np.log1p(40.0)
+            for index in range(len(ROLES))
+        ])
+        for role in ROLES:
+            for side in ("blue", "red"):
+                key = (
+                    str(game[side][role]["player"]).casefold(),
+                    _champion(game[side][role]["champion"]),
+                )
+                prior[key] = prior.get(key, 0) + 1
+    return np.asarray(rows, dtype=float)
+
+
+_BAN_TABLE_CACHE: dict[str, dict[str, list[str]]] | None = None
+
+
+def _bans_v2_feature_builder(
+    train: Sequence[Mapping[str, Any]],
+    validation: Sequence[Mapping[str, Any]],
+    draft: FittedCompositionModel,
+) -> Any:
+    """Ban tax + per-role ban coverage + ban-rate edge + mastery hits.
+
+    Returns a callable rows(games) -> (n, 8) strictly-prior ban features.
+    """
+    global _BAN_TABLE_CACHE
+    if _BAN_TABLE_CACHE is None:
+        _BAN_TABLE_CACHE = _ban_table([*train, *validation])
+    bans = _BAN_TABLE_CACHE
+    role_order = ROLES
+    ban_counts: dict[str, int] = {}
+    pick_counts: dict[str, int] = {}
+    mastery: dict[tuple[str, str], int] = {}
+    champion_roles: dict[str, list[str]] = {}
+    for game in train:
+        game_bans = bans.get(str(game["game_uid"]))
+        if game_bans:
+            for side in ("blue", "red"):
+                for champion in game_bans[side]:
+                    ban_counts[_champion(champion)] = ban_counts.get(_champion(champion), 0) + 1
+        for side in ("blue", "red"):
+            for role in role_order:
+                champion = _champion(game[side][role]["champion"])
+                player = str(game[side][role]["player"]).casefold()
+                pick_counts[champion] = pick_counts.get(champion, 0) + 1
+                mastery[(player, champion)] = mastery.get((player, champion), 0) + 1
+                champion_roles.setdefault(champion, []).append(role)
+    top_champion: dict[str, str] = {}
+    top_count: dict[str, int] = {}
+    for (player, champion), count in mastery.items():
+        if count > top_count.get(player, 0):
+            top_champion[player] = champion
+            top_count[player] = count
+    role_top3: dict[str, list[str]] = {}
+    for champion, roles in champion_roles.items():
+        for role in set(roles):
+            role_top3.setdefault(role, []).append((pick_counts.get(champion, 0), champion))
+    for role in role_top3:
+        role_top3[role] = [champion for _, champion in sorted(role_top3[role], reverse=True)[:3]]
+    total_bans = max(sum(ban_counts.values()), 1)
+    total_picks = max(sum(pick_counts.values()), 1)
+    meta = sorted(pick_counts, key=pick_counts.get, reverse=True)[:20]
+    meta_value = {champion: pick_counts.get(champion, 0) for champion in meta}
+
+    def rows(games: Sequence[Mapping[str, Any]]) -> np.ndarray:
+        out: list[list[float]] = []
+        for game in games:
+            game_bans = bans.get(str(game["game_uid"]))
+            blue_bans = [_champion(value) for value in (game_bans["blue"] if game_bans else [])]
+            red_bans = [_champion(value) for value in (game_bans["red"] if game_bans else [])]
+            ban_rate_diff = (
+                sum(ban_counts.get(c, 0) for c in blue_bans)
+                - sum(ban_counts.get(c, 0) for c in red_bans)
+            ) / total_bans
+            ban_tax_diff = (
+                sum(meta_value.get(c, 0) for c in blue_bans)
+                - sum(meta_value.get(c, 0) for c in red_bans)
+            ) / total_picks
+            coverage: list[float] = []
+            for role in role_order:
+                top = role_top3.get(role, [])
+                blue_cov = sum(1 for c in blue_bans if c in top)
+                red_cov = sum(1 for c in red_bans if c in top)
+                coverage.append(float(blue_cov - red_cov))
+            blue_hits = sum(
+                mastery.get(
+                    (str(game["blue"][role]["player"]).casefold(),
+                     _champion(game["blue"][role]["champion"])), 0
+                )
+                for role in role_order
+                if _champion(game["blue"][role]["champion"]) in red_bans
+            )
+            red_hits = sum(
+                mastery.get(
+                    (str(game["red"][role]["player"]).casefold(),
+                     _champion(game["red"][role]["champion"])), 0
+                )
+                for role in role_order
+                if _champion(game["red"][role]["champion"]) in blue_bans
+            )
+            mastery_hit_diff = (blue_hits - red_hits) / max(sum(mastery.values()), 1)
+            out.append([
+                float(ban_rate_diff), float(ban_tax_diff), *coverage, float(mastery_hit_diff),
+            ])
+        return np.asarray(out, dtype=float)
+
+    return rows
+
+
+_FRONTIER_NAMES: list[str] = []
+_FRONTIER: dict[str, np.ndarray] = {}
+
+
+def _frontier_names() -> list[str]:
+    return list(_FRONTIER_NAMES)
+
+
+def _frontier_rows(games_list: Sequence[Mapping[str, Any]]) -> np.ndarray:
+    if not _FRONTIER_NAMES:
+        return np.zeros((len(games_list), 0))
+    rows = []
+    for game in games_list:
+        row = _FRONTIER.get(str(game["game_uid"]))
+        rows.append(
+            row if row is not None else np.zeros(len(_FRONTIER_NAMES))
+        )
+    return np.asarray(rows, dtype=float)
+
+
+def _build_frontier(ordered_games: Sequence[Mapping[str, Any]]) -> dict[str, np.ndarray]:
+    """One date-ordered strictly-prior pass; every feature uses prior games only."""
+    global _FRONTIER_NAMES, _FRONTIER
+    bans = _ban_table(ordered_games)
+
+    patch_first: dict[str, pd.Timestamp] = {}
+    for game in ordered_games:
+        patch = str(game.get("patch") or "UNKNOWN")
+        date = _timestamp(game["date"])
+        if patch not in patch_first or date < patch_first[patch]:
+            patch_first[patch] = date
+    pick_counts: dict[str, int] = {}
+    pick_total = 0
+    form_alpha = 0.1
+    player_form: dict[str, np.ndarray] = {}
+    h2h: dict[str, dict[str, float]] = {}
+    blue_wr: dict[str, float] = {}
+    red_wr: dict[str, float] = {}
+    pools: dict[str, Any] = {}
+    lineups: dict[str, Any] = {}
+    matchup: dict[tuple, list[int]] = {}
+
+    names = [
+        "f1_h2h", "f2_kda", "f2_ds", "f2_cspm", "f2_vis",
+        "f3_roster_last", "f3_roster_last3",
+        "f4_pool_overlap", "f5_ban1_meta", "f6_patch_recency", "f7_side_pref",
+        *[f"f8_matchup_{role}" for role in ROLES],
+        *[f"corp_fam{index}" for index in range(len(ATOM_FAMILIES))],
+        *[f"corp_mech{index}" for index in range(len(ATOM_MECHANIC_KEYS))],
+        *[f"corp_role{role}_{index}" for role in ROLES for index in range(len(ATOM_FAMILIES))],
+        "corp_counters",
+    ]
+    _FRONTIER_NAMES = names
+    _FRONTIER = {}
+
+    def ewma(state: float | None, value: float, alpha: float) -> float:
+        return value if state is None else alpha * value + (1 - alpha) * state
+
+    stats_by_game: list[tuple[pd.Timestamp, str, float, float, float, float, float]] = []
+    for game in ordered_games:
+        date = _timestamp(game["date"])
+        for player_key, stats in (game.get("player_stats") or {}).items():
+            stats_by_game.append((
+                date,
+                str(player_key),
+                float(stats.get("damageshare", 0.0)),
+                float(stats.get("cspm", 0.0)),
+                float(stats.get("visionscore", 0.0)),
+                float(stats.get("kills", 0.0)),
+                float(stats.get("deaths", 0.0)),
+            ))
+    stats_by_game.sort(key=lambda item: item[0])
+    stats_ptr = 0
+    rows: dict[str, np.ndarray] = {}
+    for game in ordered_games:
+        game_date = _timestamp(game["date"])
+        game_uid = str(game["game_uid"])
+        while stats_ptr < len(stats_by_game) and stats_by_game[stats_ptr][0] < game_date:
+            _, player, dmg, cspm, vis, kills, deaths = stats_by_game[stats_ptr]
+            kda = (kills + deaths) / 2.0 if (kills + deaths) > 0 else 0.0
+            prior = player_form.get(player)
+            if prior is None:
+                player_form[player] = np.asarray([kda, dmg, cspm, vis], dtype=float)
+            else:
+                player_form[player] = (1 - form_alpha) * prior + form_alpha * np.asarray(
+                    [kda, dmg, cspm, vis], dtype=float
+                )
+            stats_ptr += 1
+
+        blue_team = str(game["blue_team"]).strip()
+        red_team = str(game["red_team"]).strip()
+        blue_players = [str(game["blue"][role]["player"]).strip().casefold() for role in ROLES]
+        red_players = [str(game["red"][role]["player"]).strip().casefold() for role in ROLES]
+        blue_champs = [str(game["blue"][role]["champion"]) for role in ROLES]
+        red_champs = [str(game["red"][role]["champion"]) for role in ROLES]
+
+        row: list[float] = []
+        blue_prior = (h2h.get(blue_team) or {}).get(red_team)
+        row.append(0.0 if blue_prior is None else blue_prior - 0.5)
+
+        blue_forms = [player_form.get(p) for p in blue_players]
+        red_forms = [player_form.get(p) for p in red_players]
+
+        def avg(forms: Sequence[np.ndarray | None], index: int) -> float:
+            values = [f[index] for f in forms if f is not None]
+            return float(np.mean(values)) if values else 0.0
+
+        for index in range(4):
+            row.append(avg(blue_forms, index) - avg(red_forms, index))
+
+        def roster_overlap(players: Sequence[str], team: str) -> float:
+            last = lineups.get(team)
+            if not last:
+                return 0.0
+            any3: set[str] = set()
+            for lineup in list(last)[-3:]:
+                any3 |= lineup
+            last_set = last[-1]
+            return float(len(set(players) & last_set)) / 5.0
+
+        row.append(roster_overlap(blue_players, blue_team))
+        row.append(roster_overlap(red_players, red_team))
+
+        def pool(team: str) -> set[str]:
+            return set(pools.get(team, []))
+
+        bp, rp = pool(blue_team), pool(red_team)
+        row.append(float(len(bp & rp) / max(len(bp | rp), 1)) if bp or rp else 0.0)
+
+        game_bans = bans.get(game_uid)
+        ban1_meta = [0.0, 0.0]
+        if game_bans:
+            for side_index, side in enumerate(("blue", "red")):
+                slot = game_bans.get(side) or []
+                if slot:
+                    ban1_meta[side_index] = pick_counts.get(_atom_slug(slot[0]), 0) / max(pick_total, 1)
+        row.append(ban1_meta[0] - ban1_meta[1])
+
+        patch = str(game.get("patch") or "UNKNOWN")
+        first = patch_first.get(patch)
+        row.append(float((game_date - first).total_seconds() / 86400.0) if first is not None else 0.0)
+
+        row.append((blue_wr.get(blue_team) or 0.5) - (red_wr.get(red_team) or 0.5))
+
+        for lane_index, role in enumerate(ROLES):
+            key = (role, blue_champs[lane_index], red_champs[lane_index])
+            wins, meets = matchup.get(key, [0, 0])
+            rate = (wins + 2.5 * 0.5) / (meets + 2.5) if meets >= 0 else 0.5
+            row.append(rate - 0.5)
+
+        row.extend(_corpus_game_features(game))
+        rows[game_uid] = np.asarray(row, dtype=float)
+
+        outcome = int(game["y"])
+        h2h.setdefault(blue_team, {})[red_team] = ewma(
+            h2h.get(blue_team, {}).get(red_team), float(outcome), alpha=0.2)
+        h2h.setdefault(red_team, {})[blue_team] = ewma(
+            h2h.get(red_team, {}).get(blue_team), 1.0 - float(outcome), alpha=0.2)
+        blue_wr[blue_team] = ewma(blue_wr.get(blue_team), float(outcome), alpha=0.1)
+        red_wr[red_team] = ewma(red_wr.get(red_team), 1.0 - float(outcome), alpha=0.1)
+        pools.setdefault(blue_team, []).extend(blue_champs)
+        if len(pools[blue_team]) > 10:
+            pools[blue_team] = pools[blue_team][-10:]
+        pools.setdefault(red_team, []).extend(red_champs)
+        if len(pools[red_team]) > 10:
+            pools[red_team] = pools[red_team][-10:]
+        lineups.setdefault(blue_team, []).append(frozenset(blue_players))
+        if len(lineups[blue_team]) > 5:
+            lineups[blue_team] = lineups[blue_team][-5:]
+        lineups.setdefault(red_team, []).append(frozenset(red_players))
+        if len(lineups[red_team]) > 5:
+            lineups[red_team] = lineups[red_team][-5:]
+        for lane_index, role in enumerate(ROLES):
+            key = (role, blue_champs[lane_index], red_champs[lane_index])
+            state = matchup.setdefault(key, [0, 0])
+            state[1] += 1
+            if outcome == 1:
+                state[0] += 1
+        for champion in [*blue_champs, *red_champs]:
+            pick_counts[_atom_slug(champion)] = pick_counts.get(_atom_slug(champion), 0) + 1
+            pick_total += 1
+    _FRONTIER = rows
+    return rows
+
+
+def _full_feature_columns(
+    train: Sequence[Mapping[str, Any]],
+    validation: Sequence[Mapping[str, Any]],
+    draft: FittedCompositionModel,
+    tl: np.ndarray,
+    vl: np.ndarray,
+    th: np.ndarray,
+    vh: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Winner feature matrix: [linpred, history, log1p mastery, bans_v2, frontier]."""
+    ban_rows = _bans_v2_feature_builder(train, validation, draft)
+    train_x = np.column_stack([
+        tl, th, _exp_rows_log1p(train), ban_rows(train), _frontier_rows(train),
+    ])
+    validation_x = np.column_stack([
+        vl, vh, _exp_rows_log1p(validation), ban_rows(validation), _frontier_rows(validation),
+    ])
+    return train_x, validation_x
+
+
+def _catboost_factory(params: Mapping[str, Any]) -> Any:
+    def factory():
+        from catboost import CatBoostClassifier
+        return CatBoostClassifier(
+            iterations=int(params.get("n_estimators", 600)),
+            learning_rate=float(params.get("lr", 0.03)),
+            depth=int(params.get("depth", 5)),
+            l2_leaf_reg=float(params.get("reg", 8.0)),
+            random_seed=461,
+            verbose=0,
+            allow_writing_files=False,
+        )
+    return factory
+
+
+def _production_style_recalibrate(
+    train: Sequence[Mapping[str, Any]],
+    validation: Sequence[Mapping[str, Any]],
+    draft: FittedCompositionModel,
+    model_factory: Any,
+    raw_val_probs: np.ndarray,
+    *,
+    shrink: float = 0.5,
+) -> np.ndarray:
+    """Identity-shrunk affine recalibration fit strictly inside the training
+    fold for any model class (mirrors the round-5 winner)."""
+    ordered = sorted(
+        (dict(game) for game in train if game.get("controls_available", False)),
+        key=lambda item: (_timestamp(item["date"]), str(item["game_uid"])),
+    )
+    cutoff = max(int(len(ordered) * 0.8), 8)
+    fit_games = ordered[:cutoff]
+    cal_games = ordered[cutoff:]
+    clipped_raw = np.clip(np.asarray(raw_val_probs, dtype=float), 1e-5, 1 - 1e-5)
+    if len(cal_games) < 8 or len({int(game["y"]) for game in cal_games}) < 2:
+        return clipped_raw
+    names = _feature_names(fit_games)
+    fold_draft = _fit_model(
+        fit_games,
+        names=names,
+        include_draft=True,
+        regularization_c=draft.regularization_c,
+    )
+    if fold_draft is None:
+        return clipped_raw
+    sequence = fit_games + cal_games
+    history = _history_features(sequence, fold_draft)
+    fit_history = history[: len(fit_games)]
+    cal_history = history[len(fit_games):]
+    fit_linpred = np.asarray(
+        _matrix(fit_games, fold_draft.feature_names, include_draft=True)
+        @ np.asarray(fold_draft.coefficients),
+        dtype=float,
+    )
+    cal_linpred = np.asarray(
+        _matrix(cal_games, fold_draft.feature_names, include_draft=True)
+        @ np.asarray(fold_draft.coefficients),
+        dtype=float,
+    )
+    fold_model = model_factory()
+    fold_model.fit(
+        np.column_stack([fit_linpred, fit_history]),
+        [int(game["y"]) for game in fit_games],
+    )
+    cal_probs = fold_model.predict_proba(np.column_stack([cal_linpred, cal_history]))[:, 1]
+    calibrator = LogisticRegression(C=1e6, solver="liblinear", max_iter=1000)
+    calibrator.fit(
+        np.log(np.clip(cal_probs, 1e-5, 1 - 1e-5) / (1 - np.clip(cal_probs, 1e-5, 1 - 1e-5))).reshape(-1, 1),
+        [int(game["y"]) for game in cal_games],
+    )
+    a = float(calibrator.intercept_[0])
+    b = float(calibrator.coef_[0][0])
+    a_eff = shrink * a
+    b_eff = 1.0 + shrink * (b - 1.0)
+    raw_logits = np.log(clipped_raw / (1 - clipped_raw))
+    return 1.0 / (1.0 + np.exp(-np.clip(a_eff + b_eff * raw_logits, -30.0, 30.0)))
+
+
 def evaluate_composition_signal(
     games: Sequence[Mapping[str, Any]],
     *,
@@ -1389,6 +1981,9 @@ def evaluate_composition_signal(
             date_clusters.append([])
         date_clusters[-1].append(game)
     boundaries = np.linspace(0, len(date_clusters), 6).astype(int)
+    # Round-5 winner: one global date-ordered strictly-prior frontier pass
+    # (F1-F8 + champion-mechanic corpus features) shared by all windows.
+    _build_frontier(ordered)
     for window_index in range(4):
         train = [game for cluster in date_clusters[: boundaries[window_index + 1]] for game in cluster]
         validation = [game for cluster in date_clusters[boundaries[window_index + 1] : boundaries[window_index + 2]] for game in cluster]
@@ -1444,38 +2039,63 @@ def evaluate_composition_signal(
         history = _history_features(train + validation, draft)
         train_history = history[: len(train)]
         validation_history = history[len(train) :]
-        history_train_x = np.column_stack(
-            [
-                _matrix(train, draft.feature_names, include_draft=True) @ np.asarray(draft.coefficients),
+        train_linpred = np.asarray(
+            _matrix(train, draft.feature_names, include_draft=True) @ np.asarray(draft.coefficients),
+            dtype=float,
+        )
+        validation_linpred = np.asarray(
+            _matrix(validation, draft.feature_names, include_draft=True) @ np.asarray(draft.coefficients),
+            dtype=float,
+        )
+        try:
+            # Round-5 winner: CatBoost over the full frontier feature set with
+            # identity-shrunk in-fold recalibration (no validation contact).
+            train_x, validation_x = _full_feature_columns(
+                train,
+                validation,
+                draft,
+                train_linpred,
+                validation_linpred,
                 train_history,
-            ]
-        )
-        history_c = _select_history_regularization(
-            train,
-            history_train_x,
-            candidates=(0.03, 0.1, 0.3, 1.0, 3.0),
-            internal_fraction=0.15,
-            min_training_games=min_training_games,
-        )
-        history_model = LogisticRegression(C=history_c, solver="liblinear", max_iter=2000, random_state=461)
-        history_model.fit(history_train_x, [int(game["y"]) for game in train])
-        history_validation_x = np.column_stack(
-            [
-                _matrix(validation, draft.feature_names, include_draft=True) @ np.asarray(draft.coefficients),
                 validation_history,
-            ]
-        )
-        history_probabilities = _recalibrate_history_probabilities(
-            train,
-            validation,
-            draft,
-            history_train_x,
-            history_validation_x,
-            history_model,
-            folds=4,
-            shrink=history_calibrate_shrink,
-            fold_c=history_c,
-        )
+            )
+            catboost_model = _catboost_factory({})().fit(
+                train_x,
+                [int(game["y"]) for game in train],
+            )
+            raw_probabilities = catboost_model.predict_proba(validation_x)[:, 1]
+            history_probabilities = _production_style_recalibrate(
+                train,
+                validation,
+                draft,
+                lambda: LogisticRegression(C=1.0, solver="liblinear", max_iter=2000, random_state=461),
+                raw_probabilities,
+                shrink=0.5,
+            )
+        except ImportError:
+            # Fallback without catboost: round-2 history logistic.
+            history_train_x = np.column_stack([train_linpred, train_history])
+            history_c = _select_history_regularization(
+                train,
+                history_train_x,
+                candidates=(0.03, 0.1, 0.3, 1.0, 3.0),
+                internal_fraction=0.15,
+                min_training_games=min_training_games,
+            )
+            history_model = LogisticRegression(C=history_c, solver="liblinear", max_iter=2000, random_state=461)
+            history_model.fit(history_train_x, [int(game["y"]) for game in train])
+            history_validation_x = np.column_stack([validation_linpred, validation_history])
+            history_probabilities = _recalibrate_history_probabilities(
+                train,
+                validation,
+                draft,
+                history_train_x,
+                history_validation_x,
+                history_model,
+                folds=4,
+                shrink=history_calibrate_shrink,
+                fold_c=history_c,
+            )
         windows[-1]["draft_plus_team_history"] = _metrics(y, history_probabilities)
         windows[-1]["draft_plus_team_history"]["probabilities"] = [
             float(value) for value in history_probabilities
