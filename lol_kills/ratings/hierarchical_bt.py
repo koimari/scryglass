@@ -507,14 +507,25 @@ def _recent_team_baseline_anchor(
     sunday_baseline: pd.Timestamp,
     cutoff: pd.Timestamp,
 ) -> pd.Timestamp:
-    """Previous-refresh movement anchor with safe fallbacks."""
+    """Previous-refresh movement anchor with safe fallbacks.
+
+    The CLI passes ISO strings with a trailing ``Z`` (tz-aware); the cutoff
+    from the refresh is naive.  Normalize every input so the comparison is
+    robust regardless of caller convention.
+    """
     if previous_as_of is None:
         return sunday_baseline
     anchor = pd.Timestamp(previous_as_of)
     if anchor.tzinfo is not None:
         anchor = anchor.tz_convert("UTC").tz_localize(None)
-    if anchor >= cutoff or anchor < sunday_baseline - pd.Timedelta(days=400):
-        return sunday_baseline
+    base = pd.Timestamp(sunday_baseline)
+    if base.tzinfo is not None:
+        base = base.tz_convert("UTC").tz_localize(None)
+    cap = pd.Timestamp(cutoff)
+    if cap.tzinfo is not None:
+        cap = cap.tz_convert("UTC").tz_localize(None)
+    if anchor >= cap or anchor < base - pd.Timedelta(days=400):
+        return base
     return anchor
 
 

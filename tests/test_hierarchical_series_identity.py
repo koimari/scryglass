@@ -194,6 +194,19 @@ class TeamWeeklyRanksMovementTests(unittest.TestCase):
             previous_as_of=pd.Timestamp("2026-07-26T13:00:00"),
         )
         self.assertEqual(guarded["previous_as_of"], "2026-07-19T00:00:00Z")
+        # CLI-style tz-aware ISO input (trailing Z) must not raise: the
+        # refresh passes --previous-as-of from the previous bundle verbatim.
+        cli_style = build_team_weekly_ranks(
+            maps, as_of=cutoff, min_series=1,
+            previous_as_of=pd.Timestamp("2026-07-24T00:00:00Z"),
+        )
+        self.assertEqual(cli_style["previous_as_of"], "2026-07-24T00:00:00Z")
+        cli_same_day = build_team_weekly_ranks(
+            maps, as_of=pd.Timestamp("2026-07-24T12:00:00"), min_series=1,
+            previous_as_of=pd.Timestamp("2026-07-24T12:00:00Z"),
+        )
+        # Friday cutoff: current week Sunday is 07-19, so the fallback is 07-12.
+        self.assertEqual(cli_same_day["previous_as_of"], "2026-07-12T00:00:00Z")
 
 
 class PackAdapterSeriesIdentityTests(unittest.TestCase):

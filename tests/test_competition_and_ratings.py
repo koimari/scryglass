@@ -607,6 +607,15 @@ class CompetitionIdentityTests(unittest.TestCase):
             previous_as_of=pd.Timestamp("2026-07-26T13:00:00Z"),
         )
         self.assertEqual(guarded["previous_as_of"], "2026-07-19T00:00:00Z")
+        # CLI-style tz-aware ISO input (trailing Z) must not raise.
+        cli_style = build_player_weekly_ranks(
+            maps,
+            frame,
+            as_of=cutoff,
+            min_games=1,
+            previous_as_of=pd.Timestamp("2026-07-24T00:00:00Z"),
+        )
+        self.assertEqual(cli_style["previous_as_of"], "2026-07-24T00:00:00Z")
 
     def test_player_game_uid_falls_back_per_row_to_gameid(self) -> None:
         rows = []
