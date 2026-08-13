@@ -1,5 +1,7 @@
 import { chatJson, clean, readChatJson, searchParams } from "@/lib/chatApi";
 import { leaderboardRows } from "@/lib/chatData";
+import { draftRankingsFromProfile, filterDraftRankings } from "@/lib/draftRankings";
+import type { ProfileRecords } from "@/lib/pack";
 
 export const runtime = "nodejs";
 
@@ -11,27 +13,45 @@ export async function GET(request: Request) {
   const limit = Math.min(Math.max(parseInt(params.get("limit") ?? "10", 10) || 10, 1), 50);
   let rows = await leaderboardRows(category, role, limit, tier);
   if (category === "teams_draft" || category === "players_draft") {
-    // Whole-archive draft leaderboards. Teams use draft win share. Players use
-    // the share of evaluated picks that were best available after bans.
+    // Use the same profile evidence as player and team pages. The optional
+    // leaderboard artifact may contain one row per league or tier.
     try {
-      const payload = await readChatJson<{ teams_draft: Array<{ team?: string; player?: string; games?: number; draft_win_share?: number; draft_score?: number; best_available_rate?: number | null; role?: string | null }>; players_draft: Array<{ team?: string; player?: string; games?: number; draft_win_share?: number; draft_score?: number; best_available_rate?: number | null; role?: string | null }> }>("features/leaderboards.json");
-      const source = category === "teams_draft" ? payload.teams_draft : payload.players_draft;
-      rows = source.slice(0, limit).map((row) => ({
-        name: String(row.team ?? row.player ?? ""),
-        rating: null,
-        role: row.role ?? null,
-        team: row.team ?? null,
-        league: null,
-        tier: null,
-        games: row.games ?? 0,
-        wins: null,
-        win_rate: null,
-        grade_a_games: 0,
-        grade_games: 0,
-        recent_form: category === "players_draft"
-          ? row.best_available_rate ?? null
-          : row.draft_win_share ?? null,
-      }));
+      const records = await readChatJson<ProfileRecords>("features/profile_records.json");
+      const rankings = filterDraftRankings(
+        draftRankingsFromProfile(records),
+        { leagues: tier ? [tier] : [], role: role ?? undefined, minGames: 5 },
+      );
+      if (category === "teams_draft") {
+        rows = rankings.teams.slice(0, limit).map((row) => ({
+          name: row.team,
+          rating: null,
+          role: null,
+          team: row.team,
+          league: row.league ?? null,
+          tier: row.tier ?? null,
+          games: row.games,
+          wins: null,
+          win_rate: null,
+          grade_a_games: 0,
+          grade_games: 0,
+          recent_form: row.draft_win_share,
+        }));
+      } else {
+        rows = rankings.players.slice(0, limit).map((row) => ({
+          name: row.player,
+          rating: null,
+          role: row.role ?? null,
+          team: row.team ?? null,
+          league: row.league ?? null,
+          tier: row.tier ?? null,
+          games: row.games,
+          wins: null,
+          win_rate: null,
+          grade_a_games: 0,
+          grade_games: 0,
+          recent_form: row.best_available_rate ?? null,
+        }));
+      }
     } catch {
       rows = [];
     }

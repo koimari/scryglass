@@ -47,12 +47,10 @@ export default async function EloPage() {
   let draftPlayers: DraftPlayerRow[] = [];
   let draftScope: DraftRankingsScope = "whole_archive";
   let draftEvidenceGames: number | null = null;
-  let draftAssetLoaded = false;
   try {
     const leaderboards = await readPackJson<{ teams_draft?: DraftTeamRow[]; players_draft?: DraftPlayerRow[] }>(man, "features/leaderboards.json");
     draftTeams = leaderboards.teams_draft ?? [];
     draftPlayers = leaderboards.players_draft ?? [];
-    draftAssetLoaded = true;
   } catch {
     // draft rankings are optional
   }
@@ -96,9 +94,10 @@ export default async function EloPage() {
   }
 
   const fallbackDraft = profileRecords ? draftRankingsFromProfile(profileRecords) : null;
-  const draftAssetHasScopes = draftTeams.some((row) => row.tier || row.league)
-    || draftPlayers.some((row) => row.tier || row.league);
-  if (fallbackDraft && (!draftAssetLoaded || !draftAssetHasScopes)) {
+  // Profile records are the canonical evidence for this view. The optional
+  // leaderboard asset can contain one row per league or tier, which splits a
+  // player's picks and makes the total disagree with their profile.
+  if (fallbackDraft) {
     draftTeams = fallbackDraft.teams;
     draftPlayers = fallbackDraft.players;
     draftScope = fallbackDraft.scope;

@@ -6,7 +6,7 @@ import type { PackManifest } from "./pack";
 const packJsonCache = new Map<string, Promise<unknown>>();
 const PACK_CACHE_SECONDS = 21_600;
 export const PACK_MANIFEST_CACHE_TAG = "scryglass-pack-manifest";
-const MAX_STORAGE_ASSET_BYTES = 50 * 1024 * 1024;
+const MAX_STORAGE_ASSET_BYTES = 120 * 1024 * 1024;
 
 type SupabaseConfig = {
   url: string;
@@ -60,7 +60,7 @@ function readStorageJson<T>(url: string): Promise<T> {
     const request = https.get(url, { timeout: 60_000 }, (response) => {
       if (response.statusCode !== 200) {
         response.resume();
-        reject(new Error(`Supabase Storage asset ${response.statusCode ?? "unavailable"}`));
+        reject(new Error(`Public pack asset ${response.statusCode ?? "unavailable"}`));
         return;
       }
       const chunks: Buffer[] = [];
@@ -77,7 +77,7 @@ function readStorageJson<T>(url: string): Promise<T> {
         try {
           resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")) as T);
         } catch {
-          reject(new Error("Supabase Storage asset is invalid JSON"));
+          reject(new Error("Public pack asset is invalid JSON"));
         }
       });
       response.on("error", reject);
@@ -85,6 +85,11 @@ function readStorageJson<T>(url: string): Promise<T> {
     request.on("timeout", () => request.destroy(new Error("Supabase Storage request timed out")));
     request.on("error", reject);
   });
+}
+
+function blobPackBase(manifest: PackManifest): string | null {
+  const base = manifest.base_url?.trim().replace(/\/$/, "");
+  return base && /^https:\/\//i.test(base) ? base : null;
 }
 
 async function readSupabaseManifest(cache: "no-store" | "cached"): Promise<PackManifest> {
@@ -195,14 +200,19 @@ export async function readPackJson<T>(manifest: PackManifest, relativePath: stri
   const clean = safeRelativePath(relativePath);
   const localPath = path.join(localPackRoot(), manifest.pack_id, clean);
   const supabase = manifest.data_backend === "supabase" && supabaseConfig();
+  const blobBase = supabase ? null : blobPackBase(manifest);
   const cacheKey = supabase
     ? `supabase:${manifest.pack_id}:${clean}`
-    : localPath;
+    : blobBase
+      ? `blob:${blobBase}:${clean}`
+      : localPath;
   let pending = packJsonCache.get(cacheKey);
   if (!pending) {
     pending = supabase
       ? readSupabaseAsset(manifest.pack_id, clean)
-      : fs.readFile(localPath, "utf8").then((raw) => JSON.parse(raw) as unknown);
+      : blobBase
+        ? readStorageJson<unknown>(`${blobBase}/${clean}`)
+        : fs.readFile(localPath, "utf8").then((raw) => JSON.parse(raw) as unknown);
     packJsonCache.set(cacheKey, pending);
     pending.catch(() => packJsonCache.delete(cacheKey));
   }
