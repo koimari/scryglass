@@ -111,6 +111,7 @@ def refresh_ratings(
     as_of: pd.Timestamp | None = None,
     min_games: int = 20,
     min_series: int = 5,
+    previous_as_of: pd.Timestamp | None = None,
 ) -> dict[str, Any]:
     repo_root = Path(root).resolve()
     team_path = repo_root / LIVE_TEAM_OUTPUT
@@ -164,12 +165,14 @@ def refresh_ratings(
         maps,
         as_of=cutoff,
         min_series=min_series,
+        previous_as_of=previous_as_of,
     )
     player_weekly = build_player_weekly_ranks(
         player_maps,
         players,
         as_of=cutoff,
         min_games=min_games,
+        previous_as_of=previous_as_of,
     )
     features_dir = repo_root / FEATURES_DIR
     features_dir.mkdir(parents=True, exist_ok=True)
@@ -218,11 +221,13 @@ def refresh_ratings(
             "model": team_meta.get("model"),
             "weekly_rows": len(team_weekly.get("by_team", {})),
             "weekly_locator": "features/team_weekly_ranks.json",
+            "movement_baseline": str(team_weekly.get("previous_as_of") or ""),
         },
         "player": {
             "snapshot_rows": int(len(pd.read_parquet(features_dir / "player_ratings_snapshot.parquet"))),
             "weekly_rows": len(player_weekly.get("by_player", {})),
             "weekly_locator": "features/player_weekly_ranks.json",
+            "movement_baseline": str(player_weekly.get("previous_as_of") or ""),
         },
         "artifacts": {
             "team_snapshot": _artifact_meta(
@@ -262,12 +267,14 @@ def main() -> int:
     parser.add_argument("--as-of", default=None)
     parser.add_argument("--min-games", type=int, default=20)
     parser.add_argument("--min-series", type=int, default=5)
+    parser.add_argument("--previous-as-of", default=None)
     args = parser.parse_args()
     payload = refresh_ratings(
         args.root,
         as_of=pd.Timestamp(args.as_of) if args.as_of else None,
         min_games=args.min_games,
         min_series=args.min_series,
+        previous_as_of=pd.Timestamp(args.previous_as_of) if args.previous_as_of else None,
     )
     print(json.dumps({
         "source_as_of": payload["source"]["as_of"],

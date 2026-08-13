@@ -732,6 +732,15 @@ def refresh_candidate(
             step_timeout_seconds=step_timeout_seconds,
         )
 
+    previous_live_as_of: str | None = None
+    if previous_path is not None:
+        try:
+            previous_file = previous_path if previous_path.is_absolute() else root / previous_path
+            previous_early = json.loads(previous_file.read_text(encoding="utf-8"))
+            previous_live_as_of = str(previous_early.get("as_of") or "") or None
+        except (OSError, ValueError, TypeError):
+            previous_live_as_of = None
+
     if prepared_source is not None:
         prepared_mode = prepared_source.get("source_mode")
         if prepared_mode != source_mode:
@@ -804,6 +813,11 @@ def refresh_candidate(
                     str(root),
                     "--as-of",
                     candidate_expected_live_as_of,
+                    *(
+                        ["--previous-as-of", previous_live_as_of]
+                        if previous_live_as_of
+                        else []
+                    ),
                 ],
                 source="ratings",
             )

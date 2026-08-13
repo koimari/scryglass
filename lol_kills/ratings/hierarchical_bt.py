@@ -502,17 +502,37 @@ def _sunday_utc(as_of: pd.Timestamp | None) -> pd.Timestamp:
     return stamp.normalize() - pd.Timedelta(days=(stamp.weekday() + 1) % 7)
 
 
+def _recent_team_baseline_anchor(
+    previous_as_of: pd.Timestamp | None,
+    sunday_baseline: pd.Timestamp,
+    cutoff: pd.Timestamp,
+) -> pd.Timestamp:
+    """Previous-refresh movement anchor with safe fallbacks."""
+    if previous_as_of is None:
+        return sunday_baseline
+    anchor = pd.Timestamp(previous_as_of)
+    if anchor.tzinfo is not None:
+        anchor = anchor.tz_convert("UTC").tz_localize(None)
+    if anchor >= cutoff or anchor < sunday_baseline - pd.Timedelta(days=400):
+        return sunday_baseline
+    return anchor
+
+
 def build_team_weekly_ranks(
     maps: pd.DataFrame,
     *,
     as_of: pd.Timestamp | None = None,
     min_series: int = 5,
+    previous_as_of: pd.Timestamp | None = None,
 ) -> dict[str, Any]:
-    """Return team rank movement from consecutive Sunday snapshots.
+    """Return team rank movement against the previous refresh's ladder.
 
     Both snapshots use the same hierarchical fit and the same conservative
-    ``rating_p10`` ordering as the public team ladder. New games therefore
-    change the ladder and its weekly movement in one refresh.
+    ``rating_p10`` ordering as the public team ladder. The recent baseline is
+    the previous refresh's cutoff when ``previous_as_of`` is provided (so
+    movement reflects every published cycle), falling back to the prior
+    Sunday snapshot otherwise. New games therefore change the ladder and its
+    movement in one refresh.
     """
 
     if min_series < 1:
@@ -520,8 +540,9 @@ def build_team_weekly_ranks(
     week_start = _sunday_utc(as_of)
     previous_start = week_start - pd.Timedelta(days=7)
     cutoff = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp.now(tz="UTC")
+    recent_anchor = _recent_team_baseline_anchor(previous_as_of, previous_start, cutoff)
     current, _ = fit_hierarchical_bt(maps, as_of=cutoff, write=False)
-    previous, _ = fit_hierarchical_bt(maps, as_of=week_start - pd.Timedelta(microseconds=1), write=False)
+    previous, _ = fit_hierarchical_bt(maps, as_of=recent_anchor - pd.Timedelta(microseconds=1), write=False)
 
     def order(snapshot: pd.DataFrame) -> tuple[dict[str, int], dict[str, float]]:
         if snapshot.empty:
@@ -556,9 +577,9 @@ def build_team_weekly_ranks(
 
     return {
         "as_of": f"{week_start.isoformat()}Z",
-        "previous_as_of": f"{previous_start.isoformat()}Z",
+        "previous_as_of": f"{recent_anchor.isoformat()}Z",
         "current_through": f"{current_through.isoformat()}Z",
         "min_series": int(min_series),
         "by_team": by_team,
-        "note": "Rank movement compares conservative team rating at Sunday 00:00 UTC snapshots; positive delta means a climb.",
+        "note": "Rank movement compares conservative team rating against the previous refresh (or the prior Sunday when no earlier refresh exists); positive delta means a climb.",
     }

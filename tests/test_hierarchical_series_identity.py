@@ -164,6 +164,38 @@ class SeriesIdentityTests(unittest.TestCase):
         self.assertEqual(audit["n_unresolved_maps"], 0)
 
 
+class TeamWeeklyRanksMovementTests(unittest.TestCase):
+    def test_team_weekly_ranks_use_previous_refresh_baseline(self) -> None:
+        from lol_kills.export.pack_records import build_maps_frame_from_team_games
+        from lol_kills.ratings.hierarchical_bt import build_team_weekly_ranks
+
+        team_games = pd.DataFrame(
+            [
+                {"game_uid": "g1", "side": "Blue", "teamname": "Team A", "date": "2026-07-10 10:00:00", "league": "LEC", "tournament": "LEC 2026", "result": 1},
+                {"game_uid": "g1", "side": "Red", "teamname": "Team B", "date": "2026-07-10 10:00:00", "league": "LEC", "tournament": "LEC 2026", "result": 0},
+                {"game_uid": "g2", "side": "Blue", "teamname": "Team B", "date": "2026-07-20 10:00:00", "league": "LEC", "tournament": "LEC 2026", "result": 1},
+                {"game_uid": "g2", "side": "Red", "teamname": "Team A", "date": "2026-07-20 10:00:00", "league": "LEC", "tournament": "LEC 2026", "result": 0},
+            ]
+        )
+        maps = build_maps_frame_from_team_games(team_games)
+        cutoff = pd.Timestamp("2026-07-26T12:00:00")
+        baseline = build_team_weekly_ranks(maps, as_of=cutoff, min_series=1)
+        self.assertEqual(baseline["previous_as_of"], "2026-07-19T00:00:00Z")
+        anchored = build_team_weekly_ranks(
+            maps, as_of=cutoff, min_series=1,
+            previous_as_of=pd.Timestamp("2026-07-24T00:00:00"),
+        )
+        self.assertEqual(anchored["previous_as_of"], "2026-07-24T00:00:00Z")
+        self.assertEqual(anchored["current_through"], "2026-07-26T12:00:00Z")
+        self.assertIn("Team A", anchored["by_team"])
+        self.assertIn("delta", anchored["by_team"]["Team A"])
+        guarded = build_team_weekly_ranks(
+            maps, as_of=cutoff, min_series=1,
+            previous_as_of=pd.Timestamp("2026-07-26T13:00:00"),
+        )
+        self.assertEqual(guarded["previous_as_of"], "2026-07-19T00:00:00Z")
+
+
 class PackAdapterSeriesIdentityTests(unittest.TestCase):
     def test_team_games_adapter_carries_grid_series_id(self) -> None:
         from lol_kills.export.pack_records import build_maps_frame_from_team_games

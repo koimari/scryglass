@@ -559,6 +559,55 @@ class CompetitionIdentityTests(unittest.TestCase):
             },
         )
 
+    def test_player_weekly_ranks_use_previous_refresh_baseline(self) -> None:
+        roles = ["top", "jng", "mid", "bot", "sup"]
+        players = []
+        for game, date, winner in (
+            ("g1", "2026-07-10", "A"),
+            ("g2", "2026-07-20", "B"),
+            ("g3", "2026-07-24", "A"),
+        ):
+            for side, team, result in (("Blue", "A", int(winner == "A")), ("Red", "B", int(winner == "B"))):
+                for role_index, role in enumerate(roles):
+                    players.append(
+                        {
+                            "gameid": game,
+                            "date": date,
+                            "league": "LCS",
+                            "side": side,
+                            "position": role,
+                            "playername": f"{team}{role_index}",
+                            "teamname": team,
+                            "result": result,
+                        }
+                    )
+        frame = pd.DataFrame(players)
+        maps = build_maps_frame_from_players(frame)
+        cutoff = pd.Timestamp("2026-07-26T12:00:00Z")
+        baseline = build_player_weekly_ranks(maps, frame, as_of=cutoff, min_games=1)
+        self.assertEqual(baseline["previous_as_of"], "2026-07-19T00:00:00Z")
+        # previous refresh anchor: movement against the last published cycle
+        anchored = build_player_weekly_ranks(
+            maps,
+            frame,
+            as_of=cutoff,
+            min_games=1,
+            previous_as_of=pd.Timestamp("2026-07-24T00:00:00Z"),
+        )
+        self.assertEqual(anchored["previous_as_of"], "2026-07-24T00:00:00Z")
+        self.assertEqual(anchored["current_through"], "2026-07-26T12:00:00Z")
+        self.assertIn("A0", anchored["by_player"])
+        self.assertIn("delta", anchored["by_player"]["A0"]["tier1"])
+        # guard: an anchor at/after the cutoff falls back to the Sunday baseline
+        guarded = build_player_weekly_ranks(
+            maps,
+            frame,
+            as_of=cutoff,
+            min_games=1,
+            previous_as_of=pd.Timestamp("2026-07-26T13:00:00Z"),
+        )
+        self.assertEqual(guarded["previous_as_of"], "2026-07-19T00:00:00Z")
+
     def test_player_game_uid_falls_back_per_row_to_gameid(self) -> None:
         rows = []
         roles = ["top", "jng", "mid", "bot", "sup"]

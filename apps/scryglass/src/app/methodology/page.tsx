@@ -154,11 +154,13 @@ export default function MethodologyPage() {
             marks champions with deeper mechanic coverage.
           </p>
           <p>
-            Rank movement compares the current tier ladder with the prior Sunday
-            and the positions one, three, and twelve calendar months earlier.
-            A positive change means that the player climbed. “New” means that the
-            player did not meet the ranking rules on the comparison date. The
-            public site receives only the finished display rows.
+            Rank movement compares the current ladder with the previous
+            refresh (so movement reflects every batch of games) and with the
+            positions one, three, and twelve calendar months earlier. When no
+            earlier refresh exists, the prior Sunday snapshot is the baseline.
+            A positive change means that the player climbed. “New” means that
+            the player did not meet the ranking rules on the comparison date.
+            The public site receives only the finished display rows.
             Training data, coefficients, and evaluation files stay in the local
             research workspace.
           </p>
