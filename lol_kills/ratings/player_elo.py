@@ -28,6 +28,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from lol_kills.etl.aliases import normalize_team
@@ -366,15 +367,31 @@ def _run_player_elo(
             checkpoints[target] = _snapshot_rows(states)
             target_idx += 1
 
+    # Pre-extract the columns the sequential loop reads (avoids per-row pandas access).
+    _gid_arr = df["game_uid"].to_numpy(dtype=object)
+    _date_arr = df["date"].to_numpy(dtype="datetime64[ns]")
+    _bt_col = "blue_team" if "blue_team" in df.columns else "blue_teamname"
+    _rt_col = "red_team" if "red_team" in df.columns else "red_teamname"
+    _bt_arr = df[_bt_col].astype(str).to_numpy(dtype=object)
+    _rt_arr = df[_rt_col].astype(str).to_numpy(dtype=object)
+    _y_arr = df["y_blue_win"].to_numpy(dtype=object) if "y_blue_win" in df.columns else np.full(len(df), np.nan, dtype=object)
+    _league_arr = df["league"].astype(str).to_numpy(dtype=object) if "league" in df.columns else np.full(len(df), "", dtype=object)
+    _tourn_arr = df["tournament"].astype(str).to_numpy(dtype=object) if "tournament" in df.columns else np.full(len(df), "", dtype=object)
+    _g15_arr = df["blue_golddiffat15"].to_numpy(dtype=object) if "blue_golddiffat15" in df.columns else np.full(len(df), np.nan, dtype=object)
+    _g10_arr = df["blue_golddiffat10"].to_numpy(dtype=object) if "blue_golddiffat10" in df.columns else np.full(len(df), np.nan, dtype=object)
+    _len_arr = df["length_min"].to_numpy(dtype=object) if "length_min" in df.columns else np.full(len(df), np.nan, dtype=object)
+    _glen_arr = df["gamelength"].to_numpy(dtype=object) if "gamelength" in df.columns else np.full(len(df), np.nan, dtype=object)
+
     rows = []
-    for _, row in df.iterrows():
-        gid = str(row.get("game_uid") or "")
-        d = pd.Timestamp(row["date"]) if pd.notna(row.get("date")) else None
+    for i in range(len(df)):
+        gid = str(_gid_arr[i] or "")
+        _dv = _date_arr[i]
+        d = pd.Timestamp(_dv) if not pd.isna(_dv) else None
         capture_before(d)
         blue_lu = lineups.get(gid, {}).get("Blue") or []
         red_lu = lineups.get(gid, {}).get("Red") or []
-        bt = normalize_team(str(row.get("blue_team") or row.get("blue_teamname") or ""))
-        rt = normalize_team(str(row.get("red_team") or row.get("red_teamname") or ""))
+        bt = normalize_team(str(_bt_arr[i] or ""))
+        rt = normalize_team(str(_rt_arr[i] or ""))
 
         # inactivity + team-switch uncertainty
         for name, role in list(blue_lu[:5]) + list(red_lu[:5]):
@@ -399,7 +416,7 @@ def _run_player_elo(
         rows.append(
             {
                 "game_uid": gid,
-                "date": row.get("date"),
+                "date": _dv,
                 "blue_team": bt,
                 "red_team": rt,
                 "player_mu_blue": mu_b,
@@ -415,18 +432,22 @@ def _run_player_elo(
             }
         )
 
-        y = row.get("y_blue_win")
+        y = _y_arr[i]
         if pd.isna(y):
             continue
         y = float(y)
-        intl = _is_intl(str(row.get("league") or ""), row.get("tournament"))
+        intl = _is_intl(str(_league_arr[i] or ""), _tourn_arr[i])
 
-        g10 = row.get("blue_golddiffat15")
+        g10 = _g15_arr[i]
         if pd.isna(g10):
-            g10 = row.get("blue_golddiffat10")
-        length = row.get("length_min") or (
-            float(row["gamelength"]) / 60.0 if pd.notna(row.get("gamelength")) else 30.0
-        )
+            g10 = _g10_arr[i]
+        _len = _len_arr[i]
+        if pd.notna(_len):
+            length = float(_len)
+        elif pd.notna(_glen_arr[i]):
+            length = float(_glen_arr[i]) / 60.0
+        else:
+            length = 30.0
         mov = 1.0
         if pd.notna(g10) and length:
             mov = 1.0 + cfg.mov_scale * math.tanh(float(g10) / (200.0 * max(float(length), 1.0)))
@@ -445,7 +466,7 @@ def _run_player_elo(
             if d is not None:
                 st.last_date = d
             st.last_team = bt
-            league = str(row.get("league") or "")
+            league = str(_league_arr[i] or "")
             if is_team_affiliation_league(league):
                 st.home_league = league
             states[name] = st
@@ -461,7 +482,7 @@ def _run_player_elo(
             if d is not None:
                 st.last_date = d
             st.last_team = rt
-            league = str(row.get("league") or "")
+            league = str(_league_arr[i] or "")
             if is_team_affiliation_league(league):
                 st.home_league = league
             states[name] = st

@@ -102,6 +102,9 @@ def _utc_stamp(value: pd.Timestamp) -> str:
     return stamp.isoformat().replace("+00:00", "Z")
 
 
+from functools import lru_cache as _lru_cache
+
+@_lru_cache(maxsize=65536)
 def _normalize_name(value: object) -> str:
     return "".join(ch for ch in str(value).strip().casefold() if ch.isalnum())
 

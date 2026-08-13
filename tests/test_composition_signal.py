@@ -726,3 +726,37 @@ def test_l7_is_strictly_prior_to_own_outcome() -> None:
     assert np.allclose(rows_a[1][l7_start:l7_start + 6], rows_b[1][l7_start:l7_start + 6])
     # g3's L7 feature SHOULD reflect g2's outcome (profile updated after g2)
     assert not np.allclose(rows_a[2][l7_start:l7_start + 6], rows_b[2][l7_start:l7_start + 6])
+
+
+def test_atom_estimate_picks_validate_in_an_available_signal() -> None:
+    from lol_kills.research.composition_signal import validate_public_signal
+    signal = {
+        "schema_version": "scryglass:composition-signal:v1",
+        "status": "available",
+        "model_version": "composition-signal-v2",
+        "fit_through": "2026-04-23T23:12:11Z",
+        "blue": {"signal": 0.1, "prior_role_games": 500},
+        "red": {"signal": -0.1, "prior_role_games": 500},
+        "note": "test",
+        "picks": [],
+    }
+    players = []
+    for side in ("Blue", "Red"):
+        for role in ROLES:
+            players.append({"side": side, "role": role, "champion": f"Champ{side}{role}"})
+    for side in ("Blue", "Red"):
+        for role in ROLES:
+            signal["picks"].append({
+                "side": side,
+                "role": role,
+                "champion": f"Champ{side}{role}",
+                "contribution": 0.02 if side == "Blue" else -0.02,
+                "prior_role_games": 0 if (side, role) == ("Blue", "top") else 100,
+                "evidence_status": "atom_estimate" if (side, role) == ("Blue", "top") else "available",
+            })
+    game = {
+        "game_id": "game-x",
+        "date": "2026-05-01T00:00:00Z",
+        "players": players,
+    }
+    validate_public_signal(signal, game)
