@@ -100,8 +100,8 @@ export default async function PlayerEloPage({ params }: Props) {
       recentGames={recentGames}
       championImages={profileRecords?.champion_images ?? {}}
       manifest={man}
-      draftMetric={draftMetric?.best_pick_rate != null && draftProfile ? {
-        bestPickRate: draftMetric.best_pick_rate,
+      draftMetric={draftMetric?.best_available_rate != null && draftProfile ? {
+        bestAvailableRate: draftMetric.best_available_rate,
         games: draftMetric.games,
         scope: draftProfile.scope,
       } : null}

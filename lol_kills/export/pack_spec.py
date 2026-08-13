@@ -42,6 +42,21 @@ MAPS_IDENTITY: tuple[str, ...] = (
     "source_grid",
     "oe_year",
     "tournament",
+    # Draft identity is read for the public profile pool audit. These columns
+    # remain in memory and are never copied to raw public tables.
+    "patch",
+    "blue_firstPick",
+    "red_firstPick",
+    "blue_pick1",
+    "blue_pick2",
+    "blue_pick3",
+    "blue_pick4",
+    "blue_pick5",
+    "red_pick1",
+    "red_pick2",
+    "red_pick3",
+    "red_pick4",
+    "red_pick5",
 )
 
 

@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from lol_kills.etl.aliases import normalize_team
+from lol_kills.etl.aliases import normalize_champ, normalize_team
 from lol_kills.etl.competition import (
     TRANSPORT_LEAGUE_LABELS,
     canonicalize_competition_frame,
@@ -37,6 +37,140 @@ PUBLIC_ROLE_ALIASES = {
     "support": "support",
     "utility": "support",
 }
+
+DRAFT_PICK_SLOTS = (1, 2, 3, 4, 5)
+
+
+def _draft_text(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        if bool(pd.isna(value)):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+
+def _draft_champion_key(value: Any) -> str:
+    return normalize_champ(_draft_text(value)).casefold()
+
+
+def _draft_slots(row: pd.Series, prefix: str) -> list[str]:
+    return [
+        _draft_text(row.get(f"{prefix}{slot}"))
+        for slot in DRAFT_PICK_SLOTS
+        if _draft_text(row.get(f"{prefix}{slot}"))
+    ]
+
+
+def _first_pick_value(group: pd.DataFrame, metadata: Mapping[str, Any] | None) -> bool | None:
+    candidate = (metadata or {}).get("blue_first_pick")
+    if not _draft_text(candidate):
+        for column in ("blue_firstPick", "firstPick"):
+            if column in group.columns:
+                candidate = group.iloc[0].get(column)
+                if _draft_text(candidate):
+                    break
+    if isinstance(candidate, bool):
+        return candidate
+    if isinstance(candidate, (int, float)) and not pd.isna(candidate) and candidate in (0, 1):
+        return bool(candidate)
+    text = _draft_text(candidate).casefold()
+    if text in {"blue", "1", "true", "yes", "first"}:
+        return True
+    if text in {"red", "0", "false", "no", "second"}:
+        return False
+    return None
+
+
+def _public_draft_payload(
+    group: pd.DataFrame,
+    participants: list[dict[str, Any]],
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Keep the source draft facts public before tier scoring is attached.
+
+    The source repeats bans and team pick slots on every player row. We read
+    one side row and preserve the values only when they are present. Pick
+    order is reconstructed from the source team pick slots and first-pick
+    flag. Missing order remains explicit so downstream rates can fail closed.
+    """
+
+    bans: dict[str, list[str]] = {}
+    picks_by_side: dict[str, list[str]] = {}
+    for side in ("Blue", "Red"):
+        side_frame = group[group["_side"].eq(side)]
+        if side_frame.empty:
+            continue
+        first = side_frame.iloc[0]
+        bans[side] = _draft_slots(first, "ban")
+        picks = _draft_slots(first, "pick")
+        if not picks and metadata:
+            picks = [
+                _draft_text(value)
+                for value in (metadata.get(f"{side.lower()}_picks") or [])
+                if _draft_text(value)
+            ]
+        picks_by_side[side] = picks
+
+    roster_by_side_champion = {
+        (str(row.get("side") or ""), _draft_champion_key(row.get("champion"))): row
+        for row in participants
+        if row.get("side") and row.get("champion")
+    }
+    first_pick = _first_pick_value(group, metadata)
+    picked: list[dict[str, Any]] = []
+    if first_pick is not None and all(len(picks_by_side.get(side, [])) == 5 for side in ("Blue", "Red")):
+        first_side = "Blue" if first_pick else "Red"
+        second_side = "Red" if first_side == "Blue" else "Blue"
+        sequence = [
+            (first_side, 1), (second_side, 1), (second_side, 2),
+            (first_side, 2), (first_side, 3), (second_side, 3),
+            (second_side, 4), (first_side, 4), (first_side, 5),
+            (second_side, 5),
+        ]
+        for order, (side, slot) in enumerate(sequence, start=1):
+            champion = picks_by_side[side][slot - 1]
+            participant = roster_by_side_champion.get((side, _draft_champion_key(champion)))
+            picked.append(
+                {
+                    "side": side,
+                    "role": participant.get("role") if participant else None,
+                    "champion": champion,
+                    "order": order,
+                }
+            )
+    else:
+        for participant in participants:
+            champion = _draft_text(participant.get("champion"))
+            if champion:
+                picked.append(
+                    {
+                        "side": participant.get("side"),
+                        "role": participant.get("role"),
+                        "champion": champion,
+                        "order": None,
+                    }
+                )
+
+    patch = _draft_text((metadata or {}).get("patch"))
+    if not patch and "patch" in group.columns:
+        patch = _draft_text(group.iloc[0].get("patch"))
+    complete_bans = all(len(bans.get(side, [])) == 5 for side in ("Blue", "Red"))
+    complete_picks = len(picked) == 10 and len({_draft_champion_key(item.get("champion")) for item in picked}) == 10
+    complete_order = complete_picks and all(item.get("order") is not None for item in picked)
+    status = "complete" if complete_bans and complete_order and patch else "limited" if complete_bans or picked else "unavailable"
+    return {
+        "schema_version": "scryglass:draft-pool:v1",
+        "status": status,
+        "source": "oracle-elixir",
+        "patch": patch or None,
+        "bans": {"Blue": bans.get("Blue", []), "Red": bans.get("Red", [])},
+        "picked": picked,
+        "unpicked": [],
+        "reason": None if status == "complete" else "Complete bans, pick order, and patch identity are required for best-available rates.",
+    }
 
 
 def _wr(wins: int, games: int) -> float | None:
@@ -502,7 +636,11 @@ def merge_accepted_profile_games(
         )
         if not profile_game_has_complete_stats(candidate):
             if identities_match and profile_game_has_complete_stats(accepted):
-                merged[game_id] = deepcopy(dict(accepted))
+                selected = deepcopy(dict(accepted))
+                for field in ("patch", "draft_pool", "draft_contribution"):
+                    if field in candidate:
+                        selected[field] = deepcopy(candidate[field])
+                merged[game_id] = selected
             continue
 
         selected = deepcopy(dict(candidate))
@@ -532,6 +670,7 @@ def build_profile_records(
     *,
     champion_image_urls: Mapping[str, str] | None = None,
     composition_signals: Mapping[str, Mapping[str, Any]] | None = None,
+    draft_metadata: Mapping[str, Mapping[str, Any]] | None = None,
     recent_limit: int = 10,
     recent_window_days: int = 120,
     include_archive: bool = False,
@@ -540,7 +679,7 @@ def build_profile_records(
 
     required = {"playername", "teamname", "side", "position", "result", "date"}
     if players is None or players.empty or not required.issubset(players.columns):
-        return {"schema_version": "scryglass:profile-records:v2", "grade_contract": GRADE_CONTRACT, "window_days": recent_window_days, "champion_images": {}, "games": {}, "players": {}, "teams": {}}
+        return {"schema_version": "scryglass:profile-records:v3", "grade_contract": GRADE_CONTRACT, "window_days": recent_window_days, "champion_images": {}, "games": {}, "players": {}, "teams": {}}
     if recent_limit < 1 or recent_window_days < 1:
         raise ValueError("recent_limit and recent_window_days must be positive")
 
@@ -584,13 +723,26 @@ def build_profile_records(
             "atakhans",
             "towers",
             "inhibitors",
+            "patch",
+            "ban1",
+            "ban2",
+            "ban3",
+            "ban4",
+            "ban5",
+            "pick1",
+            "pick2",
+            "pick3",
+            "pick4",
+            "pick5",
+            "firstPick",
+            "blue_firstPick",
         )
         if column in players.columns
     ]
     frame = canonicalize_competition_frame(players[useful_columns].copy())
     identity_source = frame.get("game_uid", frame.get("gameid"))
     if identity_source is None:
-        return {"schema_version": "scryglass:profile-records:v2", "grade_contract": GRADE_CONTRACT, "window_days": recent_window_days, "champion_images": {}, "games": {}, "players": {}, "teams": {}}
+        return {"schema_version": "scryglass:profile-records:v3", "grade_contract": GRADE_CONTRACT, "window_days": recent_window_days, "champion_images": {}, "games": {}, "players": {}, "teams": {}}
     fallback = frame["gameid"] if "gameid" in frame.columns else None
     frame["_game_id"] = [
         canonical_source_game_key(value, fallback.loc[index] if fallback is not None else None)
@@ -723,11 +875,15 @@ def build_profile_records(
                 "inhibitors": _profile_number(first.get("inhibitors")),
             }
         key = str(game_id)
+        game_draft_metadata = (draft_metadata or {}).get(key)
+        if not isinstance(game_draft_metadata, Mapping):
+            game_draft_metadata = None
         games[key] = {
             "game_id": key,
             "date": date.isoformat().replace("+00:00", "Z"),
             "league": league,
             "competition_tier": tier,
+            "patch": _draft_text((game_draft_metadata or {}).get("patch")) or _draft_text(group.iloc[0].get("patch")) or None,
             "blue_team": blue_team,
             "red_team": red_team,
             "blue_win": int(blue_result),
@@ -735,6 +891,11 @@ def build_profile_records(
             "team_stats": team_stats,
             "players": participants,
         }
+        games[key]["draft_pool"] = _public_draft_payload(
+            group,
+            participants,
+            game_draft_metadata,
+        )
         if composition_signals and key in composition_signals:
             games[key]["draft_contribution"] = deepcopy(dict(composition_signals[key]))
     archive_games = games
@@ -750,7 +911,7 @@ def build_profile_records(
         if any(game_id in available for game_id in values)
     }
     payload = {
-        "schema_version": "scryglass:profile-records:v2",
+        "schema_version": "scryglass:profile-records:v3",
         "grade_contract": GRADE_CONTRACT,
         "window_days": recent_window_days,
         "champion_images": dict(sorted(images.items())),

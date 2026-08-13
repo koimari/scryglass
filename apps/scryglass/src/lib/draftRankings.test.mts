@@ -31,8 +31,8 @@ function game(
       blue: { signal: blueSignal, prior_role_games: 10 },
       red: { signal: redSignal, prior_role_games: 10 },
       picks: [
-        { side: "Blue" as const, role: "mid", champion: "Ahri", contribution: 0.2, prior_role_games: 10, evidence_status: "available" as const },
-        { side: "Red" as const, role: "mid", champion: "Azir", contribution: -0.1, prior_role_games: 10, evidence_status: "available" as const },
+        { side: "Blue" as const, role: "mid", champion: "Ahri", contribution: 0.2, prior_role_games: 10, evidence_status: "available" as const, best_available: true },
+        { side: "Red" as const, role: "mid", champion: "Azir", contribution: -0.1, prior_role_games: 10, evidence_status: "available" as const, best_available: true },
       ],
       note: "test",
     },
@@ -63,15 +63,17 @@ test("derives team and player rankings when the leaderboard asset is missing", (
     { team: "Team B", games: 5, draft_win_share: 0.4013, draft_edge: -0.4, league: "LCK", tier: "tier1" },
   ]);
   assert.deepEqual(result.players, [
-    { player: "BlueMid", games: 5, draft_score: 0.2, best_pick_rate: 1, role: "mid", team: "Team A", league: "LCK", tier: "tier1" },
-    { player: "RedMid", games: 5, draft_score: -0.1, best_pick_rate: 1, role: "mid", team: "Team B", league: "LCK", tier: "tier1" },
+    { player: "BlueMid", games: 5, draft_score: 0.2, best_available_rate: 1, role: "mid", team: "Team A", league: "LCK", tier: "tier1" },
+    { player: "RedMid", games: 5, draft_score: -0.1, best_available_rate: 1, role: "mid", team: "Team B", league: "LCK", tier: "tier1" },
   ]);
 });
 
-test("ranks players by the share of highest-contribution picks", () => {
+test("ranks players by the share of best-available picks", () => {
   const games = Object.fromEntries(
     Array.from({ length: 5 }, (_, index) => {
       const value = game(`best-${index}`, "Team A", "Team B", 0.5, 0.1);
+      value.draft_contribution!.picks[0].best_available = index < 4;
+      value.draft_contribution!.picks[1].best_available = true;
       value.draft_contribution!.picks[0].contribution = index < 4 ? 0.2 : -0.2;
       value.draft_contribution!.picks[1].contribution = 0.1;
       value.players.push(
@@ -79,8 +81,8 @@ test("ranks players by the share of highest-contribution picks", () => {
         { player: "RedTop", side: "Red" as const, role: "top", champion: "Ornn", kills: null, deaths: null, assists: null },
       );
       value.draft_contribution!.picks.push(
-        { side: "Blue" as const, role: "top", champion: "Gnar", contribution: 0.1, prior_role_games: 10, evidence_status: "available" as const },
-        { side: "Red" as const, role: "top", champion: "Ornn", contribution: 0.2, prior_role_games: 10, evidence_status: "available" as const },
+        { side: "Blue" as const, role: "top", champion: "Gnar", contribution: 0.1, prior_role_games: 10, evidence_status: "available" as const, best_available: false },
+        { side: "Red" as const, role: "top", champion: "Ornn", contribution: 0.2, prior_role_games: 10, evidence_status: "available" as const, best_available: true },
       );
       return [`best-${index}`, value];
     }),
@@ -96,8 +98,8 @@ test("ranks players by the share of highest-contribution picks", () => {
 
   const result = draftRankingsFromProfile(records);
   assert.equal(result.players[0]?.player, "RedTop");
-  assert.equal(result.players.find((row) => row.player === "BlueMid")?.best_pick_rate, 0.8);
-  assert.equal(result.players.find((row) => row.player === "BlueTop")?.best_pick_rate, 0.2);
+  assert.equal(result.players.find((row) => row.player === "BlueMid")?.best_available_rate, 0.8);
+  assert.equal(result.players.find((row) => row.player === "BlueTop")?.best_available_rate, 0);
 });
 
 test("accepts the limited status and normalizes role abbreviations", () => {

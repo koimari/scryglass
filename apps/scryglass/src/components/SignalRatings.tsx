@@ -284,9 +284,9 @@ export function SignalRatings({
     : draftWindowDays ? `Published ${draftWindowDays}-day window` : "Published profile window";
   const draftEvidenceLabel = draftEvidenceGames ? `${draftEvidenceGames.toLocaleString()} games with draft evidence` : "Published draft evidence";
   const formatDraftWinShare = (value: number) => `${Math.round(value * 100)}%`;
-  const formatBestPickRate = (value: number | null | undefined) => value == null ? "—" : `${Math.round(value * 100)}%`;
+  const formatBestAvailableRate = (value: number | null | undefined) => value == null ? "—" : `${Math.round(value * 100)}%`;
   const draftShareBarWidth = (value: number) => Math.min(100, Math.abs(value - 0.5) * 300);
-  const bestPickRateBarWidth = (value: number | null | undefined) => value == null ? 0 : Math.min(100, value * 100);
+  const bestAvailableRateBarWidth = (value: number | null | undefined) => value == null ? 0 : Math.min(100, value * 100);
 
   return (
     <div className={styles.root}>
@@ -305,7 +305,7 @@ export function SignalRatings({
           ) : null}
           {tab === "draft" ? null : <label><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="rating">Rating</option><option value="movement">Movement</option><option value="games">Games</option><option value="name">Name</option></select></label>}
           {tab === "players" ? <label className={styles.minGames}><span>Min games</span><input type="number" min={5} value={minGames} onChange={(event) => setMinGames(Math.max(5, Number(event.target.value) || 5))} /></label> : null}
-          {tab === "draft" ? <label className={styles.minGames}><span>Min games</span><input type="number" min={5} value={draftMinGames} onChange={(event) => setDraftMinGames(Math.max(5, Number(event.target.value) || 5))} /></label> : null}
+          {tab === "draft" ? <label className={styles.minGames}><span>Min games / picks</span><input type="number" min={5} value={draftMinGames} onChange={(event) => setDraftMinGames(Math.max(5, Number(event.target.value) || 5))} /></label> : null}
         </div>
         <div className={styles.scopeRow} role="group" aria-label="Competition level">
           <span>Level</span>
@@ -317,7 +317,7 @@ export function SignalRatings({
 
       {tab === "draft" ? (
         draftRows.teams.length || draftRows.players.length ? <>
-          <p className={styles.draftNote}>{draftScopeLabel} · {draftEvidenceLabel}. Teams use average published draft win share. Player rows use the share of scored drafts where their pick had the highest contribution on their side.</p>
+          <p className={styles.draftNote}>{draftScopeLabel} · {draftEvidenceLabel}. Teams use average published draft win share. Player rows use the best-available rate: the share of evaluated picks that were the highest-ranked unbanned champion available for the role.</p>
           <section className={styles.draftSection} aria-label="Draft rankings">
               <div className={styles.draftColumn}>
                 <header><div><h2>Teams by draft</h2><p>Average published draft win share · per-game estimate</p></div><b>{draftRows.teams.length} teams</b></header>
@@ -332,12 +332,12 @@ export function SignalRatings({
                 {draftRows.teams.length > 18 ? <button type="button" className={styles.showAll} onClick={() => setExpanded((value) => !value)}>{expanded ? "Show fewer" : `Show all ${draftRows.teams.length} teams`}</button> : null}
               </div>
               <div className={styles.draftColumn}>
-                <header><div><h2>Players by draft</h2><p>Best-pick rate · highest contribution on side</p></div><b>{draftRows.players.length} players</b></header>
+                <header><div><h2>Players by draft</h2><p>Best-available rate · published bans and tier pool</p></div><b>{draftRows.players.length} players</b></header>
                 {draftRows.players.length ? <ol className={styles.draftList}>
                   {(expanded ? draftRows.players : draftRows.players.slice(0, 18)).map((row, index) => <li key={`${row.player}-${row.league ?? "all"}-${row.tier ?? "all"}`}>
                     <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
                     <span className={styles.draftIdentity}><TeamMark team={row.team} /><Link className="row-link" href={`/elo/player/${playerSlug(row.player)}`}>{row.player}</Link></span>
-                    <span className={styles.draftMetric}><b title="Share of scored drafts where this pick had the highest contribution on its side">{formatBestPickRate(row.best_pick_rate)}</b><span className={styles.draftBarTrack} aria-hidden="true"><span className={styles.draftBarPositive} style={{ width: `${bestPickRateBarWidth(row.best_pick_rate)}%` }} /></span></span>
+                    <span className={styles.draftMetric}><b title="Best-available rate: share of evaluated picks that were the highest-ranked unbanned champion available for the role">{formatBestAvailableRate(row.best_available_rate)}</b><span className={styles.draftBarTrack} aria-hidden="true"><span className={styles.draftBarPositive} style={{ width: `${bestAvailableRateBarWidth(row.best_available_rate)}%` }} /></span></span>
                     <small>{row.games} picks{row.role ? ` · ${roleLabel(row.role)}` : ""}</small>
                   </li>)}
                 </ol> : <p className={styles.empty}>No player rows meet the evidence floor.</p>}

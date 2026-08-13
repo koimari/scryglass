@@ -15,7 +15,7 @@ import json
 import math
 from typing import Any, Mapping
 
-LEADERBOARDS_SCHEMA = "scryglass:leaderboards:v1"
+LEADERBOARDS_SCHEMA = "scryglass:leaderboards:v2"
 TOP_LIMIT = 50
 ROLE_ORDER = ("top", "jng", "mid", "bot", "sup")
 MIN_WIN_RATE_GAMES = 20
@@ -221,8 +221,47 @@ def _teams_draft(draft_records: Mapping[str, Any] | None) -> list[dict[str, Any]
     return rows[:TOP_LIMIT]
 
 
+def _teams_draft_from_profile(profile_records: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """Use the same profile-window composition rows as player profiles."""
+
+    games = profile_records.get("games") if isinstance(profile_records, Mapping) else None
+    if not isinstance(games, Mapping):
+        return []
+    by_team: dict[str, list[tuple[float, float]]] = {}
+    for game in games.values():
+        if not isinstance(game, Mapping):
+            continue
+        signal = game.get("draft_contribution")
+        if not isinstance(signal, Mapping):
+            continue
+        blue_signal = _number((signal.get("blue") or {}).get("signal")) if isinstance(signal.get("blue"), Mapping) else None
+        red_signal = _number((signal.get("red") or {}).get("signal")) if isinstance(signal.get("red"), Mapping) else None
+        if blue_signal is None or red_signal is None:
+            continue
+        edge = blue_signal - red_signal
+        share = _sigmoid(edge)
+        blue = str(game.get("blue_team") or "").strip()
+        red = str(game.get("red_team") or "").strip()
+        if blue:
+            by_team.setdefault(blue, []).append((edge, share))
+        if red:
+            by_team.setdefault(red, []).append((-edge, 1.0 - share))
+    rows = []
+    for team, evidence in by_team.items():
+        if len(evidence) < 5:
+            continue
+        rows.append({
+            "team": team,
+            "games": len(evidence),
+            "draft_edge": round(sum(edge for edge, _ in evidence) / len(evidence), 4),
+            "draft_win_share": round(sum(share for _, share in evidence) / len(evidence), 4),
+        })
+    rows.sort(key=lambda row: (-row["draft_win_share"], -row["draft_edge"], -row["games"], row["team"]))
+    return rows[:TOP_LIMIT]
+
+
 def _players_draft(players: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Players ranked by the share of highest-contribution picks."""
+    """Players ranked by the share of picks that were best available."""
     rows = []
     for entry in players:
         if not isinstance(entry, Mapping):
@@ -230,21 +269,21 @@ def _players_draft(players: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]
         name = str(entry.get("player") or "").strip()
         games_n = int(entry.get("games") or 0)
         score = _number(entry.get("draft_score"))
-        best_pick_rate = _number(entry.get("best_pick_rate"))
-        if not name or games_n < 5 or score is None:
+        best_available_rate = _number(entry.get("best_available_rate"))
+        if not name or games_n < 5:
             continue
         rows.append({
             "player": name,
             "games": games_n,
-            "draft_score": round(score, 4),
-            "best_pick_rate": round(best_pick_rate, 4) if best_pick_rate is not None else None,
+            "draft_score": round(score, 4) if score is not None else None,
+            "best_available_rate": round(best_available_rate, 4) if best_available_rate is not None else None,
             "role": str(entry.get("role") or "").strip() or None,
             "team": str(entry.get("team") or "").strip() or None,
         })
     rows.sort(key=lambda row: (
-        -(row["best_pick_rate"] if row["best_pick_rate"] is not None else float("-inf")),
+        -(row["best_available_rate"] if row["best_available_rate"] is not None else float("-inf")),
         -row["games"],
-        -row["draft_score"],
+        -(row["draft_score"] if row["draft_score"] is not None else float("-inf")),
         row["player"],
     ))
     return rows[:TOP_LIMIT]
@@ -259,6 +298,7 @@ def build_leaderboards(
     match_index: Mapping[str, Any] | None = None,
     draft_records: Mapping[str, Any] | None = None,
     draft_players: Sequence[Mapping[str, Any]] | None = None,
+    draft_profile_records: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Aggregate the public payloads into the leaderboards artifact."""
 
@@ -387,7 +427,7 @@ def build_leaderboards(
         "teams": teams,
         "champions": champions,
         "indexes": indexes,
-        "teams_draft": _teams_draft(draft_records),
+        "teams_draft": _teams_draft_from_profile(draft_profile_records) if draft_profile_records is not None else _teams_draft(draft_records),
         "players_draft": _players_draft(draft_players or []),
     }
 

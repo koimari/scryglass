@@ -11,6 +11,7 @@ import {
   teamSlug,
   type PackManifest,
   type DraftContribution,
+  type DraftPool,
   type PlayerChampionRecord,
   type PlayerRating,
   type PlayerPositionDeltas,
@@ -48,7 +49,7 @@ type TeamDraftMetric = {
 };
 
 type PlayerDraftMetric = {
-  bestPickRate: number;
+  bestAvailableRate: number;
   games: number;
   scope: DraftRankingsScope;
 };
@@ -397,11 +398,13 @@ function pickWinSharePoints(pick: { side: "Blue" | "Red"; contribution: number |
 
 function CompositionEvidence({
   contribution,
+  draftPool,
   blueTeam,
   redTeam,
   championImages,
 }: {
   contribution?: DraftContribution;
+  draftPool?: DraftPool;
   blueTeam: string;
   redTeam: string;
   championImages: Record<string, string>;
@@ -427,6 +430,18 @@ function CompositionEvidence({
           {status === "available" ? "Available" : status === "limited" ? "Limited evidence" : "Unavailable"}
         </span>
       </div>
+      {draftPool ? (
+        <details className={styles.draftPool}>
+          <summary>
+            Draft pool · {draftPool.bans.Blue.length + draftPool.bans.Red.length} bans · {draftPool.unpicked.length} unpicked
+          </summary>
+          <div className={styles.draftPoolGrid}>
+            <div><strong>Bans</strong><span>{[...draftPool.bans.Blue, ...draftPool.bans.Red].join(" · ") || "Unavailable"}</span></div>
+            <div><strong>Unpicked published champions</strong><span>{draftPool.unpicked.join(" · ") || "None in the published role pool"}</span></div>
+          </div>
+          <small>{draftPool.basis ?? draftPool.reason ?? "The published draft pool is unavailable."}</small>
+        </details>
+      ) : null}
       {status === "unavailable" ? (
         <p className={styles.compositionEmpty}>{contribution?.reason ?? "The complete pre-game draft evidence is not available for this game."}</p>
       ) : (
@@ -477,7 +492,12 @@ function CompositionEvidence({
                             : "—"}
                       </strong>
                       <small>
-                        {pick?.evidence_status === "atom_estimate"
+                        {pick?.best_available === true
+                          ? "Best available · "
+                          : pick?.best_available === false
+                            ? "Available pool · "
+                            : ""
+                        }{pick?.evidence_status === "atom_estimate"
                           ? "atom estimate"
                           : pick?.evidence_status === "available"
                             ? `${pick.prior_role_games} prior role games`
@@ -529,6 +549,7 @@ export function MatchRatingProfile({ game, championImages }: { game: ProfileGame
       </header>
       <CompositionEvidence
         contribution={game.draft_contribution}
+        draftPool={game.draft_pool}
         blueTeam={game.blue_team}
         redTeam={game.red_team}
         championImages={championImages}
@@ -638,10 +659,10 @@ export function PlayerRatingProfile({
         <div><dt>Confidence</dt><dd>{formatEvidenceCell(trust)}</dd></div>
         <div>
           <dt>Draft score</dt>
-          <dd title="Share of scored drafts where this player's pick had the highest contribution on their side">
-            {draftMetric ? `${Math.round(draftMetric.bestPickRate * 100)}%` : "—"}
+          <dd title="Best-available rate: share of evaluated picks that were the highest-ranked unbanned champion available for the role">
+            {draftMetric ? `${Math.round(draftMetric.bestAvailableRate * 100)}%` : "—"}
           </dd>
-          <small>{draftMetric ? `${draftMetric.games} picks · best-pick rate · ${draftMetric.scope === "whole_archive" ? "whole archive" : "profile window"}` : "Published draft evidence unavailable"}</small>
+          <small>{draftMetric ? `${draftMetric.games} evaluated picks · best-available rate · ${draftMetric.scope === "whole_archive" ? "whole archive" : "profile window"}` : "Published best-available evidence unavailable"}</small>
         </div>
         <div><dt>Updated</dt><dd>{packUpdatedLabel(manifest)}</dd></div>
       </dl>

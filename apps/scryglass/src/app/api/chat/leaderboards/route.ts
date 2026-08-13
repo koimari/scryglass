@@ -12,9 +12,9 @@ export async function GET(request: Request) {
   let rows = await leaderboardRows(category, role, limit, tier);
   if (category === "teams_draft" || category === "players_draft") {
     // Whole-archive draft leaderboards. Teams use draft win share. Players use
-    // the share of scored drafts where their pick led their side.
+    // the share of evaluated picks that were best available after bans.
     try {
-      const payload = await readChatJson<{ teams_draft: Array<{ team?: string; player?: string; games?: number; draft_win_share?: number; draft_score?: number; best_pick_rate?: number | null; role?: string | null }>; players_draft: Array<{ team?: string; player?: string; games?: number; draft_win_share?: number; draft_score?: number; best_pick_rate?: number | null; role?: string | null }> }>("features/leaderboards.json");
+      const payload = await readChatJson<{ teams_draft: Array<{ team?: string; player?: string; games?: number; draft_win_share?: number; draft_score?: number; best_available_rate?: number | null; role?: string | null }>; players_draft: Array<{ team?: string; player?: string; games?: number; draft_win_share?: number; draft_score?: number; best_available_rate?: number | null; role?: string | null }> }>("features/leaderboards.json");
       const source = category === "teams_draft" ? payload.teams_draft : payload.players_draft;
       rows = source.slice(0, limit).map((row) => ({
         name: String(row.team ?? row.player ?? ""),
@@ -29,7 +29,7 @@ export async function GET(request: Request) {
         grade_a_games: 0,
         grade_games: 0,
         recent_form: category === "players_draft"
-          ? row.best_pick_rate ?? null
+          ? row.best_available_rate ?? null
           : row.draft_win_share ?? null,
       }));
     } catch {

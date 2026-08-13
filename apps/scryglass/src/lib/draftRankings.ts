@@ -12,9 +12,9 @@ export type DraftTeamRow = {
 export type DraftPlayerRow = {
   player: string;
   games: number;
-  draft_score: number;
-  /** Share of scored drafts where this player's pick had the highest contribution on their side. */
-  best_pick_rate?: number | null;
+  draft_score: number | null;
+  /** Share of evaluated picks that were the highest-ranked available pick. */
+  best_available_rate?: number | null;
   role?: string | null;
   team?: string | null;
   league?: string | null;
@@ -49,8 +49,8 @@ type PlayerAggregate = {
   tier: string | null;
   league: string | null;
   scores: number[];
-  bestPicks: number;
-  bestRateAvailable: boolean;
+  bestAvailablePicks: number;
+  evaluatedPicks: number;
   roles: Map<string, number>;
   teams: Map<string, number>;
 };
@@ -98,8 +98,8 @@ function addPlayerEvidence(
   player: string,
   tier: string | null,
   league: string | null,
-  score: number,
-  bestPick: boolean,
+  score: number | null,
+  bestPick: boolean | null,
   role: string,
   team: string,
 ): void {
@@ -109,13 +109,16 @@ function addPlayerEvidence(
     tier,
     league,
     scores: [],
-    bestPicks: 0,
-    bestRateAvailable: true,
+    bestAvailablePicks: 0,
+    evaluatedPicks: 0,
     roles: new Map<string, number>(),
     teams: new Map<string, number>(),
   };
-  aggregate.scores.push(score);
-  if (bestPick) aggregate.bestPicks += 1;
+  if (finite(score)) aggregate.scores.push(score);
+  if (bestPick !== null) {
+    aggregate.evaluatedPicks += 1;
+    if (bestPick) aggregate.bestAvailablePicks += 1;
+  }
   if (role) aggregate.roles.set(role, (aggregate.roles.get(role) ?? 0) + 1);
   if (team) aggregate.teams.set(team, (aggregate.teams.get(team) ?? 0) + 1);
   aggregates.set(key, aggregate);
@@ -188,8 +191,9 @@ function aggregatePlayerRows(rows: DraftPlayerRow[]): DraftPlayerRow[] {
   const aggregates = new Map<string, {
     games: number;
     score: number;
-    bestPicks: number;
-    bestRateAvailable: boolean;
+    scoreGames: number;
+    bestAvailablePicks: number;
+    evaluatedPicks: number;
     roles: Map<string, number>;
     teams: Map<string, number>;
   }>();
@@ -197,17 +201,20 @@ function aggregatePlayerRows(rows: DraftPlayerRow[]): DraftPlayerRow[] {
     const aggregate = aggregates.get(row.player) ?? {
       games: 0,
       score: 0,
-      bestPicks: 0,
-      bestRateAvailable: true,
+      scoreGames: 0,
+      bestAvailablePicks: 0,
+      evaluatedPicks: 0,
       roles: new Map(),
       teams: new Map(),
     };
     aggregate.games += row.games;
-    aggregate.score += row.draft_score * row.games;
-    if (finite(row.best_pick_rate)) {
-      aggregate.bestPicks += row.best_pick_rate * row.games;
-    } else {
-      aggregate.bestRateAvailable = false;
+    if (finite(row.draft_score)) {
+      aggregate.score += row.draft_score * row.games;
+      aggregate.scoreGames += row.games;
+    }
+    if (finite(row.best_available_rate)) {
+      aggregate.bestAvailablePicks += row.best_available_rate * row.games;
+      aggregate.evaluatedPicks += row.games;
     }
     if (row.role) aggregate.roles.set(row.role, (aggregate.roles.get(row.role) ?? 0) + row.games);
     if (row.team) aggregate.teams.set(row.team, (aggregate.teams.get(row.team) ?? 0) + row.games);
@@ -217,15 +224,15 @@ function aggregatePlayerRows(rows: DraftPlayerRow[]): DraftPlayerRow[] {
     .map(([player, aggregate]) => ({
       player,
       games: aggregate.games,
-      draft_score: round(aggregate.score / aggregate.games),
-      best_pick_rate: aggregate.bestRateAvailable ? round(aggregate.bestPicks / aggregate.games) : null,
+      draft_score: aggregate.scoreGames ? round(aggregate.score / aggregate.scoreGames) : null,
+      best_available_rate: aggregate.evaluatedPicks ? round(aggregate.bestAvailablePicks / aggregate.evaluatedPicks) : null,
       role: mostCommon(aggregate.roles),
       team: mostCommon(aggregate.teams),
     }))
     .sort((left, right) => (
-      (right.best_pick_rate ?? -Infinity) - (left.best_pick_rate ?? -Infinity)
+      (right.best_available_rate ?? -Infinity) - (left.best_available_rate ?? -Infinity)
       || right.games - left.games
-      || right.draft_score - left.draft_score
+      || (right.draft_score ?? -Infinity) - (left.draft_score ?? -Infinity)
       || left.player.localeCompare(right.player)
     ));
 }
@@ -246,9 +253,9 @@ export function filterDraftRankings(rankings: DraftRankings, filters: DraftRanki
 /**
  * Build compact, scope-aware rankings from published profile evidence.
  * A team row stores the per-game average of the descriptive draft win share.
- * Player rows publish a top-pick rate alongside the underlying contribution.
- * The rate counts how often the player's pick has the highest contribution on
- * their side. It does not infer an unobserved ban or champion pool.
+ * Player rows publish a best-available rate alongside the underlying
+ * contribution. The rate is attached to each pick only after the public
+ * record has complete bans, pick order, patch identity, and tier evidence.
  */
 export function draftRankingsFromProfile(records: ProfileRecords): DraftRankings {
   const teamAggregates = new Map<string, TeamAggregate>();
@@ -257,10 +264,11 @@ export function draftRankingsFromProfile(records: ProfileRecords): DraftRankings
 
   for (const game of Object.values(records.games)) {
     const contribution = game.draft_contribution;
-    if (!contribution || (contribution.status !== "available" && contribution.status !== "limited")) continue;
+    const poolPicks = game.draft_pool?.picked ?? [];
+    if (!contribution && !poolPicks.length) continue;
 
-    const blueSignal = contribution.blue.signal;
-    const redSignal = contribution.red.signal;
+    const blueSignal = contribution?.blue.signal;
+    const redSignal = contribution?.red.signal;
     const tier = game.competition_tier?.trim().toLowerCase() || null;
     const league = game.league?.trim() || null;
     if (finite(blueSignal) && finite(redSignal)) {
@@ -271,28 +279,30 @@ export function draftRankingsFromProfile(records: ProfileRecords): DraftRankings
       evidenceGames += 1;
     }
 
-    const bestBySide: Partial<Record<"Blue" | "Red", number>> = {};
-    for (const side of ["Blue", "Red"] as const) {
-      const values = contribution.picks
-        .filter((pick) => pick.side === side && finite(pick.contribution))
-        .map((pick) => pick.contribution as number);
-      if (values.length) bestBySide[side] = Math.max(...values);
-    }
-
-    for (const pick of contribution.picks) {
-      if (!finite(pick.contribution)) continue;
+    const contributionPicks = contribution?.picks ?? [];
+    const contributionFor = (side: "Blue" | "Red", role: string, champion: string) => contributionPicks.find(
+      (pick) => pick.side === side && roleKey(pick.role) === role && pick.champion === champion,
+    );
+    const evaluatedPoolPicks = poolPicks.filter((pick) => typeof pick.best_available === "boolean");
+    const qualityPicks = evaluatedPoolPicks.length ? evaluatedPoolPicks : contributionPicks.filter(
+      (pick) => typeof pick.best_available === "boolean",
+    );
+    for (const pick of qualityPicks) {
       const side = pick.side;
       const role = roleKey(pick.role);
       const participant = participantForPick(game, side, role);
       const player = participant?.player.trim();
       if (!participant || !player) continue;
+      const contributionPick = "contribution" in pick
+        ? pick
+        : contributionFor(side, role, pick.champion);
       addPlayerEvidence(
         playerAggregates,
         player,
         tier,
         league,
-        pick.contribution,
-        bestBySide[side] != null && Math.abs(pick.contribution - bestBySide[side]!) <= 1e-9,
+        contributionPick?.contribution ?? null,
+        typeof pick.best_available === "boolean" ? pick.best_available : null,
         roleKey(participant.role) || role,
         side === "Blue" ? game.blue_team : game.red_team,
       );
@@ -312,21 +322,21 @@ export function draftRankingsFromProfile(records: ProfileRecords): DraftRankings
     .sort((left, right) => right.draft_win_share - left.draft_win_share || right.draft_edge - left.draft_edge || right.games - left.games || left.team.localeCompare(right.team));
 
   const players = [...playerAggregates.values()]
-    .filter((aggregate) => aggregate.scores.length >= 5)
+    .filter((aggregate) => aggregate.evaluatedPicks >= 5)
     .map((aggregate) => ({
       player: aggregate.player,
-      games: aggregate.scores.length,
-      draft_score: round(average(aggregate.scores)),
-      best_pick_rate: round(aggregate.bestPicks / aggregate.scores.length),
+      games: aggregate.evaluatedPicks,
+      draft_score: aggregate.scores.length ? round(average(aggregate.scores)) : null,
+      best_available_rate: round(aggregate.bestAvailablePicks / aggregate.evaluatedPicks),
       role: mostCommon(aggregate.roles),
       team: mostCommon(aggregate.teams),
       league: aggregate.league,
       tier: aggregate.tier,
     }))
     .sort((left, right) => (
-      right.best_pick_rate - left.best_pick_rate
+      (right.best_available_rate ?? -Infinity) - (left.best_available_rate ?? -Infinity)
       || right.games - left.games
-      || right.draft_score - left.draft_score
+      || (right.draft_score ?? -Infinity) - (left.draft_score ?? -Infinity)
       || left.player.localeCompare(right.player)
     ));
 
