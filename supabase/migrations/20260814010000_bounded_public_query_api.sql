@@ -2279,6 +2279,7 @@ end
 $grant$;
 
 grant usage on schema public to scryglass_release_transition_owner;
+grant create on schema public to scryglass_release_transition_owner;
 grant select on public.scryglass_public_releases
   to scryglass_release_transition_owner;
 grant select on public.scryglass_public_assets
@@ -2295,6 +2296,7 @@ grant execute on function public.assert_scryglass_query_release(text)
   to scryglass_release_transition_owner;
 
 grant usage on schema public to scryglass_release_retention_owner;
+grant create on schema public to scryglass_release_retention_owner;
 grant select,delete on public.scryglass_public_releases
   to scryglass_release_retention_owner;
 grant select on public.scryglass_public_assets
@@ -2441,6 +2443,9 @@ alter function public.activate_scryglass_public_release(text)
   owner to scryglass_release_transition_owner;
 alter function public.restore_scryglass_public_release(text)
   owner to scryglass_release_transition_owner;
+
+revoke create on schema public
+  from scryglass_release_transition_owner, scryglass_release_retention_owner;
 
 drop trigger if exists guard_scryglass_public_asset_mutation on public.scryglass_public_assets;
 create trigger guard_scryglass_public_asset_mutation
