@@ -21,6 +21,26 @@ const records = {
   },
 } satisfies ProfileRecords;
 
+const aliasRecords = {
+  ...records,
+  games: {
+    ...records.games,
+    kcOne: game("kc-one", "Karmine Corp", "G2 Esports", 1.2, 0.4),
+    kcTwo: game("kc-two", "G2 Esports", "Karmine Corp", 0.9, 0.3),
+    kcThree: game("kc-three", "Karmine Corp", "G2 Esports", 1.1, 0.2),
+  },
+} satisfies ProfileRecords;
+
+const shareRankingRecords = {
+  ...records,
+  games: {
+    rawHighOne: game("raw-high-one", "RawHigh", "Opponent One", 3, -2),
+    rawHighTwo: game("raw-high-two", "RawHigh", "Opponent Two", -2, 3),
+    shareHighOne: game("share-high-one", "ShareHigh", "Opponent Three", 0.4, 0),
+    shareHighTwo: game("share-high-two", "ShareHigh", "Opponent Four", 0.4, 0),
+  },
+} satisfies ProfileRecords;
+
 function game(
   gameId: string,
   blueTeam: string,
@@ -57,8 +77,8 @@ test("team draft scores support best, worst, and the ordered rows between", () =
   const worst = queryTeamDraftScores(records, "which team has the worst draft score");
   assert.deepEqual(best.rows.map((row) => row.team), ["T1", "Gen.G", "HLE", "KT"]);
   assert.deepEqual(worst.rows.map((row) => row.team), ["KT", "HLE", "Gen.G", "T1"]);
-  assert.match(best.answer.headline, /T1 has the highest average published draft score/);
-  assert.match(worst.answer.headline, /KT has the lowest average published draft score/);
+  assert.match(best.answer.headline, /T1 has the highest average published draft win share/);
+  assert.match(worst.answer.headline, /KT has the lowest average published draft win share/);
   assert.match(best.answer.basis, /Tier 1/);
 
   const fullOrder = queryTeamDraftScores(records, "show team draft scores from best to worst");
@@ -71,7 +91,8 @@ test("team draft rankings support limits, sample floors, and named teams", () =>
 
   const named = queryTeamDraftScores(records, "what is T1's draft score?");
   assert.deepEqual(named.rows.map((row) => row.team), ["T1"]);
-  assert.match(named.answer.headline, /across 3 drafts/);
+  assert.match(named.answer.headline, /67%/);
+  assert.match(named.answer.headline, /across 3 games/);
 
   const allTiers = queryTeamDraftScores(records, "best team draft score across all tiers with at least 1 draft");
   assert.equal(allTiers.rows[0].team, "Academy");
@@ -82,7 +103,12 @@ test("team draft scores compare two teams over their published history", () => {
   assert.equal(comparison.kind, "team_draft_comparison");
   assert.deepEqual(comparison.rows.map((row) => row.team), ["T1", "Gen.G"]);
   assert.equal(comparison.comparison?.winner, "T1");
-  assert.match(comparison.answer.headline, /T1 has the higher historical average published draft score/);
+  assert.match(comparison.answer.headline, /T1 has the higher average published draft win share in the active 90-day profile window/);
+  assert.match(comparison.answer.headline, /67%/);
+  assert.match(comparison.answer.headline, /49%/);
+  assert.match(comparison.answer.headline, /18 percentage-point edge/);
+  assert.ok((comparison.comparison?.win_share_gap ?? 0) > 0.16);
+  assert.doesNotMatch(comparison.answer.headline, /[+-]\d+\.\d{2}/);
   assert.match(comparison.answer.basis, /active 90-day profile window/);
   assert.match(comparison.answer.basis, /not all seasons/);
 
@@ -90,4 +116,16 @@ test("team draft scores compare two teams over their published history", () => {
   assert.equal(insufficient.kind, "team_draft_comparison");
   assert.equal(insufficient.comparison, undefined);
   assert.match(insufficient.answer.headline, /do not support a complete historical comparison/);
+});
+
+test("team draft comparisons resolve common team aliases", () => {
+  const comparison = queryTeamDraftScores(aliasRecords, "who has the best draft between KC and G2?");
+  assert.equal(comparison.kind, "team_draft_comparison");
+  assert.deepEqual(comparison.rows.map((row) => row.team), ["Karmine Corp", "G2 Esports"]);
+});
+
+test("draft rankings use the visible win-share percentage metric", () => {
+  const result = queryTeamDraftScores(shareRankingRecords, "which team has the best draft with at least 2 drafts");
+  assert.equal(result.rows[0]?.team, "ShareHigh");
+  assert.match(result.answer.headline, /ShareHigh has the highest average published draft win share at 60%/);
 });
