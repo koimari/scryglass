@@ -19,6 +19,7 @@ type LeaderboardRow = {
   role: string | null;
   team: string | null;
   league: string | null;
+  tier: string | null;
   games: number;
   wins: number | null;
   win_rate: number | null;
@@ -75,6 +76,11 @@ function roleName(value: string | null | undefined): string {
   return value ? (roles[value.toLowerCase()] ?? value) : "—";
 }
 
+function tierName(value: string | null | undefined): string {
+  const match = /^tier\s*(\d+)$/i.exec(value ?? "");
+  return match ? `Tier ${match[1]}` : String(present(value));
+}
+
 function renderValue(value: unknown, depth = 0): string {
   if (value == null) return "—";
   if (typeof value === "string") return value || "—";
@@ -100,11 +106,12 @@ function leaderboardTable(rows: LeaderboardRow[], category: string): React.React
   if (category === "teams") {
     return table(
       <table className={styles.resultTable}>
-        <thead><tr><th>Team</th><th className={styles.numeric}>Rating</th><th>League</th><th className={styles.numeric}>Wins</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>WR</th></tr></thead>
+        <thead><tr><th>Team</th><th>Level</th><th className={styles.numeric}>Rating</th><th>League</th><th className={styles.numeric}>Wins</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>WR</th></tr></thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.name}>
-              <td><a className="row-link" href={`/teams/${teamSlug(row.name)}`}>{present(row.name)}</a></td>
+              <td><a className="row-link" href={`/elo/team/${teamSlug(row.name)}`}>{present(row.name)}</a></td>
+              <td>{tierName(row.tier)}</td>
               <td className={styles.numeric}>{rating(row.rating)}</td>
               <td>{present(row.league)}</td>
               <td className={styles.numeric}>{present(row.wins)}</td>
@@ -119,12 +126,13 @@ function leaderboardTable(rows: LeaderboardRow[], category: string): React.React
 
   return table(
     <table className={styles.resultTable}>
-      <thead><tr><th>Player</th><th>Role</th><th className={styles.numeric}>Rating</th><th className={styles.numeric}>A grades</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>WR</th></tr></thead>
+      <thead><tr><th>Player</th><th>Role</th><th>Level</th><th className={styles.numeric}>Rating</th><th className={styles.numeric}>A grades</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>WR</th></tr></thead>
       <tbody>
         {rows.map((row) => (
           <tr key={row.name}>
-            <td><a className="row-link" href={`/players/${playerSlug(row.name)}`}>{present(row.name)}</a></td>
+            <td><a className="row-link" href={`/elo/player/${playerSlug(row.name)}`}>{present(row.name)}</a></td>
             <td>{roleName(row.role)}</td>
+            <td>{tierName(row.tier)}</td>
             <td className={styles.numeric}>{rating(row.rating)}</td>
             <td className={styles.numeric}>{present(row.grade_a_games)}</td>
             <td className={styles.numeric}>{present(row.games)}</td>
@@ -139,15 +147,47 @@ function leaderboardTable(rows: LeaderboardRow[], category: string): React.React
 function resultTable(result: unknown, call: ToolCall): React.ReactNode {
   const data = result as Record<string, unknown> | null;
 
+  if (call.tool === "compare_players" && Array.isArray(data?.players)) {
+    const players = data.players as LeaderboardRow[];
+    const better = typeof data.better === "string" ? data.better : null;
+    const difference = typeof data.difference === "number" ? Math.round(data.difference) : null;
+    return (
+      <div className={styles.comparison}>
+        <p className={styles.comparisonAnswer}>
+          {better && difference != null
+            ? <><strong>{better}</strong> has the higher rating by {difference} {difference === 1 ? "point" : "points"}.</>
+            : "The published ratings do not support a winner."}
+        </p>
+        {table(
+          <table className={styles.resultTable}>
+            <thead><tr><th>Player</th><th>Role</th><th>Level</th><th className={styles.numeric}>Rating</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>WR</th></tr></thead>
+            <tbody>
+              {players.map((player) => (
+                <tr key={player.name}>
+                  <td><a className="row-link" href={`/elo/player/${playerSlug(player.name)}`}>{player.name}</a></td>
+                  <td>{roleName(player.role)}</td>
+                  <td>{tierName(player.tier)}</td>
+                  <td className={styles.numeric}>{rating(player.rating)}</td>
+                  <td className={styles.numeric}>{present(player.games)}</td>
+                  <td className={styles.numeric}>{percentage(player.win_rate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>,
+        )}
+      </div>
+    );
+  }
+
   if (call.tool === "player" && data?.name) {
     const profile = data as unknown as LeaderboardRow;
     return (
       <div className={styles.resultLines}>
-        <p className={styles.resultTitle}><a className="row-link" href={`/players/${playerSlug(profile.name)}`}>{profile.name}</a></p>
+        <p className={styles.resultTitle}><a className="row-link" href={`/elo/player/${playerSlug(profile.name)}`}>{profile.name}</a></p>
         <dl className={styles.statGrid}>
           <div><dt>Rating</dt><dd>{rating(profile.rating)}</dd></div>
           <div><dt>Role</dt><dd>{roleName(profile.role)}</dd></div>
-          <div><dt>Team</dt><dd>{profile.team ? <a className="row-link" href={`/teams/${teamSlug(profile.team)}`}>{profile.team}</a> : "—"}</dd></div>
+          <div><dt>Team</dt><dd>{profile.team ? <a className="row-link" href={`/elo/team/${teamSlug(profile.team)}`}>{profile.team}</a> : "—"}</dd></div>
           <div><dt>League</dt><dd>{present(profile.league)}</dd></div>
           <div><dt>A-grade games</dt><dd>{present(profile.grade_a_games)}</dd></div>
           <div><dt>Win rate</dt><dd>{percentage(profile.win_rate)}</dd></div>
@@ -164,10 +204,11 @@ function resultTable(result: unknown, call: ToolCall): React.ReactNode {
       games: number;
       wins: number | null;
       win_rate: number | null;
+      recent?: Array<{ date: string; opponent: string; side: string; won: boolean; game_id: string }>;
     };
     return (
       <div className={styles.resultLines}>
-        <p className={styles.resultTitle}><a className="row-link" href={`/teams/${teamSlug(profile.team)}`}>{profile.team}</a></p>
+        <p className={styles.resultTitle}><a className="row-link" href={`/elo/team/${teamSlug(profile.team)}`}>{profile.team}</a></p>
         <dl className={styles.statGrid}>
           <div><dt>Rating</dt><dd>{rating(profile.rating)}</dd></div>
           <div><dt>League</dt><dd>{present(profile.league)}</dd></div>
@@ -175,6 +216,26 @@ function resultTable(result: unknown, call: ToolCall): React.ReactNode {
           <div><dt>Games</dt><dd>{present(profile.games)}</dd></div>
           <div><dt>Win rate</dt><dd>{percentage(profile.win_rate)}</dd></div>
         </dl>
+        {profile.recent?.length ? (
+          <div className={styles.recentBlock}>
+            <strong>Recent matches</strong>
+            {table(
+              <table className={styles.resultTable}>
+                <thead><tr><th>Date</th><th>Opponent</th><th>Side</th><th>Result</th></tr></thead>
+                <tbody>
+                  {profile.recent.map((match) => (
+                    <tr key={match.game_id}>
+                      <td><a className="row-link" href={`/matches/${encodeURIComponent(match.game_id)}`}>{present(match.date.slice(0, 10))}</a></td>
+                      <td><a className="row-link" href={`/elo/team/${teamSlug(match.opponent)}`}>{match.opponent}</a></td>
+                      <td>{match.side}</td>
+                      <td>{match.won ? "Win" : "Loss"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>,
+            )}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -213,8 +274,8 @@ function resultTable(result: unknown, call: ToolCall): React.ReactNode {
               <tr key={match.game_id}>
                 <td><a className="row-link" href={`/matches/${encodeURIComponent(match.game_id)}`}>{present(match.date?.slice(0, 10))}</a></td>
                 <td>{present(match.league)}</td>
-                <td><a className="row-link" href={`/teams/${teamSlug(match.blue_team)}`}>{present(match.blue_team)}</a></td>
-                <td><a className="row-link" href={`/teams/${teamSlug(match.red_team)}`}>{present(match.red_team)}</a></td>
+                <td><a className="row-link" href={`/elo/team/${teamSlug(match.blue_team)}`}>{present(match.blue_team)}</a></td>
+                <td><a className="row-link" href={`/elo/team/${teamSlug(match.red_team)}`}>{present(match.red_team)}</a></td>
                 <td>{present(winner)}</td>
               </tr>
             );
@@ -232,8 +293,8 @@ function resultTable(result: unknown, call: ToolCall): React.ReactNode {
           {(data.upcoming as ScheduleRow[]).slice(0, 10).map((row, index) => (
             <tr key={row.series_id ?? index}>
               <td>{present(row.start_utc)}</td>
-              <td><a className="row-link" href={`/teams/${teamSlug(row.team1)}`}>{present(row.team1)}</a></td>
-              <td><a className="row-link" href={`/teams/${teamSlug(row.team2)}`}>{present(row.team2)}</a></td>
+              <td><a className="row-link" href={`/elo/team/${teamSlug(row.team1)}`}>{present(row.team1)}</a></td>
+              <td><a className="row-link" href={`/elo/team/${teamSlug(row.team2)}`}>{present(row.team2)}</a></td>
               <td className={styles.numeric}>{present(row.best_of)}</td>
             </tr>
           ))}

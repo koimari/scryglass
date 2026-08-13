@@ -13,6 +13,7 @@ export type LeaderboardRow = {
   role: string | null;
   team: string | null;
   league: string | null;
+  tier: string | null;
   games: number;
   wins: number | null;
   win_rate: number | null;
@@ -53,7 +54,6 @@ async function scanProfileStats(): Promise<ProfileStats> {
         const leagueByPlayer = new Map<string, string>();
         const roleCounts = new Map<string, Map<string, number>>();
         for (const game of Object.values(payload.games ?? {})) {
-          const league = String((game && (game as { league?: string }).league) ?? "").trim();
           for (const player of game.players ?? []) {
             const name = String(player.player ?? "").trim();
             if (!name) continue;
@@ -104,8 +104,8 @@ type TeamRatingsSnapshot = Array<{
   home_league?: string;
 }>;
 
-type PlayerRecords = Record<string, { wins?: number; games?: number; wr?: number; current_team?: string; current_league?: string }>;
-type TeamRecords = Record<string, { wins?: number; games?: number; wr?: number; leagues?: string[] }>;
+type PlayerRecords = Record<string, { wins?: number; games?: number; wr?: number; current_team?: string; current_league?: string; current_tier?: string }>;
+type TeamRecords = Record<string, { wins?: number; games?: number; wr?: number; leagues?: string[]; current_tier?: string }>;
 
 export function findPlayerRecord(records: PlayerRecords, name: string): PlayerRecords[string] {
   const exact = records[name];
@@ -125,7 +125,7 @@ async function loadPlayerRecords(): Promise<PlayerRecords> {
   return readChatJson<PlayerRecords>("features/player_records.json").catch(() => ({}));
 }
 
-export async function leaderboardRows(category: string, role: string | null, limit: number): Promise<LeaderboardRow[]> {
+export async function leaderboardRows(category: string, role: string | null, limit: number, tier: string | null = null): Promise<LeaderboardRow[]> {
   // Preferred: the precomputed artifact.
   try {
     const payload = await readChatJson<{
@@ -142,12 +142,13 @@ export async function leaderboardRows(category: string, role: string | null, lim
           : role
             ? ((payload.top?.rating_by_role as Record<string, unknown[]> | undefined)?.[role] ?? [])
             : (payload.top?.rating ?? []);
-    return (rows as Array<Record<string, unknown>>).slice(0, limit).map((row) => ({
+    const mapped = (rows as Array<Record<string, unknown>>).map((row) => ({
       name: String(row.name ?? row.player ?? row.team ?? ""),
       rating: typeof row.rating === "number" ? row.rating : null,
       role: typeof row.role === "string" ? row.role : null,
       team: typeof row.team === "string" ? row.team : null,
       league: typeof row.league === "string" ? row.league : null,
+      tier: typeof (row.tier ?? row.current_tier) === "string" ? String(row.tier ?? row.current_tier) : null,
       games: Number(row.games ?? row.n_maps ?? 0) || 0,
       wins: typeof row.wins === "number" ? row.wins : null,
       win_rate: typeof row.win_rate === "number" ? row.win_rate : null,
@@ -155,6 +156,7 @@ export async function leaderboardRows(category: string, role: string | null, lim
       grade_games: Number(row.grade_games ?? 0) || 0,
       recent_form: typeof row.recent_form === "number" ? row.recent_form : null,
     }));
+    return (tier ? mapped.filter((row) => row.tier === tier) : mapped).slice(0, limit);
   } catch {
     // Fallback: compute from the always-present assets.
     if (category === "teams") {
@@ -172,6 +174,7 @@ export async function leaderboardRows(category: string, role: string | null, lim
             role: null,
             team: name,
             league: String(entry.home_league ?? "") || null,
+            tier: String(record.current_tier ?? "") || null,
             games: Number(record.games ?? 0) || 0,
             wins: Number(record.wins ?? null) || null,
             win_rate: typeof record.wr === "number" ? record.wr : null,
@@ -180,6 +183,7 @@ export async function leaderboardRows(category: string, role: string | null, lim
             recent_form: null,
           };
         })
+        .filter((row) => !tier || row.tier === tier)
         .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
         .slice(0, limit);
     }
@@ -188,7 +192,6 @@ export async function leaderboardRows(category: string, role: string | null, lim
       loadPlayerRecords(),
       scanProfileStats(),
     ]);
-    const byName = new Map(ratings.map((entry) => [String(entry.player ?? "").toLowerCase(), entry]));
     const rows: LeaderboardRow[] = ratings.map((entry) => {
       const name = String(entry.player ?? "");
       const record = findPlayerRecord(records, name);
@@ -202,6 +205,7 @@ export async function leaderboardRows(category: string, role: string | null, lim
         role,
         team: String(entry.last_team ?? "") || null,
         league: String(entry.home_league ?? "") || null,
+        tier: String(record.current_tier ?? "") || null,
         games,
         wins,
         win_rate: winRate,
@@ -215,7 +219,7 @@ export async function leaderboardRows(category: string, role: string | null, lim
       : category === "win_rate"
         ? rows.filter((row) => row.games >= 10).sort((a, b) => (b.win_rate ?? 0) - (a.win_rate ?? 0))
         : rows.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
-    const filtered = role ? sorted.filter((row) => row.role === role) : sorted;
+    const filtered = sorted.filter((row) => (!role || row.role === role) && (!tier || row.tier === tier));
     return filtered.slice(0, limit);
   }
 }
@@ -229,7 +233,7 @@ export async function lookupPlayer(name: string): Promise<LeaderboardRow | null>
       ?? Object.keys(players).find((candidate) => candidate.toLowerCase().includes(lower));
     if (key) {
       const row = players[key];
-      return { name: key, rating: row.rating ?? null, role: row.role ?? null, team: row.team ?? null, league: row.league ?? null, games: row.games ?? 0, wins: row.wins ?? null, win_rate: row.win_rate ?? null, grade_a_games: row.grade_a_games ?? 0, grade_games: row.grade_games ?? 0, recent_form: row.recent_form ?? null };
+      return { name: key, rating: row.rating ?? null, role: row.role ?? null, team: row.team ?? null, league: row.league ?? null, tier: row.tier ?? null, games: row.games ?? 0, wins: row.wins ?? null, win_rate: row.win_rate ?? null, grade_a_games: row.grade_a_games ?? 0, grade_games: row.grade_games ?? 0, recent_form: row.recent_form ?? null };
     }
     return null;
   } catch {
@@ -247,6 +251,7 @@ export async function lookupPlayer(name: string): Promise<LeaderboardRow | null>
       role: stats.roleByPlayer.get(name) ?? null,
       team: String(entry.last_team ?? "") || null,
       league: String(entry.home_league ?? "") || null,
+      tier: String(record.current_tier ?? "") || null,
       games,
       wins,
       win_rate: typeof record.wr === "number" ? record.wr : games > 0 && wins != null ? wins / games : null,
@@ -267,6 +272,46 @@ export type TeamLookup = {
   recent: Array<{ date: string; opponent: string; side: string; won: boolean; game_id: string }>;
 };
 
+export type ChatMatch = {
+  game_id: string;
+  date: string;
+  league: string;
+  blue_team: string;
+  red_team: string;
+  blue_win: number;
+  champions: string[];
+};
+
+export async function loadChatMatches(): Promise<ChatMatch[]> {
+  try {
+    const index = await readChatJson<{ games: ChatMatch[] }>("features/match_index.json");
+    return index.games ?? [];
+  } catch {
+    type ProfileGame = Omit<ChatMatch, "champions"> & { players?: Array<{ champion?: string }> };
+    const profiles = await readChatJson<{ games: Record<string, ProfileGame> }>("features/profile_records.json");
+    return Object.values(profiles.games ?? {}).map((game) => ({
+      game_id: String(game.game_id ?? ""),
+      date: String(game.date ?? ""),
+      league: String(game.league ?? ""),
+      blue_team: String(game.blue_team ?? ""),
+      red_team: String(game.red_team ?? ""),
+      blue_win: Number(game.blue_win ?? 0),
+      champions: (game.players ?? []).map((player) => String(player.champion ?? "")).filter(Boolean),
+    }));
+  }
+}
+
+export function filterChatMatchesByTeam(games: ChatMatch[], query: string): ChatMatch[] {
+  const lower = query.trim().toLowerCase();
+  const exact = games.filter(
+    (game) => game.blue_team.toLowerCase() === lower || game.red_team.toLowerCase() === lower,
+  );
+  if (exact.length) return exact;
+  return games.filter(
+    (game) => game.blue_team.toLowerCase().includes(lower) || game.red_team.toLowerCase().includes(lower),
+  );
+}
+
 export async function lookupTeam(name: string): Promise<TeamLookup | null> {
   const lower = name.trim().toLowerCase();
   try {
@@ -286,10 +331,10 @@ export async function lookupTeam(name: string): Promise<TeamLookup | null> {
     }
     return null;
   } catch {
-    const [ratings, records, index] = await Promise.all([
+    const [ratings, records, matchGames] = await Promise.all([
       readChatJson<TeamRatingsSnapshot>("features/ratings_snapshot.json").catch(() => []),
       readChatJson<TeamRecords>("features/team_records.json").catch(() => ({}) as TeamRecords),
-      readChatJson<{ games: Array<{ game_id?: string; date?: string; blue_team?: string; red_team?: string; blue_win?: number }> }>("features/match_index.json").catch(() => ({ games: [] })),
+      loadChatMatches().catch(() => []),
     ]);
     const ratingEntry = ratings.find((entry) => String(entry.team ?? "").toLowerCase() === lower)
       ?? ratings.find((entry) => String(entry.team ?? "").toLowerCase().includes(lower));
@@ -300,7 +345,7 @@ export async function lookupTeam(name: string): Promise<TeamLookup | null> {
     const team = String(ratingEntry?.team ?? recordKey ?? "");
     const games = Number(record?.games ?? 0) || 0;
     const wins = typeof record?.wins === "number" ? record.wins : null;
-    const recent = (index.games ?? [])
+    const recent = matchGames
       .filter((game) => String(game.blue_team ?? "").toLowerCase() === lower || String(game.red_team ?? "").toLowerCase() === lower)
       .sort((a, b) => String(b.date ?? "").localeCompare(String(a.date ?? "")))
       .slice(0, 5)

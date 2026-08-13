@@ -182,6 +182,32 @@
   font-weight: 700;
 }
 
+.comparison {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.comparisonAnswer {
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.recentBlock {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line);
+}
+
+.recentBlock > strong {
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: var(--text-micro);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 .statGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
