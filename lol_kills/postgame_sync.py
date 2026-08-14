@@ -609,30 +609,32 @@ def validate_match_archive(pack_dir: Path) -> dict[str, int]:
     detail_ids: set[str] = set()
     year_counts: dict[str, int] = {}
     for year in (2025, 2026):
+        year_count = 0
         for quarter in (1, 2, 3, 4):
             payload = _read_pack_json(pack_dir, f"features/match_records_{year}_q{quarter}.json")
             games = payload.get("games") if isinstance(payload, dict) else None
             if not isinstance(games, dict):
                 raise RefreshValidationError(f"{year} Q{quarter} match archive is malformed")
-        for game_id, game in games.items():
-            if game_id in detail_ids:
-                raise RefreshValidationError("match archive details contain duplicate identities")
-            if not isinstance(game, dict) or str(game.get("game_id") or "") != str(game_id):
-                raise RefreshValidationError(f"match archive game {game_id} has a malformed identity")
-            if not str(game.get("date") or "").startswith(f"{year}-"):
-                raise RefreshValidationError(f"match archive game {game_id} is in the wrong year")
-            if not profile_game_has_complete_stats(game):
-                raise RefreshValidationError(f"match archive game {game_id} has incomplete KDA")
-            signal = game.get("draft_contribution")
-            if signal is not None:
-                try:
-                    validate_public_signal(signal, game)
-                except CompositionSignalError as error:
-                    raise RefreshValidationError(
-                        f"match archive game {game_id} has invalid composition evidence: {error}"
-                    ) from error
+            for game_id, game in games.items():
+                if game_id in detail_ids:
+                    raise RefreshValidationError("match archive details contain duplicate identities")
+                if not isinstance(game, dict) or str(game.get("game_id") or "") != str(game_id):
+                    raise RefreshValidationError(f"match archive game {game_id} has a malformed identity")
+                if not str(game.get("date") or "").startswith(f"{year}-"):
+                    raise RefreshValidationError(f"match archive game {game_id} is in the wrong year")
+                if not profile_game_has_complete_stats(game):
+                    raise RefreshValidationError(f"match archive game {game_id} has incomplete KDA")
+                signal = game.get("draft_contribution")
+                if signal is not None:
+                    try:
+                        validate_public_signal(signal, game)
+                    except CompositionSignalError as error:
+                        raise RefreshValidationError(
+                            f"match archive game {game_id} has invalid composition evidence: {error}"
+                        ) from error
                 detail_ids.add(str(game_id))
-            year_counts[str(year)] = year_counts.get(str(year), 0) + len(games)
+                year_count += 1
+        year_counts[str(year)] = year_count
     if set(index_ids) != detail_ids:
         raise RefreshValidationError("match archive index and detail files contain different maps")
     return {"maps": len(detail_ids), **year_counts}
