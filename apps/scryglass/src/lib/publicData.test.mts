@@ -35,6 +35,8 @@ test("public query row limits stay inside the chat response budget", () => {
   assert.equal(boundedRowLimit(1, 20), 1);
   assert.equal(boundedRowLimit(20, 20), 20);
   assert.equal(boundedRowLimit(50, 20), 20);
+  assert.equal(boundedRowLimit(50, 20, 100), 50);
+  assert.equal(boundedRowLimit(500, 20, 100), 100);
   assert.equal(boundedRowLimit(0, 20), 1);
 });
 
@@ -68,6 +70,40 @@ test("ratings RPC uses publishable auth and caps exact-name comparisons at 20 ro
       limit: 500,
     });
     assert.equal(result.limit, 20);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;
+    else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+    else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
+  }
+});
+
+test("ratings list can request the full bounded page", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
+  const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+  process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
+  process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { p_limit: number };
+    assert.equal(body.p_limit, 100);
+    return Response.json({
+      schema_version: "scryglass:query-api:v1",
+      release_id: RELEASE_ID,
+      rows: [],
+      limit: 100,
+      offset: 0,
+      total: 0,
+    });
+  }) as typeof fetch;
+  try {
+    const result = await getRatings(queryManifest(), {
+      kind: "teams",
+      tiers: ["tier1"],
+      limit: 100,
+    });
+    assert.equal(result.limit, 100);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;

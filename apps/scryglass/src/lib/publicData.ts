@@ -21,6 +21,7 @@ export const QUERY_API_SCHEMA = "scryglass:query-api:v1" as const;
 export const PUBLIC_RESPONSE_MAX_BYTES = 500 * 1024;
 const RPC_TIMEOUT_MS = 5_000;
 const PUBLIC_ROW_LIMIT = 20;
+const PUBLIC_RATINGS_ROW_LIMIT = 100;
 
 export type QueryApiEnvelope<T> = {
   schema_version: typeof QUERY_API_SCHEMA;
@@ -251,9 +252,13 @@ function safeIntegerArray(value: unknown): number[] {
     : [];
 }
 
-export function boundedRowLimit(value: number | undefined, fallback: number): number {
+export function boundedRowLimit(
+  value: number | undefined,
+  fallback: number,
+  maximum = PUBLIC_ROW_LIMIT,
+): number {
   if (!Number.isInteger(value)) return fallback;
-  return Math.min(Math.max(Number(value), 1), PUBLIC_ROW_LIMIT);
+  return Math.min(Math.max(Number(value), 1), maximum);
 }
 
 async function readBoundedJson(response: Response): Promise<unknown> {
@@ -362,6 +367,7 @@ export async function getRatings(
   },
   signal?: AbortSignal,
 ): Promise<QueryApiEnvelope<RatingQueryRow>> {
+  const maximumRows = input.names?.length ? PUBLIC_ROW_LIMIT : PUBLIC_RATINGS_ROW_LIMIT;
   return publicRpc("get_scryglass_ratings", {
     p_kind: input.kind,
     p_leagues: input.leagues?.length ? input.leagues : null,
@@ -373,7 +379,7 @@ export async function getRatings(
     p_search: input.search?.trim() || null,
     p_order: input.order ?? "rating_desc",
     p_min_games: input.minGames ?? 0,
-    p_limit: boundedRowLimit(input.limit, PUBLIC_ROW_LIMIT),
+    p_limit: boundedRowLimit(input.limit, maximumRows, maximumRows),
     p_offset: input.offset ?? 0,
   }, { manifest, signal });
 }
