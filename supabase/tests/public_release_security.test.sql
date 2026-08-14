@@ -3,8 +3,8 @@ select plan(44);
 
 select is(
   (select public from storage.buckets where id = 'scryglass-public'),
-  true,
-  'phase 1 keeps the public asset bucket during the compatibility window'
+  false,
+  'strict cutover keeps the public asset bucket private'
 );
 select is(
   (select file_size_limit from storage.buckets where id = 'scryglass-public'),
@@ -13,20 +13,20 @@ select is(
 );
 
 select ok(
-  has_table_privilege('anon', 'public.scryglass_public_releases', 'select'),
-  'anon can select the active release through RLS'
+  not has_table_privilege('anon', 'public.scryglass_public_releases', 'select'),
+  'anon cannot select the release base table'
 );
 select ok(
-  has_table_privilege('authenticated', 'public.scryglass_public_releases', 'select'),
-  'authenticated can select the active release through RLS'
+  not has_table_privilege('authenticated', 'public.scryglass_public_releases', 'select'),
+  'authenticated cannot select the release base table'
 );
 select ok(
-  has_table_privilege('anon', 'public.scryglass_public_assets', 'select'),
-  'anon can select active asset metadata through RLS'
+  not has_table_privilege('anon', 'public.scryglass_public_assets', 'select'),
+  'anon cannot select the asset base table'
 );
 select ok(
-  has_table_privilege('authenticated', 'public.scryglass_public_assets', 'select'),
-  'authenticated can select active asset metadata through RLS'
+  not has_table_privilege('authenticated', 'public.scryglass_public_assets', 'select'),
+  'authenticated cannot select the asset base table'
 );
 select ok(
   not has_table_privilege('anon', 'public.scryglass_public_releases', 'insert'),
@@ -484,14 +484,11 @@ select is(
 
 reset role;
 set local role anon;
-select is(
-  (
-    select count(*)::integer
-    from public.scryglass_public_releases
-    where release_id = 'v2026.08.11.120000'
-  ),
-  0,
-  'anon cannot read a staged release'
+select throws_ok(
+  $$select count(*) from public.scryglass_public_releases$$,
+  '42501',
+  null,
+  'anon cannot read the release base table'
 );
 select throws_ok(
   $$select public.activate_scryglass_public_release('v2026.08.13.120000')$$,
@@ -502,14 +499,11 @@ select throws_ok(
 reset role;
 
 set local role authenticated;
-select is(
-  (
-    select count(*)::integer
-    from public.scryglass_public_releases
-    where release_id = 'v2026.08.11.120000'
-  ),
-  0,
-  'authenticated cannot read a staged release'
+select throws_ok(
+  $$select count(*) from public.scryglass_public_releases$$,
+  '42501',
+  null,
+  'authenticated cannot read the release base table'
 );
 select throws_ok(
   $$select public.restore_scryglass_public_release('v2026.08.12.120000')$$,

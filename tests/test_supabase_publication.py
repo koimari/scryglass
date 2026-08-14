@@ -278,7 +278,7 @@ def test_publish_release_omits_unpromoted_draft_asset() -> None:
     assert published["draft_authority"]["status"] == "unavailable"
 
 
-def test_publish_release_binds_promoted_draft_asset_to_release_and_receipt() -> None:
+def test_publish_release_rejects_promoted_draft_until_independent_verification() -> None:
     with TemporaryDirectory() as temporary:
         pack, manifest, tier = _fixture(Path(temporary))
         model_version = "draft-promoted-v1"
@@ -300,28 +300,16 @@ def test_publish_release_binds_promoted_draft_asset_to_release_and_receipt() -> 
             "receipt_sha256": "a" * 64,
             "issued_utc": "2026-08-10T15:29:00Z",
         }
-        client = FakeSupabase()
-
-        supabase_publication.publish_release(
-            pack,
-            manifest,
-            tier,
-            project_url=client.project_url,
-            secret_key="sb_secret_unused_because_client_is_injected",
-            client=client,
-        )
-
-    storage_path = f"{manifest['pack_id']}/{supabase_publication.DRAFT_ASSET_PATH}"
-    payload = json.loads(client.storage[storage_path])
-    assert payload["schema_version"] == "scryglass:draft-records:v1"
-    assert payload["release_id"] == manifest["pack_id"]
-    assert payload["authority"] == "promoted"
-    assert payload["authority_receipt_sha256"] == "a" * 64
-    published = client.releases[manifest["pack_id"]]["manifest"]
-    assert published["draft_authority"]["status"] == "promoted"
-    assert published["release"]["artifact_hashes"][supabase_publication.DRAFT_ASSET_PATH] == (
-        hashlib.sha256(client.storage[storage_path]).hexdigest()
-    )
+        with pytest.raises(
+            supabase_publication.SupabasePublicationError,
+            match="independent receipt verifier",
+        ):
+            supabase_publication.prepare_release(
+                pack,
+                manifest,
+                tier,
+                project_url="https://example.supabase.co",
+            )
 
 
 def test_publish_release_rejects_unbound_promoted_draft_authority() -> None:
@@ -337,7 +325,7 @@ def test_publish_release_rejects_unbound_promoted_draft_authority() -> None:
 
         with pytest.raises(
             supabase_publication.SupabasePublicationError,
-            match="not release-bound",
+            match="independent receipt verifier",
         ):
             supabase_publication.prepare_release(
                 pack,
@@ -423,19 +411,21 @@ def test_publish_release_adds_latest_view_to_existing_active_release() -> None:
         del client.assets[latest_key]
         del client.storage[latest_storage]
 
-        result = supabase_publication.publish_release(
-            pack,
-            manifest,
-            tier,
-            project_url=client.project_url,
-            secret_key="sb_secret_unused_because_client_is_injected",
-            client=client,
-        )
+        with pytest.raises(
+            supabase_publication.SupabasePublicationError,
+            match="readback failed",
+        ):
+            supabase_publication.publish_release(
+                pack,
+                manifest,
+                tier,
+                project_url=client.project_url,
+                secret_key="sb_secret_unused_because_client_is_injected",
+                client=client,
+            )
 
-    assert result["status"] == "already_active"
-    assert result["reused_assets"] == result["assets"] - 1
-    assert latest_key in client.assets
-    assert latest_storage in client.storage
+    assert latest_key not in client.assets
+    assert latest_storage not in client.storage
     assert client.active_id == manifest["pack_id"]
 
 
@@ -603,10 +593,10 @@ def test_client_repr_redacts_secret_key() -> None:
     assert "<redacted>" in repr(client)
 
 
-def test_rollback_accepts_the_existing_minute_release_id_only_for_restore() -> None:
+def test_rollback_requires_the_canonical_release_id() -> None:
     assert (
-        supabase_publication._rollback_release_id("v2026.08.13.1830")
-        == "v2026.08.13.1830"
+        supabase_publication._rollback_release_id("v2026.08.13.183000")
+        == "v2026.08.13.183000"
     )
     with pytest.raises(
         supabase_publication.SupabasePublicationError,
@@ -764,26 +754,23 @@ def test_database_allowlist_matches_publication_contract() -> None:
 
 
 def test_final_publication_migration_closes_storage_and_function_boundaries() -> None:
-    migration = (
-        ROOT
-        / "supabase/migrations/20260813010000_public_release_security_hardening.sql"
-    ).read_text(encoding="utf-8").lower()
+    migration = "\n".join(
+        [
+            (
+                ROOT / "supabase/migrations/20260814020000_private_storage_phase.sql"
+            ).read_text(encoding="utf-8"),
+            (
+                ROOT / "supabase/migrations/20260814030000_strict_public_cutover.sql"
+            ).read_text(encoding="utf-8"),
+        ]
+    ).lower()
 
     assert "set public = false" in migration
     assert 'create policy "read active scryglass storage assets"' in migration
-    assert "release.status = 'active'" in migration
-    assert "asset.storage_path = storage.objects.name" in migration
-    assert "security invoker" in migration
-    assert "security definer" not in migration
-    assert "body is not null" in migration
-    assert "artifact_hashes" in migration
-    assert "prune_scryglass_public_releases_v2" in migration
-    assert "create table if not exists public.scryglass_storage_cleanup" in migration
-    assert "ack_scryglass_storage_cleanup" in migration
-    assert (
-        "revoke all on function public.prune_scryglass_public_releases(integer)"
-        in migration
-    )
+    assert "active scryglass storage objects are immutable" in migration
+    assert "revoke all on public.scryglass_public_releases" in migration
+    assert "revoke all on public.scryglass_public_assets" in migration
+    assert "drop function if exists public.get_scryglass_active_inline_asset(text, text)" in migration
 
 
 def test_quarantine_reason_migration_keeps_details_private() -> None:
