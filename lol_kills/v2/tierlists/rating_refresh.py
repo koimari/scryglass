@@ -11,7 +11,6 @@ from typing import Any
 import pandas as pd
 
 from lol_kills.etl.oe_live_source import LIVE_MAP_OUTPUT, LIVE_PLAYER_OUTPUT, LIVE_TEAM_OUTPUT
-from lol_kills.etl.paths import FEATURES_DIR
 from lol_kills.ratings.dual_elo import build_dual_ratings, lineup_hashes_from_players
 from lol_kills.ratings.hierarchical_bt import build_team_weekly_ranks, fit_hierarchical_bt
 from lol_kills.ratings.player_elo import (
@@ -24,6 +23,7 @@ RATING_WINDOW_START = pd.Timestamp("2025-01-01T00:00:00Z")
 RATING_YEARS = (2025, 2026)
 OUTPUT_ROOT = Path("data/lol/v2/tierlists/rating-refresh")
 OUTPUT = OUTPUT_ROOT / "rating-refresh-v1.json"
+FEATURES_RELATIVE = Path("data/lol/features")
 
 
 def _sha256(path: Path) -> str:
@@ -154,13 +154,28 @@ def refresh_ratings(
         label="player",
     )
 
+    # ``FEATURES_DIR`` is resolved when the worker imports the ETL path
+    # module.  It can point at the code checkout, so use the runtime-relative
+    # locator for this refresh output.
+    features_dir = repo_root / FEATURES_RELATIVE
+    features_dir.mkdir(parents=True, exist_ok=True)
+
     player_maps = build_maps_frame_from_players(players)
     if player_maps.empty or set(player_maps["game_uid"].astype(str)) != map_ids:
         raise ValueError("OE live player rows do not form the complete deduplicated map set")
     lineup_hashes = lineup_hashes_from_players(players)
-    build_dual_ratings(maps, lineup_by_game=lineup_hashes)
-    build_player_ratings(player_maps, players)
-    team_snapshot, team_meta = fit_hierarchical_bt(maps, write=True)
+    # Keep every generated rating artifact under the requested runtime root.
+    # The worker imports this module from its checkout, while ``root`` points
+    # to the isolated runtime data tree.  The default output locations in the
+    # rating modules follow the process working directory, which can point at
+    # the checkout and make the refresh non-reproducible.
+    build_dual_ratings(maps, lineup_by_game=lineup_hashes, output_dir=features_dir)
+    build_player_ratings(player_maps, players, output_dir=features_dir)
+    team_snapshot, team_meta = fit_hierarchical_bt(
+        maps,
+        write=True,
+        output_dir=features_dir,
+    )
     team_weekly = build_team_weekly_ranks(
         maps,
         as_of=cutoff,
@@ -174,8 +189,6 @@ def refresh_ratings(
         min_games=min_games,
         previous_as_of=previous_as_of,
     )
-    features_dir = repo_root / FEATURES_DIR
-    features_dir.mkdir(parents=True, exist_ok=True)
     (features_dir / "team_weekly_ranks.json").write_text(
         json.dumps(team_weekly, indent=2) + "\n",
         encoding="utf-8",

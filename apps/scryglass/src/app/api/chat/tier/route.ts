@@ -14,10 +14,23 @@ type TierRow = {
   movement?: string | null;
 };
 
+function publicPatchLabel(value: string): string {
+  const match = /^(15|16)\.(\d{1,2})(?:\.\d+)?$/.exec(value.trim());
+  if (!match) return value.trim();
+  const minor = match[2].length === 1 ? `${match[2]}0` : match[2].padStart(2, "0");
+  return `${Number(match[1]) + 10}.${minor}`;
+}
+
+function patchOrder(value: string): number {
+  const [major, minor] = publicPatchLabel(value).split(".").map(Number);
+  return (Number.isFinite(major) ? major : 0) * 1000 + (Number.isFinite(minor) ? minor : 0);
+}
+
 async function get(request: Request, signal: AbortSignal) {
   const params = searchParams(request);
   const role = clean(params.get("role"));
-  const patch = clean(params.get("patch"));
+  const requestedPatch = clean(params.get("patch"));
+  const patch = requestedPatch ? publicPatchLabel(requestedPatch) : "";
   const limit = Math.min(Math.max(parseInt(params.get("limit") ?? "20", 10) || 20, 1), 20);
   try {
     const manifest = await readPackManifest(signal);
@@ -45,9 +58,11 @@ async function get(request: Request, signal: AbortSignal) {
       "rankings/tierlists.json",
       signal,
     );
-    const patches = tier.options?.patches ?? [];
+    const patches = [...(tier.options?.patches ?? [])].map(publicPatchLabel).sort((a, b) => patchOrder(a) - patchOrder(b));
     const latestPatch = patch || (patches.length ? patches[patches.length - 1] : "");
-    let rows = tier.rows.filter((row) => row.patch === latestPatch);
+    let rows = tier.rows
+      .map((row) => ({ ...row, patch: publicPatchLabel(row.patch) }))
+      .filter((row) => row.patch === latestPatch);
     if (role) {
       const lower = role.toLowerCase();
       rows = rows.filter((row) => row.role.toLowerCase() === lower);
