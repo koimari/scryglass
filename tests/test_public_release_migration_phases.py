@@ -22,6 +22,7 @@ def test_migrations_are_split_into_ordered_cutover_phases() -> None:
         "20260814161000_oe_import_patch_receipts.sql",
         "20260814170000_strict_public_cutover.sql",
         "20260814190000_query_stage_batch_budget.sql",
+        "20260814200000_ratings_page_budget.sql",
     ]
 
 
@@ -40,6 +41,15 @@ def test_query_staging_batch_budget_matches_worker() -> None:
     assert "discard_stale_staging_releases(limit=1)" in publisher
 
 
+def test_ratings_page_budget_updates_the_private_rpc() -> None:
+    migration = (
+        MIGRATIONS / "20260814200000_ratings_page_budget.sql"
+    ).read_text(encoding="utf-8")
+    assert "scryglass_private" in migration
+    assert "p_limit, 20), 1), 100" in migration
+    assert "unknown limit guard" in migration
+
+
 def test_phase_workdir_excludes_later_migrations() -> None:
     script = (ROOT / "tools/prepare_supabase_phase.py").read_text(encoding="utf-8")
     runbook = (ROOT / "docs/public-refresh-runbook.md").read_text(encoding="utf-8")
@@ -50,6 +60,13 @@ def test_phase_workdir_excludes_later_migrations() -> None:
     assert "prepare_supabase_phase.py --phase strict" in runbook
     bounded = runbook.split("## Bounded query and private Storage cutover", 1)[1]
     assert "npx supabase db push --linked\n" not in bounded
+
+
+def test_runbook_never_pushes_all_cutover_phases_from_the_repository() -> None:
+    runbook = (ROOT / "docs/public-refresh-runbook.md").read_text(encoding="utf-8")
+    assert "npx supabase db push --linked\n" not in runbook
+    assert runbook.index("--phase additive") < runbook.index("--phase storage")
+    assert runbook.index("--phase storage") < runbook.index("--phase strict")
 
 
 def test_phase_two_keeps_compatibility_reads_and_phase_three_removes_them() -> None:

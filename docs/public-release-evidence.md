@@ -8,10 +8,10 @@ This file records repeatable evidence for the public-release review. Secrets and
 
 | Field | Value |
 | --- | --- |
-| Review date | 2026-08-13 |
+| Review date | 2026-08-14 |
 | Base branch | `origin/main` |
-| Base commit | `8023372` |
-| Candidate branch | `release/public-readiness-audit` |
+| Base commit | `6fa61f1d987a93adbe1e4ab6be75adea1895f211` |
+| Candidate branch | `main` after PR #238 |
 | Preserved visual commit | `ced2f63` |
 | Preserved source commit | `73b7dfa` on `preserve/public-readiness-ui` |
 | Initial worktree state | The 12 visual and chat paths were committed before the candidate branch was made. The candidate started from a clean `origin/main` and cherry-picked that commit. |
@@ -63,6 +63,21 @@ Semgrep OSS scanned 978 tracked files with the `security-audit`, `python`, and `
 
 Bandit reports no high-severity findings after the subprocess fix. The Python release lock reports no known vulnerabilities through `pip-audit`.
 
+## Security and dependency closure
+
+The merged release checks completed successfully in Validate run
+[`31839779393`](https://github.com/koimari/scryglass/actions/runs/31839779393)
+and Security run
+[`31839779387`](https://github.com/koimari/scryglass/actions/runs/31839779387).
+The PR checks also passed CodeQL for Python and JavaScript, Secret scan,
+Dependency review, workflow and shell security, and the Elemental Drakes
+dependency, type, lint, build, and SBOM job. The GitHub Dependabot alert API
+returned zero open alerts for `koimari/scryglass` on 2026-08-14.
+
+The Supabase security and performance advisors returned zero lints on
+2026-08-14. The advisor result is checked again after each schema or
+publication change.
+
 ## Retired public Blob cleanup
 
 GitHub Actions run [`31749119639`](https://github.com/koimari/scryglass/actions/runs/31749119639) retired the approved `packs/`, `rankings/`, `state/`, and `tierlists/` prefixes on 2026-08-13.
@@ -73,9 +88,21 @@ Independent requests after the workflow returned `404` for the known Draft recor
 
 ## Production HOLD control
 
-The legacy `xyz.scryglass.public-refresh` launchd job is unloaded and persistently disabled. A submitted `scryglass.manual-cycle-7` refresh was also stopped during derive, before publication. No `lol_kills.public_refresh` process remained after the stop. The last production release stayed `v2026.08.13.183000`.
+Production currently serves active release `v2026.08.14.181106`. The public health response at
+2026-08-14T20:43:37.530Z reported `status: ok`, `refresh_status: idle`, and
+`stale: false`. Authenticated diagnostics bound the same release to run
+`refresh-20260814T193826Z-1a385de262e2`, source observation
+`2026-08-14T09:09:44+00:00`, and worker commit
+`dace1bb60d5b9f49144d7602457a6e10c822b5ad`.
 
-Run `refresh-20260813T223244Z-803f0d6b7322` is recorded as `error` with no release ID. Production health now reports `status: partial` and `refresh_status: failed`. The worker stays disabled until the ordered migration, application, publisher, and clean-refresh cutover reaches its health-alignment gate.
+The active database release and manifest both name `v2026.08.14.181106`.
+Supabase reports 22 active Storage assets, 145,019,319 bytes, zero inline
+assets, zero Draft assets, and zero invalid metadata rows. A byte-for-byte
+audit of all 22 deployed `/api/assets` responses passed.
+
+The worker checkout currently has a later clean commit than the commit recorded
+by the active receipt. The worker proof stays open until a clean, lock-bound
+refresh records the same worker commit required by the final receipt.
 
 The Production and Development Vercel values for `SCRYGLASS_SUPABASE_URL` and `SCRYGLASS_SUPABASE_PUBLISHABLE_KEY` contained a literal `\\n` suffix. Both environments now contain canonical values. The Preview values were already canonical. The web project keeps the publication service key outside Vercel and holds only the public key plus the separate diagnostic credential.
 
@@ -117,8 +144,7 @@ Ruleset `20711858` is active on `refs/heads/main`. It requires these contexts:
 `app`, `rankings-data`, `Vercel`, `browser`, `Supabase clean replay`,
 `Workflow and shell security`, `elemental-drakes`, `CodeQL
 (javascript-typescript)`, `CodeQL (python)`, `Secret scan`, and `Dependency
-review`. The candidate PR remains blocked from merge while the full
-`rankings-data` run is pending.
+review`. The required checks for this evidence update passed.
 
 ## Ordered query and Storage cutover
 
@@ -136,14 +162,15 @@ fallback.
 
 ## Evidence still required
 
-- clean CI from a zero-state Supabase replay;
 - two public release Python-suite passes from the hashed Python 3.12 environment;
 - two private research-suite passes from the hashed environment with the approved artifact bundle mounted;
-- complete app tests, type check, lint, build, browser, accessibility, and performance checks;
-- preview security-header and abuse-budget probes;
 - source-rights records and Riot product registration;
 - an independent, hash-bound Draft Score promotion record;
+- a clean worker checkout and lock digest bound to the active receipt;
+- a production rollback drill with all route-family and release-ID probes;
 - the final aligned production receipt.
-- a fresh active-release asset audit. The current `v2026.08.14.123517` row for
-  `features/match_records_2025_q2.json` claims the SHA-256 of empty bytes while
-  serving 19,047,051 bytes. This release cannot close the integrity gate.
+
+The merged application, zero-state Supabase replay, browser, security, asset,
+HTML budget, and public-boundary checks are recorded in PR #238. The current
+active release has passed the full 22-asset deployed hash audit. The release
+remains on HOLD until the outstanding evidence above is complete.

@@ -5,6 +5,7 @@ from copy import deepcopy
 import pandas as pd
 
 from lol_kills.research.composition_signal import (
+    ATOM_CORPUS_PATH,
     FittedCompositionModel,
     REGULARIZATION_C,
     _apply_oof_recalibration,
@@ -20,6 +21,7 @@ from lol_kills.research.composition_signal import (
     evaluate_composition_signal,
     public_signal_for_game,
     score_games_temporally,
+    _composition_code_digest,
 )
 
 import numpy as np
@@ -27,6 +29,20 @@ from sklearn.linear_model import LogisticRegression
 
 
 ROLES = ("top", "jng", "mid", "bot", "sup")
+
+
+def test_composition_digest_changes_when_atom_corpus_changes(monkeypatch) -> None:
+    before = _composition_code_digest()
+    original_read_bytes = type(ATOM_CORPUS_PATH).read_bytes
+
+    def changed_read_bytes(path):
+        content = original_read_bytes(path)
+        if path == ATOM_CORPUS_PATH:
+            return content + b"\nchanged for digest test"
+        return content
+
+    monkeypatch.setattr(type(ATOM_CORPUS_PATH), "read_bytes", changed_read_bytes)
+    assert _composition_code_digest() != before
 
 
 def _rows(game_id: str, date: str, result: int, *, suffix: str = "") -> list[dict[str, object]]:

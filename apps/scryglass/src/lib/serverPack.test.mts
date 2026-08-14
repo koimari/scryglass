@@ -7,9 +7,9 @@ import {
   fetchVerifiedStorageAsset,
   publicPackManifest,
   readActivePublicAsset,
-  readActiveInlineAssetJson,
   readPackJson,
   readPrivateRefreshHealth,
+  readRemotePackManifest,
   safeRelativePath,
   validatePublicManifest,
 } from "./serverPack";
@@ -56,6 +56,27 @@ function manifest(): PackManifest & {
     files: [{ path: PATH, bytes: RAW.byteLength, rows: 0, cols: 0, sha256: SHA256 }],
   };
 }
+
+test("remote manifests fail closed without the bounded query API", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
+  const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+  process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
+  process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
+  globalThis.fetch = (async () => Response.json([{
+    release_id: RELEASE_ID,
+    manifest: manifest(),
+  }])) as typeof fetch;
+  try {
+    await assert.rejects(readRemotePackManifest(), /bounded public query API/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;
+    else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+    else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
+  }
+});
 
 test("public asset paths use the canonical allowlist", () => {
   assert.equal(safeRelativePath(PATH), PATH);
@@ -127,153 +148,22 @@ test("asset lookup requires the active manifest and matching database metadata",
   }
 });
 
-test("temporary inline compatibility returns parsed active data but never asset bytes", async () => {
+test("strict Storage reads reject inline-only assets", async () => {
   const previousFetch = globalThis.fetch;
   const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
   const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
   process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
   process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
-  let inlineCalls = 0;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes("get_scryglass_active_release")) {
       return Response.json([{ release_id: RELEASE_ID, status: "active", manifest: manifest() }]);
     }
     if (url.includes("get_scryglass_active_asset")) return Response.json([]);
-    if (url.includes("get_scryglass_active_inline_asset")) {
-      inlineCalls += 1;
-      return Response.json([{
-        release_id: RELEASE_ID,
-        path: PATH,
-        body: { teams: {} },
-        source_bytes: RAW.byteLength,
-        source_sha256: SHA256,
-        content_type: "application/json",
-      }]);
-    }
     throw new Error(`unexpected request: ${url}`);
   }) as typeof fetch;
   try {
-    const inline = await readActiveInlineAssetJson<{ teams: Record<string, unknown> }>(RELEASE_ID, PATH);
-    assert.deepEqual(inline?.body, { teams: {} });
-    assert.equal(inline?.sourceBytes, RAW.byteLength);
-    assert.equal(inline?.sourceSha256, SHA256);
-    assert.equal(inlineCalls, 1);
-
-    inlineCalls = 0;
-    const response = await getPublicAsset(
-      new Request(`https://scryglass.xyz/api/assets/${RELEASE_ID}/${PATH}`),
-      { params: Promise.resolve({ path: [RELEASE_ID, PATH] }) },
-    );
-    assert.equal(response.status, 404);
-    assert.equal(response.headers.get("etag"), null);
-    assert.equal(inlineCalls, 0);
-  } finally {
-    globalThis.fetch = previousFetch;
-    if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;
-    else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
-    if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
-    else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
-  }
-});
-
-test("temporary inline compatibility rejects superseded release rows", async () => {
-  const previousFetch = globalThis.fetch;
-  const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
-  const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
-  process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
-  process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
-  let inlineCalls = 0;
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    if (url.includes("get_scryglass_active_release")) {
-      return Response.json([{ release_id: RELEASE_ID, status: "superseded", manifest: manifest() }]);
-    }
-    if (url.includes("get_scryglass_active_asset")) return Response.json([]);
-    if (url.includes("get_scryglass_active_inline_asset")) {
-      inlineCalls += 1;
-      return Response.json([{
-        release_id: RELEASE_ID,
-        path: PATH,
-        body: { teams: {} },
-        source_bytes: RAW.byteLength,
-        source_sha256: SHA256,
-        content_type: "application/json",
-      }]);
-    }
-    throw new Error(`unexpected request: ${url}`);
-  }) as typeof fetch;
-  try {
-    assert.equal(await readActiveInlineAssetJson(RELEASE_ID, PATH), null);
-    assert.equal(inlineCalls, 0);
-  } finally {
-    globalThis.fetch = previousFetch;
-    if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;
-    else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
-    if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
-    else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
-  }
-});
-
-test("temporary inline compatibility rejects the wrong parsed root schema", async () => {
-  const previousFetch = globalThis.fetch;
-  const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
-  const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
-  process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
-  process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    if (url.includes("get_scryglass_active_release")) {
-      return Response.json([{ release_id: RELEASE_ID, status: "active", manifest: manifest() }]);
-    }
-    if (url.includes("get_scryglass_active_inline_asset")) {
-      return Response.json([{
-        release_id: RELEASE_ID,
-        path: PATH,
-        body: [],
-        source_bytes: RAW.byteLength,
-        source_sha256: SHA256,
-        content_type: "application/json",
-      }]);
-    }
-    throw new Error(`unexpected request: ${url}`);
-  }) as typeof fetch;
-  try {
-    assert.equal(await readActiveInlineAssetJson(RELEASE_ID, PATH), null);
-  } finally {
-    globalThis.fetch = previousFetch;
-    if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;
-    else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
-    if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
-    else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
-  }
-});
-
-test("temporary inline compatibility enforces the bounded RPC body budget", async () => {
-  const previousFetch = globalThis.fetch;
-  const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
-  const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
-  process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
-  process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    if (url.includes("get_scryglass_active_release")) {
-      return Response.json([{ release_id: RELEASE_ID, status: "active", manifest: manifest() }]);
-    }
-    if (url.includes("get_scryglass_active_inline_asset")) {
-      return Response.json([{
-        release_id: RELEASE_ID,
-        path: PATH,
-        body: { padding: "x".repeat(500 * 1024) },
-        source_bytes: RAW.byteLength,
-        source_sha256: SHA256,
-        content_type: "application/json",
-      }]);
-    }
-    throw new Error(`unexpected request: ${url}`);
-  }) as typeof fetch;
-  try {
-    assert.equal(await readActiveInlineAssetJson(RELEASE_ID, PATH), null);
+    await assert.rejects(readPackJson(manifest(), PATH), /Storage asset is unavailable/);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;

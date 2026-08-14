@@ -138,7 +138,7 @@ export function SignalRatings({
   const [minGames, setMinGames] = useState(Math.max(5, Number(searchParams.get("min") ?? 20)));
   const [draftMinGames, setDraftMinGames] = useState(Math.max(5, Number(searchParams.get("draftMin") ?? 5)));
   const [sort, setSort] = useState<Sort>((searchParams.get("sort") as Sort) || "rating");
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() => tab === "teams" && serverFiltered);
   const [selected, setSelected] = useState("");
   const [page, setPage] = useState(initialPage);
 
@@ -525,7 +525,7 @@ export function SignalRatings({
           />
 
           <section className={styles.gallerySection}>
-            <header><h2>{tab === "teams" ? "Team ratings" : "Player ratings"}</h2><p>{entities.length} shown · {scope}</p></header>
+            <header><h2>{tab === "teams" ? "Team ratings" : "Player ratings"}</h2><p>{visible.length} of {serverFiltered ? total : entities.length} shown · {scope}</p></header>
             <div className={styles.gallery}>
               {visible.map((entity, index) => {
                 const name = entityName(entity);
