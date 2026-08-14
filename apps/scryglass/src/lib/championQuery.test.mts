@@ -44,7 +44,7 @@ test("general worst champion follows the published tier list", () => {
   assert.equal(result.minimumGames, 1);
   assert.equal(result.rows[0].champion, "Zed");
   assert.equal(result.rows[0].rank, 3);
-  assert.match(result.answer.headline, /Zed \(mid\) ranks last on the published 16\.15 champion tier list/);
+  assert.match(result.answer.headline, /Zed \(mid\) ranks last on the published 26\.15 champion tier list/);
   assert.match(result.answer.caveat, /published patch tier-list order/);
 });
 
