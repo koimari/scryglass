@@ -646,7 +646,9 @@ def _source_step_failure(steps: list[dict[str, Any]]) -> str:
 def _verify_prebuilt_atom_bridge(root: Path) -> dict[str, Any]:
     """Verify the committed atom bridge when the worker has no LCC checkout."""
 
-    path = root / "data/lol/v2/champions/lcc-atom-bridge-v1.json"
+    from lol_kills.v2.champions.atoms.consume import DEFAULT_ARTIFACT_PATH
+
+    path = root / "data" / "lol" / "v2" / "champions" / DEFAULT_ARTIFACT_PATH.name
     try:
         bridge = AtomBridge.load(path)
     except Exception as error:  # noqa: BLE001

@@ -24,7 +24,7 @@
    "client_patch": "16.16",
    "kind": "atom_bridge",
    "locator_kind": "repository_path",
-   "locator": "data/lol/v2/champions/lcc-atom-bridge-v1.json",
+   "locator": "data/lol/v2/champions/lcc-atom-bridge-26.16.json",
    "publication_decision": "private_pending_review",
    "reviewed_by": "l3_atom_bridge",
    "reviewed_at": "2026-08-13T23:52:09Z",

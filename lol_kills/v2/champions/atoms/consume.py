@@ -28,7 +28,7 @@ DEFAULT_ARTIFACT_PATH = (
     / "lol"
     / "v2"
     / "champions"
-    / "lcc-atom-bridge-v1.json"
+    / "lcc-atom-bridge-26.16.json"
 )
 
 

@@ -17,6 +17,11 @@ the LCC source commit. The raw packet stays in the ignored local cache.
 The bridge has profiles for all 173 champions. The current ontology output is
 `data/lol/v2/champions/champion-ontology-seed-26.16.json`. Its source metadata
 is `data/lol/v2/champions/champion-ontology-sources-26.16.json`.
+The bridge is stored at
+`data/lol/v2/champions/lcc-atom-bridge-26.16.json`. The live tier refresh keeps
+the audited 26.15 bridge at
+`data/lol/v2/champions/lcc-atom-bridge-v1.json` until 16.16 games enter the
+accepted source window.
 
 The frozen C1 files keep their original bytes:
 

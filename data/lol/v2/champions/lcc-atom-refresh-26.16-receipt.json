@@ -12,6 +12,7 @@
   "base_champion_count": 173,
   "captured_entity_count": 236,
   "captured_file_count": 474,
+  "atom_bridge_locator": "data/lol/v2/champions/lcc-atom-bridge-26.16.json",
   "atom_bridge_artifact_sha256": "e5d37ddf4a20fcbdc1e2fc90fb0bd988be82b3563a8ec8bc3a21792313a239a8",
   "lcc_commit": "5b0ad6eabc3396ea714a270e3d87ad1dc72c6fac",
   "raw_packet_retained": false,

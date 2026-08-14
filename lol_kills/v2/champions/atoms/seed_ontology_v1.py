@@ -257,7 +257,7 @@ def build_sources(
             "client_patch": current_client,
             "kind": "atom_bridge",
             "locator_kind": "repository_path",
-            "locator": "data/lol/v2/champions/lcc-atom-bridge-v1.json",
+            "locator": "data/lol/v2/champions/lcc-atom-bridge-26.16.json",
             "publication_decision": "private_pending_review",
             "reviewed_by": "l3_atom_bridge",
             "reviewed_at": CANONICAL_AS_OF,

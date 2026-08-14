@@ -9,8 +9,9 @@ from lol_kills.v2.champions.atoms.consume import AtomBridge
 
 ROOT = Path(__file__).resolve().parents[1]
 RECEIPT_PATH = ROOT / "data/lol/v2/champions/lcc-atom-refresh-26.16-receipt.json"
-BRIDGE_PATH = ROOT / "data/lol/v2/champions/lcc-atom-bridge-v1.json"
+BRIDGE_PATH = ROOT / "data/lol/v2/champions/lcc-atom-bridge-26.16.json"
 SOURCE_PATH = ROOT / "data/lol/v2/champions/champion-ontology-sources-26.16.json"
+LIVE_TIER_BRIDGE_PATH = ROOT / "data/lol/v2/champions/lcc-atom-bridge-v1.json"
 
 
 def test_26_16_receipt_binds_source_and_bridge() -> None:
@@ -23,6 +24,7 @@ def test_26_16_receipt_binds_source_and_bridge() -> None:
     assert identity.public_patch == receipt["public_patch"] == "26.16"
     assert identity.client_patch == receipt["client_patch"] == "16.16"
     assert receipt["source_root"].endswith("/16.16/")
+    assert receipt["atom_bridge_locator"] == "data/lol/v2/champions/lcc-atom-bridge-26.16.json"
     assert receipt["base_champion_count"] == len(bridge["champions"]) == 173
     assert validated_bridge.artifact_sha256 == receipt["atom_bridge_artifact_sha256"]
     provenance = bridge["provenance"]
@@ -53,3 +55,12 @@ def test_current_source_rows_keep_public_and_client_patch_namespaces_separate() 
     assert "/cdn/16.16.1/" in rows["source:riot-dd-26.16"]["url"]
     assert rows["source:riot-dd-26.15"]["patch_id"] == "26.15"
     assert "/cdn/16.15.1/" in rows["source:riot-dd-26.15"]["url"]
+
+
+def test_patch_bridges_are_versioned_at_the_data_boundary() -> None:
+    live_tier_bridge = AtomBridge.load(LIVE_TIER_BRIDGE_PATH)
+    current_atom_bridge = AtomBridge.load(BRIDGE_PATH)
+
+    assert live_tier_bridge.provenance["data_patch"] == "26.15"
+    assert current_atom_bridge.provenance["data_patch"] == "26.16"
+    assert live_tier_bridge.artifact_sha256 != current_atom_bridge.artifact_sha256
