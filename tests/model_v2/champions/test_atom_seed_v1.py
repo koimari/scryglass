@@ -24,6 +24,7 @@ from lol_kills.v2.champions.catalog import (
     load_champion_ontology,
 )
 from lol_kills.v2.champions.schema import DIMENSION_LABELS, REQUIRED_DIMENSIONS
+from lol_kills.v2.patch_identity import CURRENT_PUBLIC_PATCH
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -63,6 +64,15 @@ class AtomSeedV1Tests(unittest.TestCase):
                 )
                 self.assertEqual(profile["source_ids"], [SOURCE_ID])
                 self.assertEqual(profile["residual"]["status"], "prior_only")
+
+    def test_current_26_16_profile_is_present_for_each_legal_role(self) -> None:
+        for row in self.seed["champions"]:
+            patch = row["patch_profiles"].get(CURRENT_PUBLIC_PATCH)
+            self.assertIsNotNone(patch, row["champion_id"])
+            self.assertTrue(patch["role_profiles"])
+            self.assertLessEqual(
+                set(patch["role_profiles"]), set(row["role_legalities"])
+            )
 
     def test_dimension_labels_are_complete_and_probabilities_bounded(self) -> None:
         for row in self.seed["champions"]:
