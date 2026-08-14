@@ -175,8 +175,11 @@ Interpretation (adaptive development diagnostics, no authority):
 ## Ontology seeding (v1)
 
 The bridge is the sanctioned zero-play prior path. `lol_kills/v2/champions/atoms/seed_ontology_v1.py`
-emits the full 173-champion ontology seed (`data/lol/v2/champions/champion-ontology-seed.json`)
-at patch **26.16**, one role profile per legal role:
+emits the full 173-champion ontology seed
+(`data/lol/v2/champions/champion-ontology-seed-26.16.json`) at patch
+**26.16**, one role profile per legal role. The frozen
+`champion-ontology-seed.json` remains unchanged because the C1 trust root
+binds it by hash.
 
 - available atom dimensions → mapped label probabilities with the bridge's
   dimension uncertainty (per label); unavailable dimensions → explicit
@@ -186,7 +189,7 @@ at patch **26.16**, one role profile per legal role:
   existing 26.14 profiles untouched; bridge profiles are additive.
 - every profile references the new `atom_bridge` source kind
   (`source:lcc-atom-bridge-v1`, private pending review) declared in
-  `champion-ontology-sources.json`.
+  `champion-ontology-sources-26.16.json`.
 - reproducible: `python3 -m lol_kills.v2.champions.atoms.seed_ontology_v1`
   regenerates the identical seed; `tests/model_v2/champions/test_atom_seed_v1.py`
   enforces coverage, fail-closed priors, idempotent sources, and CLI determinism.

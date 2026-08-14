@@ -1,16 +1,17 @@
 {
  "schema_version": "v2-champion-sources-1",
- "as_of": "2026-08-07T12:00:00Z",
+ "as_of": "2026-08-13T23:52:09Z",
  "sources": [
   {
    "source_id": "source:lcc-atom-bridge-v1",
+   "patch": "26.16",
    "kind": "atom_bridge",
    "locator_kind": "repository_path",
    "locator": "data/lol/v2/champions/lcc-atom-bridge-v1.json",
    "publication_decision": "private_pending_review",
    "reviewed_by": "l3_atom_bridge",
-   "reviewed_at": "2026-08-07T12:00:00Z",
-   "notes": "Mechanistic champion atoms from the League Combat Calculator atom cache (wiki 26.15 authority), mapped through scryglass.lcc-atom-bridge.v1. Automated prior; pending review."
+   "reviewed_at": "2026-08-13T23:52:09Z",
+   "notes": "Mechanistic champion atoms from the League Combat Calculator atom cache (public patch 26.16), mapped through scryglass.lcc-atom-bridge.v1. Automated prior; pending review."
   },
   {
    "source_id": "source:manual-labels-v2",

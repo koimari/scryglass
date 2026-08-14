@@ -33,11 +33,11 @@ CURATED_CHAMPION_IDS = ("riot:champion:115", "riot:champion:101", "riot:champion
 
 DEFAULT_SEED_PATH = (
     Path(__file__).resolve().parents[4]
-    / "data" / "lol" / "v2" / "champions" / "champion-ontology-seed.json"
+    / "data" / "lol" / "v2" / "champions" / "champion-ontology-seed-26.16.json"
 )
 DEFAULT_SOURCES_PATH = (
     Path(__file__).resolve().parents[4]
-    / "data" / "lol" / "v2" / "champions" / "champion-ontology-sources.json"
+    / "data" / "lol" / "v2" / "champions" / "champion-ontology-sources-26.16.json"
 )
 
 POSITION_MAP = {

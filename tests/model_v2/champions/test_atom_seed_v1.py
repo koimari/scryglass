@@ -11,6 +11,8 @@ from pathlib import Path
 from lol_kills.v2.champions.atoms.consume import AtomBridge, DEFAULT_ARTIFACT_PATH
 from lol_kills.v2.champions.atoms.seed_ontology_v1 import (
     CANONICAL_AS_OF,
+    DEFAULT_SEED_PATH,
+    DEFAULT_SOURCES_PATH,
     PRIOR_PATCH,
     SOURCE_ID,
     SNAPSHOT_ID,
@@ -18,9 +20,7 @@ from lol_kills.v2.champions.atoms.seed_ontology_v1 import (
     build_sources,
 )
 from lol_kills.v2.champions.catalog import (
-    DEFAULT_ONTOLOGY_PATH,
     DEFAULT_REVIEW_PATH,
-    DEFAULT_SOURCE_PATH,
     load_champion_ontology,
 )
 from lol_kills.v2.champions.schema import DIMENSION_LABELS, REQUIRED_DIMENSIONS
@@ -33,11 +33,11 @@ class AtomSeedV1Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.bridge = AtomBridge.load(DEFAULT_ARTIFACT_PATH)
-        cls.seed = json.loads(DEFAULT_ONTOLOGY_PATH.read_text(encoding="utf-8"))
-        cls.sources = json.loads(DEFAULT_SOURCE_PATH.read_text(encoding="utf-8"))
+        cls.seed = json.loads(DEFAULT_SEED_PATH.read_text(encoding="utf-8"))
+        cls.sources = json.loads(DEFAULT_SOURCES_PATH.read_text(encoding="utf-8"))
         cls.ontology = load_champion_ontology(
-            ontology_path=DEFAULT_ONTOLOGY_PATH,
-            source_path=DEFAULT_SOURCE_PATH,
+            ontology_path=DEFAULT_SEED_PATH,
+            source_path=DEFAULT_SOURCES_PATH,
             review_path=DEFAULT_REVIEW_PATH,
         )
 
@@ -129,8 +129,8 @@ class AtomSeedV1Tests(unittest.TestCase):
         self.assertLessEqual(self.sources["as_of"], self.seed["as_of"])
 
     def test_builder_is_reproducible_and_fail_closed(self) -> None:
-        rebuilt = build_seed(self.bridge, json.loads(DEFAULT_ONTOLOGY_PATH.read_text()))
-        rebuilt_sources = build_sources(json.loads(DEFAULT_SOURCE_PATH.read_text()))
+        rebuilt = build_seed(self.bridge, json.loads(DEFAULT_SEED_PATH.read_text()))
+        rebuilt_sources = build_sources(json.loads(DEFAULT_SOURCES_PATH.read_text()))
         self.assertEqual(rebuilt, self.seed)
         self.assertEqual(rebuilt_sources, self.sources)
 
@@ -148,14 +148,14 @@ class AtomSeedV1Tests(unittest.TestCase):
     def test_cli_regenerates_identical_seed(self) -> None:
         proc = subprocess.run(
             [sys.executable, "-m", "lol_kills.v2.champions.atoms.seed_ontology_v1",
-             "--out-seed", str(ROOT / "data/lol/v2/champions/champion-ontology-seed.json"),
-             "--out-sources", str(ROOT / "data/lol/v2/champions/champion-ontology-sources.json")],
+             "--out-seed", str(DEFAULT_SEED_PATH),
+             "--out-sources", str(DEFAULT_SOURCES_PATH)],
             capture_output=True,
             text=True,
             cwd=ROOT,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr[-800:])
-        after = json.loads(DEFAULT_ONTOLOGY_PATH.read_text(encoding="utf-8"))
+        after = json.loads(DEFAULT_SEED_PATH.read_text(encoding="utf-8"))
         self.assertEqual(after, self.seed)
 
 
