@@ -15,7 +15,7 @@ def test_migrations_are_split_into_ordered_cutover_phases() -> None:
         "20260814010001_query_seal_statement_budget.sql",
         "20260814010002_query_activate_statement_budget.sql",
         "20260814010003_release_retention_cascade_guard.sql",
-        "20260814010004_discard_staging_release.sql",
+        "20260814122801_discard_staging_release.sql",
         "20260814135746_supabase_advisor_cleanup.sql",
         "20260814135848_restore_fk_indexes.sql",
         "20260814160000_private_storage_phase.sql",
@@ -60,7 +60,7 @@ def test_phase_one_accepts_legacy_match_rows_during_compatibility() -> None:
 
 def test_staging_cleanup_is_locked_and_service_only() -> None:
     migration = (
-        MIGRATIONS / "20260814010004_discard_staging_release.sql"
+        MIGRATIONS / "20260814122801_discard_staging_release.sql"
     ).read_text(encoding="utf-8")
 
     assert "pg_advisory_xact_lock" in migration
