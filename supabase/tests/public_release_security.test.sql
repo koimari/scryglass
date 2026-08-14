@@ -450,6 +450,15 @@ select is(
   'restore leaves the prior release active'
 );
 
+insert into public.scryglass_public_releases (
+  release_id, status, manifest, source_as_of
+) values (
+  'v2026.08.11.120000',
+  'staging',
+  '{"pack_id":"v2026.08.11.120000","files":[],"release":{"release_id":"v2026.08.11.120000","artifact_hashes":{}}}'::jsonb,
+  now()
+);
+
 select throws_ok(
   $$select public.prune_scryglass_public_releases_v2(0)$$,
   null,
@@ -479,7 +488,7 @@ select is(
   (
     select count(*)::integer
     from public.scryglass_public_releases
-    where release_id = 'v2026.08.13.120000'
+    where release_id = 'v2026.08.11.120000'
   ),
   0,
   'anon cannot read a staged release'
@@ -497,7 +506,7 @@ select is(
   (
     select count(*)::integer
     from public.scryglass_public_releases
-    where release_id = 'v2026.08.13.120000'
+    where release_id = 'v2026.08.11.120000'
   ),
   0,
   'authenticated cannot read a staged release'
