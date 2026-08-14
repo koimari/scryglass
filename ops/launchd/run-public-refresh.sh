@@ -86,6 +86,8 @@ export SCRYGLASS_ACCEPTED_IMPORT_RECEIPT="${import_receipt}"
   data/lol/v2 \
   | /usr/bin/tar -x -C "${runtime_root}"
 
+cd "${repo_root}"
+
 resume_cycle=0
 if [[ -f "${source_receipt}" && -f "${import_receipt}" ]]; then
   if "${python}" -m lol_kills.etl.oe_database \
@@ -122,7 +124,6 @@ if [[ "${resume_cycle}" -eq 0 ]]; then
     exit 1
   fi
 
-  cd "${repo_root}"
   "${python}" -m lol_kills.etl.oe_ingest \
     --install-browser-candidate "${oe_candidate}" \
     --year "${oe_year}" \

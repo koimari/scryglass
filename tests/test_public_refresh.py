@@ -1123,6 +1123,7 @@ def test_systemd_worker_cannot_start_without_production_environment() -> None:
     assert '"${repo_root}/data/lol/warehouse' not in launchd
     assert 'runtime/cycles/${cycle_id}' in launchd
     assert "--validate-only" in launchd
+    assert launchd.index('cd "${repo_root}"') < launchd.index('"${python}" -m lol_kills.etl.oe_database')
     assert "status --porcelain=v1 --untracked-files=normal" in launchd
     assert '"${SCRYGLASS_WORKER_COMMIT}" != "${real_worker_commit}"' in launchd
     assert 'verify-public-refresh-env.sh" "${repo_root}" "${worker_root}/venv"' in launchd
