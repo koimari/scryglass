@@ -101,6 +101,44 @@ function patchOrder(value: string): number {
   return (Number.isFinite(major) ? major : 0) * 1000 + (Number.isFinite(minor) ? minor : 0);
 }
 
+function publicPatchLabel(value: string): string {
+  const match = /^(15|16)\.(\d{1,2})(?:\.\d+)?$/.exec(value.trim());
+  if (!match) return value;
+  const minor = match[2].length === 1 ? `${match[2]}0` : match[2].padStart(2, "0");
+  return `${Number(match[1]) + 10}.${minor}`;
+}
+
+function publicPatchScopeId(scopeId: string | undefined, sourcePatch: string, patch: string): string | undefined {
+  if (!scopeId) return scopeId;
+  const prefix = `patch:${sourcePatch}`;
+  return scopeId.startsWith(prefix) ? `patch:${patch}${scopeId.slice(prefix.length)}` : scopeId;
+}
+
+function normalizeTierResponse(payload: TierResponse): TierResponse {
+  const options = payload.options
+    ? { ...payload.options, patches: payload.options.patches.map(publicPatchLabel) }
+    : payload.options;
+  const rows = payload.rows?.map((row) => {
+    const sourcePatch = row.patch;
+    const patch = publicPatchLabel(sourcePatch);
+    return {
+      ...row,
+      patch,
+      scope_id: publicPatchScopeId(row.scope_id, sourcePatch, patch) ?? row.scope_id,
+    };
+  });
+  const scopes = payload.scopes?.map((scope) => {
+    const sourcePatch = scope.patch;
+    const patch = publicPatchLabel(sourcePatch);
+    return {
+      ...scope,
+      patch,
+      scope_id: publicPatchScopeId(scope.scope_id, sourcePatch, patch) ?? scope.scope_id,
+    };
+  });
+  return { ...payload, options, rows, scopes };
+}
+
 function roleLabel(role: string): string {
   return ROLE_LABELS[role] ?? role;
 }
@@ -826,19 +864,19 @@ export function TierListExplorer({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [role, setRole] = useState(initialFilters?.role ?? "");
-  const [patch, setPatch] = useState(initialFilters?.patch ?? "");
+  const [patch, setPatch] = useState(publicPatchLabel(initialFilters?.patch ?? ""));
   const [minimumGames, setMinimumGames] = useState(initialFilters?.minimumGames ?? 5);
   const [mode, setMode] = useState<BoardMode>("first_pick");
   const [responseChampion, setResponseChampion] = useState("");
   const [region, setRegion] = useState(initialFilters?.region ?? "");
   const [league, setLeague] = useState(initialFilters?.league ?? "");
   const [tier, setTier] = useState(initialFilters?.tier ?? "");
-  const [data, setData] = useState<TierResponse>(initialData ?? EMPTY);
+  const [data, setData] = useState<TierResponse>(normalizeTierResponse(initialData ?? EMPTY));
   const [loading, setLoading] = useState(!initialData);
   const [fullHistoryLoaded, setFullHistoryLoaded] = useState(serverFiltered);
 
   const commitData = useCallback((payload: TierResponse, fullHistory: boolean) => {
-    setData(payload);
+    setData(normalizeTierResponse(payload));
     setFullHistoryLoaded(fullHistory);
   }, []);
 

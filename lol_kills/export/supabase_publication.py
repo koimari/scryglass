@@ -35,6 +35,7 @@ from lol_kills.export.public_query_projection import (
     query_dataset_receipt,
     validate_public_query_projection,
 )
+from lol_kills.v2.patch_identity import PatchIdentityError, public_patch
 
 
 TIER_ASSET_PATH = "rankings/tierlists.json"
@@ -937,6 +938,27 @@ def _patch_order(value: object) -> tuple[int, int]:
         return 0, 0
 
 
+def _public_patch_label(value: object) -> str:
+    """Return the public Riot label for a source or client patch token."""
+
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return public_patch(text)
+    except PatchIdentityError:
+        return text
+
+
+def _public_scope_id(scope_id: object, source_patch: object, patch: str) -> str:
+    value = str(scope_id or "").strip()
+    source = str(source_patch or "").strip()
+    prefix = f"patch:{source}" if source else ""
+    if prefix and value.startswith(prefix):
+        return f"patch:{patch}{value[len(prefix):]}"
+    return value
+
+
 def latest_tier_payload(tier_body: dict[str, Any]) -> dict[str, Any]:
     """Keep the newest patch while preserving every view for that patch."""
 
@@ -944,14 +966,38 @@ def latest_tier_payload(tier_body: dict[str, Any]) -> dict[str, Any]:
     patches = options.get("patches") if isinstance(options, dict) else None
     if not isinstance(patches, list) or not patches:
         raise SupabasePublicationError("tier-list asset has no patch options")
-    latest_patch = max((str(value) for value in patches), key=_patch_order)
+    normalized_patches = [_public_patch_label(value) for value in patches]
+    latest_patch = max(normalized_patches, key=_patch_order)
     rows = tier_body.get("rows")
     scopes = tier_body.get("scopes")
     if not isinstance(rows, list) or not isinstance(scopes, list):
         raise SupabasePublicationError("tier-list asset has invalid rows or scopes")
+    normalized_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        source_patch = item.get("patch")
+        item["patch"] = _public_patch_label(source_patch)
+        if item.get("scope_id") is not None:
+            item["scope_id"] = _public_scope_id(item.get("scope_id"), source_patch, item["patch"])
+        normalized_rows.append(item)
+    normalized_scopes: list[dict[str, Any]] = []
+    for scope in scopes:
+        if not isinstance(scope, dict):
+            continue
+        item = dict(scope)
+        source_patch = item.get("patch")
+        item["patch"] = _public_patch_label(source_patch)
+        if item.get("scope_id") is not None:
+            item["scope_id"] = _public_scope_id(item.get("scope_id"), source_patch, item["patch"])
+        normalized_scopes.append(item)
     latest = dict(tier_body)
-    latest["rows"] = [row for row in rows if isinstance(row, dict) and row.get("patch") == latest_patch]
-    latest["scopes"] = [scope for scope in scopes if isinstance(scope, dict) and scope.get("patch") == latest_patch]
+    latest_options = dict(options) if isinstance(options, dict) else {}
+    latest_options["patches"] = sorted(set(normalized_patches), key=_patch_order)
+    latest["options"] = latest_options
+    latest["rows"] = [row for row in normalized_rows if row.get("patch") == latest_patch]
+    latest["scopes"] = [scope for scope in normalized_scopes if scope.get("patch") == latest_patch]
     latest["latest_patch"] = latest_patch
     if not latest["rows"] or not latest["scopes"]:
         raise SupabasePublicationError("latest tier-list patch has no public data")

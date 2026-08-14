@@ -682,9 +682,10 @@ def test_latest_tier_payload_keeps_only_newest_patch_and_all_views() -> None:
 
     latest = supabase_publication.latest_tier_payload(payload)
 
-    assert latest["latest_patch"] == "16.10"
-    assert latest["rows"] == [{"patch": "16.10", "champion": "New"}]
-    assert latest["scopes"] == [{"patch": "16.10", "response_matrix": {"new": True}}]
+    assert latest["latest_patch"] == "26.10"
+    assert latest["options"]["patches"] == ["26.09", "26.10"]
+    assert latest["rows"] == [{"patch": "26.10", "champion": "New"}]
+    assert latest["scopes"] == [{"patch": "26.10", "response_matrix": {"new": True}}]
     assert latest["structural_similarity"] == payload["structural_similarity"]
 
 

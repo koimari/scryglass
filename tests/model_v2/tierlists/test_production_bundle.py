@@ -14,6 +14,8 @@ from lol_kills.v2.tierlists.production_bundle import (
     SOURCE_META_LOCATOR,
     ProductionBundleError,
     _public_structural_similarity,
+    _cell_patch,
+    _public_patch_scope_id,
     _require_public_source_mode,
     _source_tree_sha256,
     _validate_matchup_profile,
@@ -31,6 +33,12 @@ def test_patch_wide_bundle_verifies() -> None:
     assert report["scope_count"] == 39
     assert report["cell_count"] == 195
     assert report["production_cell_count"] == 195
+
+
+def test_public_bundle_uses_riot_patch_namespace_and_scope_ids() -> None:
+    assert _cell_patch({"patches": ["16.15"]}) == "26.15"
+    assert _cell_patch({"patches": ["16.16"]}) == "26.16"
+    assert _public_patch_scope_id("patch:16.16", "16.16", "26.16") == "patch:26.16"
 
 
 def test_source_tree_reads_code_from_the_worker_checkout(tmp_path: Path) -> None:

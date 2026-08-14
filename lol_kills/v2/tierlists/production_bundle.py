@@ -20,6 +20,7 @@ import subprocess
 from typing import Any, Mapping
 
 from lol_kills.v2.champions.atoms.consume import AtomBridge
+from lol_kills.v2.patch_identity import PatchIdentityError, public_patch
 
 from .forward_evaluation import (
     CANDIDATE_LOCATOR,
@@ -122,9 +123,30 @@ def _patch_key(value: str) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+def _public_patch_label(value: object) -> str:
+    """Convert OE/client patch labels before they enter a public artifact."""
+
+    text = str(value or "").strip()
+    if not text:
+        return "rolling"
+    try:
+        return public_patch(text)
+    except PatchIdentityError:
+        return text
+
+
+def _public_patch_scope_id(scope_id: object, source_patch: object, patch_id: str) -> str:
+    value = str(scope_id or "").strip()
+    source = str(source_patch or "").strip()
+    prefix = f"patch:{source}" if source else ""
+    if prefix and value.startswith(prefix):
+        return f"patch:{patch_id}{value[len(prefix):]}"
+    return value
+
+
 def _cell_patch(cell: Mapping[str, Any]) -> str:
     patches = [str(value) for value in cell.get("patches", []) if isinstance(value, str)]
-    valid = [value for value in patches if _patch_key(value) != (-1, -1)]
+    valid = [_public_patch_label(value) for value in patches if _patch_key(value) != (-1, -1)]
     return max(valid, key=_patch_key) if valid else "rolling"
 
 
@@ -439,9 +461,11 @@ def build_production_index(
     cell_bytes: dict[str, bytes] = {}
     metas: list[dict[str, Any]] = []
     for source_cell in candidate["cells"]:
-        scope_id = str(source_cell["scope_id"])
+        source_scope_id = str(source_cell["scope_id"])
         role = str(source_cell["role"])
         patch_id = _cell_patch(source_cell)
+        source_patch = source_cell.get("patches", [None])[0]
+        scope_id = _public_patch_scope_id(source_scope_id, source_patch, patch_id)
         filename = _cell_slug(scope_id, patch_id, role)
         production_rows: list[dict[str, Any]] = []
         for source_row in source_cell["rows"]:
