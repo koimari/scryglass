@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pandas as pd
@@ -240,3 +241,34 @@ def test_live_binding_accepts_zero_padded_alias_for_float_like_oe_token(tmp_path
 
     assert list(intervals) == ["16.02"]
     assert binding["source_token_count"] == 1
+
+
+def test_float_like_token_uses_event_time_when_both_audited_aliases_exist() -> None:
+    path = Path("data/lol/v2/champions/oe-atom-patch-map-v1.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    rows = {row["oe_token"]: row for row in payload["mappings"]}
+    early = deepcopy(rows["16.02"])
+    late = deepcopy(rows["16.02"])
+    late["oe_token"] = "16.20"
+    late["official_patch"] = "26.20"
+    late["official_release_at"] = "2026-08-01T00:00:00Z"
+    late["oe_observed_interval"] = {
+        "start": "2026-08-01T00:00:00Z",
+        "end": "2026-08-10T00:00:00Z",
+    }
+    mapping = MappingArtifact(
+        payload=payload,
+        rows={"16.02": early, "16.20": late},
+        path=path,
+        repo_root=path.parents[3],
+    )
+
+    early_result = resolve_oe_patch("16.2", "2026-01-25T12:00:00Z", mapping=mapping)
+    late_result = resolve_oe_patch("16.2", "2026-08-05T12:00:00Z", mapping=mapping)
+
+    assert early_result.status == "resolved"
+    assert early_result.oe_token == "16.02"
+    assert early_result.official_patch == "26.02"
+    assert late_result.status == "resolved"
+    assert late_result.oe_token == "16.20"
+    assert late_result.official_patch == "26.20"

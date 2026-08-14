@@ -626,14 +626,20 @@ def resolve_oe_patch(
     """
 
     try:
-        token = normalize_oe_token(oe_token)
+        candidates = _live_oe_token_candidates(oe_token)
     except PatchMappingError:
         return _unavailable(token=None, as_of=None, reason="malformed_oe_token")
     artifact = mapping or load_mapping(
         mapping_path,
         verify_source_hashes=verify_source_hashes,
     )
-    row = artifact.rows.get(token)
+    available = [
+        (candidate, artifact.rows[candidate])
+        for candidate in candidates
+        if candidate in artifact.rows
+    ]
+    token = available[0][0] if available else candidates[0]
+    row = available[0][1] if available else None
     if row is None:
         return _unavailable(token=token, as_of=None, reason="unknown_oe_token")
     if as_of is None:
@@ -643,6 +649,41 @@ def resolve_oe_patch(
     except PatchMappingError:
         return _unavailable(token=token, as_of=None, reason="invalid_as_of", row=row)
     as_of_text = _rfc3339(instant)
+
+    # A float-like token such as ``16.2`` can mean ``16.02`` or ``16.20``.
+    # Use the event timestamp when both audited spellings exist. Overlapping
+    # intervals are unsafe, so they stay unavailable.
+    in_interval: list[tuple[str, Mapping[str, Any]]] = []
+    for candidate, candidate_row in available:
+        candidate_interval = candidate_row["oe_observed_interval"]
+        candidate_start = _parse_utc(
+            candidate_interval["start"],
+            field=f"{candidate}.interval.start",
+        )
+        candidate_end = _parse_utc(
+            candidate_interval["end"],
+            field=f"{candidate}.interval.end",
+        )
+        if candidate_start <= instant <= candidate_end:
+            in_interval.append((candidate, candidate_row))
+    if len(in_interval) > 1:
+        return PatchResolution(
+            oe_token=token,
+            as_of=as_of_text,
+            status="unavailable",
+            reason="ambiguous_oe_token",
+            ambiguity_status="ambiguous",
+            evidence=tuple(
+                {
+                    "oe_token": candidate,
+                    "source_interval": dict(candidate_row["oe_observed_interval"]),
+                }
+                for candidate, candidate_row in in_interval
+            ),
+        )
+    if len(in_interval) == 1:
+        token, row = in_interval[0]
+
     interval = row["oe_observed_interval"]
     start = _parse_utc(interval["start"], field=f"{token}.interval.start")
     end = _parse_utc(interval["end"], field=f"{token}.interval.end")
