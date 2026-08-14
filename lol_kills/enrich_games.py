@@ -10,6 +10,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from lol_kills.net import require_https_url
+
 ROOT = Path(__file__).resolve().parents[1]
 GAMES = ROOT / "data" / "lol" / "draft_games.json"
 UA = "parlay-risk-sim/lol-markets"
@@ -39,6 +41,7 @@ def cargo_by_ids(game_ids: list[str], sleep_s: float = 0.35) -> dict[str, dict]:
             "format": "json",
         }
         url = "https://lol.fandom.com/wiki/Special:CargoExport?" + urllib.parse.urlencode(params)
+        url = require_https_url(url, hosts={"lol.fandom.com"})
         req = urllib.request.Request(url, headers={"User-Agent": UA})
         with urllib.request.urlopen(req, timeout=120) as resp:
             raw = resp.read().decode()

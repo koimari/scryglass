@@ -1,10 +1,9 @@
 """Seed the v2 champion ontology from the LCC atom bridge (v1).
 
-For every champion in the pinned LCC atom bridge artifact, emit a
-patch-26.15 ontology profile (12 dimensions, per-label probabilities and
-uncertainties) so the ontology has full 173-champion coverage.  The four
-hand-authored champions keep their existing 26.14 profiles untouched; the
-bridge-derived 26.15 profiles are additive.
+For every champion in the pinned LCC atom bridge artifact, emit a patch-pinned
+ontology profile (12 dimensions, per-label probabilities and uncertainties)
+so the ontology has full champion coverage. Existing profiles remain intact;
+the bridge-derived profile for the current public patch is additive.
 
 Fail-closed rules:
   * champions missing from the bridge are an error (never a silent zero)
@@ -25,20 +24,21 @@ from typing import Any
 
 from .consume import AtomBridge, DEFAULT_ARTIFACT_PATH
 from ..schema import DIMENSION_LABELS, REQUIRED_DIMENSIONS, ROLES
+from ...patch_identity import client_patch as canonical_client_patch, public_patch as canonical_public_patch
 
-PRIOR_PATCH = "26.15"
 SOURCE_ID = "source:lcc-atom-bridge-v1"
+PRIOR_PATCH = "26.15"  # compatibility default for older hand-authored callers
 SEED_SCHEMA_VERSION = "v2-champion-ontology-1"
 SOURCES_SCHEMA_VERSION = "v2-champion-sources-1"
 CURATED_CHAMPION_IDS = ("riot:champion:115", "riot:champion:101", "riot:champion:161", "riot:champion:518")
 
 DEFAULT_SEED_PATH = (
     Path(__file__).resolve().parents[4]
-    / "data" / "lol" / "v2" / "champions" / "champion-ontology-seed.json"
+    / "data" / "lol" / "v2" / "champions" / "champion-ontology-seed-26.16.json"
 )
 DEFAULT_SOURCES_PATH = (
     Path(__file__).resolve().parents[4]
-    / "data" / "lol" / "v2" / "champions" / "champion-ontology-sources.json"
+    / "data" / "lol" / "v2" / "champions" / "champion-ontology-sources-26.16.json"
 )
 
 POSITION_MAP = {
@@ -49,8 +49,8 @@ POSITION_MAP = {
     "SUPPORT": "support",
 }
 
-CANONICAL_AS_OF = "2026-08-07T12:00:00Z"
-SNAPSHOT_ID = "scryglass:v2:champion-ontology:2026-08-07"
+CANONICAL_AS_OF = "2026-08-13T23:52:09Z"
+SNAPSHOT_ID = "scryglass:v2:champion-ontology:26.16"
 
 
 class SeedError(ValueError):
@@ -137,8 +137,13 @@ def _roles_from_positions(positions: list[str]) -> list[str]:
 def build_seed(
     bridge: AtomBridge,
     existing_seed: dict[str, Any],
+    *,
+    patch: str | None = None,
 ) -> dict[str, Any]:
     """Build the full-coverage ontology seed (deterministic)."""
+    patch = patch or str(bridge.provenance.get("data_patch") or "")
+    if not patch or patch == "unknown":
+        raise SeedError("bridge provenance has no canonical public data_patch")
     existing_by_id = {row["champion_id"]: row for row in existing_seed["champions"]}
     champions: list[dict[str, Any]] = []
 
@@ -161,14 +166,14 @@ def build_seed(
 
         existing = existing_by_id.get(champion_id)
         if existing is not None:
-            # Keep the hand-authored entry verbatim; add the 26.15 profile
+            # Keep the hand-authored entry verbatim; add the current profile
             # only for roles that are legal in the authored entry AND present
             # in the bridge positions.
             curated = json.loads(_canonical(existing))
             authored_legal = set(existing.get("role_legalities") or [])
             seed_roles = [r for r in bridge_roles if r in authored_legal]
             if seed_roles:
-                curated["patch_profiles"][PRIOR_PATCH] = {
+                curated["patch_profiles"][patch] = {
                     "role_profiles": {
                         role: _bridge_role_profile(prior, role) for role in seed_roles
                     }
@@ -186,7 +191,7 @@ def build_seed(
                 "aliases": _aliases_for(display_name, lcc_key, []),
                 "role_legalities": bridge_roles,
                 "patch_profiles": {
-                    PRIOR_PATCH: {"role_profiles": role_profiles},
+                    patch: {"role_profiles": role_profiles},
                 },
             }
         )
@@ -208,26 +213,93 @@ def _bridge_role_profile(prior: dict[str, Any], role: str) -> dict[str, Any]:
     return profile
 
 
-def build_sources(existing_sources: dict[str, Any]) -> dict[str, Any]:
-    """Return the sources payload with the atom-bridge source row added."""
+def build_sources(
+    existing_sources: dict[str, Any], *, patch: str | None = None
+) -> dict[str, Any]:
+    """Return sources with explicit public and client patch provenance.
+
+    Historical source rows may have been written with the public label in a
+    client-data URL. Rebuild those URLs from the canonical patch pair before
+    adding the current 26.16 bridge and exact client packet rows.
+    """
     rows = list(existing_sources.get("sources") or [])
+    if patch is None:
+        current = next((row for row in rows if row.get("source_id") == SOURCE_ID), None)
+        patch = str((current or {}).get("patch") or PRIOR_PATCH)
     # Idempotent: a re-run replaces the canonical row instead of failing.
-    rows = [row for row in rows if row.get("source_id") != SOURCE_ID]
+    normalized_rows: list[dict[str, Any]] = []
+    for source in rows:
+        row = dict(source)
+        source_patch = row.get("patch") or row.get("public_patch") or row.get("patch_id")
+        if row.get("kind") == "riot_datadragon" and source_patch:
+            try:
+                public = canonical_public_patch(source_patch)
+                client = canonical_client_patch(source_patch)
+            except (TypeError, ValueError):
+                public = client = None
+            if public and client:
+                row["patch"] = public
+                row["public_patch"] = public
+                row["client_patch"] = client
+                row["patch_id"] = public
+                if isinstance(row.get("url"), str) and "/data/" in row["url"]:
+                    _, suffix = row["url"].split("/data/", 1)
+                    row["url"] = f"https://ddragon.leagueoflegends.com/cdn/{client}.1/data/{suffix}"
+        normalized_rows.append(row)
+    rows = [row for row in normalized_rows if row.get("source_id") not in {SOURCE_ID, "source:cdragon-26.16", "source:riot-dd-26.16"}]
+    current_public = canonical_public_patch(patch)
+    current_client = canonical_client_patch(patch)
     rows.append(
         {
             "source_id": SOURCE_ID,
+            "patch": current_public,
+            "public_patch": current_public,
+            "client_patch": current_client,
             "kind": "atom_bridge",
             "locator_kind": "repository_path",
-            "locator": "data/lol/v2/champions/lcc-atom-bridge-v1.json",
+            "locator": "data/lol/v2/champions/lcc-atom-bridge-26.16.json",
             "publication_decision": "private_pending_review",
             "reviewed_by": "l3_atom_bridge",
             "reviewed_at": CANONICAL_AS_OF,
             "notes": (
                 "Mechanistic champion atoms from the League Combat Calculator "
-                "atom cache (wiki 26.15 authority), mapped through "
+                f"atom cache (public patch {current_public}, client patch {current_client}), mapped through "
                 "scryglass.lcc-atom-bridge.v1. Automated prior; pending review."
             ),
         }
+    )
+    rows.extend(
+        [
+            {
+                "source_id": "source:cdragon-26.16",
+                "patch": current_public,
+                "public_patch": current_public,
+                "client_patch": current_client,
+                "source_version": "16.16.1",
+                "kind": "communitydragon",
+                "locator_kind": "receipt",
+                "locator": "data/lol/v2/champions/lcc-atom-refresh-26.16-receipt.json",
+                "url": "https://raw.communitydragon.org/16.16/",
+                "publication_decision": "private_pending_review",
+                "reviewed_by": "l3_atom_bridge",
+                "reviewed_at": CANONICAL_AS_OF,
+                "notes": "Exact CommunityDragon 16.16 packet for public patch 26.16; receipt-bound and development-only.",
+            },
+            {
+                "source_id": "source:riot-dd-26.16",
+                "patch": current_public,
+                "public_patch": current_public,
+                "client_patch": current_client,
+                "source_version": "16.16.1",
+                "kind": "riot_datadragon",
+                "url": "https://ddragon.leagueoflegends.com/cdn/16.16.1/data/en_US/champion.json",
+                "publication_decision": "private_pending_review",
+                "reviewed_by": "l3_authoring",
+                "reviewed_at": CANONICAL_AS_OF,
+                "patch_id": current_public,
+                "notes": "Official champion metadata source version 16.16.1 for public patch 26.16.",
+            },
+        ]
     )
     rows.sort(key=lambda row: row["source_id"])
     return {
@@ -242,18 +314,25 @@ def main() -> int:
     ap.add_argument("--bridge", type=Path, default=DEFAULT_ARTIFACT_PATH)
     ap.add_argument("--out-seed", type=Path, default=DEFAULT_SEED_PATH)
     ap.add_argument("--out-sources", type=Path, default=DEFAULT_SOURCES_PATH)
+    ap.add_argument(
+        "--patch",
+        help="public patch label; defaults to the bridge provenance data_patch",
+    )
     args = ap.parse_args()
 
     bridge = AtomBridge.load(args.bridge)
     existing_seed = json.loads(args.out_seed.read_text(encoding="utf-8"))
     existing_sources = json.loads(args.out_sources.read_text(encoding="utf-8"))
 
-    seed = build_seed(bridge, existing_seed)
-    sources = build_sources(existing_sources)
+    patch = args.patch or str(bridge.provenance.get("data_patch") or "")
+    if not patch or patch == "unknown":
+        raise SeedError("bridge provenance has no canonical public data_patch")
+    seed = build_seed(bridge, existing_seed, patch=patch)
+    sources = build_sources(existing_sources, patch=patch)
 
     args.out_seed.write_text(json.dumps(seed, indent=1, ensure_ascii=True) + "\n", encoding="utf-8")
     args.out_sources.write_text(json.dumps(sources, indent=1, ensure_ascii=True) + "\n", encoding="utf-8")
-    print(f"wrote {args.out_seed} ({len(seed['champions'])} champions, patch {PRIOR_PATCH})")
+    print(f"wrote {args.out_seed} ({len(seed['champions'])} champions, patch {patch})")
     print(f"wrote {args.out_sources} ({len(sources['sources'])} sources)")
     return 0
 

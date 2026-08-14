@@ -1,7 +1,4 @@
-import io
 import json
-import os
-import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +10,18 @@ from lol_kills.export import warehouse_snapshot as snapshot
 
 
 class WarehouseSnapshotTests(unittest.TestCase):
+    def test_pointer_rejects_remote_snapshots(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            pointer = Path(temp) / "pointer.json"
+            for url in (
+                "file:///tmp/archive.tar.gz",
+                "https://example.com/archive.tar.gz",
+                "https://token@example.public.blob.vercel-storage.com/archive.tar.gz",
+            ):
+                pointer.write_text(json.dumps({"url": url}))
+                with self.assertRaisesRegex(RuntimeError, "remote warehouse snapshots are disabled"):
+                    snapshot._read_pointer(pointer)
+
     def test_bootstrap_writes_oe_shaped_parquet_from_public_pack(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -42,7 +51,7 @@ class WarehouseSnapshotTests(unittest.TestCase):
             finally:
                 snapshot.ROOT = old_root
 
-    def test_save_uses_stable_blob_path_and_internal_manifest(self) -> None:
+    def test_remote_save_is_disabled_before_reading_credentials_or_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             parquet_dir = root / "data/lol/warehouse/parquet"
@@ -51,31 +60,18 @@ class WarehouseSnapshotTests(unittest.TestCase):
                 parquet_dir / "oe_team_games.parquet", index=False
             )
             pointer = root / "data/lol/warehouse_snapshot.json"
-            uploaded: dict[str, bytes] = {}
             old_root = snapshot.ROOT
             old_default_pointer = snapshot.DEFAULT_POINTER
             try:
                 snapshot.ROOT = root
                 snapshot.DEFAULT_POINTER = pointer
-
-                def fake_blob_put(_token, pathname, data, _content_type, **_kwargs):
-                    uploaded[pathname] = data
-                    return "https://example.public.blob.vercel-storage.com/" + pathname
-
-                with patch.dict(os.environ, {"BLOB_READ_WRITE_TOKEN": "test-token"}), patch(
-                    "lol_kills.export.upload_pack._blob_put", side_effect=fake_blob_put
-                ) as put:
-                    snapshot.save_snapshot(pointer)
-                    snapshot.save_snapshot(pointer)
-
-                self.assertEqual(put.call_count, 2)
-                self.assertEqual(list(uploaded), [snapshot.SNAPSHOT_PATH])
-                payload = json.loads(pointer.read_text())
-                self.assertEqual(payload["pathname"], snapshot.SNAPSHOT_PATH)
-                with tarfile.open(fileobj=io.BytesIO(uploaded[snapshot.SNAPSHOT_PATH]), mode="r:gz") as archive:
-                    manifest = json.loads(archive.extractfile("snapshot_manifest.json").read())
-                self.assertEqual(manifest["schema"], snapshot.SNAPSHOT_SCHEMA)
-                self.assertNotIn("warehouse/raw", " ".join(item["path"] for item in manifest["files"]))
+                with patch("urllib.request.urlopen") as request:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "remote warehouse snapshots are disabled",
+                    ):
+                        snapshot.save_snapshot(pointer)
+                request.assert_not_called()
             finally:
                 snapshot.ROOT = old_root
                 snapshot.DEFAULT_POINTER = old_default_pointer

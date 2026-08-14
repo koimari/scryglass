@@ -554,6 +554,40 @@
   color: var(--canvas);
 }
 
+.pagination {
+  display: grid;
+  grid-template-columns: minmax(7rem, 1fr) auto minmax(7rem, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+  padding-top: 1rem;
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: var(--text-micro);
+  text-align: center;
+}
+
+.pagination button {
+  min-height: 3rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.pagination button:hover:not(:disabled),
+.pagination button:focus-visible {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+.pagination button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .tournamentGroup {
   display: grid;
   grid-template-columns: minmax(9rem, 14rem) minmax(0, 1fr);
@@ -734,6 +768,15 @@
   .gallery,
   .resultDay > div {
     grid-template-columns: 1fr;
+  }
+
+  .pagination {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pagination span {
+    grid-column: 1 / -1;
+    grid-row: 1;
   }
 
   .matchCardFeatured {

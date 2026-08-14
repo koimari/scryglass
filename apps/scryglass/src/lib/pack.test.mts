@@ -4,11 +4,15 @@ import test from "node:test";
 import {
   bestChampionRecords,
   compactPlayerRatings,
+  findRecordByName,
   findPlayerByRouteName,
+  hasPromotedDraftAuthority,
   isActiveRating,
+  packUrl,
   recentProfileGames,
   scopedTeamWr,
   type PlayerRating,
+  type PackManifest,
   type ProfileGame,
   type ProfileRecords,
   type TeamRecord,
@@ -21,6 +25,70 @@ test("player route lookup preserves exact source casing for duplicate handles", 
   ];
   assert.equal(findPlayerByRouteName(players, "random")?.last_team, "Team Solid");
   assert.equal(findPlayerByRouteName(players, "Random")?.last_team, "Disruptors");
+});
+
+test("record joins ignore source casing and harmless spacing differences", () => {
+  const records = { "Gen.G": { current_tier: "tier1" } };
+  assert.deepEqual(findRecordByName(records, "  GEN.G  "), { current_tier: "tier1" });
+});
+
+test("draft authority stays closed until an independent receipt verifier exists", () => {
+  const manifest = {
+    pack_id: "v2026.08.13.1830",
+    schema_version: "test",
+    created_utc: "2026-08-13T18:31:17Z",
+    filters: { years: [2026], leagues: "all" },
+    attribution: "test",
+    excluded: [],
+    base_url: null,
+    total_bytes: 0,
+    total_files: 0,
+    files: [],
+  } satisfies PackManifest;
+
+  assert.equal(hasPromotedDraftAuthority(manifest), false);
+  assert.equal(hasPromotedDraftAuthority({
+    ...manifest,
+    draft_authority: {
+      schema_version: "scryglass:draft-authority:v1",
+      status: "promoted",
+      release_id: manifest.pack_id,
+      model_version: "draft-v1",
+      receipt_sha256: "a".repeat(64),
+    },
+  }), false);
+  assert.equal(hasPromotedDraftAuthority({
+    ...manifest,
+    draft_authority: {
+      schema_version: "scryglass:draft-authority:v1",
+      status: "promoted",
+      release_id: "different-release",
+      model_version: "draft-v1",
+      receipt_sha256: "a".repeat(64),
+    },
+  }), false);
+});
+
+test("Supabase pack URLs stay behind the active-release proxy", () => {
+  const manifest = {
+    pack_id: "v2026.08.13.183000",
+    schema_version: "test",
+    created_utc: "2026-08-13T18:31:17Z",
+    filters: { years: [2026], leagues: "all" },
+    attribution: "test",
+    excluded: [],
+    base_url: "https://legacy.example/packs/old",
+    data_backend: "supabase" as const,
+    total_bytes: 0,
+    total_files: 0,
+    files: [],
+  } satisfies PackManifest;
+
+  assert.equal(
+    packUrl(manifest, "features/team_records.json"),
+    "/api/assets/v2026.08.13.183000/features%2Fteam_records.json",
+  );
+  assert.throws(() => packUrl(manifest, "../private.json"), /invalid/);
 });
 
 function profileGame(game_id: string, date: string): ProfileGame {

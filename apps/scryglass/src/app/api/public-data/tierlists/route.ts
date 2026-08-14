@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { publicTierListViewDownloadUrl } from "@/lib/serverPack";
+import {
+  e2eLocalPackRoot,
+  publicTierListViewDownloadUrl,
+  readPublicTierList,
+} from "@/lib/serverPack";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,21 +11,26 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const view = new URL(request.url).searchParams.get("view") === "latest" ? "latest" : "full";
   try {
-    const url = await publicTierListViewDownloadUrl(view);
+    if (e2eLocalPackRoot()) {
+      return NextResponse.json(await readPublicTierList(), {
+        headers: { "Cache-Control": "private, no-store" },
+      });
+    }
+    const url = new URL(await publicTierListViewDownloadUrl(view), request.url);
     return NextResponse.redirect(url, {
       status: 307,
       headers: {
-        "Cache-Control": "public, max-age=0, s-maxage=21600, stale-while-revalidate=3600",
+        "Cache-Control": "public, max-age=0, must-revalidate",
       },
     });
   } catch {
     if (view === "latest") {
       try {
-        const url = await publicTierListViewDownloadUrl("full");
+        const url = new URL(await publicTierListViewDownloadUrl("full"), request.url);
         return NextResponse.redirect(url, {
           status: 307,
           headers: {
-            "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=60",
+            "Cache-Control": "public, max-age=0, must-revalidate",
           },
         });
       } catch {

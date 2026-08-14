@@ -1,12 +1,4 @@
-/** Support-chat router: natural language -> tool calls, executed against the
- * real /api/chat endpoints. The model (Cactus/Needle WASM) only EMITS tool
- * calls; this module executes them and the UI renders executed results.
- *
- * Two implementations behind one interface:
- *   - needleRoute: the on-device Cactus/Needle WASM adapter (OpenAI-compatible
- *     tool calling), loaded async with graceful degradation.
- *   - fallbackRoute: a deterministic keyword/regex router that always works.
- */
+/** Support-chat router: natural language -> validated read-only tool calls. */
 
 export type ToolName =
   | "query_players"
@@ -40,13 +32,16 @@ export const TOOLS: ToolSpec[] = [
   { name: "compare_players", description: "Compare the ratings of two named players and answer which rating is higher.", args: [{ name: "player1", description: "first player name" }, { name: "player2", description: "second player name" }] },
   { name: "team", description: "Team profile: rating, record, recent results.", args: [{ name: "name", description: "team name" }] },
   { name: "matches", description: "Recent completed matches, optionally filtered by team, league, or champion.", args: [{ name: "team", description: "team name (optional)" }, { name: "league", description: "league code such as LEC or LCK (optional)" }, { name: "champion", description: "champion name (optional)" }, { name: "limit", description: "number of matches (optional)" }] },
-  { name: "tier", description: "Patch-wide champion tier list, optionally per role.", args: [{ name: "role", description: "top | jng | mid | bot | sup (optional)" }, { name: "patch", description: "patch such as 16.15 (optional)" }] },
+  { name: "tier", description: "Patch-wide champion tier list, optionally per role.", args: [{ name: "role", description: "top | jng | mid | bot | sup (optional)" }, { name: "patch", description: "public patch such as 26.15 (optional)" }] },
   { name: "schedule", description: "Upcoming fixtures, optionally for a league.", args: [{ name: "league", description: "league or tournament (optional)" }] },
   { name: "methodology", description: "Explain ratings, grades, tier lists, the draft win share, matches, or schedules.", args: [{ name: "topic", description: "ratings | grades | tiers | draft | matches | schedule | all" }] },
   { name: "navigation", description: "What pages exist on the site and where to find something.", args: [] },
 ];
 
 const TOOL_NAMES = new Set<string>(TOOLS.map((tool) => tool.name));
+export const SUPPORT_QUESTION_MAX_CHARS = 500;
+const SUPPORT_ARGUMENT_MAX_CHARS = 100;
+const SUPPORT_TOOL_TIMEOUT_MS = 5_000;
 
 // --- Deterministic fallback router -----------------------------------------
 
@@ -290,90 +285,35 @@ export function fallbackRoute(text: string): RouteResult {
     return name ? { call: { tool: "player", args: { name } } } : { call: { tool: "leaderboards", args: { category: "rating" } } };
   }
 
-  return { explanation: "I can help with players, champions, teams, matches, ratings, draft scores, tier lists, schedules, and methodology. Try: \"what is the worst champion in general?\", \"show me T1's recent matches\", or \"how does the draft win share work?\"." };
+  return { explanation: "I can help with players, champions, teams, matches, ratings, tier lists, schedules, methodology, and Draft Score availability. Try: \"what is the worst champion in general?\", \"show me T1's recent matches\", or \"is Draft Score available?\"." };
 }
 
-// --- Cactus / Needle WASM adapter ------------------------------------------
-
-/** Config for the on-device model; wire these to the hosted engine + weights. */
-export const NEEDLE_CONFIG = {
-  engineUrl: "/needle/engine.wasm", // Cactus engine WASM build
-  modelUrl: "/needle/needle-model.bin", // Needle 2 weights (14 MB)
-  enabled: true,
-};
-
-let needleState: "unloaded" | "loading" | "ready" | "failed" = "unloaded";
-let needleModule: { call: (prompt: string) => Promise<string> } | null = null;
-
-async function loadNeedleModule(): Promise<{ call: (prompt: string) => Promise<string> } | null> {
-  // Dynamic import keeps the WASM engine out of the main bundle until first use.
-  // The engine exposes an OpenAI-compatible chat/tool-calling entry point.
-  const client = await import("./needleClient").then(
-    (mod) => mod.createNeedleClient(NEEDLE_CONFIG),
-    () => null,
-  );
-  return client;
-}
-
-export async function needleRoute(text: string): Promise<RouteResult | null> {
-  if (!NEEDLE_CONFIG.enabled) return null;
-  if (needleState === "unloaded") {
-    needleState = "loading";
-    try {
-      needleModule = await loadNeedleModule();
-      needleState = needleModule ? "ready" : "failed";
-    } catch {
-      needleState = "failed";
-    }
-  }
-  if (needleState !== "ready" || !needleModule) return null;
-  const schema = TOOLS.map(
-    (tool) =>
-      `${tool.name}: ${tool.description}${
-        tool.args.length ? ` args(${tool.args.map((arg) => `${arg.name} = ${arg.description}`).join(", ")})` : " (no args)"
-      }`,
-  ).join("\n");
-  const prompt = [
-    "You route a question about the Scryglass League of Legends data site to exactly one tool.",
-    "Prefer query_players for any question that compares, filters, ranks, or evaluates players. Pass the complete original question as q.",
-    "Use query_drafts for team draft-score rankings or comparisons between two named teams. Pass the complete original question as q.",
-    "Use query_champions for general champion rankings. Pass the complete original question as q.",
-    "TOOLS:\n" + schema,
-    "Respond with ONLY a JSON object: {\"tool\": \"<name>\", \"args\": {\"<arg>\": \"<value>\"}}.",
-    "If the question is off-topic or ambiguous, respond {\"explanation\": \"...\"}.",
-    "QUESTION: " + text,
-  ].join("\n");
-  const raw = await needleModule.call(prompt);
-  try {
-    const parsed = JSON.parse(raw) as { tool?: string; args?: Record<string, string>; explanation?: string };
-    if (parsed.explanation) return { explanation: parsed.explanation };
-    if (parsed.tool && TOOL_NAMES.has(parsed.tool)) {
-      return { call: { tool: parsed.tool as ToolName, args: parsed.args ?? {} } };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/** Route a question: prefer the on-device model, fall back deterministically. */
+/** Route a question through the deterministic, auditable query router. */
 export async function routeQuestion(text: string): Promise<RouteResult> {
-  if (!text.trim()) return { explanation: "Ask me anything about players, teams, matches, ratings, tiers, schedules, or methodology." };
-  const deterministic = deterministicDataRoute(text);
+  const question = text.trim();
+  if (!question) return { explanation: "Ask me anything about players, teams, matches, ratings, tiers, schedules, or methodology." };
+  if (Array.from(question).length > SUPPORT_QUESTION_MAX_CHARS) {
+    return { explanation: `Questions can contain up to ${SUPPORT_QUESTION_MAX_CHARS} characters.` };
+  }
+  const deterministic = deterministicDataRoute(question);
   if (deterministic) return deterministic;
-  const routed = await needleRoute(text);
-  if (routed) return routed;
-  return fallbackRoute(text);
+  return fallbackRoute(question);
 }
 
 // --- Execution --------------------------------------------------------------
 
 export async function executeTool(call: ToolCall): Promise<unknown> {
+  if (!TOOL_NAMES.has(call.tool)) throw new Error("The chat tool is unsupported");
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(call.args)) {
+    const maximum = key === "q" ? SUPPORT_QUESTION_MAX_CHARS : SUPPORT_ARGUMENT_MAX_CHARS;
+    if (Array.from(value).length > maximum) throw new Error("A chat tool argument is too long");
     if (value) params.set(key, value);
   }
-  const response = await fetch(`/api/chat/${call.tool}?${params.toString()}`);
+  const response = await fetch(`/api/chat/${call.tool}?${params.toString()}`, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(SUPPORT_TOOL_TIMEOUT_MS),
+  });
   const payload = (await response.json()) as { ok: boolean; data?: unknown; reason?: string };
   if (!response.ok || !payload.ok) {
     throw new Error(payload.reason ?? `Chat tool ${call.tool} failed`);

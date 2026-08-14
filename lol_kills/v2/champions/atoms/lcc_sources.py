@@ -11,9 +11,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
+from ...patch_identity import PatchIdentityError, canonical_patch
 from .schema import AtomBridgeError, require_object
 
 DEFAULT_LCC_REPO = Path(os.environ.get("SCRYGLASS_LCC_REPO", "/Users/river/Projects/league-combat-calculator"))
@@ -25,9 +27,6 @@ REQUIRED_DATA_FILES: tuple[str, ...] = (
     "data/wiki-atoms/atom-relations.json",
     "data/champions.json",
 )
-# Canonical data-patch marker: the wiki cache is the authority (26.15-era);
-# the ddragon 16.15.1 label in static/js/app.js is a stale CDN artifact.
-# Coordination answer from the LCC thread (2026-08-07).
 PATCH_MARKER_FILE = "data/.champions.json.meta"
 OPTIONAL_DATA_FILES: tuple[str, ...] = (
     "data/atoms/items.json",
@@ -93,25 +92,51 @@ class LccSources:
 
     def _git_head(self) -> str | None:
         try:
-            proc = os.popen(f"git -C {self.repo} rev-parse HEAD 2>/dev/null")
-            out = proc.read().strip()
-            proc.close()
-            return out or None
-        except Exception:  # noqa: BLE001
+            completed = subprocess.run(
+                ["git", "-C", str(self.repo), "rev-parse", "HEAD"],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=5,
+            )
+            out = completed.stdout.strip()
+            return out if completed.returncode == 0 and out else None
+        except (OSError, subprocess.SubprocessError):
             return None
 
     def source_provenance(self) -> dict[str, Any]:
         data_patch: str | None = None
+        client_patch: str | None = None
+        source_version: str | None = None
         meta = self.payloads.get(PATCH_MARKER_FILE)
         if isinstance(meta, dict):
-            data_patch = "26.15" if str(meta.get("fetched_at", "")).startswith("1786") else None
+            raw_namespace = meta.get("patch_namespace")
+            if isinstance(raw_namespace, dict) and raw_namespace.get("source_version"):
+                source_version = str(raw_namespace["source_version"])
+            if not source_version and meta.get("source_version"):
+                source_version = str(meta["source_version"])
+            candidate = meta.get("public_patch") or (
+                raw_namespace.get("public_patch")
+                if isinstance(raw_namespace, dict)
+                else None
+            )
+            try:
+                identity = canonical_patch(candidate or source_version)
+            except (PatchIdentityError, TypeError):
+                identity = None
+            if identity is not None:
+                data_patch = identity.public_patch
+                client_patch = identity.client_patch
         return {
             "lcc_repo": str(self.repo),
             "lcc_commit": self.commit,
             "data_patch": data_patch or "unknown",
+            "client_patch": client_patch or "unknown",
+            "source_version": source_version,
             "data_patch_note": (
-                "wiki cache is the authority (LCC thread, 2026-08-07); "
-                "ddragon 16.15.1 label is a stale CDN artifact"
+                "public_patch is the canonical Riot label; client_patch is the "
+                "CommunityDragon/Data Dragon source namespace"
             ),
             "file_sha256": dict(sorted(self.files.items())),
         }

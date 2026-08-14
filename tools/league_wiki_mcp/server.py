@@ -117,7 +117,7 @@ def _title_matches(connection: sqlite3.Connection, query: str, limit: int) -> li
     rows = connection.execute(
         "SELECT p.page_id, p.namespace, p.title, p.source_url, p.revision_id, "
         "p.revision_timestamp, p.has_text, p.cataloged "
-        f"FROM pages AS p WHERE {conditions} ORDER BY ({match_count}) DESC, {exact_case}, "
+        f"FROM pages AS p WHERE {conditions} ORDER BY ({match_count}) DESC, {exact_case}, "  # nosec B608: generated placeholders only
         "CASE WHEN p.namespace = 0 THEN 0 ELSE 1 END, CASE WHEN instr(p.title, '(') > 0 THEN 1 ELSE 0 END, "
         "length(p.title), p.has_text DESC, p.title COLLATE NOCASE LIMIT ?",
         (*likes, *likes, *exact_terms, limit),
@@ -137,7 +137,7 @@ def _exact_title_matches(connection: sqlite3.Connection, query: str) -> list[dic
     rows = connection.execute(
         "SELECT p.page_id, p.namespace, p.title, p.source_url, p.revision_id, "
         "p.revision_timestamp, p.has_text, p.cataloged FROM pages AS p "
-        f"WHERE p.namespace = 0 AND lower(p.title) IN ({placeholders}) AND p.has_text = 1 "
+        f"WHERE p.namespace = 0 AND lower(p.title) IN ({placeholders}) AND p.has_text = 1 "  # nosec B608: generated placeholders only
         "ORDER BY length(p.title), p.title COLLATE NOCASE",
         tuple(terms),
     ).fetchall()

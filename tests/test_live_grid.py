@@ -249,7 +249,7 @@ class GridSeriesEventsTests(unittest.TestCase):
 
     def test_grid_file_download_stops_after_bounded_429_retry(self) -> None:
         error = urllib.error.HTTPError(
-            "https://example.test/events.jsonl",
+            "https://cdn.api.grid.gg/events.jsonl",
             429,
             "too many requests",
             {"Retry-After": "120"},
@@ -258,7 +258,7 @@ class GridSeriesEventsTests(unittest.TestCase):
         with TemporaryDirectory() as temp, patch(
             "lol_kills.etl.grid_ingest.urllib.request.urlopen", side_effect=error
         ) as urlopen, patch("lol_kills.etl.grid_ingest.time.sleep") as sleep:
-            self.assertFalse(_download("https://example.test/events.jsonl", "key", Path(temp) / "events.jsonl"))
+            self.assertFalse(_download("https://cdn.api.grid.gg/events.jsonl", "key", Path(temp) / "events.jsonl"))
         self.assertEqual(urlopen.call_count, 2)
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 90)
         sleep.assert_called_once_with(30)
@@ -449,6 +449,13 @@ class GridSeriesEventsTests(unittest.TestCase):
             self.assertEqual(pointer["snapshot_url"], "/live/series/2970137/snapshots/12.json")
             self.assertTrue((Path(temp) / "series/2970137/snapshots/12.json").is_file())
             self.assertTrue((Path(temp) / "index.json").is_file())
+
+    def test_live_publisher_requires_a_private_explicit_output_path(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "explicit private live output"):
+            LivePublisher.from_environment()
+        public_root = Path(__file__).resolve().parents[1] / "apps" / "scryglass" / "public" / "live"
+        with self.assertRaisesRegex(RuntimeError, "public web tree"):
+            LivePublisher.from_environment(public_root)
 
 
 if __name__ == "__main__":

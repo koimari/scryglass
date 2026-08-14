@@ -41,6 +41,10 @@ from lol_kills.export.public_schedule import (
     build_public_schedule,
     validate_public_schedule,
 )
+from lol_kills.export.public_query_projection import (
+    build_public_query_projection,
+    write_public_query_projection,
+)
 from lol_kills.etl.competition import TAXONOMY_VERSION, canonicalize_competition_frame, competition_tier
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.refresh_ledger import worker_commit as resolve_worker_commit
@@ -63,6 +67,7 @@ from lol_kills.research.composition_signal import (
     validate_public_signal,
 )
 from lol_kills.v2.tierlists.patch_mapping import normalize_oe_token
+from lol_kills.v2.patch_identity import public_patch
 
 ROOT = Path(__file__).resolve().parents[2]
 WAREHOUSE = ROOT / "data" / "lol" / "warehouse" / "parquet"
@@ -349,6 +354,21 @@ def build_draft_records_payload(
     return payload
 
 
+def _withhold_unpromoted_draft_fields(payload: Mapping[str, Any]) -> None:
+    """Remove model-derived draft fields from one public profile payload."""
+
+    if isinstance(payload, dict):
+        payload.pop("draft_pool_audit", None)
+    games = payload.get("games")
+    if not isinstance(games, Mapping):
+        return
+    for game in games.values():
+        if not isinstance(game, dict):
+            continue
+        game.pop("draft_contribution", None)
+        game.pop("draft_pool", None)
+
+
 def _draft_players_from_signals(
     signals: Mapping[str, Any], games: Mapping[str, Any] | Sequence[Mapping[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -521,7 +541,9 @@ def _draft_metadata_from_maps(frame: pd.DataFrame) -> dict[str, dict[str, Any]]:
         if not game_id:
             continue
         value: dict[str, Any] = {
-            "patch": clean(row.get("patch")) or None,
+            # OE stores the source token in the client namespace (16.x). The
+            # public pack uses Riot's 26.x label.
+            "patch": _draft_patch(clean(row.get("patch"))) or None,
             "blue_bans": [
                 clean(row.get(f"blue_ban{slot}"))
                 for slot in range(1, 6)
@@ -553,15 +575,18 @@ def _draft_key(value: Any) -> str:
 
 
 def _draft_patch(value: Any) -> str:
-    """Canonicalize an OE patch token while keeping malformed values unavailable."""
+    """Return Riot's public patch label for an OE or client patch token."""
 
     text = str(value or "").strip()
     if not text:
         return ""
     try:
-        return normalize_oe_token(text)
+        return public_patch(normalize_oe_token(text))
     except (TypeError, ValueError):
-        return text
+        try:
+            return public_patch(text)
+        except (TypeError, ValueError):
+            return ""
 
 
 def _draft_role(value: Any) -> str:
@@ -625,7 +650,7 @@ def _attach_published_draft_pools(
                 "schema_version": "scryglass:draft-pool:v1",
                 "status": "unavailable",
                 "source": "oracle-elixir",
-                "patch": game.get("patch"),
+                "patch": _draft_patch(game.get("patch")) or None,
                 "bans": {"Blue": [], "Red": []},
                 "picked": [],
                 "unpicked": [],
@@ -754,7 +779,7 @@ def export_public_pack(
     )
     # Include UTC time so the 15-minute freshness workflow can publish more
     # than one immutable pack per day without colliding in Blob storage.
-    stamp = datetime.now(timezone.utc).strftime("%Y.%m.%d.%H%M")
+    stamp = datetime.now(timezone.utc).strftime("%Y.%m.%d.%H%M%S")
     pack_id = pack_id or f"v{stamp}"
     out_root = Path(out_root or runtime / "output" / "public_pack")
     pack_dir = out_root / pack_id
@@ -1335,21 +1360,6 @@ def export_public_pack(
         "scope": "published profile window after accepted-profile bridge",
         **draft_pool_audit,
     }
-    draft_records_dest = feat_dir / "draft_records.json"
-    draft_records_dest.write_text(
-        json.dumps(draft_records_payload, separators=(",", ":"), ensure_ascii=False),
-        encoding="utf-8",
-    )
-    register(
-        {
-            "rows": len(draft_records_payload["games"]),
-            "cols": None,
-            "bytes": draft_records_dest.stat().st_size,
-            "sha256": _sha256(draft_records_dest),
-            "columns": None,
-        },
-        "features/draft_records.json",
-    )
     published_composition = _validate_public_composition_records(profile_records_payload)
     composition_audit.update(
         {
@@ -1366,6 +1376,8 @@ def export_public_pack(
             ),
         }
     )
+    _withhold_unpromoted_draft_fields(profile_records_payload)
+    _withhold_unpromoted_draft_fields({"games": archive_games})
     del player_profile_frame
 
     # These records are intentionally built from the same year-filtered
@@ -1516,38 +1528,28 @@ def export_public_pack(
             "year": archive_year,
             "games": year_games,
         }
-        # Whole-archive match records are split into calendar quarters so
-        # every published object stays under the Supabase storage size limit
-        # (~50 MiB); the site resolves the quarter from the game date.
         quarters: dict[int, dict[str, Any]] = {}
         for game_id, game in year_games.items():
             month = int(str(game.get("date") or "")[5:7] or 0)
             quarter = ((month - 1) // 3) + 1
             bucket = quarters.setdefault(
                 quarter,
-                {
-                    "schema_version": archive_payload["schema_version"],
-                    "year": archive_year,
-                    "games": {},
-                },
+                {"schema_version": archive_payload["schema_version"], "year": archive_year, "games": {}},
             )
             bucket["games"][game_id] = game
         for quarter in (1, 2, 3, 4):
-            if quarter not in quarters:
-                quarters[quarter] = {
-                    "schema_version": archive_payload["schema_version"],
-                    "year": archive_year,
-                    "games": {},
-                }
-        for quarter in sorted(quarters):
+            bucket = quarters.setdefault(
+                quarter,
+                {"schema_version": archive_payload["schema_version"], "year": archive_year, "games": {}},
+            )
             archive_dest = feat_dir / f"match_records_{archive_year}_q{quarter}.json"
             archive_dest.write_text(
-                json.dumps(quarters[quarter], separators=(",", ":"), ensure_ascii=False),
+                json.dumps(bucket, separators=(",", ":"), ensure_ascii=False),
                 encoding="utf-8",
             )
             register(
                 {
-                    "rows": len(quarters[quarter]["games"]),
+                    "rows": len(bucket["games"]),
                     "cols": None,
                     "bytes": archive_dest.stat().st_size,
                     "sha256": _sha256(archive_dest),
@@ -1555,8 +1557,6 @@ def export_public_pack(
                 },
                 f"features/match_records_{archive_year}_q{quarter}.json",
             )
-    del archive_games
-
     for src_name, cols, out_name in (
         ("ratings_snapshot.parquet", spec.RATINGS_SNAPSHOT_COLS, "ratings_snapshot.json"),
         (
@@ -1603,9 +1603,6 @@ def export_public_pack(
         team_records_payload_raw = dict(team_records_payload)
         player_champion_records_raw = dict(player_champions_payload)
         match_index_raw = dict(match_index_payload)
-        draft_players_rows = _draft_players_from_signals(
-            composition_result.signals, profile_records_payload
-        )
         leaderboards = build_leaderboards(
             player_records_payload,
             profile_records_payload,
@@ -1614,9 +1611,9 @@ def export_public_pack(
             team_records=team_records_payload_raw,
             player_champion_records=player_champion_records_raw,
             match_index=match_index_raw,
-            draft_records=draft_records_payload,
-            draft_players=draft_players_rows,
-            draft_profile_records=profile_records_payload,
+            draft_records=None,
+            draft_players=[],
+            draft_profile_records=None,
         )
         leaderboards_dest = feat_dir / "leaderboards.json"
         leaderboards_dest.write_text(
@@ -1635,6 +1632,24 @@ def export_public_pack(
         )
     except (OSError, ValueError, TypeError, KeyError) as error:
         raise RuntimeError("support-chat leaderboards could not be built") from error
+
+    progress("building bounded public query projection")
+    query_projection = build_public_query_projection(
+        release_id=pack_id,
+        player_ratings=player_rating_rows,
+        team_ratings=team_rating_rows,
+        player_records=player_records_payload,
+        team_records=team_records_payload,
+        player_champion_records=player_champions_payload,
+        profile_records=profile_records_payload,
+        archive_games=archive_games,
+        player_weekly_ranks=weekly_ranks,
+        team_weekly_ranks=team_weekly_ranks,
+        player_metadata=player_metadata,
+        leaderboards=leaderboards,
+    )
+    query_api_manifest = write_public_query_projection(query_projection, pack_dir)
+    del archive_games, query_projection
 
     present_paths = {str(item["path"]) for item in files_meta}
     missing_public_files = sorted(
@@ -1698,6 +1713,16 @@ def export_public_pack(
         "attribution": spec.ATTRIBUTION,
         "composition_signal": composition_audit,
         "draft_pool": draft_pool_audit,
+        "draft_authority": {
+            "schema_version": "scryglass:draft-authority:v1",
+            "status": "unavailable",
+            "release_id": pack_id,
+            "model_version": None,
+            "receipt_sha256": None,
+            "issued_utc": None,
+            "reason": "model_not_promoted",
+        },
+        "query_api": query_api_manifest,
         "excluded": [
             "raw game rows",
             "research studies",
@@ -1741,7 +1766,11 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Export the public LoL ratings payload")
     ap.add_argument("--years", default="2025,2026", help="Comma-separated years (default 2025,2026)")
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT, help="Output root directory")
-    ap.add_argument("--pack-id", default=None, help="Override pack id (default vYYYY.MM.DD)")
+    ap.add_argument(
+        "--pack-id",
+        default=None,
+        help="Override pack id (default vYYYY.MM.DD.HHMMSS)",
+    )
     ap.add_argument("--warehouse-root", type=Path, default=None, help="Use a source-root overlay for live refreshes")
     args = ap.parse_args(argv)
     years = tuple(int(x.strip()) for x in args.years.split(",") if x.strip())

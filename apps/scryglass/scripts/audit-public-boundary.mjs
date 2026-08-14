@@ -2,6 +2,35 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 const appRoot = process.cwd();
+// PUBLIC_ASSET_ALLOWLIST_V1. A cross-language contract test keeps this set in
+// step with the publisher, web runtime, and final database constraint.
+const allowedAssetPaths = new Set([
+  "features/ratings_snapshot.json",
+  "features/player_ratings_snapshot.json",
+  "features/team_records.json",
+  "features/team_weekly_ranks.json",
+  "features/player_records.json",
+  "features/player_champion_records.json",
+  "features/profile_records.json",
+  "features/match_index.json",
+  "features/match_records_2025.json",
+  "features/match_records_2026.json",
+  "features/player_weekly_ranks.json",
+  "features/player_metadata.json",
+  "features/schedule.json",
+  "features/leaderboards.json",
+  "features/draft_records.json",
+  "features/match_records_2025_q1.json",
+  "features/match_records_2025_q2.json",
+  "features/match_records_2025_q3.json",
+  "features/match_records_2025_q4.json",
+  "features/match_records_2026_q1.json",
+  "features/match_records_2026_q2.json",
+  "features/match_records_2026_q3.json",
+  "features/match_records_2026_q4.json",
+  "rankings/tierlists.json",
+  "rankings/tierlists-latest.json",
+]);
 const forbiddenPaths = [
   "src/app/articles",
   "src/app/browse",
@@ -29,25 +58,32 @@ const forbiddenPaths = [
   "data/draft",
   "api/cron",
   "public/v2/tierlists",
+  "public/live",
+  "public/packs/manifest.json",
+  "public/rankings/tierlists.json",
 ];
-const forbiddenText = [
-  "draft_score",
-  "draft-wr",
-  "draft_recommendation",
-  "draft_composition",
-  "composition_runtime",
-  "Draft Score",
+const requiredDynamicPaths = [
+  "src/app/packs/manifest.json/route.ts",
+  "src/app/rankings/tierlists.json/route.ts",
+  "src/app/rankings/tierlists-latest.json/route.ts",
 ];
-const forbiddenPublicPath = /(?:draft|composition|blade_chest|tierlists_csv)/i;
-const excludedPublicRatingText = ["los ratones"];
-const invalidPublicLeagueText = ["oracle_elixir_api", "public_datalisk_api"];
-const forbiddenTierText = [
-  "artifact_sha256",
-  "claim_ceiling",
-  "development_only",
-  "publication_eligible",
-  "raw_sha256",
-  "training",
+const forbiddenArtifactText = [
+  "BLOB_READ_WRITE_TOKEN",
+  "GRID_API_KEY",
+  "SCRYGLASS_SUPABASE_SERVICE_ROLE_KEY",
+  "service_role_key",
+  "data/lol/warehouse/raw_grid",
+  "data/lol/v2/",
+  "private source receipts",
+  '"training_rows"',
+  '"raw_sha256"',
+];
+const forbiddenPublicDataText = [
+  "oracle_elixir_api",
+  "public_datalisk_api",
+  '"last_run_id"',
+  '"worker_commit"',
+  '"service_role"',
 ];
 const retiredPublicationText = [
   "@vercel/blob",
@@ -55,19 +91,13 @@ const retiredPublicationText = [
   "LIVE_BLOB_BASE_URL",
   "SCRYGLASS_TIERLIST_BLOB_BASE_URL",
 ];
-const allowedPackFile = /^public\/packs\/(?:manifest\.json|[^/]+\/features\/(?:ratings_snapshot|player_ratings_snapshot|team_records|team_weekly_ranks|player_records|player_champion_records|profile_records|player_weekly_ranks|player_metadata)\.json)$/;
-const textExtensions = new Set([
-  ".css",
-  ".html",
-  ".js",
-  ".json",
-  ".map",
-  ".md",
-  ".mjs",
-  ".rsc",
-  ".tex",
-  ".txt",
-]);
+const textExtensions = new Set([".css", ".html", ".js", ".json", ".map", ".mjs", ".rsc", ".txt"]);
+const retiredBlobHost = ["public", "blob", "vercel-storage", "com"].join(".");
+const failures = [];
+
+if ([...allowedAssetPaths].some((assetPath) => !/^[a-z0-9/_-]+\.json$/.test(assetPath))) {
+  failures.push("public asset allowlist contains an invalid path");
+}
 
 async function exists(relative) {
   try {
@@ -83,8 +113,7 @@ async function filesUnder(relative) {
   if (!(await exists(relative))) return [];
   const files = [];
   async function visit(current) {
-    const entries = await readdir(current, { withFileTypes: true });
-    for (const entry of entries) {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
       const target = path.join(current, entry.name);
       if (entry.isDirectory()) await visit(target);
       else if (entry.isFile()) files.push(target);
@@ -94,68 +123,70 @@ async function filesUnder(relative) {
   return files;
 }
 
-const failures = [];
-for (const relative of forbiddenPaths) {
-  if (await exists(relative)) failures.push(`removed public path exists: ${relative}`);
-}
-
-for (const file of await filesUnder("public")) {
-  const relative = path.relative(appRoot, file);
-  if (forbiddenPublicPath.test(relative)) {
-    failures.push(`private model path is public: ${relative}`);
-  }
-  if (relative.startsWith("public/packs/") && !allowedPackFile.test(relative)) {
-    failures.push(`non-rating pack file is public: ${relative}`);
-  }
-  if (relative.startsWith("public/packs/") && path.extname(file) === ".json") {
-    const content = await readFile(file, "utf8").catch(() => "");
-    for (const value of excludedPublicRatingText) {
-      if (content.toLowerCase().includes(value)) {
-        failures.push(`excluded team appears in ${relative}`);
-      }
-    }
-    for (const value of invalidPublicLeagueText) {
-      if (content.toLowerCase().includes(value)) {
-        failures.push(`transport label appears as public data in ${relative}`);
-      }
-    }
-  }
-}
-
-for (const root of ["public", ".next"]) {
+async function findText(root, values, failures) {
   for (const file of await filesUnder(root)) {
     if (!textExtensions.has(path.extname(file))) continue;
     const content = await readFile(file, "utf8").catch(() => "");
-    for (const value of forbiddenText) {
-      if (content.includes(value)) {
-        failures.push(`${value} appears in ${path.relative(appRoot, file)}`);
-      }
+    for (const value of values) {
+      if (content.includes(value)) failures.push(`${value} appears in ${path.relative(appRoot, file)}`);
     }
   }
+}
+
+for (const relative of forbiddenPaths) {
+  if (await exists(relative)) failures.push(`retired public path exists: ${relative}`);
+}
+for (const relative of requiredDynamicPaths) {
+  if (!(await exists(relative))) failures.push(`active-release compatibility route is missing: ${relative}`);
+}
+
+const publicPackFiles = await filesUnder("public/packs");
+if (publicPackFiles.length) {
+  failures.push(`checked-in public pack assets remain: ${publicPackFiles.map((file) => path.relative(appRoot, file)).join(", ")}`);
+}
+await findText("public", [...forbiddenArtifactText, ...forbiddenPublicDataText], failures);
+
+// A clean production build has BUILD_ID. Ignore `.next/dev`, which can contain
+// an older local server and is not a deployable artifact.
+if (await exists(".next/BUILD_ID")) {
+  await findText(".next/static", forbiddenArtifactText, failures);
+  await findText(".next/server/app", forbiddenArtifactText, failures);
 }
 
 for (const relative of ["package.json", "package-lock.json"]) {
   const content = await readFile(path.join(appRoot, relative), "utf8");
   for (const value of retiredPublicationText) {
-    if (content.includes(value)) {
-      failures.push(`retired publication dependency appears in ${relative}: ${value}`);
+    if (content.includes(value)) failures.push(`retired publication dependency appears in ${relative}: ${value}`);
+  }
+}
+
+for (const relative of ["next.config.ts", "src/proxy.ts", "src/lib/pack.ts", "src/lib/serverPack.ts"]) {
+  const content = await readFile(path.join(appRoot, relative), "utf8");
+  for (const candidate of content.match(/https?:\/\/[^\s"'`<>]+/g) ?? []) {
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.hostname === retiredBlobHost || parsed.hostname.endsWith(`.${retiredBlobHost}`)) {
+        failures.push(`retired public Blob origin appears in ${relative}`);
+      }
+    } catch {
+      // Ignore non-URLs. The boundary check only blocks parsed host matches.
     }
   }
 }
 
-const tierFile = "public/rankings/tierlists.json";
-if (!(await exists(tierFile))) {
-  failures.push(`missing static tier-list file: ${tierFile}`);
-} else {
-  const content = await readFile(path.join(appRoot, tierFile), "utf8");
-  for (const value of forbiddenTierText) {
-    if (content.includes(value)) failures.push(`${value} appears in ${tierFile}`);
-  }
+const bundledManifestPath = "src/lib/bundledPackManifest.json";
+if (await exists(bundledManifestPath)) {
+  failures.push(`stale build-only release manifest exists: ${bundledManifestPath}`);
+}
+
+const draftRoute = await readFile(path.join(appRoot, "src/app/api/chat/query_drafts/route.ts"), "utf8").catch(() => "");
+if (!draftRoute.match(/authority:\s*["']unavailable["']/) || draftRoute.includes("draft_records")) {
+  failures.push("draft chat route does not fail closed");
 }
 
 if (failures.length) {
-  process.stderr.write(`${failures.join("\n")}\n`);
+  process.stderr.write(`${[...new Set(failures)].join("\n")}\n`);
   process.exit(1);
 }
 
-process.stdout.write("Public rankings boundary: clean\n");
+process.stdout.write("Public release boundary: clean\n");

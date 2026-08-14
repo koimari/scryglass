@@ -23,6 +23,13 @@ from typing import Any, Iterable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from lol_kills.net import require_https_url
+from lol_kills.v2.patch_identity import (
+    CURRENT_PUBLIC_PATCH,
+    client_patch as canonical_client_patch,
+    public_patch as canonical_public_patch,
+)
+
 
 SCHEMA_VERSION = "scryglass:cdragon-patch-packet:v1"
 SOURCE_ROOT = "https://raw.communitydragon.org"
@@ -85,8 +92,10 @@ def _client_patch_for(patch: str) -> str:
     the source does not exist.
     """
 
-    match = re.fullmatch(r"26\.(\d{1,2})", patch.strip("/"))
-    return f"16.{int(match.group(1))}" if match else patch.strip("/")
+    try:
+        return canonical_client_patch(patch.strip("/"))
+    except ValueError:
+        return patch.strip("/")
 
 
 class CDragonClient:
@@ -98,13 +107,22 @@ class CDragonClient:
         delay: float = 0.15,
         timeout: float = 60.0,
     ):
-        self.patch = patch.strip("/")
-        self.source_patch = (source_patch or _client_patch_for(self.patch)).strip("/")
+        self.patch = canonical_public_patch(patch)
+        raw_source_patch = (source_patch or _client_patch_for(self.patch)).strip("/")
+        try:
+            self.source_patch = canonical_client_patch(raw_source_patch)
+        except ValueError:
+            # Preserve an explicitly supplied non-Riot source namespace so the
+            # exact-source probe can fail closed at the network boundary.
+            self.source_patch = raw_source_patch
         self.delay = max(0.0, delay)
         self.timeout = timeout
 
     def get(self, relative_path: str, *, retries: int = 4) -> tuple[bytes, str]:
-        url = f"{SOURCE_ROOT}/{self.source_patch}/{relative_path}"
+        url = require_https_url(
+            f"{SOURCE_ROOT}/{self.source_patch}/{relative_path}",
+            hosts={"raw.communitydragon.org"},
+        )
         request = Request(
             url,
             headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
@@ -127,7 +145,10 @@ class CDragonClient:
     def probe(self, relative_path: str) -> dict[str, Any]:
         """Probe one exact-patch path without substituting another patch."""
 
-        url = f"{SOURCE_ROOT}/{self.source_patch}/{relative_path}"
+        url = require_https_url(
+            f"{SOURCE_ROOT}/{self.source_patch}/{relative_path}",
+            hosts={"raw.communitydragon.org"},
+        )
         request = Request(
             url,
             headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
@@ -318,9 +339,10 @@ def capture(
     include_bins: bool = True,
     delay: float = 0.15,
 ) -> dict[str, Any]:
-    output = output_root / patch
+    normalized_patch = canonical_public_patch(patch)
+    output = output_root / normalized_patch
     output.mkdir(parents=True, exist_ok=True)
-    client = CDragonClient(patch, source_patch=source_patch, delay=delay)
+    client = CDragonClient(normalized_patch, source_patch=source_patch, delay=delay)
     files: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
 
@@ -402,7 +424,7 @@ def capture(
 
     normalized_payload = {
         "schema_version": SCHEMA_VERSION,
-        "patch": patch,
+        "patch": normalized_patch,
         "client_patch": client.source_patch,
         "source": "CommunityDragon",
         "source_root": f"{SOURCE_ROOT}/{client.source_patch}/",
@@ -418,7 +440,7 @@ def capture(
     _write_json(output / "mechanics-index.json", normalized_payload)
     manifest_unsigned = {
         "schema_version": SCHEMA_VERSION,
-        "patch": patch,
+        "patch": normalized_patch,
         "client_patch": client.source_patch,
         "source": "CommunityDragon",
         "source_root": f"{SOURCE_ROOT}/{client.source_patch}/",
@@ -436,7 +458,7 @@ def capture(
     }
     _write_json(output / "manifest.json", manifest)
     return {
-        "patch": patch,
+        "patch": normalized_patch,
         "client_patch": client.source_patch,
         "output": str(output),
         "champions": len(champions),
@@ -464,9 +486,18 @@ def capture_patch_matrix(
     without rewriting successful packets.
     """
 
-    normalized = tuple(
-        sorted({str(patch).strip("/") for patch in patches if str(patch).strip("/")})
-    )
+    try:
+        normalized = tuple(
+            sorted(
+                {
+                    canonical_public_patch(patch)
+                    for patch in patches
+                    if str(patch).strip("/")
+                }
+            )
+        )
+    except ValueError as exc:
+        raise ValueError(f"invalid patch in matrix: {exc}") from exc
     if not normalized:
         raise ValueError("at least one patch is required")
     if workers < 1:
@@ -476,6 +507,12 @@ def capture_patch_matrix(
         source_patch = str(
             (client_patch_map or {}).get(patch) or _client_patch_for(patch)
         ).strip("/")
+        try:
+            source_patch = canonical_client_patch(source_patch)
+        except ValueError:
+            # An explicit custom source namespace remains exact and is allowed
+            # to fail as unavailable rather than being silently substituted.
+            pass
         patch_dir = output_root / patch
         probe_path = patch_dir / "probe.json"
         existing: dict[str, Any] | None = None
@@ -591,7 +628,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--probe-matrix-2026",
         action="store_true",
-        help="probe/capture 26.01 through 26.15 as exact paths",
+        help="probe/capture 26.01 through the current 26.16 patch as exact paths",
     )
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument(
@@ -606,7 +643,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--delay", type=float, default=0.15)
     args = parser.parse_args(argv)
     if args.probe_matrix_2026:
-        patches = args.patch or [f"26.{index:02d}" for index in range(1, 16)]
+        current_minor = int(CURRENT_PUBLIC_PATCH.split(".", 1)[1])
+        patches = args.patch or [f"26.{index:02d}" for index in range(1, current_minor + 1)]
         try:
             result = capture_patch_matrix(
                 patches,

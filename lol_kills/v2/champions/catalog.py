@@ -24,6 +24,7 @@ from .schema import (
     validate_dimension_map,
     validate_uncertainty_map,
 )
+from ..patch_identity import client_patch, public_patch
 
 __all__ = [
     "ChampionOntologyError",
@@ -142,11 +143,17 @@ def _extract_datadragon_patch(url: str) -> str | None:
         if not segment:
             continue
         if PATCH_RE.fullmatch(segment):
-            return segment
+            try:
+                return public_patch(segment)
+            except ValueError:
+                return segment
         if segment.count(".") >= 2:
             parts = segment.split(".")
             if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
-                return f"{parts[0]}.{parts[1]}"
+                try:
+                    return public_patch(f"{parts[0]}.{parts[1]}")
+                except ValueError:
+                    return f"{parts[0]}.{parts[1]}"
     return None
 
 
@@ -442,6 +449,7 @@ def _validate_sources(
     }
     allowed_kinds = {
         "riot_datadragon",
+        "communitydragon",
         "manual_labels",
         "manual_review",
         "official_note",
@@ -541,6 +549,40 @@ def _validate_sources(
                 raise ChampionOntologyError(
                     f"atom_bridge source must not use url: {source_id}"
                 )
+        elif kind == "communitydragon":
+            if locator_kind != "receipt":
+                raise ChampionOntologyError(
+                    f"communitydragon source must declare a receipt locator: {source_id}"
+                )
+            _validate_repository_locator(locator)
+            if not locator.endswith("-receipt.json"):
+                raise ChampionOntologyError(
+                    f"communitydragon source locator must target a receipt: {source_id}"
+                )
+            if not isinstance(url, str) or not url.startswith("https://"):
+                raise ChampionOntologyError(
+                    f"communitydragon source must include an https URL: {source_id}"
+                )
+            parsed = urlparse(url)
+            if parsed.netloc != "raw.communitydragon.org":
+                raise ChampionOntologyError(
+                    f"communitydragon source host is not allowlisted: {source_id}"
+                )
+            public = row.get("public_patch") or row.get("patch")
+            client = row.get("client_patch")
+            if public is None or client is None:
+                raise ChampionOntologyError(
+                    f"communitydragon source must declare public and client patches: {source_id}"
+                )
+            try:
+                if public_patch(public) != str(public) or client_patch(public) != str(client):
+                    raise ChampionOntologyError(
+                        f"communitydragon source patch namespaces do not match: {source_id}"
+                    )
+            except ValueError as exc:
+                raise ChampionOntologyError(
+                    f"communitydragon source patch is invalid: {source_id}"
+                ) from exc
         elif kind == "riot_datadragon":
             if locator is not None:
                 raise ChampionOntologyError(f"riot_datadragon source cannot include locator: {source_id}")

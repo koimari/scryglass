@@ -2,7 +2,8 @@
 
 Status: **development infrastructure, version 1 — no authority granted**
 Schema: `scryglass.lcc-atom-bridge.v1` | Builder: `lol_kills/v2/champions/atoms/**`
-Artifact: `data/lol/v2/champions/lcc-atom-bridge-v1.json`
+Live atom artifact: `data/lol/v2/champions/lcc-atom-bridge-26.16.json`
+Audited 26.15 tier source: `data/lol/v2/champions/lcc-atom-bridge-v1.json`
 
 ## Purpose
 
@@ -46,7 +47,7 @@ League Combat Calculator (external repo, read-only)
                                     uncertainty; unavailable when no evidence)
           |
           v
-  data/lol/v2/champions/lcc-atom-bridge-v1.json
+  data/lol/v2/champions/lcc-atom-bridge-26.16.json
     schema_id, version, generated_at, artifact_sha256 (canonical),
     provenance (LCC repo path, git commit, per-file sha256)
           |
@@ -120,7 +121,8 @@ SCRYGLASS_LCC_REPO=/path/to/league-combat-calculator \
   python3 -m lol_kills.v2.champions.atoms.bridge_v1
 ```
 
-Rebuild whenever LCC data changes (patch day), then re-run
+Rebuild whenever LCC data changes (patch day), write the new patch to its
+versioned artifact path, then re-run
 `tests/model_v2/champions/test_atom_bridge.py` and update this doc's coverage
 numbers if they moved.
 

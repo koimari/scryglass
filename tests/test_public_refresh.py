@@ -6,7 +6,7 @@ import urllib.error
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -64,7 +64,7 @@ def test_tier_failure_keeps_a_smoke_verified_ratings_release(tmp_path: Path) -> 
     ratings = {
         "status": "published",
         "pack_id": "new",
-        "publication": {"runtime": "blob", "pack_id": "new"},
+        "publication": {"runtime": "local_staging", "pack_id": "new"},
     }
 
     with patch.object(public_refresh, "_preflight"), patch.object(
@@ -96,7 +96,7 @@ def test_failed_public_smoke_restores_the_previous_pack(tmp_path: Path) -> None:
     ratings = {
         "status": "published",
         "pack_id": "new",
-        "publication": {"runtime": "blob", "pack_id": "new"},
+        "publication": {"runtime": "local_staging", "pack_id": "new"},
     }
 
     with patch.object(public_refresh, "_preflight"), patch.object(
@@ -136,7 +136,7 @@ def test_cache_failure_restores_the_new_pack_and_retries_cache_clear(tmp_path: P
     ratings = {
         "status": "published",
         "pack_id": "new",
-        "publication": {"runtime": "blob", "pack_id": "new"},
+        "publication": {"runtime": "local_staging", "pack_id": "new"},
     }
 
     with patch.object(public_refresh, "_preflight"), patch.object(
@@ -261,7 +261,10 @@ def test_production_preflight_rejects_the_legacy_blob_backend(tmp_path: Path) ->
     )
     with patch.dict(
         "os.environ",
-        {"SCRYGLASS_DATA_PUBLISH_TOKEN": "publish-key"},
+        {
+            "SCRYGLASS_DATA_PUBLISH_TOKEN": "publish-key",
+            "SCRYGLASS_DIAGNOSTIC_TOKEN": "diagnostic-key",
+        },
         clear=True,
     ), pytest.raises(public_refresh.PublicRefreshError, match="Supabase publication backend"):
         public_refresh._preflight(config)
@@ -272,6 +275,32 @@ def test_supabase_preflight_does_not_require_blob_credentials(tmp_path: Path) ->
         replace(
             _config(tmp_path),
             production=True,
+            site=public_refresh.DEFAULT_SITE,
+            publication_backend="supabase",
+            supabase_url="https://example.supabase.co",
+            supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
+        )
+    )
+    with patch.dict(
+        "os.environ",
+        {
+            "SCRYGLASS_DATA_PUBLISH_TOKEN": "publish-key",
+            "SCRYGLASS_DIAGNOSTIC_TOKEN": "diagnostic-key",
+        },
+        clear=True,
+    ), patch.object(public_refresh, "worker_commit", return_value="a" * 40) as commit:
+        public_refresh._preflight(config)
+    commit.assert_called_once_with(config.root, require_clean=True)
+
+
+def test_production_preflight_requires_a_separate_diagnostic_token(
+    tmp_path: Path,
+) -> None:
+    config = _with_receipt_paths(
+        replace(
+            _config(tmp_path),
+            production=True,
+            site=public_refresh.DEFAULT_SITE,
             publication_backend="supabase",
             supabase_url="https://example.supabase.co",
             supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
@@ -281,7 +310,29 @@ def test_supabase_preflight_does_not_require_blob_credentials(tmp_path: Path) ->
         "os.environ",
         {"SCRYGLASS_DATA_PUBLISH_TOKEN": "publish-key"},
         clear=True,
-    ):
+    ), pytest.raises(public_refresh.PublicRefreshError, match="SCRYGLASS_DIAGNOSTIC_TOKEN"):
+        public_refresh._preflight(config)
+
+
+def test_production_preflight_requires_the_exact_public_origin(tmp_path: Path) -> None:
+    config = _with_receipt_paths(
+        replace(
+            _config(tmp_path),
+            production=True,
+            site="https://scryglass.xyz.evil.test",
+            publication_backend="supabase",
+            supabase_url="https://example.supabase.co",
+            supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
+        )
+    )
+    with patch.dict(
+        "os.environ",
+        {
+            "SCRYGLASS_DATA_PUBLISH_TOKEN": "publish-key",
+            "SCRYGLASS_DIAGNOSTIC_TOKEN": "diagnostic-key",
+        },
+        clear=True,
+    ), pytest.raises(public_refresh.PublicRefreshError, match="exactly"):
         public_refresh._preflight(config)
 
 
@@ -289,13 +340,17 @@ def test_production_preflight_requires_bound_source_receipts(tmp_path: Path) -> 
     config = replace(
         _config(tmp_path),
         production=True,
+        site=public_refresh.DEFAULT_SITE,
         publication_backend="supabase",
         supabase_url="https://example.supabase.co",
         supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
     )
     with patch.dict(
         "os.environ",
-        {"SCRYGLASS_DATA_PUBLISH_TOKEN": "publish-key"},
+        {
+            "SCRYGLASS_DATA_PUBLISH_TOKEN": "publish-key",
+            "SCRYGLASS_DIAGNOSTIC_TOKEN": "diagnostic-key",
+        },
         clear=True,
     ), pytest.raises(public_refresh.PublicRefreshError, match="accepted source"):
         public_refresh._preflight(config)
@@ -676,6 +731,30 @@ def test_http_read_retries_transient_statuses(monkeypatch: pytest.MonkeyPatch) -
     assert sleeps == [1.0]
 
 
+def test_http_read_requires_the_expected_release_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Response:
+        headers = {"X-Scryglass-Release": "v2026.08.13.120000"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b"ok"
+
+    monkeypatch.setattr(public_refresh.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
+
+    with pytest.raises(public_refresh.PublicRefreshError, match="expected v2026.08.13.120001"):
+        public_refresh._http_bytes(
+            "https://example.test",
+            expected_release_id="v2026.08.13.120001",
+        )
+
+
 def test_cache_invalidation_is_bound_to_the_activated_release(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -703,8 +782,147 @@ def test_cache_invalidation_is_bound_to_the_activated_release(
     assert result["served_release_id"] == release_id
 
 
+def test_public_release_probes_cover_each_cache_family(tmp_path: Path) -> None:
+    release_id = "v2026.08.11.184500"
+    config = replace(_config(tmp_path), production=True)
+    requested: list[str] = []
+
+    def read(url: str, **_kwargs):
+        requested.append(url)
+        if url.endswith("/api/health"):
+            return json.dumps({"pack_id": release_id}).encode()
+        if url.endswith("/packs/manifest.json"):
+            return json.dumps({"release_id": release_id}).encode()
+        if "/api/chat/matches?team=T1&limit=1" in url:
+            return json.dumps(
+                {"ok": True, "data": {"matches": [{"game_id": "game-1"}]}}
+            ).encode()
+        if "/api/" in url:
+            return b"{}"
+        return b"page"
+
+    with patch.object(public_refresh, "_http_bytes", side_effect=read):
+        result = public_refresh.probe_public_release_families(config, release_id)
+
+    assert result == {
+        "release_id": release_id,
+        "routes": [
+            *public_refresh.PUBLIC_RELEASE_PROBES,
+            "/elo/player/Faker",
+            "/elo/team/T1",
+            "/matches/game-1",
+        ],
+    }
+    assert requested[0].endswith("/api/health")
+    assert requested[-1].endswith("/api/health")
+    assert requested[1 : 1 + len(public_refresh.PUBLIC_RELEASE_PROBES)] == [
+        f"{config.site}{path}" for path in public_refresh.PUBLIC_RELEASE_PROBES
+    ]
+    assert requested[-4:-1] == [
+        f"{config.site}/elo/player/Faker",
+        f"{config.site}/elo/team/T1",
+        f"{config.site}/matches/game-1",
+    ]
+
+
+def test_health_alignment_failure_restores_previous_supabase_release(
+    tmp_path: Path,
+) -> None:
+    config = replace(
+        _config(tmp_path),
+        publication_backend="supabase",
+        supabase_url="https://example.supabase.co",
+        supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    previous_release = "v2026.08.10.001500"
+    release_id = "v2026.08.11.184500"
+    config.sync.state_path.parent.mkdir(parents=True, exist_ok=True)
+    config.sync.state_path.write_text(
+        json.dumps({"pack_id": previous_release, "published_game_ids": ["game-1"]}),
+        encoding="utf-8",
+    )
+    pack_dir = config.public_root / release_id
+    pack_dir.mkdir(parents=True)
+    (pack_dir / "manifest.json").write_text(
+        json.dumps({"pack_id": release_id, "total_files": 1, "total_bytes": 1}),
+        encoding="utf-8",
+    )
+    (config.public_root / "manifest.json").write_text(
+        json.dumps({"pack_id": previous_release, "tier": {"status": "available"}}),
+        encoding="utf-8",
+    )
+    ratings = {
+        "status": "published",
+        "pack_id": release_id,
+        "source_observed_through": "2026-08-11T18:00:00Z",
+    }
+    accepted = {
+        "source_observed_through": "2026-08-11T18:00:00Z",
+        "new_games": 1,
+        "corrected_games": 0,
+    }
+    ledger = MagicMock()
+    ledger.run_id = "refresh-20260811T180000Z-aaaaaaaaaaaa"
+    ledger.worker_git_commit = "a" * 40
+
+    with patch.object(public_refresh, "_preflight"), patch.object(
+        public_refresh, "_accepted_run_inputs", return_value=accepted
+    ), patch.object(
+        public_refresh, "_start_run_ledger", return_value=ledger
+    ), patch.object(
+        public_refresh, "_write_remote_health"
+    ), patch.object(
+        public_refresh, "seed_supabase_continuity", return_value={"status": "current"}
+    ), patch.object(
+        public_refresh, "_run_with_source_retries", return_value=ratings
+    ), patch.object(
+        public_refresh, "_run_tier_refresh", return_value={"status": "production_promoted"}
+    ), patch.object(
+        public_refresh.supabase_publication,
+        "publish_release",
+        return_value={
+            "status": "published",
+            "release_id": release_id,
+            "previous_release_id": previous_release,
+            "bytes": 1,
+            "assets": 1,
+        },
+    ), patch.object(
+        public_refresh, "invalidate_public_cache", return_value={"revalidated": True}
+    ) as invalidate, patch.object(
+        public_refresh, "probe_public_release_families", return_value={"release_id": release_id}
+    ), patch.object(
+        public_refresh,
+        "verify_public_release",
+        return_value={"pack_id": release_id, "files": 1, "tier_status": "available"},
+    ), patch.object(
+        public_refresh,
+        "verify_public_health_alignment",
+        side_effect=public_refresh.PublicRefreshError("health is stale"),
+    ), patch.object(
+        public_refresh.supabase_publication,
+        "restore_release",
+        return_value={"status": "restored", "release_id": previous_release},
+    ) as restore:
+        with pytest.raises(public_refresh.PublicRefreshError, match="health is stale"):
+            public_refresh.run_once(config, now=NOW)
+
+    restore.assert_called_once_with(
+        previous_release,
+        project_url=config.supabase_url,
+        secret_key=config.supabase_secret_key,
+    )
+    assert invalidate.call_args_list[-1].args[1] == previous_release
+    ledger.finish.assert_not_called()
+    ledger.fail.assert_called_once()
+    health = json.loads(config.health_path.read_text(encoding="utf-8"))
+    assert health["rollback"]["status"] == "restored"
+    assert health["rollback"]["supabase"]["release_id"] == previous_release
+
+
 def test_public_health_alignment_requires_release_watermark_and_worker(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     release_id = "v2026.08.11.184500"
     worker = "a" * 40
@@ -714,20 +932,27 @@ def test_public_health_alignment_requires_release_watermark_and_worker(
         production=True,
         publication_backend="supabase",
     )
+    monkeypatch.setenv("SCRYGLASS_DIAGNOSTIC_TOKEN", "diagnostic-secret")
     payload = {
         "status": "ok",
-        "pack_id": release_id,
-        "source_as_of": "2026-08-11T18:00:00Z",
-        "last_refresh_success_at": "2026-08-11T18:45:00Z",
-        "refresh_status": "idle",
-        "worker_commit": worker,
+        "last_success_at": "2026-08-11T18:45:00Z",
         "stale": False,
+        "diagnostics": {
+            "release_id": release_id,
+            "source_as_of": "2026-08-11T18:00:00Z",
+            "refresh_status": "idle",
+            "worker_commit": worker,
+        },
     }
+
+    def health(_url: str, **kwargs):
+        assert kwargs["headers"]["authorization"] == "Bearer diagnostic-secret"
+        return json.dumps(payload).encode()
 
     with patch.object(
         public_refresh,
         "_http_bytes",
-        return_value=json.dumps(payload).encode(),
+        side_effect=health,
     ):
         result = public_refresh.verify_public_health_alignment(
             config,
@@ -738,7 +963,7 @@ def test_public_health_alignment_requires_release_watermark_and_worker(
 
     assert result == payload
 
-    payload["worker_commit"] = "b" * 40
+    payload["diagnostics"]["worker_commit"] = "b" * 40
     with patch.object(
         public_refresh,
         "_http_bytes",
@@ -847,8 +1072,10 @@ def test_supabase_smoke_accepts_a_storage_backed_tier_asset(tmp_path: Path) -> N
             return json.dumps(
                 {
                     "status": "ok",
-                    "pack_id": manifest["pack_id"],
-                    "tier": {"status": "available"},
+                    "diagnostics": {
+                        "release_id": manifest["pack_id"],
+                        "tier": {"status": "available"},
+                    },
                 }
             ).encode()
         return b"page"
@@ -896,3 +1123,18 @@ def test_systemd_worker_cannot_start_without_production_environment() -> None:
     assert '"${repo_root}/data/lol/warehouse' not in launchd
     assert 'runtime/cycles/${cycle_id}' in launchd
     assert "--validate-only" in launchd
+    assert launchd.index('cd "${repo_root}"') < launchd.index('"${python}" -m lol_kills.etl.oe_database')
+    assert "status --porcelain=v1 --untracked-files=normal" in launchd
+    assert '"${SCRYGLASS_WORKER_COMMIT}" != "${real_worker_commit}"' in launchd
+    assert 'verify-public-refresh-env.sh" "${repo_root}" "${worker_root}/venv"' in launchd
+    assert "ExecStartPre=/srv/scryglass/current/ops/verify-public-refresh-env.sh" in service
+    installer = (root / "ops/install-public-refresh-env.sh").read_text(encoding="utf-8")
+    verifier = (root / "ops/verify-public-refresh-env.sh").read_text(encoding="utf-8")
+    assert "--require-hashes" in installer
+    assert "--only-binary=:all:" in installer
+    assert ".scryglass-requirements-lock.sha256" in installer
+    assert "pip check" in verifier
+    plist = (
+        root / "ops/launchd/xyz.scryglass.public-refresh.plist.template"
+    ).read_text(encoding="utf-8")
+    assert "__TESTED_WORKER_COMMIT__" in plist

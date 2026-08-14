@@ -1,4 +1,15 @@
-import { readChatJson } from "@/lib/chatApi";
+import { readPackJson, readPackManifest } from "@/lib/serverPack";
+import {
+  getPlayerChampions,
+  getQueryEntities,
+  getRatings,
+  queryApiAvailable,
+  type PlayerChampionQueryEnvelope,
+  type PlayerChampionOrder,
+  type PlayerChampionQueryRow,
+  type RatingQueryRow,
+} from "@/lib/publicData";
+import type { PackManifest } from "@/lib/pack";
 
 export type QueryDataset = "players" | "player_champions";
 export type QueryOperation = "rank" | "compare";
@@ -68,6 +79,11 @@ export type SupportQueryIndex = {
     champions: string[];
     teams: string[];
     leagues: string[];
+  };
+  aliases?: {
+    players: Record<string, string>;
+    champions: Record<string, string>;
+    teams: Record<string, string>;
   };
 };
 
@@ -348,24 +364,93 @@ export function buildSupportQueryIndex(assets: {
   };
 }
 
-let queryIndexPromise: Promise<SupportQueryIndex> | null = null;
+let queryIndexCache: { releaseId: string; promise: Promise<SupportQueryIndex> } | null = null;
 
-export function loadSupportQueryIndex(): Promise<SupportQueryIndex> {
-  if (!queryIndexPromise) {
-    queryIndexPromise = Promise.all([
-      readChatJson<RatingAsset>(QUERY_SOURCES[0]),
-      readChatJson<PlayerRecordsAsset>(QUERY_SOURCES[1]),
-      readChatJson<PlayerChampionAsset>(QUERY_SOURCES[2]),
-      readChatJson<ProfileAsset>(QUERY_SOURCES[3]),
-    ])
-      .then(([ratings, records, champions, profiles]) =>
-        buildSupportQueryIndex({ ratings, records, champions, profiles }))
+function emptyQueryRow(name: string): QueryPlayerRow {
+  return {
+    name,
+    role: null,
+    team: null,
+    league: null,
+    tier: null,
+    active: null,
+    rating: null,
+    games: 0,
+    wins: null,
+    win_rate: null,
+    grade_a_games: 0,
+    champion: null,
+    champion_games: null,
+    champion_wins: null,
+    champion_win_rate: null,
+    champion_score: null,
+    champion_median_distance: null,
+    champion_mean_distance: null,
+  };
+}
+
+async function loadQueryApiIndex(
+  manifest: PackManifest,
+  signal?: AbortSignal,
+): Promise<SupportQueryIndex> {
+  const entities = await getQueryEntities(manifest, signal);
+  const aliases = entities.aliases ?? [];
+  const playerAliasEntries = aliases
+    .filter((entry) => entry.kind === "player"
+      && normalizeEntity(entry.alias) !== normalizeEntity(entry.name))
+    .map((entry) => [entry.alias, entry.name] as const);
+  const championAliasEntries = aliases
+    .filter((entry) => entry.kind === "champion"
+      && normalizeEntity(entry.alias) !== normalizeEntity(entry.name))
+    .map((entry) => [entry.alias, entry.name] as const);
+  const teamAliasEntries = aliases
+    .filter((entry) => entry.kind === "team"
+      && normalizeEntity(entry.alias) !== normalizeEntity(entry.name))
+    .map((entry) => [entry.alias, entry.name] as const);
+  const playerAliases = playerAliasEntries.map(([alias]) => alias);
+  const championAliases = championAliasEntries.map(([alias]) => alias);
+  const teamAliases = teamAliasEntries.map(([alias]) => alias);
+  const playerNames = [...new Set([...entities.players, ...playerAliases])];
+  return {
+    players: playerNames.map(emptyQueryRow),
+    playerChampions: [],
+    entities: {
+      players: playerNames,
+      champions: [...new Set([...entities.champions, ...championAliases])],
+      teams: [...new Set([...entities.teams, ...teamAliases])],
+      leagues: entities.leagues,
+    },
+    aliases: {
+      players: Object.fromEntries(playerAliasEntries.map(([alias, canonical]) => [normalizeEntity(alias), canonical])),
+      champions: Object.fromEntries(championAliasEntries.map(([alias, canonical]) => [normalizeEntity(alias), canonical])),
+      teams: Object.fromEntries(teamAliasEntries.map(([alias, canonical]) => [normalizeEntity(alias), canonical])),
+    },
+  };
+}
+
+export async function loadSupportQueryIndex(signal?: AbortSignal): Promise<SupportQueryIndex> {
+  const manifest = await readPackManifest(signal);
+  const load = () => queryApiAvailable(manifest)
+    ? loadQueryApiIndex(manifest, signal)
+    : Promise.all([
+      readPackJson<RatingAsset>(manifest, QUERY_SOURCES[0], signal),
+      readPackJson<PlayerRecordsAsset>(manifest, QUERY_SOURCES[1], signal),
+      readPackJson<PlayerChampionAsset>(manifest, QUERY_SOURCES[2], signal),
+      readPackJson<ProfileAsset>(manifest, QUERY_SOURCES[3], signal),
+    ]).then(([ratings, records, champions, profiles]) =>
+      buildSupportQueryIndex({ ratings, records, champions, profiles }));
+  // Request-scoped signals must not control a promise shared with another request.
+  if (signal) return load();
+  if (queryIndexCache?.releaseId !== manifest.pack_id) {
+    const releaseId = manifest.pack_id;
+    const promise = load()
       .catch((error) => {
-        queryIndexPromise = null;
+        if (queryIndexCache?.releaseId === releaseId) queryIndexCache = null;
         throw error;
       });
+    queryIndexCache = { releaseId, promise };
   }
-  return queryIndexPromise;
+  return queryIndexCache.promise;
 }
 
 export function parseQueryPlan(value: unknown): { ok: true; plan: QueryPlan } | { ok: false; reason: string } {
@@ -462,6 +547,8 @@ function resolvePlayerTarget(
     .replace(/\s+(?:rating|ratings|win rate|wr|games|maps)$/i, "")
     .replace(/^(?:the\s+)?player\s+/i, "")
     .trim());
+  const canonicalAlias = index.aliases?.players[target];
+  if (canonicalAlias) return { ok: true, name: canonicalAlias };
   let candidates = index.players.filter((player) => normalizeEntity(player.name) === target);
   if (team) {
     candidates = candidates.filter((player) => normalizeEntity(player.team ?? "") === normalizeEntity(team));
@@ -541,7 +628,7 @@ function metricFor(
     return championQuery ? "champion_games" : "games";
   }
   if (/\brating|\brated\b/.test(normalized)) return "rating";
-  if (championQuery && hasNamedPlayer && !hasNamedChampion) return "champion_win_rate";
+  if (championQuery && hasNamedPlayer && !hasNamedChampion) return "champion_score";
   return championQuery ? "champion_score" : "rating";
 }
 
@@ -567,9 +654,12 @@ export function planPlayerQuestion(
 ): { ok: true; plan: QueryPlan } | { ok: false; reason: string } {
   const text = question.trim();
   if (text.length < 3 || text.length > 500) return { ok: false, reason: "The player question has an invalid length." };
-  let players = mentionedEntities(text, index.entities.players);
-  const champions = mentionedEntities(text, index.entities.champions);
-  const teams = mentionedEntities(text, index.entities.teams);
+  let players = mentionedEntities(text, index.entities.players)
+    .map((value) => index.aliases?.players[normalizeEntity(value)] ?? value);
+  const champions = mentionedEntities(text, index.entities.champions)
+    .map((value) => index.aliases?.champions[normalizeEntity(value)] ?? value);
+  const teams = mentionedEntities(text, index.entities.teams)
+    .map((value) => index.aliases?.teams[normalizeEntity(value)] ?? value);
   const leagues = mentionedEntities(text, index.entities.leagues);
   const namedTarget = namedMetricTarget(text);
   if (namedTarget) {
@@ -695,6 +785,7 @@ function answerFor(
   rows: QueryPlayerRow[],
   total: number,
   allRows: QueryPlayerRow[] = rows,
+  references: { median?: number | null; mean?: number | null } = {},
 ): QueryAnswer {
   if (!rows.length) {
     return {
@@ -720,9 +811,11 @@ function answerFor(
       headline = "Published values are unavailable for a complete comparison.";
     } else if (difference < Number.EPSILON) {
       headline = `${top.name} and ${runnerUp.name} have the same published ${metric.replaceAll("_", " ")}.`;
-    } else if (metric === "win_rate" || metric === "champion_win_rate" || metric === "champion_score") {
+    } else if (metric === "win_rate" || metric === "champion_win_rate") {
       const percentagePoints = Math.round(difference * 100);
       headline = `${top.name} ranks higher than ${runnerUp.name} by ${percentagePoints} percentage ${percentagePoints === 1 ? "point" : "points"} on ${metric.replaceAll("_", " ")}.`;
+    } else if (metric === "champion_score") {
+      headline = `${top.name} ranks higher than ${runnerUp.name} under the published champion evidence order.`;
     } else {
       const points = Math.round(difference);
       headline = `${top.name} ranks higher than ${runnerUp.name} by ${points} ${metric.replaceAll("_", " ")} ${points === 1 ? "point" : "points"}.`;
@@ -732,11 +825,16 @@ function answerFor(
       .map((row) => row.champion_win_rate)
       .filter((candidate): candidate is number => candidate != null && Number.isFinite(candidate))
       .sort((left, right) => left - right);
-    const reference = values.length
-      ? metric === "champion_median_distance"
-        ? medianValue(values)
-        : values.reduce((sum, candidate) => sum + candidate, 0) / values.length
-      : null;
+    const publishedReference = metric === "champion_median_distance"
+      ? references.median
+      : references.mean;
+    const reference = publishedReference !== undefined
+      ? publishedReference
+      : values.length
+        ? metric === "champion_median_distance"
+          ? medianValue(values)
+          : values.reduce((sum, candidate) => sum + candidate, 0) / values.length
+        : null;
     const label = metric === "champion_median_distance" ? "median" : "mean";
     headline = reference == null
       ? `${top.name}'s ${label}-performance champion is ${top.champion}.`
@@ -814,4 +912,233 @@ export function executeQueryPlan(planInput: unknown, index: SupportQueryIndex): 
     rows,
     proof: { sources: QUERY_SOURCES, resultCount: matching.length },
   };
+}
+
+function stringFilterValues(plan: QueryPlan, field: QueryField): string[] {
+  return plan.filters.flatMap((filter) => {
+    if (filter.field !== field) return [];
+    if (typeof filter.value === "string") return [filter.value];
+    return Array.isArray(filter.value) ? filter.value : [];
+  });
+}
+
+function numericFilter(plan: QueryPlan, field: QueryField, op: QueryOperator): number | null {
+  const filter = plan.filters.find((candidate) => candidate.field === field && candidate.op === op);
+  return typeof filter?.value === "number" ? filter.value : null;
+}
+
+function ratingRow(row: RatingQueryRow): QueryPlayerRow {
+  const gradeAGames = finiteNumber(row.grade_a_games)
+    ? row.grade_a_games
+    : finiteNumber(row.payload?.grade_a_games)
+      ? row.payload.grade_a_games
+      : 0;
+  return {
+    name: row.name,
+    role: roleKey(row.role),
+    team: row.team,
+    league: row.league,
+    tier: row.tier?.toLowerCase() ?? null,
+    active: row.active ? 1 : 0,
+    rating: numberOrNull(row.rating),
+    games: Number.isInteger(row.games) ? row.games : 0,
+    wins: numberOrNull(row.wins),
+    win_rate: numberOrNull(row.win_rate),
+    grade_a_games: gradeAGames,
+    champion: null,
+    champion_games: null,
+    champion_wins: null,
+    champion_win_rate: null,
+    champion_score: null,
+    champion_median_distance: null,
+    champion_mean_distance: null,
+  };
+}
+
+function playerChampionRow(row: PlayerChampionQueryRow): QueryPlayerRow {
+  return {
+    name: row.player,
+    role: roleKey(row.role),
+    team: row.team,
+    league: row.league,
+    tier: row.tier?.toLowerCase() ?? null,
+    active: row.active ? 1 : 0,
+    rating: numberOrNull(row.rating),
+    games: 0,
+    wins: null,
+    win_rate: null,
+    grade_a_games: 0,
+    champion: row.champion,
+    champion_games: Number.isInteger(row.games) ? row.games : null,
+    champion_wins: Number.isInteger(row.wins) ? row.wins : null,
+    champion_win_rate: numberOrNull(row.win_rate),
+    champion_score: numberOrNull(row.tier_score ?? row.score),
+    champion_median_distance: numberOrNull(row.median_distance),
+    champion_mean_distance: numberOrNull(row.mean_distance),
+  };
+}
+
+export function boundedRatingsOrder(plan: QueryPlan): Parameters<typeof getRatings>[1]["order"] {
+  const order = plan.orderBy[0];
+  const suffix = order.direction === "desc" ? "desc" : "asc";
+  if (order.field === "rating") return `rating_${suffix}`;
+  if (order.field === "games") return `games_${suffix}`;
+  if (order.field === "wins") return `wins_${suffix}`;
+  if (order.field === "win_rate") return `win_rate_${suffix}`;
+  if (order.field === "grade_a_games") return `grade_a_${suffix}`;
+  throw new Error(`The bounded ratings query cannot order by ${order.field}.`);
+}
+
+export function boundedChampionOrder(plan: QueryPlan): PlayerChampionOrder {
+  const order = plan.orderBy[0];
+  if (order.field === "champion_score") return order.direction === "desc" ? "best" : "worst";
+  if (order.field === "champion_games") return order.direction === "desc" ? "games_desc" : "games_asc";
+  if (order.field === "champion_win_rate") return order.direction === "desc" ? "win_rate_desc" : "win_rate_asc";
+  if (order.field === "rating") return order.direction === "desc" ? "rating_desc" : "rating_asc";
+  if (order.field === "champion_median_distance") return "median";
+  if (order.field === "champion_mean_distance") return "mean";
+  throw new Error(`The bounded player-champion query cannot order by ${order.field}.`);
+}
+
+function assertBoundedFilters(plan: QueryPlan): void {
+  for (const filter of plan.filters) {
+    const allowed = plan.dataset === "players"
+      ? STRING_FIELDS.has(filter.field)
+        || (filter.field === "active" && filter.op === "eq")
+        || (filter.field === "games" && filter.op === "gte")
+      : ["name", "champion", "role", "team", "league", "tier"].includes(filter.field)
+        || (filter.field === "active" && filter.op === "eq")
+        || (filter.field === "champion_games" && filter.op === "gte");
+    if (!allowed) {
+      throw new Error(`Filter ${filter.field} is unavailable in the bounded public query API.`);
+    }
+  }
+}
+
+function resultForBoundedRows(
+  plan: QueryPlan,
+  rows: QueryPlayerRow[],
+  total: number,
+  sources: string[],
+  references: { median?: number | null; mean?: number | null } = {},
+): QueryExecutionResult {
+  const matching = rows.filter((row) => plan.filters.every((filter) => matchesFilter(row, filter)));
+  const visible = [...matching]
+    .sort((left, right) => compareRows(left, right, plan.orderBy))
+    .slice(0, plan.limit);
+  const answer = answerFor(plan, visible, total, matching, references);
+  if (plan.orderBy[0].field === "champion_score") {
+    answer.basis = `Ranked ${total} matching player-champion records by the published champion evidence score, with tier-list alignment where available; ${filterDescription(plan)}.`;
+    answer.caveat = "This is descriptive champion evidence. It is not a causal estimate or a champion-specific player rating.";
+  }
+  return {
+    kind: "player_query",
+    plan,
+    answer,
+    rows: visible,
+    proof: { sources, resultCount: total },
+  };
+}
+
+async function executeRatingsQuery(
+  plan: QueryPlan,
+  manifest: PackManifest,
+  signal?: AbortSignal,
+): Promise<QueryExecutionResult> {
+  const names = stringFilterValues(plan, "name");
+  if (names.length) {
+    const activeValue = numericFilter(plan, "active", "eq");
+    const response = await getRatings(manifest, {
+      kind: "players",
+      names: names.slice(0, 20),
+      leagues: stringFilterValues(plan, "league"),
+      tiers: stringFilterValues(plan, "tier"),
+      roles: stringFilterValues(plan, "role"),
+      teams: stringFilterValues(plan, "team"),
+      active: activeValue == null ? undefined : activeValue === 1,
+      order: boundedRatingsOrder(plan),
+      minGames: numericFilter(plan, "games", "gte") ?? 0,
+      limit: Math.min(plan.limit, 20),
+      offset: 0,
+    }, signal);
+    return resultForBoundedRows(
+      plan,
+      response.rows.map(ratingRow),
+      response.total,
+      ["rpc:get_scryglass_ratings"],
+    );
+  }
+  const activeValue = numericFilter(plan, "active", "eq");
+  const response = await getRatings(manifest, {
+    kind: "players",
+    leagues: stringFilterValues(plan, "league"),
+    tiers: stringFilterValues(plan, "tier"),
+    roles: stringFilterValues(plan, "role"),
+    teams: stringFilterValues(plan, "team"),
+    active: activeValue == null ? undefined : activeValue === 1,
+    order: boundedRatingsOrder(plan),
+    minGames: numericFilter(plan, "games", "gte") ?? 0,
+    limit: plan.limit,
+    offset: 0,
+  }, signal);
+  return resultForBoundedRows(
+    plan,
+    response.rows.map(ratingRow),
+    response.total,
+    ["rpc:get_scryglass_ratings"],
+  );
+}
+
+async function executePlayerChampionQuery(
+  plan: QueryPlan,
+  manifest: PackManifest,
+  signal?: AbortSignal,
+): Promise<QueryExecutionResult> {
+  const names = stringFilterValues(plan, "name");
+  const queries = names.length ? names.slice(0, 20) : [undefined];
+  const perQueryLimit = Math.max(1, Math.floor(20 / queries.length));
+  const activeValue = numericFilter(plan, "active", "eq");
+  const responses = await Promise.all(queries.map((player) => getPlayerChampions(manifest, {
+    player,
+    champion: stringFilterValues(plan, "champion")[0],
+    leagues: stringFilterValues(plan, "league"),
+    tiers: stringFilterValues(plan, "tier"),
+    roles: stringFilterValues(plan, "role"),
+    teams: stringFilterValues(plan, "team"),
+    active: activeValue == null ? undefined : activeValue === 1,
+    minGames: numericFilter(plan, "champion_games", "gte") ?? 5,
+    order: boundedChampionOrder(plan),
+    limit: Math.min(plan.limit, perQueryLimit),
+    offset: 0,
+  }, signal))) as PlayerChampionQueryEnvelope[];
+  const rows = responses.flatMap((response) => response.rows.map(playerChampionRow));
+  const total = responses.reduce((sum, response) => sum + response.total, 0);
+  return resultForBoundedRows(
+    plan,
+    rows,
+    total,
+    ["rpc:get_scryglass_player_champions"],
+    {
+      median: responses.length === 1 ? responses[0]?.median_reference : undefined,
+      mean: responses.length === 1 ? responses[0]?.mean_reference : undefined,
+    },
+  );
+}
+
+/** Execute against active-release RPC rows. Large asset reads remain a rollout-only fallback. */
+export async function executePublishedQueryPlan(
+  planInput: unknown,
+  signal?: AbortSignal,
+): Promise<QueryExecutionResult> {
+  const parsed = parseQueryPlan(planInput);
+  if (!parsed.ok) throw new Error(parsed.reason);
+  const manifest = await readPackManifest(signal);
+  if (!queryApiAvailable(manifest)) {
+    const index = await loadSupportQueryIndex(signal);
+    return executeQueryPlan(parsed.plan, index);
+  }
+  assertBoundedFilters(parsed.plan);
+  return parsed.plan.dataset === "players"
+    ? executeRatingsQuery(parsed.plan, manifest, signal)
+    : executePlayerChampionQuery(parsed.plan, manifest, signal);
 }

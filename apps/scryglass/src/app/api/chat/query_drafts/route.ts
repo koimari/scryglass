@@ -1,16 +1,17 @@
-import { chatError, chatJson, clean, readChatJson, searchParams } from "@/lib/chatApi";
-import { queryTeamDraftScores } from "@/lib/draftQuery";
-import type { ProfileRecords } from "@/lib/pack";
+import { chatError, chatJson, clean, searchParams, secureChatRoute } from "@/lib/chatApi";
+import { readPackManifest } from "@/lib/serverPack";
 
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
+async function get(request: Request, signal: AbortSignal) {
   const question = clean(searchParams(request).get("q"));
-  if (!question) return chatError("A team draft-score question is required.", 400);
-  try {
-    const records = await readChatJson<ProfileRecords>("features/profile_records.json");
-    return chatJson(queryTeamDraftScores(records, question));
-  } catch (error) {
-    return chatError(error instanceof Error ? error.message : "Team draft scores are unavailable.", 422);
-  }
+  if (!question) return chatError("A team draft-score question is required.", 422);
+  const manifest = await readPackManifest(signal);
+  return chatJson({
+    schema_version: "scryglass:draft-api:v1",
+    release_id: manifest.pack_id,
+    authority: "unavailable",
+  });
 }
+
+export const GET = secureChatRoute(get);

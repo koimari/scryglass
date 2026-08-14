@@ -12,6 +12,8 @@ import urllib.request
 from collections import defaultdict
 from pathlib import Path
 
+from lol_kills.net import require_https_url
+
 ROOT = Path(__file__).resolve().parents[1]
 OUT_GAMES = ROOT / "data" / "lol" / "draft_games.json"
 OUT_PLAYERS = ROOT / "data" / "lol" / "draft_players.json"
@@ -59,6 +61,7 @@ def cargo_export(tables: str, fields: str, where: str, offset: int = 0, limit: i
     elif tables == "ScoreboardPlayers":
         params["order_by"] = "ScoreboardPlayers.DateTime_UTC DESC"
     url = "https://lol.fandom.com/wiki/Special:CargoExport?" + urllib.parse.urlencode(params)
+    url = require_https_url(url, hosts={"lol.fandom.com"})
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=120) as resp:
         raw = resp.read().decode()

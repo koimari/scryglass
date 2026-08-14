@@ -48,27 +48,69 @@ def canonical_sha256(value: object) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def worker_commit(root: Path) -> str:
+def _git_output(root: Path, *arguments: str) -> str:
+    try:
+        return subprocess.check_output(
+            ["git", *arguments],
+            cwd=root,
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).strip()
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError("worker Git checkout cannot be inspected") from error
+
+
+def worker_commit(root: Path, *, require_clean: bool = False) -> str:
+    """Resolve the real worker HEAD and verify its operator-provided binding."""
+
+    checkout = root.expanduser().resolve()
     configured = os.environ.get("SCRYGLASS_WORKER_COMMIT", "").strip().lower()
-    if len(configured) == 40 and all(character in "0123456789abcdef" for character in configured):
-        return configured
-    value = ""
-    for candidate in (root, Path(__file__).resolve().parents[1]):
-        try:
-            value = subprocess.check_output(
-                ["git", "rev-parse", "HEAD"],
-                cwd=candidate,
-                text=True,
-                stderr=subprocess.DEVNULL,
-                timeout=5,
-            ).strip().lower()
-        except (OSError, subprocess.SubprocessError):
-            value = ""
-        if len(value) == 40 and all(character in "0123456789abcdef" for character in value):
-            break
+    try:
+        top_level = Path(_git_output(checkout, "rev-parse", "--show-toplevel")).resolve()
+        value = _git_output(checkout, "rev-parse", "--verify", "HEAD").lower()
+    except RuntimeError:
+        if require_clean or configured:
+            raise
+        checkout = Path(__file__).resolve().parents[1]
+        top_level = Path(_git_output(checkout, "rev-parse", "--show-toplevel")).resolve()
+        value = _git_output(checkout, "rev-parse", "--verify", "HEAD").lower()
+    if require_clean and top_level != checkout:
+        raise RuntimeError("worker root is not the Git checkout root")
     if len(value) != 40 or any(character not in "0123456789abcdef" for character in value):
         raise RuntimeError("worker Git commit cannot be resolved")
+
+    if configured:
+        if len(configured) != 40 or any(
+            character not in "0123456789abcdef" for character in configured
+        ):
+            raise RuntimeError("configured worker Git commit is malformed")
+        if configured != value:
+            raise RuntimeError("configured worker Git commit does not match HEAD")
+
+    if require_clean:
+        dirty = _git_output(
+            checkout,
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=normal",
+        )
+        if dirty:
+            raise RuntimeError("worker Git checkout has uncommitted files")
     return value
+
+
+def requirements_lock_sha256(root: Path) -> str:
+    """Bind each release receipt to the exact hashed worker environment lock."""
+
+    lock_path = root.expanduser().resolve() / "requirements.lock"
+    try:
+        raw = lock_path.read_bytes()
+    except OSError as error:
+        raise RuntimeError("worker requirements lock cannot be read") from error
+    if not raw:
+        raise RuntimeError("worker requirements lock is empty")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def input_fingerprint(
@@ -76,12 +118,14 @@ def input_fingerprint(
     source_file_sha256: str,
     transform_version: str,
     worker_git_commit: str,
+    requirements_lock_sha256: str,
 ) -> str:
     return canonical_sha256(
         {
             "source_file_sha256": source_file_sha256,
             "transform_version": transform_version,
             "worker_commit": worker_git_commit,
+            "requirements_lock_sha256": requirements_lock_sha256,
         }
     )
 
@@ -108,6 +152,7 @@ def reusable_stage_receipt(
     fingerprint: str,
     transform_version: str,
     worker_git_commit: str,
+    requirements_lock_sha256: str,
 ) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -122,6 +167,7 @@ def reusable_stage_receipt(
         "input_fingerprint": fingerprint,
         "transform_version": transform_version,
         "worker_commit": worker_git_commit,
+        "requirements_lock_sha256": requirements_lock_sha256,
     }
     return payload if all(payload.get(key) == value for key, value in expected.items()) else None
 
@@ -156,17 +202,27 @@ class RefreshRunLedger:
     transform_version: str
     source_file_sha256: str
     source_observed_through: str | None
+    requirements_lock_sha256: str
     counts: dict[str, int] = field(default_factory=dict)
     remote_write: Callable[[dict[str, Any]], None] | None = None
     retry_of: str | None = None
 
     def __post_init__(self) -> None:
+        if (
+            len(self.requirements_lock_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.requirements_lock_sha256
+            )
+        ):
+            raise ValueError("requirements lock digest is malformed")
         stamp = self.scheduled_for.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         self.run_id = f"refresh-{stamp}-{uuid.uuid4().hex[:12]}"
         self.fingerprint = input_fingerprint(
             source_file_sha256=self.source_file_sha256,
             transform_version=self.transform_version,
             worker_git_commit=self.worker_git_commit,
+            requirements_lock_sha256=self.requirements_lock_sha256,
         )
         if self.retry_of is None:
             self.retry_of = latest_failed_run(self.runtime_root, self.fingerprint)
@@ -193,6 +249,7 @@ class RefreshRunLedger:
             "stage": self.stage,
             "input_fingerprint": self.fingerprint,
             "worker_commit": self.worker_git_commit,
+            "requirements_lock_sha256": self.requirements_lock_sha256,
             "transform_version": self.transform_version,
             "source_file_sha256": self.source_file_sha256,
             "source_observed_through": self.source_observed_through,

@@ -1,81 +1,93 @@
 from __future__ import annotations
 
-import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from lol_kills import update_public_pack
 from lol_kills.export import upload_pack
 
 
 class UploadPackTests(unittest.TestCase):
-    def test_vercel_ignore_keeps_only_older_pack_directories(self) -> None:
-        with TemporaryDirectory() as temporary:
-            app_root = Path(temporary) / "app"
-            public_root = app_root / "public/packs"
-            public_root.mkdir(parents=True)
-            for pack_id in ("v1", "v2"):
-                (public_root / pack_id).mkdir()
-            ignore = app_root / ".vercelignore"
-            ignore.write_text(
-                "custom-private-path/\npublic/packs/*\n!public/packs/manifest.json\n",
-                encoding="utf-8",
-            )
+    def test_public_pack_blob_paths_fail_before_any_network_request(self) -> None:
+        paths = (
+            "packs/v2026.08.13.120000/features/draft_records.json",
+            "packs/v2026.08.13.120000/features/ratings_snapshot.json",
+            "packs/manifest.json",
+            "%70acks/v2026.08.13.120000/features/profile_records.json",
+            "snapshot/../packs/v2026.08.13.120000/features/team_records.json",
+        )
+        for pathname in paths:
+            with self.subTest(pathname=pathname), self.assertRaisesRegex(
+                RuntimeError,
+                "public pack Blob publication is disabled",
+            ):
+                upload_pack._blob_put(
+                    "token",
+                    pathname,
+                    b"{}",
+                    "application/json",
+                )
 
-            upload_pack.write_vercel_pack_ignore(
-                "v2",
-                public_root=public_root,
-                ignore_path=ignore,
-            )
-
-            self.assertEqual(
-                ignore.read_text(encoding="utf-8").splitlines(),
-                ["custom-private-path/", "public/packs/v1/"],
-            )
-
-    def test_publish_blob_pointers_uses_stable_overwritable_paths(self) -> None:
-        manifest = {
-            "pack_id": "v2026.07.26.1700",
-            "created_utc": "2026-07-26T17:00:00+00:00",
-            "base_url": None,
-        }
-
-        objects: dict[str, bytes] = {}
-
-        def fake_get(url: str) -> bytes | None:
-            return objects.get(url)
-
-        def fake_put(_token, pathname, data, *_args, **_kwargs):
-            objects[f"https://blob/{pathname}"] = data
-            return f"https://blob/{pathname}"
-
-        with patch.object(upload_pack, "_blob_get", side_effect=fake_get), patch.object(
-            upload_pack,
-            "_blob_put",
-            side_effect=fake_put,
-        ) as put:
-            urls = upload_pack.publish_blob_pointers(
+    def test_all_legacy_pack_publish_entrypoints_fail_closed(self) -> None:
+        manifest = {"pack_id": "v2026.08.13.120000"}
+        entrypoints = (
+            lambda: upload_pack.upload_to_blob(
+                Path("candidate"), manifest["pack_id"], "token"
+            ),
+            lambda: upload_pack.publish_blob_pointers(
                 "token",
                 manifest["pack_id"],
                 manifest,
-                base_url="https://blob/packs/v2026.07.26.1700",
-            )
-
-        self.assertEqual(set(urls), {"packs/manifest.json", "packs/latest.json"})
-        self.assertEqual(put.call_count, 2)
-        for call in put.call_args_list:
-            self.assertTrue(call.kwargs["allow_overwrite"])
-            self.assertEqual(
-                call.kwargs["cache_control"],
-                "public, max-age=60, must-revalidate",
-            )
-
-        manifest_payload = json.loads(put.call_args_list[0].args[2])
-        self.assertEqual(
-            manifest_payload["base_url"],
-            "https://blob/packs/v2026.07.26.1700",
+                base_url="https://example.public.blob.vercel-storage.com/packs/x",
+            ),
+            lambda: upload_pack.write_atlas_manifest(
+                manifest["pack_id"],
+                manifest,
+                base_url=f"/packs/{manifest['pack_id']}",
+            ),
+            lambda: upload_pack.main([]),
         )
+        for entrypoint in entrypoints:
+            with self.subTest(entrypoint=entrypoint), self.assertRaisesRegex(
+                (RuntimeError, SystemExit),
+                "public pack Blob publication is disabled",
+            ):
+                entrypoint()
+
+    def test_update_command_rejects_legacy_publication_flags_before_work(self) -> None:
+        with patch.object(update_public_pack, "_run_module") as run:
+            for flag in ("--publish", "--local-only"):
+                with self.subTest(flag=flag), self.assertRaises(SystemExit):
+                    update_public_pack.main([flag])
+        run.assert_not_called()
+
+    def test_public_pack_callers_have_no_blob_token_or_pointer_lane(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        for relative in (
+            "lol_kills/postgame_sync.py",
+            "lol_kills/update_public_pack.py",
+        ):
+            source = (root / relative).read_text(encoding="utf-8")
+            with self.subTest(relative=relative):
+                self.assertNotIn("BLOB_READ_WRITE_TOKEN", source)
+                self.assertNotIn("VERCEL_BLOB_READ_WRITE_TOKEN", source)
+                self.assertNotIn("publish_blob_pointers", source)
+                self.assertNotIn("upload_to_blob", source)
+
+    def test_pack_directory_rejects_symlinks_and_noncanonical_ids(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pack = root / "v2026.08.13.120000"
+            pack.mkdir()
+            self.assertEqual(upload_pack._pack_directory(root, pack.name), pack.resolve())
+            with self.assertRaisesRegex(RuntimeError, "pack ID is invalid"):
+                upload_pack._pack_directory(root, "../escape")
+            alias = root / "v2026.08.13.120001"
+            alias.symlink_to(pack, target_is_directory=True)
+            with self.assertRaisesRegex(RuntimeError, "pack directory is invalid"):
+                upload_pack._pack_directory(root, alias.name)
 
 
 if __name__ == "__main__":

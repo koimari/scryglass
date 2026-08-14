@@ -24,6 +24,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from lol_kills.net import require_https_url
+
 
 SCHEMA_VERSION = "scryglass:leaguepedia-patch-revisions:v1"
 DEFAULT_RUN = Path("data/lol/v2/experiments/leaguepedia/manual-run-2026-07-31")
@@ -119,6 +121,7 @@ def _write_json(path: Path, value: Any) -> None:
 
 
 def _fetch(url: str, *, timeout: float) -> tuple[bytes, Any]:
+    url = require_https_url(url, hosts={"lol.fandom.com"})
     request = urllib.request.Request(
         url,
         headers={"User-Agent": USER_AGENT, "Accept": "application/json"},

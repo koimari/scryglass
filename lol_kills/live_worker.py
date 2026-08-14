@@ -244,7 +244,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--seconds", type=float, default=0.0, help="Stop the worker after this many seconds")
     parser.add_argument("--pack-id", default=None)
     parser.add_argument("--ratings-file", default=None)
-    parser.add_argument("--local-root", default=None, help="Local live directory when Blob token is absent")
+    parser.add_argument(
+        "--local-root",
+        required=True,
+        help="Explicit private directory for live research snapshots",
+    )
     parser.add_argument("--env-file", default=None)
     args = parser.parse_args(argv)
     if bool(args.state_file) != bool(args.series_id):

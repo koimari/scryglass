@@ -3,11 +3,20 @@ set -euo pipefail
 
 umask 077
 
+refresh_args=()
+if [[ "${1:-}" == "--force" && "$#" -eq 1 ]]; then
+  refresh_args+=(--force)
+elif [[ "$#" -ne 0 ]]; then
+  print -u2 "Usage: run-public-refresh.sh [--force]"
+  exit 64
+fi
+
 worker_root="${SCRYGLASS_WORKER_ROOT:-${HOME}/Library/Application Support/Scryglass Worker}"
 repo_root="${worker_root}/repo"
 public_root="${worker_root}/public-packs"
 runtime_root="${worker_root}/runtime"
 python="${worker_root}/venv/bin/python"
+"${repo_root}/ops/verify-public-refresh-env.sh" "${repo_root}" "${worker_root}/venv"
 oe_inbox="${worker_root}/oe-inbox"
 cycle_id="$("${python}" -c 'from datetime import datetime; now=datetime.now(); print(f"{now:%Y%m%d}T{now.hour // 6 * 6:02d}0000")')"
 run_root="${runtime_root}/data/lol/runtime/cycles/${cycle_id}"
@@ -28,7 +37,20 @@ export SCRYGLASS_STEP_TIMEOUT_MINUTES=15
 export SCRYGLASS_STALE_AFTER_HOURS=12
 export SCRYGLASS_OE_BROWSER_REFRESHED=1
 export SCRYGLASS_OE_DATABASE_REFRESHED=1
-export SCRYGLASS_WORKER_COMMIT="$(/usr/bin/git -C "${repo_root}" rev-parse HEAD)"
+real_worker_commit="$(/usr/bin/git -C "${repo_root}" rev-parse --verify HEAD)"
+if [[ ! "${SCRYGLASS_WORKER_COMMIT:-}" =~ '^[0-9a-f]{40}$' ]]; then
+  print -u2 "SCRYGLASS_WORKER_COMMIT must name the tested worker commit."
+  exit 78
+fi
+if [[ "${SCRYGLASS_WORKER_COMMIT}" != "${real_worker_commit}" ]]; then
+  print -u2 "The worker HEAD differs from SCRYGLASS_WORKER_COMMIT."
+  exit 78
+fi
+if [[ -n "$(/usr/bin/git -C "${repo_root}" status --porcelain=v1 --untracked-files=normal)" ]]; then
+  print -u2 "The worker checkout contains uncommitted files."
+  exit 78
+fi
+export SCRYGLASS_WORKER_COMMIT
 export SCRYGLASS_SUPABASE_SECRET_KEY="$(
   /usr/bin/security find-generic-password \
     -a scryglass-public-worker \
@@ -39,6 +61,12 @@ export SCRYGLASS_DATA_PUBLISH_TOKEN="$(
   /usr/bin/security find-generic-password \
     -a scryglass-public-worker \
     -s scryglass-data-publish-token \
+    -w
+)"
+export SCRYGLASS_DIAGNOSTIC_TOKEN="$(
+  /usr/bin/security find-generic-password \
+    -a scryglass-public-worker \
+    -s scryglass-diagnostic-token \
     -w
 )"
 
@@ -56,8 +84,9 @@ export SCRYGLASS_ACCEPTED_IMPORT_RECEIPT="${import_receipt}"
 
 /usr/bin/git -C "${repo_root}" archive HEAD \
   data/lol/v2 \
-  apps/scryglass/public/rankings/tierlists.json \
   | /usr/bin/tar -x -C "${runtime_root}"
+
+cd "${repo_root}"
 
 resume_cycle=0
 if [[ -f "${source_receipt}" && -f "${import_receipt}" ]]; then
@@ -95,7 +124,6 @@ if [[ "${resume_cycle}" -eq 0 ]]; then
     exit 1
   fi
 
-  cd "${repo_root}"
   "${python}" -m lol_kills.etl.oe_ingest \
     --install-browser-candidate "${oe_candidate}" \
     --year "${oe_year}" \
@@ -111,4 +139,5 @@ fi
 exec "${python}" -m lol_kills.public_refresh \
   --root "${repo_root}" \
   --public-root "${public_root}" \
-  --once
+  --once \
+  "${refresh_args[@]}"

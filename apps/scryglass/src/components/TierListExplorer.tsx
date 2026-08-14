@@ -9,6 +9,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   filterRowsByMinimumGames,
   filterRowsByRegion,
@@ -26,6 +27,7 @@ import {
   type TierRankedMode,
   type TierScope,
 } from "@/lib/tierBoard";
+import { publicPatchLabel } from "@/lib/patchIdentity";
 import styles from "./TierListExplorer.module.css";
 
 const TIER_LIST_URL = "/api/public-data/tierlists";
@@ -64,16 +66,33 @@ type MatchupTooltip = {
   basis: MatchupBasis | undefined;
 };
 
-type TierResponse = {
+export type TierResponse = {
   status: string;
   reason?: string;
   generated_at?: string;
   as_of?: string;
   source_freshness?: "oe_daily_export" | "oe_with_same_day_grid_bridge";
-  options?: { roles: string[]; patches: string[]; tier_buckets?: TierBucket[] };
+  options?: {
+    roles: string[];
+    patches: string[];
+    regions?: string[];
+    leagues?: string[];
+    tiers?: string[];
+    tier_buckets?: TierBucket[];
+  };
   scopes?: TierScope[];
   rows?: TierRow[];
   structural_similarity?: StructuralSimilarity;
+  champion_images?: Record<string, string>;
+};
+
+export type TierFilterState = {
+  patch: string;
+  role: string;
+  region: string;
+  league: string;
+  tier: string;
+  minimumGames: number;
 };
 
 const EMPTY: TierResponse = { status: "unavailable" };
@@ -81,6 +100,37 @@ const EMPTY: TierResponse = { status: "unavailable" };
 function patchOrder(value: string): number {
   const [major, minor] = value.split(".").map(Number);
   return (Number.isFinite(major) ? major : 0) * 1000 + (Number.isFinite(minor) ? minor : 0);
+}
+
+function publicPatchScopeId(scopeId: string | undefined, sourcePatch: string, patch: string): string | undefined {
+  if (!scopeId) return scopeId;
+  const prefix = `patch:${sourcePatch}`;
+  return scopeId.startsWith(prefix) ? `patch:${patch}${scopeId.slice(prefix.length)}` : scopeId;
+}
+
+function normalizeTierResponse(payload: TierResponse): TierResponse {
+  const options = payload.options
+    ? { ...payload.options, patches: payload.options.patches.map(publicPatchLabel) }
+    : payload.options;
+  const rows = payload.rows?.map((row) => {
+    const sourcePatch = row.patch;
+    const patch = publicPatchLabel(sourcePatch);
+    return {
+      ...row,
+      patch,
+      scope_id: publicPatchScopeId(row.scope_id, sourcePatch, patch) ?? row.scope_id,
+    };
+  });
+  const scopes = payload.scopes?.map((scope) => {
+    const sourcePatch = scope.patch;
+    const patch = publicPatchLabel(sourcePatch);
+    return {
+      ...scope,
+      patch,
+      scope_id: publicPatchScopeId(scope.scope_id, sourcePatch, patch) ?? scope.scope_id,
+    };
+  });
+  return { ...payload, options, rows, scopes };
 }
 
 function roleLabel(role: string): string {
@@ -220,6 +270,21 @@ function Select({
         ))}
       </select>
     </label>
+  );
+}
+
+function TierLoadingState() {
+  return (
+    <div className={styles.loadingState} role="status" aria-live="polite">
+      <div className={styles.loadingHeader}>
+        <span>Loading accepted tier artifact</span>
+        <i aria-hidden="true" />
+      </div>
+      <div className={styles.loadingRows} aria-hidden="true">
+        {Array.from({ length: 5 }, (_, index) => <span key={index} style={{ "--loading-width": `${62 + index * 7}%` } as CSSProperties} />)}
+      </div>
+      <small>Preparing the patch, role, and evidence controls.</small>
+    </div>
   );
 }
 
@@ -780,32 +845,50 @@ function ResponseBoard({
   );
 }
 
-export function TierListExplorer() {
-  const [role, setRole] = useState("");
-  const [patch, setPatch] = useState("");
-  const [minimumGames, setMinimumGames] = useState(5);
+export function TierListExplorer({
+  initialData,
+  initialFilters,
+  serverFiltered = false,
+}: {
+  initialData?: TierResponse;
+  initialFilters?: TierFilterState;
+  serverFiltered?: boolean;
+} = {}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [role, setRole] = useState(initialFilters?.role ?? "");
+  const [patch, setPatch] = useState(publicPatchLabel(initialFilters?.patch ?? ""));
+  const [minimumGames, setMinimumGames] = useState(initialFilters?.minimumGames ?? 5);
   const [mode, setMode] = useState<BoardMode>("first_pick");
   const [responseChampion, setResponseChampion] = useState("");
-  const [region, setRegion] = useState("");
-  const [data, setData] = useState<TierResponse>(EMPTY);
-  const [loading, setLoading] = useState(true);
-  const [fullHistoryLoaded, setFullHistoryLoaded] = useState(false);
+  const [region, setRegion] = useState(initialFilters?.region ?? "");
+  const [league, setLeague] = useState(initialFilters?.league ?? "");
+  const [tier, setTier] = useState(initialFilters?.tier ?? "");
+  const [data, setData] = useState<TierResponse>(normalizeTierResponse(initialData ?? EMPTY));
+  const [loading, setLoading] = useState(!initialData);
+  const [fullHistoryLoaded, setFullHistoryLoaded] = useState(serverFiltered);
+
+  const commitData = useCallback((payload: TierResponse, fullHistory: boolean) => {
+    setData(normalizeTierResponse(payload));
+    setFullHistoryLoaded(fullHistory);
+  }, []);
 
   const load = useCallback(async (url: string, signal?: AbortSignal, showLoading = false) => {
     if (showLoading) setLoading(true);
     try {
       const response = await fetch(url, { signal });
       if (!response.ok) throw new Error("tier-list file is unavailable");
-      setData((await response.json()) as TierResponse);
-      setFullHistoryLoaded(url === TIER_LIST_URL);
+      commitData((await response.json()) as TierResponse, url === TIER_LIST_URL);
     } catch {
       if (!signal?.aborted) setData(EMPTY);
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, []);
+  }, [commitData]);
 
   useEffect(() => {
+    if (serverFiltered) return;
     const controller = new AbortController();
     fetch(LATEST_TIER_LIST_URL, { signal: controller.signal })
       .then((response) => {
@@ -813,8 +896,7 @@ export function TierListExplorer() {
         return response.json() as Promise<TierResponse>;
       })
       .then((payload) => {
-        setData(payload);
-        setFullHistoryLoaded(false);
+        commitData(payload, false);
       })
       .catch(() => {
         if (!controller.signal.aborted) setData(EMPTY);
@@ -823,8 +905,24 @@ export function TierListExplorer() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, []);
+  }, [commitData, serverFiltered]);
 
+  useEffect(() => {
+    if (!serverFiltered) return;
+    const params = new URLSearchParams(searchParams.toString());
+    if (patch) params.set("patch", patch); else params.delete("patch");
+    if (role) params.set("role", role); else params.delete("role");
+    if (region) params.set("region", region); else params.delete("region");
+    if (league) params.set("league", league); else params.delete("league");
+    if (tier) params.set("tier", tier); else params.delete("tier");
+    if (minimumGames !== 5) params.set("min", String(minimumGames)); else params.delete("min");
+    const suffix = params.toString();
+    const next = `${pathname}${suffix ? `?${suffix}` : ""}`;
+    const current = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+    if (next !== current) router.replace(next, { scroll: false });
+  }, [league, minimumGames, patch, pathname, region, role, router, searchParams, serverFiltered, tier]);
+
+  if (loading && data.status !== "available") return <TierLoadingState />;
   if (data.status !== "available") {
     return (
       <div className={styles.unavailable}>
@@ -840,10 +938,25 @@ export function TierListExplorer() {
   const activePatch = patch || patchOptions[0] || "";
   const latestPatch = patchOptions[0] || "";
   const roleOptions = (data.options?.roles ?? [...ROLE_ORDER]).map((value) => ({ value, label: roleLabel(value) }));
-  const rows = (data.rows ?? []).filter((row) => row.patch === activePatch);
-  const regionOptions = regionalOptions(scopes, activePatch);
+  const rows = (data.rows ?? [])
+    .filter((row) => row.patch === activePatch)
+    .map((row) => ({
+      ...row,
+      champion_image_url: row.champion_image_url ?? data.champion_images?.[row.champion] ?? null,
+    }));
+  const scopeRegionOptions = regionalOptions(scopes, activePatch);
+  const regionLabels = new Map(scopeRegionOptions.map((option) => [option.id, option.label]));
+  const serverRegionIds = scopeRegionOptions.length
+    ? scopeRegionOptions.map((option) => option.id)
+    : data.options?.regions ?? [];
+  const regionOptions = serverFiltered
+    ? serverRegionIds.map((value) => ({
+        id: value,
+        label: regionLabels.get(value) ?? value,
+      }))
+    : scopeRegionOptions;
   const activeRegion = regionOptions.some((candidate) => candidate.id === region) ? region : "";
-  const regionalRows = filterRowsByRegion(rows, scopes, activePatch, activeRegion);
+  const regionalRows = serverFiltered ? rows : filterRowsByRegion(rows, scopes, activePatch, activeRegion);
   const visibleRows = filterRowsByMinimumGames(regionalRows, minimumGames);
   const selectedRows = role ? visibleRows.filter((row) => row.role === role) : [];
   const selectedScope = role
@@ -862,8 +975,13 @@ export function TierListExplorer() {
   const boardRows = rowsForMode(selectedRows, rankedMode);
   const patchRoleRows = role ? rows.filter((row) => row.role === role) : [];
 
+  const changeMode = (value: BoardMode) => {
+    if (value === mode) return;
+    setMode(value);
+  };
+
   return (
-    <section className={styles.section}>
+    <section className={styles.section} aria-busy={loading}>
       <div className={styles.filters}>
         <Select
           label="Patch"
@@ -873,11 +991,13 @@ export function TierListExplorer() {
             setPatch(value);
             setResponseChampion("");
             setRegion("");
+            setLeague("");
+            setTier("");
             if (value && value !== latestPatch && !fullHistoryLoaded) {
               void load(TIER_LIST_URL, undefined, true);
             }
           }}
-          emptyLabel={`latest (${activePatch})`}
+          emptyLabel={latestPatch ? `latest (${publicPatchLabel(latestPatch)})` : "latest patch"}
         />
         <Select
           label="Role"
@@ -895,10 +1015,36 @@ export function TierListExplorer() {
           options={regionOptions.map((candidate) => ({ value: candidate.id, label: candidate.label }))}
           onChange={(value) => {
             setRegion(value);
+            setLeague("");
             setResponseChampion("");
           }}
           emptyLabel={regionOptions.length ? "all regions" : "regional refresh pending"}
         />
+        {serverFiltered && data.options?.leagues?.length ? (
+          <Select
+            label="League"
+            value={league}
+            options={data.options.leagues.map((value) => ({ value, label: value }))}
+            onChange={(value) => {
+              setLeague(value);
+              setRegion("");
+              setResponseChampion("");
+            }}
+            emptyLabel="all leagues"
+          />
+        ) : null}
+        {serverFiltered && data.options?.tiers?.length ? (
+          <Select
+            label="Tier"
+            value={tier}
+            options={data.options.tiers.map((value) => ({ value, label: value.replace(/^tier/, "Tier ") }))}
+            onChange={(value) => {
+              setTier(value);
+              setResponseChampion("");
+            }}
+            emptyLabel="all tiers"
+          />
+        ) : null}
         <label className={styles.field}>
           <span>Minimum games</span>
           <select value={minimumGames} onChange={(event) => setMinimumGames(Number(event.target.value))}>
@@ -909,7 +1055,10 @@ export function TierListExplorer() {
         </label>
         <button
           className={styles.button}
-          onClick={() => void load(activePatch === latestPatch ? LATEST_TIER_LIST_URL : TIER_LIST_URL, undefined, true)}
+          onClick={() => {
+            if (serverFiltered) router.refresh();
+            else void load(activePatch === latestPatch ? LATEST_TIER_LIST_URL : TIER_LIST_URL, undefined, true);
+          }}
           disabled={loading}
         >
           {loading ? "Loading…" : "Refresh"}
@@ -929,7 +1078,7 @@ export function TierListExplorer() {
             className={mode === item.value ? styles.questionTabActive : styles.questionTab}
             aria-pressed={mode === item.value}
             aria-current={mode === item.value ? "page" : undefined}
-            onClick={() => setMode(item.value)}
+            onClick={() => changeMode(item.value)}
           >
             <strong>{item.label}</strong>
             <span>{item.note}</span>

@@ -238,7 +238,8 @@ def _wiki_meta(connection: sqlite3.Connection) -> dict[str, Any]:
     )
     placeholders = ",".join("?" for _ in keys)
     rows = connection.execute(
-        f"SELECT key, value FROM meta WHERE key IN ({placeholders})", keys
+        f"SELECT key, value FROM meta WHERE key IN ({placeholders})",  # nosec B608: placeholders only
+        keys,
     ).fetchall()
     values = {str(key): json.loads(value) for key, value in rows}
     missing = [key for key in keys if key not in values]

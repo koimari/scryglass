@@ -30,6 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from lol_kills.net import require_https_url
+
 from lol_kills.v2.data.common import (
     ROLES,
     ContractError,
@@ -183,6 +185,7 @@ def capture_leaguepedia_page(
     base = _slug(title)
     for rendered in (False, True):
         url = leaguepedia_api_url(title, rendered=rendered, before=before)
+        url = require_https_url(url, hosts={"lol.fandom.com"})
         request = urllib.request.Request(url, headers={"User-Agent": user_agent})
         try:
             with urllib.request.urlopen(request, timeout=120) as response:

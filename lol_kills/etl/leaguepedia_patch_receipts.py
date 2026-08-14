@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from lol_kills.etl.aliases import normalize_team
+from lol_kills.net import require_https_url
 
 
 SCHEMA_VERSION = "scryglass:leaguepedia-patch-receipts:v1"
@@ -116,6 +117,7 @@ def _cargo_url(game_ids: list[str]) -> str:
 
 
 def _fetch(url: str, timeout: int) -> bytes:
+    url = require_https_url(url, hosts={"lol.fandom.com"})
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read()

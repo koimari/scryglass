@@ -1,7 +1,6 @@
 :root {
   --font-sans:
-    var(--font-hanken-grotesk), "Avenir Next", Avenir, "Segoe UI", Helvetica,
-    Arial;
+    "Avenir Next", Avenir, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-mono:
     "SFMono-Regular", Consolas, "Liberation Mono", "Courier New", monospace;
   --ink: #f2f0ea;

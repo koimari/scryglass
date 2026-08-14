@@ -34,12 +34,6 @@ from lol_kills.export.public_pack import (
     export_public_pack,
     source_identity_sha256,
 )
-from lol_kills.export.upload_pack import (
-    _blob_get,
-    publish_blob_pointers,
-    restore_blob_pointers,
-    upload_to_blob,
-)
 from lol_kills.ratings.player_map_grades import CORE_INPUTS
 from lol_kills.etl.oe_database import TRANSFORM_VERSION
 from lol_kills.research.composition_signal import CompositionSignalError, validate_public_signal
@@ -54,6 +48,9 @@ LIVE_ROOT = Path("data/lol/warehouse/parquet/oe_live")
 LIVE_MAPS = LIVE_ROOT / "maps.parquet"
 LIVE_TEAMS = LIVE_ROOT / "oe_team_games.parquet"
 LIVE_PLAYERS = LIVE_ROOT / "oe_player_games.parquet"
+STATIC_APP_PUBLIC_ROOT = (
+    Path(__file__).resolve().parents[1] / "apps" / "scryglass" / "public"
+).resolve()
 REVIEWED_QUARANTINED_GAME_IDS = frozenset(
     {
         "oe:game:40e753290593c20c4cc990b1abfaf674",
@@ -690,28 +687,10 @@ def validate_pack(pack_dir: Path, manifest: dict[str, Any], source: dict[str, An
     }
 
 
-def _capture_blob_pointers(base_url: str) -> dict[str, str | None]:
-    root = base_url.split("/packs/", 1)[0].rstrip("/")
-    captured: dict[str, str | None] = {}
-    for pathname in ("packs/manifest.json", "packs/latest.json"):
-        raw = _blob_get(f"{root}/{pathname}")
-        captured[pathname] = raw.decode("utf-8") if raw is not None else None
-    return captured
-
-
 def rollback_public_pack(publication: dict[str, Any], public_root: Path) -> dict[str, Any]:
-    """Restore the last known-good pointers after a post-publication smoke failure."""
+    """Restore the last known-good local staging pointer."""
 
     restored = {"runtime": publication.get("runtime"), "pack_id": publication.get("pack_id")}
-    previous = publication.get("previous_blob_pointers")
-    token = (
-        os.environ.get("BLOB_READ_WRITE_TOKEN")
-        or os.environ.get("VERCEL_BLOB_READ_WRITE_TOKEN")
-        or ""
-    ).strip()
-    if token and isinstance(previous, dict):
-        restore_blob_pointers(token, previous)
-        restored["blob"] = True
     old_local = publication.get("previous_local_manifest")
     if isinstance(old_local, dict):
         _atomic_json(public_root / "manifest.json", old_local)
@@ -720,46 +699,34 @@ def rollback_public_pack(publication: dict[str, Any], public_root: Path) -> dict
 
 
 def publish_pack(pack_dir: Path, manifest: dict[str, Any], public_root: Path) -> dict[str, Any]:
-    """Publish an immutable directory, then replace local and Blob pointers last."""
+    """Stage an immutable local candidate for private Supabase publication."""
 
     pack_id = str(manifest.get("pack_id") or "")
     if not pack_id or not pack_dir.is_dir():
         raise RefreshValidationError("pack publication has no valid source directory")
+    candidate_root = public_root.expanduser().resolve()
+    try:
+        candidate_root.relative_to(STATIC_APP_PUBLIC_ROOT)
+    except ValueError:
+        pass
+    else:
+        raise RefreshValidationError(
+            "candidate staging cannot write into the web app public directory"
+        )
+    public_root = candidate_root
     public_root.mkdir(parents=True, exist_ok=True)
     destination = public_root / pack_id
     if destination.exists():
         raise FileExistsError(f"immutable pack already exists: {destination}")
     staging = public_root / f".{pack_id}.{uuid.uuid4().hex}.incoming"
     old_local_manifest = _load_json(public_root / "manifest.json")
-    token = (
-        os.environ.get("BLOB_READ_WRITE_TOKEN")
-        or os.environ.get("VERCEL_BLOB_READ_WRITE_TOKEN")
-        or ""
-    ).strip()
-    blob_base = ""
-    previous_blob_pointers: dict[str, str | None] = {}
-    if token:
-        urls = upload_to_blob(pack_dir, pack_id, token)
-        if not urls:
-            raise RefreshValidationError("pack Blob publication uploaded no files")
-        sample = next(iter(urls.values()))
-        marker = f"/packs/{pack_id}/"
-        if marker not in sample:
-            raise RefreshValidationError("pack Blob publication returned an invalid URL")
-        blob_base = sample.rsplit(marker, 1)[0] + f"/packs/{pack_id}"
-        previous_blob_pointers = _capture_blob_pointers(blob_base)
     published = dict(manifest)
-    published["base_url"] = blob_base or f"/packs/{pack_id}"
+    published["base_url"] = f"/packs/{pack_id}"
     try:
         shutil.copytree(pack_dir, staging)
         _atomic_json(staging / "manifest.json", published)
         os.replace(staging, destination)
         _atomic_json(public_root / "manifest.json", published)
-        blob_pointers = (
-            publish_blob_pointers(token, pack_id, manifest, base_url=blob_base)
-            if token
-            else {}
-        )
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         if old_local_manifest:
@@ -770,10 +737,8 @@ def publish_pack(pack_dir: Path, manifest: dict[str, Any], public_root: Path) ->
     return {
         "pack_id": pack_id,
         "destination": str(destination),
-        "runtime": "blob" if token else "local_only",
+        "runtime": "local_staging",
         "base_url": published["base_url"],
-        "blob_pointers": blob_pointers,
-        "previous_blob_pointers": previous_blob_pointers,
         "previous_local_manifest": old_local_manifest,
     }
 

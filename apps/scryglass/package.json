@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --import tsx --test src/lib/*.test.mts",
+    "e2e:pack": "node e2e/fixtures/generate-pack.mjs",
     "test:e2e": "playwright test",
     "identities:build": "node scripts/build-visual-identities.mjs",
     "audit:public-boundary": "node scripts/audit-public-boundary.mjs"
@@ -19,6 +20,7 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@playwright/test": "^1.62.1",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -27,5 +29,17 @@
     "eslint-config-next": "16.3.0",
     "tsx": "^4.23.1",
     "typescript": "^5"
+  },
+  "overrides": {
+    "js-yaml": "4.3.1",
+    "minimatch@3.1.5": {
+      "brace-expansion": "1.1.18"
+    },
+    "minimatch@10.2.5": {
+      "brace-expansion": "5.0.9"
+    },
+    "nanoid": "3.3.18",
+    "postcss": "8.5.26",
+    "sharp": "0.35.3"
   }
 }

@@ -146,6 +146,25 @@ OPTIONAL_PUBLIC_FILES: tuple[str, ...] = (
     "features/draft_records.json",
 )
 
+MATCH_YEAR_COMPATIBILITY_FILES: tuple[str, ...] = tuple(
+    f"features/match_records_{year}.json" for year in DEFAULT_YEARS
+)
+
+TIER_PUBLIC_FILES: tuple[str, ...] = (
+    "rankings/tierlists.json",
+    "rankings/tierlists-latest.json",
+)
+
+# PUBLIC_ASSET_ALLOWLIST_V1. Keep this marker beside the one authoritative
+# tuple. A cross-language contract test reads each runtime consumer and the
+# final SQL constraint so an allowlist change cannot ship on one boundary only.
+PUBLIC_ASSET_PATHS: tuple[str, ...] = (
+    *PUBLIC_RATING_REQUIRED_FILES,
+    *OPTIONAL_PUBLIC_FILES,
+    *MATCH_YEAR_COMPATIBILITY_FILES,
+    *TIER_PUBLIC_FILES,
+)
+
 FORBIDDEN_PUBLIC_MODEL_FILES: tuple[str, ...] = (
     "draft_wr_calibration.json",
     "draft_recommendation.json",

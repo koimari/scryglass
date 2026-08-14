@@ -1,4 +1,5 @@
 import type { QueryPlayerRow, SupportQueryIndex } from "./supportQuery";
+import { publicPatchLabel } from "./patchIdentity";
 
 export type ChampionQueryDirection = "asc" | "desc";
 export type ChampionQueryMetric = "tier" | "win_rate" | "games";
@@ -188,7 +189,11 @@ function queryTierBoard(
     };
   }
 
-  const patches = (board.options?.patches ?? [...new Set(board.rows.map((row) => row.patch).filter((patch): patch is string => Boolean(patch)))])
+  const normalizedRows = board.rows.map((row) => ({
+    ...row,
+    patch: row.patch ? publicPatchLabel(row.patch) : row.patch,
+  }));
+  const patches = (board.options?.patches?.map(publicPatchLabel) ?? [...new Set(normalizedRows.map((row) => row.patch).filter((patch): patch is string => Boolean(patch)))])
     .sort(patchSort);
   const patch = patches.at(-1) ?? null;
   if (!patch) {
@@ -204,7 +209,7 @@ function queryTierBoard(
     };
   }
 
-  const rows = board.rows
+  const rows = normalizedRows
     .filter((row) => {
       const playedMaps = finite(row.played_maps) ? row.played_maps : 0;
       return row.patch === patch

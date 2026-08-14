@@ -77,6 +77,7 @@ actions and state, normally below 12% of the screen.
 - Active navigation uses a three-pixel red baseline.
 - Selected table rows use a restrained state treatment, never decorative podium styling.
 - Callouts use a full border or black header band.
+- Data graphics use labeled horizontal bars for rankings and percentages. Each bar keeps its exact value, sample size, axis, and baseline visible. Detail rows remain available for audit.
 - Loading uses skeleton rows; empty and error states explain the next useful action.
 - Phosphor supplies interface icons. Do not draw replacement icons with CSS or text glyphs.
 

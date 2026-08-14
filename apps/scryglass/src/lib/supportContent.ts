@@ -28,8 +28,8 @@ export const METHODOLOGY_SECTIONS: Record<MethodologyTopic, { title: string; bod
     body: "Patch-wide champion tier lists per role, built from the Dual Elo and matchup evidence. Tiers run S/A/B/C; the lists are descriptive (how champions have performed), not recommendations or betting signals.",
   },
   draft: {
-    title: "Draft win share",
-    body: "The draft win share is the estimated probability each team wins from the draft alone — the ten picks and who plays them — before the game starts. Each pick shows its contribution as a percentage of the team's draft win share; atom-based estimates are marked with an estimate badge when a player-champion pairing has little direct history.",
+    title: "Draft Score",
+    body: "Draft Score is a private research track. Public draft results stay unavailable until an independent review issues a release-bound promotion receipt.",
   },
   matches: {
     title: "Matches",
@@ -41,15 +41,15 @@ export const METHODOLOGY_SECTIONS: Record<MethodologyTopic, { title: string; bod
   },
   all: {
     title: "How Scryglass works",
-    body: "Scryglass publishes team ratings, player ratings, patch-wide tier lists, match results, and draft win share for professional League of Legends. Data refreshes every six hours from Oracle's Elixir. Ratings are Dual Elo; grades are A–F per game; tier lists are patch-wide per role; the draft win share is the pre-game win probability from the picks.",
+    body: "Scryglass publishes team ratings, player ratings, patch-wide tier lists, and match results for professional League of Legends. Data refreshes every six hours from Oracle's Elixir. Ratings use Dual Elo, grades run from A to F per game, and tier lists cover each role across a patch. Draft Score stays unavailable until its separate promotion gate passes.",
   },
 };
 
 export const NAVIGATION_HELP: Array<{ page: string; path: string; description: string }> = [
   { page: "Elo / ratings", path: "/elo", description: "Team and player rating ladders with league and role filters." },
-  { page: "Matches", path: "/matches", description: "Completed games and upcoming fixtures; open a match for rosters, champions, KDA, grades, and the draft win share." },
+  { page: "Matches", path: "/matches", description: "Completed games and upcoming fixtures; open a match for rosters, champions, KDA, and grades." },
   { page: "Tier lists", path: "/tiers", description: "Patch-wide champion tier lists per role, with role and regional views." },
-  { page: "Methodology", path: "/methodology", description: "How ratings, grades, tier lists, and the draft win share are computed." },
+  { page: "Methodology", path: "/methodology", description: "How ratings, grades, and tier lists are computed, plus the Draft Score release gate." },
   { page: "Chat", path: "/chat", description: "Ask Scryglass about players, teams, matches, ratings, tiers, schedules, or methodology." },
 ];
 

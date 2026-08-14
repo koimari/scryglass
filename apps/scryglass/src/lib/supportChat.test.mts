@@ -105,6 +105,11 @@ test("high-confidence ranking routes bypass model inference", async () => {
   });
 });
 
+test("routing rejects questions above the public request budget", async () => {
+  const result = await routeQuestion("x".repeat(501));
+  assert.deepEqual(result, { explanation: "Questions can contain up to 500 characters." });
+});
+
 test("executeTool builds the right endpoint and parses the response", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL) => {

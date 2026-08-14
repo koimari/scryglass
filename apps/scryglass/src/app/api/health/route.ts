@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { validDiagnosticSecret } from "@/lib/dataPublish";
 import { sameTimestamp } from "@/lib/health";
 import {
   readPublicRefreshHealth,
+  readPrivateRefreshHealth,
   readPublicTierList,
   readRemotePackManifest,
 } from "@/lib/serverPack";
@@ -23,11 +25,16 @@ async function readTierState(manifest: Awaited<ReturnType<typeof readRemotePackM
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const [manifest, refresh] = await Promise.all([
+    const diagnostic = validDiagnosticSecret(
+      request.headers.get("authorization"),
+      process.env.SCRYGLASS_DIAGNOSTIC_TOKEN,
+    );
+    const [manifest, refresh, privateRefresh] = await Promise.all([
       readRemotePackManifest(),
       readPublicRefreshHealth(),
+      diagnostic ? readPrivateRefreshHealth() : Promise.resolve(null),
     ]);
     let tier = { status: "unavailable", as_of: null as string | null };
     try {
@@ -35,33 +42,47 @@ export async function GET() {
     } catch {
       // Ratings remain useful while a later tier authority cycle is pending.
     }
-    const releaseAligned = !refresh?.active_release_id
-      || refresh.active_release_id === manifest.pack_id
-      || refresh.refresh_status === "running";
+    const releaseAligned = refresh?.active_release_id === manifest.pack_id;
     const sourceAsOf = manifest.ratings?.source_as_of ?? null;
     const sourceAligned = !refresh?.source_as_of
-      || sameTimestamp(refresh.source_as_of, sourceAsOf)
-      || refresh.refresh_status === "running";
+      || sameTimestamp(refresh.source_as_of, sourceAsOf);
     const status = refresh
       && refresh.status === "ok"
+      && refresh.refresh_status === "idle"
       && tier.status === "available"
       && releaseAligned
       && sourceAligned
       && !refresh.stale
       ? "ok"
       : "partial";
-    return NextResponse.json({
+    const checkedAt = new Date().toISOString();
+    const publicHealth = {
       status,
-      pack_id: manifest.pack_id,
-      pack_created_utc: manifest.created_utc ?? null,
-      source_as_of: sourceAsOf,
-      tier,
-      last_refresh_success_at: refresh?.last_success_at ?? null,
-      refresh_status: refresh?.refresh_status ?? "unknown",
-      worker_commit: refresh?.worker_commit ?? null,
+      checked_at: checkedAt,
+      last_success_at: refresh?.last_success_at ?? null,
       stale: refresh?.stale ?? false,
-    });
+    };
+    return NextResponse.json(
+      diagnostic
+        ? {
+            ...publicHealth,
+            diagnostics: {
+              release_id: manifest.pack_id,
+              pack_created_utc: manifest.created_utc ?? null,
+              source_as_of: sourceAsOf,
+              tier,
+              refresh_status: privateRefresh?.refresh_status ?? "unknown",
+              worker_commit: privateRefresh?.worker_commit ?? null,
+              run_id: privateRefresh?.last_run_id ?? null,
+            },
+          }
+        : publicHealth,
+      { headers: { "Cache-Control": "private, no-store" } },
+    );
   } catch {
-    return NextResponse.json({ status: "error" }, { status: 503 });
+    return NextResponse.json(
+      { status: "error", checked_at: new Date().toISOString() },
+      { status: 503, headers: { "Cache-Control": "private, no-store" } },
+    );
   }
 }

@@ -1,27 +1,35 @@
-import { chatError, chatJson, clean, searchParams } from "@/lib/chatApi";
+import { chatError, chatJson, clean, searchParams, secureChatRoute } from "@/lib/chatApi";
 import { filterChatMatchesByTeam, loadChatMatches } from "@/lib/chatData";
+import { queryApiAvailable } from "@/lib/publicData";
+import { readPackManifest } from "@/lib/serverPack";
 
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
+async function get(request: Request, signal: AbortSignal) {
   const params = searchParams(request);
   const team = clean(params.get("team"));
   const league = clean(params.get("league"));
   const champion = clean(params.get("champion"));
-  const limit = Math.min(Math.max(parseInt(params.get("limit") ?? "10", 10) || 10, 1), 50);
+  const limit = Math.min(Math.max(parseInt(params.get("limit") ?? "10", 10) || 10, 1), 20);
   if (!team && !league && !champion) {
-    return chatError("One of team, league, or champion is required.", 400);
+    return chatError("One of team, league, or champion is required.", 422);
   }
   try {
-    let games = await loadChatMatches();
-    if (team) {
+    const bounded = queryApiAvailable(await readPackManifest(signal));
+    let games = await loadChatMatches({
+      team: team || undefined,
+      league: league || undefined,
+      champion: champion || undefined,
+      limit,
+    }, signal);
+    if (!bounded && team) {
       games = filterChatMatchesByTeam(games, team);
     }
-    if (league) {
+    if (!bounded && league) {
       const lower = league.toLowerCase();
       games = games.filter((game) => game.league.toLowerCase() === lower);
     }
-    if (champion) {
+    if (!bounded && champion) {
       const lower = champion.toLowerCase();
       games = games.filter((game) =>
         (game.champions ?? []).some((pick) => pick.toLowerCase() === lower),
@@ -33,3 +41,5 @@ export async function GET(request: Request) {
     return chatError("Match search is unavailable for the current release.");
   }
 }
+
+export const GET = secureChatRoute(get);

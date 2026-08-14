@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
 
 from lol_kills.etl.aliases import normalize_team
+from lol_kills.net import require_https_url
 
 
 SCHEMA_VERSION = "scryglass:public-schedule:v1"
@@ -63,6 +64,7 @@ def _row_value(row: Mapping[str, Any], field: str) -> Any:
 
 
 def _fetch_json(url: str) -> Any:
+    url = require_https_url(url, hosts={"lol.fandom.com"})
     request = urllib.request.Request(
         url,
         headers={"User-Agent": USER_AGENT, "Accept": "application/json"},

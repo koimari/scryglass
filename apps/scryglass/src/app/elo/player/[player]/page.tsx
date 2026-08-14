@@ -3,15 +3,17 @@ import { PlayerRatingProfile } from "@/components/RatingProfiles";
 import type {
   PlayerChampionRecord,
   PlayerRating,
+  PlayerPositionDeltas,
   PlayerWeeklyRanks,
   PlayerRecord,
   ProfileGame,
   ProfileRecords,
   TeamRating,
 } from "@/lib/pack";
-import { compactPlayerRatings, findPlayerByRouteName, isActiveRating, PLAYER_SIGMA_MIN, softMu } from "@/lib/pack";
+import { compactPlayerRatings, findPlayerByRouteName, hasPromotedDraftAuthority, isActiveRating, PLAYER_SIGMA_MIN, softMu } from "@/lib/pack";
 import { draftRankingsFromProfile, filterDraftRankings } from "@/lib/draftRankings";
 import { playerPortrait } from "@/lib/playerPortraits";
+import { getPlayerProfile, queryApiAvailable } from "@/lib/publicData";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 export const revalidate = 21_600;
@@ -22,33 +24,64 @@ export default async function PlayerEloPage({ params }: Props) {
   const { player: raw } = await params;
   const name = decodeURIComponent(raw);
   const man = await readPackManifest();
-  const playerRows = await readPackJson<PlayerRating[]>(man, "features/player_ratings_snapshot.json");
+  if (queryApiAvailable(man)) {
+    const profile = await getPlayerProfile(man, name);
+    if (!profile.row) notFound();
+    const player = profile.row.payload.rating as PlayerRating | undefined;
+    if (!player) throw new Error("The public player profile has no rating payload");
+    const record = profile.row.payload.record as PlayerRecord | undefined;
+    const team = profile.team_row?.payload.rating as TeamRating | undefined;
+    const champions = profile.champions.map((row) => ({
+      ...(row.payload.record ?? {}),
+      champion: row.champion,
+      champion_image_url: row.payload.champion_image_url ?? null,
+      games: row.games,
+      wins: row.wins,
+      losses: Math.max(0, row.games - row.wins),
+      wr: row.win_rate,
+      kills: row.payload.record?.kills ?? null,
+      deaths: row.payload.record?.deaths ?? null,
+      assists: row.payload.record?.assists ?? null,
+    }));
+    const standing = profile.standing ?? {
+      tier_rank: 0,
+      tier_total: 0,
+      role_rank: 0,
+      role_total: 0,
+    };
+    const weekly = profile.row.payload.weekly as { position_deltas?: PlayerPositionDeltas } | undefined;
+    return (
+      <PlayerRatingProfile
+        player={player}
+        portrait={playerPortrait(player.player, record?.current_team ?? player.last_team)}
+        champions={champions}
+        record={record}
+        team={team ?? null}
+        standing={{
+          tierRank: standing.tier_rank,
+          tierTotal: standing.tier_total,
+          roleRank: standing.role_rank,
+          roleTotal: standing.role_total,
+        }}
+        positionDeltas={weekly?.position_deltas}
+        recentGames={profile.recent_games.map((row) => row.payload)}
+        championImages={profile.champion_images}
+        manifest={man}
+        draftMetric={null}
+      />
+    );
+  }
+  const [playerRows, teams, playerRecords, playerChampions, profileRecords, weeklyRanks] = await Promise.all([
+    readPackJson<PlayerRating[]>(man, "features/player_ratings_snapshot.json"),
+    readPackJson<TeamRating[]>(man, "features/ratings_snapshot.json"),
+    readPackJson<Record<string, PlayerRecord>>(man, "features/player_records.json")
+      .catch((): Record<string, PlayerRecord> => ({})),
+    readPackJson<Record<string, PlayerChampionRecord[]>>(man, "features/player_champion_records.json")
+      .catch((): Record<string, PlayerChampionRecord[]> => ({})),
+    readPackJson<ProfileRecords>(man, "features/profile_records.json").catch(() => null),
+    readPackJson<PlayerWeeklyRanks>(man, "features/player_weekly_ranks.json").catch(() => null),
+  ]);
   const players = compactPlayerRatings(playerRows);
-  const teams = await readPackJson<TeamRating[]>(man, "features/ratings_snapshot.json");
-  let playerRecords: Record<string, PlayerRecord> = {};
-  let playerChampions: Record<string, PlayerChampionRecord[]> = {};
-  let profileRecords: ProfileRecords | null = null;
-  let weeklyRanks: PlayerWeeklyRanks | null = null;
-  try {
-    playerRecords = await readPackJson(man, "features/player_records.json");
-  } catch {
-    playerRecords = {};
-  }
-  try {
-    playerChampions = await readPackJson(man, "features/player_champion_records.json");
-  } catch {
-    playerChampions = {};
-  }
-  try {
-    profileRecords = await readPackJson(man, "features/profile_records.json");
-  } catch {
-    profileRecords = null;
-  }
-  try {
-    weeklyRanks = await readPackJson(man, "features/player_weekly_ranks.json");
-  } catch {
-    weeklyRanks = null;
-  }
 
   const player = findPlayerByRouteName(players, name);
   if (!player) notFound();
@@ -76,7 +109,7 @@ export default async function PlayerEloPage({ params }: Props) {
   const recentGames = gameIds
     .map((gameId) => profileRecords?.games[gameId])
     .filter((game): game is ProfileGame => Boolean(game));
-  const draftProfile = profileRecords
+  const draftProfile = hasPromotedDraftAuthority(man) && profileRecords
     ? filterDraftRankings(draftRankingsFromProfile(profileRecords), { leagues: [], minGames: 5 })
     : null;
   const draftMetric = draftProfile?.players.find(

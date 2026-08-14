@@ -560,7 +560,9 @@ class StateWarehouse:
             "dim_champion", "fact_champion_stat", "dim_ability", "fact_ability_value",
             "dim_item", "fact_item_stat", "dim_rune", "dim_structure", "dim_rule_receipt",
         ):
-            counts[table] = int(self.connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
+            counts[table] = int(
+                self.connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]  # nosec B608
+            )
         payload = {
             "schema_version": SCHEMA_VERSION,
             "patch": self.pack.get("patch"),
@@ -616,7 +618,7 @@ class StateWarehouse:
             # caller forgot LIMIT.  Parameters cannot be used for the inner
             # statement because it is already a validated read-only string.
             cursor = self.connection.execute(
-                f"SELECT * FROM ({sql}) AS warehouse_query LIMIT {max_rows + 1}"
+                f"SELECT * FROM ({sql}) AS warehouse_query LIMIT {max_rows + 1}"  # nosec B608: validated read-only SQL above
             )
             raw_rows = cursor.fetchall()
         except sqlite3.Error as exc:
@@ -682,7 +684,9 @@ class StateWarehouse:
             "dim_champion", "fact_champion_stat", "dim_ability", "fact_ability_value",
             "dim_item", "fact_item_stat", "dim_rune", "dim_structure", "dim_rule_receipt",
         ):
-            counts[table] = int(self.connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
+            counts[table] = int(
+                self.connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]  # nosec B608
+            )
         return {
             "status": "ready" if self.ready else "closed",
             "engine": ENGINE_VERSION,
