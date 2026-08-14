@@ -63,6 +63,21 @@ Semgrep OSS scanned 978 tracked files with the `security-audit`, `python`, and `
 
 Bandit reports no high-severity findings after the subprocess fix. The Python release lock reports no known vulnerabilities through `pip-audit`.
 
+## Security and dependency closure
+
+The merged release checks completed successfully in Validate run
+[`31839779393`](https://github.com/koimari/scryglass/actions/runs/31839779393)
+and Security run
+[`31839779387`](https://github.com/koimari/scryglass/actions/runs/31839779387).
+The PR checks also passed CodeQL for Python and JavaScript, Secret scan,
+Dependency review, workflow and shell security, and the Elemental Drakes
+dependency, type, lint, build, and SBOM job. The GitHub Dependabot alert API
+returned zero open alerts for `koimari/scryglass` on 2026-08-14.
+
+Supabase MCP security and performance advisor calls for project
+`uytblwbtkwuukbbrugdi` returned zero lints on 2026-08-14. The advisor result is
+checked again after each schema or publication change.
+
 ## Retired public Blob cleanup
 
 GitHub Actions run [`31749119639`](https://github.com/koimari/scryglass/actions/runs/31749119639) retired the approved `packs/`, `rankings/`, `state/`, and `tierlists/` prefixes on 2026-08-13.
