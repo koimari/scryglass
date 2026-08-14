@@ -101,7 +101,7 @@ function assetAuthorized(manifest: PackManifest, relativePath: string): boolean 
   return relativePath !== "features/draft_records.json" || hasPromotedDraftAuthority(manifest);
 }
 
-async function readLocalManifest(): Promise<PackManifest> {
+export async function readLocalManifest(): Promise<PackManifest> {
   const manifestPath = path.join(localPackRoot(), "manifest.json");
   return JSON.parse(
     await fs.readFile(manifestPath, "utf8"),
@@ -560,28 +560,4 @@ export async function readPackJson<T>(
     pending.catch(() => packJsonCache.delete(cacheKey));
   }
   return pending as Promise<T>;
-}
-
-export async function readPublicTierList<T>(): Promise<T> {
-  if (e2eLocalPackRoot()) {
-    const manifest = await readLocalManifest();
-    return readPackJson<T>(manifest, "rankings/tierlists.json");
-  }
-  const manifest = await readSupabaseManifest("no-store");
-  return readSupabaseAsset<T>(manifest, "rankings/tierlists.json");
-}
-
-/** Send the large tier artifact from storage instead of proxying it through Vercel. */
-export async function publicTierListDownloadUrl(): Promise<string> {
-  return publicTierListViewDownloadUrl("full");
-}
-
-export async function publicTierListViewDownloadUrl(view: "full" | "latest"): Promise<string> {
-  const relativePath = view === "latest"
-    ? "rankings/tierlists-latest.json"
-    : "rankings/tierlists.json";
-  const manifest = await readSupabaseManifest("no-store");
-  const asset = await readActivePublicAsset(manifest.pack_id, relativePath);
-  if (!asset) throw new Error("Supabase public tier asset is unavailable");
-  return `/api/assets/${encodeURIComponent(manifest.pack_id)}/${encodeURIComponent(relativePath)}`;
 }

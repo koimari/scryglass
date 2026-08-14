@@ -4,7 +4,6 @@ import { sameTimestamp } from "@/lib/health";
 import {
   readPublicRefreshHealth,
   readPrivateRefreshHealth,
-  readPublicTierList,
   readRemotePackManifest,
 } from "@/lib/serverPack";
 
@@ -18,11 +17,7 @@ async function readTierState(manifest: Awaited<ReturnType<typeof readRemotePackM
       as_of: manifest.tier.as_of ?? null,
     };
   }
-  const payload = await readPublicTierList<Record<string, unknown>>();
-  return {
-    status: payload.status === "available" ? "available" : "unavailable",
-    as_of: typeof payload.as_of === "string" ? payload.as_of : null,
-  };
+  return { status: "unavailable", as_of: null };
 }
 
 export async function GET(request: Request) {
