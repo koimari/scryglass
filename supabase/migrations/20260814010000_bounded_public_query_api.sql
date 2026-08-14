@@ -269,8 +269,8 @@ begin
     'champions', 'aliases', 'tier_rows', 'tier_scopes',
     'tier_matrix_rows', 'tier_similarity_champions', 'tier_similarity_edges'
   ) or pg_catalog.jsonb_typeof(p_rows) <> 'array'
-     or pg_catalog.jsonb_array_length(p_rows) > 100
-     or pg_catalog.octet_length(p_rows::text) > 450000
+     or pg_catalog.jsonb_array_length(p_rows) > 500
+     or pg_catalog.octet_length(p_rows::text) > 3500000
   then
     raise exception 'Scryglass query staging batch is invalid';
   end if;

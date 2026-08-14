@@ -24,6 +24,7 @@ class FakeSupabase:
         self.stage_calls = 0
         self.storage: dict[str, bytes] = {}
         self.discard_calls: list[str] = []
+        self.stale_discard_limits: list[int] = []
         self.drain_calls: list[str] = []
 
     def release(self, release_id: str):
@@ -116,7 +117,8 @@ class FakeSupabase:
     def discard_stale_staging_releases(
         self, *, min_age_minutes: int = 360, limit: int = 10
     ) -> int:
-        del min_age_minutes, limit
+        del min_age_minutes
+        self.stale_discard_limits.append(limit)
         return 0
 
     def activate(self, release_id: str):
@@ -247,6 +249,7 @@ def test_publish_release_stages_then_activates_complete_snapshot() -> None:
     assert result["release_id"] == manifest["pack_id"]
     assert result["assets"] == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 2
     assert result["reused_assets"] == 0
+    assert client.stale_discard_limits == [1]
     assert client.active_id == manifest["pack_id"]
     assert len(client.assets) == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 2
     assert list(client.storage) == [
