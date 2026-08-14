@@ -22,6 +22,7 @@ def test_migrations_are_split_into_ordered_cutover_phases() -> None:
         "20260814161000_oe_import_patch_receipts.sql",
         "20260814170000_strict_public_cutover.sql",
         "20260814190000_query_stage_batch_budget.sql",
+        "20260814200000_ratings_page_budget.sql",
     ]
 
 
@@ -38,6 +39,15 @@ def test_query_staging_batch_budget_matches_worker() -> None:
     assert "QUERY_STAGE_BATCH_ROWS = 500" in publisher
     assert "QUERY_STAGE_BATCH_BYTES = 3_200_000" in publisher
     assert "discard_stale_staging_releases(limit=1)" in publisher
+
+
+def test_ratings_page_budget_updates_the_private_rpc() -> None:
+    migration = (
+        MIGRATIONS / "20260814200000_ratings_page_budget.sql"
+    ).read_text(encoding="utf-8")
+    assert "scryglass_private" in migration
+    assert "p_limit, 20), 1), 100" in migration
+    assert "unknown limit guard" in migration
 
 
 def test_phase_workdir_excludes_later_migrations() -> None:
