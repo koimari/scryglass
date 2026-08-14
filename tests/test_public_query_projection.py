@@ -13,6 +13,7 @@ from lol_kills.export.public_query_projection import (
     PublicQueryProjectionError,
     build_public_query_projection,
     build_tier_query_datasets,
+    canonical_query_bytes,
     normalize_public_key,
     write_public_query_projection,
 )
@@ -169,6 +170,10 @@ def test_query_projection_is_bounded_release_bound_and_draft_free() -> None:
         and len(receipt["sha256"]) == 64
         for dataset, receipt in projection["receipts"].items()
     )
+    for rows in projection["datasets"].values():
+        for row in rows:
+            source = {key: value for key, value in row.items() if key != "row_sha256"}
+            assert row["row_sha256"] == hashlib.sha256(canonical_query_bytes(source)).hexdigest()
 
 
 def test_query_projection_rejects_any_nested_draft_field() -> None:

@@ -252,6 +252,13 @@ def _row(dataset: str, row_key: str, payload: Mapping[str, Any], **columns: Any)
     return row
 
 
+def _refresh_row_digest(row: dict[str, Any]) -> None:
+    """Rebind a row digest after a final typed-column join."""
+
+    source = {key: value for key, value in row.items() if key != "row_sha256"}
+    row["row_sha256"] = _sha256(_canonical_bytes(source))
+
+
 def _wilson_lower_bound(wins: int, games: int, z: float = 1.96) -> float | None:
     if games <= 0 or wins < 0 or wins > games:
         return None
@@ -763,6 +770,7 @@ def build_public_query_projection(
     )
     for player in players:
         player["team_id"] = team_ids.get(_source_identity_key(player.get("team")))
+        _refresh_row_digest(player)
     images = profile_records.get("champion_images", {})
     if not isinstance(images, Mapping):
         images = {}
