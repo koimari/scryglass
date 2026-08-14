@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 
 import pandas as pd
 import pytest
 
-import lol_kills.research.draft_phase_curve as phase_curve
 from lol_kills.research.draft_phase_curve import (
     BASELINE_AUC_FLOOR,
     PHASES,
+    PROMOTION_SCHEMA_VERSION,
+    REQUIRED_PROMOTION_GATES,
+    SCHEMA_VERSION,
+    _artifact_payload_without_promotion,
+    _canonical_json_bytes,
+    _phase_model_payload,
     assert_no_gold_leakage,
     atomized_draft_features,
     fit_phase_curve,
@@ -151,6 +157,7 @@ def test_phase_output_is_unavailable_without_promotion() -> None:
 
 
 def test_promoted_phase_curve_requires_file_bound_independent_receipt(tmp_path, monkeypatch) -> None:
+    phase_curve = importlib.import_module("lol_kills.research.draft_phase_curve")
     models_dir = tmp_path / "data" / "lol" / "models"
     promotion_dir = models_dir / "promotions"
     promotion_dir.mkdir(parents=True)
@@ -158,9 +165,9 @@ def test_promoted_phase_curve_requires_file_bound_independent_receipt(tmp_path, 
     monkeypatch.setattr(phase_curve, "ROOT", tmp_path)
     monkeypatch.setattr(phase_curve, "MODELS_DIR", models_dir)
     monkeypatch.setattr(phase_curve, "PROMOTION_ROOT", promotion_dir)
-    gates = {name: True for name in phase_curve.REQUIRED_PROMOTION_GATES}
+    gates = {name: True for name in REQUIRED_PROMOTION_GATES}
     artifact = {
-        "schema_version": phase_curve.SCHEMA_VERSION,
+        "schema_version": SCHEMA_VERSION,
         "authority": "promoted",
         "source": "oe_only",
         "window": list(PHASES),
@@ -179,13 +186,13 @@ def test_promoted_phase_curve_requires_file_bound_independent_receipt(tmp_path, 
         "promotion": {},
     }
     model_hash = hashlib.sha256(
-        phase_curve._canonical_json_bytes(phase_curve._phase_model_payload(artifact))
+        _canonical_json_bytes(_phase_model_payload(artifact))
     ).hexdigest()
     artifact_hash = hashlib.sha256(
-        phase_curve._canonical_json_bytes(phase_curve._artifact_payload_without_promotion(artifact))
+        _canonical_json_bytes(_artifact_payload_without_promotion(artifact))
     ).hexdigest()
     receipt = {
-        "schema_version": phase_curve.PROMOTION_SCHEMA_VERSION,
+        "schema_version": PROMOTION_SCHEMA_VERSION,
         "status": "approved",
         "authority": "independent",
         "model_version": artifact["model_version"],
@@ -194,14 +201,14 @@ def test_promoted_phase_curve_requires_file_bound_independent_receipt(tmp_path, 
         "gates": gates,
     }
     receipt_path = promotion_dir / "phase-test.json"
-    receipt_bytes = phase_curve._canonical_json_bytes(receipt)
+    receipt_bytes = _canonical_json_bytes(receipt)
     receipt_path.write_bytes(receipt_bytes)
     artifact["promotion"] = {
         "receipt_path": "data/lol/models/promotions/phase-test.json",
         "receipt_sha256": hashlib.sha256(receipt_bytes).hexdigest(),
         "model_sha256": model_hash,
     }
-    artifact_path.write_bytes(phase_curve._canonical_json_bytes(artifact))
+    artifact_path.write_bytes(_canonical_json_bytes(artifact))
     loaded = json.loads(artifact_path.read_text(encoding="utf-8"))
     scored = score_phase_curve(
         loaded,
