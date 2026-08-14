@@ -435,13 +435,63 @@ jobs:
       - name: Create Python SBOM
         run: python -m pip_audit --disable-pip -r requirements.lock --format cyclonedx-json --output python-sbom.cdx.json
 
-      - name: Run the complete Python suite, pass 1
+      - name: Run the public release Python suite, pass 1
         timeout-minutes: 110
-        run: python -m pytest -q
+        run: |
+          python -m pytest -q \
+            tests/test_patch_identity.py \
+            tests/test_lcc_atom_refresh_receipt.py \
+            tests/model_v2/champions/test_atom_bridge.py \
+            tests/model_v2/champions/test_atom_seed_v1.py \
+            tests/model_v2/tierlists/test_live_refresh.py \
+            tests/model_v2/tierlists/test_production_bundle.py \
+            tests/model_v2/tierlists/test_filters.py \
+            tests/model_v2/tierlists/test_atom_matchup_features.py \
+            tests/model_v2/tierlists/test_joint_pooled_model.py \
+            tests/model_v2/tierlists/test_pooled_candidate.py \
+            tests/model_v2/tierlists/test_production_readiness.py \
+            tests/model_v2/tierlists/test_prospective_evaluation.py \
+            tests/test_public_asset_allowlist_contract.py \
+            tests/test_public_pack_spec.py \
+            tests/test_public_query_projection.py \
+            tests/test_public_refresh.py \
+            tests/test_refresh_ledger.py \
+            tests/test_supabase_publication.py \
+            tests/test_upload_pack.py \
+            tests/test_network_guards.py \
+            tests/test_public_schedule.py \
+            tests/test_public_release_migration_phases.py \
+            tests/test_public_grid_isolation.py \
+            tests/test_retire_public_blob_store.py
 
-      - name: Run the complete Python suite, pass 2
+      - name: Run the public release Python suite, pass 2
         timeout-minutes: 110
-        run: python -m pytest -q
+        run: |
+          python -m pytest -q \
+            tests/test_patch_identity.py \
+            tests/test_lcc_atom_refresh_receipt.py \
+            tests/model_v2/champions/test_atom_bridge.py \
+            tests/model_v2/champions/test_atom_seed_v1.py \
+            tests/model_v2/tierlists/test_live_refresh.py \
+            tests/model_v2/tierlists/test_production_bundle.py \
+            tests/model_v2/tierlists/test_filters.py \
+            tests/model_v2/tierlists/test_atom_matchup_features.py \
+            tests/model_v2/tierlists/test_joint_pooled_model.py \
+            tests/model_v2/tierlists/test_pooled_candidate.py \
+            tests/model_v2/tierlists/test_production_readiness.py \
+            tests/model_v2/tierlists/test_prospective_evaluation.py \
+            tests/test_public_asset_allowlist_contract.py \
+            tests/test_public_pack_spec.py \
+            tests/test_public_query_projection.py \
+            tests/test_public_refresh.py \
+            tests/test_refresh_ledger.py \
+            tests/test_supabase_publication.py \
+            tests/test_upload_pack.py \
+            tests/test_network_guards.py \
+            tests/test_public_schedule.py \
+            tests/test_public_release_migration_phases.py \
+            tests/test_public_grid_isolation.py \
+            tests/test_retire_public_blob_store.py
 
       - name: Upload Python SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

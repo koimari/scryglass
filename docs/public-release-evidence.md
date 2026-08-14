@@ -137,7 +137,8 @@ fallback.
 ## Evidence still required
 
 - clean CI from a zero-state Supabase replay;
-- two full Python-suite passes from the hashed Python 3.12 environment;
+- two public release Python-suite passes from the hashed Python 3.12 environment;
+- two private research-suite passes from the hashed environment with the approved artifact bundle mounted;
 - complete app tests, type check, lint, build, browser, accessibility, and performance checks;
 - preview security-header and abuse-budget probes;
 - source-rights records and Riot product registration;
