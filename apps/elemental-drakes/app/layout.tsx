@@ -1,14 +1,6 @@
 import type { Metadata } from "next";
-import { Hanken_Grotesk } from "next/font/google";
 
 import "./globals.css";
-
-const hankenGrotesk = Hanken_Grotesk({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  display: "swap",
-  variable: "--font-hanken-grotesk",
-});
 
 export const metadata: Metadata = {
   title: "Elemental Dragon Value — Scryglass",
@@ -30,7 +22,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html className={hankenGrotesk.variable} lang="en">
+    <html lang="en">
       <body>{children}</body>
     </html>
   );
