@@ -1871,11 +1871,6 @@ as $$
         'base_url',null,
         'data_backend','supabase',
         'tier',pg_catalog.jsonb_build_object('status','available','as_of',pg_catalog.to_jsonb(candidate.source_as_of)),
-        'draft_authority',pg_catalog.jsonb_build_object(
-          'schema_version','scryglass:draft-authority:v1','status','unavailable',
-          'release_id',candidate.release_id,'model_version',null,
-          'receipt_sha256',null,'issued_utc',null,'reason','model_not_promoted'
-        ),
         'query_api',case when
           candidate.manifest#>>'{query_api,schema_version}'='scryglass:query-api:v1'
           and candidate.manifest#>>'{query_api,status}'='available'
