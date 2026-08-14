@@ -483,11 +483,13 @@ export async function fetchVerifiedStorageAsset(
   const responseLength = response.headers.get("content-length");
   const responseBytes = responseLength && /^\d+$/.test(responseLength)
     ? Number(responseLength)
-    : Number.NaN;
+    : null;
   if (
     responseType !== asset.contentType
-    || !Number.isSafeInteger(responseBytes)
-    || responseBytes !== asset.bytes
+    || (
+      responseBytes !== null
+      && (!Number.isSafeInteger(responseBytes) || responseBytes !== asset.bytes)
+    )
   ) {
     throw new Error("Public Storage response metadata is invalid");
   }

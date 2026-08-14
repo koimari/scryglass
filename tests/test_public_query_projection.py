@@ -13,6 +13,7 @@ from lol_kills.export.public_query_projection import (
     PublicQueryProjectionError,
     build_public_query_projection,
     build_tier_query_datasets,
+    canonical_query_bytes,
     normalize_public_key,
     write_public_query_projection,
 )
@@ -169,6 +170,10 @@ def test_query_projection_is_bounded_release_bound_and_draft_free() -> None:
         and len(receipt["sha256"]) == 64
         for dataset, receipt in projection["receipts"].items()
     )
+    for rows in projection["datasets"].values():
+        for row in rows:
+            source = {key: value for key, value in row.items() if key != "row_sha256"}
+            assert row["row_sha256"] == hashlib.sha256(canonical_query_bytes(source)).hexdigest()
 
 
 def test_query_projection_rejects_any_nested_draft_field() -> None:
@@ -309,6 +314,39 @@ def test_tier_projection_splits_scopes_matrices_and_similarity() -> None:
     assert datasets["tier_matrix_rows"][0]["scope_id"] == "26.15-mid"
     assert datasets["tier_rows"][0]["patch"] == "26.15"
     assert datasets["tier_similarity_edges"][0]["score"] == 1.0
+
+
+def test_tier_projection_keeps_same_patch_roles_in_separate_scopes() -> None:
+    body = {
+        "rows": [
+            {
+                "scope_id": "patch:26.14",
+                "patch": "26.14",
+                "role": "mid",
+                "champion": "Galio",
+                "champion_id": "riot:champion:3",
+                "rank": 1,
+            },
+            {
+                "scope_id": "patch:26.14",
+                "patch": "26.14",
+                "role": "top",
+                "champion": "Galio",
+                "champion_id": "riot:champion:3",
+                "rank": 1,
+            },
+        ],
+        "scopes": [
+            {"scope_id": "patch:26.14", "patch": "26.14", "role": "mid", "regional_views": []},
+            {"scope_id": "patch:26.14", "patch": "26.14", "role": "top", "regional_views": []},
+        ],
+    }
+
+    datasets = build_tier_query_datasets(body)
+
+    assert {row["scope_id"] for row in datasets["tier_rows"]} == {"26.14-mid", "26.14-top"}
+    assert {row["scope_id"] for row in datasets["tier_scopes"]} == {"26.14-mid", "26.14-top"}
+    assert len({row["row_key"] for row in datasets["tier_rows"]}) == len(datasets["tier_rows"])
 
 
 def test_tier_projection_rejects_draft_fields_and_unapproved_images() -> None:

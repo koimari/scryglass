@@ -966,24 +966,40 @@ def _public_patch_label(value: object) -> str:
         return text
 
 
-def _public_scope_id(scope_id: object, source_patch: object, patch: str) -> str:
+def _public_scope_id(
+    scope_id: object,
+    source_patch: object,
+    patch: str,
+    role: object | None = None,
+) -> str:
     value = str(scope_id or "").strip()
     source = str(source_patch or "").strip()
-    prefix = f"patch:{source}" if source else ""
-    if prefix and value.startswith(prefix):
-        return f"patch:{patch}{value[len(prefix):]}"
+    source_prefix = f"patch:{source}" if source else ""
+    public_prefix = f"patch:{patch}"
+    if value == public_prefix or (source_prefix and value == source_prefix):
+        value = patch
+    elif value.startswith(f"{public_prefix}-"):
+        value = f"{patch}-{value[len(public_prefix) + 1:]}"
+    elif source_prefix and value.startswith(f"{source_prefix}-"):
+        value = f"{patch}-{value[len(source_prefix) + 1:]}"
+    elif value == source:
+        value = patch
+    elif source and value.startswith(f"{source}-"):
+        value = f"{patch}-{value[len(source) + 1:]}"
+    role_text = str(role or "").strip().casefold()
+    if role_text and value == patch:
+        return f"{patch}-{role_text}"
     return value
 
 
-def latest_tier_payload(tier_body: dict[str, Any]) -> dict[str, Any]:
-    """Keep the newest patch while preserving every view for that patch."""
+def _normalized_tier_payload(tier_body: dict[str, Any]) -> dict[str, Any]:
+    """Normalize every published patch and role-scoped identity."""
 
     options = tier_body.get("options")
     patches = options.get("patches") if isinstance(options, dict) else None
     if not isinstance(patches, list) or not patches:
         raise SupabasePublicationError("tier-list asset has no patch options")
     normalized_patches = [_public_patch_label(value) for value in patches]
-    latest_patch = max(normalized_patches, key=_patch_order)
     rows = tier_body.get("rows")
     scopes = tier_body.get("scopes")
     if not isinstance(rows, list) or not isinstance(scopes, list):
@@ -996,7 +1012,9 @@ def latest_tier_payload(tier_body: dict[str, Any]) -> dict[str, Any]:
         source_patch = item.get("patch")
         item["patch"] = _public_patch_label(source_patch)
         if item.get("scope_id") is not None:
-            item["scope_id"] = _public_scope_id(item.get("scope_id"), source_patch, item["patch"])
+            item["scope_id"] = _public_scope_id(
+                item.get("scope_id"), source_patch, item["patch"], item.get("role")
+            )
         normalized_rows.append(item)
     normalized_scopes: list[dict[str, Any]] = []
     for scope in scopes:
@@ -1006,14 +1024,29 @@ def latest_tier_payload(tier_body: dict[str, Any]) -> dict[str, Any]:
         source_patch = item.get("patch")
         item["patch"] = _public_patch_label(source_patch)
         if item.get("scope_id") is not None:
-            item["scope_id"] = _public_scope_id(item.get("scope_id"), source_patch, item["patch"])
+            item["scope_id"] = _public_scope_id(
+                item.get("scope_id"), source_patch, item["patch"], item.get("role")
+            )
         normalized_scopes.append(item)
-    latest = dict(tier_body)
-    latest_options = dict(options) if isinstance(options, dict) else {}
-    latest_options["patches"] = sorted(set(normalized_patches), key=_patch_order)
-    latest["options"] = latest_options
-    latest["rows"] = [row for row in normalized_rows if row.get("patch") == latest_patch]
-    latest["scopes"] = [scope for scope in normalized_scopes if scope.get("patch") == latest_patch]
+    normalized = dict(tier_body)
+    normalized_options = dict(options)
+    normalized_options["patches"] = sorted(set(normalized_patches), key=_patch_order)
+    normalized["options"] = normalized_options
+    normalized["rows"] = normalized_rows
+    normalized["scopes"] = normalized_scopes
+    return normalized
+
+
+def latest_tier_payload(tier_body: dict[str, Any]) -> dict[str, Any]:
+    """Keep the newest patch while preserving every view for that patch."""
+
+    normalized = _normalized_tier_payload(tier_body)
+    options = normalized["options"]
+    normalized_patches = options["patches"]
+    latest_patch = max(normalized_patches, key=_patch_order)
+    latest = dict(normalized)
+    latest["rows"] = [row for row in normalized["rows"] if row.get("patch") == latest_patch]
+    latest["scopes"] = [scope for scope in normalized["scopes"] if scope.get("patch") == latest_patch]
     latest["latest_patch"] = latest_patch
     if not latest["rows"] or not latest["scopes"]:
         raise SupabasePublicationError("latest tier-list patch has no public data")
@@ -1101,11 +1134,18 @@ def prepare_release(
         storage_objects[storage_path] = raw
         assets.append(asset)
 
-    tier_raw = tier_path.read_bytes()
-    tier_asset = _asset(TIER_ASSET_PATH, tier_raw, release_id)
-    tier_body = tier_asset["body"]
+    tier_source_raw = tier_path.read_bytes()
+    try:
+        tier_body = json.loads(tier_source_raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SupabasePublicationError("tier-list asset is invalid JSON") from error
     if not isinstance(tier_body, dict) or tier_body.get("status") != "available":
         raise SupabasePublicationError("tier-list asset is unavailable")
+    tier_body = _normalized_tier_payload(tier_body)
+    tier_raw = (
+        json.dumps(tier_body, ensure_ascii=False, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
+    tier_asset = _asset(TIER_ASSET_PATH, tier_raw, release_id)
     _query_datasets, published_query_api = _prepare_query_datasets(
         pack_dir,
         manifest,

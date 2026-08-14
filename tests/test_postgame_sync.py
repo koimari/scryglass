@@ -19,6 +19,7 @@ from lol_kills.postgame_sync import (
     publish_pack,
     sync_once,
     validate_live_source,
+    validate_match_archive,
     validate_pack,
     validate_source_continuity,
     exclusive_lock,
@@ -612,6 +613,73 @@ def test_pack_validation_rejects_a_changed_file(tmp_path: Path) -> None:
     source = {"game_ids": ["game-2"], "game_count": 1, "identity_sha256": source_identity_sha256(["game-2"])}
     with pytest.raises(RefreshValidationError, match="wrong size"):
         validate_pack(pack_dir, manifest, source)
+
+
+def test_match_archive_validation_collects_all_quarter_files(tmp_path: Path) -> None:
+    pack_dir = tmp_path / "pack"
+    features = pack_dir / "features"
+    features.mkdir(parents=True)
+
+    def game(game_id: str, date: str) -> dict:
+        players = []
+        for side in ("Blue", "Red"):
+            for role in ("top", "jungle", "mid", "bot", "support"):
+                players.append(
+                    {
+                        "player": f"{side}-{role}-{game_id}",
+                        "side": side,
+                        "role": role,
+                        "champion": f"Champion-{side}-{role}",
+                        "kills": 1,
+                        "deaths": 1,
+                        "assists": 1,
+                    }
+                )
+        return {
+            "game_id": game_id,
+            "date": date,
+            "blue_team": "Blue Team",
+            "red_team": "Red Team",
+            "blue_win": True,
+            "players": players,
+        }
+
+    games = {
+        "game-2025-q1": game("game-2025-q1", "2025-01-10T00:00:00Z"),
+        "game-2025-q2": game("game-2025-q2", "2025-04-10T00:00:00Z"),
+        "game-2026-q3": game("game-2026-q3", "2026-07-10T00:00:00Z"),
+    }
+    (features / "match_index.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "scryglass:match-index:v1",
+                "games": [
+                    {"game_id": game_id}
+                    for game_id in sorted(games)
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    for year in (2025, 2026):
+        for quarter in (1, 2, 3, 4):
+            quarter_games = {
+                game_id: value
+                for game_id, value in games.items()
+                if value["date"].startswith(f"{year}-")
+                and ((value["date"][5:7] in {"01", "02", "03"} and quarter == 1)
+                     or (value["date"][5:7] in {"04", "05", "06"} and quarter == 2)
+                     or (value["date"][5:7] in {"07", "08", "09"} and quarter == 3)
+                     or (value["date"][5:7] in {"10", "11", "12"} and quarter == 4))
+            }
+            (features / f"match_records_{year}_q{quarter}.json").write_text(
+                json.dumps({"schema_version": "scryglass:match-records:v1", "games": quarter_games}),
+                encoding="utf-8",
+            )
+
+    result = validate_match_archive(pack_dir)
+
+    assert result == {"maps": 3, "2025": 2, "2026": 1}
 
 
 def test_pack_validation_accepts_optional_schedule(tmp_path: Path) -> None:

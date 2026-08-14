@@ -762,6 +762,26 @@ def test_latest_tier_payload_keeps_only_newest_patch_and_all_views() -> None:
     assert latest["structural_similarity"] == payload["structural_similarity"]
 
 
+def test_latest_tier_payload_separates_role_scopes_with_shared_patch_id() -> None:
+    payload = {
+        "status": "available",
+        "options": {"patches": ["26.14"]},
+        "rows": [
+            {"scope_id": "patch:26.14", "patch": "26.14", "role": "mid", "champion": "Galio"},
+            {"scope_id": "patch:26.14", "patch": "26.14", "role": "top", "champion": "Galio"},
+        ],
+        "scopes": [
+            {"scope_id": "patch:26.14", "patch": "26.14", "role": "mid"},
+            {"scope_id": "patch:26.14", "patch": "26.14", "role": "top"},
+        ],
+    }
+
+    latest = supabase_publication.latest_tier_payload(payload)
+
+    assert {row["scope_id"] for row in latest["rows"]} == {"26.14-mid", "26.14-top"}
+    assert {scope["scope_id"] for scope in latest["scopes"]} == {"26.14-mid", "26.14-top"}
+
+
 def test_refresh_ledger_migration_keeps_private_rows_private() -> None:
     migration = (
         ROOT / "supabase/migrations/20260811174735_refresh_run_ledger.sql"
@@ -825,8 +845,10 @@ def test_database_allowlist_matches_publication_contract() -> None:
     for path in supabase_publication.PUBLIC_ASSET_PATHS:
         assert f"'{path}'" in sql
     activation_migrations = [
-        path for path in migrations
-        if "activate_scryglass_public_release" in path.read_text(encoding="utf-8")
+        path
+        for path in migrations
+        if "required_assets constant text[] := array["
+        in path.read_text(encoding="utf-8")
     ]
     assert activation_migrations, "no activation migration found"
     activation = activation_migrations[-1].read_text(encoding="utf-8")

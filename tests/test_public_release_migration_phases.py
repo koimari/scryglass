@@ -12,6 +12,9 @@ def test_phase_one_contains_only_additive_cutover_migrations() -> None:
     assert names == [
         "20260814000001_add_quarter_match_records.sql",
         "20260814010000_bounded_public_query_api.sql",
+        "20260814010001_query_seal_statement_budget.sql",
+        "20260814010002_query_activate_statement_budget.sql",
+        "20260814010003_release_retention_cascade_guard.sql",
     ]
 
 
