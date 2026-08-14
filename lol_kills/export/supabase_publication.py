@@ -45,7 +45,9 @@ DRAFT_AUTHORITY_SCHEMA = "scryglass:draft-authority:v1"
 DRAFT_RECORDS_SCHEMA = "scryglass:draft-records:v1"
 PUBLIC_ASSET_PATH_SET = frozenset(PUBLIC_ASSET_PATHS)
 PACK_ID_RE = re.compile(r"^v\d{4}\.\d{2}\.\d{2}\.\d{6}$")
-REQUEST_TIMEOUT_SECONDS = 60.0
+REQUEST_TIMEOUT_SECONDS = 150.0
+QUERY_STAGE_BATCH_ROWS = 500
+QUERY_STAGE_BATCH_BYTES = 3_200_000
 PUBLIC_ASSET_CONTENT_TYPE = "application/json"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 QUERY_TABLE = "scryglass_public_query_rows"
@@ -866,7 +868,10 @@ class SupabasePublicData:
                     "payload_json": canonical_query_bytes(source.get("payload")).decode("utf-8"),
                 }
                 row_bytes = len(canonical_query_bytes(row))
-                if pending and (len(pending) >= 100 or pending_bytes + row_bytes > 400_000):
+                if pending and (
+                    len(pending) >= QUERY_STAGE_BATCH_ROWS
+                    or pending_bytes + row_bytes > QUERY_STAGE_BATCH_BYTES
+                ):
                     staged = self._request(
                         "POST",
                         "rpc/stage_scryglass_query_rows",
@@ -1447,7 +1452,9 @@ def publish_release(
     client: SupabasePublicData | None = None,
 ) -> dict[str, Any]:
     database = client or SupabasePublicData(project_url, secret_key)
-    database.discard_stale_staging_releases()
+    # A stale release can contain a large query index. Remove one per
+    # publication so retention stays inside the database statement budget.
+    database.discard_stale_staging_releases(limit=1)
     release, assets, storage_objects = prepare_release(
         pack_dir,
         manifest,
