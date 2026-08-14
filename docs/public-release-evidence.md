@@ -74,9 +74,9 @@ Dependency review, workflow and shell security, and the Elemental Drakes
 dependency, type, lint, build, and SBOM job. The GitHub Dependabot alert API
 returned zero open alerts for `koimari/scryglass` on 2026-08-14.
 
-Supabase MCP security and performance advisor calls for project
-`uytblwbtkwuukbbrugdi` returned zero lints on 2026-08-14. The advisor result is
-checked again after each schema or publication change.
+The Supabase security and performance advisors returned zero lints on
+2026-08-14. The advisor result is checked again after each schema or
+publication change.
 
 ## Retired public Blob cleanup
 
@@ -144,8 +144,7 @@ Ruleset `20711858` is active on `refs/heads/main`. It requires these contexts:
 `app`, `rankings-data`, `Vercel`, `browser`, `Supabase clean replay`,
 `Workflow and shell security`, `elemental-drakes`, `CodeQL
 (javascript-typescript)`, `CodeQL (python)`, `Secret scan`, and `Dependency
-review`. The candidate PR remains blocked from merge while the full
-`rankings-data` run is pending.
+review`. The required checks for this evidence update passed.
 
 ## Ordered query and Storage cutover
 

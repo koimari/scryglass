@@ -2,8 +2,6 @@
 
 Review date: 2026-08-14
 
-Project: `uytblwbtkwuukbbrugdi`
-
 The live project is on the Pro plan. The database is PostgreSQL 17.6.1.155.
 The public refresh is `ok`, `idle`, and `stale: false`.
 
@@ -29,7 +27,7 @@ database size. This setting remains suitable when the compute size changes.
 
 ## Verification
 
-The live checks used Supabase MCP advisor calls and a Management API readback.
+The live checks used the Supabase advisors and a Management API readback.
 The next refresh must run the same advisor checks after migrations and data
 publication. A non-empty advisor result blocks release review.
 
