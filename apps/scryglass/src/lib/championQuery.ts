@@ -1,4 +1,5 @@
 import type { QueryPlayerRow, SupportQueryIndex } from "./supportQuery";
+import { publicPatchLabel } from "./patchIdentity";
 
 export type ChampionQueryDirection = "asc" | "desc";
 export type ChampionQueryMetric = "tier" | "win_rate" | "games";
@@ -157,13 +158,6 @@ function patchSort(left: string, right: string): number {
   return (leftParts[0] ?? 0) - (rightParts[0] ?? 0)
     || (leftParts[1] ?? 0) - (rightParts[1] ?? 0)
     || left.localeCompare(right);
-}
-
-function publicPatchLabel(value: string): string {
-  const match = /^(15|16)\.(\d{1,2})(?:\.\d+)?$/.exec(value.trim());
-  if (!match) return value.trim();
-  const minor = match[2].length === 1 ? `${match[2]}0` : match[2].padStart(2, "0");
-  return `${Number(match[1]) + 10}.${minor}`;
 }
 
 function queryTierBoard(

@@ -5,6 +5,7 @@ import {
   type TierResponse,
 } from "@/components/TierListExplorer";
 import { getTierFacets, getTierScope, queryApiAvailable } from "@/lib/publicData";
+import { publicPatchLabel, samePublicPatch } from "@/lib/patchIdentity";
 import { readPackManifest } from "@/lib/serverPack";
 import type { TierScope } from "@/lib/tierBoard";
 import styles from "./TiersPage.module.css";
@@ -23,6 +24,11 @@ function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function sourcePatchFor(value: string | undefined, options: string[]): string {
+  if (!value) return "";
+  return options.find((option) => samePublicPatch(option, value)) ?? "";
+}
+
 function oneOf(value: string | undefined, options: string[]): string {
   return value && options.includes(value) ? value : "";
 }
@@ -34,8 +40,8 @@ function minimumGames(value: string | undefined): number {
 
 function latestPatch(options: string[]): string {
   return [...options].sort((left, right) => {
-    const [leftMajor, leftMinor] = left.split(".").map(Number);
-    const [rightMajor, rightMinor] = right.split(".").map(Number);
+    const [leftMajor, leftMinor] = publicPatchLabel(left).split(".").map(Number);
+    const [rightMajor, rightMinor] = publicPatchLabel(right).split(".").map(Number);
     return rightMajor - leftMajor || rightMinor - leftMinor;
   })[0] ?? "";
 }
@@ -49,21 +55,22 @@ export default async function TiersPage({ searchParams }: PageProps) {
 
   if (boundedQueries) {
     const facets = await getTierFacets(manifest);
-    const patch = oneOf(first(query.patch), facets.options.patches) || latestPatch(facets.options.patches);
+    const sourcePatch = sourcePatchFor(first(query.patch), facets.options.patches) || latestPatch(facets.options.patches);
+    const patch = publicPatchLabel(sourcePatch);
     const role = oneOf(first(query.role), facets.options.roles);
     const region = oneOf(first(query.region), facets.options.regions);
     const league = oneOf(first(query.league), facets.options.leagues);
     const tier = oneOf(first(query.tier), facets.options.tiers);
     const min = minimumGames(first(query.min));
-    const scope = patch
-      ? await getTierScope(manifest, { patch, role, region, league, tier, similarityLimit: 100 })
+    const scope = sourcePatch
+      ? await getTierScope(manifest, { patch: sourcePatch, role, region, league, tier, similarityLimit: 100 })
       : null;
     const scopedRows = scope?.rows ?? [];
     const selectedScope = scope?.scope ?? null;
     const scopes: TierScope[] = selectedScope
       ? [selectedScope]
       : facets.scopes
-          .filter((item) => item.patch === patch)
+          .filter((item) => samePublicPatch(item.patch, sourcePatch))
           .map((item) => ({
             scope_id: item.scope_id,
             scope_kind: "patch" as const,

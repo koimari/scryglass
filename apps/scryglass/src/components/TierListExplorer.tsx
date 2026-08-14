@@ -27,6 +27,7 @@ import {
   type TierRankedMode,
   type TierScope,
 } from "@/lib/tierBoard";
+import { publicPatchLabel } from "@/lib/patchIdentity";
 import styles from "./TierListExplorer.module.css";
 
 const TIER_LIST_URL = "/api/public-data/tierlists";
@@ -99,13 +100,6 @@ const EMPTY: TierResponse = { status: "unavailable" };
 function patchOrder(value: string): number {
   const [major, minor] = value.split(".").map(Number);
   return (Number.isFinite(major) ? major : 0) * 1000 + (Number.isFinite(minor) ? minor : 0);
-}
-
-function publicPatchLabel(value: string): string {
-  const match = /^(15|16)\.(\d{1,2})(?:\.\d+)?$/.exec(value.trim());
-  if (!match) return value;
-  const minor = match[2].length === 1 ? `${match[2]}0` : match[2].padStart(2, "0");
-  return `${Number(match[1]) + 10}.${minor}`;
 }
 
 function publicPatchScopeId(scopeId: string | undefined, sourcePatch: string, patch: string): string | undefined {

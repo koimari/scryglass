@@ -79,6 +79,20 @@ Run `refresh-20260813T223244Z-803f0d6b7322` is recorded as `error` with no relea
 
 The Production and Development Vercel values for `SCRYGLASS_SUPABASE_URL` and `SCRYGLASS_SUPABASE_PUBLISHABLE_KEY` contained a literal `\\n` suffix. Both environments now contain canonical values. The Preview values were already canonical. The web project keeps the publication service key outside Vercel and holds only the public key plus the separate diagnostic credential.
 
+## Regional refresh evidence
+
+The regional refresh completed as a deferred production build in the worker
+runtime. Receipt
+`tierlist-live-refresh-20260814T023917347193Z-898104ca0bcf88e7.json` records
+17,483 replayed maps, a 1,162-map live window, 195 cells, 7,544 rows, and 970
+regional views across 39 scopes. The latest accepted source is public patch
+`26.15`; the output contains no client-only `16.xx` labels. Publication stays
+deferred until the ordered release checks pass.
+
+The 26.16 atom bridge is a development input. The current accepted OE source
+has no 16.16 game rows, so the regional model continues to use the audited
+26.15 bridge. This keeps patch identity and atom provenance aligned.
+
 ## Staged Vercel firewall rules
 
 Two log-only rules are staged for traffic review. They are not published:

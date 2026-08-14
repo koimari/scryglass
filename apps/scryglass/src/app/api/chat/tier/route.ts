@@ -1,6 +1,7 @@
 import { chatError, chatJson, clean, readChatJson, searchParams, secureChatRoute } from "@/lib/chatApi";
 import { getTierRows, queryApiAvailable } from "@/lib/publicData";
 import { readPackManifest } from "@/lib/serverPack";
+import { publicPatchLabel } from "@/lib/patchIdentity";
 
 export const runtime = "nodejs";
 
@@ -13,13 +14,6 @@ type TierRow = {
   played_maps: number;
   movement?: string | null;
 };
-
-function publicPatchLabel(value: string): string {
-  const match = /^(15|16)\.(\d{1,2})(?:\.\d+)?$/.exec(value.trim());
-  if (!match) return value.trim();
-  const minor = match[2].length === 1 ? `${match[2]}0` : match[2].padStart(2, "0");
-  return `${Number(match[1]) + 10}.${minor}`;
-}
 
 function patchOrder(value: string): number {
   const [major, minor] = publicPatchLabel(value).split(".").map(Number);

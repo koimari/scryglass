@@ -47,6 +47,21 @@ numeric aggregate files remain separate certified development artifacts until
 the complete 26.16 corpus is rebuilt and evaluated. This avoids a false patch
 label on a model that has not passed its chronological holdouts.
 
+## Regional refresh boundary
+
+A regional tier refresh was run after the label fix. Its receipt is kept in the
+worker runtime at
+`data/lol/v2/tierlists/refresh-receipts/tierlist-live-refresh-20260814T023917347193Z-898104ca0bcf88e7.json`.
+It replayed 17,483 maps, used a 1,162-map live window, and built 195 cells
+with 7,544 rows. The bundle contains 970 regional views across 39 scopes.
+The latest accepted game data is still public patch `26.15`, and every scope
+label uses the Riot namespace.
+
+The refresh was deferred from publication. It used the audited 26.15 bridge
+because the accepted OE source has no 16.16 game rows yet. The 26.16 bridge is
+staged for the next complete 16.16 ingest and must not be mixed into 26.15
+regional ratings.
+
 ## Verification
 
 Run:
