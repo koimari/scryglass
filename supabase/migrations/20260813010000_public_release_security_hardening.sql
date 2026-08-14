@@ -33,6 +33,10 @@ alter table public.scryglass_public_assets
       'features/player_champion_records.json',
       'features/profile_records.json',
       'features/match_index.json',
+      -- Existing active and superseded releases use these yearly files. Keep
+      -- them valid until the private Storage cutover replaces those releases.
+      'features/match_records_2025.json',
+      'features/match_records_2026.json',
       'features/match_records_2025_q1.json',
       'features/match_records_2025_q2.json',
       'features/match_records_2025_q3.json',

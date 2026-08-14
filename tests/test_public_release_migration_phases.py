@@ -18,3 +18,11 @@ def test_phase_one_contains_only_additive_cutover_migrations() -> None:
 def test_later_storage_phases_are_deferred_to_follow_up_commits() -> None:
     assert not (MIGRATIONS / "20260814020000_private_storage_phase.sql").exists()
     assert not (MIGRATIONS / "20260814030000_strict_public_cutover.sql").exists()
+
+
+def test_phase_one_accepts_legacy_match_rows_during_compatibility() -> None:
+    source = (
+        MIGRATIONS / "20260813010000_public_release_security_hardening.sql"
+    ).read_text(encoding="utf-8")
+    assert "features/match_records_2025.json" in source
+    assert "features/match_records_2026.json" in source
