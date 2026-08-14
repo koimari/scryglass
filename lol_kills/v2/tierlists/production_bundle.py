@@ -28,6 +28,7 @@ from .forward_evaluation import (
     SOURCE_META_LOCATOR,
 )
 from .structural_similarity import build_structural_similarity
+from .champion_elo import ATOM_BRIDGE_LOCATOR, ATOM_BRIDGE_LOCATORS
 
 
 EVALUATION_LOCATOR = Path("data/lol/v2/tierlists/prospective-evaluation-v1.json")
@@ -171,9 +172,34 @@ def _image_url(champion_id: str) -> str | None:
     return f"https://cdn.communitydragon.org/latest/champion/{match.group(1)}/square"
 
 
-def _public_structural_similarity(root: Path) -> dict[str, Any]:
+def _atom_bridge_path(root: Path, locator: str | None = None) -> Path:
+    selected = str(locator or ATOM_BRIDGE_LOCATOR)
+    allowed = {str(value) for value in ATOM_BRIDGE_LOCATORS.values()}
+    if selected not in allowed:
+        raise ProductionBundleError("candidate atom bridge locator is not allowlisted")
+    root_resolved = root.resolve()
+    path = (root / selected).resolve()
+    if root_resolved not in path.parents:
+        raise ProductionBundleError("candidate atom bridge escapes the repository root")
+    try:
+        bridge = AtomBridge.load(path)
+    except Exception as exc:  # noqa: BLE001
+        raise ProductionBundleError("candidate atom bridge cannot be loaded") from exc
+    expected_patch = next(
+        patch for patch, value in ATOM_BRIDGE_LOCATORS.items() if value == selected
+    )
+    if bridge.provenance.get("data_patch") != expected_patch:
+        raise ProductionBundleError("candidate atom bridge patch provenance is inconsistent")
+    return path
+
+
+def _public_structural_similarity(
+    root: Path,
+    *,
+    bridge_locator: str | None = None,
+) -> dict[str, Any]:
     library = build_structural_similarity(
-        AtomBridge.load(root / "data/lol/v2/champions/lcc-atom-bridge-v1.json")
+        AtomBridge.load(_atom_bridge_path(root, bridge_locator))
     )
     for profile in library["champions"]:
         profile["champion_image_url"] = _image_url(profile["champion_id"])
@@ -628,8 +654,16 @@ def _source_tree_sha256(
     extra: Mapping[str, bytes],
     *,
     code_root: Path | None = None,
+    atom_bridge_locator: str | None = None,
 ) -> str:
     source_root = code_root or _installed_code_root()
+    selected_bridge = str(atom_bridge_locator or ATOM_BRIDGE_LOCATOR)
+    if selected_bridge not in {str(value) for value in ATOM_BRIDGE_LOCATORS.values()}:
+        raise ProductionBundleError("candidate atom bridge locator is not allowlisted")
+    atom_bridge_path = (root / selected_bridge).resolve()
+    if root.resolve() not in atom_bridge_path.parents or not atom_bridge_path.is_file():
+        raise ProductionBundleError("candidate atom bridge path is unavailable")
+    atom_bridge_relative = atom_bridge_path.relative_to(root).as_posix()
     paths = {
         CANDIDATE_LOCATOR.as_posix(): _sha256_path(root / CANDIDATE_LOCATOR),
         EVALUATION_LOCATOR.as_posix(): _sha256_path(root / EVALUATION_LOCATOR),
@@ -639,7 +673,7 @@ def _source_tree_sha256(
         "lol_kills/v2/tierlists/forward_evaluation.py": _sha256_path(source_root / "lol_kills/v2/tierlists/forward_evaluation.py"),
         "lol_kills/v2/tierlists/production_bundle.py": _sha256_path(source_root / "lol_kills/v2/tierlists/production_bundle.py"),
         "lol_kills/v2/tierlists/structural_similarity.py": _sha256_path(source_root / "lol_kills/v2/tierlists/structural_similarity.py"),
-        "data/lol/v2/champions/lcc-atom-bridge-v1.json": _sha256_path(root / "data/lol/v2/champions/lcc-atom-bridge-v1.json"),
+        atom_bridge_relative: _sha256_path(atom_bridge_path),
     }
     paths.update(extra)
     return _sha256_bytes(_canonical([{"locator": key, "raw_sha256": paths[key]} for key in sorted(paths)]))
@@ -685,7 +719,10 @@ def write_production_bundle(
     (production_dir / "index-v1.json").write_bytes(index_raw)
     display_scopes: list[dict[str, Any]] = []
     display_rows: list[dict[str, Any]] = []
-    structural_similarity = _public_structural_similarity(repo_root)
+    structural_similarity = _public_structural_similarity(
+        repo_root,
+        bridge_locator=str(index.get("patch_ingestion", {}).get("atom_bridge_locator") or ATOM_BRIDGE_LOCATOR),
+    )
     for meta in index["cells"]:
         cell_raw = cell_bytes[f"production/cells/{Path(str(meta['locator'])).name}"]
         cell = json.loads(cell_raw.decode("utf-8"))
@@ -750,6 +787,7 @@ def write_production_bundle(
         repo_root,
         {relative: _sha256_bytes(raw) for relative, raw in cell_bytes.items()},
         code_root=code_root,
+        atom_bridge_locator=str(index.get("patch_ingestion", {}).get("atom_bridge_locator") or ATOM_BRIDGE_LOCATOR),
     )
     manifest: dict[str, Any] = {
         "schema_version": "scryglass:tierlist-production-manifest:v1",

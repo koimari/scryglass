@@ -73,6 +73,15 @@ def test_public_similarity_library_uses_the_validated_atom_bridge() -> None:
     assert all(profile["champion_image_url"] for profile in library["champions"])
 
 
+def test_public_similarity_library_can_bind_the_current_patch_bridge() -> None:
+    library = _public_structural_similarity(
+        ROOT,
+        bridge_locator="data/lol/v2/champions/lcc-atom-bridge-26.16.json",
+    )
+    assert library["schema_version"] == "scryglass:champion-structural-similarity:v1"
+    assert len(library["champions"]) == 173
+
+
 def test_coach_board_matchups_and_regional_views_are_validated() -> None:
     row = {
         "champion_id": "riot:champion:1",

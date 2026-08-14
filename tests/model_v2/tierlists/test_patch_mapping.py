@@ -272,3 +272,71 @@ def test_float_like_token_uses_event_time_when_both_audited_aliases_exist() -> N
     assert late_result.status == "resolved"
     assert late_result.oe_token == "16.20"
     assert late_result.official_patch == "26.20"
+
+
+def test_live_binding_uses_event_time_when_both_aliases_are_present(tmp_path: Path) -> None:
+    player_path = tmp_path / "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet"
+    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_live/meta.json"
+    player_path.parent.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {
+                "gameid": "early",
+                "date": "2026-01-25T12:00:00Z",
+                "patch": "16.2",
+            },
+            {
+                "gameid": "late",
+                "date": "2026-08-05T12:00:00Z",
+                "patch": "16.2",
+            },
+        ]
+    ).to_parquet(player_path, index=False)
+    meta_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "scryglass:oe-live-source:v1",
+                "source_mode": "oe_only",
+                "source_latest": "2026-08-05T12:00:00Z",
+                "maps": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload = {
+        "source_window": {"start": "2026-01-01T00:00:00Z"},
+        "sources": [
+            {
+                "kind": "oe_live_player_games",
+                "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+                "mutable_live_source": True,
+            },
+            {
+                "kind": "oe_live_meta",
+                "locator": "data/lol/warehouse/parquet/oe_live/meta.json",
+                "mutable_live_source": True,
+            },
+        ],
+        "mappings": [
+            {
+                "oe_token": "16.02",
+                "oe_observed_interval": {
+                    "start": "2026-01-20T00:00:00Z",
+                    "end": "2026-01-30T00:00:00Z",
+                },
+            },
+            {
+                "oe_token": "16.20",
+                "oe_observed_interval": {
+                    "start": "2026-08-01T00:00:00Z",
+                    "end": "2026-08-10T00:00:00Z",
+                },
+            },
+        ],
+    }
+
+    intervals, _binding = _live_source_binding(payload, repo_root=tmp_path)
+
+    assert set(intervals) == {"16.02", "16.20"}
+    assert intervals["16.02"]["observed_game_count"] == 1
+    assert intervals["16.20"]["observed_game_count"] == 1
