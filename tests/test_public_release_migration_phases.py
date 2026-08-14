@@ -21,7 +21,23 @@ def test_migrations_are_split_into_ordered_cutover_phases() -> None:
         "20260814160000_private_storage_phase.sql",
         "20260814161000_oe_import_patch_receipts.sql",
         "20260814170000_strict_public_cutover.sql",
+        "20260814190000_query_stage_batch_budget.sql",
     ]
+
+
+def test_query_staging_batch_budget_matches_worker() -> None:
+    migration = (
+        MIGRATIONS / "20260814190000_query_stage_batch_budget.sql"
+    ).read_text(encoding="utf-8")
+    publisher = (
+        ROOT / "lol_kills/export/supabase_publication.py"
+    ).read_text(encoding="utf-8")
+
+    assert "jsonb_array_length(p_rows) > 500" in migration
+    assert "octet_length(p_rows::text) > 3500000" in migration
+    assert "QUERY_STAGE_BATCH_ROWS = 500" in publisher
+    assert "QUERY_STAGE_BATCH_BYTES = 3_200_000" in publisher
+    assert "discard_stale_staging_releases(limit=1)" in publisher
 
 
 def test_phase_workdir_excludes_later_migrations() -> None:
