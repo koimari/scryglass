@@ -88,12 +88,29 @@ def _public_patch_label(value: object) -> str | None:
             return None
 
 
-def _public_scope_id(scope_id: str, raw_patch: object, patch: str | None) -> str:
+def _public_scope_id(
+    scope_id: str,
+    raw_patch: object,
+    patch: str | None,
+    role: str | None = None,
+) -> str:
     if not patch:
         return scope_id
     source = str(raw_patch or "").strip()
-    if source and scope_id.startswith(f"{source}-"):
-        return f"{patch}-{scope_id[len(source) + 1:]}"
+    source_prefix = f"patch:{source}" if source else ""
+    public_prefix = f"patch:{patch}"
+    if scope_id == public_prefix or (source_prefix and scope_id == source_prefix):
+        scope_id = patch
+    elif scope_id.startswith(f"{public_prefix}-"):
+        scope_id = f"{patch}-{scope_id[len(public_prefix) + 1:]}"
+    elif source_prefix and scope_id.startswith(f"{source_prefix}-"):
+        scope_id = f"{patch}-{scope_id[len(source_prefix) + 1:]}"
+    elif source and scope_id == source:
+        scope_id = patch
+    elif source and scope_id.startswith(f"{source}-"):
+        scope_id = f"{patch}-{scope_id[len(source) + 1:]}"
+    if role and scope_id == patch:
+        return f"{patch}-{role}"
     return scope_id
 
 
@@ -903,8 +920,9 @@ def build_tier_query_datasets(
         scope = payload.get("scope") if isinstance(payload.get("scope"), Mapping) else {}
         raw_patch = payload.get("patch") or scope.get("patch")
         patch = _public_patch_label(raw_patch)
+        role = str(payload.get("role") or scope.get("role") or "").strip().casefold() or None
         raw_scope_id = str(payload.get("scope_id") or scope.get("scope_id") or "").strip()
-        scope_id = _public_scope_id(raw_scope_id, raw_patch, patch)
+        scope_id = _public_scope_id(raw_scope_id, raw_patch, patch, role)
         if patch:
             payload["patch"] = patch
         if scope_id:
@@ -912,7 +930,6 @@ def build_tier_query_datasets(
         region = str(payload.get("region") or scope.get("region") or "").strip() or None
         league = str(payload.get("league") or scope.get("league") or "").strip() or None
         tier = str(payload.get("tier") or scope.get("tier") or "").strip().casefold() or None
-        role = str(payload.get("role") or scope.get("role") or "").strip().casefold() or None
         rank = _integer(payload.get("rank"), index + 1)
         score = _finite(
             payload.get("score")
@@ -978,10 +995,10 @@ def build_tier_query_datasets(
         scope_id = str(scope.get("scope_id") or "").strip()
         raw_scope_patch = scope.get("patch")
         patch = _public_patch_label(raw_scope_patch) or ""
-        scope_id = _public_scope_id(scope_id, raw_scope_patch, patch)
+        role = str(scope.get("role") or "").strip().casefold()
+        scope_id = _public_scope_id(scope_id, raw_scope_patch, patch, role)
         scope["scope_id"] = scope_id
         scope["patch"] = patch
-        role = str(scope.get("role") or "").strip().casefold()
         if not scope_id or not patch or not role:
             raise PublicQueryProjectionError("tier scope identity is invalid")
         raw_regional_views = scope.get("regional_views", [])

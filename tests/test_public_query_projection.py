@@ -316,6 +316,39 @@ def test_tier_projection_splits_scopes_matrices_and_similarity() -> None:
     assert datasets["tier_similarity_edges"][0]["score"] == 1.0
 
 
+def test_tier_projection_keeps_same_patch_roles_in_separate_scopes() -> None:
+    body = {
+        "rows": [
+            {
+                "scope_id": "patch:26.14",
+                "patch": "26.14",
+                "role": "mid",
+                "champion": "Galio",
+                "champion_id": "riot:champion:3",
+                "rank": 1,
+            },
+            {
+                "scope_id": "patch:26.14",
+                "patch": "26.14",
+                "role": "top",
+                "champion": "Galio",
+                "champion_id": "riot:champion:3",
+                "rank": 1,
+            },
+        ],
+        "scopes": [
+            {"scope_id": "patch:26.14", "patch": "26.14", "role": "mid", "regional_views": []},
+            {"scope_id": "patch:26.14", "patch": "26.14", "role": "top", "regional_views": []},
+        ],
+    }
+
+    datasets = build_tier_query_datasets(body)
+
+    assert {row["scope_id"] for row in datasets["tier_rows"]} == {"26.14-mid", "26.14-top"}
+    assert {row["scope_id"] for row in datasets["tier_scopes"]} == {"26.14-mid", "26.14-top"}
+    assert len({row["row_key"] for row in datasets["tier_rows"]}) == len(datasets["tier_rows"])
+
+
 def test_tier_projection_rejects_draft_fields_and_unapproved_images() -> None:
     with pytest.raises(PublicQueryProjectionError, match="Draft"):
         build_tier_query_datasets({"rows": [{"draft_score": 1}], "scopes": []})
