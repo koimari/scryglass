@@ -421,6 +421,13 @@ def _validate_row(
     interval = row.get("oe_observed_interval")
     if not isinstance(interval, Mapping):
         raise PatchMappingError(f"{token}: OE interval is required")
+    observed_game_count = row.get("observed_game_count")
+    if (
+        isinstance(observed_game_count, bool)
+        or not isinstance(observed_game_count, int)
+        or observed_game_count < 0
+    ):
+        raise PatchMappingError(f"{token}: observed_game_count must be a non-negative integer")
     start = _parse_utc(interval.get("start"), field=f"{token}.interval.start")
     end = _parse_utc(interval.get("end"), field=f"{token}.interval.end")
     if start > end:
@@ -625,6 +632,13 @@ def resolve_oe_patch(
             token=token,
             as_of=as_of_text,
             reason="as_of_predates_official_release",
+            row=row,
+        )
+    if int(row.get("observed_game_count", 0)) < 1:
+        return _unavailable(
+            token=token,
+            as_of=as_of_text,
+            reason="no_accepted_oe_rows",
             row=row,
         )
     if row.get("audit_status") != "audited" or row.get("ambiguity_status") not in {

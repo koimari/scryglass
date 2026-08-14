@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = ROOT / "supabase/migrations"
 
 
-def test_phase_one_contains_only_additive_cutover_migrations() -> None:
+def test_migrations_are_split_into_ordered_cutover_phases() -> None:
     names = sorted(path.name for path in MIGRATIONS.glob("20260814*.sql"))
     assert names == [
         "20260814000001_add_quarter_match_records.sql",
@@ -16,12 +16,26 @@ def test_phase_one_contains_only_additive_cutover_migrations() -> None:
         "20260814010002_query_activate_statement_budget.sql",
         "20260814010003_release_retention_cascade_guard.sql",
         "20260814010004_discard_staging_release.sql",
+        "20260814135746_supabase_advisor_cleanup.sql",
+        "20260814135848_restore_fk_indexes.sql",
+        "20260814160000_private_storage_phase.sql",
+        "20260814170000_strict_public_cutover.sql",
     ]
 
 
-def test_later_storage_phases_are_deferred_to_follow_up_commits() -> None:
-    assert not (MIGRATIONS / "20260814020000_private_storage_phase.sql").exists()
-    assert not (MIGRATIONS / "20260814030000_strict_public_cutover.sql").exists()
+def test_phase_two_keeps_compatibility_reads_and_phase_three_removes_them() -> None:
+    phase_two = (
+        MIGRATIONS / "20260814160000_private_storage_phase.sql"
+    ).read_text(encoding="utf-8")
+    phase_three = (
+        MIGRATIONS / "20260814170000_strict_public_cutover.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "set public = false" in phase_two
+    assert 'revoke select on public.scryglass_public_releases from anon, authenticated' in phase_three
+    assert 'revoke all on function public.get_scryglass_active_inline_asset(text, text)' in phase_three
+    assert "status in ('staging', 'active', 'superseded')" in phase_three
+    assert "release_manifest #>> '{query_api,schema_version}'" in phase_three
 
 
 def test_phase_one_accepts_legacy_match_rows_during_compatibility() -> None:
@@ -48,3 +62,28 @@ def test_staging_cleanup_is_locked_and_service_only() -> None:
         "create or replace function public.discard_scryglass_staging_release",
         1,
     )[1]
+
+
+def test_supabase_advisor_cleanup_keeps_public_wrappers_and_private_tables() -> None:
+    migration = (
+        MIGRATIONS / "20260814135746_supabase_advisor_cleanup.sql"
+    ).read_text(encoding="utf-8").lower()
+
+    assert "create schema if not exists scryglass_private" in migration
+    assert "security invoker" in migration
+    assert "security definer" in migration
+    assert "set search_path to public, pg_temp" in migration
+    assert 'create policy "deny public api access"' in migration
+    assert "using (false) with check (false)" in migration
+    for index in (
+        "scryglass_oe_game_versions_date_idx",
+        "scryglass_oe_games_version_fk_idx",
+        "scryglass_oe_games_year_date_idx",
+        "scryglass_oe_games_league_date_idx",
+        "scryglass_refresh_runs_started_idx",
+        "scryglass_refresh_runs_retry_idx",
+        "scryglass_refresh_runs_failures_idx",
+        "scryglass_public_health_release_idx",
+        "scryglass_public_health_run_idx",
+    ):
+        assert f"drop index if exists public.{index}" in migration

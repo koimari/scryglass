@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from lol_kills.v2.tierlists.patch_mapping import (
+    MappingArtifact,
     PatchMappingError,
     _live_source_binding,
     load_mapping,
@@ -20,7 +21,7 @@ from lol_kills.v2.tierlists.patch_mapping import (
 def test_sidecar_loads_with_all_source_tokens_and_hashes() -> None:
     artifact = load_mapping()
 
-    assert len(artifact.rows) == 39
+    assert len(artifact.rows) == 40
     assert artifact.payload["source_window"]["start"] == "2025-01-01T00:00:00Z"
     assert artifact.payload["source_window"]["end"] == "2026-08-08T12:13:56Z"
     assert artifact.payload["atom_snapshots"][0]["patch"] == "26.15"
@@ -83,10 +84,31 @@ def test_time_safe_lookup_requires_as_of_inside_the_source_interval() -> None:
 
 
 def test_unknown_token_has_no_nearest_patch_fallback() -> None:
-    result = resolve_oe_patch("16.16", "2026-08-08T00:00:00Z")
+    result = resolve_oe_patch("16.17", "2026-08-08T00:00:00Z")
 
     assert result.status == "unavailable"
     assert result.reason == "unknown_oe_token"
+    assert result.official_patch is None
+    assert result.atom_snapshot_patch is None
+
+
+def test_26_16_atom_mapping_stays_unavailable_without_accepted_rows() -> None:
+    path = Path("data/lol/v2/champions/oe-atom-patch-map-v1.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    mapping = MappingArtifact(
+        payload=payload,
+        rows={row["oe_token"]: row for row in payload["mappings"]},
+        path=path,
+        repo_root=path.parents[3],
+    )
+    result = resolve_oe_patch(
+        "16.16",
+        "2026-08-11T18:00:00Z",
+        mapping=mapping,
+    )
+
+    assert result.status == "unavailable"
+    assert result.reason == "no_accepted_oe_rows"
     assert result.official_patch is None
     assert result.atom_snapshot_patch is None
 

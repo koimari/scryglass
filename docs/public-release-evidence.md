@@ -124,9 +124,9 @@ review`. The candidate PR remains blocked from merge while the full
 
 1. Merge and apply additive migrations `20260813010000` and `20260814010000`.
 2. Merge the compatible web build. Verify the active legacy inline release and the bounded RPC path.
-3. Merge and apply private Storage migration `20260814020000`.
+3. Merge and apply private Storage migration `20260814160000`.
 4. Install the tested publisher. Create and verify two Storage-only, query-complete releases.
-5. Merge the strict web build. Merge and apply strict migration `20260814030000`, then repeat every route, asset, cache, and rollback probe.
+5. Merge the strict web build. Merge and apply strict migration `20260814170000`, then repeat every route, asset, cache, and rollback probe.
 
 Each migration phase uses a separate merge commit and an exact Supabase dry run.
 The operator stops when a checkout contains a later phase. The temporary inline
@@ -144,3 +144,6 @@ fallback.
 - source-rights records and Riot product registration;
 - an independent, hash-bound Draft Score promotion record;
 - the final aligned production receipt.
+- a fresh active-release asset audit. The current `v2026.08.14.123517` row for
+  `features/match_records_2025_q2.json` claims the SHA-256 of empty bytes while
+  serving 19,047,051 bytes. This release cannot close the integrity gate.

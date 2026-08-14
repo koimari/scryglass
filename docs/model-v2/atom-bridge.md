@@ -210,3 +210,22 @@ that treats the bridge as a champion-composition channel (not just a prior):
    the authority; ddragon 16.15.1 is a stale CDN artifact). Pinned in bridge
    provenance as `data_patch: 26.15` from `data/.champions.json.meta`.
 3. Reciprocal mapping table in LCC for `analyze-champion`/`atomizer`.
+
+## Versioned 26.16 bridge and entity space
+
+The current patch refresh has a separate bridge at
+`data/lol/v2/champions/lcc-atom-bridge-26.16.json`. It uses public patch
+`26.16`, client patch `16.16`, and the hash-bound receipt
+`lcc-atom-refresh-26.16-receipt.json`. The older `lcc-atom-bridge-v1.json`
+remains a historical 26.15 artifact.
+
+`lol_kills/v2/champions/atoms/entity_atom_profiles.py` aggregates player and
+team champion rows into a development-only atom space. It keeps source-row
+counts, champion coverage, family exposure, ontology exposure, and a stable
+plot matrix. Unknown champions are counted as skipped. Missing bridge data or
+an unbound receipt fails closed. The output has no rating, probability, or
+public Draft Score authority.
+
+This entity projection is a read-only Scryglass consumer of LCC data. It does
+not write to the LCC repository. It is suitable for private plots and model
+diagnostics after the 26.16 source receipt has been reviewed.

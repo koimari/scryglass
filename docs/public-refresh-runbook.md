@@ -83,10 +83,10 @@ The checkpoints are:
 1. Apply additive migrations `20260813010000` and `20260814010000`.
 2. Deploy the compatible web build. It can read the active inline release and
    the bounded query API.
-3. Apply private Storage migration `20260814020000`.
+3. Apply private Storage migration `20260814160000`.
 4. Install the tested publisher and create two Storage-only, query-complete
    releases.
-5. Deploy the strict web build, then apply strict migration `20260814030000`.
+5. Deploy the strict web build, then apply strict migration `20260814170000`.
 
 Keep the prior verified data release and Vercel deployment as rollback targets
 through all five checkpoints.
@@ -132,7 +132,7 @@ team profile.
 ### Phase 2: private Storage and clean releases
 
 Check out the merged Phase 2 migration commit. Its dry run must contain only
-`20260814020000`:
+`20260814160000`:
 
 ```sh
 npx supabase migration list --linked
@@ -237,7 +237,7 @@ large-asset page and chat fallbacks. Confirm the production deployment and
 repeat the family probes.
 
 Check out the merged Phase 3 migration commit. Its dry run must contain only
-`20260814030000`. Apply it and run the final database tests:
+`20260814170000`. Apply it and run the final database tests:
 
 ```sh
 npx supabase migration list --linked

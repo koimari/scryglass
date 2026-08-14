@@ -1,0 +1,61 @@
+{
+  "schema_version": "scryglass:draft-phase-curve:v1",
+  "authority": "unavailable",
+  "source": "oe_only",
+  "window": ["10", "15", "20", "25"],
+  "expected_gold_diff": {"10": null, "15": null, "20": null, "25": null},
+  "phase_draft_edge": {"10": null, "15": null, "20": null, "25": null},
+  "scaling_index": null,
+  "snowball_index": null,
+  "comeback_resilience": null,
+  "sample_window": null,
+  "model_version": null,
+  "lcc_atomization": {
+    "status": "staged",
+    "authority": "development_only",
+    "public_patch": "26.16",
+    "client_patch": "16.16",
+    "bridge": "data/lol/v2/champions/lcc-atom-bridge-26.16.json",
+    "depths": [2, 3, 4],
+    "auc_reference": 0.70681,
+    "bridge_sha256": "e5d37ddf4a20fcbdc1e2fc90fb0bd988be82b3563a8ec8bc3a21792313a239a",
+    "receipt_bridge_sha256": "e5d37ddf4a20fcbdc1e2fc90fb0bd988be82b3563a8ec8bc3a21792313a239a"
+  },
+  "source_snapshot": {
+    "oe_source_token": "16.15",
+    "required_client_patch": "16.16",
+    "source_patches": ["16.15"],
+    "regions": [],
+    "date_min": null,
+    "date_max": null,
+    "gold_30_available": false,
+    "required_patch_rows": 0,
+    "required_patch_minimum": 100
+  },
+  "evaluation": {
+    "authority": "unavailable",
+    "auc_floor": 0.70681,
+    "auc_noninferior": false,
+    "chronological": false,
+    "regional": false,
+    "patch_transfer": false,
+    "roster_change": false,
+    "sparse_data": false,
+    "missingness": false,
+    "early_snowball": false,
+    "late_scaling": false,
+    "comeback_behind_10": false,
+    "comeback_behind_15": false
+  },
+  "leakage_contract": {
+    "pre_match_features": true,
+    "gold_targets": ["10", "15", "20", "25"],
+    "gold_30_available": false,
+    "missing_25_censored": true,
+    "observed_gold_allowed": false
+  },
+  "blockers": [
+    "accepted_oe_patch_16.16_rows_missing",
+    "frozen_phase_curve_promotion_receipt_missing"
+  ]
+}

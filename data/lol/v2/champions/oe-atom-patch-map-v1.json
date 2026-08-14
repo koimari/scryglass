@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "89c8009b0441c640d791c382db7f078d329a1448ef049f68f82ff27a06fb0942",
+  "artifact_sha256": "82ce6baea2c9d46a11ddb66dcc04bd7e3c27bacf707823da9c2f209eac8afd53",
   "atom_snapshots": [
     {
       "bridge_artifact_sha256": "1b781f70e0899157bcd3c6e197785a47a33467a2490b5e776c955b4a7aff92d9",
@@ -14,14 +14,28 @@
         "locator": "data/lol/v2/champions/lcc-atom-bridge-v1.json",
         "sha256": "35aaa81d0fd8b1a6a633c5e8c34ab956af7a4dc1344cf3c3129d988dff13555f"
       }
+    },
+    {
+      "bridge_artifact_sha256": "e5d37ddf4a20fcbdc1e2fc90fb0bd988be82b3563a8ec8bc3a21792313a239a8",
+      "effective_from": "2026-08-11T18:00:00.000Z",
+      "effective_to": null,
+      "generated_at": "2026-08-14T11:26:00.000Z",
+      "official_patch": "26.16",
+      "patch": "26.16",
+      "source": {
+        "data_patch": "26.16",
+        "lcc_commit": "5b0ad6eabc3396ea714a270e3d87ad1dc72c6fac",
+        "locator": "data/lol/v2/champions/lcc-atom-bridge-26.16.json",
+        "sha256": "e5d37ddf4a20fcbdc1e2fc90fb0bd988be82b3563a8ec8bc3a21792313a239a8"
+      }
     }
   ],
   "audit": {
     "ambiguity_policy": "missing evidence, a changed hash, an unknown token, or a missing atom snapshot returns unavailable",
     "audited_at": "2026-08-08T12:13:56Z",
     "method": {
-      "atom_policy": "the current LCC bridge is one 26.15 snapshot; historical tokens remain unavailable for atom resolution",
-      "lag_policy": "professional competition can remain on an older patch after a live release; the exact OE token is retained and no nearest-patch substitution is made",
+      "atom_policy": "the current LCC bridge is versioned by public patch; only a registered, time-safe snapshot resolves",
+      "lag_policy": "retain the raw OE token; apply a dated correction only when a row has explicit live-realm evidence, because tournament realms may remain on the prior patch",
       "oe_interval": "deduplicate OE player rows by gameid, then group exact source patch tokens after the scope start",
       "official_match": "match the OE season minor to the official Riot patch minor, then require the first OE observation to be on or after the Riot patch-note publication time",
       "time_safe_lookup": "resolver requires as_of inside the hash-bound OE interval and on or after the official release"
@@ -1360,6 +1374,40 @@
       "source_tokens": [
         "16.15"
       ]
+    },
+    {
+      "ambiguity_status": "none",
+      "atom_snapshot_patch": "26.16",
+      "audit_status": "audited",
+      "confidence": "high",
+      "evidence": [
+        {
+          "kind": "oe_source",
+          "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+          "observed_game_count": 0,
+          "selector": "no accepted 16.16 rows; post-release tournament rows remain source-reported 16.15 until realm evidence is present",
+          "sha256": "c5064704f3fe5943f28e7133fa5ff42ca0c912e863e2262e8401e4ff926caf64"
+        },
+        {
+          "kind": "riot_patch_notes",
+          "locator": "https://www.leagueoflegends.com/en-us/news/game-updates/league-of-legends-patch-26-16-notes/",
+          "published_at": "2026-08-11T18:00:00.000Z",
+          "selector": "official patch-note title '26.16' and JSON-LD datePublished",
+          "sha256": "b860db027019e61a32bf687670573e14432ec85ee662079835ae91fdba60ccf7"
+        }
+      ],
+      "observed_game_count": 0,
+      "oe_observed_interval": {
+        "end": "2026-08-11T18:00:00Z",
+        "start": "2026-08-11T18:00:00Z"
+      },
+      "oe_token": "16.16",
+      "official_label": "26.16",
+      "official_patch": "26.16",
+      "official_release_at": "2026-08-11T18:00:00.000Z",
+      "source_tokens": [
+        "16.16"
+      ]
     }
   ],
   "schema_version": "scryglass:oe-atom-patch-map:v1",
@@ -1393,6 +1441,15 @@
       "role": "atom snapshot provenance",
       "semantic_sha256": "6c99cb25d981954e5e08231a89c3cab23b2062988cd7ccfc3eb7c79d38092bbd",
       "sha256": "35aaa81d0fd8b1a6a633c5e8c34ab956af7a4dc1344cf3c3129d988dff13555f"
+    },
+    {
+      "bridge_artifact_sha256": "e5d37ddf4a20fcbdc1e2fc90fb0bd988be82b3563a8ec8bc3a21792313a239a8",
+      "kind": "lcc_atom_bridge",
+      "locator": "data/lol/v2/champions/lcc-atom-bridge-26.16.json",
+      "mutable_source": true,
+      "role": "26.16 atom snapshot provenance",
+      "semantic_sha256": "f677f4c6fee9faf90837540696fbcc752e32768464734e96ba0cf6e3b0bff8ee",
+      "sha256": "e5d37ddf4a20fcbdc1e2fc90fb0bd988be82b3563a8ec8bc3a21792313a239a8"
     }
   ]
 }

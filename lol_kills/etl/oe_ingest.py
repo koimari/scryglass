@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 import pandas as pd
 
@@ -29,6 +29,8 @@ from lol_kills.etl.paths import (
     ROOT,
 )
 from lol_kills.net import require_https_url
+from lol_kills.etl.riot_patch_receipts import RiotPatchReceiptError, validate_patch_receipt
+from lol_kills.v2.patch_identity import corrected_oe_patch_token
 
 
 OE_MIN_DOWNLOAD_BYTES = 10_000
@@ -710,15 +712,90 @@ def _normalize_patch_column(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _normalize_identity(frame: pd.DataFrame, *, players: bool) -> pd.DataFrame:
+def _normalize_identity(
+    frame: pd.DataFrame,
+    *,
+    players: bool,
+    patch_receipts: Mapping[str, Mapping[str, Any]] | None = None,
+) -> pd.DataFrame:
     """Team/champ aliases + dates only — do not drop or invent columns."""
     out = _normalize_patch_column(frame)
+    if "patch" in out.columns:
+        out["oe_patch_token"] = out["patch"]
     if "teamname" in out.columns:
         out["teamname"] = out["teamname"].map(
             lambda x: normalize_team(str(x)) if pd.notna(x) else x
         )
     if "date" in out.columns:
         out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    if "patch" in out.columns and "date" in out.columns:
+        realm_patch_column = next(
+            (
+                column
+                for column in (
+                    "server_patch",
+                    "game_patch",
+                    "realm_patch",
+                    "authoritative_patch",
+                )
+                if column in out.columns
+            ),
+            None,
+        )
+        realm_kind_column = next(
+            (
+                column
+                for column in ("patch_realm", "realm_kind", "server_kind")
+                if column in out.columns
+            ),
+            None,
+        )
+        corrected_tokens: list[str] = []
+        corrections: list[str | None] = []
+        patch_values = out[realm_patch_column].tolist() if realm_patch_column else [None] * len(out)
+        realm_values = out[realm_kind_column].tolist() if realm_kind_column else [None] * len(out)
+        for token, event_time, realm_patch, realm_kind in zip(
+            out["patch"].tolist(),
+            out["date"].tolist(),
+            patch_values,
+            realm_values,
+        ):
+            if token is None or bool(pd.isna(token)):
+                corrected_tokens.append(pd.NA)
+                corrections.append(None)
+                continue
+            corrected, rule = corrected_oe_patch_token(
+                token,
+                event_time,
+                realm_patch=realm_patch,
+                realm_kind=realm_kind,
+            )
+            corrected_tokens.append(corrected)
+            corrections.append(rule["corrected_token"] if rule else None)
+        out["patch"] = pd.Series(corrected_tokens, index=out.index, dtype="string")
+        out["patch_correction"] = pd.Series(corrections, index=out.index, dtype="string")
+    if patch_receipts and "gameid" in out.columns:
+        receipt_patches: list[str | None] = []
+        receipt_hashes: list[str | None] = []
+        for game_id in out["gameid"].tolist():
+            receipt = patch_receipts.get(str(game_id))
+            if receipt is None:
+                receipt_patches.append(None)
+                receipt_hashes.append(None)
+                continue
+            try:
+                validated = validate_patch_receipt(receipt)
+            except RiotPatchReceiptError as exc:
+                raise ValueError(f"invalid Riot patch receipt for game {game_id!r}") from exc
+            observed = validated["observed"]
+            receipt_patches.append(str(observed["client_patch"]))
+            receipt_hashes.append(str(validated["receipt_canonical_sha256"]))
+        receipt_patch_series = pd.Series(receipt_patches, index=out.index, dtype="string")
+        out["patch_receipt_sha256"] = pd.Series(receipt_hashes, index=out.index, dtype="string")
+        has_receipt = receipt_patch_series.notna()
+        if has_receipt.any():
+            out.loc[has_receipt, "patch"] = receipt_patch_series.loc[has_receipt]
+            out.loc[has_receipt, "patch_source"] = "riot_live_feed"
     if "playoffs" in out.columns:
         numeric = pd.to_numeric(out["playoffs"], errors="coerce")
         invalid = numeric.notna() & ~numeric.isin((0, 1))
@@ -732,7 +809,11 @@ def _normalize_identity(frame: pd.DataFrame, *, players: bool) -> pd.DataFrame:
     return out
 
 
-def parse_oe_csv(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+def parse_oe_csv(
+    path: Path,
+    *,
+    patch_receipts: Mapping[str, Mapping[str, Any]] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return (team_games, player_games) with the full OE schema on each."""
     print(f"[oe] parsing {path.name}")
     try:
@@ -749,10 +830,14 @@ def parse_oe_csv(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
         raise ValueError(f"No position column in {path}")
 
     team = _normalize_identity(
-        df[df[pos_col].astype(str).str.lower() == "team"].copy(), players=False
+        df[df[pos_col].astype(str).str.lower() == "team"].copy(),
+        players=False,
+        patch_receipts=patch_receipts,
     )
     players = _normalize_identity(
-        df[df[pos_col].astype(str).str.lower() != "team"].copy(), players=True
+        df[df[pos_col].astype(str).str.lower() != "team"].copy(),
+        players=True,
+        patch_receipts=patch_receipts,
     )
 
     year = _year_from_name(path.name)

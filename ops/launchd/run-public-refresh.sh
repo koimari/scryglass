@@ -79,6 +79,11 @@ trap '/bin/rm -f "${worker_lock}"' EXIT HUP INT TERM
 
 source_receipt="${run_root}/accepted-source.json"
 import_receipt="${run_root}/accepted-import.json"
+patch_receipt_catalog="${run_root}/riot-patch-receipts.json"
+patch_receipt_args=()
+if [[ -f "${patch_receipt_catalog}" ]]; then
+  patch_receipt_args=(--patch-receipts "${patch_receipt_catalog}")
+fi
 export SCRYGLASS_ACCEPTED_SOURCE_RECEIPT="${source_receipt}"
 export SCRYGLASS_ACCEPTED_IMPORT_RECEIPT="${import_receipt}"
 
@@ -87,14 +92,18 @@ export SCRYGLASS_ACCEPTED_IMPORT_RECEIPT="${import_receipt}"
   | /usr/bin/tar -x -C "${runtime_root}"
 
 cd "${repo_root}"
+# launchd can start this script with a working directory outside the checkout.
+# Keep module discovery bound to the attested worker checkout.
+export PYTHONPATH="${repo_root}${PYTHONPATH:+:${PYTHONPATH}}"
 
 resume_cycle=0
-if [[ -f "${source_receipt}" && -f "${import_receipt}" ]]; then
+if [[ ! -f "${patch_receipt_catalog}" && -f "${source_receipt}" && -f "${import_receipt}" ]]; then
   if "${python}" -m lol_kills.etl.oe_database \
     --csv "${runtime_root}/data/lol/warehouse/raw/${oe_name}" \
     --year "${oe_year}" \
     --parquet-dir "${runtime_root}/data/lol/warehouse/parquet" \
     --source-receipt "${source_receipt}" \
+    "${patch_receipt_args[@]}" \
     --result-output "${import_receipt}" \
     --validate-only >/dev/null; then
     resume_cycle=1
@@ -133,6 +142,7 @@ if [[ "${resume_cycle}" -eq 0 ]]; then
     --year "${oe_year}" \
     --parquet-dir "${runtime_root}/data/lol/warehouse/parquet" \
     --source-receipt "${source_receipt}" \
+    "${patch_receipt_args[@]}" \
     --result-output "${import_receipt}"
 fi
 

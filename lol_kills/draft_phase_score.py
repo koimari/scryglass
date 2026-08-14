@@ -309,6 +309,7 @@ def draft_score_composite(
             "win_edge": classic["components"]["win_edge"],
             "pace_total_shift": classic["components"]["pace_total_shift"],
         },
+        "phase_curve": classic.get("phase_curve"),
         "components": {
             **classic["components"],
             "composite_p_blue": round(p_comp, 4),
