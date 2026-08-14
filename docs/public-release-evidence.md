@@ -95,14 +95,17 @@ The 26.16 atom bridge is a development input. The current accepted OE source
 has no 16.16 game rows, so the regional model continues to use the audited
 26.15 bridge. This keeps patch identity and atom provenance aligned.
 
-## Staged Vercel firewall rules
+## Active Vercel firewall rules
 
-Two log-only rules are staged for traffic review. They are not published:
+The production WAF has two active path-scoped rules:
 
-- `Observe chat request budget`, rule `rule_observe_chat_request_budget_rYFEqV`, records requests above 60 per minute per IP for `/api/chat/*`;
-- `Observe publication callback budget`, rule `rule_observe_publication_callback_budget_E2SZOh`, records POST requests above six per minute per IP for `/api/data-published`.
+- `Enforce chat request budget`, rule `rule_enforce_chat_request_budget_vLN2R1`, limits `/api/chat/*` to 60 requests per minute per IP;
+- `Enforce publication callback budget`, rule `rule_enforce_publication_callback_budget_KHvJXI`, limits POST `/api/data-published` to six requests per minute per IP.
 
-Review these rules at [chat traffic](https://vercel.com/koidevelopments/scryglass/firewall/traffic?filter=rule_observe_chat_request_budget_rYFEqV) and [publication traffic](https://vercel.com/koidevelopments/scryglass/firewall/traffic?filter=rule_observe_publication_callback_budget_E2SZOh). Publish them only after the log traffic and preview behavior match the intended clients.
+A production probe sent 65 concurrent requests to `/api/chat/navigation`. It
+returned 60 `200` responses and 5 edge denials. The edge action is `deny`, so
+the WAF response is `403`; requests that reach the application limiter keep
+the application `429` contract.
 
 ## Ordered query and Storage cutover
 
