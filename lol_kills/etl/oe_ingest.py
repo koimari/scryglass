@@ -696,9 +696,23 @@ def _strip_columns(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _normalize_patch_column(frame: pd.DataFrame) -> pd.DataFrame:
+    """Keep source patch tokens nullable and string-typed across cache versions."""
+
+    if "patch" not in frame.columns:
+        return frame
+    out = frame.copy()
+    patch = out["patch"].astype("string").str.strip()
+    out["patch"] = patch.mask(
+        patch.isna()
+        | patch.str.casefold().isin({"", "nan", "nat", "none", "<na>"})
+    )
+    return out
+
+
 def _normalize_identity(frame: pd.DataFrame, *, players: bool) -> pd.DataFrame:
     """Team/champ aliases + dates only — do not drop or invent columns."""
-    out = frame
+    out = _normalize_patch_column(frame)
     if "teamname" in out.columns:
         out["teamname"] = out["teamname"].map(
             lambda x: normalize_team(str(x)) if pd.notna(x) else x
@@ -722,11 +736,13 @@ def parse_oe_csv(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return (team_games, player_games) with the full OE schema on each."""
     print(f"[oe] parsing {path.name}")
     try:
-        # pyarrow engine is ~12x faster; keep date as str so payload bytes are
-        # identical to the default-engine output (ISO dates stay verbatim).
-        df = _strip_columns(pd.read_csv(path, engine="pyarrow", dtype={"date": str}))
+        # Keep date and patch as source text. Patch labels such as 16.10 and
+        # 16.1 are different Riot patches, so numeric inference is unsafe.
+        df = _strip_columns(
+            pd.read_csv(path, low_memory=False, dtype={"date": str, "patch": str})
+        )
     except (ValueError, TypeError):
-        df = _strip_columns(pd.read_csv(path, low_memory=False))
+        df = _strip_columns(pd.read_csv(path, low_memory=False, dtype={"patch": str}))
     # position/participant: team rows have position == 'team'
     pos_col = next((c for c in df.columns if c.lower() == "position"), None)
     if pos_col is None:
