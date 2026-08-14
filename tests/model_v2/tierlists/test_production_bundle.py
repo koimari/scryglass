@@ -61,6 +61,25 @@ def test_source_tree_reads_code_from_the_worker_checkout(tmp_path: Path) -> None
     assert len(digest) == 64
 
 
+def test_source_tree_accepts_a_relative_repository_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for locator in (
+        CANDIDATE_LOCATOR,
+        EVALUATION_LOCATOR,
+        AUTHORITY_LOCATOR,
+        SOURCE_LOCATOR,
+        SOURCE_META_LOCATOR,
+        Path("data/lol/v2/champions/lcc-atom-bridge-v1.json"),
+    ):
+        target = tmp_path / locator
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(locator.as_posix().encode("utf-8"))
+
+    monkeypatch.chdir(tmp_path)
+    digest = _source_tree_sha256(Path("."), {}, code_root=ROOT)
+
+    assert len(digest) == 64
+
+
 def test_public_bundle_rejects_a_grid_backed_candidate() -> None:
     with pytest.raises(ProductionBundleError, match="OE-only candidate"):
         _require_public_source_mode({"source_mode": "oe_plus_grid"})
@@ -71,6 +90,24 @@ def test_public_similarity_library_uses_the_validated_atom_bridge() -> None:
     assert library["schema_version"] == "scryglass:champion-structural-similarity:v1"
     assert len(library["champions"]) == 173
     assert all(profile["champion_image_url"] for profile in library["champions"])
+
+
+def test_public_similarity_library_can_bind_the_current_patch_bridge() -> None:
+    library = _public_structural_similarity(
+        ROOT,
+        bridge_locator="data/lol/v2/champions/lcc-atom-bridge-26.16.json",
+    )
+    assert library["schema_version"] == "scryglass:champion-structural-similarity:v1"
+    assert len(library["champions"]) == 173
+
+
+def test_public_similarity_rejects_a_changed_candidate_bridge_digest() -> None:
+    with pytest.raises(ProductionBundleError, match="artifact digest changed"):
+        _public_structural_similarity(
+            ROOT,
+            bridge_locator="data/lol/v2/champions/lcc-atom-bridge-26.16.json",
+            expected_artifact_sha256="0" * 64,
+        )
 
 
 def test_coach_board_matchups_and_regional_views_are_validated() -> None:

@@ -44,6 +44,12 @@ ANNUAL_SOURCE_LOCATOR = "data/lol/warehouse/parquet/oe_player_games.parquet"
 IDENTITY_CROSSWALK_LOCATOR = "data/lol/v2/champions/champion-id-crosswalk-v1.json"
 IDENTITY_METADATA_LOCATOR = "data/lol/v2/champions/sources/riot-champion-metadata-16.14.1.json"
 ATOM_BRIDGE_LOCATOR = "data/lol/v2/champions/lcc-atom-bridge-v1.json"
+# Keep the historical bridge as the default for older fixtures and rows. New
+# patch rows must use the bridge for their exact atom snapshot.
+ATOM_BRIDGE_LOCATORS = {
+    "26.15": ATOM_BRIDGE_LOCATOR,
+    "26.16": "data/lol/v2/champions/lcc-atom-bridge-26.16.json",
+}
 DEFAULT_OUTPUT = Path("data/lol/v2/tierlists/champion-elo-candidate-v1.json")
 DEFAULT_MIN_APPEARANCES = 1
 INITIAL_RATING = 1500.0

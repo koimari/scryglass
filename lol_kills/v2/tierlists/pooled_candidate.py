@@ -45,9 +45,10 @@ from lol_kills.v2.tierlists.patch_mapping import (
     normalize_oe_token,
     resolve_oe_patch,
 )
+from lol_kills.v2.patch_identity import CURRENT_PUBLIC_PATCH
 
 from .champion_elo import (
-    ATOM_BRIDGE_LOCATOR,
+    ATOM_BRIDGE_LOCATORS,
     DEFAULT_MIN_APPEARANCES,
     HISTORY_START,
     INITIAL_RATING,
@@ -234,7 +235,7 @@ def _map_atom_features(
     game: Mapping[str, Any],
     *,
     stable_roles: Mapping[str, Mapping[str, str]],
-    resolver: AtomMatchupFeatureResolver,
+    resolvers: Mapping[str, AtomMatchupFeatureResolver],
     registry: AtomFeatureRegistry,
     mapping: MappingArtifact | None,
     pair_cache: dict[tuple[str, str, str | None], AtomFeatureVector],
@@ -251,10 +252,13 @@ def _map_atom_features(
             mapping=mapping,
             verify_source_hashes=False,
         )
+    if resolution is not None and resolution.oe_token:
+        oe_patch = resolution.oe_token
     atom_patch = resolution.atom_snapshot_patch if resolution is not None and resolution.exact_atom_snapshot else None
+    resolver = resolvers.get(str(atom_patch)) if atom_patch is not None else None
     snapshot_mapping = (
         _atom_snapshot_mapping(mapping, atom_patch, resolver.bridge.artifact_sha256)
-        if mapping is not None and atom_patch is not None
+        if mapping is not None and atom_patch is not None and resolver is not None
         else None
     )
     exact_pair_count = 0
@@ -265,7 +269,7 @@ def _map_atom_features(
         cache_key = (blue_id, red_id, atom_patch)
         if cache_key in pair_cache:
             vector = pair_cache[cache_key]
-        elif atom_patch is None or snapshot_mapping is None:
+        elif atom_patch is None or snapshot_mapping is None or resolver is None:
             vector = unavailable
         else:
             try:
@@ -628,7 +632,7 @@ def _response_matrix(
     reference_champions: Mapping[str, str],
     pair_stats: Mapping[tuple[str, str, str, str], Mapping[str, Any]],
     pooled_pair_stats: Mapping[tuple[str, str, str], Mapping[str, Any]],
-    resolver: AtomMatchupFeatureResolver,
+    resolvers: Mapping[str, AtomMatchupFeatureResolver],
     target_mapping: ExactAtomSnapshotMapping | None,
     exact_atom_patch: str | None,
     empty_vector: AtomFeatureVector,
@@ -642,7 +646,8 @@ def _response_matrix(
             if focal == opponent:
                 continue
             vector = empty_vector
-            if exact_atom_patch is not None and target_mapping is not None:
+            resolver = resolvers.get(str(exact_atom_patch)) if exact_atom_patch is not None else None
+            if exact_atom_patch is not None and target_mapping is not None and resolver is not None:
                 cache_key = (focal, opponent, exact_atom_patch)
                 vector = atom_vector_cache.get(cache_key, empty_vector)
                 if cache_key not in atom_vector_cache:
@@ -758,10 +763,9 @@ def _build_cell_metrics(
     reference_champions: Mapping[str, str],
     pair_stats: Mapping[tuple[str, str, str, str], Mapping[str, Any]],
     pooled_pair_stats: Mapping[tuple[str, str, str], Mapping[str, Any]],
-    resolver: AtomMatchupFeatureResolver,
+    resolvers: Mapping[str, AtomMatchupFeatureResolver],
     mapping: MappingArtifact | None,
     exact_atom_patch: str | None,
-    bridge_sha256: str,
     posterior_draws: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     registry = AtomFeatureRegistry.from_names(FEATURE_ORDER, source="validated_atom_bridge")
@@ -769,10 +773,17 @@ def _build_cell_metrics(
     atom_vector_cache: dict[tuple[str, str, str | None], AtomFeatureVector] = {}
     pool, _pool_legal, pool_hash = _legal_pool(counts, display_names)
     target_mapping = (
-        _atom_snapshot_mapping(mapping, exact_atom_patch, bridge_sha256)
-        if mapping is not None and exact_atom_patch is not None
+        _atom_snapshot_mapping(
+            mapping,
+            exact_atom_patch,
+            resolvers[str(exact_atom_patch)].bridge.artifact_sha256,
+        )
+        if mapping is not None
+        and exact_atom_patch is not None
+        and str(exact_atom_patch) in resolvers
         else None
     )
+    resolver = resolvers.get(str(exact_atom_patch)) if exact_atom_patch is not None else None
     pair_keys: list[tuple[str, str]] = []
     hypotheses: list[JointMapObservation] = []
     for focal in champions:
@@ -786,7 +797,7 @@ def _build_cell_metrics(
         opponents = opponents[:LEGAL_OPPONENT_COUNT]
         for opponent in opponents:
             vector = empty_vector
-            if exact_atom_patch is not None and target_mapping is not None:
+            if exact_atom_patch is not None and target_mapping is not None and resolver is not None:
                 cache_key = (focal, opponent, exact_atom_patch)
                 vector = atom_vector_cache.get(cache_key, empty_vector)
                 if cache_key not in atom_vector_cache:
@@ -984,7 +995,7 @@ def _build_cell_metrics(
         reference_champions=reference_champions,
         pair_stats=pair_stats,
         pooled_pair_stats=pooled_pair_stats,
-        resolver=resolver,
+        resolvers=resolvers,
         target_mapping=target_mapping,
         exact_atom_patch=exact_atom_patch,
         empty_vector=empty_vector,
@@ -1146,11 +1157,27 @@ def build_pooled_candidate(
     if not raw_maps:
         raise PooledCandidateError("no complete five-role maps remain after identity checks")
     crosswalk, identity_sources = _load_crosswalk(root)
-    atom_path = root / ATOM_BRIDGE_LOCATOR
     from lol_kills.v2.champions.atoms.consume import AtomBridge
 
-    bridge = AtomBridge.load(atom_path)
-    resolver = AtomMatchupFeatureResolver(bridge)
+    resolvers: dict[str, AtomMatchupFeatureResolver] = {}
+    bridge_paths: dict[str, Path] = {}
+    for declared_patch, locator in ATOM_BRIDGE_LOCATORS.items():
+        path = root / locator
+        if not path.is_file():
+            continue
+        bridge = AtomBridge.load(path)
+        resolver = AtomMatchupFeatureResolver(bridge)
+        actual_patch = resolver.snapshot_patch
+        if actual_patch != declared_patch:
+            raise PooledCandidateError(
+                f"atom bridge patch mismatch for {locator}: {actual_patch!r} != {declared_patch!r}"
+            )
+        resolvers[declared_patch] = resolver
+        bridge_paths[declared_patch] = path
+    if not resolvers:
+        raise PooledCandidateError("no validated LCC atom bridge is available")
+    default_patch = "26.15" if "26.15" in resolvers else sorted(resolvers)[0]
+    default_resolver = resolvers[default_patch]
     registry = AtomFeatureRegistry.from_names(FEATURE_ORDER, source="validated_atom_bridge")
     mapping, mapping_meta = _mapping_for_root(root)
 
@@ -1187,7 +1214,7 @@ def build_pooled_candidate(
         atom_vectors, patch_meta = _map_atom_features(
             game,
             stable_roles=stable_roles,
-            resolver=resolver,
+            resolvers=resolvers,
             registry=registry,
             mapping=mapping,
             pair_cache=atom_pair_cache,
@@ -1239,7 +1266,8 @@ def build_pooled_candidate(
     latest_prepared = max(prepared, key=lambda game: (game["date"], game["game_id"]))
     current_patch_verified = (
         mapping is not None
-        and latest_prepared.get("atom_snapshot_patch") == resolver.snapshot_patch
+        and any(game.get("atom_snapshot_patch") == CURRENT_PUBLIC_PATCH for game in prepared)
+        and CURRENT_PUBLIC_PATCH in resolvers
     )
 
     fit = fit_joint_pooled_model(
@@ -1290,11 +1318,15 @@ def build_pooled_candidate(
                 reference_champions=reference_champions,
                 pair_stats=pair_stats,
                 pooled_pair_stats=pooled_pair_stats,
-                resolver=resolver,
+                resolvers=resolvers,
                 mapping=mapping,
                 exact_atom_patch=exact_atom_patch,
-                bridge_sha256=bridge.artifact_sha256,
                 posterior_draws=POSTERIOR_DRAWS,
+            )
+            profile_resolver = (
+                default_resolver
+                if exact_atom_patch is None
+                else resolvers.get(str(exact_atom_patch))
             )
             for row in rows:
                 prior = previous_rows.get((scope_id, role, row["champion"])) or previous_rows.get((scope_id, role, row["champion_id"]))
@@ -1310,8 +1342,16 @@ def build_pooled_candidate(
                         "rank_delta": rank_delta,
                         "rating_delta": round(rating_delta, 4) if rating_delta is not None else None,
                         "movement": "new" if rank_delta is None else "up" if rank_delta > 0 else "down" if rank_delta < 0 else "flat",
-                        "atom_profile_status": (bridge.profile(row["champion_id"]) or {}).get("profile_status", "unavailable"),
-                        "atom_patch_last_changed": (bridge.profile(row["champion_id"]) or {}).get("lcc_patch_last_changed"),
+                        "atom_profile_status": (
+                            profile_resolver.bridge.profile(row["champion_id"]) or {}
+                        ).get("profile_status", "unavailable")
+                        if profile_resolver is not None
+                        else "unavailable",
+                        "atom_patch_last_changed": (
+                            profile_resolver.bridge.profile(row["champion_id"]) or {}
+                        ).get("lcc_patch_last_changed")
+                        if profile_resolver is not None
+                        else None,
                     }
                 )
             scope_kind = "patch"
@@ -1380,6 +1420,22 @@ def build_pooled_candidate(
     exact_atom_maps = sum(bool(game.get("atom_snapshot_patch")) for game in prepared)
     atom_role_pairs = sum(int(game.get("atom_exact_role_pairs", 0)) for game in prepared)
     patch_counts = Counter(str(game["oe_patch_id"]) for game in prepared)
+    selected_patch = str(latest_prepared.get("atom_snapshot_patch") or default_patch)
+    if selected_patch not in resolvers:
+        selected_patch = default_patch
+    selected_resolver = resolvers[selected_patch]
+    selected_bridge_path = bridge_paths[selected_patch]
+    atom_bridges = {
+        patch: {
+            "locator": str(path.relative_to(root)),
+            "raw_sha256": _sha256_path(path),
+            "artifact_sha256": resolvers[patch].bridge.artifact_sha256,
+            "generated_at": resolvers[patch].bridge.generated_at,
+            "data_patch": resolvers[patch].snapshot_patch,
+            "lcc_commit": resolvers[patch].bridge.provenance.get("lcc_commit"),
+        }
+        for patch, path in sorted(bridge_paths.items())
+    }
     payload: dict[str, Any] = {
         "schema_version": POOLED_CANDIDATE_SCHEMA,
         "legacy_schema_version": "scryglass:champion-role-elo-candidate:v1",
@@ -1410,12 +1466,13 @@ def build_pooled_candidate(
         "identity_sources": identity_sources,
         "patch_ingestion": {
             "mode": "champion_atomization",
-            "canonical_data_patch": resolver.snapshot_patch,
-            "atom_bridge_locator": ATOM_BRIDGE_LOCATOR,
-            "atom_bridge_artifact_sha256": bridge.artifact_sha256,
-            "atom_bridge_raw_sha256": _sha256_path(atom_path),
-            "atom_bridge_generated_at": bridge.generated_at,
-            "lcc_commit": bridge.provenance.get("lcc_commit"),
+            "canonical_data_patch": selected_resolver.snapshot_patch,
+            "atom_bridge_locator": str(selected_bridge_path.relative_to(root)),
+            "atom_bridge_artifact_sha256": selected_resolver.bridge.artifact_sha256,
+            "atom_bridge_raw_sha256": _sha256_path(selected_bridge_path),
+            "atom_bridge_generated_at": selected_resolver.bridge.generated_at,
+            "lcc_commit": selected_resolver.bridge.provenance.get("lcc_commit"),
+            "atom_bridges": atom_bridges,
             "oe_patch_namespace": "Oracle's Elixir source patch token",
             "official_to_oe_patch_mapping": mapping_meta,
             "oe_patch_counts": dict(sorted(patch_counts.items())),
@@ -1433,7 +1490,7 @@ def build_pooled_candidate(
             "posterior_seed": POSTERIOR_SEED,
             "joint_posterior_draws_gate": True,
             "atom_feature_count": len(FEATURE_ORDER),
-            "atom_feature_schema": resolver.feature_schema_sha256,
+            "atom_feature_schema": selected_resolver.feature_schema_sha256,
             "atom_exact_map_coverage": round(exact_atom_maps / max(1, len(prepared)), 6),
         },
         "stability": stability,

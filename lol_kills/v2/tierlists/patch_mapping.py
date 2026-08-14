@@ -354,18 +354,40 @@ def _live_source_binding(
     if (conflicts["date_count"] > 1).any() or (conflicts["patch_count"] > 1).any():
         raise PatchMappingError("OE live source has a game with conflicting date or patch tokens")
     games = unique_games.drop_duplicates("source_game_key").copy()
-    known_tokens = {
-        str(row.get("oe_token"))
+    static_rows = {
+        str(row.get("oe_token")): row
         for row in payload.get("mappings", [])
         if isinstance(row, Mapping)
     }
+    known_tokens = set(static_rows)
     normalized_tokens: list[str] = []
-    for value in games["patch"].tolist():
+    for value, date in zip(games["patch"].tolist(), games["date"].tolist()):
         try:
             candidates = _live_oe_token_candidates(value)
         except PatchMappingError as exc:
             raise PatchMappingError(f"OE live source has a malformed patch token: {value!r}") from exc
-        matched = next((candidate for candidate in candidates if candidate in known_tokens), None)
+        instant = pd.Timestamp(date).to_pydatetime()
+        interval_matches: list[str] = []
+        for candidate in candidates:
+            row = static_rows.get(candidate)
+            if row is None:
+                continue
+            interval = row.get("oe_observed_interval")
+            if not isinstance(interval, Mapping):
+                continue
+            start = _parse_utc(interval.get("start"), field=f"{candidate}.interval.start")
+            end = _parse_utc(interval.get("end"), field=f"{candidate}.interval.end")
+            if start <= instant <= end:
+                interval_matches.append(candidate)
+        if len(interval_matches) > 1:
+            raise PatchMappingError(
+                "OE live source has an ambiguous float-like patch token at "
+                f"{value!r} on {_rfc3339(instant)}"
+            )
+        matched = interval_matches[0] if interval_matches else next(
+            (candidate for candidate in candidates if candidate in known_tokens),
+            None,
+        )
         normalized_tokens.append(matched or candidates[0])
     games["oe_token"] = normalized_tokens
     unknown_tokens = sorted(set(games["oe_token"]) - known_tokens)
