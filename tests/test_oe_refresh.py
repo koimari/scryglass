@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from lol_kills.etl import oe_ingest
+from lol_kills.etl.riot_patch_receipts import receipt_from_response_bytes
 
 
 def _csv_bytes(*, date: str, gameid: str = "g1") -> bytes:
@@ -235,3 +236,50 @@ def test_parse_normalizes_numeric_playoffs_to_nullable_boolean(tmp_path: Path) -
     assert str(players["playoffs"].dtype) == "boolean"
     assert bool(teams.iloc[0]["playoffs"]) is True
     assert bool(players.iloc[0]["playoffs"]) is False
+
+
+def test_parse_preserves_tournament_token_and_accepts_explicit_live_realm(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+    path.write_text(
+        "gameid,date,patch,server_patch,patch_realm,position,teamname,champion\n"
+        "g1,2026-08-13T10:00:00Z,16.15,16.16,live,team,Blue Team,\n"
+        "g1,2026-08-13T10:00:00Z,16.15,16.16,live,top,Blue Team,Gnar\n"
+        "g2,2026-08-13T10:00:00Z,16.15,16.15,tournament,team,Red Team,\n"
+        "g2,2026-08-13T10:00:00Z,16.15,16.15,tournament,top,Red Team,Gnar\n",
+        encoding="utf-8",
+    )
+    teams, players = oe_ingest.parse_oe_csv(path)
+    assert set(teams["patch"].astype(str)) == {"16.15", "16.16"}
+    assert set(players["patch"].astype(str)) == {"16.15", "16.16"}
+    assert set(teams["oe_patch_token"].astype(str)) == {"16.15"}
+    assert set(players["oe_patch_token"].astype(str)) == {"16.15"}
+    assert set(teams["patch_correction"].dropna().astype(str)) == {"16.16"}
+    assert set(teams.loc[teams["gameid"] == "g2", "patch"].astype(str)) == {"16.15"}
+    assert teams.loc[teams["gameid"] == "g2", "patch_correction"].isna().all()
+
+
+def test_parse_applies_exact_riot_patch_receipt_by_game_id(tmp_path: Path) -> None:
+    path = tmp_path / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+    path.write_text(
+        "gameid,date,patch,position,teamname,champion\n"
+        "g1,2026-08-13T10:00:00Z,16.15,team,Blue Team,\n"
+        "g1,2026-08-13T10:00:00Z,16.15,top,Blue Team,Gnar\n"
+        "g2,2026-08-13T10:00:00Z,16.15,team,Red Team,\n",
+        encoding="utf-8",
+    )
+    raw = b'{"gameMetadata":{"patchVersion":"16.16.801.5000"}}'
+    receipt = receipt_from_response_bytes(
+        "g1",
+        raw,
+        retrieved_at_utc="2026-08-14T12:00:00Z",
+    )
+    teams, players = oe_ingest.parse_oe_csv(path, patch_receipts={"g1": receipt})
+    assert set(teams.loc[teams["gameid"] == "g1", "oe_patch_token"].astype(str)) == {"16.15"}
+    assert set(teams.loc[teams["gameid"] == "g1", "patch"].astype(str)) == {"16.16"}
+    assert set(players.loc[players["gameid"] == "g1", "patch"].astype(str)) == {"16.16"}
+    assert set(teams.loc[teams["gameid"] == "g1", "patch_source"].astype(str)) == {
+        "riot_live_feed"
+    }
+    assert teams.loc[teams["gameid"] == "g2", "patch"].astype(str).tolist() == ["16.15"]

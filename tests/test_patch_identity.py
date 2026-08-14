@@ -6,6 +6,7 @@ from lol_kills.knowledge.cdragon_patch_packet import CDragonClient
 from lol_kills.v2.patch_identity import (
     PatchIdentityError,
     client_patch,
+    corrected_oe_patch_token,
     public_patch,
 )
 
@@ -30,3 +31,33 @@ def test_cdragon_client_keeps_26_15_public_label() -> None:
     assert client.patch == "26.15"
     assert client.source_patch == "16.15"
 
+
+def test_oe_26_16_correction_requires_realm_evidence() -> None:
+    unchanged, no_rule = corrected_oe_patch_token("16.15", "2026-08-13T10:00:00Z")
+    assert unchanged == "16.15"
+    assert no_rule is None
+
+    corrected, rule = corrected_oe_patch_token(
+        "16.15",
+        "2026-08-13T10:00:00Z",
+        realm_kind="live",
+    )
+    assert corrected == "16.16"
+    assert rule is not None
+    unchanged, no_rule = corrected_oe_patch_token("16.15", "2026-08-11T17:59:59Z")
+    assert unchanged == "16.15"
+    assert no_rule is None
+
+    unchanged, no_rule = corrected_oe_patch_token(
+        "16.15",
+        "2026-08-13T10:00:00Z",
+        realm_kind="tournament",
+    )
+    assert unchanged == "16.15"
+    assert no_rule is None
+
+
+def test_oe_26_16_correction_does_not_replace_an_exact_newer_token() -> None:
+    corrected, rule = corrected_oe_patch_token("16.16", "2026-08-13T10:00:00Z")
+    assert corrected == "16.16"
+    assert rule is None

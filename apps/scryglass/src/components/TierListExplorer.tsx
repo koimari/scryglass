@@ -986,7 +986,7 @@ export function TierListExplorer({
         <Select
           label="Patch"
           value={patch}
-          options={patchOptions.map((value) => ({ value, label: value }))}
+          options={patchOptions.map((value) => ({ value, label: publicPatchLabel(value) }))}
           onChange={(value) => {
             setPatch(value);
             setResponseChampion("");

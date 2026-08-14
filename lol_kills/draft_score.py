@@ -12,6 +12,7 @@ import json
 import math
 from collections import defaultdict
 from pathlib import Path
+from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
@@ -19,6 +20,7 @@ import pandas as pd
 from lol_kills.etl.aliases import normalize_champ
 from lol_kills.etl.paths import FEATURES_DIR, MODELS_DIR, PARQUET_DIR
 from lol_kills.features.build import _load_champ_betas
+from lol_kills.research.draft_phase_curve import phase_curve_for_draft
 
 ROOT = Path(__file__).resolve().parents[1]
 DRAFT_MODEL = ROOT / "data" / "lol" / "draft_model.json"
@@ -239,6 +241,10 @@ def draft_score(
     blue_side_bonus: float = 0.03,
     league: str | None = None,
     elo_diff: float | None = None,
+    region: str | None = None,
+    player_elo_diff: float | None = None,
+    roster_change: float | None = None,
+    phase_features: Mapping[str, Any] | None = None,
 ) -> dict:
     """
     Draft Score with league-calibrated WR mapping when
@@ -293,6 +299,25 @@ def draft_score(
     legacy_p = sigmoid(win_edge * DEFAULT_TEMP)
     legacy_shrunk = 0.5 + (legacy_p - 0.5) * conf
 
+    # This is a separate pre-match research estimand. It never reads the
+    # observed gold used by lol_kills.live_model, and it stays unavailable
+    # until the phase artifact has a valid promotion receipt.
+    phase_patch = None
+    if phase_features:
+        phase_patch = phase_features.get("patch") or phase_features.get("oe_patch_token")
+    phase_curve = phase_curve_for_draft(
+        b["champs"],
+        r["champs"],
+        draft_logit=win_edge,
+        league=league,
+        region=region,
+        elo_diff=elo_diff,
+        player_elo_diff=player_elo_diff,
+        patch=phase_patch,
+        roster_change=roster_change,
+        extra_features=phase_features,
+    )
+
     return {
         "draft_score_blue": round(score_blue, 2),
         "draft_score_red": round(score_red, 2),
@@ -321,6 +346,7 @@ def draft_score(
             "known_frac_blue": round(b["known_frac"], 3),
             "known_frac_red": round(r["known_frac"], 3),
         },
+        "phase_curve": phase_curve,
         "blue": b["champs"],
         "red": r["champs"],
         "note": (

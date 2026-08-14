@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable, Iterator, Mapping
 
 import numpy as np
 import pandas as pd
@@ -25,6 +25,7 @@ from lol_kills.etl.oe_ingest import (
     parse_oe_csv,
     validate_accepted_source_receipt,
 )
+from lol_kills.etl.riot_patch_receipts import RiotPatchReceiptError, load_patch_receipts
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.player_map_grades import CORE_INPUTS
 
@@ -45,7 +46,7 @@ REVIEWED_REMOVED_GAME_IDS: dict[str, str] = {
     "LOLTMNT01_442514": "oe-revision-2026-08-12: ljl series re-identified",
 }
 STATE_SCHEMA = "scryglass:oe-local-cache-state:v1"
-TRANSFORM_VERSION = "oe-normalization:v2"
+TRANSFORM_VERSION = "oe-normalization:v3"
 REQUEST_TIMEOUT_SECONDS = 180.0
 # Keep version writes below the Supabase statement budget. This matters during
 # a transform migration, when one unchanged source can rewrite the full cache.
@@ -571,7 +572,11 @@ def _game_statistics_complete(players: dict[str, np.ndarray], p_index: tuple[int
 
 
 def _prepare_import_fast(
-    csv_path: Path, year: int, *, source: dict[str, Any] | None = None
+    csv_path: Path,
+    year: int,
+    *,
+    source: dict[str, Any] | None = None,
+    patch_receipts: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> PreparedImport:
     """Vectorized prepare_import: one global sort + precomputed arrays.
 
@@ -580,7 +585,7 @@ def _prepare_import_fast(
     """
     path = csv_path.expanduser().resolve()
     source = source or _validate_oe_csv(path, str(year))
-    team_rows, player_rows = parse_oe_csv(path)
+    team_rows, player_rows = parse_oe_csv(path, patch_receipts=patch_receipts)
     for frame in (team_rows, player_rows):
         frame["gameid"] = frame["gameid"].map(canonical_source_game_key)
         frame.reset_index(drop=True, inplace=True)
@@ -723,14 +728,23 @@ def _prepare_import_fast(
 
 
 def prepare_import(
-    csv_path: Path, year: int, *, source: dict[str, Any] | None = None
+    csv_path: Path,
+    year: int,
+    *,
+    source: dict[str, Any] | None = None,
+    patch_receipts: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> PreparedImport:
     """Vectorized OE import preparation (globally sorted rows + numpy checks).
 
     Output is byte-identical to the previous per-game pandas implementation:
     same payloads, payload sha256s, quarantines, and receipts.
     """
-    return _prepare_import_fast(csv_path, year, source=source)
+    return _prepare_import_fast(
+        csv_path,
+        year,
+        source=source,
+        patch_receipts=patch_receipts,
+    )
 
 
 def _batches(values: list[Any], size: int = WRITE_BATCH_SIZE) -> Iterator[list[Any]]:
@@ -1095,6 +1109,7 @@ def sync_csv(
     parquet_dir: Path,
     client: SupabaseOeDatabase | Any | None = None,
     source_receipt: Path | None = None,
+    patch_receipt_catalog: Path | None = None,
 ) -> dict[str, Any]:
     database = client or SupabaseOeDatabase(project_url, secret_key)
     path = csv_path.expanduser().resolve()
@@ -1104,18 +1119,29 @@ def sync_csv(
         if source_receipt is not None
         else None
     )
+    try:
+        patch_receipts = (
+            load_patch_receipts(patch_receipt_catalog)
+            if patch_receipt_catalog is not None
+            else None
+        )
+    except RiotPatchReceiptError as exc:
+        raise OeDatabaseError("Riot patch receipt catalog is invalid") from exc
     receipt = database.import_receipt(
         year, str(source["raw_sha256"]), TRANSFORM_VERSION
     )
-    if receipt is not None and _cache_is_current(
-        parquet_dir, year, str(source["raw_sha256"])
+    if (
+        receipt is not None
+        and patch_receipt_catalog is None
+        and _cache_is_current(parquet_dir, year, str(source["raw_sha256"]))
     ):
         return {
             **_current_result_from_receipt(receipt, source, parquet_dir),
             "accepted_source_receipt": accepted_source,
+            "riot_patch_receipts": 0,
             "worker_commit": os.environ.get("SCRYGLASS_WORKER_COMMIT") or None,
         }
-    prepared = prepare_import(path, year, source=source)
+    prepared = prepare_import(path, year, source=source, patch_receipts=patch_receipts)
     existing = database.current_hashes(year)
     accepted_hashes = {
         game_id: game.payload_sha256 for game_id, game in prepared.games.items()
@@ -1206,6 +1232,13 @@ def sync_csv(
             f"Supabase OE readback failed for {len(mismatched)} games; first: {mismatched[0]}"
         )
     cache = update_local_cache(prepared, parquet_dir)
+    patch_receipt_count = len(
+        {
+            str(receipt.get("receipt_canonical_sha256"))
+            for receipt in (patch_receipts or {}).values()
+            if isinstance(receipt, Mapping)
+        }
+    )
     import_row = {
         "source_year": year,
         "source_file_sha256": prepared.source["raw_sha256"],
@@ -1223,6 +1256,7 @@ def sync_csv(
             game.statistics_complete for game in prepared.games.values()
         ),
         "source_observed_through": prepared.source["date_max_utc"],
+        "riot_patch_receipts": patch_receipt_count,
         "completed_at": datetime.now(timezone.utc).isoformat(),
     }
     database.record_import(import_row)
@@ -1243,6 +1277,7 @@ def sync_csv(
         "cache": cache,
         "status": "updated" if changed_ids else "current",
         "accepted_source_receipt": accepted_source,
+        "riot_patch_receipts": patch_receipt_count,
         "worker_commit": os.environ.get("SCRYGLASS_WORKER_COMMIT") or None,
     }
 
@@ -1286,6 +1321,11 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--csv", required=True, type=Path)
     parser.add_argument("--year", required=True, type=int)
     parser.add_argument("--source-receipt", required=True, type=Path)
+    parser.add_argument(
+        "--patch-receipts",
+        type=Path,
+        help="Optional Riot official-feed receipt catalog for OE game IDs.",
+    )
     parser.add_argument("--result-output", type=Path)
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument(
@@ -1312,6 +1352,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         secret_key=_required_environment("SCRYGLASS_SUPABASE_SECRET_KEY"),
         parquet_dir=arguments.parquet_dir.resolve(),
         source_receipt=arguments.source_receipt,
+        patch_receipt_catalog=arguments.patch_receipts,
     )
     if arguments.result_output is not None:
         _atomic_json(arguments.result_output.expanduser().resolve(), result)

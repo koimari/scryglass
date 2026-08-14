@@ -78,7 +78,7 @@ label on a model that has not passed its chronological holdouts.
 
 ## Regional refresh boundary
 
-A regional tier refresh was run after the label fix and the latest OE download.
+A regional tier refresh was run after the latest OE download.
 Its receipt is kept in the worker runtime at
 `data/lol/v2/tierlists/refresh-receipts/tierlist-live-refresh-20260814T052013765685Z-7427f9957fe5fc9b.json`.
 It replayed 17,503 maps, used a 1,182-map live window, and built 195 cells
@@ -89,13 +89,38 @@ scope label uses the Riot namespace.
 
 The refresh was deferred from publication. It used the audited 26.15 bridge
 because the accepted OE source has no 16.16 game rows yet. The latest OE file
-ends at `2026-08-13T20:27:53Z` and contains zero 16.16 rows. The production
-index was rebuilt with canonical `26.15` patch options and scope labels. Its
-index raw digest is `e8c5aab7bd365ec440c531b44b4a18c7b500218c3c69a132abc1f2ea2f7d8954`
-and its embedded artifact digest is
-`db4dc5b457d0f81a8e15ca003c105df69e1170c53e83ade8ca24fa3fba008592`.
-The 26.16 bridge is staged for the first complete 16.16 ingest. It must not be
-mixed into 26.15 regional ratings.
+ends at `2026-08-14T03:34:42Z`. It contains 133 maps after the 26.16 public
+release boundary, all reported as source patch `16.15`. LCK and LPL match
+reports provide secondary corroboration, so a date-only rewrite would be
+unsafe. The ingest now keeps the raw token and requires explicit live-realm
+evidence before it derives `16.16`.
+
+The public release boundary comes from [Riot's 26.16 patch notes](https://www.leagueoflegends.com/en-us/news/game-updates/league-of-legends-patch-26-16-notes/).
+The primary per-game check is [Riot's official LoL Esports live-stats feed](https://feed.lolesports.com/livestats/v1/window/115548147900619042). It
+publishes `gameMetadata.patchVersion` for a game window. Three LCK games from
+the 12 to 14 August post-release window were checked directly:
+
+The checks below were retrieved at `2026-08-14T15:06:20Z`. The live-stats
+window is a rolling response, so the hash is a transport receipt for that
+retrieval and is not treated as a timeless fixture.
+
+| Official game ID | Feed patch | Public patch | Raw response SHA-256 |
+| --- | --- | --- | --- |
+| `115548147900684590` | `16.15.800.4844` | `26.15` | `d2892677097990caa0d1910c344a40adbdcde551250d80321a90ffeed958734f` |
+| `115548147900750226` | `16.15.800.4844` | `26.15` | `9021add057f851f937d99ac484a6a38d730647009fef4e245cb8b74b94cefa26` |
+| `115548147900619042` | `16.15.800.4844` | `26.15` | `6e608fb3044c65080c14387f3003ed7797426e74ed80c272029443285692032a` |
+
+The source receipts are game-bound and hash-bound. They contain no winner or
+model fields. A future accepted OE row can use the same receipt path when its
+game identity is crosswalked to an official game ID. GRID is not required for
+this correction. The worker accepts an optional JSON catalog at
+`$SCRYGLASS_RUN_ROOT/riot-patch-receipts.json` and passes it to the OE
+importer. A row with no exact Riot receipt keeps the OE token. The catalog is
+never built from dates alone.
+
+The production index remains on canonical `26.15` patch options and scope
+labels. The 26.16 bridge is staged for the first accepted 16.16 ingest. It
+must not be mixed into 26.15 regional ratings.
 
 ## Verification
 

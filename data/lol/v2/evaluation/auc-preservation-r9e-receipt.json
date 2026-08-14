@@ -1,0 +1,27 @@
+{
+  "schema_version": "scryglass:auc-preservation-gate:v1",
+  "authority": "development_only",
+  "status": "reference_baseline",
+  "model_id": "scryglass-pi-r9-depth4-state-space",
+  "metrics": {
+    "auc": 0.70681,
+    "brier": 0.21708,
+    "log_loss": 0.6233
+  },
+  "source_sha256": "d0253ff05a0326b825d597a8e911b646542732484a890d0d6628cd59ca622831",
+  "scorer_sha256": "a34a7a5c9eb30c8506f0c5337d829fbbf9f7754da4ff1aa08a726a50299bae7d",
+  "gate": {
+    "rule": "candidate_auc >= reference_auc",
+    "tolerance": 0.0,
+    "promotion_receipt_required": true
+  },
+  "claim_ceiling": {
+    "public_prediction": false,
+    "public_probability": false,
+    "model_promotion": false
+  },
+  "notes": [
+    "The reference is the Pi round-9 same-data depth-4 plus state-space result.",
+    "This receipt does not certify a 26.16 holdout or public Draft Score authority."
+  ]
+}

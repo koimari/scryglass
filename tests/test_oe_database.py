@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from lol_kills.etl import oe_database
+from lol_kills.etl.riot_patch_receipts import receipt_from_response_bytes
 
 
 ROLES = ("top", "jng", "mid", "bot", "sup")
@@ -140,6 +141,32 @@ def test_prepare_import_accepts_complete_games_and_quarantines_bad_identity(
     payload = oe_database.payload_for_game(prepared, "game-1")
     assert len(payload["team_rows"]) == 2
     assert len(payload["player_rows"]) == 10
+
+
+def test_prepare_import_applies_official_patch_receipt_without_date_rewrite(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+    _write_csv(path)
+    receipt = receipt_from_response_bytes(
+        "game-1",
+        b'{"gameMetadata":{"patchVersion":"16.16.801.5000"}}',
+        retrieved_at_utc="2026-08-14T12:00:00Z",
+    )
+
+    prepared = oe_database.prepare_import(
+        path,
+        2026,
+        patch_receipts={"game-1": receipt},
+    )
+
+    assert prepared.games["game-1"].patch == "16.16"
+    assert prepared.team_rows.loc[prepared.team_rows["gameid"] == "game-1", "patch"].eq(
+        "16.16"
+    ).all()
+    assert prepared.player_rows.loc[prepared.player_rows["gameid"] == "game-1", "patch"].eq(
+        "16.16"
+    ).all()
 
 
 def test_sync_is_incremental_idempotent_and_records_corrections(tmp_path: Path) -> None:
@@ -418,6 +445,7 @@ def test_database_migration_keeps_oe_tables_private() -> None:
     assert "grant select, insert on public.scryglass_oe_game_versions to service_role" in migration
     assert "scryglass_oe_games_version_fk_idx" in migration
     assert "transform_version" in migration
+    assert "riot_patch_receipts" in migration
 
 
 def test_client_repr_redacts_secret_key() -> None:
