@@ -1377,17 +1377,29 @@ def _games_digest(games: Sequence[Mapping[str, Any]]) -> str:
 
 
 def _composition_code_digest() -> str:
-    """SHA-256 of the composition signal implementation.
+    """Digest the scorer and every atom corpus used by the fit.
 
     The eval/checkpoint caches must be invalidated when this code changes,
-    not merely when the worker deploys (the model JSON itself records the
-    exact worker commit and is verified on load).
+    not merely when the worker deploys. The atom corpora are fit-time model
+    inputs, so a corpus edit must invalidate the checkpoint as well. Missing
+    files stay part of the digest as an explicit marker.
     """
-    try:
-        source = Path(__file__).read_text(encoding="utf-8")
-    except OSError:
-        return ""
-    return hashlib.sha256(source.encode("utf-8")).hexdigest()[:24]
+    inputs = (
+        ("composition_signal.py", Path(__file__)),
+        ("atom-corpus-v1", ATOM_CORPUS_PATH),
+        ("atom-corpus-v2", _ATOM_DEPTH2_PATH),
+        ("atom-corpus-v3", _ATOM_DEPTH3_PATH),
+        ("atom-corpus-v4", _ATOM_DEPTH4_PATH),
+    )
+    material: list[tuple[str, str]] = []
+    for label, path in inputs:
+        try:
+            content = path.read_bytes()
+        except OSError:
+            content = b"<missing>"
+        material.append((label, hashlib.sha256(content).hexdigest()))
+    encoded = json.dumps(material, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:24]
 
 
 def _load_or_fit(
