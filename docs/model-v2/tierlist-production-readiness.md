@@ -181,8 +181,12 @@ The durable worker runs this command with --promote:
 python3 -m lol_kills.v2.tierlists.live_refresh \
   --expected-live-as-of <worker-received-time> \
   --source-mode oe_only \
-  --promote
+  --promote \
+  --defer-publication
 ~~~
+
+The defer flag keeps the tier build in the release coordinator. The worker does
+not write a public pointer or use the retired Blob path.
 
 The command checks the public OE file metadata, downloads changed files, builds
 one validated source, replays the champion, team, and player ladders, writes
