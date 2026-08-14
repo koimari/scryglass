@@ -997,7 +997,7 @@ export function TierListExplorer({
               void load(TIER_LIST_URL, undefined, true);
             }
           }}
-          emptyLabel={`latest (${activePatch})`}
+          emptyLabel={latestPatch ? `latest (${publicPatchLabel(latestPatch)})` : "latest patch"}
         />
         <Select
           label="Role"
