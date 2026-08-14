@@ -123,8 +123,10 @@ begin
 end;
 $$;
 
+grant create on schema public to scryglass_release_transition_owner;
 alter function public.assert_scryglass_query_release(text)
   owner to scryglass_release_transition_owner;
+revoke create on schema public from scryglass_release_transition_owner;
 alter function public.assert_scryglass_query_release(text)
   security definer;
 alter function public.assert_scryglass_query_release(text)

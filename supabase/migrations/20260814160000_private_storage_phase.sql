@@ -120,8 +120,12 @@ begin
 end;
 $$;
 
+-- The bounded-query migration revokes CREATE after its helper ownership setup.
+-- Re-open that privilege only for this ownership transfer, then close it.
+grant create on schema public to scryglass_release_transition_owner;
 alter function public.guard_active_scryglass_storage_object()
   owner to scryglass_release_transition_owner;
+revoke create on schema public from scryglass_release_transition_owner;
 revoke all on function public.guard_active_scryglass_storage_object()
   from public, anon, authenticated, service_role;
 
