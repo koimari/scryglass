@@ -1027,7 +1027,10 @@ def _tier_publication(tier: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(steps, list):
         return None
     for step in steps:
-        if not isinstance(step, dict) or step.get("source") != "blob_publication":
+        if not isinstance(step, dict) or step.get("source") not in {
+            "publication_coordinator",
+            "supabase_publication",
+        }:
             continue
         publication = step.get("publication")
         if isinstance(publication, dict):

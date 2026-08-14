@@ -33,9 +33,9 @@ Each champion and role starts at 1500. The replay runs in chronological order.
 It uses the pre-map team Elo as the team-strength control. It updates the
 champion and opposing-champion states after the map result.
 
-The bundle contains 285 role and scope cells. The scope set contains 57 league
-or international scopes, 44 league labels, six international event labels,
-five competition bands, and all five roles.
+The bundle contains 195 role and scope cells. The scope set contains 39
+patch-wide scopes and all five roles. Each eligible scope also carries regional
+appearance views for the named league contexts present in the accepted games.
 
 Each champion row contains:
 
@@ -114,7 +114,7 @@ apps/scryglass/public/v2/tierlists/production/index-v1.json
 apps/scryglass/public/v2/tierlists/production/cells/
 ~~~
 
-The current index contains 285 production cells. Every scope has top, jungle,
+The current index contains 195 production cells. Every scope has top, jungle,
 mid, bot, and support cells. Every cell has an independent raw SHA-256 digest.
 The canonical index raw SHA-256 is:
 
@@ -140,7 +140,7 @@ python3 -m lol_kills.v2.tierlists.production_readiness --root . --strict
 ~~~
 
 The current audit returns ready_for_promotion_review, with no tier-list
-blockers. It reports 285 production cells. The terminal Draft Score boundary
+blockers. It reports 195 production cells. The terminal Draft Score boundary
 remains closed and does not block this result.
 
 ## Public API
@@ -187,11 +187,10 @@ python3 -m lol_kills.v2.tierlists.live_refresh \
 The command checks the public OE file metadata, downloads changed files, builds
 one validated source, replays the champion, team, and player ladders, writes
 weekly rank snapshots, runs the forward evaluation, runs the independent
-authority check, and writes the production bundle. It then publishes immutable
-production cells and an immutable release index to Vercel Blob. It replaces the
-stable pointer only after those writes pass the retention guard. The pointer
-passes an exact readback check before the receipt reports production
-promotion. A failed step leaves the prior published artifact in place.
+authority check, and writes the production bundle. Publication is handled by
+the Supabase release coordinator. It stages immutable Storage objects, verifies
+their metadata and bytes, then activates one release row. A failed step leaves
+the prior verified release in place.
 
 The weekly baseline is Sunday 00:00 UTC. Team, player, and champion movement
 use the same rank convention. One run can process several completed games.
@@ -209,30 +208,19 @@ download. Most cycles use the validated local cache.
 The Vercel route does not run Python and cannot rewrite the deployed app. A
 durable HTTPS worker endpoint is required. It must accept the route's POST
 request with `Authorization: Bearer <SCRYGLASS_TIERLIST_INGEST_TOKEN>`.
-It must run from a checkout that contains the Scryglass repository and keep
-the following values in its private environment:
+It must run from a clean checkout that contains the Scryglass repository and
+keep the following values in its private environment:
 
 ~~~text
-BLOB_READ_WRITE_TOKEN=...
-SCRYGLASS_TIERLIST_BLOB_BASE_URL=https://<store>.public.blob.vercel-storage.com
+SCRYGLASS_SUPABASE_URL=https://<project>.supabase.co
+SCRYGLASS_SUPABASE_PUBLISHABLE_KEY=...
+SCRYGLASS_SUPABASE_SECRET_KEY=...
+SCRYGLASS_DATA_PUBLISH_TOKEN=...
 ~~~
 
-`SCRYGLASS_TIERLIST_BLOB_BASE_URL` can use the existing Blob public root. The
-worker also accepts `LIVE_BLOB_BASE_URL` as a fallback. The token and public
-root must identify the same Blob store. `BLOB_STORE_ID` is optional because
-the worker checks the store identity encoded in the token and URL.
-
-The worker publishes the stable index at:
-
-~~~text
-https://<store>.public.blob.vercel-storage.com/tierlists/index-v1.json
-~~~
-
-The Vercel app must have this production variable:
-
-~~~text
-SCRYGLASS_TIERLIST_INDEX_URL=https://<store>.public.blob.vercel-storage.com/tierlists/index-v1.json
-~~~
+The secret key stays on the worker and the server-side diagnostic path. The
+browser receives only the bounded public RPC projections and active asset
+responses.
 
 The Vercel Production environment also needs:
 
@@ -242,16 +230,10 @@ SCRYGLASS_TIERLIST_INGEST_URL=https://<worker-host>/tierlist-refresh
 SCRYGLASS_TIERLIST_INGEST_TOKEN=...
 ~~~
 
-The secret values must be generated outside the repository. The current
-Vercel Production environment audit found `LIVE_BLOB_BASE_URL` and
-`BLOB_READ_WRITE_TOKEN`. It did not find the cron secret, worker URL, worker
-token, or tier-list index URL. No external worker or paid service was created
-by this change.
-
-The Blob publication uses the existing fail-closed retention guard. The
-current hard stop is 850,000,000 retained bytes. Immutable release files use
-`tierlists/releases/<source-index-sha256>/`. The stable pointer is written
-last. A missing or malformed existing pointer blocks replacement.
+The secret values must be generated outside the repository. The release
+receipt binds the worker commit, active release ID, manifest digest, source
+watermark, and Storage object digests. A missing or malformed receipt blocks
+activation.
 
 The `*/5 * * * *` schedule needs a Vercel plan that supports five-minute cron
 intervals. A daily-only plan cannot provide after-game polling at this rate.

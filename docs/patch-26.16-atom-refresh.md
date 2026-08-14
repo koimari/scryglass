@@ -47,6 +47,30 @@ result passed the composition gate at bootstrap 100. This is research evidence
 for the scorer path. It is not a 26.16 holdout result or a public promotion
 receipt.
 
+The Pi expansion work separates the Scryglass bridge from full ability-level
+atom research. The bridge currently covers 173 champions, six mechanic
+families, 20 atom relations, and 12 ontology dimensions. The scorer adds
+depth-2 descriptors, depth-3 state and cycle descriptors, depth-4 interaction
+descriptors, strictly prior state-space features, and per-pick contributions.
+These layers preserve the provenance of each pick contribution and keep the
+pre-game boundary explicit.
+
+The round-4 expansion tests covered the full semantic dimension set, the
+relations graph, composition geometry, role-specific profiles, embeddings,
+cold-start champions, combined features, and a regularisation floor check.
+The full semantic set, graph, geometry, and PCA variants stayed close to the
+21-dimension baseline. Pure atom features and role-specific profiles were
+weaker. Cold-start AUC was 0.477. Atom features became useful when injected
+into draft space, where all four evaluation windows improved. The best flexible
+floor remained in the approximate Brier range `0.215` to `0.220` for that
+dataset. These findings guide the next 26.16 evaluation. They do not grant
+production authority.
+
+The deeper ability-level corpus from the separate LCC research line is not
+part of this Scryglass release. Scryglass keeps the 26.16 bridge as a staged
+development input until the accepted 16.16 game rows, the chronological
+holdouts, and the hash-bound promotion record are complete.
+
 The 26.16 bridge refresh supplies new mechanistic source data. The existing
 numeric aggregate files remain separate certified development artifacts until
 the complete 26.16 corpus is rebuilt and evaluated. This avoids a false patch
@@ -54,21 +78,24 @@ label on a model that has not passed its chronological holdouts.
 
 ## Regional refresh boundary
 
-A regional tier refresh was run after the label fix. Its receipt is kept in the
-worker runtime at
-`data/lol/v2/tierlists/refresh-receipts/tierlist-live-refresh-20260814T042036200243Z-898104ca0bcf88e7.json`.
-It replayed 17,483 maps, used a 1,162-map live window, and built 195 cells
-with 7,544 rows. The bundle contains 970 regional views across 39 scopes.
-The latest accepted game data is still public patch `26.15`, and every scope
-label uses the Riot namespace.
+A regional tier refresh was run after the label fix and the latest OE download.
+Its receipt is kept in the worker runtime at
+`data/lol/v2/tierlists/refresh-receipts/tierlist-live-refresh-20260814T052013765685Z-7427f9957fe5fc9b.json`.
+It replayed 17,503 maps, used a 1,182-map live window, and built 195 cells
+with 7,546 rows. The bundle contains 1,100 regional views across 39 scopes,
+covering CBLOL, LCK, LCP, LCS, LEC, LJL, LPL, PCS, TCL, VCS, and international
+events. The latest accepted game data is still public patch `26.15`, and every
+scope label uses the Riot namespace.
 
 The refresh was deferred from publication. It used the audited 26.15 bridge
-because the accepted OE source has no 16.16 game rows yet. The production index
-was rebuilt with canonical `26.15` patch options and scope labels. Its
-production index artifact is `7a9e1248761d11f3262e761b6839add43b2e3b917e2a948ef4c0011bc57c1d08`.
-The 26.16
-bridge is staged for the next complete 16.16 ingest and must not be mixed into
-26.15 regional ratings.
+because the accepted OE source has no 16.16 game rows yet. The latest OE file
+ends at `2026-08-13T20:27:53Z` and contains zero 16.16 rows. The production
+index was rebuilt with canonical `26.15` patch options and scope labels. Its
+index raw digest is `e8c5aab7bd365ec440c531b44b4a18c7b500218c3c69a132abc1f2ea2f7d8954`
+and its embedded artifact digest is
+`db4dc5b457d0f81a8e15ca003c105df69e1170c53e83ade8ca24fa3fba008592`.
+The 26.16 bridge is staged for the first complete 16.16 ingest. It must not be
+mixed into 26.15 regional ratings.
 
 ## Verification
 

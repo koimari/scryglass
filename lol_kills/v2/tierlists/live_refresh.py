@@ -8,8 +8,6 @@ independent authority check, and production bundle after the source gates pass.
 from __future__ import annotations
 
 import argparse
-import base64
-from copy import deepcopy
 import hashlib
 import json
 import os
@@ -19,19 +17,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import pandas as pd
 
-from lol_kills.export.blob_retention import (
-    BlobIdentity,
-    PlannedWrite,
-    RetentionExecutor,
-    RetentionPlan,
-    WriteMode,
-)
-from lol_kills.export.vercel_blob_transport import VercelBlobTransport
 from lol_kills.v2.champions.atoms.consume import AtomBridge
+from lol_kills.v2.patch_identity import CURRENT_PUBLIC_PATCH, PatchIdentityError, public_patch
 
 from .champion_elo import (
     DEFAULT_OUTPUT,
@@ -39,25 +29,15 @@ from .champion_elo import (
     build_candidate,
     write_candidate,
 )
-from .production_bundle import _canonical as _production_canonical
-from .production_bundle import _sha256_bytes as _production_sha256_bytes
-from .production_bundle import verify_production_index
 
 HISTORY_START = "2025-01-01T00:00:00Z"
 LIVE_WINDOW_START = "2026-07-18T00:00:00Z"
 RECEIPT_SCHEMA = "scryglass:tierlist-live-refresh:v1"
 DEFAULT_RECEIPT = Path("data/lol/v2/tierlists/refresh-receipts")
 DEFAULT_STEP_TIMEOUT_SECONDS = 15 * 60
-BLOB_BASE_ENV = "SCRYGLASS_TIERLIST_BLOB_BASE_URL"
-BLOB_BASE_FALLBACK_ENV = "LIVE_BLOB_BASE_URL"
-BLOB_TOKEN_ENV = "BLOB_READ_WRITE_TOKEN"
-BLOB_TOKEN_FALLBACK_ENV = "VERCEL_BLOB_READ_WRITE_TOKEN"
-BLOB_STORE_ENV = "BLOB_STORE_ID"
-BLOB_STORE_FALLBACK_ENV = "VERCEL_BLOB_STORE_ID"
-BLOB_POINTER_PATH = "tierlists/index-v1.json"
-BLOB_MOVEMENT_PATH = "tierlists/movement-v1.json"
-BLOB_DISPLAY_PATH = "rankings/tierlists.json"
-BLOB_WRITER_ID = "scryglass-tierlist-worker"
+LEGACY_BLOB_PUBLICATION_DISABLED = (
+    "Vercel Blob tier-list publication is retired; use Supabase public release publication"
+)
 
 
 class PublicationError(RuntimeError):
@@ -77,471 +57,87 @@ def _canonical_sha256(value: object) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def _production_artifact_bytes(payload: dict[str, Any]) -> bytes:
-    unsigned = dict(payload)
-    unsigned.pop("artifact_sha256", None)
-    payload["artifact_sha256"] = _production_sha256_bytes(_production_canonical(unsigned))
-    return _production_canonical(payload) + b"\n"
+def _regional_refresh_summary(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Describe the regional views carried by one candidate receipt.
 
+    Regional views reuse the patch-wide fit. They only change the appearance
+    filter and the evidence count for each named league context. The receipt
+    records the coverage so a refresh cannot look complete while silently
+    dropping the regional layer.
+    """
 
-def _publication_credentials() -> tuple[str, str, str]:
-    token = (os.environ.get(BLOB_TOKEN_ENV) or os.environ.get(BLOB_TOKEN_FALLBACK_ENV) or "").strip()
-    if not token:
-        raise PublicationError(f"{BLOB_TOKEN_ENV} is not configured")
-    base = (os.environ.get(BLOB_BASE_ENV) or os.environ.get(BLOB_BASE_FALLBACK_ENV) or "").strip()
-    if not base:
-        raise PublicationError(
-            f"{BLOB_BASE_ENV} or {BLOB_BASE_FALLBACK_ENV} is not configured"
-        )
-    try:
-        parsed = urlsplit(base)
-        if parsed.scheme != "https" or parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError
-        host = parsed.hostname or ""
-        suffix = ".public.blob.vercel-storage.com"
-        if not host.endswith(suffix) or host == suffix:
-            raise ValueError
-        host_store = VercelBlobTransport._normalize_store_id(host[: -len(suffix)])
-        token_store = VercelBlobTransport._read_write_token_store(token)
-    except (ValueError, TypeError):
-        raise PublicationError(
-            "tier-list Blob configuration must use the matching HTTPS public Blob root and read-write token"
-        ) from None
-    if host_store != token_store:
-        raise PublicationError("tier-list Blob base URL and token identify different stores")
-    explicit_store = os.environ.get(BLOB_STORE_ENV) or os.environ.get(BLOB_STORE_FALLBACK_ENV)
-    if explicit_store:
-        try:
-            if VercelBlobTransport._normalize_store_id(explicit_store.strip()) != token_store:
-                raise PublicationError("explicit Blob store ID does not match the read-write token")
-        except ValueError:
-            raise PublicationError("explicit Blob store ID is malformed") from None
-    return base.rstrip("/"), token, token_store
-
-
-def _blob_inventory(transport: VercelBlobTransport, store_id: str) -> dict[str, BlobIdentity]:
-    deadline = int(time.time()) + 30
-    cursor: str | None = None
-    seen_cursors: set[str] = set()
-    identities: dict[str, BlobIdentity] = {}
-    while True:
-        page = transport.list_page(
-            store_id,
-            cursor=cursor,
-            limit=1000,
-            deadline_epoch=deadline,
-        )
-        raw_blobs = page.get("blobs")
-        if not isinstance(raw_blobs, list):
-            raise PublicationError("Blob inventory response is malformed")
-        for raw in raw_blobs:
-            if not isinstance(raw, dict):
-                raise PublicationError("Blob inventory entry is malformed")
-            identity = BlobIdentity(raw["pathname"], raw["size"], raw["etag"])
-            if identity.pathname in identities:
-                raise PublicationError("Blob inventory contains a duplicate pathname")
-            identities[identity.pathname] = identity
-        if page.get("hasMore") is not True:
-            return identities
-        next_cursor = page.get("cursor")
-        if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
-            raise PublicationError("Blob inventory pagination is incomplete")
-        seen_cursors.add(next_cursor)
-        cursor = next_cursor
-
-
-def _validate_existing_pointer(raw: bytes) -> None:
-    try:
-        payload = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise PublicationError("existing tier-list pointer is not valid JSON") from error
-    if (
-        not isinstance(payload, dict)
-        or payload.get("artifact_kind") != "tier_list_index_production"
-        or payload.get("development_only") is not False
-        or payload.get("production_eligible") is not True
-        or payload.get("publication_eligible") is not True
-        or payload.get("artifact_sha256")
-        != _production_sha256_bytes(
-            _production_canonical({key: value for key, value in payload.items() if key != "artifact_sha256"})
-        )
-    ):
-        raise PublicationError("existing tier-list pointer is not an approved production index")
-
-
-def _publication_payloads(root: Path) -> dict[str, Any]:
-    report = verify_production_index(root)
-    index_path = root / "data/lol/v2/tierlists/production/index-v1.json"
-    index = json.loads(index_path.read_text(encoding="utf-8"))
-    if not isinstance(index, dict) or report["artifact_sha256"] != index.get("artifact_sha256"):
-        raise PublicationError("production index changed during publication preparation")
-    release_id = str(index["artifact_sha256"])
-    release_index = deepcopy(index)
-    release_index["base_url"] = "./"
-    cell_bytes: dict[str, bytes] = {}
-    for cell in release_index["cells"]:
-        locator = cell.get("locator")
-        if not isinstance(locator, str):
-            raise PublicationError("production cell locator is malformed")
-        local_path = root / Path(locator)
-        raw = local_path.read_bytes()
-        if _production_sha256_bytes(raw) != cell.get("raw_sha256"):
-            raise PublicationError("production cell digest changed during publication preparation")
-        filename = Path(locator).name
-        remote_locator = f"cells/{filename}"
-        cell["locator"] = remote_locator
-        cell_bytes[f"tierlists/releases/{release_id}/{remote_locator}"] = raw
-    release_index_raw = _production_artifact_bytes(release_index)
-    pointer_index = deepcopy(release_index)
-    pointer_index["base_url"] = f"./releases/{release_id}/"
-    pointer_raw = _production_artifact_bytes(pointer_index)
-    movement_snapshot = {
-        "schema_version": "scryglass:tier-list-movement-snapshot:v1",
-        "artifact_kind": "tier_list_movement_snapshot",
-        "status": "production",
-        "production_eligible": True,
-        "as_of": index["as_of"],
-        "source_index_artifact_sha256": index["artifact_sha256"],
-        "cells": [],
-    }
-    for cell_meta in index["cells"]:
-        locator = cell_meta.get("locator")
-        if not isinstance(locator, str):
-            raise PublicationError("production cell locator is malformed")
-        local_path = root / Path(locator)
-        cell_payload = json.loads(local_path.read_text(encoding="utf-8"))
-        movement_rows = []
-        for row in cell_payload.get("rows", []):
-            movement_rows.append(
-                {
-                    "champion_id": row.get("champion_id"),
-                    "champion_name": row.get("champion_name"),
-                    "rank": row.get("rank"),
-                    "rating": row.get("rating"),
-                }
-            )
-        movement_snapshot["cells"].append(
-            {
-                "scope_id": cell_meta["scope_id"],
-                "role": cell_meta["role"],
-                "as_of": cell_meta["as_of"],
-                "rows": movement_rows,
-            }
-        )
-    movement_raw = _production_artifact_bytes(movement_snapshot)
-    display_path = root / "apps/scryglass/public/rankings/tierlists.json"
-    display_raw = display_path.read_bytes()
-    try:
-        display = json.loads(display_raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise PublicationError("public tier-list display is malformed") from error
-    if (
-        not isinstance(display, dict)
-        or display.get("schema_version") != "rankings-tierlists-v2"
-        or display.get("status") != "available"
-        or not isinstance(display.get("rows"), list)
-    ):
-        raise PublicationError("public tier-list display is not available")
-    return {
-        "release_id": release_id,
-        "release_index_path": f"tierlists/releases/{release_id}/index-v1.json",
-        "release_index_raw": release_index_raw,
-        "release_index_artifact_sha256": release_index["artifact_sha256"],
-        "cell_bytes": cell_bytes,
-        "pointer_raw": pointer_raw,
-        "pointer_artifact_sha256": pointer_index["artifact_sha256"],
-        "pointer_url_suffix": BLOB_POINTER_PATH,
-        "movement_raw": movement_raw,
-        "movement_artifact_sha256": movement_snapshot["artifact_sha256"],
-        "movement_url_suffix": BLOB_MOVEMENT_PATH,
-        "display_raw": display_raw,
-        "display_sha256": _production_sha256_bytes(display_raw),
-        "display_url_suffix": BLOB_DISPLAY_PATH,
-        "cell_count": len(cell_bytes),
-        "source_index_artifact_sha256": index["artifact_sha256"],
-    }
-
-
-def _restore_pointer(
-    transport: VercelBlobTransport,
-    store_id: str,
-    pathname: str,
-    previous: tuple[bytes, BlobIdentity] | None,
-) -> None:
-    """Restore one stable object with an exact conditional mutation."""
-
-    current = transport.get_blob(
-        store_id,
-        pathname,
-        deadline_epoch=int(time.time()) + 30,
-    )
-    if previous is None:
-        if current is not None:
-            deleted = transport.delete_if_match(
-                store_id,
-                pathname,
-                etag=current[1].etag,
-                deadline_epoch=int(time.time()) + 30,
-            )
-            if deleted is None:
-                raise PublicationError(f"could not remove new tier-list pointer: {pathname}")
-        return
-    if current is None:
-        raise PublicationError(f"previous tier-list pointer disappeared: {pathname}")
-    if current[0] == previous[0]:
-        return
-    restored = transport.put_if_match(
-        store_id,
-        pathname,
-        previous[0],
-        etag=current[1].etag,
-        deadline_epoch=int(time.time()) + 30,
-    )
-    if restored is None:
-        raise PublicationError(f"tier-list pointer changed during rollback: {pathname}")
-    readback = transport.get_blob(
-        store_id,
-        pathname,
-        deadline_epoch=int(time.time()) + 30,
-    )
-    if readback is None or readback[0] != previous[0]:
-        raise PublicationError(f"tier-list pointer rollback failed exact readback: {pathname}")
-
-
-def _restore_stable_pointers(
-    transport: VercelBlobTransport,
-    store_id: str,
-    previous: dict[str, tuple[bytes, BlobIdentity] | None],
-) -> None:
-    errors: list[str] = []
-    for pathname, prior in previous.items():
-        try:
-            _restore_pointer(transport, store_id, pathname, prior)
-        except Exception as error:  # noqa: BLE001
-            errors.append(f"{pathname}: {type(error).__name__}: {error}")
-    if errors:
-        raise PublicationError("tier-list rollback was not fully proven: " + " | ".join(errors))
-
-
-def _serialize_previous_pointers(
-    previous: dict[str, tuple[bytes, BlobIdentity] | None],
-) -> dict[str, dict[str, str] | None]:
-    serialized: dict[str, dict[str, str] | None] = {}
-    for pathname, value in previous.items():
-        if value is None:
-            serialized[pathname] = None
-            continue
-        raw, identity = value
-        if identity is None:
-            raise PublicationError(f"tier-list pointer identity is missing: {pathname}")
-        serialized[pathname] = {
-            "content_b64": base64.b64encode(raw).decode("ascii"),
-            "etag": identity.etag,
+    cells = candidate.get("cells")
+    if not isinstance(cells, list):
+        return {
+            "status": "unavailable",
+            "view_count": 0,
+            "cell_count": 0,
+            "cells_with_views": 0,
+            "contexts": [],
         }
-    return serialized
+    view_count = 0
+    cells_with_views = 0
+    contexts: set[str] = set()
+    for cell in cells:
+        if not isinstance(cell, dict):
+            continue
+        views = cell.get("regional_views")
+        if not isinstance(views, list) or not views:
+            continue
+        cells_with_views += 1
+        for view in views:
+            if not isinstance(view, dict):
+                continue
+            view_id = view.get("id")
+            if isinstance(view_id, str) and view_id.strip():
+                contexts.add(view_id.strip())
+                view_count += 1
+    return {
+        "status": "available" if view_count else "unavailable",
+        "view_count": view_count,
+        "cell_count": len(cells),
+        "cells_with_views": cells_with_views,
+        "contexts": sorted(contexts),
+        "basis": "patch_wide_model_with_regional_appearance_filter",
+    }
+
+
+def _patch_refresh_summary(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Record accepted and pending public patch coverage in the receipt."""
+
+    accepted: set[str] = set()
+    cells = candidate.get("cells")
+    if isinstance(cells, list):
+        for cell in cells:
+            if not isinstance(cell, dict) or not isinstance(cell.get("patches"), list):
+                continue
+            for value in cell["patches"]:
+                try:
+                    accepted.add(public_patch(str(value)))
+                except PatchIdentityError:
+                    continue
+    ordered = sorted(
+        accepted,
+        key=lambda value: tuple(int(part) for part in value.split(".")),
+    )
+    return {
+        "current_public_patch": CURRENT_PUBLIC_PATCH,
+        "accepted_public_patches": ordered,
+        "latest_accepted_public_patch": ordered[-1] if ordered else None,
+        "status": "current" if CURRENT_PUBLIC_PATCH in accepted else "awaiting_source_rows",
+    }
 
 
 def restore_production_bundle(publication: dict[str, Any]) -> dict[str, Any]:
     """Restore stable tier-list pointers captured by a successful publication."""
 
-    raw_previous = publication.get("previous_pointers")
-    if not isinstance(raw_previous, dict):
-        raise PublicationError("tier-list publication has no rollback pointers")
-    previous: dict[str, tuple[bytes, BlobIdentity] | None] = {}
-    for pathname in (BLOB_POINTER_PATH, BLOB_MOVEMENT_PATH, BLOB_DISPLAY_PATH):
-        value = raw_previous.get(pathname)
-        if value is None:
-            previous[pathname] = None
-            continue
-        if not isinstance(value, dict):
-            raise PublicationError(f"tier-list rollback pointer is malformed: {pathname}")
-        encoded = value.get("content_b64")
-        etag = value.get("etag")
-        if not isinstance(encoded, str) or not isinstance(etag, str) or not etag:
-            raise PublicationError(f"tier-list rollback pointer is incomplete: {pathname}")
-        try:
-            raw = base64.b64decode(encoded.encode("ascii"), validate=True)
-        except (ValueError, UnicodeEncodeError) as error:
-            raise PublicationError(f"tier-list rollback pointer is not base64: {pathname}") from error
-        previous[pathname] = (raw, BlobIdentity(pathname, len(raw), etag))
-
-    _blob_base, token, store_id = _publication_credentials()
-    _restore_stable_pointers(VercelBlobTransport(token, store_id), store_id, previous)
-    return {
-        "status": "restored",
-        "pointer_path": BLOB_POINTER_PATH,
-        "movement_path": BLOB_MOVEMENT_PATH,
-        "display_path": BLOB_DISPLAY_PATH,
-    }
+    raise PublicationError(LEGACY_BLOB_PUBLICATION_DISABLED)
 
 
 def publish_production_bundle(root: Path | str = Path(".")) -> dict[str, Any]:
     """Publish immutable tier-list files, then replace the stable pointer."""
 
-    repo_root = Path(root)
-    blob_base, token, store_id = _publication_credentials()
-    payloads = _publication_payloads(repo_root)
-    transport = VercelBlobTransport(token, store_id)
-    inventory = _blob_inventory(transport, store_id)
-    pointer_identity = inventory.get(BLOB_POINTER_PATH)
-    movement_identity = inventory.get(BLOB_MOVEMENT_PATH)
-    display_identity = inventory.get(BLOB_DISPLAY_PATH)
-    previous_pointers: dict[str, tuple[bytes, BlobIdentity] | None] = {
-        BLOB_POINTER_PATH: None,
-        BLOB_MOVEMENT_PATH: None,
-        BLOB_DISPLAY_PATH: None,
-    }
-    pointer_mode = WriteMode.NEW_IMMUTABLE
-    if pointer_identity is not None:
-        current = transport.get_blob(
-            store_id,
-            BLOB_POINTER_PATH,
-            deadline_epoch=int(time.time()) + 30,
-        )
-        if current is None or current[1] != pointer_identity:
-            raise PublicationError("existing tier-list pointer changed during inventory")
-        _validate_existing_pointer(current[0])
-        previous_pointers[BLOB_POINTER_PATH] = current
-        pointer_mode = WriteMode.OVERWRITE
-    movement_mode = WriteMode.NEW_IMMUTABLE
-    if movement_identity is not None:
-        current_movement = transport.get_blob(
-            store_id,
-            BLOB_MOVEMENT_PATH,
-            deadline_epoch=int(time.time()) + 30,
-        )
-        if current_movement is None or current_movement[1] != movement_identity:
-            raise PublicationError("existing tier-list movement snapshot changed during inventory")
-        previous_pointers[BLOB_MOVEMENT_PATH] = current_movement
-        movement_mode = WriteMode.OVERWRITE
-    display_mode = WriteMode.NEW_IMMUTABLE
-    if display_identity is not None:
-        current_display = transport.get_blob(
-            store_id,
-            BLOB_DISPLAY_PATH,
-            deadline_epoch=int(time.time()) + 30,
-        )
-        if current_display is None or current_display[1] != display_identity:
-            raise PublicationError("existing tier-list display changed during inventory")
-        previous_pointers[BLOB_DISPLAY_PATH] = current_display
-        display_mode = WriteMode.OVERWRITE
-
-    immutable_payloads = {
-        **payloads["cell_bytes"],
-        payloads["release_index_path"]: payloads["release_index_raw"],
-    }
-    writes: list[PlannedWrite] = []
-    reused_immutable_paths: list[str] = []
-    for pathname, raw in sorted(immutable_payloads.items()):
-        existing = inventory.get(pathname)
-        if existing is None:
-            writes.append(PlannedWrite(pathname, raw, WriteMode.NEW_IMMUTABLE))
-            continue
-        current = transport.get_blob(
-            store_id,
-            pathname,
-            deadline_epoch=int(time.time()) + 30,
-        )
-        if current is None or current[1] != existing:
-            raise PublicationError(
-                f"existing immutable tier-list file changed during verification: {pathname}"
-            )
-        if current[0] != raw:
-            raise PublicationError(
-                f"existing immutable tier-list file has different content: {pathname}"
-            )
-        reused_immutable_paths.append(pathname)
-    writes.append(
-        PlannedWrite(
-            BLOB_MOVEMENT_PATH,
-            payloads["movement_raw"],
-            movement_mode,
-        )
-    )
-    writes.append(
-        PlannedWrite(
-            BLOB_DISPLAY_PATH,
-            payloads["display_raw"],
-            display_mode,
-        )
-    )
-    writes.append(PlannedWrite(BLOB_POINTER_PATH, payloads["pointer_raw"], pointer_mode))
-    plan = RetentionPlan(
-        store_id=store_id,
-        writer_id=os.environ.get("SCRYGLASS_TIERLIST_WRITER_ID", BLOB_WRITER_ID),
-        run_id=payloads["release_id"],
-        writes=tuple(writes),
-    )
-    try:
-        result = RetentionExecutor(transport).execute(plan)
-        if not result.success:
-            failed = [operation.pathname for operation in result.operations if not operation.success]
-            raise PublicationError(
-                "Blob publication failed before the stable pointer was proven: "
-                f"state={result.state.value}, failed={failed}"
-            )
-        readback = transport.get_blob(
-            store_id,
-            BLOB_POINTER_PATH,
-            deadline_epoch=int(time.time()) + 30,
-        )
-        if readback is None or readback[0] != payloads["pointer_raw"]:
-            raise PublicationError("published tier-list pointer failed exact readback")
-        movement_readback = transport.get_blob(
-            store_id,
-            BLOB_MOVEMENT_PATH,
-            deadline_epoch=int(time.time()) + 30,
-        )
-        if movement_readback is None or movement_readback[0] != payloads["movement_raw"]:
-            raise PublicationError("published tier-list movement snapshot failed exact readback")
-        display_readback = transport.get_blob(
-            store_id,
-            BLOB_DISPLAY_PATH,
-            deadline_epoch=int(time.time()) + 30,
-        )
-        if display_readback is None or display_readback[0] != payloads["display_raw"]:
-            raise PublicationError("published tier-list display failed exact readback")
-    except Exception as error:  # noqa: BLE001
-        try:
-            _restore_stable_pointers(transport, store_id, previous_pointers)
-        except Exception as rollback_error:  # noqa: BLE001
-            raise PublicationError(
-                f"{type(error).__name__}: {error}; "
-                f"{type(rollback_error).__name__}: {rollback_error}"
-            ) from error
-        raise
-    return {
-        "status": "published",
-        "blob_store_id": store_id,
-        "pointer_path": BLOB_POINTER_PATH,
-        "index_url": f"{blob_base}/{BLOB_POINTER_PATH}",
-        "release_id": payloads["release_id"],
-        "release_index_path": payloads["release_index_path"],
-        "source_index_artifact_sha256": payloads["source_index_artifact_sha256"],
-        "pointer_artifact_sha256": payloads["pointer_artifact_sha256"],
-        "release_index_artifact_sha256": payloads["release_index_artifact_sha256"],
-        "cell_count": payloads["cell_count"],
-        "reused_immutable_files": len(reused_immutable_paths),
-        "pointer_mode": pointer_mode.value,
-        "movement_path": BLOB_MOVEMENT_PATH,
-        "movement_artifact_sha256": payloads["movement_artifact_sha256"],
-        "movement_mode": movement_mode.value,
-        "movement_readback_verified": True,
-        "display_path": BLOB_DISPLAY_PATH,
-        "display_sha256": payloads["display_sha256"],
-        "display_mode": display_mode.value,
-        "display_readback_verified": True,
-        "pointer_readback_verified": True,
-        "previous_pointers": _serialize_previous_pointers(previous_pointers),
-        "retention": {
-            "state": result.state.value,
-            "current_retained_bytes": result.current_retained_bytes,
-            "peak_retained_bytes": result.peak_retained_bytes,
-            "projected_final_bytes": result.projected_final_bytes,
-            "actual_final_bytes": result.actual_final_bytes,
-            "policy_sha256": result.policy_sha256,
-        },
-    }
+    raise PublicationError(LEGACY_BLOB_PUBLICATION_DISABLED)
 
 
 def _step_text(value: object) -> str:
@@ -933,7 +529,7 @@ def refresh_candidate(
             try:
                 publication = publish_production_bundle(root)
                 publication_step = {
-                    "source": "blob_publication",
+                    "source": "publication_coordinator",
                     "command": [],
                     "returncode": 0,
                     "completed": True,
@@ -941,7 +537,7 @@ def refresh_candidate(
                 }
             except Exception as error:
                 publication_step = _skipped_step(
-                    "blob_publication",
+                    "publication_disabled",
                     f"{type(error).__name__}: {error}",
                 )
                 publication_step["returncode"] = 2
@@ -1007,6 +603,8 @@ def refresh_candidate(
             "source_mode": candidate["source_mode"],
             "rating_refresh_completed": rating_step["completed"],
         },
+        "regional_refresh": _regional_refresh_summary(candidate),
+        "patch_refresh": _patch_refresh_summary(candidate),
         "authority": {
             "source_freshness": True,
             "model_validation": False,
