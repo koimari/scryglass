@@ -83,11 +83,13 @@ The Production and Development Vercel values for `SCRYGLASS_SUPABASE_URL` and `S
 
 The regional refresh completed as a deferred production build in the worker
 runtime. Receipt
-`tierlist-live-refresh-20260814T023917347193Z-898104ca0bcf88e7.json` records
+`tierlist-live-refresh-20260814T032716887375Z-898104ca0bcf88e7.json` records
 17,483 replayed maps, a 1,162-map live window, 195 cells, 7,544 rows, and 970
-regional views across 39 scopes. The latest accepted source is public patch
-`26.15`; the output contains no client-only `16.xx` labels. Publication stays
-deferred until the ordered release checks pass.
+regional views across 39 scopes. Its production index digest is
+`2a9ebe414cafa089fbd2572149b127276db5458e3422b9327b27c8be64d3a555`. The
+latest accepted source is public patch `26.15`; the output contains no
+client-only `16.xx` labels. Publication stays deferred until the ordered
+release checks pass.
 
 The 26.16 atom bridge is a development input. The current accepted OE source
 has no 16.16 game rows, so the regional model continues to use the audited
