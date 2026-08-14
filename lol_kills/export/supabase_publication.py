@@ -620,6 +620,78 @@ class SupabasePublicData:
             )
         return result
 
+    def discard_staging_release(self, release_id: str) -> int:
+        """Remove one failed staging release and drain its Storage inventory.
+
+        The database RPC queues exact Storage paths before deleting the rows.
+        Storage deletion is retried independently, so a transient Storage
+        failure cannot leave the database release rows behind.
+        """
+
+        release_id = _release_id(release_id)
+        result = self._request(
+            "POST",
+            "rpc/discard_scryglass_staging_release",
+            {"p_release_id": release_id},
+        )
+        if not isinstance(result, dict) or result.get("release_id") != release_id:
+            raise SupabasePublicationError(
+                "Supabase staging discard response is malformed"
+            )
+        status = result.get("status")
+        if status not in {"discarded", "absent"}:
+            raise SupabasePublicationError(
+                "Supabase staging discard status is malformed"
+            )
+        storage_paths = result.get("storage_paths")
+        if not isinstance(storage_paths, list) or any(
+            not isinstance(path, str) for path in storage_paths
+        ):
+            raise SupabasePublicationError(
+                "Supabase staging discard Storage inventory is malformed"
+            )
+        if storage_paths:
+            self.delete_storage_objects(storage_paths)
+            self.ack_storage_cleanup(storage_paths)
+        return len(storage_paths)
+
+    def discard_stale_staging_releases(
+        self,
+        *,
+        min_age_minutes: int = 360,
+        limit: int = 10,
+    ) -> int:
+        result = self._request(
+            "POST",
+            "rpc/discard_stale_scryglass_staging_releases",
+            {
+                "p_min_age_minutes": min_age_minutes,
+                "p_limit": limit,
+            },
+        )
+        if not isinstance(result, dict) or result.get("status") != "complete":
+            raise SupabasePublicationError(
+                "Supabase stale staging discard response is malformed"
+            )
+        release_ids = result.get("release_ids")
+        storage_paths = result.get("storage_paths")
+        if not isinstance(release_ids, list) or any(
+            not isinstance(release_id, str) for release_id in release_ids
+        ):
+            raise SupabasePublicationError(
+                "Supabase stale staging release inventory is malformed"
+            )
+        if not isinstance(storage_paths, list) or any(
+            not isinstance(path, str) for path in storage_paths
+        ):
+            raise SupabasePublicationError(
+                "Supabase stale staging Storage inventory is malformed"
+            )
+        if storage_paths:
+            self.delete_storage_objects(storage_paths)
+            self.ack_storage_cleanup(storage_paths)
+        return len(release_ids)
+
     def stage_release(
         self,
         release: dict[str, Any],
@@ -1335,6 +1407,7 @@ def publish_release(
     client: SupabasePublicData | None = None,
 ) -> dict[str, Any]:
     database = client or SupabasePublicData(project_url, secret_key)
+    database.discard_stale_staging_releases()
     release, assets, storage_objects = prepare_release(
         pack_dir,
         manifest,
@@ -1380,37 +1453,53 @@ def publish_release(
         }
 
     if existing and existing.get("status") == "staging":
-        reused_assets = database.stage_assets(
-            release_id,
-            assets,
-            storage_objects=storage_objects,
-        )
-    else:
+        # A previous interrupted run must not be resumed from an unbounded
+        # partial snapshot.  Discard it under the locked database RPC and
+        # start one complete immutable staging release.
+        database.discard_staging_release(release_id)
+        existing = None
+
+    try:
+        if existing:
+            raise SupabasePublicationError(
+                "Supabase release has an unsupported existing status"
+            )
         reused_assets = database.stage_release(
             release,
             assets,
             storage_objects=storage_objects,
         )
-    staged = database.release(release_id)
-    if not staged or staged.get("status") != "staging":
-        raise SupabasePublicationError("Supabase staged release readback failed")
-    reused_query_rows = 0
-    if query_api is not None:
-        receipts = query_api.get("datasets")
-        if not isinstance(receipts, dict):
-            raise SupabasePublicationError("query API receipt inventory is missing")
-        reused_query_rows = database.stage_query_datasets(
+        staged = database.release(release_id)
+        if not staged or staged.get("status") != "staging":
+            raise SupabasePublicationError("Supabase staged release readback failed")
+        reused_query_rows = 0
+        if query_api is not None:
+            receipts = query_api.get("datasets")
+            if not isinstance(receipts, dict):
+                raise SupabasePublicationError("query API receipt inventory is missing")
+            reused_query_rows = database.stage_query_datasets(
+                release_id,
+                query_datasets,
+                receipts,
+            )
+            _verify_query_receipts(database, release_id, query_api)
+        _verify_release_assets(
+            database,
             release_id,
-            query_datasets,
-            receipts,
+            assets,
+            verify_storage_content=True,
         )
-        _verify_query_receipts(database, release_id, query_api)
-    _verify_release_assets(
-        database,
-        release_id,
-        assets,
-        verify_storage_content=True,
-    )
+    except Exception:
+        try:
+            staged_after_failure = database.release(release_id)
+            if (
+                isinstance(staged_after_failure, dict)
+                and staged_after_failure.get("status") == "staging"
+            ):
+                database.discard_staging_release(release_id)
+        except Exception:
+            pass
+        raise
     activation = database.activate(release_id)
     try:
         _verify_active_release(

@@ -15,6 +15,7 @@ def test_phase_one_contains_only_additive_cutover_migrations() -> None:
         "20260814010001_query_seal_statement_budget.sql",
         "20260814010002_query_activate_statement_budget.sql",
         "20260814010003_release_retention_cascade_guard.sql",
+        "20260814010004_discard_staging_release.sql",
     ]
 
 
@@ -29,3 +30,20 @@ def test_phase_one_accepts_legacy_match_rows_during_compatibility() -> None:
     ).read_text(encoding="utf-8")
     assert "features/match_records_2025.json" in source
     assert "features/match_records_2026.json" in source
+
+
+def test_staging_cleanup_is_locked_and_service_only() -> None:
+    migration = (
+        MIGRATIONS / "20260814010004_discard_staging_release.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "pg_advisory_xact_lock" in migration
+    assert "discard_scryglass_staging_release(text)" in migration
+    assert "discard_stale_scryglass_staging_releases(integer, integer)" in migration
+    assert "Only a staging Scryglass release can be discarded" in migration
+    assert "grant execute on function public.discard_scryglass_staging_release(text)\n  to service_role" in migration
+    assert "from public, anon, authenticated, service_role" in migration
+    assert "status = 'active'" not in migration.split(
+        "create or replace function public.discard_scryglass_staging_release",
+        1,
+    )[1]

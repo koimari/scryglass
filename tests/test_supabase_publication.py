@@ -23,6 +23,7 @@ class FakeSupabase:
         self.active_id: str | None = None
         self.stage_calls = 0
         self.storage: dict[str, bytes] = {}
+        self.discard_calls: list[str] = []
 
     def release(self, release_id: str):
         return self.releases.get(release_id)
@@ -80,6 +81,35 @@ class FakeSupabase:
                 )
             self.storage[path] = raw
         return reused
+
+    def discard_staging_release(self, release_id: str) -> int:
+        self.discard_calls.append(release_id)
+        release = self.releases.get(release_id)
+        if release is None:
+            return 0
+        if release.get("status") != "staging":
+            raise supabase_publication.SupabasePublicationError(
+                "Only a staging release can be discarded"
+            )
+        paths = [
+            path
+            for (stored_release, path) in self.assets
+            if stored_release == release_id
+        ]
+        for key in list(self.assets):
+            if key[0] == release_id:
+                del self.assets[key]
+        for path in list(self.storage):
+            if path.startswith(f"{release_id}/"):
+                del self.storage[path]
+        del self.releases[release_id]
+        return len(paths)
+
+    def discard_stale_staging_releases(
+        self, *, min_age_minutes: int = 360, limit: int = 10
+    ) -> int:
+        del min_age_minutes, limit
+        return 0
 
     def activate(self, release_id: str):
         previous = self.active_id
@@ -392,6 +422,44 @@ def test_publish_release_is_idempotent_after_verified_activation() -> None:
     assert second["status"] == "already_active"
     assert second["reused_assets"] == second["assets"]
     assert client.stage_calls == 1
+
+
+def test_publish_release_discards_an_interrupted_staging_snapshot() -> None:
+    with TemporaryDirectory() as temporary:
+        pack, manifest, tier = _fixture(Path(temporary))
+        client = FakeSupabase()
+        prepared_release, _, _ = supabase_publication.prepare_release(
+            pack,
+            manifest,
+            tier,
+            project_url=client.project_url,
+        )
+        client.releases[manifest["pack_id"]] = {
+            "release_id": manifest["pack_id"],
+            "status": "staging",
+            "manifest": prepared_release["manifest"],
+        }
+        client.assets[(manifest["pack_id"], "stale.json")] = {
+            "release_id": manifest["pack_id"],
+            "path": "stale.json",
+            "bytes": 1,
+            "sha256": "0" * 64,
+            "content_type": "application/json",
+        }
+        client.storage[f"{manifest['pack_id']}/stale.json"] = b"x"
+
+        result = supabase_publication.publish_release(
+            pack,
+            manifest,
+            tier,
+            project_url=client.project_url,
+            secret_key="sb_secret_unused_because_client_is_injected",
+            client=client,
+        )
+
+    assert result["status"] == "activated_pending_health"
+    assert client.discard_calls == [manifest["pack_id"]]
+    assert (manifest["pack_id"], "stale.json") not in client.assets
 
 
 def test_publish_release_adds_latest_view_to_existing_active_release() -> None:
