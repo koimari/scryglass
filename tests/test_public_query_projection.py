@@ -306,7 +306,8 @@ def test_tier_projection_splits_scopes_matrices_and_similarity() -> None:
     assert tier_one["played_maps"] == 9
     assert datasets["tier_scopes"][0]["payload"]["regional_views"][0]["rows"] == []
     assert datasets["tier_scopes"][0]["payload"].get("response_matrix") is None
-    assert datasets["tier_matrix_rows"][0]["scope_id"] == "16.15-mid"
+    assert datasets["tier_matrix_rows"][0]["scope_id"] == "26.15-mid"
+    assert datasets["tier_rows"][0]["patch"] == "26.15"
     assert datasets["tier_similarity_edges"][0]["score"] == 1.0
 
 

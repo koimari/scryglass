@@ -3,15 +3,32 @@
  "as_of": "2026-08-13T23:52:09Z",
  "sources": [
   {
+   "source_id": "source:cdragon-26.16",
+   "patch": "26.16",
+   "public_patch": "26.16",
+   "client_patch": "16.16",
+   "source_version": "16.16.1",
+   "kind": "communitydragon",
+   "locator_kind": "receipt",
+   "locator": "data/lol/v2/champions/lcc-atom-refresh-26.16-receipt.json",
+   "url": "https://raw.communitydragon.org/16.16/",
+   "publication_decision": "private_pending_review",
+   "reviewed_by": "l3_atom_bridge",
+   "reviewed_at": "2026-08-13T23:52:09Z",
+   "notes": "Exact CommunityDragon 16.16 packet for public patch 26.16; receipt-bound and development-only."
+  },
+  {
    "source_id": "source:lcc-atom-bridge-v1",
    "patch": "26.16",
+   "public_patch": "26.16",
+   "client_patch": "16.16",
    "kind": "atom_bridge",
    "locator_kind": "repository_path",
    "locator": "data/lol/v2/champions/lcc-atom-bridge-v1.json",
    "publication_decision": "private_pending_review",
    "reviewed_by": "l3_atom_bridge",
    "reviewed_at": "2026-08-13T23:52:09Z",
-   "notes": "Mechanistic champion atoms from the League Combat Calculator atom cache (public patch 26.16), mapped through scryglass.lcc-atom-bridge.v1. Automated prior; pending review."
+   "notes": "Mechanistic champion atoms from the League Combat Calculator atom cache (public patch 26.16, client patch 16.16), mapped through scryglass.lcc-atom-bridge.v1. Automated prior; pending review."
   },
   {
    "source_id": "source:manual-labels-v2",
@@ -26,22 +43,42 @@
   {
    "source_id": "source:riot-dd-26.14",
    "kind": "riot_datadragon",
-   "url": "https://ddragon.leagueoflegends.com/cdn/26.14.1/data/en_US/champion.json",
+   "url": "https://ddragon.leagueoflegends.com/cdn/16.14.1/data/en_US/champion.json",
    "publication_decision": "private_pending_review",
    "reviewed_by": "l3_authoring",
    "reviewed_at": "2026-07-27T12:40:00Z",
    "patch_id": "26.14",
-   "notes": "Official champion metadata snapshot for competition patch 26.14."
+   "notes": "Official champion metadata snapshot for competition patch 26.14.",
+   "patch": "26.14",
+   "public_patch": "26.14",
+   "client_patch": "16.14"
   },
   {
    "source_id": "source:riot-dd-26.15",
    "kind": "riot_datadragon",
-   "url": "https://ddragon.leagueoflegends.com/cdn/26.15.1/data/en_US/champion.json",
+   "url": "https://ddragon.leagueoflegends.com/cdn/16.15.1/data/en_US/champion.json",
    "publication_decision": "private_pending_review",
    "reviewed_by": "l3_authoring",
    "reviewed_at": "2026-07-27T12:40:00Z",
    "patch_id": "26.15",
-   "notes": "Official champion metadata snapshot for competition patch 26.15."
+   "notes": "Official champion metadata snapshot for competition patch 26.15.",
+   "patch": "26.15",
+   "public_patch": "26.15",
+   "client_patch": "16.15"
+  },
+  {
+   "source_id": "source:riot-dd-26.16",
+   "patch": "26.16",
+   "public_patch": "26.16",
+   "client_patch": "16.16",
+   "source_version": "16.16.1",
+   "kind": "riot_datadragon",
+   "url": "https://ddragon.leagueoflegends.com/cdn/16.16.1/data/en_US/champion.json",
+   "publication_decision": "private_pending_review",
+   "reviewed_by": "l3_authoring",
+   "reviewed_at": "2026-08-13T23:52:09Z",
+   "patch_id": "26.16",
+   "notes": "Official champion metadata source version 16.16.1 for public patch 26.16."
   }
  ]
 }

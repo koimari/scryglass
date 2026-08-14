@@ -10,6 +10,7 @@ from lol_kills.v2.champions.atoms.consume import AtomBridge
 ROOT = Path(__file__).resolve().parents[1]
 RECEIPT_PATH = ROOT / "data/lol/v2/champions/lcc-atom-refresh-26.16-receipt.json"
 BRIDGE_PATH = ROOT / "data/lol/v2/champions/lcc-atom-bridge-v1.json"
+SOURCE_PATH = ROOT / "data/lol/v2/champions/champion-ontology-sources-26.16.json"
 
 
 def test_26_16_receipt_binds_source_and_bridge() -> None:
@@ -41,3 +42,14 @@ def test_26_16_receipt_keeps_unreviewed_claims_closed() -> None:
     assert ceiling["publication"] is False
     assert receipt["raw_packet_retained"] is False
     assert receipt["raw_packet_path_ignored"] is True
+
+
+def test_current_source_rows_keep_public_and_client_patch_namespaces_separate() -> None:
+    sources = json.loads(SOURCE_PATH.read_text(encoding="utf-8"))
+    rows = {row["source_id"]: row for row in sources["sources"]}
+    assert rows["source:cdragon-26.16"]["patch"] == "26.16"
+    assert rows["source:cdragon-26.16"]["client_patch"] == "16.16"
+    assert rows["source:riot-dd-26.16"]["patch_id"] == "26.16"
+    assert "/cdn/16.16.1/" in rows["source:riot-dd-26.16"]["url"]
+    assert rows["source:riot-dd-26.15"]["patch_id"] == "26.15"
+    assert "/cdn/16.15.1/" in rows["source:riot-dd-26.15"]["url"]

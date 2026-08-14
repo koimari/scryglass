@@ -24,6 +24,7 @@ from typing import Any
 
 from .consume import AtomBridge, DEFAULT_ARTIFACT_PATH
 from ..schema import DIMENSION_LABELS, REQUIRED_DIMENSIONS, ROLES
+from ...patch_identity import client_patch as canonical_client_patch, public_patch as canonical_public_patch
 
 SOURCE_ID = "source:lcc-atom-bridge-v1"
 PRIOR_PATCH = "26.15"  # compatibility default for older hand-authored callers
@@ -215,17 +216,45 @@ def _bridge_role_profile(prior: dict[str, Any], role: str) -> dict[str, Any]:
 def build_sources(
     existing_sources: dict[str, Any], *, patch: str | None = None
 ) -> dict[str, Any]:
-    """Return the sources payload with the atom-bridge source row added."""
+    """Return sources with explicit public and client patch provenance.
+
+    Historical source rows may have been written with the public label in a
+    client-data URL. Rebuild those URLs from the canonical patch pair before
+    adding the current 26.16 bridge and exact client packet rows.
+    """
     rows = list(existing_sources.get("sources") or [])
     if patch is None:
         current = next((row for row in rows if row.get("source_id") == SOURCE_ID), None)
         patch = str((current or {}).get("patch") or PRIOR_PATCH)
     # Idempotent: a re-run replaces the canonical row instead of failing.
-    rows = [row for row in rows if row.get("source_id") != SOURCE_ID]
+    normalized_rows: list[dict[str, Any]] = []
+    for source in rows:
+        row = dict(source)
+        source_patch = row.get("patch") or row.get("public_patch") or row.get("patch_id")
+        if row.get("kind") == "riot_datadragon" and source_patch:
+            try:
+                public = canonical_public_patch(source_patch)
+                client = canonical_client_patch(source_patch)
+            except (TypeError, ValueError):
+                public = client = None
+            if public and client:
+                row["patch"] = public
+                row["public_patch"] = public
+                row["client_patch"] = client
+                row["patch_id"] = public
+                if isinstance(row.get("url"), str) and "/data/" in row["url"]:
+                    _, suffix = row["url"].split("/data/", 1)
+                    row["url"] = f"https://ddragon.leagueoflegends.com/cdn/{client}.1/data/{suffix}"
+        normalized_rows.append(row)
+    rows = [row for row in normalized_rows if row.get("source_id") not in {SOURCE_ID, "source:cdragon-26.16", "source:riot-dd-26.16"}]
+    current_public = canonical_public_patch(patch)
+    current_client = canonical_client_patch(patch)
     rows.append(
         {
             "source_id": SOURCE_ID,
-            "patch": patch,
+            "patch": current_public,
+            "public_patch": current_public,
+            "client_patch": current_client,
             "kind": "atom_bridge",
             "locator_kind": "repository_path",
             "locator": "data/lol/v2/champions/lcc-atom-bridge-v1.json",
@@ -234,10 +263,43 @@ def build_sources(
             "reviewed_at": CANONICAL_AS_OF,
             "notes": (
                 "Mechanistic champion atoms from the League Combat Calculator "
-                f"atom cache (public patch {patch}), mapped through "
+                f"atom cache (public patch {current_public}, client patch {current_client}), mapped through "
                 "scryglass.lcc-atom-bridge.v1. Automated prior; pending review."
             ),
         }
+    )
+    rows.extend(
+        [
+            {
+                "source_id": "source:cdragon-26.16",
+                "patch": current_public,
+                "public_patch": current_public,
+                "client_patch": current_client,
+                "source_version": "16.16.1",
+                "kind": "communitydragon",
+                "locator_kind": "receipt",
+                "locator": "data/lol/v2/champions/lcc-atom-refresh-26.16-receipt.json",
+                "url": "https://raw.communitydragon.org/16.16/",
+                "publication_decision": "private_pending_review",
+                "reviewed_by": "l3_atom_bridge",
+                "reviewed_at": CANONICAL_AS_OF,
+                "notes": "Exact CommunityDragon 16.16 packet for public patch 26.16; receipt-bound and development-only.",
+            },
+            {
+                "source_id": "source:riot-dd-26.16",
+                "patch": current_public,
+                "public_patch": current_public,
+                "client_patch": current_client,
+                "source_version": "16.16.1",
+                "kind": "riot_datadragon",
+                "url": "https://ddragon.leagueoflegends.com/cdn/16.16.1/data/en_US/champion.json",
+                "publication_decision": "private_pending_review",
+                "reviewed_by": "l3_authoring",
+                "reviewed_at": CANONICAL_AS_OF,
+                "patch_id": current_public,
+                "notes": "Official champion metadata source version 16.16.1 for public patch 26.16.",
+            },
+        ]
     )
     rows.sort(key=lambda row: row["source_id"])
     return {

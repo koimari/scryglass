@@ -36,6 +36,12 @@ The production composition scorer keeps the Scryglass Pi research path:
 - strictly prior team state-space features;
 - atomized per-pick contributions.
 
+The Pi round-9 same-data comparison recorded Brier `0.21708`, log-loss
+`0.62330`, and AUC `0.70681` for the depth-4 plus state-space variant. The
+result passed the composition gate at bootstrap 100. This is research evidence
+for the scorer path. It is not a 26.16 holdout result or a public promotion
+receipt.
+
 The 26.16 bridge refresh supplies new mechanistic source data. The existing
 numeric aggregate files remain separate certified development artifacts until
 the complete 26.16 corpus is rebuilt and evaluated. This avoids a false patch

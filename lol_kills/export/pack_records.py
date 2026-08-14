@@ -18,6 +18,8 @@ from lol_kills.etl.competition import (
 )
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.player_map_grades import GRADE_CONTRACT, compute_player_map_grades, grade_payload
+from lol_kills.v2.patch_identity import public_patch
+from lol_kills.v2.tierlists.patch_mapping import normalize_oe_token
 
 
 PUBLIC_TEAM_RATING_EXCLUSIONS = frozenset({"los-ratones"})
@@ -162,9 +164,9 @@ def _public_draft_payload(
                     }
                 )
 
-    patch = _draft_text((metadata or {}).get("patch"))
+    patch = _public_patch((metadata or {}).get("patch"))
     if not patch and "patch" in group.columns:
-        patch = _draft_text(group.iloc[0].get("patch"))
+        patch = _public_patch(group.iloc[0].get("patch"))
     complete_bans = all(len(bans.get(side, [])) == 5 for side in ("Blue", "Red"))
     complete_picks = len(picked) == 10 and len({_draft_champion_key(item.get("champion")) for item in picked}) == 10
     complete_order = complete_picks and all(item.get("order") is not None for item in picked)
@@ -179,6 +181,21 @@ def _public_draft_payload(
         "unpicked": [],
         "reason": None if status == "complete" else "Complete bans, pick order, and patch identity are required for best-available rates.",
     }
+
+
+def _public_patch(value: Any) -> str:
+    """Convert source/client patch tokens to the public Riot label."""
+
+    text = _draft_text(value)
+    if not text:
+        return ""
+    try:
+        return public_patch(normalize_oe_token(text))
+    except (TypeError, ValueError):
+        try:
+            return public_patch(text)
+        except (TypeError, ValueError):
+            return ""
 
 
 def _wr(wins: int, games: int) -> float | None:
@@ -921,7 +938,7 @@ def build_profile_records(
             "date": date.isoformat().replace("+00:00", "Z"),
             "league": league,
             "competition_tier": tier,
-            "patch": _draft_text((game_draft_metadata or {}).get("patch")) or _draft_text(group.iloc[0].get("patch")) or None,
+            "patch": _public_patch((game_draft_metadata or {}).get("patch")) or _public_patch(group.iloc[0].get("patch")) or None,
             "blue_team": blue_team,
             "red_team": red_team,
             "blue_win": int(blue_result),

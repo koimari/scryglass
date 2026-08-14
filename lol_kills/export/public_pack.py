@@ -67,6 +67,7 @@ from lol_kills.research.composition_signal import (
     validate_public_signal,
 )
 from lol_kills.v2.tierlists.patch_mapping import normalize_oe_token
+from lol_kills.v2.patch_identity import public_patch
 
 ROOT = Path(__file__).resolve().parents[2]
 WAREHOUSE = ROOT / "data" / "lol" / "warehouse" / "parquet"
@@ -540,7 +541,9 @@ def _draft_metadata_from_maps(frame: pd.DataFrame) -> dict[str, dict[str, Any]]:
         if not game_id:
             continue
         value: dict[str, Any] = {
-            "patch": clean(row.get("patch")) or None,
+            # OE stores the source token in the client namespace (16.x). The
+            # public pack uses Riot's 26.x label.
+            "patch": _draft_patch(clean(row.get("patch"))) or None,
             "blue_bans": [
                 clean(row.get(f"blue_ban{slot}"))
                 for slot in range(1, 6)
@@ -572,15 +575,18 @@ def _draft_key(value: Any) -> str:
 
 
 def _draft_patch(value: Any) -> str:
-    """Canonicalize an OE patch token while keeping malformed values unavailable."""
+    """Return Riot's public patch label for an OE or client patch token."""
 
     text = str(value or "").strip()
     if not text:
         return ""
     try:
-        return normalize_oe_token(text)
+        return public_patch(normalize_oe_token(text))
     except (TypeError, ValueError):
-        return text
+        try:
+            return public_patch(text)
+        except (TypeError, ValueError):
+            return ""
 
 
 def _draft_role(value: Any) -> str:
@@ -644,7 +650,7 @@ def _attach_published_draft_pools(
                 "schema_version": "scryglass:draft-pool:v1",
                 "status": "unavailable",
                 "source": "oracle-elixir",
-                "patch": game.get("patch"),
+                "patch": _draft_patch(game.get("patch")) or None,
                 "bans": {"Blue": [], "Red": []},
                 "picked": [],
                 "unpicked": [],

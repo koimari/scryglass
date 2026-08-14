@@ -24,6 +24,7 @@ from lol_kills.export.public_pack import (
     build_draft_records_payload,
     source_identity_sha256,
 )
+from lol_kills.export.pack_records import _public_draft_payload
 from lol_kills.research.composition_signal import CompositionSignalError
 
 
@@ -380,13 +381,60 @@ def test_published_draft_pool_uses_bans_and_fails_closed_without_them() -> None:
     payload = {"games": {"game-1": game}}
     audit = _attach_published_draft_pools(payload, {"rows": tier_rows})
     assert audit["quality_games"] == 1
-    assert game["draft_pool"]["patch"] == "16.10"
+    assert game["draft_pool"]["patch"] == "26.10"
     assert game["draft_pool"]["evaluated_picks"] == 10
     assert game["draft_contribution"]["picks"][0]["best_available"] is False
     assert game["draft_contribution"]["picks"][5]["best_available"] is True
     game["draft_pool"]["bans"]["Red"] = []
     _attach_published_draft_pools(payload, {"rows": tier_rows})
     assert game["draft_contribution"]["picks"][0]["best_available"] is None
+
+
+def test_public_draft_patch_uses_riot_namespace_for_client_source_token() -> None:
+    participants = [
+        {"side": side, "role": role, "champion": champion}
+        for side, role, champion in (
+            ("Blue", "top", "Aatrox"),
+            ("Blue", "jungle", "Lee Sin"),
+            ("Blue", "mid", "Ahri"),
+            ("Blue", "bot", "Jinx"),
+            ("Blue", "support", "Nautilus"),
+            ("Red", "top", "Gnar"),
+            ("Red", "jungle", "Vi"),
+            ("Red", "mid", "Orianna"),
+            ("Red", "bot", "Aphelios"),
+            ("Red", "support", "Thresh"),
+        )
+    ]
+    frame = pd.DataFrame(
+        [
+            {
+                "_side": side,
+                "champion": champion,
+                "ban1": "",
+                "ban2": "",
+                "ban3": "",
+                "ban4": "",
+                "ban5": "",
+            }
+            for side, _, champion in (
+                ("Blue", "top", "Aatrox"),
+                ("Red", "top", "Gnar"),
+            )
+        ]
+    )
+    # The helper only needs a group with the expected side column for the
+    # namespace assertion. Missing pick order remains unavailable.
+    payload = _public_draft_payload(
+        frame,
+        participants,
+        {"patch": "16.15"},
+    )
+    assert payload["patch"] == "26.15"
+
+    fallback = {"games": {"fallback": {"patch": "16.15"}}}
+    _attach_published_draft_pools(fallback, {"rows": []})
+    assert fallback["games"]["fallback"]["draft_pool"]["patch"] == "26.15"
 
 
 def test_first_pick_falls_back_from_null_map_metadata() -> None:

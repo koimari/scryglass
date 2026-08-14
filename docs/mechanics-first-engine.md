@@ -12,7 +12,7 @@ The first bounded implementation is materialized locally:
   three legacy latest-checkpoint rows are preserved and reported rather than
   silently deleted;
 - one explicit Wiki packet and one exact client-source packet exist for each
-  tracked 2026 patch, 26.01 through 26.15; the client packets provide
+  tracked 2026 patch, 26.01 through 26.16; the client packets provide
   patch-pinned base-stat cells, while abilities, items, runes, and game-system
   execution remain semantic-only or blocked;
 - the typed transition kernel, deterministic event ordering, state hashes,
@@ -34,17 +34,17 @@ same-minor client namespace (`26.13` → `16.13`) and records both labels in
 the packet. It rejects a payload when the requested client namespace does not
 match, emits exact cells only for extracted base stats, and keeps ability
 formula graphs and item payloads semantic-only until execution semantics are
-implemented and tested. The full exact-source matrix is preserved at
-`data/lol/knowledge/patch-packets/cdragon/2026/matrix-manifest.json`: all 15
-patches have captured raw client packets and authority packets, with 26,993
-exact base-stat cells in total. This makes patch source available, but does
-not yet make the full game mechanics executable.
+implemented and tested. The packet index is maintained in the local ignored
+cache at `data/lol/knowledge/patch-packets/cdragon/matrix-manifest.json`.
+The tracked 26.16 source receipt is the authority record for this candidate.
+This makes patch source available, but does not make the full game mechanics
+executable.
 
 The 26.16 CommunityDragon capture is recorded by
 `data/lol/v2/champions/lcc-atom-refresh-26.16-receipt.json`. Its raw packet is
-an ignored local cache until the source packet receives the same review as the
-tracked matrix. The receipt binds the 26.16 public label to the 16.16 client
-namespace and the atom bridge used for the Scryglass refresh.
+an ignored local cache. The receipt binds its manifest and source hashes to the
+26.16 public label, the 16.16 client namespace, and the atom bridge used for
+the Scryglass refresh.
 
 ## Current authority artifacts
 
@@ -58,13 +58,10 @@ The receipt manifest is hash-bound to 997 fixture rows and 279 team histories:
 - confirmed fixture receipts: 610;
 - unavailable fixture receipts: 387.
 
-The exact-source client probe manifest is hash-bound separately:
-
-- manifest SHA-256: `ed35666badcb7c206d3cc9affb845a87c6296531d6db2021f861b96697a6c438`;
-- exact 2026 client packets captured: 15 of 15;
-- authority packets hash-validated: 15 of 15;
-- exact base-stat cells: 26,993;
-- ability, item, rune, and game-system execution: still blocked or semantic-only.
+The exact-source client probe manifest is hash-bound separately in the local
+packet cache. The tracked candidate receipt binds the 26.16 public label to
+the 16.16 client namespace and the atom bridge. Ability, item, rune, and
+game-system execution remain blocked or semantic-only.
 
 The result-free Leaguepedia patch capture is at
 `data/lol/v2/experiments/leaguepedia/manual-run-2026-07-31/leaguepedia-patch-receipts-v1/`:

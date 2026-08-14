@@ -17,6 +17,8 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from lol_kills.etl.aliases import CHAMP_ALIASES, TEAM_ALIASES
 from lol_kills.etl.competition import competition_tier
+from lol_kills.v2.patch_identity import public_patch
+from lol_kills.v2.tierlists.patch_mapping import normalize_oe_token
 
 QUERY_API_SCHEMA = "scryglass:query-api:v1"
 QUERY_PROJECTION_PATH = "query/public_query_v1.json"
@@ -65,6 +67,34 @@ def normalize_public_key(value: object) -> str:
     text = unicodedata.normalize("NFKC", str(value or "")).strip().casefold()
     text = text.replace("’", "'").replace("`", "'")
     return " ".join(text.split())
+
+
+def _public_patch_label(value: object) -> str | None:
+    """Expose Riot's public 25/26.x patch label in query data.
+
+    OE and client feeds use 15/16.x tokens. They remain valid source inputs,
+    but they must not leak into public tier or profile output.
+    """
+
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return public_patch(normalize_oe_token(text))
+    except (TypeError, ValueError):
+        try:
+            return public_patch(text)
+        except (TypeError, ValueError):
+            return None
+
+
+def _public_scope_id(scope_id: str, raw_patch: object, patch: str | None) -> str:
+    if not patch:
+        return scope_id
+    source = str(raw_patch or "").strip()
+    if source and scope_id.startswith(f"{source}-"):
+        return f"{patch}-{scope_id[len(source) + 1:]}"
+    return scope_id
 
 
 def _source_identity_key(value: object) -> str:
@@ -863,7 +893,14 @@ def build_tier_query_datasets(
         if not name:
             raise PublicQueryProjectionError("tier row name is empty")
         scope = payload.get("scope") if isinstance(payload.get("scope"), Mapping) else {}
-        patch = str(payload.get("patch") or scope.get("patch") or "").strip() or None
+        raw_patch = payload.get("patch") or scope.get("patch")
+        patch = _public_patch_label(raw_patch)
+        raw_scope_id = str(payload.get("scope_id") or scope.get("scope_id") or "").strip()
+        scope_id = _public_scope_id(raw_scope_id, raw_patch, patch)
+        if patch:
+            payload["patch"] = patch
+        if scope_id:
+            payload["scope_id"] = scope_id
         region = str(payload.get("region") or scope.get("region") or "").strip() or None
         league = str(payload.get("league") or scope.get("league") or "").strip() or None
         tier = str(payload.get("tier") or scope.get("tier") or "").strip().casefold() or None
@@ -898,7 +935,7 @@ def build_tier_query_datasets(
                 league=league,
                 tier=tier,
                 role=role,
-                scope_id=str(payload.get("scope_id") or "").strip() or None,
+                scope_id=scope_id or None,
                 rank=rank,
                 score=score,
                 played_maps=_integer(
@@ -931,7 +968,11 @@ def build_tier_query_datasets(
         scope = dict(source)
         response_matrix = scope.pop("response_matrix", None)
         scope_id = str(scope.get("scope_id") or "").strip()
-        patch = str(scope.get("patch") or "").strip()
+        raw_scope_patch = scope.get("patch")
+        patch = _public_patch_label(raw_scope_patch) or ""
+        scope_id = _public_scope_id(scope_id, raw_scope_patch, patch)
+        scope["scope_id"] = scope_id
+        scope["patch"] = patch
         role = str(scope.get("role") or "").strip().casefold()
         if not scope_id or not patch or not role:
             raise PublicQueryProjectionError("tier scope identity is invalid")
@@ -990,6 +1031,8 @@ def build_tier_query_datasets(
                     )
                     if key in base_payload
                 }
+                payload["scope_id"] = scope_id
+                payload["patch"] = patch
                 regional_rank = _integer(
                     regional.get("regional_rank"), regional_index + 1
                 )
@@ -1077,6 +1120,8 @@ def build_tier_query_datasets(
                     )
                     if key in base_payload
                 }
+                payload["scope_id"] = scope_id
+                payload["patch"] = patch
                 payload.update(
                     {
                         "rank": tier_rank,
