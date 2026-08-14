@@ -9,7 +9,6 @@ const PACK_CACHE_SECONDS = 21_600;
 export const PACK_MANIFEST_CACHE_TAG = "scryglass-pack-manifest";
 export const MAX_STORAGE_ASSET_BYTES = 120 * 1024 * 1024;
 export const PUBLIC_ASSET_CONTENT_TYPE = "application/json";
-const MAX_INLINE_RPC_BODY_BYTES = 500 * 1024;
 
 export const PUBLIC_ASSET_PATHS = new Set([
   "features/ratings_snapshot.json",
@@ -41,11 +40,6 @@ export const PUBLIC_ASSET_PATHS = new Set([
 
 const RELEASE_ID = /^v\d{4}\.\d{2}\.\d{2}\.\d{6}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
-const INLINE_ARRAY_ASSET_PATHS = new Set([
-  "features/ratings_snapshot.json",
-  "features/player_ratings_snapshot.json",
-]);
-
 type SupabaseConfig = {
   url: string;
   publishableKey: string;
@@ -171,15 +165,6 @@ type PublicAssetRow = {
   content_type?: string;
 };
 
-type InlinePublicAssetRow = {
-  release_id?: string;
-  path?: string;
-  body?: unknown;
-  source_bytes?: number;
-  source_sha256?: string;
-  content_type?: string;
-};
-
 export type ActivePublicAsset = {
   releaseId: string;
   path: string;
@@ -188,33 +173,6 @@ export type ActivePublicAsset = {
   contentType: typeof PUBLIC_ASSET_CONTENT_TYPE;
   storagePath: string;
 };
-
-export type ActiveInlineAssetJson<T = unknown> = {
-  releaseId: string;
-  path: string;
-  sourceBytes: number;
-  sourceSha256: string;
-  contentType: typeof PUBLIC_ASSET_CONTENT_TYPE;
-  body: T;
-};
-
-function validInlineJsonBody(relativePath: string, body: unknown): boolean {
-  const expectsArray = INLINE_ARRAY_ASSET_PATHS.has(relativePath);
-  if (expectsArray !== Array.isArray(body)) return false;
-  if (!expectsArray && (typeof body !== "object" || body === null)) return false;
-  const objectBody = body as Record<string, unknown>;
-  if (!Array.isArray(body) && "schema_version" in objectBody) {
-    const version = objectBody.schema_version;
-    if (typeof version !== "string" || version.length < 1 || version.length > 100) return false;
-  }
-  try {
-    const serialized = JSON.stringify(body);
-    return serialized !== undefined
-      && new TextEncoder().encode(serialized).byteLength <= MAX_INLINE_RPC_BODY_BYTES;
-  } catch {
-    return false;
-  }
-}
 
 function manifestAsset(
   manifest: ManifestWithRelease,
@@ -335,89 +293,6 @@ export async function readActivePublicAsset(
   };
 }
 
-/**
- * TEMPORARY ROLLOUT SEAM: remove after the final Storage-only cutover.
- *
- * This returns parsed JSON for server use only. A jsonb value cannot reproduce
- * the original file bytes, so callers must not expose it through the asset
- * route or claim the source digest as a response ETag. The RPC and this caller
- * both require an exact active release and manifest-bound source metadata.
- */
-export async function readActiveInlineAssetJson<T = unknown>(
-  releaseId: string,
-  relativePath: string,
-  signal?: AbortSignal,
-): Promise<ActiveInlineAssetJson<T> | null> {
-  const clean = safeRelativePath(relativePath);
-  if (!RELEASE_ID.test(releaseId)) return null;
-  const config = supabaseConfig();
-  if (!config) throw new Error("Supabase public data is not configured");
-  const release = encodeURIComponent(releaseId);
-  const assetPath = encodeURIComponent(clean);
-  const releases = await supabaseJson<Array<{
-    release_id?: string;
-    status?: string;
-    manifest?: ManifestWithRelease;
-  }>>(
-    `${config.url}/rest/v1/rpc/get_scryglass_active_release?p_release_id=${release}`,
-    config,
-    "no-store",
-    {},
-    signal,
-  );
-  const active = releases[0];
-  if (active?.manifest) {
-    try {
-      validatePublicManifest(active.manifest, releaseId);
-    } catch {
-      return null;
-    }
-  }
-  const expected = active?.manifest ? manifestAsset(active.manifest, clean) : null;
-  if (
-    active?.release_id !== releaseId
-    || active.status !== "active"
-    || active.manifest?.pack_id !== releaseId
-    || !expected
-  ) {
-    return null;
-  }
-  const rows = await supabaseJson<InlinePublicAssetRow[]>(
-    `${config.url}/rest/v1/rpc/get_scryglass_active_inline_asset?p_release_id=${release}&p_path=${assetPath}`,
-    config,
-    "no-store",
-    {},
-    signal,
-  );
-  const row = rows[0];
-  const bytes = Number(row?.source_bytes);
-  const sha256 = row?.source_sha256 ?? "";
-  const contentType = row?.content_type?.split(";", 1)[0]?.trim().toLowerCase();
-  if (
-    rows.length !== 1
-    || row?.release_id !== releaseId
-    || row.path !== clean
-    || row.body === undefined
-    || row.body === null
-    || !validInlineJsonBody(clean, row.body)
-    || !Number.isSafeInteger(bytes)
-    || bytes !== expected.bytes
-    || sha256 !== expected.sha256
-    || !SHA256.test(sha256)
-    || contentType !== PUBLIC_ASSET_CONTENT_TYPE
-  ) {
-    return null;
-  }
-  return {
-    releaseId,
-    path: clean,
-    sourceBytes: bytes,
-    sourceSha256: sha256,
-    contentType: PUBLIC_ASSET_CONTENT_TYPE,
-    body: row.body as T,
-  };
-}
-
 function privateStorageHeaders(config: SupabaseConfig): HeadersInit {
   return {
     Accept: PUBLIC_ASSET_CONTENT_TYPE,
@@ -533,6 +408,12 @@ async function readSupabaseManifest(
     throw new Error("Supabase release is unavailable");
   }
   validatePublicManifest(manifest, row.release_id);
+  if (
+    manifest.query_api?.schema_version !== "scryglass:query-api:v1"
+    || manifest.query_api.status !== "available"
+  ) {
+    throw new Error("The active release has no bounded public query API");
+  }
   return manifest;
 }
 
@@ -646,15 +527,7 @@ async function readSupabaseAsset<T>(
     const raw = await readVerifiedAssetBytes(asset, signal);
     return JSON.parse(new TextDecoder().decode(raw)) as T;
   }
-  const inline = await readActiveInlineAssetJson<T>(releaseId, relativePath, signal);
-  if (
-    !inline
-    || inline.sourceBytes !== expected.bytes
-    || inline.sourceSha256 !== expected.sha256
-  ) {
-    throw new Error("Supabase public asset is unavailable");
-  }
-  return inline.body;
+  throw new Error("Supabase public Storage asset is unavailable");
 }
 
 /** Load one immutable release asset from private Storage or the E2E fixture. */
