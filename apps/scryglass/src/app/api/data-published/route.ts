@@ -6,41 +6,17 @@ import {
   readJsonBody,
 } from "@/lib/chatApi";
 import { validPublishSecret, validReleaseId } from "@/lib/dataPublish";
+import { REVALIDATED_TARGETS } from "@/lib/revalidationTargets";
 import { PACK_MANIFEST_CACHE_TAG, readRemotePackManifest } from "@/lib/serverPack";
 
 export const runtime = "nodejs";
 
-const REVALIDATED_PATHS = [
-  "/",
-  "/elo",
-  "/matches",
-  "/tiers",
-  "/chat",
-  "/methodology",
-  "/packs/manifest.json",
-  "/rankings/tierlists.json",
-  "/rankings/tierlists-latest.json",
-  "/api/public-data/tierlists",
-  "/api/chat/compare_players",
-  "/api/chat/leaderboards",
-  "/api/chat/matches",
-  "/api/chat/methodology",
-  "/api/chat/navigation",
-  "/api/chat/player",
-  "/api/chat/query_champions",
-  "/api/chat/query_drafts",
-  "/api/chat/query_players",
-  "/api/chat/schedule",
-  "/api/chat/team",
-  "/api/chat/tier",
-] as const;
-
-const REVALIDATED_PATTERNS = [
-  "/elo/player/[player]",
-  "/elo/team/[team]",
-  "/matches/[game]",
-  "/api/assets/[...path]",
-] as const;
+// Next 16's runtime supports the `/route` cache target for App Router route
+// handlers, while its public type still lists only page and layout.
+const revalidateReleasePath = revalidatePath as unknown as (
+  path: string,
+  type: "layout" | "page" | "route",
+) => void;
 
 export async function POST(request: Request) {
   const limited = rateLimitResponse(request, "publish", PUBLISH_RATE_LIMIT);
@@ -61,8 +37,7 @@ export async function POST(request: Request) {
     );
   }
   revalidateTag(PACK_MANIFEST_CACHE_TAG, { expire: 0 });
-  for (const path of REVALIDATED_PATHS) revalidatePath(path);
-  for (const pattern of REVALIDATED_PATTERNS) revalidatePath(pattern, "page");
+  for (const target of REVALIDATED_TARGETS) revalidateReleasePath(target.path, target.type);
   const manifest = await readRemotePackManifest();
   const servedReleaseId = manifest.pack_id;
   const matches = servedReleaseId === body.release_id;
