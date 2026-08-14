@@ -47,8 +47,10 @@ REVIEWED_REMOVED_GAME_IDS: dict[str, str] = {
 STATE_SCHEMA = "scryglass:oe-local-cache-state:v1"
 TRANSFORM_VERSION = "oe-normalization:v2"
 REQUEST_TIMEOUT_SECONDS = 180.0
-WRITE_BATCH_SIZE = 100
-WRITE_CONCURRENCY = 8
+# Keep version writes below the Supabase statement budget. This matters during
+# a transform migration, when one unchanged source can rewrite the full cache.
+WRITE_BATCH_SIZE = 20
+WRITE_CONCURRENCY = 4
 READ_PAGE_SIZE = 1_000
 ROLE_ORDER = {"top": 0, "jng": 1, "mid": 2, "bot": 3, "sup": 4}
 SIDE_ORDER = {"Blue": 0, "Red": 1}
