@@ -107,6 +107,15 @@ returned 60 `200` responses and 5 edge denials. The edge action is `deny`, so
 the WAF response is `403`; requests that reach the application limiter keep
 the application `429` contract.
 
+## Protected main-branch checks
+
+Ruleset `20711858` is active on `refs/heads/main`. It requires these contexts:
+`app`, `rankings-data`, `Vercel`, `browser`, `Supabase clean replay`,
+`Workflow and shell security`, `elemental-drakes`, `CodeQL
+(javascript-typescript)`, `CodeQL (python)`, `Secret scan`, and `Dependency
+review`. The candidate PR remains blocked from merge while the full
+`rankings-data` run is pending.
+
 ## Ordered query and Storage cutover
 
 1. Merge and apply additive migrations `20260813010000` and `20260814010000`.
