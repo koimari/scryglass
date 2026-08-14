@@ -699,6 +699,16 @@ def _strip_columns(df: pd.DataFrame) -> pd.DataFrame:
 def _normalize_identity(frame: pd.DataFrame, *, players: bool) -> pd.DataFrame:
     """Team/champ aliases + dates only — do not drop or invent columns."""
     out = frame
+    if "patch" in out.columns:
+        # OE exports sometimes infer an all-numeric patch column as float when
+        # one row is blank. Keep the source token as text before it reaches the
+        # incremental Parquet cache. This preserves labels such as 16.16 and
+        # prevents mixed object columns from failing Arrow serialization.
+        patch = out["patch"].astype("string").str.strip()
+        out["patch"] = patch.mask(
+            patch.isna()
+            | patch.str.casefold().isin({"", "nan", "nat", "none", "<na>"})
+        )
     if "teamname" in out.columns:
         out["teamname"] = out["teamname"].map(
             lambda x: normalize_team(str(x)) if pd.notna(x) else x

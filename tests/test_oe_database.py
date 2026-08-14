@@ -200,6 +200,32 @@ def test_sync_is_incremental_idempotent_and_records_corrections(tmp_path: Path) 
     assert changed.iloc[0]["kills"] == 9
 
 
+def test_sync_normalizes_numeric_patch_tokens_before_parquet(tmp_path: Path) -> None:
+    path = tmp_path / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+    rows = _game_rows("game-1", "2026-08-11T10:00:00Z")
+    rows.extend(_game_rows("game-2", "2026-08-11T11:00:00Z"))
+    for row in rows:
+        row["patch"] = 16.16
+    pd.DataFrame(rows).to_csv(path, index=False)
+
+    result = oe_database.sync_csv(
+        path,
+        2026,
+        project_url="https://example.supabase.co",
+        secret_key="sb_secret_unused_in_fake_database",
+        parquet_dir=tmp_path / "parquet",
+        client=FakeDatabase(),
+    )
+
+    assert result["accepted_games"] == 2
+    players = pd.read_parquet(tmp_path / "parquet/oe_player_games.parquet")
+    teams = pd.read_parquet(tmp_path / "parquet/oe_team_games.parquet")
+    assert str(players["patch"].dtype) == "string"
+    assert str(teams["patch"].dtype) == "string"
+    assert set(players["patch"].dropna()) == {"16.16"}
+    assert set(teams["patch"].dropna()) == {"16.16"}
+
+
 def test_sync_rejects_disappearance_before_database_writes(tmp_path: Path) -> None:
     path = tmp_path / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
     _write_csv(path)
