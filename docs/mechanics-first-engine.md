@@ -12,7 +12,7 @@ The first bounded implementation is materialized locally:
   three legacy latest-checkpoint rows are preserved and reported rather than
   silently deleted;
 - one explicit Wiki packet and one exact client-source packet exist for each
-  discovered 2026 patch, 26.01 through 26.15; the client packets provide
+  tracked 2026 patch, 26.01 through 26.15; the client packets provide
   patch-pinned base-stat cells, while abilities, items, runes, and game-system
   execution remain semantic-only or blocked;
 - the typed transition kernel, deterministic event ordering, state hashes,
@@ -39,6 +39,12 @@ implemented and tested. The full exact-source matrix is preserved at
 patches have captured raw client packets and authority packets, with 26,993
 exact base-stat cells in total. This makes patch source available, but does
 not yet make the full game mechanics executable.
+
+The 26.16 CommunityDragon capture is recorded by
+`data/lol/v2/champions/lcc-atom-refresh-26.16-receipt.json`. Its raw packet is
+an ignored local cache until the source packet receives the same review as the
+tracked matrix. The receipt binds the 26.16 public label to the 16.16 client
+namespace and the atom bridge used for the Scryglass refresh.
 
 ## Current authority artifacts
 

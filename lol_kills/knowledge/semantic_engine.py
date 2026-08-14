@@ -36,6 +36,7 @@ from urllib.parse import quote
 from .lol_oracle import LeagueOracleEngine
 from .mechanics_engine import Combatant, Damage, Event, GameState, MechanicsEngine
 from .quick_mechanics_fastpack import compile_fastpack
+from ..v2.patch_identity import CURRENT_PUBLIC_PATCH
 
 
 SCHEMA_VERSION = "scryglass:semantic-oracle:v1"
@@ -487,7 +488,7 @@ class SemanticOracleEngine:
         issues: list[SemanticIssue] = []
         patch = fields.get("patch")
         if patch is None or patch == "":
-            slots.append(self._slot("patch", "string", "An exact patch is required; current is not a reproducible value.", "26.15"))
+            slots.append(self._slot("patch", "string", "An exact patch is required; current is not a reproducible value.", CURRENT_PUBLIC_PATCH))
             selected_oracle = self.oracle
         else:
             patch = str(patch).removeprefix("v")

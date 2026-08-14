@@ -23,6 +23,25 @@ must keep them distinguishable from empirical residuals and review-accepted
 ontology values, and must fail closed when the artifact or its pinned sources
 are unavailable.
 
+## Patch identity and the 26.16 refresh
+
+The public Riot patch label is `26.16`. The client-source namespace is
+`16.16`. Scryglass keeps both labels in every patch receipt. It never uses the
+client label as a public patch name.
+
+The 26.16 source receipt is
+`data/lol/v2/champions/lcc-atom-refresh-26.16-receipt.json`. It binds the
+CommunityDragon manifest, the 16.16.1 LCC source, the 173-champion atom bridge,
+and the LCC commit used to build it. The raw packet remains a local ignored
+cache. The receipt therefore proves the source capture and bridge input, not
+that the raw packet is part of the repository.
+
+The R9 depth-2, depth-3, depth-4, and state-space production features from the
+Scryglass Pi research sessions remain in the production scorer. Their current
+aggregate files are separate certified development artifacts. They are not
+silently relabelled as a 26.16 depth refresh until the full numeric corpus is
+rebuilt and evaluated against the 26.16 receipt.
+
 ## Architecture
 
 ```text
@@ -30,7 +49,7 @@ League Combat Calculator (external repo, read-only)
   data/atoms/atom-summary.json        champion x family presence index (173)
   data/atoms/classification-report.json  classifier totals, damage-type mix
   data/wiki-atoms/atom-relations.json    directed mechanic-interaction graph
-  data/atoms/<champion>.atoms.json       per-champion atom detail (7 tracked)
+  data/atoms/<champion>.atoms.json       per-champion atom detail (26.16: 173)
   data/champions.json                    identity, positions, roles, ratings
           |
           |  lol_kills/v2/champions/atoms/lcc_sources.py (pin by sha256)
@@ -40,7 +59,7 @@ League Combat Calculator (external repo, read-only)
     - atom profiles                (family presence + counts, damage-type mix,
                                     relations, LCC positions/roles/ratings)
     - mapping table                (55 curated atom -> dimension/label rows)
-    - family fallback              (7 presence-level rows for family-only data)
+    - family fallback              (used only when a source row lacks atom detail)
     - soft ontology prior          (weighted atom evidence per dimension,
                                     normalized, with evidence-derived
                                     uncertainty; unavailable when no evidence)
@@ -103,13 +122,11 @@ a measured zero (same rule as L5 lineup synergy).
 ## Current coverage
 
 - 173/173 champions profiled (identity crosswalk complete).
-- 7 champions with full atom detail (`atom_detail`): aatrox, anivia, kayle,
-  neeko, senna, thresh, vladimir.
+- 173/173 champions carry 26.16 atom detail from the refreshed LCC binary
+  extraction. This is mechanistic source data, not a reviewed game emulator.
 - 55 mapping rows, 7 family fallbacks, 20 relation edges (from
   atom-relations.json).
-- Damage-type mix available only for the 7 detail champions (LCC limitation:
-  `damage_type` null for most atoms in the binary path; wiki pages are the
-  fix, tracked by LCC as their next iteration).
+- Damage-type coverage remains source-dependent. Missing values stay null.
 
 ## Regeneration
 
@@ -159,7 +176,7 @@ Interpretation (adaptive development diagnostics, no authority):
 
 The bridge is the sanctioned zero-play prior path. `lol_kills/v2/champions/atoms/seed_ontology_v1.py`
 emits the full 173-champion ontology seed (`data/lol/v2/champions/champion-ontology-seed.json`)
-at patch **26.15**, one role profile per legal role:
+at patch **26.16**, one role profile per legal role:
 
 - available atom dimensions → mapped label probabilities with the bridge's
   dimension uncertainty (per label); unavailable dimensions → explicit
@@ -204,7 +221,7 @@ that treats the bridge as a champion-composition channel (not just a prior):
 1. Regenerate the full 173-champion `*.atoms.json` set (needs `data/bin`
    game binaries via `scripts/decompose_binaries.py` + `scripts/extract_atoms.py`)
    so every champion gets atom-level detail. LCC thread will ping when done.
-2. **Resolved 2026-08-07**: canonical data patch is **26.15** (wiki cache is
-   the authority; ddragon 16.15.1 is a stale CDN artifact). Pinned in bridge
-   provenance as `data_patch: 26.15` from `data/.champions.json.meta`.
+2. **Resolved 2026-08-13**: canonical data patch is **26.16**. The public
+   label is pinned separately from the `16.16` client namespace in the refresh
+   receipt and bridge provenance.
 3. Reciprocal mapping table in LCC for `analyze-champion`/`atomizer`.

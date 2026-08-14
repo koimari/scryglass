@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .quick_mechanics_fastpack import level_growth_multiplier
+from ..v2.patch_identity import CURRENT_PUBLIC_PATCH
 
 
 ADAPTIVE_SHARD_ATTACK_DAMAGE = 5.4
@@ -494,7 +495,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--index",
         type=Path,
         default=Path(
-            "data/lol/knowledge/patch-packets/cdragon/2026/26.15/mechanics-index.json"
+            f"data/lol/knowledge/patch-packets/cdragon/2026/{CURRENT_PUBLIC_PATCH}/mechanics-index.json"
         ),
     )
     parser.add_argument("--champion", default="Jax")

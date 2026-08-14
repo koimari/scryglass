@@ -1,0 +1,25 @@
+{
+  "schema_version": "scryglass:lcc-atom-refresh-receipt:v1",
+  "public_patch": "26.16",
+  "client_patch": "16.16",
+  "source_version": "16.16.1",
+  "source_root": "https://raw.communitydragon.org/16.16/",
+  "captured_at": "2026-08-13T23:42:02Z",
+  "communitydragon_manifest_sha256": "5d8686c8d255a917ac48d5711ff090dcfc3945f6b5c4152bb512f068c9943c39",
+  "communitydragon_manifest_file_sha256": "bab4a397f174ed2aecccd3ac5fc6d0db5e1b663fe8e686ad474fad7652cf6713",
+  "champion_summary_sha256": "caf42a58dea431cd62c7593852ece004371b58543dacd9919498e16b3c75dda2",
+  "items_sha256": "fcb6464532b8ab995766c2484837179d9dd7a38bc48ca9291c9d67b000be4a4f",
+  "base_champion_count": 173,
+  "captured_entity_count": 236,
+  "captured_file_count": 474,
+  "atom_bridge_artifact_sha256": "e5d37ddf4a20fcbdc1e2fc90fb0bd988be82b3563a8ec8bc3a21792313a239a8",
+  "lcc_commit": "5b0ad6eabc3396ea714a270e3d87ad1dc72c6fac",
+  "raw_packet_retained": false,
+  "raw_packet_path_ignored": true,
+  "claim_ceiling": {
+    "exact_source": true,
+    "full_game_emulation": false,
+    "prediction": false,
+    "publication": false
+  }
+}
