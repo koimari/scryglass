@@ -41,15 +41,15 @@ for version in \
 do
   npx supabase migration repair --linked --status applied "${version}"
 done
-npx supabase db push --linked --dry-run
-npx supabase db push --linked
-npx supabase migration list --linked
+PHASE_DIR="$(python tools/prepare_supabase_phase.py --phase additive)"
+npx supabase migration list --linked --workdir "${PHASE_DIR}"
+npx supabase db push --linked --workdir "${PHASE_DIR}" --dry-run
 ```
 
 The current worker needs migrations `20260811174735` and `20260811193000`. Keep the old worker commit active until both appear in the remote list.
 After those historical migrations, use the phase-specific commands below. A
-general database push from a checkout that contains more than one cutover phase
-is prohibited.
+database push from the full repository is prohibited. Every push must use the
+derived phase workdir, and the dry run must show only the intended phase.
 
 ## Worker update
 

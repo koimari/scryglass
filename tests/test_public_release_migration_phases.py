@@ -62,6 +62,13 @@ def test_phase_workdir_excludes_later_migrations() -> None:
     assert "npx supabase db push --linked\n" not in bounded
 
 
+def test_runbook_never_pushes_all_cutover_phases_from_the_repository() -> None:
+    runbook = (ROOT / "docs/public-refresh-runbook.md").read_text(encoding="utf-8")
+    assert "npx supabase db push --linked\n" not in runbook
+    assert runbook.index("--phase additive") < runbook.index("--phase storage")
+    assert runbook.index("--phase storage") < runbook.index("--phase strict")
+
+
 def test_phase_two_keeps_compatibility_reads_and_phase_three_removes_them() -> None:
     phase_two = (
         MIGRATIONS / "20260814160000_private_storage_phase.sql"
