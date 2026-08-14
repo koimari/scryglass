@@ -13,7 +13,7 @@ from lol_kills.v2.champions.atoms.bridge_v1 import (
     build_bridge_payload,
 )
 from lol_kills.v2.champions.atoms.consume import AtomBridge, AtomBridgeError
-from lol_kills.v2.champions.atoms.lcc_sources import LccSources
+from lol_kills.v2.champions.atoms.lcc_sources import LccSources, PATCH_MARKER_FILE
 from lol_kills.v2.champions.atoms.mapping_v1 import FAMILY_FALLBACK_V1, MAPPING_V1
 from lol_kills.v2.champions.atoms.schema import (
     BRIDGE_SCHEMA_ID,
@@ -177,3 +177,33 @@ def test_git_head_passes_repo_as_one_subprocess_argument(monkeypatch, tmp_path):
     assert LccSources(repo)._git_head() == "a" * 40
     assert observed["args"] == ["git", "-C", str(repo.resolve()), "rev-parse", "HEAD"]
     assert observed["kwargs"]["check"] is False
+
+
+def test_patch_provenance_needs_an_explicit_namespace() -> None:
+    sources = object.__new__(LccSources)
+    sources.repo = Path("/tmp/lcc")
+    sources.commit = None
+    sources.files = {}
+    sources.payloads = {
+        PATCH_MARKER_FILE: {"fetched_at": "1786000000000"}
+    }
+
+    provenance = sources.source_provenance()
+
+    assert provenance["data_patch"] == "unknown"
+    assert provenance["client_patch"] == "unknown"
+
+
+def test_patch_provenance_maps_16_16_source_to_public_26_16() -> None:
+    sources = object.__new__(LccSources)
+    sources.repo = Path("/tmp/lcc")
+    sources.commit = None
+    sources.files = {}
+    sources.payloads = {
+        PATCH_MARKER_FILE: {"source_version": "16.16.1"}
+    }
+
+    provenance = sources.source_provenance()
+
+    assert provenance["data_patch"] == "26.16"
+    assert provenance["client_patch"] == "16.16"
