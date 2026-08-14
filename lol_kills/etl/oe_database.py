@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from lol_kills.etl.oe_ingest import (
+    _normalize_patch_column,
     _validate_oe_csv,
     parse_oe_csv,
     validate_accepted_source_receipt,
@@ -44,7 +45,7 @@ REVIEWED_REMOVED_GAME_IDS: dict[str, str] = {
     "LOLTMNT01_442514": "oe-revision-2026-08-12: ljl series re-identified",
 }
 STATE_SCHEMA = "scryglass:oe-local-cache-state:v1"
-TRANSFORM_VERSION = "oe-normalization:v1"
+TRANSFORM_VERSION = "oe-normalization:v2"
 REQUEST_TIMEOUT_SECONDS = 180.0
 WRITE_BATCH_SIZE = 100
 WRITE_CONCURRENCY = 8
@@ -434,11 +435,18 @@ def _canonical_order(frame: pd.DataFrame, *, by_role: bool) -> pd.DataFrame:
 
 def _clean_text_values(series: pd.Series) -> np.ndarray:
     """Object array of stripped strings; None for empty or 'nan' values."""
-    values = series.astype(str).to_numpy()
+    values = series.to_numpy(dtype=object)
     out = np.empty(len(values), dtype=object)
     for index, value in enumerate(values):
-        cleaned = value.strip()
-        out[index] = None if (not cleaned or cleaned.casefold() == "nan") else cleaned
+        if value is None or pd.isna(value):
+            out[index] = None
+            continue
+        cleaned = str(value).strip()
+        out[index] = (
+            None
+            if (not cleaned or cleaned.casefold() in {"nan", "nat", "none", "<na>"})
+            else cleaned
+        )
     return out
 
 
@@ -945,8 +953,16 @@ def update_local_cache(prepared: PreparedImport, parquet_dir: Path) -> dict[str,
     player_path = parquet_dir / "oe_player_games.parquet"
     state_path = parquet_dir / "oe_incremental_state.json"
     meta_path = parquet_dir / "oe_meta.json"
-    cached_team = pd.read_parquet(team_path) if team_path.is_file() else pd.DataFrame()
-    cached_players = pd.read_parquet(player_path) if player_path.is_file() else pd.DataFrame()
+    cached_team = (
+        _normalize_patch_column(pd.read_parquet(team_path))
+        if team_path.is_file()
+        else pd.DataFrame()
+    )
+    cached_players = (
+        _normalize_patch_column(pd.read_parquet(player_path))
+        if player_path.is_file()
+        else pd.DataFrame()
+    )
     state = _load_json(state_path)
     years = state.get("years") if isinstance(state.get("years"), dict) else {}
     prior_year = years.get(str(prepared.year)) if isinstance(years, dict) else None

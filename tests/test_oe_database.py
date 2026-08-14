@@ -226,6 +226,58 @@ def test_sync_normalizes_numeric_patch_tokens_before_parquet(tmp_path: Path) -> 
     assert set(teams["patch"].dropna()) == {"16.16"}
 
 
+def test_sync_rewrites_legacy_numeric_patch_cache_and_accepts_blank_patch(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+    rows = _game_rows("game-1", "2026-08-11T10:00:00Z")
+    rows.extend(_game_rows("game-2", "2026-08-11T11:00:00Z"))
+    for row in rows:
+        row["patch"] = 16.15 if row["gameid"] == "game-1" else None
+    pd.DataFrame(rows).to_csv(path, index=False)
+    parquet = tmp_path / "parquet"
+    database = FakeDatabase()
+
+    result = oe_database.sync_csv(
+        path,
+        2026,
+        project_url="https://example.supabase.co",
+        secret_key="sb_secret_unused_in_fake_database",
+        parquet_dir=parquet,
+        client=database,
+    )
+
+    assert result["accepted_games"] == 2
+    players = pd.read_parquet(parquet / "oe_player_games.parquet")
+    teams = pd.read_parquet(parquet / "oe_team_games.parquet")
+    assert str(players["patch"].dtype) == "string"
+    assert str(teams["patch"].dtype) == "string"
+    assert set(players["patch"].dropna()) == {"16.15"}
+
+    # Simulate a pre-v2 cache. The next source pass must normalize it before
+    # concatenating replacement rows.
+    players["patch"] = players["patch"].astype(float)
+    teams["patch"] = teams["patch"].astype(float)
+    players.to_parquet(parquet / "oe_player_games.parquet", index=False)
+    teams.to_parquet(parquet / "oe_team_games.parquet", index=False)
+    frame = pd.read_csv(path)
+    frame.loc[frame["gameid"].eq("game-2"), "kills"] = 9
+    frame.to_csv(path, index=False)
+
+    corrected = oe_database.sync_csv(
+        path,
+        2026,
+        project_url="https://example.supabase.co",
+        secret_key="sb_secret_unused_in_fake_database",
+        parquet_dir=parquet,
+        client=database,
+    )
+
+    assert corrected["corrected_games"] == 1
+    players = pd.read_parquet(parquet / "oe_player_games.parquet")
+    assert str(players["patch"].dtype) == "string"
+
+
 def test_sync_rejects_disappearance_before_database_writes(tmp_path: Path) -> None:
     path = tmp_path / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
     _write_csv(path)
