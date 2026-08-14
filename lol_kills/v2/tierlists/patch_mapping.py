@@ -71,6 +71,27 @@ def normalize_oe_token(value: object) -> str:
     return f"{match.group('major')}.{canonical_minor}"
 
 
+def _live_oe_token_candidates(value: object) -> tuple[str, ...]:
+    """Return safe aliases for a one-digit OE token from a float-like export.
+
+    OE has used both ``15.1`` for patch ``15.10`` and ``16.2`` for patch
+    ``16.02``.  The raw token has lost the leading zero, so the normalizer
+    keeps its historical trailing-zero behavior for public callers.  Live
+    binding may also try the zero-padded spelling, but only when that exact
+    spelling exists in the audited sidecar.
+    """
+
+    normalized = normalize_oe_token(value)
+    candidates = [normalized]
+    text = str(value).strip()
+    match = OE_TOKEN_RE.fullmatch(text)
+    if match is not None and len(match.group("minor")) == 1:
+        padded = f"{match.group('major')}.{match.group('minor').zfill(2)}"
+        if padded not in candidates:
+            candidates.append(padded)
+    return tuple(candidates)
+
+
 def _parse_utc(value: object, *, field: str) -> datetime:
     text = str(value or "").strip()
     if not text:
@@ -333,14 +354,20 @@ def _live_source_binding(
     if (conflicts["date_count"] > 1).any() or (conflicts["patch_count"] > 1).any():
         raise PatchMappingError("OE live source has a game with conflicting date or patch tokens")
     games = unique_games.drop_duplicates("source_game_key").copy()
+    known_tokens = {
+        str(row.get("oe_token"))
+        for row in payload.get("mappings", [])
+        if isinstance(row, Mapping)
+    }
     normalized_tokens: list[str] = []
     for value in games["patch"].tolist():
         try:
-            normalized_tokens.append(normalize_oe_token(value))
+            candidates = _live_oe_token_candidates(value)
         except PatchMappingError as exc:
             raise PatchMappingError(f"OE live source has a malformed patch token: {value!r}") from exc
+        matched = next((candidate for candidate in candidates if candidate in known_tokens), None)
+        normalized_tokens.append(matched or candidates[0])
     games["oe_token"] = normalized_tokens
-    known_tokens = {str(row.get("oe_token")) for row in payload.get("mappings", []) if isinstance(row, Mapping)}
     unknown_tokens = sorted(set(games["oe_token"]) - known_tokens)
     if unknown_tokens:
         raise PatchMappingError(
