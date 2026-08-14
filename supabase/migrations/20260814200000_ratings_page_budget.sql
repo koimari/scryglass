@@ -18,8 +18,9 @@ begin
     raise exception 'Scryglass private ratings function is missing';
   end if;
 
-  if pg_catalog.position(
-    'least(greatest(coalesce(p_limit, 20), 1), 100)' in function_definition
+  if pg_catalog.strpos(
+    function_definition,
+    'least(greatest(coalesce(p_limit, 20), 1), 100)'
   ) > 0 then
     return;
   end if;
