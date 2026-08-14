@@ -83,10 +83,12 @@ The Production and Development Vercel values for `SCRYGLASS_SUPABASE_URL` and `S
 
 The regional refresh completed as a deferred production build in the worker
 runtime. Receipt
-`tierlist-live-refresh-20260814T032716887375Z-898104ca0bcf88e7.json` records
+`tierlist-live-refresh-20260814T042036200243Z-898104ca0bcf88e7.json` records
 17,483 replayed maps, a 1,162-map live window, 195 cells, 7,544 rows, and 970
-regional views across 39 scopes. Its production index digest is
-`2a9ebe414cafa089fbd2572149b127276db5458e3422b9327b27c8be64d3a555`. The
+regional views across 39 scopes. Its production index artifact is
+`7a9e1248761d11f3262e761b6839add43b2e3b917e2a948ef4c0011bc57c1d08`; the
+raw index digest is
+`f133c534267fbae446f0d86a4f1955752cd33ff5f99f43325fe4d1e180e12960`. The
 latest accepted source is public patch `26.15`; the output contains no
 client-only `16.xx` labels. Publication stays deferred until the ordered
 release checks pass.

@@ -803,7 +803,7 @@ class SupabasePublicData:
             raise SupabasePublicationError("Supabase activation response is malformed")
         return result
 
-    def restore(self, release_id: str) -> dict[str, Any]:
+    def restore(self, release_id: str, *, _recover: bool = True) -> dict[str, Any]:
         release_id = _rollback_release_id(release_id)
         candidate = self.release(release_id)
         manifest = candidate.get("manifest") if isinstance(candidate, dict) else None
@@ -882,17 +882,33 @@ class SupabasePublicData:
         )
         if not isinstance(result, dict) or result.get("release_id") != release_id:
             raise SupabasePublicationError("Supabase rollback response is malformed")
-        _verify_active_release(
-            self,
-            release_id,
-            expected_assets,
-            verify_storage_content=False,
-        )
-        _verify_query_receipts(
-            self,
-            release_id,
-            query_api if isinstance(query_api, dict) else None,
-        )
+        try:
+            # The target was checked before the transition. Check the bytes
+            # again after it becomes active. A superseded Storage object may
+            # have changed while the transition waited for its database lock.
+            _verify_active_release(
+                self,
+                release_id,
+                expected_assets,
+                verify_storage_content=True,
+            )
+            _verify_query_receipts(
+                self,
+                release_id,
+                query_api if isinstance(query_api, dict) else None,
+            )
+        except Exception:
+            replaced_release_id = result.get("replaced_release_id") or result.get(
+                "previous_release_id"
+            )
+            if _recover and isinstance(replaced_release_id, str) and replaced_release_id:
+                try:
+                    self.restore(replaced_release_id, _recover=False)
+                except Exception as recovery_error:
+                    raise SupabasePublicationError(
+                        "Supabase rollback readback failed and recovery failed"
+                    ) from recovery_error
+            raise
         return result
 
     def prune(self, keep: int = 3) -> int:

@@ -584,6 +584,89 @@ def test_post_activation_readback_failure_restores_previous_release() -> None:
         assert database.releases[old_release]["status"] == "active"
 
 
+def test_restore_rechecks_storage_and_recovers_previous_release(monkeypatch) -> None:
+    target = "v2026.08.13.183000"
+    previous = "v2026.08.12.221135"
+    path = "features/schedule.json"
+    sha256 = "a" * 64
+    active = {"release_id": previous}
+
+    def manifest(release_id: str) -> dict[str, object]:
+        return {
+            "pack_id": release_id,
+            "draft_authority": {
+                "schema_version": "scryglass:draft-authority:v1",
+                "status": "unavailable",
+                "release_id": release_id,
+            },
+            "files": [{"path": path, "bytes": 1, "sha256": sha256}],
+            "release": {
+                "release_id": release_id,
+                "artifact_hashes": {path: sha256},
+            },
+        }
+
+    client = supabase_publication.SupabasePublicData(
+        "https://example.supabase.co",
+        "sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    client.release = lambda release_id: {
+        "release_id": release_id,
+        "status": "active" if active["release_id"] == release_id else "superseded",
+        "manifest": manifest(release_id),
+    }  # type: ignore[method-assign]
+    client.asset_metadata = lambda _release_id: {path: {}}  # type: ignore[method-assign]
+    client.query_receipts = lambda _release_id: {}  # type: ignore[method-assign]
+
+    def restore_request(method, request_path, payload=None, **_kwargs):
+        assert method == "POST"
+        assert request_path == "rpc/restore_scryglass_public_release"
+        restored = payload["p_release_id"]
+        replaced = active["release_id"]
+        active["release_id"] = restored
+        return {
+            "status": "restored",
+            "release_id": restored,
+            "replaced_release_id": replaced,
+        }
+
+    client._request = restore_request  # type: ignore[method-assign]
+    verify_calls = []
+
+    monkeypatch.setattr(
+        supabase_publication,
+        "_verify_release_assets",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        supabase_publication,
+        "_verify_query_receipts",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def verify_active(_client, release_id, _assets, *, verify_storage_content):
+        verify_calls.append((release_id, verify_storage_content))
+        if release_id == target:
+            raise supabase_publication.SupabasePublicationError(
+                "Supabase Storage checksum changed after restore"
+            )
+
+    monkeypatch.setattr(
+        supabase_publication,
+        "_verify_active_release",
+        verify_active,
+    )
+
+    with pytest.raises(
+        supabase_publication.SupabasePublicationError,
+        match="checksum changed after restore",
+    ):
+        client.restore(target)
+
+    assert active["release_id"] == previous
+    assert verify_calls == [(target, True), (previous, True)]
+
+
 def test_client_repr_redacts_secret_key() -> None:
     client = supabase_publication.SupabasePublicData(
         "https://example.supabase.co",
