@@ -1266,7 +1266,7 @@ def build_pooled_candidate(
     latest_prepared = max(prepared, key=lambda game: (game["date"], game["game_id"]))
     current_patch_verified = (
         mapping is not None
-        and latest_prepared.get("atom_snapshot_patch") == CURRENT_PUBLIC_PATCH
+        and any(game.get("atom_snapshot_patch") == CURRENT_PUBLIC_PATCH for game in prepared)
         and CURRENT_PUBLIC_PATCH in resolvers
     )
 

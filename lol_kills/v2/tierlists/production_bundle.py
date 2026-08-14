@@ -172,7 +172,13 @@ def _image_url(champion_id: str) -> str | None:
     return f"https://cdn.communitydragon.org/latest/champion/{match.group(1)}/square"
 
 
-def _atom_bridge_path(root: Path, locator: str | None = None) -> Path:
+def _atom_bridge_path(
+    root: Path,
+    locator: str | None = None,
+    *,
+    expected_artifact_sha256: str | None = None,
+    expected_raw_sha256: str | None = None,
+) -> Path:
     selected = str(locator or ATOM_BRIDGE_LOCATOR)
     allowed = {str(value) for value in ATOM_BRIDGE_LOCATORS.values()}
     if selected not in allowed:
@@ -190,6 +196,10 @@ def _atom_bridge_path(root: Path, locator: str | None = None) -> Path:
     )
     if bridge.provenance.get("data_patch") != expected_patch:
         raise ProductionBundleError("candidate atom bridge patch provenance is inconsistent")
+    if expected_artifact_sha256 is not None and bridge.artifact_sha256 != expected_artifact_sha256:
+        raise ProductionBundleError("candidate atom bridge artifact digest changed")
+    if expected_raw_sha256 is not None and _sha256_path(path) != expected_raw_sha256:
+        raise ProductionBundleError("candidate atom bridge raw digest changed")
     return path
 
 
@@ -197,9 +207,18 @@ def _public_structural_similarity(
     root: Path,
     *,
     bridge_locator: str | None = None,
+    expected_artifact_sha256: str | None = None,
+    expected_raw_sha256: str | None = None,
 ) -> dict[str, Any]:
     library = build_structural_similarity(
-        AtomBridge.load(_atom_bridge_path(root, bridge_locator))
+        AtomBridge.load(
+            _atom_bridge_path(
+                root,
+                bridge_locator,
+                expected_artifact_sha256=expected_artifact_sha256,
+                expected_raw_sha256=expected_raw_sha256,
+            )
+        )
     )
     for profile in library["champions"]:
         profile["champion_image_url"] = _image_url(profile["champion_id"])
@@ -656,14 +675,15 @@ def _source_tree_sha256(
     code_root: Path | None = None,
     atom_bridge_locator: str | None = None,
 ) -> str:
+    repo_root = root.resolve()
     source_root = code_root or _installed_code_root()
     selected_bridge = str(atom_bridge_locator or ATOM_BRIDGE_LOCATOR)
     if selected_bridge not in {str(value) for value in ATOM_BRIDGE_LOCATORS.values()}:
         raise ProductionBundleError("candidate atom bridge locator is not allowlisted")
-    atom_bridge_path = (root / selected_bridge).resolve()
-    if root.resolve() not in atom_bridge_path.parents or not atom_bridge_path.is_file():
+    atom_bridge_path = (repo_root / selected_bridge).resolve()
+    if repo_root not in atom_bridge_path.parents or not atom_bridge_path.is_file():
         raise ProductionBundleError("candidate atom bridge path is unavailable")
-    atom_bridge_relative = atom_bridge_path.relative_to(root).as_posix()
+    atom_bridge_relative = atom_bridge_path.relative_to(repo_root).as_posix()
     paths = {
         CANDIDATE_LOCATOR.as_posix(): _sha256_path(root / CANDIDATE_LOCATOR),
         EVALUATION_LOCATOR.as_posix(): _sha256_path(root / EVALUATION_LOCATOR),
@@ -722,6 +742,8 @@ def write_production_bundle(
     structural_similarity = _public_structural_similarity(
         repo_root,
         bridge_locator=str(index.get("patch_ingestion", {}).get("atom_bridge_locator") or ATOM_BRIDGE_LOCATOR),
+        expected_artifact_sha256=index.get("patch_ingestion", {}).get("atom_bridge_artifact_sha256"),
+        expected_raw_sha256=index.get("patch_ingestion", {}).get("atom_bridge_raw_sha256"),
     )
     for meta in index["cells"]:
         cell_raw = cell_bytes[f"production/cells/{Path(str(meta['locator'])).name}"]
