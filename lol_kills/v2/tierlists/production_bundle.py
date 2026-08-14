@@ -144,6 +144,15 @@ def _public_patch_scope_id(scope_id: object, source_patch: object, patch_id: str
     return value
 
 
+def _public_scope_label(value: object, patch_id: str) -> str:
+    """Keep patch labels in the public Riot namespace."""
+
+    text = str(value or "").strip()
+    if text.casefold().startswith("patch "):
+        return f"Patch {_public_patch_label(text[6:])}"
+    return text
+
+
 def _cell_patch(cell: Mapping[str, Any]) -> str:
     patches = [str(value) for value in cell.get("patches", []) if isinstance(value, str)]
     valid = [_public_patch_label(value) for value in patches if _patch_key(value) != (-1, -1)]
@@ -523,7 +532,7 @@ def build_production_index(
             "scope": {
                 "scope_id": scope_id,
                 "scope_kind": source_cell["scope_kind"],
-                "scope_label": source_cell.get("scope_label"),
+                "scope_label": _public_scope_label(source_cell.get("scope_label"), patch_id),
                 "region": source_cell.get("region"),
                 "league": source_cell.get("league"),
                 "event_kind": source_cell.get("event_kind"),

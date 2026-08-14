@@ -15,6 +15,7 @@ from lol_kills.v2.tierlists.production_bundle import (
     ProductionBundleError,
     _public_structural_similarity,
     _cell_patch,
+    _public_scope_label,
     _public_patch_scope_id,
     _require_public_source_mode,
     _source_tree_sha256,
@@ -39,6 +40,7 @@ def test_public_bundle_uses_riot_patch_namespace_and_scope_ids() -> None:
     assert _cell_patch({"patches": ["16.15"]}) == "26.15"
     assert _cell_patch({"patches": ["16.16"]}) == "26.16"
     assert _public_patch_scope_id("patch:16.16", "16.16", "26.16") == "patch:26.16"
+    assert _public_scope_label("Patch 16.15", "26.15") == "Patch 26.15"
 
 
 def test_source_tree_reads_code_from_the_worker_checkout(tmp_path: Path) -> None:
