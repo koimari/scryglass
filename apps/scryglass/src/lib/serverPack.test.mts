@@ -318,7 +318,6 @@ test("private Storage reads require matching custom metadata and publishable-key
     }
     return new Response(RAW, {
       headers: {
-        "content-length": String(RAW.byteLength),
         "content-type": "application/json",
       },
     });
