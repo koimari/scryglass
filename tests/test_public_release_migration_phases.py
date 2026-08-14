@@ -19,6 +19,7 @@ def test_migrations_are_split_into_ordered_cutover_phases() -> None:
         "20260814135746_supabase_advisor_cleanup.sql",
         "20260814135848_restore_fk_indexes.sql",
         "20260814160000_private_storage_phase.sql",
+        "20260814161000_oe_import_patch_receipts.sql",
         "20260814170000_strict_public_cutover.sql",
     ]
 
@@ -74,6 +75,15 @@ def test_staging_cleanup_is_locked_and_service_only() -> None:
         "create or replace function public.discard_scryglass_staging_release",
         1,
     )[1]
+
+
+def test_live_oe_import_schema_drift_is_forward_compatible() -> None:
+    migration = (
+        MIGRATIONS / "20260814161000_oe_import_patch_receipts.sql"
+    ).read_text(encoding="utf-8")
+    assert "add column if not exists riot_patch_receipts integer not null default 0" in migration
+    assert "scryglass_oe_imports_riot_patch_receipts_check" in migration
+    assert "oe-normalization:v3" in migration
 
 
 def test_supabase_advisor_cleanup_keeps_public_wrappers_and_private_tables() -> None:
