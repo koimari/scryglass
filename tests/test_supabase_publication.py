@@ -836,24 +836,20 @@ def test_database_allowlist_matches_publication_contract() -> None:
     assert "'features/schedule.json'" not in required_section
 
 
-def test_final_publication_migration_closes_storage_and_function_boundaries() -> None:
-    migration = "\n".join(
-        [
-            (
-                ROOT / "supabase/migrations/20260814020000_private_storage_phase.sql"
-            ).read_text(encoding="utf-8"),
-            (
-                ROOT / "supabase/migrations/20260814030000_strict_public_cutover.sql"
-            ).read_text(encoding="utf-8"),
-        ]
-    ).lower()
+def test_phase_one_publication_migration_keeps_compatibility_boundaries() -> None:
+    migration = (
+        ROOT
+        / "supabase/migrations/20260813010000_public_release_security_hardening.sql"
+    ).read_text(encoding="utf-8").lower()
 
-    assert "set public = false" in migration
     assert 'create policy "read active scryglass storage assets"' in migration
-    assert "active scryglass storage objects are immutable" in migration
-    assert "revoke all on public.scryglass_public_releases" in migration
-    assert "revoke all on public.scryglass_public_assets" in migration
-    assert "drop function if exists public.get_scryglass_active_inline_asset(text, text)" in migration
+    assert "release.status = 'active'" in migration
+    assert "asset.storage_path = storage.objects.name" in migration
+    assert "body is null" in migration
+    assert "artifact_hashes" in migration
+    assert "grant select on public.scryglass_public_releases to anon, authenticated" in migration
+    assert "grant select on public.scryglass_public_assets to anon, authenticated" in migration
+    assert "set public = false" not in migration
 
 
 def test_quarantine_reason_migration_keeps_details_private() -> None:
