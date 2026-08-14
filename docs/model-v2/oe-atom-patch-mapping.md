@@ -58,9 +58,13 @@ The resolver requires an `as_of` timestamp. The timestamp must be inside the
 current source interval and after the official release time.
 
 The official resolver returns `26.15` for `16.15` and `26.14` for `16.14`.
-The atom resolver returns `26.15` only for the current `16.15` row. The bridge
-contains one atom snapshot. Older rows have exact official evidence and an
-explicit `atom_snapshot_unavailable` status.
+The sidecar's registered atom snapshot returns `26.15` only for the current
+`16.15` row. The refreshed bridge source receipt now records public patch
+`26.16` and client source `16.16`, but the sidecar does not register an OE
+`16.16` atom interval yet. `resolve_atom_snapshot_patch("16.16", ...)`
+therefore stays unavailable until a current OE interval and official patch
+evidence are captured. Older rows have exact official evidence and an explicit
+`atom_snapshot_unavailable` status.
 
 Unknown tokens, malformed tokens, changed static hashes, missing evidence,
 missing timestamps, and unavailable atom snapshots return `None` or an
