@@ -13,7 +13,11 @@ from lol_kills.v2.champions.atoms.bridge_v1 import (
     build_bridge_payload,
 )
 from lol_kills.v2.champions.atoms.consume import AtomBridge, AtomBridgeError
-from lol_kills.v2.champions.atoms.lcc_sources import LccSources, PATCH_MARKER_FILE
+from lol_kills.v2.champions.atoms.lcc_sources import (
+    DEFAULT_LCC_REPO,
+    LccSources,
+    PATCH_MARKER_FILE,
+)
 from lol_kills.v2.champions.atoms.mapping_v1 import FAMILY_FALLBACK_V1, MAPPING_V1
 from lol_kills.v2.champions.atoms.schema import (
     BRIDGE_SCHEMA_ID,
@@ -139,6 +143,11 @@ def test_consume_rejects_tampered_artifact(tmp_path):
         AtomBridge.load(path)
 
 
+@pytest.mark.skipif(
+    not (DEFAULT_LCC_REPO / ".git").exists()
+    and not (DEFAULT_LCC_REPO / "data").exists(),
+    reason="private LCC artifact bundle is not mounted",
+)
 def test_builder_is_reproducible_from_pinned_sources():
     sources = _sources()
     payload = build_bridge_payload(sources)

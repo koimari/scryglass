@@ -13,9 +13,11 @@ guards, and retired-asset controls. The target list is explicit in
 
 The complete private research suite remains a separate gate. It must run twice
 from the hashed Python environment after the approved artifact bundle is
-mounted at the repository paths declared by each receipt. A missing bundle is
-an unavailable research result. It is not replaced with a synthetic file and
-it does not grant authority to any public route.
+mounted at the repository paths declared by each receipt. The pinned LCC
+bridge rebuild skips with an explicit unavailable result when that bundle is
+not mounted. The private job must run it after the bundle is mounted. A
+missing bundle is not replaced with a synthetic file and it does not grant
+authority to any public route.
 
 Production remains on HOLD until the private suite has a recorded receipt and
 the public release receipt has aligned source, worker, release, manifest, and
