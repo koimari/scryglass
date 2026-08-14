@@ -1,5 +1,5 @@
 begin;
-select plan(43);
+select plan(44);
 
 select is(
   (select public from storage.buckets where id = 'scryglass-public'),
@@ -383,7 +383,7 @@ select lives_ok(
       release_id, status, manifest, source_as_of
     ) select
       'v2026.08.12.120000',
-      'superseded',
+      'staging',
       pg_catalog.jsonb_set(
         pg_catalog.jsonb_set(
           pg_catalog.jsonb_set(
@@ -401,7 +401,7 @@ select lives_ok(
     from public.scryglass_public_releases
     where release_id = 'v2026.08.13.120000'
   $$,
-  'a superseded rollback target can be staged for the test'
+  'a complete rollback target can be staged for the test'
 );
 
 insert into public.scryglass_public_assets (
@@ -434,12 +434,18 @@ from public.scryglass_public_assets
 where release_id = 'v2026.08.12.120000';
 
 select is(
-  public.restore_scryglass_public_release('v2026.08.12.120000') ->> 'status',
+  public.activate_scryglass_public_release('v2026.08.12.120000') ->> 'status',
+  'active',
+  'a complete rollback target can be activated through the transition function'
+);
+
+select is(
+  public.restore_scryglass_public_release('v2026.08.13.120000') ->> 'status',
   'restored',
   'restore promotes the selected prior release'
 );
 select is(
-  (select status from public.scryglass_public_releases where release_id = 'v2026.08.12.120000'),
+  (select status from public.scryglass_public_releases where release_id = 'v2026.08.13.120000'),
   'active',
   'restore leaves the prior release active'
 );
