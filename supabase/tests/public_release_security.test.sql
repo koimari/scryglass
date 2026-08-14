@@ -45,7 +45,7 @@ select ok(
   'service role can write staging asset metadata'
 );
 select ok(
-  not has_table_privilege('service_role', 'public.scryglass_public_releases', 'update(status)'),
+  not has_column_privilege('service_role', 'public.scryglass_public_releases', 'status', 'update'),
   'service role cannot change release status directly'
 );
 select ok(
