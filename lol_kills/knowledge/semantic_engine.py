@@ -493,7 +493,7 @@ class SemanticOracleEngine:
         else:
             patch = str(patch).removeprefix("v")
             if not re.fullmatch(r"\d{1,3}\.\d{1,3}", patch):
-                issues.append(SemanticIssue("invalid_patch_format", "patch must look like major.minor, for example 26.15", "patch"))
+                issues.append(SemanticIssue("invalid_patch_format", "patch must look like major.minor, for example 26.16", "patch"))
                 selected_oracle = None
             elif patch not in self._patch_indices and patch != str(self.oracle.patch):
                 issues.append(SemanticIssue("patch_not_available", f"patch {patch} is not present in the local exact packet registry", "patch"))
