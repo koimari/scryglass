@@ -445,6 +445,7 @@ def test_database_migration_keeps_oe_tables_private() -> None:
     assert "grant select, insert on public.scryglass_oe_game_versions to service_role" in migration
     assert "scryglass_oe_games_version_fk_idx" in migration
     assert "transform_version" in migration
+    assert "riot_patch_receipts" in migration
 
 
 def test_client_repr_redacts_secret_key() -> None:

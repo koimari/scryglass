@@ -123,9 +123,32 @@ def _entity_type(row: Mapping[str, Any]) -> str:
     return value
 
 
-def _entity_id(entity_type: str, name: str) -> str:
-    digest = hashlib.sha256(f"{entity_type}\0{name.casefold()}".encode("utf-8")).hexdigest()
-    return f"{entity_type}:{digest[:20]}"
+def _source_entity_ref(row: Mapping[str, Any]) -> str | None:
+    entity_type = _entity_type(row)
+    names = (
+        "entity_id",
+        "entityId",
+        "stable_entity_id",
+        "stable_id",
+        "player_id" if entity_type == "player" else "team_id",
+        "playerid" if entity_type == "player" else "teamid",
+        "playerId" if entity_type == "player" else "teamId",
+    )
+    for name in names:
+        value = row.get(name)
+        if value in (None, ""):
+            continue
+        text = str(value).strip()
+        if text and len(text) <= 200:
+            return text
+    return None
+
+
+def _entity_id(entity_type: str, name: str, source_ref: str | None = None) -> tuple[str, str]:
+    identity = source_ref if source_ref is not None else name.casefold()
+    identity_source = "canonical_id" if source_ref is not None else "display_name_fallback"
+    digest = hashlib.sha256(f"{entity_type}\0{identity}".encode("utf-8")).hexdigest()
+    return f"{entity_type}:{digest[:20]}", identity_source
 
 
 def _family_counts(profile: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -198,19 +221,22 @@ def build_entity_atom_profiles(
     for row_number, row in enumerate(source_rows, start=1):
         entity_type = _entity_type(row)
         name = _entity_name(row)
+        source_ref = _source_entity_ref(row)
         champion_ref = _champion_ref(row)
         if champion_ref in (None, ""):
             raise EntityAtomProfileError(f"source row {row_number} has no champion")
         games = _finite(row.get("games"), f"source row {row_number}.games", minimum=0.0)
         if games <= 0:
             raise EntityAtomProfileError(f"source row {row_number}.games must be positive")
-        key = _entity_id(entity_type, name)
+        key, identity_source = _entity_id(entity_type, name, source_ref)
         item = aggregate.setdefault(
             key,
             {
                 "entity_id": key,
                 "entity_type": entity_type,
                 "display_name": name,
+                "identity_source": identity_source,
+                "source_entity_ref": source_ref,
                 "source_rows": 0,
                 "contributing_rows": 0,
                 "games": 0.0,
@@ -320,6 +346,7 @@ def build_entity_atom_profiles(
             "entity_id": item["entity_id"],
             "entity_type": item["entity_type"],
             "display_name": item["display_name"],
+            "identity_source": item["identity_source"],
             "source_rows": item["source_rows"],
             "contributing_rows": item["contributing_rows"],
             "coverage": round(item["contributing_rows"] / item["source_rows"], 6),

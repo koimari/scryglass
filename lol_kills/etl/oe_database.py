@@ -46,7 +46,7 @@ REVIEWED_REMOVED_GAME_IDS: dict[str, str] = {
     "LOLTMNT01_442514": "oe-revision-2026-08-12: ljl series re-identified",
 }
 STATE_SCHEMA = "scryglass:oe-local-cache-state:v1"
-TRANSFORM_VERSION = "oe-normalization:v2"
+TRANSFORM_VERSION = "oe-normalization:v3"
 REQUEST_TIMEOUT_SECONDS = 180.0
 # Keep version writes below the Supabase statement budget. This matters during
 # a transform migration, when one unchanged source can rewrite the full cache.
@@ -1232,6 +1232,13 @@ def sync_csv(
             f"Supabase OE readback failed for {len(mismatched)} games; first: {mismatched[0]}"
         )
     cache = update_local_cache(prepared, parquet_dir)
+    patch_receipt_count = len(
+        {
+            str(receipt.get("receipt_canonical_sha256"))
+            for receipt in (patch_receipts or {}).values()
+            if isinstance(receipt, Mapping)
+        }
+    )
     import_row = {
         "source_year": year,
         "source_file_sha256": prepared.source["raw_sha256"],
@@ -1249,7 +1256,7 @@ def sync_csv(
             game.statistics_complete for game in prepared.games.values()
         ),
         "source_observed_through": prepared.source["date_max_utc"],
-        "riot_patch_receipts": len(patch_receipts or {}),
+        "riot_patch_receipts": patch_receipt_count,
         "completed_at": datetime.now(timezone.utc).isoformat(),
     }
     database.record_import(import_row)
@@ -1270,7 +1277,7 @@ def sync_csv(
         "cache": cache,
         "status": "updated" if changed_ids else "current",
         "accepted_source_receipt": accepted_source,
-        "riot_patch_receipts": len(patch_receipts or {}),
+        "riot_patch_receipts": patch_receipt_count,
         "worker_commit": os.environ.get("SCRYGLASS_WORKER_COMMIT") or None,
     }
 

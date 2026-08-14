@@ -52,6 +52,32 @@ def test_unknown_champion_is_counted_and_missing_champion_fails_closed() -> None
         )
 
 
+def test_canonical_entity_ids_keep_same_display_names_separate() -> None:
+    result = build_entity_atom_profiles(
+        [
+            {
+                "entity_type": "player",
+                "entity_name": "Same Name",
+                "player_id": "source-a",
+                "champion": "Aatrox",
+                "games": 1,
+            },
+            {
+                "entity_type": "player",
+                "entity_name": "Same Name",
+                "player_id": "source-b",
+                "champion": "Ahri",
+                "games": 1,
+            },
+        ],
+        bridge_path=ROOT / "data/lol/v2/champions/lcc-atom-bridge-26.16.json",
+        receipt_path=ROOT / "data/lol/v2/champions/lcc-atom-refresh-26.16-receipt.json",
+    )
+    assert len(result["entities"]) == 2
+    assert {row["identity_source"] for row in result["entities"]} == {"canonical_id"}
+    assert len({row["entity_id"] for row in result["entities"]}) == 2
+
+
 def test_public_projection_withholds_research_vectors() -> None:
     projection = public_projection()
     assert projection["authority"] == "unavailable"

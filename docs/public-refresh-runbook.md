@@ -75,12 +75,14 @@ Restore a backup into a temporary database before calling the backup lane ready.
 
 ## Bounded query and private Storage cutover
 
-Use three merge commits. Each commit contains only the migrations named for its
-phase. Never run one database push from a checkout that contains a later phase.
+Use three merge commits. The repository contains all phase migrations for
+review. Create a migration-only workdir before every production push. The
+derived workdir excludes later migrations, so a normal Supabase push cannot
+cross the deployment boundary.
 
 The checkpoints are:
 
-1. Apply additive migrations `20260813010000` and `20260814010000`.
+1. Apply the additive migration set through `20260814135848`.
 2. Deploy the compatible web build. It can read the active inline release and
    the bounded query API.
 3. Apply private Storage migration `20260814160000`.
@@ -106,20 +108,23 @@ test -z "$(git status --porcelain=v1 --untracked-files=normal)"
 
 ### Phase 1: additive schema and compatible web
 
-Check out the merged Phase 1 commit. Its pending migration list must contain
-only `20260813010000` and `20260814010000`:
+Check out the merged Phase 1 commit. Prepare a workdir that contains every
+migration through `20260814135848` and excludes the private Storage and strict
+cutover files:
 
 ```sh
-npx supabase migration list --linked
-npx supabase db push --linked --dry-run
+PHASE_DIR="$(python tools/prepare_supabase_phase.py --phase additive)"
+npx supabase migration list --linked --workdir "${PHASE_DIR}"
+npx supabase db push --linked --workdir "${PHASE_DIR}" --dry-run
 ```
 
-Stop when the dry run names any later migration. When the list is exact, apply
-and test Phase 1:
+Stop when the dry run names `20260814160000` or `20260814170000`. When the
+list is exact, apply and test Phase 1:
 
 ```sh
-npx supabase db push --linked
-npx supabase migration list --linked
+PHASE_DIR="$(python tools/prepare_supabase_phase.py --phase additive)"
+npx supabase db push --linked --workdir "${PHASE_DIR}"
+npx supabase migration list --linked --workdir "${PHASE_DIR}"
 npx supabase test db --linked
 ```
 
@@ -131,14 +136,15 @@ team profile.
 
 ### Phase 2: private Storage and clean releases
 
-Check out the merged Phase 2 migration commit. Its dry run must contain only
-`20260814160000`:
+Check out the merged Phase 2 migration commit. Prepare a workdir that includes
+the additive history and `20260814160000`, while excluding strict cutover:
 
 ```sh
-npx supabase migration list --linked
-npx supabase db push --linked --dry-run
-npx supabase db push --linked
-npx supabase migration list --linked
+PHASE_DIR="$(python tools/prepare_supabase_phase.py --phase storage)"
+npx supabase migration list --linked --workdir "${PHASE_DIR}"
+npx supabase db push --linked --workdir "${PHASE_DIR}" --dry-run
+npx supabase db push --linked --workdir "${PHASE_DIR}"
+npx supabase migration list --linked --workdir "${PHASE_DIR}"
 npx supabase test db --linked
 ```
 
@@ -236,14 +242,15 @@ request and manual merge flow. The strict build removes the inline RPC and all
 large-asset page and chat fallbacks. Confirm the production deployment and
 repeat the family probes.
 
-Check out the merged Phase 3 migration commit. Its dry run must contain only
-`20260814170000`. Apply it and run the final database tests:
+Check out the merged Phase 3 migration commit. Prepare a workdir that includes
+the verified compatible history and `20260814170000`:
 
 ```sh
-npx supabase migration list --linked
-npx supabase db push --linked --dry-run
-npx supabase db push --linked
-npx supabase migration list --linked
+PHASE_DIR="$(python tools/prepare_supabase_phase.py --phase strict)"
+npx supabase migration list --linked --workdir "${PHASE_DIR}"
+npx supabase db push --linked --workdir "${PHASE_DIR}" --dry-run
+npx supabase db push --linked --workdir "${PHASE_DIR}"
+npx supabase migration list --linked --workdir "${PHASE_DIR}"
 npx supabase test db --linked
 ```
 

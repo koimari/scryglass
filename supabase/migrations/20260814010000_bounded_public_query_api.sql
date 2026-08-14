@@ -4,6 +4,19 @@
 alter table public.scryglass_refresh_runs
   add column if not exists requirements_lock_sha256 text;
 
+-- The importer now records how many game rows were bound to an exact Riot
+-- live-stats patch receipt. Keep this count with the import receipt so a
+-- refresh cannot claim patch evidence that the database schema drops.
+alter table public.scryglass_oe_imports
+  add column if not exists riot_patch_receipts integer not null default 0;
+alter table public.scryglass_oe_imports
+  drop constraint if exists scryglass_oe_imports_riot_patch_receipts_check;
+alter table public.scryglass_oe_imports
+  add constraint scryglass_oe_imports_riot_patch_receipts_check
+  check (riot_patch_receipts >= 0);
+alter table public.scryglass_oe_imports
+  alter column transform_version set default 'oe-normalization:v3';
+
 alter table public.scryglass_refresh_runs
   drop constraint if exists scryglass_refresh_runs_requirements_lock_sha256_check;
 alter table public.scryglass_refresh_runs

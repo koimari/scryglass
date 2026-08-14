@@ -23,6 +23,18 @@ def test_migrations_are_split_into_ordered_cutover_phases() -> None:
     ]
 
 
+def test_phase_workdir_excludes_later_migrations() -> None:
+    script = (ROOT / "tools/prepare_supabase_phase.py").read_text(encoding="utf-8")
+    runbook = (ROOT / "docs/public-refresh-runbook.md").read_text(encoding="utf-8")
+    assert '"additive": 20260814160000' in script
+    assert '"storage": 20260814170000' in script
+    assert "prepare_supabase_phase.py --phase additive" in runbook
+    assert "prepare_supabase_phase.py --phase storage" in runbook
+    assert "prepare_supabase_phase.py --phase strict" in runbook
+    bounded = runbook.split("## Bounded query and private Storage cutover", 1)[1]
+    assert "npx supabase db push --linked\n" not in bounded
+
+
 def test_phase_two_keeps_compatibility_reads_and_phase_three_removes_them() -> None:
     phase_two = (
         MIGRATIONS / "20260814160000_private_storage_phase.sql"

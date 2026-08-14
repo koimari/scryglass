@@ -13,6 +13,7 @@ and a receipt-bound promotion are present.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -37,13 +38,26 @@ BASELINE_AUC_FLOOR = 0.70681
 REQUIRED_CLIENT_PATCH = "16.16"
 REQUIRED_PUBLIC_PATCH = "26.16"
 RAW_OE_SOURCE_TOKEN = "16.15"
-PRESERVED_OE_SOURCE_TOKEN = RAW_OE_SOURCE_TOKEN
 PHASE_CURVE_PATH = MODELS_DIR / "draft_phase_curve.json"
 ATOM_BRIDGE_PATH = ROOT / "data" / "lol" / "v2" / "champions" / "lcc-atom-bridge-26.16.json"
 ATOM_RECEIPT_PATH = ROOT / "data" / "lol" / "v2" / "champions" / "lcc-atom-refresh-26.16-receipt.json"
 
 _SOURCE_PATCH_RE = re.compile(r"^(?:15|16)\.\d{1,2}(?:\.\d+)?$")
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+PROMOTION_SCHEMA_VERSION = "scryglass:draft-phase-curve-promotion:v1"
+PROMOTION_ROOT = MODELS_DIR / "promotions"
+REQUIRED_PROMOTION_GATES = (
+    "chronological",
+    "regional",
+    "patch_transfer",
+    "roster_change",
+    "sparse_data",
+    "missingness",
+    "early_snowball",
+    "late_scaling",
+    "comeback_behind_10",
+    "comeback_behind_15",
+)
 _NUMERIC_FEATURES = (
     "draft_win_logit_blue",
     "elo_diff",
@@ -136,12 +150,12 @@ def lcc_atomization_metadata() -> dict[str, Any]:
         bridge = json.loads(ATOM_BRIDGE_PATH.read_text(encoding="utf-8"))
         bridge_sha256 = bridge.get("artifact_sha256")
     except (OSError, json.JSONDecodeError, TypeError):
-        pass
+        bridge_sha256 = None
     try:
         receipt = json.loads(ATOM_RECEIPT_PATH.read_text(encoding="utf-8"))
         receipt_sha256 = receipt.get("atom_bridge_artifact_sha256")
     except (OSError, json.JSONDecodeError, TypeError):
-        pass
+        receipt_sha256 = None
     return {
         "status": "staged",
         "authority": "development_only",
@@ -738,7 +752,11 @@ def _candidate_evaluation(
     if "y_blue_win" not in frame.columns or len(frame) < 8:
         return result
     labels = pd.to_numeric(frame["y_blue_win"], errors="coerce")
-    dates = pd.to_datetime(frame.get("date"), errors="coerce", utc=True)
+    dates = pd.to_datetime(
+        frame["date"] if "date" in frame.columns else pd.Series(pd.NaT, index=frame.index),
+        errors="coerce",
+        utc=True,
+    )
     valid = labels.isin([0, 1]) & dates.notna()
     indices = np.flatnonzero(valid.to_numpy())
     if len(indices) < 8:
@@ -765,12 +783,34 @@ def _candidate_evaluation(
         }
     )
     result["gates"]["chronological"] = True
-    result["gates"]["regional"] = bool(frame.get("region") is not None and frame["region"].notna().any())
-    result["gates"]["patch_transfer"] = bool(frame.get("oe_patch_token") is not None)
-    result["gates"]["roster_change"] = "roster_change" in frame.columns
+    result["gates"]["regional"] = bool(
+        "region" in frame.columns
+        and frame["region"].dropna().astype(str).nunique() >= 2
+    )
+    result["gates"]["patch_transfer"] = bool(
+        "oe_patch_token" in frame.columns
+        and frame["oe_patch_token"].dropna().astype(str).nunique() >= 2
+    )
+    result["gates"]["roster_change"] = bool(
+        "roster_change" in frame.columns and frame["roster_change"].notna().any()
+    )
     result["gates"]["sparse_data"] = len(test_indices) >= 20
     result["gates"]["missingness"] = any(
         frame[f"gold_diff_{phase}"].isna().any() for phase in PHASES if f"gold_diff_{phase}" in frame
+    )
+    result["gates"]["early_snowball"] = bool(
+        "gold_diff_10" in frame.columns and frame["gold_diff_10"].notna().sum() >= 20
+    )
+    result["gates"]["late_scaling"] = bool(
+        "gold_diff_25" in frame.columns and frame["gold_diff_25"].notna().sum() >= 20
+    )
+    result["gates"]["comeback_behind_10"] = bool(
+        "gold_diff_10" in frame.columns
+        and ((pd.to_numeric(frame["gold_diff_10"], errors="coerce") < 0) & labels.notna()).sum() >= 20
+    )
+    result["gates"]["comeback_behind_15"] = bool(
+        "gold_diff_15" in frame.columns
+        and ((pd.to_numeric(frame["gold_diff_15"], errors="coerce") < 0) & labels.notna()).sum() >= 20
     )
     return result
 
@@ -863,7 +903,14 @@ def fit_phase_curve(
     blockers = ["frozen_phase_curve_promotion_receipt_missing"]
     if not evaluation.get("auc_noninferior"):
         blockers.append("auc_floor_not_met")
-    sample_dates = pd.to_datetime(value.get("date"), errors="coerce", utc=True).dropna()
+    for gate, passed in (evaluation.get("gates") or {}).items():
+        if passed is not True:
+            blockers.append(f"evaluation_gate_{gate}_not_met")
+    sample_dates = pd.to_datetime(
+        value["date"] if "date" in value.columns else pd.Series(pd.NaT, index=value.index),
+        errors="coerce",
+        utc=True,
+    ).dropna()
     sample_window = (
         [sample_dates.min().date().isoformat(), sample_dates.max().date().isoformat()]
         if not sample_dates.empty
@@ -914,13 +961,107 @@ def _feature_value(features: Mapping[str, Any], feature_name: str) -> float:
     return 0.0
 
 
-def _promoted_receipt_is_valid(artifact: Mapping[str, Any]) -> bool:
+def _canonical_json_bytes(value: object) -> bytes:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+
+
+def _phase_model_payload(artifact: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "model_version": artifact.get("model_version"),
+        "design_features": artifact.get("design_features") or [],
+        "phase_models": artifact.get("phase_models") or {},
+        "phase_draft_coefficients": artifact.get("phase_draft_coefficients") or {},
+    }
+
+
+def _artifact_payload_without_promotion(artifact: Mapping[str, Any]) -> dict[str, Any]:
+    return {str(key): value for key, value in artifact.items() if key != "promotion"}
+
+
+def _safe_promotion_path(artifact_path: Path, receipt_path: object) -> Path | None:
+    if not isinstance(receipt_path, str) or not receipt_path or Path(receipt_path).is_absolute():
+        return None
+    candidate = (ROOT / receipt_path).resolve()
+    try:
+        candidate.relative_to(PROMOTION_ROOT.resolve())
+    except ValueError:
+        return None
+    if candidate.suffix.lower() != ".json":
+        return None
+    try:
+        artifact_path.resolve().relative_to(MODELS_DIR.resolve())
+    except ValueError:
+        return None
+    return candidate
+
+
+def _load_promotion_receipt(receipt_path: Path) -> tuple[dict[str, Any], str] | None:
+    try:
+        raw = receipt_path.read_bytes()
+    except OSError:
+        return None
+    if not raw or len(raw) > 256 * 1024:
+        return None
+    file_sha256 = hashlib.sha256(raw).hexdigest()
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(value, Mapping):
+        return None
+    return dict(value), file_sha256
+
+
+def _promoted_receipt_is_valid(
+    artifact: Mapping[str, Any],
+    *,
+    artifact_path: Path | None,
+) -> bool:
     promotion = artifact.get("promotion")
-    if not isinstance(promotion, Mapping):
+    if not isinstance(promotion, Mapping) or artifact_path is None:
         return False
-    receipt = str(promotion.get("receipt_sha256") or "").lower()
-    model_hash = str(promotion.get("model_sha256") or "").lower()
-    return bool(_HASH_RE.fullmatch(receipt) and _HASH_RE.fullmatch(model_hash))
+    receipt_path = _safe_promotion_path(artifact_path, promotion.get("receipt_path"))
+    if receipt_path is None:
+        return False
+    loaded = _load_promotion_receipt(receipt_path)
+    if loaded is None:
+        return False
+    receipt, file_sha256 = loaded
+    claimed_file_sha256 = str(promotion.get("receipt_sha256") or "").lower()
+    if not _HASH_RE.fullmatch(claimed_file_sha256) or claimed_file_sha256 != file_sha256:
+        return False
+    if receipt.get("schema_version") != PROMOTION_SCHEMA_VERSION:
+        return False
+    if receipt.get("status") != "approved" or receipt.get("authority") != "independent":
+        return False
+    receipt_model_hash = str(receipt.get("model_sha256") or "").lower()
+    promotion_model_hash = str(promotion.get("model_sha256") or "").lower()
+    calculated_model_hash = hashlib.sha256(_canonical_json_bytes(_phase_model_payload(artifact))).hexdigest()
+    if (
+        not _HASH_RE.fullmatch(receipt_model_hash)
+        or receipt_model_hash != promotion_model_hash
+        or receipt_model_hash != calculated_model_hash
+    ):
+        return False
+    artifact_hash = hashlib.sha256(
+        _canonical_json_bytes(_artifact_payload_without_promotion(artifact))
+    ).hexdigest()
+    if str(receipt.get("artifact_sha256") or "").lower() != artifact_hash:
+        return False
+    if receipt.get("model_version") != artifact.get("model_version"):
+        return False
+    evaluation = artifact.get("evaluation")
+    gates = evaluation.get("gates") if isinstance(evaluation, Mapping) else None
+    receipt_gates = receipt.get("gates")
+    if not isinstance(gates, Mapping) or not isinstance(receipt_gates, Mapping):
+        return False
+    if evaluation.get("auc_noninferior") is not True:
+        return False
+    if any(gates.get(name) is not True or receipt_gates.get(name) is not True for name in REQUIRED_PROMOTION_GATES):
+        return False
+    return True
 
 
 def score_phase_curve(
@@ -928,13 +1069,14 @@ def score_phase_curve(
     features: Mapping[str, Any],
     *,
     draft_logit: float,
+    artifact_path: Path | None = None,
 ) -> dict[str, Any]:
     """Score only a receipt-bound promoted artifact."""
 
     if artifact.get("authority") != "promoted":
         blockers = artifact.get("blockers") or ["phase_curve_authority_unavailable"]
         return unavailable_phase_curve(source=str(artifact.get("source") or "oe_only"), blockers=blockers)
-    if not _promoted_receipt_is_valid(artifact):
+    if not _promoted_receipt_is_valid(artifact, artifact_path=artifact_path):
         return unavailable_phase_curve(blockers=["phase_curve_promotion_receipt_invalid"])
     evaluation = artifact.get("evaluation")
     try:
@@ -1018,6 +1160,14 @@ def phase_curve_for_draft(
         return unavailable_phase_curve(blockers=["phase_curve_artifact_missing"])
     if not isinstance(artifact, Mapping):
         return unavailable_phase_curve(blockers=["phase_curve_artifact_invalid"])
+    resolved_artifact_path = Path(artifact_path).expanduser().resolve()
+    if artifact.get("authority") != "promoted":
+        return unavailable_phase_curve(
+            source=str(artifact.get("source") or "oe_only"),
+            blockers=artifact.get("blockers") or ["phase_curve_authority_unavailable"],
+        )
+    if not _promoted_receipt_is_valid(artifact, artifact_path=resolved_artifact_path):
+        return unavailable_phase_curve(blockers=["phase_curve_promotion_receipt_invalid"])
     features = pre_match_features_for_draft(
         blue,
         red,
@@ -1030,7 +1180,12 @@ def phase_curve_for_draft(
         roster_change=roster_change,
         extra_features=extra_features,
     )
-    return score_phase_curve(artifact, features, draft_logit=draft_logit)
+    return score_phase_curve(
+        artifact,
+        features,
+        draft_logit=draft_logit,
+        artifact_path=resolved_artifact_path,
+    )
 
 
 def live_state_features(observed: Mapping[str, Any]) -> dict[str, Any]:

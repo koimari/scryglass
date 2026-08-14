@@ -91,6 +91,32 @@ def test_receipt_rejects_wrong_source_and_tampering() -> None:
     with pytest.raises(RiotPatchReceiptError, match="authority"):
         validate_patch_receipt(receipt)
 
+    receipt = receipt_from_response_bytes("game-1", payload)
+    receipt["raw_response_b64"] = receipt["raw_response_b64"][:-4] + "AAAA"
+    unsigned = dict(receipt)
+    unsigned.pop("receipt_canonical_sha256")
+    receipt["receipt_canonical_sha256"] = hashlib.sha256(
+        json.dumps(unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    with pytest.raises(RiotPatchReceiptError, match="evidence hash"):
+        validate_patch_receipt(receipt)
+
+    receipt = receipt_from_response_bytes("game-1", payload)
+    receipt["observed"]["patch_version"] = "16.16.801.5000"
+    receipt["observed"]["client_patch"] = "16.16"
+    receipt["observed"]["public_patch"] = "26.16"
+    unsigned = dict(receipt)
+    unsigned.pop("receipt_canonical_sha256")
+    receipt["receipt_canonical_sha256"] = hashlib.sha256(
+        json.dumps(unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    with pytest.raises(RiotPatchReceiptError, match="raw response patch"):
+        validate_patch_receipt(receipt)
+
 
 def test_receipt_catalog_validates_and_indexes_by_game_id(tmp_path) -> None:
     first = receipt_from_response_bytes("g1", _payload("16.15.800.4844"))
@@ -111,6 +137,15 @@ def test_receipt_catalog_validates_and_indexes_by_game_id(tmp_path) -> None:
     )
     with pytest.raises(RiotPatchReceiptError, match="duplicate"):
         load_patch_receipts(duplicate)
+
+    crosswalk = receipt_from_response_bytes(
+        "riot-game-1",
+        _payload("16.16.801.5000"),
+        oe_game_id="LOLTMNT03_123456",
+    )
+    path.write_text(json.dumps({"receipts": [crosswalk]}), encoding="utf-8")
+    catalog = load_patch_receipts(path)
+    assert catalog["riot-game-1"] is catalog["LOLTMNT03_123456"]
 
 class _Response:
     def __init__(self, payload: bytes) -> None:

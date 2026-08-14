@@ -5,14 +5,16 @@ The official live-stats feed has the game-level ``gameMetadata.patchVersion``
 field. This module keeps that field separate from the public Riot patch label,
 binds it to the raw response hash, and fails closed when the field is absent.
 
-The feed response contains match state and outcome data. A patch receipt keeps
-only the game identity, source locator, patch identity, and transport hash.
-That keeps the receipt suitable for ingestion provenance without turning it into
-an outcome or model-evaluation source.
+The feed response contains match state and outcome data. A private patch receipt
+keeps the game identity, source locator, patch identity, exact response bytes,
+and transport hash. The bytes stay in the worker's private receipt catalog.
+The receipt remains ingestion provenance rather than an outcome or
+model-evaluation source.
 """
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
@@ -69,6 +71,20 @@ def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _decode_raw_response(value: object) -> bytes:
+    """Decode bounded response evidence stored in a private receipt."""
+
+    if not isinstance(value, str) or not value:
+        raise RiotPatchReceiptError("Riot raw response evidence is missing")
+    try:
+        raw = base64.b64decode(value.encode("ascii"), validate=True)
+    except (ValueError, UnicodeEncodeError) as exc:
+        raise RiotPatchReceiptError("Riot raw response evidence is not valid base64") from exc
+    if not raw or len(raw) > MAX_RESPONSE_BYTES:
+        raise RiotPatchReceiptError("Riot raw response evidence exceeds the bounded size")
+    return raw
+
+
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     output: dict[str, Any] = {}
     for key, value in pairs:
@@ -76,6 +92,19 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             raise RiotPatchReceiptError(f"duplicate JSON key in Riot response: {key}")
         output[key] = value
     return output
+
+
+def _decode_response_payload(raw_response: bytes) -> Mapping[str, Any]:
+    try:
+        payload = json.loads(
+            raw_response.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RiotPatchReceiptError("Riot response is not valid UTF-8 JSON") from exc
+    if not isinstance(payload, Mapping):
+        raise RiotPatchReceiptError("Riot response root must be an object")
+    return payload
 
 
 def _validate_game_id(game_id: object) -> str:
@@ -134,6 +163,8 @@ def build_patch_receipt(
     *,
     source_url: str,
     raw_response_sha256: str,
+    raw_response_b64: str | None = None,
+    oe_game_id: object | None = None,
     retrieved_at_utc: object | None = None,
 ) -> dict[str, Any]:
     """Build one hash-bound receipt from a decoded Riot response.
@@ -156,6 +187,14 @@ def build_patch_receipt(
         raw_response_sha256.casefold()
     ):
         raise RiotPatchReceiptError("Riot response hash must be a SHA-256 digest")
+    if raw_response_b64 is None:
+        raise RiotPatchReceiptError("Riot raw response evidence is required")
+    raw_response = _decode_raw_response(raw_response_b64)
+    if _sha256_bytes(raw_response) != raw_response_sha256.casefold():
+        raise RiotPatchReceiptError("Riot response evidence hash does not match")
+    evidence_payload = _decode_response_payload(raw_response)
+    if evidence_payload != payload:
+        raise RiotPatchReceiptError("Riot response evidence does not match decoded payload")
     patch_version = _patch_from_payload(payload)
     client = parse_client_patch(patch_version)
     identity = canonical_patch(client)
@@ -174,6 +213,7 @@ def build_patch_receipt(
             "public_patch": identity.public_patch,
         },
         "raw_response_sha256": raw_response_sha256.casefold(),
+        "raw_response_b64": raw_response_b64,
         "outcome_fields_excluded": ["winningTeam", "winner", "game_end"],
         "authority": {
             "exact_game_patch": True,
@@ -184,6 +224,8 @@ def build_patch_receipt(
             "betting_authority": False,
         },
     }
+    if oe_game_id is not None:
+        unsigned["oe_game_id"] = _validate_game_id(oe_game_id)
     receipt = dict(unsigned)
     receipt["receipt_canonical_sha256"] = _sha256_bytes(_canonical_bytes(unsigned))
     return receipt
@@ -194,6 +236,7 @@ def receipt_from_response_bytes(
     raw_response: bytes,
     *,
     source_url: str | None = None,
+    oe_game_id: object | None = None,
     retrieved_at_utc: object | None = None,
 ) -> dict[str, Any]:
     """Decode one bounded response and create its exact patch receipt."""
@@ -202,10 +245,7 @@ def receipt_from_response_bytes(
         raise RiotPatchReceiptError("Riot response must be raw bytes")
     if not raw_response or len(raw_response) > MAX_RESPONSE_BYTES:
         raise RiotPatchReceiptError("Riot response exceeds the bounded receipt size")
-    try:
-        payload = json.loads(raw_response.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RiotPatchReceiptError("Riot response is not valid UTF-8 JSON") from exc
+    payload = _decode_response_payload(raw_response)
     game = _validate_game_id(game_id)
     locator = source_url or f"{SOURCE_ROOT}/{urllib.parse.quote(game, safe='')}"
     return build_patch_receipt(
@@ -213,6 +253,8 @@ def receipt_from_response_bytes(
         payload,
         source_url=locator,
         raw_response_sha256=_sha256_bytes(raw_response),
+        raw_response_b64=base64.b64encode(raw_response).decode("ascii"),
+        oe_game_id=oe_game_id,
         retrieved_at_utc=retrieved_at_utc,
     )
 
@@ -298,11 +340,23 @@ def validate_patch_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
         or observed.get("public_patch") != identity.public_patch
     ):
         raise RiotPatchReceiptError("Riot receipt patch labels do not agree")
+    raw_response = _decode_raw_response(receipt.get("raw_response_b64"))
+    raw_hash = str(receipt.get("raw_response_sha256") or "").casefold()
+    if not _SHA256_RE.fullmatch(raw_hash) or _sha256_bytes(raw_response) != raw_hash:
+        raise RiotPatchReceiptError("Riot raw response evidence hash mismatch")
+    raw_payload = _decode_response_payload(raw_response)
+    if _patch_from_payload(raw_payload) != observed.get("patch_version"):
+        raise RiotPatchReceiptError("Riot raw response patch does not match the receipt")
+    oe_game_id = receipt.get("oe_game_id")
+    if oe_game_id is not None:
+        _validate_game_id(oe_game_id)
     built = build_patch_receipt(
         game,
-        {"gameMetadata": {"patchVersion": observed["patch_version"]}},
+        raw_payload,
         source_url=str(source.get("locator") or ""),
-        raw_response_sha256=str(receipt.get("raw_response_sha256") or ""),
+        raw_response_sha256=raw_hash,
+        raw_response_b64=str(receipt.get("raw_response_b64") or ""),
+        oe_game_id=oe_game_id,
         retrieved_at_utc=receipt.get("retrieved_at_utc"),
     )
     if built["receipt_canonical_sha256"] != claimed.casefold():
@@ -327,12 +381,23 @@ def load_patch_receipts(path: Path) -> dict[str, dict[str, Any]]:
     if not isinstance(entries, list):
         raise RiotPatchReceiptError("Riot patch receipt catalog must contain receipts")
     result: dict[str, dict[str, Any]] = {}
+    seen_receipts: set[str] = set()
     for entry in entries:
         validated = validate_patch_receipt(entry)
-        game_id = str(validated["game_id"])
-        if game_id in result:
-            raise RiotPatchReceiptError(f"duplicate Riot patch receipt for game {game_id!r}")
-        result[game_id] = validated
+        receipt_digest = str(validated["receipt_canonical_sha256"])
+        if receipt_digest in seen_receipts:
+            raise RiotPatchReceiptError(
+                f"duplicate Riot patch receipt for game {validated['game_id']!r}"
+            )
+        seen_receipts.add(receipt_digest)
+        keys = [str(validated["game_id"])]
+        if validated.get("oe_game_id") is not None:
+            keys.append(str(validated["oe_game_id"]))
+        for game_id in keys:
+            previous = result.get(game_id)
+            if previous is not None:
+                raise RiotPatchReceiptError(f"duplicate Riot patch receipt for game {game_id!r}")
+            result[game_id] = validated
     return result
 
 
