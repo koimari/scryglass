@@ -24,6 +24,7 @@ class FakeSupabase:
         self.stage_calls = 0
         self.storage: dict[str, bytes] = {}
         self.discard_calls: list[str] = []
+        self.drain_calls: list[str] = []
 
     def release(self, release_id: str):
         return self.releases.get(release_id)
@@ -51,14 +52,21 @@ class FakeSupabase:
             },
         }
 
-    def stage_release(self, release, assets, *, storage_objects=None):
+    def create_release(self, release):
         self.stage_calls += 1
         self.releases[release["release_id"]] = dict(release)
+
+    def stage_release(self, release, assets, *, storage_objects=None):
+        self.create_release(release)
         return self.stage_assets(
             str(release["release_id"]),
             assets,
             storage_objects=storage_objects,
         )
+
+    def drain_staging_cleanup(self, release_id: str) -> int:
+        self.drain_calls.append(release_id)
+        return 0
 
     def stage_assets(self, release_id, assets, *, storage_objects=None):
         reused = 0
@@ -424,7 +432,7 @@ def test_publish_release_is_idempotent_after_verified_activation() -> None:
     assert client.stage_calls == 1
 
 
-def test_publish_release_discards_an_interrupted_staging_snapshot() -> None:
+def test_publish_release_preserves_another_worker_staging_snapshot() -> None:
     with TemporaryDirectory() as temporary:
         pack, manifest, tier = _fixture(Path(temporary))
         client = FakeSupabase()
@@ -448,18 +456,21 @@ def test_publish_release_discards_an_interrupted_staging_snapshot() -> None:
         }
         client.storage[f"{manifest['pack_id']}/stale.json"] = b"x"
 
-        result = supabase_publication.publish_release(
-            pack,
-            manifest,
-            tier,
-            project_url=client.project_url,
-            secret_key="sb_secret_unused_because_client_is_injected",
-            client=client,
-        )
+        with pytest.raises(
+            supabase_publication.SupabasePublicationError,
+            match="already being staged",
+        ):
+            supabase_publication.publish_release(
+                pack,
+                manifest,
+                tier,
+                project_url=client.project_url,
+                secret_key="sb_secret_unused_because_client_is_injected",
+                client=client,
+            )
 
-    assert result["status"] == "activated_pending_health"
-    assert client.discard_calls == [manifest["pack_id"]]
-    assert (manifest["pack_id"], "stale.json") not in client.assets
+    assert client.discard_calls == []
+    assert (manifest["pack_id"], "stale.json") in client.assets
 
 
 def test_publish_release_adds_latest_view_to_existing_active_release() -> None:
@@ -551,15 +562,15 @@ def test_storage_content_digest_is_verified_before_activation() -> None:
     with TemporaryDirectory() as temporary:
         pack, manifest, tier = _fixture(Path(temporary))
         database = FakeSupabase()
-        original = database.stage_release
+        original = database.stage_assets
 
-        def stage_corrupt(release, assets, *, storage_objects=None):
-            reused = original(release, assets, storage_objects=storage_objects)
+        def stage_corrupt(release_id, assets, *, storage_objects=None):
+            reused = original(release_id, assets, storage_objects=storage_objects)
             path = f"{manifest['pack_id']}/{supabase_publication.PUBLIC_RATING_REQUIRED_FILES[0]}"
             database.storage[path] = b"{}"
             return reused
 
-        database.stage_release = stage_corrupt  # type: ignore[method-assign]
+        database.stage_assets = stage_corrupt  # type: ignore[method-assign]
         with pytest.raises(
             supabase_publication.SupabasePublicationError,
             match="Storage readback failed|Storage checksum failed",

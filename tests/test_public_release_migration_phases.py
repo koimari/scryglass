@@ -39,6 +39,7 @@ def test_staging_cleanup_is_locked_and_service_only() -> None:
 
     assert "pg_advisory_xact_lock" in migration
     assert "discard_scryglass_staging_release(text)" in migration
+    assert "drain_scryglass_staging_cleanup(text)" in migration
     assert "discard_stale_scryglass_staging_releases(integer, integer)" in migration
     assert "Only a staging Scryglass release can be discarded" in migration
     assert "grant execute on function public.discard_scryglass_staging_release(text)\n  to service_role" in migration

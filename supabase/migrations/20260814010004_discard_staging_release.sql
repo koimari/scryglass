@@ -102,10 +102,17 @@ begin
     where release.release_id = p_release_id
       and release.status = 'staging'
   ) then
+    select coalesce(
+      pg_catalog.array_agg(cleanup.storage_path order by cleanup.storage_path),
+      array[]::text[]
+    )
+    into storage_paths
+    from public.scryglass_storage_cleanup cleanup
+    where cleanup.release_id = p_release_id;
     return pg_catalog.jsonb_build_object(
       'status', 'absent',
       'release_id', p_release_id,
-      'storage_paths', '[]'::jsonb
+      'storage_paths', pg_catalog.to_jsonb(storage_paths)
     );
   end if;
 
@@ -157,6 +164,64 @@ alter function public.discard_scryglass_staging_release(text)
 revoke all on function public.discard_scryglass_staging_release(text)
   from public, anon, authenticated, service_role;
 grant execute on function public.discard_scryglass_staging_release(text)
+  to service_role;
+
+create or replace function public.drain_scryglass_staging_cleanup(
+  p_release_id text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  storage_paths text[];
+begin
+  if p_release_id is null
+     or p_release_id !~ '^v[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]{6}$'
+  then
+    raise exception 'Scryglass staging release ID is invalid';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtext('scryglass-public-release')
+  );
+
+  if exists (
+    select 1
+    from public.scryglass_public_releases release
+    where release.release_id = p_release_id
+      and release.status = 'staging'
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'status', 'staging',
+      'release_id', p_release_id,
+      'storage_paths', '[]'::jsonb
+    );
+  end if;
+
+  select coalesce(
+    pg_catalog.array_agg(cleanup.storage_path order by cleanup.storage_path),
+    array[]::text[]
+  )
+  into storage_paths
+  from public.scryglass_storage_cleanup cleanup
+  where cleanup.release_id = p_release_id;
+
+  return pg_catalog.jsonb_build_object(
+    'status', 'ready',
+    'release_id', p_release_id,
+    'storage_paths', pg_catalog.to_jsonb(storage_paths)
+  );
+end;
+$$;
+
+grant create on schema public to scryglass_release_transition_owner;
+alter function public.drain_scryglass_staging_cleanup(text)
+  owner to scryglass_release_transition_owner;
+revoke all on function public.drain_scryglass_staging_cleanup(text)
+  from public, anon, authenticated, service_role;
+grant execute on function public.drain_scryglass_staging_cleanup(text)
   to service_role;
 
 create or replace function public.discard_stale_scryglass_staging_releases(

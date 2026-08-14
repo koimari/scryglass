@@ -655,6 +655,39 @@ class SupabasePublicData:
             self.ack_storage_cleanup(storage_paths)
         return len(storage_paths)
 
+    def drain_staging_cleanup(self, release_id: str) -> int:
+        """Drain old cleanup paths without touching a live staging release."""
+
+        release_id = _release_id(release_id)
+        result = self._request(
+            "POST",
+            "rpc/drain_scryglass_staging_cleanup",
+            {"p_release_id": release_id},
+        )
+        if not isinstance(result, dict) or result.get("release_id") != release_id:
+            raise SupabasePublicationError(
+                "Supabase staging cleanup response is malformed"
+            )
+        if result.get("status") == "staging":
+            raise SupabasePublicationError(
+                "Supabase release became staging while cleanup was checked"
+            )
+        if result.get("status") != "ready":
+            raise SupabasePublicationError(
+                "Supabase staging cleanup status is malformed"
+            )
+        storage_paths = result.get("storage_paths")
+        if not isinstance(storage_paths, list) or any(
+            not isinstance(path, str) for path in storage_paths
+        ):
+            raise SupabasePublicationError(
+                "Supabase staging cleanup inventory is malformed"
+            )
+        if storage_paths:
+            self.delete_storage_objects(storage_paths)
+            self.ack_storage_cleanup(storage_paths)
+        return len(storage_paths)
+
     def discard_stale_staging_releases(
         self,
         *,
@@ -700,16 +733,20 @@ class SupabasePublicData:
         storage_objects: dict[str, bytes] | None = None,
     ) -> int:
         release_id = _release_id(release.get("release_id"))
+        self.create_release(release)
+        return self.stage_assets(
+            release_id,
+            assets,
+            storage_objects=storage_objects,
+        )
+
+    def create_release(self, release: dict[str, Any]) -> None:
+        _release_id(release.get("release_id"))
         self._request(
             "POST",
             "scryglass_public_releases",
             [release],
             prefer="return=minimal",
-        )
-        return self.stage_assets(
-            release_id,
-            assets,
-            storage_objects=storage_objects,
         )
 
     def stage_assets(
@@ -749,6 +786,17 @@ class SupabasePublicData:
                     f"existing public asset has different content: {asset['path']}"
                 )
             pending.append(asset)
+        # Insert every intended Storage asset before uploading any bytes. A
+        # failed or interrupted upload therefore leaves a complete database
+        # inventory for the locked staging discard path to clean up.
+        for asset in pending:
+            self._request(
+                "POST",
+                "scryglass_public_assets",
+                [asset],
+                prefer="return=minimal",
+            )
+
         # Phase 1: upload all large storage objects concurrently (bounded workers).
         uploads = [
             (asset, (storage_objects or {}).get(str(asset.get("storage_path"))))
@@ -769,14 +817,6 @@ class SupabasePublicData:
                     ),
                     uploads,
                 ))
-        # Phase 2: insert the asset rows (inline small assets and storage-backed).
-        for asset in pending:
-            self._request(
-                "POST",
-                "scryglass_public_assets",
-                [asset],
-                prefer="return=minimal",
-            )
         return reused
 
     def stage_query_datasets(
@@ -1453,19 +1493,27 @@ def publish_release(
         }
 
     if existing and existing.get("status") == "staging":
-        # A previous interrupted run must not be resumed from an unbounded
-        # partial snapshot.  Discard it under the locked database RPC and
-        # start one complete immutable staging release.
-        database.discard_staging_release(release_id)
-        existing = None
+        # A staging row may belong to another worker. Leave it in place and
+        # let bounded stale cleanup remove it after its retention window.
+        raise SupabasePublicationError(
+            "Supabase release is already being staged; retry after stale cleanup"
+        )
 
+    if existing is None:
+        # A previous discard may have removed the rows before Storage cleanup
+        # completed. Drain that exact queue before reusing this release ID.
+        database.drain_staging_cleanup(release_id)
+
+    staged_by_this_call = False
     try:
         if existing:
             raise SupabasePublicationError(
                 "Supabase release has an unsupported existing status"
             )
-        reused_assets = database.stage_release(
-            release,
+        database.create_release(release)
+        staged_by_this_call = True
+        reused_assets = database.stage_assets(
+            release_id,
             assets,
             storage_objects=storage_objects,
         )
@@ -1490,15 +1538,19 @@ def publish_release(
             verify_storage_content=True,
         )
     except Exception:
-        try:
-            staged_after_failure = database.release(release_id)
-            if (
-                isinstance(staged_after_failure, dict)
-                and staged_after_failure.get("status") == "staging"
-            ):
-                database.discard_staging_release(release_id)
-        except Exception:
-            pass
+        if staged_by_this_call:
+            try:
+                staged_after_failure = database.release(release_id)
+                if (
+                    isinstance(staged_after_failure, dict)
+                    and staged_after_failure.get("status") == "staging"
+                ):
+                    database.discard_staging_release(release_id)
+            except Exception:
+                # Preserve the original publication failure. Retention will
+                # retry the locked cleanup path if this best-effort cleanup
+                # cannot reach the database or Storage service.
+                pass
         raise
     activation = database.activate(release_id)
     try:
