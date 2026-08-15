@@ -23,6 +23,17 @@ def _csv_bytes(*, date: str, gameid: str = "g1") -> bytes:
     return ("\n".join(rows) + "\n").encode("utf-8")
 
 
+def _csv_bytes_with_patches() -> bytes:
+    rows = [
+        "gameid,league,date,patch,side,position,teamname,kills",
+        "g1,LCS,2026-08-08T10:00:00Z,16.15,Blue,team,Blue Team,12",
+        "g1,LCS,2026-08-08T10:00:00Z,16.15,Blue,top,Blue Team,2",
+        "g2,LEC,2026-08-14T15:07:55Z,16.16,Red,team,Shifters,8",
+        "g2,LEC,2026-08-14T15:07:55Z,16.16,Red,top,Shifters,1",
+    ]
+    return ("\n".join(rows) + "\n").encode("utf-8")
+
+
 def _configure_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
     raw = tmp_path / "raw"
     receipts = tmp_path / "receipts"
@@ -100,6 +111,36 @@ def test_download_mode_refreshes_when_remote_signature_changes(
     assert destination.read_bytes() == replacement
     state = json.loads((tmp_path / "receipts/remote-state.json").read_text())
     assert state["2026"]["bytes"] == len(replacement)
+
+
+def test_source_receipt_binds_exact_patch_tokens_and_public_labels(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    raw, receipts = _configure_paths(monkeypatch, tmp_path)
+    destination = raw / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+    replacement = _csv_bytes_with_patches()
+
+    def fake_download(_url: str, output: str, quiet: bool) -> str:
+        assert quiet is False
+        Path(output).write_bytes(replacement)
+        return output
+
+    _install_fake_gdown(monkeypatch, fake_download)
+    assert oe_ingest.download_oe_years([2026], force=True) == [destination]
+
+    receipt_path = next(receipts.glob("*.json"))
+    receipt = oe_ingest.load_refresh_receipt(receipt_path)
+    candidate = receipt["candidate"]
+    assert candidate["patch_token_counts"] == {"16.15": 2, "16.16": 2}
+    assert candidate["patch_game_counts"] == {"16.15": 1, "16.16": 1}
+    assert candidate["public_patch_by_source"] == {
+        "16.15": "26.15",
+        "16.16": "26.16",
+    }
+    accepted = oe_ingest.validate_accepted_source_receipt(
+        receipt_path, destination, 2026
+    )
+    assert accepted["patch_token_counts"] == candidate["patch_token_counts"]
 
 
 def test_refresh_stages_archives_and_receipts_replacement(

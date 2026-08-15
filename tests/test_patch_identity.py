@@ -19,6 +19,13 @@ def test_public_and_client_patch_namespaces_are_explicit() -> None:
     assert client_patch("26.16") == "16.16"
 
 
+def test_2026_source_tokens_keep_exact_public_patch_mapping() -> None:
+    assert client_patch("16.15") == "16.15"
+    assert public_patch("16.15") == "26.15"
+    assert client_patch("16.16") == "16.16"
+    assert public_patch("16.16") == "26.16"
+
+
 def test_unsupported_patch_is_rejected_without_guessing() -> None:
     with pytest.raises(PatchIdentityError):
         public_patch("16.15rc1")
