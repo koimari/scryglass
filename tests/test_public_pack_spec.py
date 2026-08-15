@@ -1,7 +1,10 @@
-import pyarrow as pa
-import pandas as pd
-import pytest
+import json
 from copy import deepcopy
+from pathlib import Path
+
+import pandas as pd
+import pyarrow as pa
+import pytest
 
 from lol_kills.export import pack_spec
 from lol_kills.export.pack_records import (
@@ -10,6 +13,7 @@ from lol_kills.export.pack_records import (
     build_maps_frame_from_team_games,
     build_profile_records,
     merge_accepted_profile_games,
+    public_patch_for_source,
     public_team_affiliation,
 )
 from lol_kills.export.public_pack import (
@@ -350,6 +354,132 @@ def test_profile_records_use_authoritative_team_objectives_for_each_side() -> No
             assert {field: actual[field] for field in source} == source
 
 
+def test_profile_objectives_fail_closed_for_pair_sentinels_and_patch_removed_atakhan() -> None:
+    roles = ("top", "jng", "mid", "bot", "sup")
+    cases = {
+        "zero-pair": (
+            "2026-08-01T12:00:00Z",
+            "16.15",
+            {},
+            {
+                "Blue": {"dragons": 0, "inhibitors": 0, "towers": 0, "atakhans": 1},
+                "Red": {"dragons": 0, "inhibitors": 0, "towers": 4, "atakhans": 0},
+            },
+        ),
+        "one-side-zero": (
+            "2026-08-02T12:00:00Z",
+            "16.15",
+            {},
+            {
+                "Blue": {"dragons": 0, "inhibitors": 1, "towers": 0, "atakhans": 1},
+                "Red": {"dragons": 2, "inhibitors": 0, "towers": 4, "atakhans": 0},
+            },
+        ),
+        "legacy-25": (
+            "2025-12-20T12:00:00Z",
+            "15.24",
+            {},
+            {
+                "Blue": {"dragons": 1, "inhibitors": 2, "towers": 0, "atakhans": 1},
+                "Red": {"dragons": 2, "inhibitors": 1, "towers": 4, "atakhans": 0},
+            },
+        ),
+        "patch-26-01": (
+            "2026-01-20T12:00:00Z",
+            "16.1",
+            {},
+            {
+                "Blue": {"dragons": 1, "inhibitors": 1, "towers": 3, "atakhans": 1},
+                "Red": {"dragons": 2, "inhibitors": 0, "towers": 2, "atakhans": 0},
+            },
+        ),
+        "realm-26-16": (
+            "2026-08-13T12:00:00Z",
+            "16.16",
+            {"server_patch": "16.16", "patch_realm": "live"},
+            {
+                "Blue": {"dragons": 3, "inhibitors": 1, "towers": 5, "atakhans": 1},
+                "Red": {"dragons": 1, "inhibitors": 0, "towers": 1, "atakhans": 0},
+            },
+        ),
+    }
+    player_rows = []
+    team_rows = []
+    for game_id, (date, patch, context, objectives) in cases.items():
+        for side, team, result in (("Blue", f"Blue-{game_id}", 1), ("Red", f"Red-{game_id}", 0)):
+            for role in roles:
+                player_rows.append(
+                    {
+                        "game_uid": game_id,
+                        "date": date,
+                        "league": "LCS",
+                        "side": side,
+                        "teamname": team,
+                        "playername": f"{team}-{role}",
+                        "position": role,
+                        "champion": f"Champion-{role}",
+                        "result": result,
+                        "patch": patch,
+                        "oe_patch_token": patch,
+                        **context,
+                    }
+                )
+            team_rows.append(
+                {
+                    "game_uid": game_id,
+                    "side": side,
+                    "position": "team",
+                    **objectives[side],
+                }
+            )
+
+    payload = build_profile_records(
+        pd.DataFrame(player_rows),
+        team_games=pd.DataFrame(team_rows),
+        recent_window_days=1000,
+    )
+
+    zero_pair = payload["games"]["zero-pair"]["team_stats"]
+    assert zero_pair["Blue"]["dragons"] is None
+    assert zero_pair["Red"]["dragons"] is None
+    assert zero_pair["Blue"]["inhibitors"] is None
+    assert zero_pair["Red"]["inhibitors"] is None
+    assert zero_pair["Blue"]["towers"] == 0
+    assert zero_pair["Red"]["towers"] == 4
+    assert zero_pair["Blue"]["atakhans"] is None
+
+    one_side = payload["games"]["one-side-zero"]["team_stats"]
+    assert one_side["Blue"]["dragons"] == 0
+    assert one_side["Red"]["dragons"] == 2
+    assert one_side["Blue"]["inhibitors"] == 1
+    assert one_side["Red"]["inhibitors"] == 0
+    assert one_side["Blue"]["towers"] == 0
+
+    legacy = payload["games"]["legacy-25"]
+    assert legacy["patch"] == "25.24"
+    assert legacy["team_stats"]["Blue"]["atakhans"] == 1
+    assert legacy["team_stats"]["Red"]["atakhans"] == 0
+
+    assert payload["games"]["patch-26-01"]["patch"] == "26.01"
+    assert payload["games"]["patch-26-01"]["team_stats"]["Blue"]["atakhans"] is None
+    assert payload["games"]["realm-26-16"]["patch"] == "26.16"
+    assert payload["games"]["realm-26-16"]["team_stats"]["Blue"]["atakhans"] is None
+
+
+def test_public_patch_for_source_uses_audited_time_and_realm_evidence() -> None:
+    assert public_patch_for_source("16.1", event_time="2026-01-20T00:00:00Z") == "26.01"
+    assert public_patch_for_source("16.9", event_time="2026-05-12T00:00:00Z") == "26.09"
+    assert public_patch_for_source("16.10", event_time="2026-05-12T00:00:00Z") == "26.10"
+    assert public_patch_for_source("16.15", event_time="2026-08-01T00:00:00Z") == "26.15"
+    assert public_patch_for_source(
+        "16.16",
+        event_time="2026-08-13T00:00:00Z",
+        realm_patch="16.16",
+        realm_kind="live",
+    ) == "26.16"
+    assert public_patch_for_source("16.1") == ""
+
+
 def test_champion_image_urls_fall_back_to_pinned_crosswalk(tmp_path) -> None:
     crosswalk_path = tmp_path / "data/lol/v2/champions/champion-id-crosswalk-v1.json"
     crosswalk_path.parent.mkdir(parents=True)
@@ -360,6 +490,23 @@ def test_champion_image_urls_fall_back_to_pinned_crosswalk(tmp_path) -> None:
     assert _champion_image_urls(tmp_path) == {
         "Galio": "https://cdn.communitydragon.org/latest/champion/3/square"
     }
+
+
+def test_champion_image_urls_cover_the_current_canonical_champion_catalog() -> None:
+    root = Path(__file__).resolve().parents[1]
+    catalog_path = root / "data/lol/v2/champions/champion-ontology-seed-26.16.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    urls = _champion_image_urls(root)
+
+    champions = catalog["champions"]
+    assert len(champions) == 173
+    assert len(urls) == len(champions)
+    for champion in champions:
+        name = champion["display_name"]
+        numeric_id = champion["champion_id"].removeprefix("riot:champion:")
+        assert urls[name] == (
+            f"https://cdn.communitydragon.org/latest/champion/{numeric_id}/square"
+        )
 
 
 def test_profile_records_keep_public_composition_evidence_optional() -> None:
@@ -475,6 +622,7 @@ def test_published_draft_pool_uses_bans_and_fails_closed_without_them() -> None:
             order += 1
     game = {
         "game_id": "game-1",
+        "date": "2026-06-01T12:00:00Z",
         "patch": "16.1",
         "players": players,
         "draft_pool": {
@@ -604,6 +752,7 @@ def test_published_draft_pool_applies_second_phase_bans_after_sixth_pick() -> No
     ]
     game = {
         "game_id": "game-2",
+        "date": "2026-06-01T12:00:00Z",
         "patch": "16.1",
         "draft_pool": {
             "patch": "16.1",

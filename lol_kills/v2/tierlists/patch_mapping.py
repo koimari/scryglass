@@ -237,6 +237,7 @@ def _verify_local_sources(
     payload: Mapping[str, Any],
     *,
     repo_root: Path | None,
+    allow_missing_mutable_live_sources: bool = False,
 ) -> None:
     if repo_root is None:
         raise PatchMappingError("cannot verify local mapping sources without a repository root")
@@ -247,6 +248,12 @@ def _verify_local_sources(
         if locator.startswith(("https://", "http://")):
             continue
         path = repo_root / locator
+        if (
+            allow_missing_mutable_live_sources
+            and source.get("mutable_live_source") is True
+            and source.get("kind") in {"oe_live_player_games", "oe_live_meta"}
+        ):
+            continue
         if not path.is_file():
             raise PatchMappingError(f"mapping source is missing: {locator}")
         if source.get("mutable_live_source") is True or source.get("mutable_source") is True:
@@ -528,8 +535,16 @@ def load_mapping(
     *,
     verify_source_hashes: bool = True,
     repo_root: Path | str | None = None,
+    bind_live_source: bool = True,
 ) -> MappingArtifact:
-    """Load and validate the sidecar, including its canonical hash."""
+    """Load and validate the sidecar, including its canonical hash.
+
+    ``bind_live_source`` controls whether the mutable OE parquet watermark is
+    bound to the static mapping rows. Public projection code uses the static
+    audited intervals while building a pack. The refresh command keeps the
+    default live binding so a publication cannot silently ignore a changed
+    source snapshot.
+    """
 
     mapping_path = Path(path)
     try:
@@ -599,8 +614,16 @@ def load_mapping(
     resolved_root = Path(repo_root) if repo_root is not None else _repo_root_for(mapping_path)
     live_source: dict[str, Any] | None = None
     if verify_source_hashes:
-        _verify_local_sources(payload, repo_root=resolved_root)
-    live_binding = _live_source_binding(payload, repo_root=resolved_root)
+        _verify_local_sources(
+            payload,
+            repo_root=resolved_root,
+            allow_missing_mutable_live_sources=not bind_live_source,
+        )
+    live_binding = (
+        _live_source_binding(payload, repo_root=resolved_root)
+        if bind_live_source
+        else None
+    )
     if live_binding is not None:
         live_intervals, live_source = live_binding
         validated = _bind_live_rows(validated, live_intervals)
