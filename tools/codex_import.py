@@ -311,7 +311,8 @@ def import_skills(repo: Path) -> list[dict]:
             target = dst if rel == "." else dst / rel
             target.mkdir(parents=True, exist_ok=True)
             for f in files:
-                data = open(os.path.join(dp, f), "rb").read()
+                with open(os.path.join(dp, f), "rb") as source_file:
+                    data = source_file.read()
                 (target / f).write_bytes(data)
                 n_files += 1
                 n_bytes += len(data)
