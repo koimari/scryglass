@@ -132,6 +132,7 @@ def test_retention_prunes_one_query_release_per_transaction() -> None:
     assert fast_path in migration
     assert migration.index(fast_path) < migration.index("pg_advisory_xact_lock")
     assert "limit 1" in migration
+    assert "'has_more', has_more" in migration
     assert "owner to scryglass_release_retention_owner" in migration
     assert "grant execute on function public.prune_scryglass_public_releases_v2(integer)" in migration
 

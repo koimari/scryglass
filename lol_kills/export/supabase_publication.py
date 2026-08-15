@@ -1044,6 +1044,9 @@ class SupabasePublicData:
             )
             if type(deleted_count) is not int or deleted_count not in (0, 1):
                 raise SupabasePublicationError("Supabase retention response is malformed")
+            has_more = result.get("has_more")
+            if type(has_more) is not bool:
+                raise SupabasePublicationError("Supabase retention response is malformed")
             storage_paths = result.get("storage_paths")
             if not isinstance(storage_paths, list) or any(
                 not isinstance(path, str) for path in storage_paths
@@ -1054,7 +1057,7 @@ class SupabasePublicData:
             self.delete_storage_objects(storage_paths)
             self.ack_storage_cleanup(storage_paths)
             deleted_total += deleted_count
-            if deleted_count == 0:
+            if not has_more:
                 return deleted_total
         raise SupabasePublicationError(
             "Supabase retention exceeded the bounded prune calls"

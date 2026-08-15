@@ -72,6 +72,7 @@ as $$
 declare
   removed_releases text[];
   queued_storage_paths text[];
+  has_more boolean;
 begin
   perform pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtext('scryglass-public-release')
@@ -110,6 +111,11 @@ begin
   delete from public.scryglass_public_releases release
   where release.release_id = any(removed_releases);
 
+  select pg_catalog.count(*) > greatest(p_keep - 1, 0)
+  into has_more
+  from public.scryglass_public_releases release
+  where release.status = 'superseded';
+
   select coalesce(
     pg_catalog.array_agg(cleanup.storage_path order by cleanup.storage_path),
     array[]::text[]
@@ -119,6 +125,7 @@ begin
 
   return pg_catalog.jsonb_build_object(
     'deleted_count', pg_catalog.cardinality(removed_releases),
+    'has_more', has_more,
     'release_ids', pg_catalog.to_jsonb(removed_releases),
     'storage_paths', pg_catalog.to_jsonb(queued_storage_paths)
   );

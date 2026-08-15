@@ -765,9 +765,16 @@ def test_retention_prunes_one_release_per_database_call() -> None:
     )
     responses = iter(
         [
-            {"deleted_count": 1, "storage_paths": ["v2026.08.10.120000/a.json"]},
-            {"deleted_count": 1, "storage_paths": ["v2026.08.11.120000/b.json"]},
-            {"deleted_count": 0, "storage_paths": []},
+            {
+                "deleted_count": 1,
+                "has_more": True,
+                "storage_paths": ["v2026.08.10.120000/a.json"],
+            },
+            {
+                "deleted_count": 1,
+                "has_more": False,
+                "storage_paths": ["v2026.08.11.120000/b.json"],
+            },
         ]
     )
     requests: list[tuple[str, str, object]] = []
@@ -793,14 +800,39 @@ def test_retention_prunes_one_release_per_database_call() -> None:
     assert requests == [
         ("POST", "rpc/prune_scryglass_public_releases_v2", {"p_keep": 3}),
         ("POST", "rpc/prune_scryglass_public_releases_v2", {"p_keep": 3}),
-        ("POST", "rpc/prune_scryglass_public_releases_v2", {"p_keep": 3}),
     ]
     assert deleted == [
         ["v2026.08.10.120000/a.json"],
         ["v2026.08.11.120000/b.json"],
-        [],
     ]
     assert acknowledged == deleted
+
+
+def test_retention_accepts_the_twentieth_final_deletion() -> None:
+    client = supabase_publication.SupabasePublicData(
+        "https://example.supabase.co",
+        "sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    responses = iter(
+        {
+            "deleted_count": 1,
+            "has_more": index < supabase_publication.MAX_RETENTION_PRUNE_CALLS - 1,
+            "storage_paths": [],
+        }
+        for index in range(supabase_publication.MAX_RETENTION_PRUNE_CALLS)
+    )
+    requests: list[tuple[str, str, object]] = []
+
+    def request(method, path, payload=None, **_kwargs):
+        requests.append((method, path, payload))
+        return next(responses)
+
+    client._request = request  # type: ignore[method-assign]
+    client.delete_storage_objects = lambda _paths: None  # type: ignore[method-assign]
+    client.ack_storage_cleanup = lambda _paths: 0  # type: ignore[method-assign]
+
+    assert client.prune(3) == supabase_publication.MAX_RETENTION_PRUNE_CALLS
+    assert len(requests) == supabase_publication.MAX_RETENTION_PRUNE_CALLS
 
 
 def test_rollback_requires_the_canonical_release_id() -> None:
