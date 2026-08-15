@@ -30,7 +30,11 @@ from lol_kills.etl.paths import (
 )
 from lol_kills.net import require_https_url
 from lol_kills.etl.riot_patch_receipts import RiotPatchReceiptError, validate_patch_receipt
-from lol_kills.v2.patch_identity import corrected_oe_patch_token
+from lol_kills.v2.patch_identity import (
+    PatchIdentityError,
+    corrected_oe_patch_token,
+    public_patch,
+)
 
 
 OE_MIN_DOWNLOAD_BYTES = 10_000
@@ -102,8 +106,15 @@ def _validate_oe_csv(path: Path, year: str) -> dict[str, Any]:
         )
 
     selected = [column for column in header if column in OE_REQUIRED_COLUMNS]
+    if "patch" in header and "patch" not in selected:
+        selected.append("patch")
     try:
-        frame = pd.read_csv(path, usecols=selected, low_memory=False)
+        frame = pd.read_csv(
+            path,
+            usecols=selected,
+            low_memory=False,
+            dtype={"date": str, "patch": str},
+        )
     except Exception as exc:  # noqa: BLE001
         raise OeDownloadError(f"OE candidate body could not be parsed: {exc}") from exc
     if frame.empty:
@@ -127,6 +138,31 @@ def _validate_oe_csv(path: Path, year: str) -> dict[str, Any]:
             f"OE candidate for {year} lacks team, player, or game rows"
         )
 
+    patch_token_counts: dict[str, int] = {}
+    patch_game_counts: dict[str, int] = {}
+    public_patch_by_source: dict[str, str] = {}
+    if "patch" in frame.columns:
+        patch = frame["patch"].astype("string").str.strip()
+        patch = patch.mask(
+            patch.isna()
+            | patch.str.casefold().isin({"", "nan", "nat", "none", "<na>"})
+        )
+        present = frame.loc[patch.notna(), ["gameid"]].copy()
+        present["patch"] = patch.loc[patch.notna()]
+        patch_token_counts = {
+            str(token): int(count)
+            for token, count in present["patch"].value_counts(sort=True).items()
+        }
+        patch_game_counts = {
+            str(token): int(count)
+            for token, count in present.groupby("patch", sort=True)["gameid"].nunique().items()
+        }
+        for token in sorted(patch_token_counts):
+            try:
+                public_patch_by_source[token] = public_patch(token)
+            except PatchIdentityError:
+                continue
+
     return {
         "raw_sha256": _sha256_file(path),
         "bytes": int(size),
@@ -138,6 +174,9 @@ def _validate_oe_csv(path: Path, year: str) -> dict[str, Any]:
         "date_min_utc": dates.min().isoformat(),
         "date_max_utc": dates.max().isoformat(),
         "columns_sha256": _canonical_sha256(header),
+        "patch_token_counts": patch_token_counts,
+        "patch_game_counts": patch_game_counts,
+        "public_patch_by_source": public_patch_by_source,
     }
 
 
@@ -244,7 +283,18 @@ def validate_accepted_source_receipt(
     validated = _validate_oe_csv(source, expected_year)
     if candidate.get("raw_sha256") != validated["raw_sha256"]:
         raise OeDownloadError("OE source receipt does not bind the requested CSV bytes")
-    for field in ("bytes", "row_count", "game_count", "columns_sha256", "date_max_utc"):
+    for field in (
+        "bytes",
+        "row_count",
+        "game_count",
+        "columns_sha256",
+        "date_max_utc",
+        "patch_token_counts",
+        "patch_game_counts",
+        "public_patch_by_source",
+    ):
+        if field not in candidate:
+            continue
         if candidate.get(field) != validated[field]:
             raise OeDownloadError(f"OE source receipt field does not match the CSV: {field}")
     return {

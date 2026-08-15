@@ -1,0 +1,46 @@
+{
+  "artifact_sha256": "fcb265a3ff7ec46420d80fd6ae06dad6b16468d3a5adfdc266052475033ab5aa",
+  "authority": {
+    "descriptive_refresh": true,
+    "private_r9e_promotion": false,
+    "public_draft": false,
+    "public_probability": false
+  },
+  "claim_ceiling": "This receipt binds the accepted OE revision, source/public patch labels, descriptive ingest counts, and private series crosswalk only. It does not promote Draft Score or authorize public probability.",
+  "ingest": {
+    "deduplication": "replace matching source game IDs before append",
+    "maps": 7,
+    "player_rows": 70,
+    "runtime_map_rows_after": 17555,
+    "runtime_player_rows_after": 175550,
+    "runtime_team_rows_after": 35110,
+    "team_rows": 14
+  },
+  "patch_identity": {
+    "accepted_public_patch": "26.16",
+    "accepted_source_token": "16.16",
+    "prior_public_patch": "26.15",
+    "prior_source_token_preserved": "16.15",
+    "source_game_count": 7,
+    "source_latest_utc": "2026-08-15T15:58:57Z",
+    "source_patch_row_count": 84
+  },
+  "schema_version": "scryglass:r9e-16-16-ingest-receipt:v1",
+  "series_crosswalk": {
+    "authority": "private_source_backed_crosswalk",
+    "issues": 0,
+    "mapped_rows": 7,
+    "mapped_series": 3,
+    "schema_version": "scryglass:r9e-oe-leaguepedia-crosswalk:v1",
+    "sha256": "906873d20b952d479eb840bfd4ba48aceed5f596cac55a888c72e27357612e8e"
+  },
+  "source": {
+    "bytes": 60364958,
+    "drive_file_id": "1hnpbrUpBMS1TZI7IovfpKeZfWJH1Aptm",
+    "modified_at_utc": "2026-08-15T19:14:11.935Z",
+    "provider": "Oracle's Elixir",
+    "revision_id": "0B_SP330uQdQ_cHhDN1h6RVI3NUkraUNyZWprQnVDSThEeE5jPQ",
+    "sha256": "9467bb8d3f15571a2445a4728d2d38290fa78079c4fe6b2d1037b54d0b988a65",
+    "transport": "public_google_drive_file_revision"
+  }
+}
