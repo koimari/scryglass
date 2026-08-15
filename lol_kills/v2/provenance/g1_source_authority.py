@@ -60,7 +60,7 @@ _PINNED_REPOSITORY_ARTIFACTS = {
     },
     "benchmark_contract_manifest": {
         "locator": "data/lol/v2/evaluation/real-v1/contract-manifest.json",
-        "raw_sha256": "22695be602fae2ef116779b502d9495937b60e8fc7af00edceb20c991928471c",
+        "raw_sha256": "d4ba3db8f556914f5be90c68018987cb55c3796e9d8ee46b54ee74c312013b7d",
     },
     "benchmark_contract": {
         "locator": "data/lol/v2/evaluation/real-v1/benchmark-contract.json",
@@ -68,7 +68,7 @@ _PINNED_REPOSITORY_ARTIFACTS = {
     },
     "benchmark_candidate_registry": {
         "locator": "data/lol/v2/evaluation/real-v1/candidate-registry.json",
-        "raw_sha256": "02dc4bd730fb6162918eb5fc565d795dde0da1745f88b4439219254da6b42697",
+        "raw_sha256": "95c1243e4c63cbcadb14f2860145c4f30abf1bbdbd385486b64417c0db0bdd51",
     },
 }
 

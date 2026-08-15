@@ -94,7 +94,7 @@
           "required": ["relative_path", "raw_sha256"],
           "properties": {
             "relative_path": {
-              "const": "data/lol/v2/models/draft-interactions/oe-private-target-authority.json"
+              "const": "data/lol/v2/models/draft-interactions/oe-private-target-authority-2026-07-29.json"
             },
             "raw_sha256": {
               "const": "b1d0a6e37abb9a74dee8689dc19ab54d30fd15516bd4ee454906a075d8f20788"

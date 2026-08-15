@@ -1,7 +1,7 @@
 {
   "schema_version": "g0-authority-v1.4",
   "authority_id": "scryglass:authority-derived-preflight:v1.4",
-  "contract_set_sha256": "22e8a93a650987026da8980309435a44207529dc42f049333f4a427732bac471",
+  "contract_set_sha256": "810f87c89a93431dddcd970fd0c1a4fc4f55d6df2969c7a771b5f11087cd1977",
   "evidence_generator_identity": "scryglass-evidence-generator:g0-unbound",
   "expected_reads": [
     {
@@ -12,13 +12,13 @@
   ],
   "candidate_registry": {
     "relative_path": "candidate-registry.json",
-    "raw_sha256": "02dc4bd730fb6162918eb5fc565d795dde0da1745f88b4439219254da6b42697",
-    "semantic_sha256": "3c51eae101d7364d6eab747380bb3d27b19fc09b75ac8dd8ef10598d01c68cba"
+    "raw_sha256": "95c1243e4c63cbcadb14f2860145c4f30abf1bbdbd385486b64417c0db0bdd51",
+    "semantic_sha256": "1b6c079b12d7b793bea40de758752c2c2e8d0e9aee09c59c57f5ab417f8582c4"
   },
   "pair_registry": {
     "relative_path": "pair-registry.json",
-    "raw_sha256": "778fd4e61a812b09005e5c6bab58a6bd6609001fc1a436176bdb12e2fdb9268a",
-    "semantic_sha256": "508f47893a45a8a5c7978ec7902de590d894b6b3c593aef3327aaa62e7333a72"
+    "raw_sha256": "b908b73aa5248ee2f1abb813507ca448c753dc519f8af7b3312d456a26c00bb6",
+    "semantic_sha256": "94eee20f5a05db87c83683cd4791937b72fdbdb7631f1f686089cb658f286799"
   },
   "permit_ledger": {
     "relative_path": "protected/permit-ledger",

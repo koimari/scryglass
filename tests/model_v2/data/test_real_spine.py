@@ -189,6 +189,25 @@ def test_lpl_source_family_url_and_ordinal_are_accepted_without_a_time_heuristic
     }
 
 
+def test_legacy_authority_locator_resolves_only_to_the_exact_archived_receipt() -> None:
+    import lol_kills.v2.data.real_spine as spine
+
+    archived = spine._resolve_koi_mari_authority_path(
+        spine.LEGACY_KOI_MARI_AUTHORITY_LOCATOR,
+        expected_raw_sha256=spine.KOI_MARI_AUTHORITY_RAW_SHA256,
+    )
+    assert archived == spine.REPO_ROOT / spine.KOI_MARI_AUTHORITY_LOCATOR
+    assert spine._raw_file_sha256(archived) == spine.KOI_MARI_AUTHORITY_RAW_SHA256
+
+    current = spine.REPO_ROOT / spine.LEGACY_KOI_MARI_AUTHORITY_LOCATOR
+    assert spine._raw_file_sha256(current) != spine.KOI_MARI_AUTHORITY_RAW_SHA256
+    unresolved = spine._resolve_koi_mari_authority_path(
+        spine.LEGACY_KOI_MARI_AUTHORITY_LOCATOR,
+        expected_raw_sha256="f" * 64,
+    )
+    assert unresolved == current
+
+
 def test_future_prior_mutation_never_becomes_eligible_for_an_earlier_map() -> None:
     first = build_real_v1_packet(_payload())
     payload = _payload()

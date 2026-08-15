@@ -23,8 +23,8 @@
       "semantic_sha256": "cf3231dcf2af25aa5be2356dd27d5492e2915d4d8dde822f51a9dc4b1e029a37"
     },
     "candidate-registry.schema.json": {
-      "raw_sha256": "ac2a3eab8e49d7372273e5bee6a0e3c7149a98e3adc9560974b401799c608d6e",
-      "semantic_sha256": "42e7b34788fc3019e3ea24b0cfccfeb4f2893880623cb5dc4ad475cebe069419"
+      "raw_sha256": "13b22d83ba7abb72b3daec198baacf33f0b7ac9dd551c977bc78abf80304b1a9",
+      "semantic_sha256": "f1330284a95d6a5b473b25c049e886b84e510410ba7c5f92b72855d9f2bd8934"
     },
     "pair-registry.schema.json": {
       "raw_sha256": "8dee0513f91352a600ad7ccd97d561bb2de78ee1de265be9ca7b46420665389f",
@@ -43,23 +43,23 @@
       "semantic_sha256": "008244475121ab2ee612dad929fd7644463ee0141386889024ba243a3d60466f"
     },
     "authority-bundle.json": {
-      "raw_sha256": "51a696297e6afc282a765dc08f9682b5c63c16ad35487db2b659be468b8d5b86",
-      "semantic_sha256": "f09299cfd008719af0ba2dc0619da23b1d2f5bf63a2371563bff089d84ffe5b0"
+      "raw_sha256": "2cfd7a44d96817d825892498b4d60156fd8464916f3c85aac52ded419184b681",
+      "semantic_sha256": "6424304e027eb07ce6199e86d22341ba55e58b667777b34a495dcacba72d6fb8"
     },
     "candidate-registry.json": {
-      "raw_sha256": "02dc4bd730fb6162918eb5fc565d795dde0da1745f88b4439219254da6b42697",
-      "semantic_sha256": "3c51eae101d7364d6eab747380bb3d27b19fc09b75ac8dd8ef10598d01c68cba"
+      "raw_sha256": "95c1243e4c63cbcadb14f2860145c4f30abf1bbdbd385486b64417c0db0bdd51",
+      "semantic_sha256": "1b6c079b12d7b793bea40de758752c2c2e8d0e9aee09c59c57f5ab417f8582c4"
     },
     "pair-registry.json": {
-      "raw_sha256": "778fd4e61a812b09005e5c6bab58a6bd6609001fc1a436176bdb12e2fdb9268a",
-      "semantic_sha256": "508f47893a45a8a5c7978ec7902de590d894b6b3c593aef3327aaa62e7333a72"
+      "raw_sha256": "b908b73aa5248ee2f1abb813507ca448c753dc519f8af7b3312d456a26c00bb6",
+      "semantic_sha256": "94eee20f5a05db87c83683cd4791937b72fdbdb7631f1f686089cb658f286799"
     }
   },
   "authority_code": {
     "lol_kills/v2/evaluation/benchmark_contract.py": {
-      "raw_sha256": "f706b4e2583560e5591ba508555d9130ea50cd18eb22d405b698bdad9d2991e8"
+      "raw_sha256": "90e2aa11ef03faab0b56a00d572ca6ed8d2149c53978bffa1fa14299a4a06906"
     }
   },
-  "authority_contract_set_sha256": "22e8a93a650987026da8980309435a44207529dc42f049333f4a427732bac471",
-  "contract_set_sha256": "d0adbef347af8b366b2427c943516383921753fdf5e9cf6884927318c8c67195"
+  "authority_contract_set_sha256": "810f87c89a93431dddcd970fd0c1a4fc4f55d6df2969c7a771b5f11087cd1977",
+  "contract_set_sha256": "c118fe87256d3ae22bfec3272f7b87a317658179ee6dec544989c6989e24cdae"
 }

@@ -393,7 +393,7 @@ def test_g1_human_authority_handoff_binds_and_reopens_exact_artifact() -> None:
     assert binding == {
         "relative_path": (
             "data/lol/v2/models/draft-interactions/"
-            "oe-private-target-authority.json"
+            "oe-private-target-authority-2026-07-29.json"
         ),
         "raw_sha256": (
             "b1d0a6e37abb9a74dee8689dc19ab54d"
@@ -421,7 +421,7 @@ def test_g1_human_authority_handoff_binds_and_reopens_exact_artifact() -> None:
         ("authority_artifact", {
             "relative_path": (
                 "data/lol/v2/models/draft-interactions/"
-                "oe-private-target-authority.json"
+                "oe-private-target-authority-2026-07-29.json"
             ),
             "raw_sha256": "f" * 64,
         }),
