@@ -77,14 +77,14 @@ test("match objectives follow patch support and remain reachable on mobile", asy
   await expect(currentStats.locator("dt", { hasText: "Atakhan" })).toHaveCount(0);
   await expect(currentStats.locator("dt", { hasText: "Heralds" }).locator("..").locator("dd")).toHaveText("—");
   await expect(currentStats.locator("dt", { hasText: "Inhibitors" }).locator("..").locator("dd")).toHaveText("0");
+  await expect(currentStats.locator("dt", { hasText: "Towers" }).locator("..").locator("dd")).toHaveText("9");
+  await expect(currentStats.locator("dt", { hasText: "Dragons" }).locator("..").locator("dd")).toHaveText("3");
   const currentScroll = await currentStrip.evaluate((node) => ({
     clientWidth: node.clientWidth,
     scrollWidth: node.scrollWidth,
   }));
-  expect(currentScroll.scrollWidth).toBeGreaterThan(currentScroll.clientWidth);
-  await currentStrip.focus();
-  await currentStrip.evaluate((node) => { node.scrollLeft = node.scrollWidth; });
-  await expect(currentStats.locator("dt", { hasText: "Inhibitors" })).toBeVisible();
+  expect(currentScroll.scrollWidth).toBe(currentScroll.clientWidth);
+  await expect(page.getByText("Swipe sideways for more statistics.")).toHaveCount(0);
 
   await page.goto("/matches/e2e-game-25");
   const legacyStats = page.getByTestId("team-objective-stats").first();
