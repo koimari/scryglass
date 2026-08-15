@@ -64,16 +64,9 @@ def historical_capture_root(
             destination.parent.mkdir(parents=True, exist_ok=True)
             if not destination.exists():
                 os.link(source, destination)
-    market_artifacts = (
-        Path("data/lol/v2/evaluation/match-winner-market-v1/future-protocol-v1.json"),
-        Path(
-            "data/lol/v2/evaluation/match-winner-market-v1/"
-            "quote-adapter-candidate-v1.json"
-        ),
-    )
-    for artifact in market_artifacts:
-        (root / artifact.parent).mkdir(parents=True, exist_ok=True)
-        shutil.copy2(repo_root / artifact, root / artifact)
+    market_root = Path("data/lol/v2/evaluation/match-winner-market-v1")
+    (root / market_root.parent).mkdir(parents=True, exist_ok=True)
+    shutil.copytree(repo_root / market_root, root / market_root)
 
     (root / "data/lol/warehouse/parquet").mkdir(parents=True)
     (root / "data/lol/warehouse/raw_grid").symlink_to(

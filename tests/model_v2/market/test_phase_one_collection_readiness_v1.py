@@ -12,14 +12,13 @@ from lol_kills.v2.market import (
 )
 
 
-ROOT = Path(".").resolve()
 LOCKED_AT = datetime(2026, 8, 2, 2, 40, tzinfo=timezone.utc)
 
 
 @pytest.fixture(scope="module")
-def receipt() -> dict:
+def receipt(historical_capture_root: Path) -> dict:
     return readiness.build_phase_one_collection_readiness_v1(
-        root=ROOT,
+        root=historical_capture_root,
         clock=lambda: LOCKED_AT,
     )
 
@@ -30,9 +29,12 @@ def _resign(payload: dict) -> None:
     )
 
 
-def test_readiness_is_pre_boundary_empty_and_non_authorizing(receipt: dict) -> None:
+def test_readiness_is_pre_boundary_empty_and_non_authorizing(
+    receipt: dict,
+    historical_capture_root: Path,
+) -> None:
     checked = readiness.validate_phase_one_collection_readiness_v1(
-        receipt, root=ROOT
+        receipt, root=historical_capture_root
     )
     assert checked["result_state"] == readiness.RESULT_STATE
     assert checked["locked_empty_collection_state"]["plans"] == 0
@@ -47,19 +49,20 @@ def test_readiness_is_pre_boundary_empty_and_non_authorizing(receipt: dict) -> N
     assert all(value is None for value in checked["decision_outputs"].values())
 
 
-def test_readiness_rejects_boundary_lock() -> None:
+def test_readiness_rejects_boundary_lock(historical_capture_root: Path) -> None:
     with pytest.raises(
         readiness.PhaseOneCollectionReadinessError,
         match="before the future boundary",
     ):
         readiness.build_phase_one_collection_readiness_v1(
-            root=ROOT,
+            root=historical_capture_root,
             clock=lambda: datetime(2026, 8, 3, 0, 0, tzinfo=timezone.utc),
         )
 
 
 def test_readiness_rejects_forged_future_evidence_or_authority(
     receipt: dict,
+    historical_capture_root: Path,
 ) -> None:
     forged_evidence = deepcopy(receipt)
     forged_evidence["implementation"]["actual_future_evidence_present"] = True
@@ -69,7 +72,7 @@ def test_readiness_rejects_forged_future_evidence_or_authority(
         match="implementation claim changed",
     ):
         readiness.validate_phase_one_collection_readiness_v1(
-            forged_evidence, root=ROOT
+            forged_evidence, root=historical_capture_root
         )
 
     forged_authority = deepcopy(receipt)
@@ -80,7 +83,7 @@ def test_readiness_rejects_forged_future_evidence_or_authority(
         match="exceeds authority",
     ):
         readiness.validate_phase_one_collection_readiness_v1(
-            forged_authority, root=ROOT
+            forged_authority, root=historical_capture_root
         )
 
 
@@ -95,9 +98,11 @@ def test_readiness_cli_exposes_no_user_lock_timestamp(
     assert "--timestamp" not in help_text
 
 
-def test_registered_readiness_is_hash_pinned_and_empty() -> None:
+def test_registered_readiness_is_hash_pinned_and_empty(
+    historical_capture_root: Path,
+) -> None:
     checked = registry.validate_registered_phase_one_collection_readiness_v1(
-        root=ROOT
+        root=historical_capture_root
     )
     assert (
         checked["artifact_sha256"]
