@@ -15,7 +15,13 @@ export default async function MatchPage({ params }: Props) {
   if (queryApiAvailable(manifest)) {
     const result = await getMatch(manifest, gameId);
     if (!result.row) notFound();
-    return <MatchRatingProfile game={result.row.payload} championImages={result.champion_images} />;
+    return (
+      <MatchRatingProfile
+        game={result.row.payload}
+        championImages={result.champion_images}
+        releaseId={manifest.pack_id}
+      />
+    );
   }
   const profiles = await readPackJson<ProfileRecords>(manifest, "features/profile_records.json");
   let game: ProfileGame | undefined = profiles.games[gameId];
@@ -32,5 +38,11 @@ export default async function MatchPage({ params }: Props) {
   const publishedGame = hasPromotedDraftAuthority(manifest)
     ? game
     : { ...game, draft_pool: undefined, draft_contribution: undefined };
-  return <MatchRatingProfile game={publishedGame} championImages={profiles.champion_images} />;
+  return (
+    <MatchRatingProfile
+      game={publishedGame}
+      championImages={profiles.champion_images}
+      releaseId={manifest.pack_id}
+    />
+  );
 }

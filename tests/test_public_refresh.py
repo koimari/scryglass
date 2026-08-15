@@ -125,6 +125,53 @@ def test_failed_public_smoke_restores_the_previous_pack(tmp_path: Path) -> None:
     assert health["rollback"]["cache_invalidation"] == {"revalidated": True}
 
 
+def test_failed_post_rollback_probe_keeps_rollback_failed(tmp_path: Path) -> None:
+    previous_release = "v2026.08.10.001500"
+    release_id = "v2026.08.11.184500"
+    config = replace(_config(tmp_path), production=True)
+    config.sync.state_path.parent.mkdir(parents=True, exist_ok=True)
+    previous = {"pack_id": previous_release, "published_game_ids": ["game-1"]}
+    config.sync.state_path.write_text(json.dumps(previous), encoding="utf-8")
+    ratings = {
+        "status": "published",
+        "pack_id": release_id,
+        "publication": {"runtime": "local_staging", "pack_id": release_id},
+    }
+
+    with patch.object(public_refresh, "_preflight"), patch.object(
+        public_refresh, "_run_with_source_retries", return_value=ratings
+    ), patch.object(
+        public_refresh,
+        "_run_tier_refresh",
+        return_value={"status": "production_promoted"},
+    ), patch.object(
+        public_refresh, "invalidate_public_cache", return_value={"revalidated": True}
+    ), patch.object(
+        public_refresh,
+        "probe_public_release_families",
+        side_effect=[
+            {"release_id": release_id},
+            public_refresh.PublicRefreshError("restored page is stale"),
+        ],
+    ), patch.object(
+        public_refresh,
+        "verify_public_release",
+        side_effect=public_refresh.PublicRefreshError("page smoke failed"),
+    ), patch.object(
+        public_refresh,
+        "rollback_public_pack",
+        return_value={"status": "restored"},
+    ):
+        with pytest.raises(public_refresh.PublicRefreshError, match="page smoke failed"):
+            public_refresh.run_once(config, now=NOW)
+
+    health = json.loads(config.health_path.read_text(encoding="utf-8"))
+    assert health["rollback"]["status"] == "failed"
+    assert health["rollback"]["cache_invalidation"] == {"revalidated": True}
+    assert health["rollback"]["cache_probes"]["status"] == "failed"
+    assert "restored page is stale" in health["rollback"]["reason"]
+
+
 def test_cache_failure_restores_the_new_pack_and_retries_cache_clear(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config.sync.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -786,20 +833,37 @@ def test_public_release_probes_cover_each_cache_family(tmp_path: Path) -> None:
     release_id = "v2026.08.11.184500"
     config = replace(_config(tmp_path), production=True)
     requested: list[str] = []
+    asset_raw = b"asset"
+    asset_path = "features/schedule.json"
+    asset_url = f"/api/assets/{release_id}/features%2Fschedule.json"
 
     def read(url: str, **_kwargs):
         requested.append(url)
         if url.endswith("/api/health"):
             return json.dumps({"pack_id": release_id}).encode()
         if url.endswith("/packs/manifest.json"):
-            return json.dumps({"release_id": release_id}).encode()
+            return json.dumps(
+                {
+                    "release_id": release_id,
+                    "files": [
+                        {
+                            "path": asset_path,
+                            "url": asset_url,
+                            "bytes": len(asset_raw),
+                            "sha256": hashlib.sha256(asset_raw).hexdigest(),
+                        }
+                    ],
+                }
+            ).encode()
+        if url.endswith(asset_url):
+            return asset_raw
         if "/api/chat/matches?team=T1&limit=1" in url:
             return json.dumps(
                 {"ok": True, "data": {"matches": [{"game_id": "game-1"}]}}
             ).encode()
         if "/api/" in url:
             return b"{}"
-        return b"page"
+        return f'<main data-scryglass-release="{release_id}">page</main>'.encode()
 
     with patch.object(public_refresh, "_http_bytes", side_effect=read):
         result = public_refresh.probe_public_release_families(config, release_id)
@@ -808,10 +872,17 @@ def test_public_release_probes_cover_each_cache_family(tmp_path: Path) -> None:
         "release_id": release_id,
         "routes": [
             *public_refresh.PUBLIC_RELEASE_PROBES,
+            asset_url,
             "/elo/player/Faker",
             "/elo/team/T1",
             "/matches/game-1",
         ],
+        "asset": {
+            "path": asset_path,
+            "url": asset_url,
+            "bytes": len(asset_raw),
+            "sha256": hashlib.sha256(asset_raw).hexdigest(),
+        },
     }
     assert requested[0].endswith("/api/health")
     assert requested[-1].endswith("/api/health")
@@ -832,6 +903,59 @@ def test_public_release_probes_skip_the_retired_tier_artifact_route() -> None:
         "/api/public-data/tierlists?view=latest"
         not in public_refresh.PUBLIC_RELEASE_PROBES
     )
+
+
+def test_public_release_probes_reject_a_stale_page_marker(tmp_path: Path) -> None:
+    release_id = "v2026.08.11.184500"
+    stale_release_id = "v2026.08.10.001500"
+    config = replace(_config(tmp_path), production=True)
+
+    def read(url: str, **_kwargs):
+        if url.endswith("/api/health"):
+            return json.dumps({"pack_id": release_id}).encode()
+        if url.endswith("/packs/manifest.json"):
+            return json.dumps({"release_id": release_id}).encode()
+        if "/api/chat/matches?team=T1&limit=1" in url:
+            return json.dumps(
+                {"ok": True, "data": {"matches": [{"game_id": "game-1"}]}}
+            ).encode()
+        if "/api/" in url:
+            return b"{}"
+        marker = stale_release_id if url.endswith("/elo") else release_id
+        return f'<main data-scryglass-release="{marker}">page</main>'.encode()
+
+    with patch.object(public_refresh, "_http_bytes", side_effect=read):
+        with pytest.raises(
+            public_refresh.PublicRefreshError,
+            match="public page probe has no marker",
+        ):
+            public_refresh.probe_public_release_families(config, release_id)
+
+
+def test_deployed_asset_probe_rejects_equal_size_corruption(tmp_path: Path) -> None:
+    release_id = "v2026.08.11.184500"
+    asset_raw = b"good"
+    manifest = {
+        "files": [
+            {
+                "path": "features/schedule.json",
+                "url": f"/api/assets/{release_id}/features%2Fschedule.json",
+                "bytes": len(asset_raw),
+                "sha256": hashlib.sha256(asset_raw).hexdigest(),
+            }
+        ]
+    }
+
+    with patch.object(public_refresh, "_http_bytes", return_value=b"evil"):
+        with pytest.raises(
+            public_refresh.PublicRefreshError,
+            match="deployed public asset failed verification",
+        ):
+            public_refresh._probe_deployed_manifest_asset(
+                replace(_config(tmp_path), production=True),
+                manifest,
+                release_id,
+            )
 
 
 def test_health_alignment_failure_restores_previous_supabase_release(
@@ -899,8 +1023,10 @@ def test_health_alignment_failure_restores_previous_supabase_release(
     ), patch.object(
         public_refresh, "invalidate_public_cache", return_value={"revalidated": True}
     ) as invalidate, patch.object(
-        public_refresh, "probe_public_release_families", return_value={"release_id": release_id}
-    ), patch.object(
+        public_refresh,
+        "probe_public_release_families",
+        side_effect=lambda _config, probed_release: {"release_id": probed_release},
+    ) as probes, patch.object(
         public_refresh,
         "verify_public_release",
         return_value={"pack_id": release_id, "files": 1, "tier_status": "available"},
@@ -922,11 +1048,16 @@ def test_health_alignment_failure_restores_previous_supabase_release(
         secret_key=config.supabase_secret_key,
     )
     assert invalidate.call_args_list[-1].args[1] == previous_release
+    assert [call.args[1] for call in probes.call_args_list] == [
+        release_id,
+        previous_release,
+    ]
     ledger.finish.assert_not_called()
     ledger.fail.assert_called_once()
     health = json.loads(config.health_path.read_text(encoding="utf-8"))
     assert health["rollback"]["status"] == "restored"
     assert health["rollback"]["supabase"]["release_id"] == previous_release
+    assert health["rollback"]["cache_probes"] == {"release_id": previous_release}
 
 
 def test_public_health_alignment_requires_release_watermark_and_worker(

@@ -313,7 +313,7 @@ export default async function EloPage({ searchParams }: PageProps) {
   }
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} data-scryglass-release={manifest.pack_id}>
       <header className={styles.header}>
         <div>
           <h1>Team and player ratings</h1>

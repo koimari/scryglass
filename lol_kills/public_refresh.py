@@ -79,6 +79,7 @@ PUBLIC_RELEASE_PROBES = (
     "/api/chat/tier?limit=1",
     "/api/chat/methodology?topic=ratings",
 )
+RELEASE_BOUND_PAGE_PROBES = frozenset({"/elo", "/matches", "/tiers"})
 
 
 class PublicRefreshError(RuntimeError):
@@ -620,6 +621,58 @@ def _sha256(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _assert_html_release_marker(raw: bytes, release_id: str, path: str) -> None:
+    marker = f'data-scryglass-release="{release_id}"'.encode("ascii")
+    if marker not in raw:
+        raise PublicRefreshError(
+            f"public page probe has no marker for release {release_id}: {path}"
+        )
+
+
+def _probe_deployed_manifest_asset(
+    config: RefreshConfig,
+    manifest: dict[str, Any],
+    release_id: str,
+) -> dict[str, Any]:
+    files = manifest.get("files")
+    if not isinstance(files, list) or not files:
+        raise PublicRefreshError("public manifest probe has no asset inventory")
+    candidates = [
+        item
+        for item in files
+        if isinstance(item, dict)
+        and isinstance(item.get("path"), str)
+        and isinstance(item.get("bytes"), int)
+        and not isinstance(item.get("bytes"), bool)
+        and int(item["bytes"]) >= 0
+        and isinstance(item.get("sha256"), str)
+    ]
+    if not candidates:
+        raise PublicRefreshError("public manifest probe has no verifiable asset")
+    asset = min(candidates, key=lambda item: int(item["bytes"]))
+    path = str(asset["path"])
+    expected_url = (
+        f"/api/assets/{urllib.parse.quote(release_id, safe='')}/"
+        f"{urllib.parse.quote(path, safe='')}"
+    )
+    if asset.get("url") != expected_url:
+        raise PublicRefreshError("public manifest probe has an invalid asset URL")
+    raw = _http_bytes(
+        f"{config.site}{expected_url}",
+        headers={"Cache-Control": "no-cache"},
+        attempts=config.attempts,
+        expected_release_id=release_id,
+    )
+    if len(raw) != int(asset["bytes"]) or _sha256(raw) != asset["sha256"]:
+        raise PublicRefreshError(f"deployed public asset failed verification: {path}")
+    return {
+        "path": path,
+        "url": expected_url,
+        "bytes": len(raw),
+        "sha256": _sha256(raw),
+    }
+
+
 def _load_remote_manifest(config: RefreshConfig) -> tuple[dict[str, Any], str]:
     if config.publication_backend == "supabase":
         client = supabase_publication.SupabasePublicData(
@@ -924,6 +977,8 @@ def probe_public_release_families(
             if not isinstance(payload, (dict, list)):
                 raise PublicRefreshError(f"public probe returned an invalid payload: {path}")
             payloads[path] = payload
+        if path in RELEASE_BOUND_PAGE_PROBES:
+            _assert_html_release_marker(raw, release_id, path)
         checked.append(path)
 
     manifest_payload = payloads.get("/packs/manifest.json")
@@ -932,6 +987,8 @@ def probe_public_release_families(
         or manifest_payload.get("release_id") != release_id
     ):
         raise PublicRefreshError("public manifest probe has a different release")
+    asset_probe = _probe_deployed_manifest_asset(config, manifest_payload, release_id)
+    checked.append(str(asset_probe["url"]))
 
     match_payload = payloads.get("/api/chat/matches?team=T1&limit=1")
     match_data = match_payload.get("data") if isinstance(match_payload, dict) else None
@@ -947,15 +1004,16 @@ def probe_public_release_families(
         f"/matches/{urllib.parse.quote(match_id, safe='')}",
     )
     for path in dynamic_paths:
-        _http_bytes(
+        raw = _http_bytes(
             f"{config.site}{path}",
             headers={"Cache-Control": "no-cache"},
             attempts=config.attempts,
         )
+        _assert_html_release_marker(raw, release_id, path)
         checked.append(path)
     if health_watermark() != release_id:
         raise PublicRefreshError("public probes ended on a different release")
-    return {"release_id": release_id, "routes": checked}
+    return {"release_id": release_id, "routes": checked, "asset": asset_probe}
 
 
 def prune_local_releases(public_root: Path, active_release_id: str, keep: int = 3) -> list[str]:
@@ -1350,6 +1408,20 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
                     "status": "failed",
                     "reason": f"{type(cache_error).__name__}: {cache_error}",
                 }
+            else:
+                try:
+                    rollback["cache_probes"] = probe_public_release_families(
+                        config,
+                        rollback_release_id,
+                    )
+                except Exception as probe_error:  # noqa: BLE001
+                    rollback_errors.append(
+                        f"probe: {type(probe_error).__name__}: {probe_error}"
+                    )
+                    rollback["cache_probes"] = {
+                        "status": "failed",
+                        "reason": f"{type(probe_error).__name__}: {probe_error}",
+                    }
             if rollback_errors:
                 rollback = {
                     **rollback,

@@ -144,7 +144,7 @@ export default async function MatchesPage({ searchParams }: PageProps) {
   }
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} data-scryglass-release={manifest.pack_id}>
       <header className={styles.header}>
         <div>
           <h1>Matches</h1>
