@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import urllib.error
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -953,6 +954,115 @@ def test_storage_upload_sends_base64_custom_metadata() -> None:
         "content_type": "application/json",
     }
     assert headers["x-upsert"] == "false"
+
+
+def test_large_storage_upload_uses_resumable_chunks(monkeypatch) -> None:
+    raw = b"x" * (supabase_publication.RESUMABLE_UPLOAD_THRESHOLD_BYTES + 3)
+    digest = hashlib.sha256(raw).hexdigest()
+    requests = []
+
+    class Response:
+        def __init__(self, body=b"", headers=None):
+            self.body = body
+            self.headers = headers or {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return self.body
+
+    class Opener:
+        failed_first_chunk = False
+
+        def open(self, request, *, timeout):
+            requests.append(request)
+            if request.method == "POST":
+                assert timeout == supabase_publication.REQUEST_TIMEOUT_SECONDS
+                return Response(
+                    headers={"Location": "/storage/v1/upload/resumable/upload-id"}
+                )
+            if request.method == "PATCH":
+                assert timeout == supabase_publication.REQUEST_TIMEOUT_SECONDS
+                offset = int(request.headers["Upload-offset"])
+                if not self.failed_first_chunk:
+                    self.failed_first_chunk = True
+                    raise urllib.error.HTTPError(
+                        request.full_url,
+                        544,
+                        "gateway timeout",
+                        {},
+                        None,
+                    )
+                return Response(
+                    headers={"Upload-Offset": str(offset + len(request.data or b""))}
+                )
+            if request.method == "HEAD":
+                return Response(
+                    headers={
+                        "Upload-Offset": str(
+                            supabase_publication.RESUMABLE_UPLOAD_CHUNK_BYTES
+                        )
+                    }
+                )
+            if "/object/info/authenticated/" in request.full_url:
+                return Response(
+                    json.dumps(
+                        {
+                            "size": len(raw),
+                            "metadata": {
+                                "sha256": digest,
+                                "bytes": len(raw),
+                                "content_type": "application/json",
+                            },
+                        }
+                    ).encode("utf-8")
+                )
+            if "/object/authenticated/" in request.full_url:
+                return Response(raw)
+            raise AssertionError(request.full_url)
+
+    monkeypatch.setattr(supabase_publication.time, "sleep", lambda _delay: None)
+    client = supabase_publication.SupabasePublicData(
+        "https://example.supabase.co",
+        "sb_secret_abcdefghijklmnopqrstuvwxyz",
+        opener=Opener(),
+    )
+
+    client.put_storage_object(
+        "v2026.08.10.153000/features/profile_records.json",
+        raw,
+        sha256=digest,
+        content_type="application/json",
+    )
+
+    create = requests[0]
+    assert create.full_url == (
+        "https://example.storage.supabase.co/storage/v1/upload/resumable"
+    )
+    create_headers = {key.lower(): value for key, value in create.headers.items()}
+    assert create_headers["tus-resumable"] == "1.0.0"
+    assert create_headers["upload-length"] == str(len(raw))
+    assert create_headers["x-upsert"] == "false"
+    decoded_metadata = {
+        key: base64.b64decode(value).decode("utf-8")
+        for key, value in (
+            item.split(" ", 1)
+            for item in create_headers["upload-metadata"].split(",")
+        )
+    }
+    assert decoded_metadata["bucketName"] == "scryglass-public"
+    assert decoded_metadata["objectName"].endswith("/features/profile_records.json")
+    assert json.loads(decoded_metadata["metadata"]) == {
+        "sha256": digest,
+        "bytes": len(raw),
+        "content_type": "application/json",
+    }
+    assert [request.method for request in requests].count("PATCH") == 2
+    assert [request.method for request in requests].count("HEAD") == 1
 
 
 def test_latest_tier_payload_keeps_only_newest_patch_and_all_views() -> None:

@@ -51,6 +51,12 @@ MAX_QUERY_STAGE_ATTEMPTS = 4
 RETRYABLE_QUERY_STAGE_HTTP_CODES = frozenset(
     {408, 425, 429, 500, 502, 503, 504, 520, 522, 524}
 )
+RESUMABLE_UPLOAD_THRESHOLD_BYTES = 6 * 1024 * 1024
+RESUMABLE_UPLOAD_CHUNK_BYTES = 6 * 1024 * 1024
+MAX_STORAGE_UPLOAD_ATTEMPTS = 4
+RETRYABLE_STORAGE_HTTP_CODES = frozenset(
+    {408, 425, 429, 500, 502, 503, 504, 520, 522, 524, 544}
+)
 QUERY_STAGE_BATCH_ROWS = 500
 QUERY_STAGE_BATCH_BYTES = 3_200_000
 PUBLIC_ASSET_CONTENT_TYPE = "application/json"
@@ -551,6 +557,14 @@ class SupabasePublicData:
             "bytes": len(raw),
             "content_type": content_type,
         }
+        if len(raw) > RESUMABLE_UPLOAD_THRESHOLD_BYTES:
+            self._put_resumable_storage_object(
+                storage_path,
+                raw,
+                custom_metadata=custom_metadata,
+                content_type=content_type,
+            )
+            return
         metadata = base64.b64encode(
             json.dumps(custom_metadata, separators=(",", ":")).encode("utf-8")
         ).decode("ascii")
@@ -588,6 +602,171 @@ class SupabasePublicData:
             or existing_custom.get("sha256") != sha256
             or existing_custom.get("bytes") != len(raw)
             or existing_custom.get("content_type") != content_type
+        ):
+            raise SupabasePublicationError("existing Supabase Storage metadata is different")
+        existing = self.storage_object(storage_path)
+        if len(existing) != len(raw) or _sha256(existing) != _sha256(raw):
+            raise SupabasePublicationError("existing Supabase Storage object has different content")
+
+    def _put_resumable_storage_object(
+        self,
+        storage_path: str,
+        raw: bytes,
+        *,
+        custom_metadata: dict[str, Any],
+        content_type: str,
+    ) -> None:
+        """Upload one large immutable object through Supabase's TUS endpoint."""
+
+        project = urllib.parse.urlsplit(self.project_url)
+        project_ref = (project.hostname or "").removesuffix(".supabase.co")
+        endpoint = (
+            f"https://{project_ref}.storage.supabase.co/storage/v1/upload/resumable"
+        )
+        upload_metadata = {
+            "bucketName": "scryglass-public",
+            "objectName": storage_path,
+            "contentType": content_type,
+            "cacheControl": "31536000",
+            "metadata": json.dumps(custom_metadata, separators=(",", ":")),
+        }
+        metadata_header = ",".join(
+            f"{key} {base64.b64encode(value.encode('utf-8')).decode('ascii')}"
+            for key, value in upload_metadata.items()
+        )
+        location = None
+        for attempt in range(MAX_STORAGE_UPLOAD_ATTEMPTS):
+            create = urllib.request.Request(
+                endpoint,
+                data=b"",
+                method="POST",
+                headers={
+                    "apikey": self._api_key,
+                    "Tus-Resumable": "1.0.0",
+                    "Upload-Length": str(len(raw)),
+                    "Upload-Metadata": metadata_header,
+                    "x-upsert": "false",
+                },
+            )
+            try:
+                with self._opener.open(
+                    create, timeout=REQUEST_TIMEOUT_SECONDS
+                ) as response:
+                    location = response.headers.get("Location")
+                break
+            except urllib.error.HTTPError as error:
+                if error.code in {400, 409}:
+                    self._verify_existing_storage_object(
+                        storage_path, raw, custom_metadata
+                    )
+                    return
+                retryable = error.code in RETRYABLE_STORAGE_HTTP_CODES
+                if not retryable or attempt + 1 >= MAX_STORAGE_UPLOAD_ATTEMPTS:
+                    raise SupabasePublicationError(
+                        f"Supabase resumable upload creation failed with HTTP {error.code}"
+                    ) from error
+            except (urllib.error.URLError, TimeoutError) as error:
+                if attempt + 1 >= MAX_STORAGE_UPLOAD_ATTEMPTS:
+                    raise SupabasePublicationError(
+                        "Supabase resumable upload creation failed"
+                    ) from error
+            time.sleep(0.5 * (2**attempt))
+        if not isinstance(location, str) or not location:
+            raise SupabasePublicationError("Supabase resumable upload URL is missing")
+        upload_url = urllib.parse.urljoin(endpoint, location)
+        parsed_upload = urllib.parse.urlsplit(upload_url)
+        if (
+            parsed_upload.scheme != "https"
+            or parsed_upload.hostname != f"{project_ref}.storage.supabase.co"
+            or parsed_upload.port not in {None, 443}
+            or parsed_upload.username is not None
+            or parsed_upload.password is not None
+            or not parsed_upload.path.startswith("/storage/v1/upload/resumable/")
+        ):
+            raise SupabasePublicationError("Supabase resumable upload URL is invalid")
+
+        offset = 0
+        while offset < len(raw):
+            chunk = raw[offset : offset + RESUMABLE_UPLOAD_CHUNK_BYTES]
+            for attempt in range(MAX_STORAGE_UPLOAD_ATTEMPTS):
+                request = urllib.request.Request(
+                    upload_url,
+                    data=chunk,
+                    method="PATCH",
+                    headers={
+                        "apikey": self._api_key,
+                        "Tus-Resumable": "1.0.0",
+                        "Upload-Offset": str(offset),
+                        "Content-Type": "application/offset+octet-stream",
+                    },
+                )
+                try:
+                    with self._opener.open(
+                        request, timeout=REQUEST_TIMEOUT_SECONDS
+                    ) as response:
+                        next_offset = response.headers.get("Upload-Offset")
+                except Exception as error:  # noqa: BLE001
+                    retryable = isinstance(error, (urllib.error.URLError, TimeoutError))
+                    if isinstance(error, urllib.error.HTTPError):
+                        retryable = error.code in RETRYABLE_STORAGE_HTTP_CODES
+                    if not retryable or attempt + 1 >= MAX_STORAGE_UPLOAD_ATTEMPTS:
+                        raise SupabasePublicationError(
+                            "Supabase resumable upload chunk failed"
+                        ) from error
+                    time.sleep(0.5 * (2**attempt))
+                    offset = self._resumable_upload_offset(upload_url)
+                    if offset >= len(raw):
+                        break
+                    chunk = raw[offset : offset + RESUMABLE_UPLOAD_CHUNK_BYTES]
+                    continue
+                expected_offset = offset + len(chunk)
+                if next_offset != str(expected_offset):
+                    raise SupabasePublicationError(
+                        "Supabase resumable upload offset is invalid"
+                    )
+                offset = expected_offset
+                break
+            else:
+                raise AssertionError("resumable upload retry loop did not finish")
+        self._verify_existing_storage_object(storage_path, raw, custom_metadata)
+
+    def _resumable_upload_offset(self, upload_url: str) -> int:
+        request = urllib.request.Request(
+            upload_url,
+            method="HEAD",
+            headers={
+                "apikey": self._api_key,
+                "Tus-Resumable": "1.0.0",
+            },
+        )
+        try:
+            with self._opener.open(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                offset = response.headers.get("Upload-Offset")
+        except Exception as error:  # noqa: BLE001
+            raise SupabasePublicationError(
+                "Supabase resumable upload offset read failed"
+            ) from error
+        if not isinstance(offset, str) or not offset.isdigit():
+            raise SupabasePublicationError("Supabase resumable upload offset is invalid")
+        return int(offset)
+
+    def _verify_existing_storage_object(
+        self,
+        storage_path: str,
+        raw: bytes,
+        custom_metadata: dict[str, Any],
+    ) -> None:
+        existing_metadata = self.storage_object_metadata(storage_path)
+        existing_custom = existing_metadata.get("metadata")
+        if isinstance(existing_custom, str):
+            try:
+                existing_custom = json.loads(existing_custom)
+            except json.JSONDecodeError:
+                existing_custom = None
+        if (
+            int(existing_metadata.get("size") or -1) != len(raw)
+            or not isinstance(existing_custom, dict)
+            or existing_custom != custom_metadata
         ):
             raise SupabasePublicationError("existing Supabase Storage metadata is different")
         existing = self.storage_object(storage_path)
