@@ -102,10 +102,10 @@ def test_current_rating_and_total_artifacts_remain_fail_closed(monkeypatch) -> N
     ] is False
     assert report["ratings"]["checks"][
         "v3_pre_event_prediction_ledger_capture_ready"
-    ] is True
+    ] is False
     assert report["ratings"]["checks"][
         "v3_prediction_and_ledger_system_clock_hardened"
-    ] is True
+    ] is False
     assert report["ratings"]["checks"][
         "v3_pre_event_prediction_ledger_has_eligible_entries"
     ] is False
