@@ -165,17 +165,15 @@ def _lane_specs(
     market_root: Path,
     current_python: Path,
     frozen_python: Path,
+    current_tests: Sequence[str],
 ) -> tuple[LaneSpec, ...]:
     return (
         LaneSpec(
             name="current",
             source_root=current_root,
             python=current_python,
-            tests=(),
-            extra_args=tuple(
-                f"--ignore={path}"
-                for path in (*FROZEN_RUNTIME_TESTS, *HISTORICAL_CONTRACT_TESTS)
-            ),
+            tests=tuple(current_tests),
+            extra_args=(),
         ),
         LaneSpec(
             name="frozen-runtime",
@@ -201,6 +199,65 @@ def _lane_specs(
     )
 
 
+def _partition_current_tests(
+    *,
+    root: Path,
+    tests: Sequence[str],
+    shard_count: int,
+) -> tuple[tuple[str, ...], ...]:
+    """Partition the current test inventory by stable source-size balancing."""
+
+    if shard_count < 1:
+        raise PrivateSuiteError("current shard count must be positive")
+    ordered = tuple(sorted(set(tests)))
+    if len(ordered) != len(tests):
+        raise PrivateSuiteError("current test inventory contains duplicates")
+    if not ordered:
+        raise PrivateSuiteError("current test inventory is empty")
+    shard_count = min(shard_count, len(ordered))
+    buckets: list[list[str]] = [[] for _ in range(shard_count)]
+    weights = [0] * shard_count
+    try:
+        weighted_paths = sorted(
+            (((root / path).stat().st_size, path) for path in ordered),
+            key=lambda item: (-item[0], item[1]),
+        )
+    except OSError as exc:
+        raise PrivateSuiteError(
+            "current test inventory contains an unavailable file"
+        ) from exc
+    for weight, path in weighted_paths:
+        index = min(range(shard_count), key=lambda value: (weights[value], value))
+        buckets[index].append(path)
+        weights[index] += weight
+    return tuple(tuple(sorted(bucket)) for bucket in buckets)
+
+
+def _expand_current_spec(
+    *,
+    spec: LaneSpec,
+    root: Path,
+    shard_count: int,
+) -> tuple[LaneSpec, ...]:
+    if spec.name != "current":
+        return (spec,)
+    partitions = _partition_current_tests(
+        root=root,
+        tests=spec.tests,
+        shard_count=shard_count,
+    )
+    return tuple(
+        LaneSpec(
+            name=f"current-shard-{index:02d}",
+            source_root=spec.source_root,
+            python=spec.python,
+            tests=tests,
+            extra_args=spec.extra_args,
+        )
+        for index, tests in enumerate(partitions, start=1)
+    )
+
+
 def _checkpoint_path(receipt: Path, pass_number: int, lane_name: str) -> Path:
     return receipt.with_name(
         f"{receipt.stem}-pass-{pass_number}-{lane_name}.checkpoint.json"
@@ -213,6 +270,10 @@ def _lane_log_path(receipt: Path, pass_number: int, lane_name: str) -> Path:
 
 def _canonical_json(payload: dict) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+
+
+def _inventory_sha256(tests: Sequence[str]) -> str:
+    return hashlib.sha256(_canonical_json({"tests": sorted(tests)})).hexdigest()
 
 
 def _signed_payload(payload: dict, field: str) -> dict:
@@ -373,6 +434,7 @@ def _checkpoint_payload(
             "suite_receipt": str(receipt),
             "pass_number": pass_number,
             "lane": asdict(lane_receipt),
+            "test_inventory_sha256": _inventory_sha256(lane_receipt.tests),
             "source_root": str(spec.source_root),
             "source_commit": _git_head(spec.source_root),
             "current_commit": _git_head(current_root),
@@ -445,6 +507,10 @@ def _load_checkpoint(
         raise PrivateSuiteError(f"lane checkpoint lane binding mismatch: {path}")
     if lane.get("pass_number") != pass_number:
         raise PrivateSuiteError(f"lane checkpoint pass binding mismatch: {path}")
+    if payload.get("test_inventory_sha256") != _inventory_sha256(
+        tuple(lane.get("tests", ()))
+    ):
+        raise PrivateSuiteError(f"lane checkpoint test inventory digest mismatch: {path}")
     if lane.get("log_path") != str(expected_log_path):
         raise PrivateSuiteError(f"lane checkpoint log binding mismatch: {path}")
     if payload.get("source_root") != str(spec.source_root):
@@ -616,6 +682,12 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--passes", type=int, choices=(1, 2), default=2)
     parser.add_argument(
+        "--current-shards",
+        type=int,
+        default=None,
+        help="current-test shards; defaults to one shard per CPU",
+    )
+    parser.add_argument(
         "--workers",
         type=int,
         default=None,
@@ -640,6 +712,8 @@ def main() -> int:
     receipt = args.receipt.resolve()
     if args.workers is not None and args.workers < 1:
         raise PrivateSuiteError("--workers must be positive")
+    if args.current_shards is not None and args.current_shards < 1:
+        raise PrivateSuiteError("--current-shards must be positive")
     if receipt.exists() and not args.resume:
         raise PrivateSuiteError(
             f"receipt already exists, choose a new path or use --resume: {receipt}"
@@ -659,7 +733,22 @@ def main() -> int:
         market_root=market_root,
         current_python=current_python,
         frozen_python=frozen_python,
+        current_tests=current_tests,
     )
+    current_shards = min(
+        args.current_shards or max(1, os.cpu_count() or 1),
+        len(current_tests),
+    )
+    expanded_specs: list[LaneSpec] = []
+    for spec in specs:
+        expanded_specs.extend(
+            _expand_current_spec(
+                spec=spec,
+                root=current_root,
+                shard_count=current_shards,
+            )
+        )
+    specs = tuple(expanded_specs)
     workers = args.workers or min(len(specs), max(1, os.cpu_count() or 1))
     workers = min(workers, len(specs))
     receipts: list[LaneReceipt] = []
@@ -684,6 +773,7 @@ def main() -> int:
         "status": "passed",
         "completed_at_utc": datetime.now(timezone.utc).isoformat(),
         "passes": args.passes,
+        "current_shards": current_shards,
         "parallel_workers": workers,
         "resumed": args.resume,
         "current_commit": _git_head(current_root),
@@ -694,6 +784,7 @@ def main() -> int:
         "frozen_runtime": frozen_versions,
         "test_files_total": len(_test_files(current_root)),
         "current_test_files": len(current_tests),
+        "current_test_inventory_sha256": _inventory_sha256(current_tests),
         "frozen_test_files": len(FROZEN_RUNTIME_TESTS) + len(HISTORICAL_CONTRACT_TESTS),
         "lanes": [asdict(item) for item in receipts],
     }

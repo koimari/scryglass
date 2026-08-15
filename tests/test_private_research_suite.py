@@ -57,6 +57,7 @@ def test_private_suite_lane_specs_keep_exact_test_partition() -> None:
         market_root=roots[2],
         current_python=Path("/python-current"),
         frozen_python=Path("/python-frozen"),
+        current_tests=("tests/test_b.py", "tests/test_a.py"),
     )
     assert tuple(spec.name for spec in specs) == (
         "current",
@@ -64,11 +65,58 @@ def test_private_suite_lane_specs_keep_exact_test_partition() -> None:
         "historical-contract",
         "historical-market",
     )
-    assert specs[0].tests == ()
-    assert all(arg.startswith("--ignore=tests/") for arg in specs[0].extra_args)
+    assert specs[0].tests == ("tests/test_b.py", "tests/test_a.py")
+    assert specs[0].extra_args == ()
     assert specs[1].tests == suite.FROZEN_RUNTIME_TESTS
     assert specs[2].tests == suite.HISTORICAL_CONTRACT_TESTS
     assert specs[3].tests == suite.HISTORICAL_MARKET_TESTS
+
+
+def test_private_suite_current_shards_are_deterministic_and_complete(
+    tmp_path: Path,
+) -> None:
+    files = ("tests/test_a.py", "tests/test_b.py", "tests/test_c.py")
+    for index, path in enumerate(files):
+        file_path = tmp_path / path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(b"x" * (index + 1))
+    first = suite._partition_current_tests(
+        root=tmp_path,
+        tests=files,
+        shard_count=2,
+    )
+    second = suite._partition_current_tests(
+        root=tmp_path,
+        tests=files,
+        shard_count=2,
+    )
+    assert first == second
+    assert sorted(path for shard in first for path in shard) == sorted(files)
+    assert len({path for shard in first for path in shard}) == len(files)
+
+
+def test_private_suite_current_shard_names_and_commands(
+    tmp_path: Path,
+) -> None:
+    spec = suite.LaneSpec(
+        name="current",
+        source_root=tmp_path,
+        python=Path("/python"),
+        tests=("tests/test_a.py", "tests/test_b.py"),
+        extra_args=(),
+    )
+    for path in spec.tests:
+        file_path = tmp_path / path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text("def test_ok(): pass\n")
+    expanded = suite._expand_current_spec(spec=spec, root=tmp_path, shard_count=2)
+    assert tuple(item.name for item in expanded) == (
+        "current-shard-01",
+        "current-shard-02",
+    )
+    assert sorted(path for item in expanded for path in item.tests) == sorted(
+        spec.tests
+    )
 
 
 def test_private_suite_lane_copy_does_not_share_regular_file_writes(
@@ -169,3 +217,100 @@ def test_private_suite_checkpoint_rejects_log_tampering(
             historical_market_root=roots[2],
             frozen_versions=dict(suite.FROZEN_VERSIONS),
         )
+
+
+def test_private_suite_resumes_green_shards_after_later_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "current"
+    source.mkdir()
+    (source / "requirements-ci.lock").write_text("lock")
+    contract = tmp_path / "contract"
+    market = tmp_path / "market"
+    contract.mkdir()
+    market.mkdir()
+    for root in (contract, market):
+        (root / "requirements-ci.lock").write_text("lock")
+    specs = (
+        suite.LaneSpec(
+            name="current-shard-01",
+            source_root=source,
+            python=Path("/python"),
+            tests=("tests/test_a.py",),
+            extra_args=(),
+        ),
+        suite.LaneSpec(
+            name="current-shard-02",
+            source_root=source,
+            python=Path("/python"),
+            tests=("tests/test_b.py",),
+            extra_args=(),
+        ),
+    )
+    monkeypatch.setattr(suite, "_git_head", lambda _root: "head")
+    monkeypatch.setattr(
+        suite,
+        "_runtime_versions",
+        lambda _python: dict(suite.FROZEN_VERSIONS),
+    )
+    monkeypatch.setattr(suite, "_sha256", lambda _path: "a" * 64)
+    calls: list[str] = []
+    failed = False
+
+    def fake_run_lane(**kwargs: object) -> suite.LaneReceipt:
+        nonlocal failed
+        name = str(kwargs["name"])
+        calls.append(name)
+        log_path = kwargs["log_path"]
+        assert isinstance(log_path, Path)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(f"{name}\n")
+        if name == "current-shard-02" and not failed:
+            failed = True
+            raise suite.PrivateSuiteError("synthetic shard failure")
+        python = kwargs["python"]
+        assert isinstance(python, Path)
+        tests = tuple(kwargs["tests"])
+        extra_args = tuple(kwargs["extra_args"])
+        return suite.LaneReceipt(
+            name=name,
+            pass_number=1,
+            cwd=str(kwargs["cwd"]),
+            python=str(python),
+            tests=tests,
+            command=(str(python), "-m", "pytest", "-q", *extra_args, *tests),
+            elapsed_seconds=0.1,
+            log_path=str(log_path),
+            log_bytes=log_path.stat().st_size,
+            log_sha256="a" * 64,
+        )
+
+    monkeypatch.setattr(suite, "_run_lane", fake_run_lane)
+    receipt = tmp_path / "suite.json"
+    run_kwargs = dict(
+        pass_number=1,
+        specs=specs,
+        receipt=receipt,
+        current_root=source,
+        historical_contract_root=contract,
+        historical_market_root=market,
+        frozen_versions=dict(suite.FROZEN_VERSIONS),
+        lcc_root=tmp_path,
+        base_environment={},
+        workers=2,
+    )
+    with pytest.raises(suite.PrivateSuiteError, match="private suite pass 1 failed"):
+        suite._run_pass(resume=False, **run_kwargs)
+    assert calls.count("current-shard-01") == 1
+    assert calls.count("current-shard-02") == 1
+    assert suite._checkpoint_path(receipt, 1, "current-shard-01").is_file()
+
+    resumed = suite._run_pass(resume=True, **run_kwargs)
+    assert [item.name for item in resumed] == [
+        "current-shard-01",
+        "current-shard-02",
+    ]
+    assert resumed[0].resumed_from_checkpoint is True
+    assert calls.count("current-shard-01") == 1
+    assert calls.count("current-shard-02") == 2
