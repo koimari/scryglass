@@ -351,6 +351,73 @@ def test_private_suite_resumes_green_shards_after_later_failure(
     assert calls.count("current-shard-02") == 2
 
 
+def test_private_suite_propagates_process_control_exceptions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KeyboardInterrupt and SystemExit must not become lane failures."""
+
+    class SyntheticProcessControl(BaseException):
+        pass
+
+    class ExplodingFuture:
+        def result(self) -> object:
+            raise SyntheticProcessControl()
+
+    class FakeExecutor:
+        def __init__(self, *, max_workers: int) -> None:
+            assert max_workers == 1
+
+        def __enter__(self) -> "FakeExecutor":
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def submit(self, *_args: object, **_kwargs: object) -> ExplodingFuture:
+            return ExplodingFuture()
+
+    current_root = tmp_path / "current"
+    contract_root = tmp_path / "contract"
+    market_root = tmp_path / "market"
+    for root in (current_root, contract_root, market_root):
+        root.mkdir()
+    spec = suite.LaneSpec(
+        name="current",
+        source_root=current_root,
+        python=Path("/python"),
+        tests=(),
+        extra_args=(),
+    )
+    monkeypatch.setattr(suite, "ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr(suite, "as_completed", lambda futures: futures)
+    monkeypatch.setattr(
+        suite,
+        "_make_lane_workspace",
+        lambda **_kwargs: suite.LaneWorkspace(
+            cwd=tmp_path / "lane",
+            private_root=tmp_path / "private",
+            parent=tmp_path,
+        ),
+    )
+    monkeypatch.setattr(suite, "_remove_workspace", lambda _workspace: None)
+
+    with pytest.raises(SyntheticProcessControl):
+        suite._run_pass(
+            pass_number=1,
+            specs=(spec,),
+            receipt=tmp_path / "suite.json",
+            current_root=current_root,
+            historical_contract_root=contract_root,
+            historical_market_root=market_root,
+            frozen_versions=dict(suite.FROZEN_VERSIONS),
+            lcc_root=tmp_path,
+            base_environment={},
+            workers=1,
+            resume=False,
+        )
+
+
 def test_private_suite_accepts_legacy_non_current_checkpoint_after_full_validation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

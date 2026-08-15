@@ -720,7 +720,7 @@ def _run_pass(
                         f"completed {spec.name} pass {pass_number} "
                         f"in {lane_receipt.elapsed_seconds:.1f}s"
                     )
-                except BaseException as exc:
+                except Exception as exc:
                     failures.append(f"{spec.name}: {exc}")
     finally:
         for _, workspace, _, _ in active.values():
