@@ -59,8 +59,9 @@ test("rating tabs support arrow keys, direct URLs, filters, and fail-closed draf
 
   await page.getByRole("tab", { name: "Draft" }).click();
   await expect(page).toHaveURL(/tab=draft/);
-  await expect(page.getByRole("heading", { name: "Draft Score is unavailable" })).toBeVisible();
-  await expect(page.getByText("independent promotion receipt", { exact: false })).toBeVisible();
+  const draftGate = page.getByRole("heading", { name: "Draft Score is unavailable" }).locator("..");
+  await expect(draftGate).toBeVisible();
+  await expect(draftGate).toContainText("independent promotion receipt");
 });
 
 test("HTML responses use nonce-based scripts and publish launch metadata", async ({ request }) => {

@@ -28,6 +28,33 @@
   text-transform: uppercase;
 }
 
+.controlMain .includeInactive {
+  display: flex;
+  min-height: 2.65rem;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+  padding-bottom: 0.1rem;
+  color: var(--ink);
+  font-family: var(--font-ui), sans-serif;
+  font-size: 0.78rem;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.includeInactive input {
+  width: 1rem;
+  height: 1rem;
+  min-height: 1rem;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+.controlMain .includeInactive span {
+  display: block;
+}
+
 .controlMain input,
 .controlMain select {
   min-height: 2.65rem;
@@ -217,6 +244,14 @@
   font-size: var(--text-micro);
   letter-spacing: 0.07em;
   text-transform: uppercase;
+}
+
+.summaryLine small {
+  color: var(--ink-faint);
+  font-size: 0.64rem;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
 }
 
 .summaryLine strong {
@@ -697,6 +732,7 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+
 
 @media (max-width: 1100px) {
   .focusBoard {

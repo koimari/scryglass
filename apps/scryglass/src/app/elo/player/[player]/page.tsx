@@ -3,7 +3,6 @@ import { PlayerRatingProfile } from "@/components/RatingProfiles";
 import type {
   PlayerChampionRecord,
   PlayerRating,
-  PlayerPositionDeltas,
   PlayerWeeklyRanks,
   PlayerRecord,
   ProfileGame,
@@ -13,6 +12,7 @@ import type {
 import { compactPlayerRatings, findPlayerByRouteName, hasPromotedDraftAuthority, isActiveRating, PLAYER_SIGMA_MIN, softMu } from "@/lib/pack";
 import { draftRankingsFromProfile, filterDraftRankings } from "@/lib/draftRankings";
 import { playerPortrait } from "@/lib/playerPortraits";
+import { playerPositionDeltas } from "@/lib/playerMovement";
 import { getPlayerProfile, queryApiAvailable } from "@/lib/publicData";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
@@ -49,7 +49,10 @@ export default async function PlayerEloPage({ params }: Props) {
       role_rank: 0,
       role_total: 0,
     };
-    const weekly = profile.row.payload.weekly as { position_deltas?: PlayerPositionDeltas } | undefined;
+    const positionDeltas = playerPositionDeltas(
+      profile.row.payload.weekly,
+      record?.current_tier ?? profile.row.tier,
+    );
     return (
       <PlayerRatingProfile
         player={player}
@@ -63,7 +66,7 @@ export default async function PlayerEloPage({ params }: Props) {
           roleRank: standing.role_rank,
           roleTotal: standing.role_total,
         }}
-        positionDeltas={weekly?.position_deltas}
+        positionDeltas={positionDeltas}
         recentGames={profile.recent_games.map((row) => row.payload)}
         championImages={profile.champion_images}
         manifest={man}

@@ -61,6 +61,10 @@ function selectedScopes(value: string | undefined): string[] {
   return scopes.length ? scopes : ["TIER1"];
 }
 
+function includeInactive(value: string | undefined): boolean {
+  return value === "all";
+}
+
 function integer(value: string | undefined, fallback: number, minimum: number, maximum: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isInteger(parsed) ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
@@ -167,6 +171,7 @@ export default async function EloPage({ searchParams }: PageProps) {
   const query = await searchParams;
   const tab = selectedTab(first(query.tab));
   const scopes = selectedScopes(first(query.leagues));
+  const showInactive = includeInactive(first(query.active));
   const manifest = await readPackManifest();
   const sourceUpdated = packSourceUpdatedLabel(manifest);
   const draftAuthorized = hasPromotedDraftAuthority(manifest);
@@ -174,6 +179,7 @@ export default async function EloPage({ searchParams }: PageProps) {
   const page = integer(first(query.page), 1, 1, 101);
   const pageSize = 100;
   let total = 0;
+  let inactiveTotal = 0;
 
   let teams: TeamRatingView[] = [];
   let players: PlayerRatingView[] = [];
@@ -191,12 +197,12 @@ export default async function EloPage({ searchParams }: PageProps) {
   if (tab === "teams" && boundedQueries) {
     const selectedTiers = scopes.filter((scope) => scope.startsWith("TIER"));
     const selectedLeagues = scopes.filter((scope) => !scope.startsWith("TIER"));
-    const [result, tier1, tier2, tier3] = await Promise.all([
+    const [result, tier1, tier2, tier3, inactive] = await Promise.all([
       getRatings(manifest, {
         kind: "teams",
         leagues: selectedLeagues,
         tiers: selectedTiers.map((tier) => tier.toLowerCase()),
-        active: true,
+        active: showInactive ? undefined : true,
         search: first(query.q),
         order: querySort(first(query.sort)),
         limit: pageSize,
@@ -205,8 +211,18 @@ export default async function EloPage({ searchParams }: PageProps) {
       getRatingFacets(manifest, "teams", ["tier1"]),
       getRatingFacets(manifest, "teams", ["tier2"]),
       getRatingFacets(manifest, "teams", ["tier3"]),
+      getRatings(manifest, {
+        kind: "teams",
+        leagues: selectedLeagues,
+        tiers: selectedTiers.map((tier) => tier.toLowerCase()),
+        active: false,
+        search: first(query.q),
+        order: "rating_desc",
+        limit: 1,
+      }),
     ]);
     total = result.total;
+    inactiveTotal = inactive.total;
     teams = result.rows.map((row) => compactTeamRating(ratingFromQuery(row) as TeamRating));
     teamRecords = Object.fromEntries(result.rows.flatMap((row) => {
       const record = row.payload.record as TeamRecord | undefined;
@@ -229,9 +245,11 @@ export default async function EloPage({ searchParams }: PageProps) {
       readPackJson<TeamWeeklyRanks>(manifest, "features/team_weekly_ranks.json").catch(() => null),
     ]);
     allTeamRecords = records;
-    teams = ratingRows
-      .filter(isActiveRating)
-      .filter((team) => recordMatchesLeagues(findRecordByName(allTeamRecords, team.team), scopes))
+    const scopedTeams = ratingRows
+      .filter((team) => recordMatchesLeagues(findRecordByName(allTeamRecords, team.team), scopes));
+    inactiveTotal = scopedTeams.filter((team) => !isActiveRating(team)).length;
+    teams = scopedTeams
+      .filter((team) => showInactive || isActiveRating(team))
       .map(compactTeamRating);
     teamRecords = recordsFor(teams.map((team) => team.team), allTeamRecords, compactTeamRecord);
     if (ranks) {
@@ -246,13 +264,13 @@ export default async function EloPage({ searchParams }: PageProps) {
   if (tab === "players" && boundedQueries) {
     const selectedTiers = scopes.filter((scope) => scope.startsWith("TIER"));
     const selectedLeagues = scopes.filter((scope) => !scope.startsWith("TIER"));
-    const [result, tier1, tier2, tier3] = await Promise.all([
+    const [result, tier1, tier2, tier3, inactive] = await Promise.all([
       getRatings(manifest, {
         kind: "players",
         leagues: selectedLeagues,
         tiers: selectedTiers.map((tier) => tier.toLowerCase()),
         roles: first(query.role) ? [first(query.role)!] : [],
-        active: true,
+        active: showInactive ? undefined : true,
         search: first(query.q),
         order: querySort(first(query.sort)),
         minGames: integer(first(query.min), 20, 5, 10_000),
@@ -262,8 +280,20 @@ export default async function EloPage({ searchParams }: PageProps) {
       getRatingFacets(manifest, "players", ["tier1"]),
       getRatingFacets(manifest, "players", ["tier2"]),
       getRatingFacets(manifest, "players", ["tier3"]),
+      getRatings(manifest, {
+        kind: "players",
+        leagues: selectedLeagues,
+        tiers: selectedTiers.map((tier) => tier.toLowerCase()),
+        roles: first(query.role) ? [first(query.role)!] : [],
+        active: false,
+        search: first(query.q),
+        order: "rating_desc",
+        minGames: integer(first(query.min), 20, 5, 10_000),
+        limit: 1,
+      }),
     ]);
     total = result.total;
+    inactiveTotal = inactive.total;
     players = result.rows.map((row) => compactPlayerRating(ratingFromQuery(row) as PlayerRating));
     playerRecords = Object.fromEntries(result.rows.flatMap((row) => {
       const record = row.payload.record as PlayerRecord | undefined;
@@ -283,9 +313,11 @@ export default async function EloPage({ searchParams }: PageProps) {
       readPackJson<PlayerWeeklyRanks>(manifest, "features/player_weekly_ranks.json").catch(() => null),
     ]);
     allTeamRecords = records;
-    players = compactPlayerRatings(ratingRows)
-      .filter(isActiveRating)
-      .filter((player) => recordMatchesLeagues(findRecordByName(allPlayerRecords, player.player), scopes))
+    const scopedPlayers = compactPlayerRatings(ratingRows)
+      .filter((player) => recordMatchesLeagues(findRecordByName(allPlayerRecords, player.player), scopes));
+    inactiveTotal = scopedPlayers.filter((player) => !isActiveRating(player)).length;
+    players = scopedPlayers
+      .filter((player) => showInactive || isActiveRating(player))
       .map(compactPlayerRating);
     playerRecords = recordsFor(players.map((player) => player.player), allPlayerRecords, compactPlayerRecord);
     if (ranks) {
@@ -345,7 +377,7 @@ export default async function EloPage({ searchParams }: PageProps) {
         </div>
       </details>
       <SignalRatings
-        key={tab}
+        key={`${tab}|${showInactive ? "all" : "active"}`}
         loadedTab={tab}
         draftAuthorized={draftAuthorized}
         draftUnavailableReason={manifest.draft_authority?.reason ?? "Draft Score is waiting for an independent promotion receipt."}
@@ -359,6 +391,8 @@ export default async function EloPage({ searchParams }: PageProps) {
         teamRecords={teamRecords}
         playerRecords={playerRecords}
         movementByName={movementByName}
+        showInactive={showInactive}
+        inactiveTotal={inactiveTotal}
         availableLeaguesByTier={availableLeaguesByTier ?? availableLeagues(allTeamRecords)}
         total={total}
         initialPage={page}

@@ -16,6 +16,7 @@ import {
   type ScheduleSeries,
   type ScheduleTournament,
 } from "@/lib/pack";
+import { championImageUrl } from "@/lib/championImages";
 import type { MatchFacets } from "@/lib/publicData";
 import { TeamMark } from "./TeamMark";
 import styles from "./SignalMatches.module.css";
@@ -161,8 +162,8 @@ function UpcomingView({ schedule }: { schedule: PublicSchedule }) {
   );
 }
 
-function gameChampions(game: MatchSummary, limit: number): Array<{ champion: string; image: string | null }> {
-  return game.champions.slice(0, limit).map((champion) => ({ champion, image: null }));
+function gameChampions(game: MatchSummary, limit: number): Array<{ champion: string }> {
+  return game.champions.slice(0, limit).map((champion) => ({ champion }));
 }
 
 function gameCount(value: number): string {
@@ -173,11 +174,14 @@ function ChampionLine({ game, images, limit = 10 }: { game: MatchSummary; images
   const champions = gameChampions(game, limit);
   return (
     <span className={styles.championLine} role="group" aria-label={`Champions: ${champions.map((item) => item.champion).join(", ")}`}>
-      {champions.map((item) => images[item.champion] ? (
+      {champions.map((item) => {
+        const image = championImageUrl(item.champion, images[item.champion]);
+        return image ? (
         // CommunityDragon supplies these portraits through the published pack.
         // eslint-disable-next-line @next/next/no-img-element
-        <img key={`${item.champion}-${images[item.champion]}`} src={images[item.champion]} alt={item.champion} loading="lazy" />
-      ) : null)}
+        <img key={`${item.champion}-${image}`} src={image} alt={item.champion} loading="lazy" />
+        ) : null;
+      })}
     </span>
   );
 }

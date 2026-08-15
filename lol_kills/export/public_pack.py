@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import shutil
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -141,23 +142,82 @@ def source_identity_sha256(game_ids: Iterable[str]) -> str:
 
 
 def _champion_image_urls(project: Path) -> dict[str, str]:
-    """Reuse the accepted tier-list champion identity map for profile art."""
+    """Return approved CommunityDragon art for every known champion.
+
+    Tier output can be empty during a fresh patch window. Profile and match
+    art must not depend on a tier list row, so the pinned champion crosswalk is
+    the fallback identity source.
+    """
+
+    def approved(value: object) -> str | None:
+        url = str(value or "").strip()
+        if not url:
+            return None
+        parsed = urllib.parse.urlsplit(url)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "cdn.communitydragon.org"
+            or parsed.username
+            or parsed.password
+            or parsed.port not in {None, 443}
+            or parsed.fragment
+        ):
+            return None
+        return url
+
+    def champion_key(value: object) -> str:
+        return normalize_champ(str(value or "")).strip().casefold()
+
+    urls: dict[str, str] = {}
 
     path = project / "apps" / "scryglass" / "public" / "rankings" / "tierlists.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return {}
+        payload = {}
     rows = payload.get("rows") if isinstance(payload, dict) else None
-    if not isinstance(rows, list):
-        return {}
-    return {
-        str(row["champion"]): str(row["champion_image_url"])
-        for row in rows
-        if isinstance(row, dict)
-        and isinstance(row.get("champion"), str)
-        and isinstance(row.get("champion_image_url"), str)
-    }
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("champion") or "").strip()
+            url = approved(row.get("champion_image_url"))
+            if name and url:
+                urls[normalize_champ(name)] = url
+
+    crosswalk_path = (
+        project
+        / "data"
+        / "lol"
+        / "v2"
+        / "champions"
+        / "champion-id-crosswalk-v1.json"
+    )
+    try:
+        crosswalk = json.loads(crosswalk_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        crosswalk = {}
+    entries = crosswalk.get("entries") if isinstance(crosswalk, dict) else None
+    existing_keys = {champion_key(key) for key in urls}
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            numeric_id = entry.get("riot_numeric_id")
+            try:
+                numeric_id = int(numeric_id)
+            except (TypeError, ValueError):
+                continue
+            if numeric_id <= 0:
+                continue
+            name = normalize_champ(
+                str(entry.get("riot_display_name") or entry.get("oe_name") or "").strip()
+            )
+            if not name or champion_key(name) in existing_keys:
+                continue
+            urls[name] = f"https://cdn.communitydragon.org/latest/champion/{numeric_id}/square"
+            existing_keys.add(champion_key(name))
+    return dict(sorted(urls.items()))
 
 
 def _present(cols: Sequence[str], available: Iterable[str]) -> list[str]:
@@ -847,6 +907,8 @@ def export_public_pack(
             *(f"red_ban{slot}" for slot in range(1, 6)),
             *(f"blue_pick{slot}" for slot in range(1, 6)),
             *(f"red_pick{slot}" for slot in range(1, 6)),
+            "dragons", "heralds", "void_grubs", "barons", "atakhans",
+            "towers", "inhibitors",
         ),
         team_available,
     )
@@ -855,6 +917,7 @@ def export_public_pack(
     )
     team_rating_frame = _filter_year_frame(team_source, years, ("year", "oe_year"))
     team_maps_for_ratings = build_maps_frame_from_team_games(team_rating_frame)
+    team_profile_source = _filter_year_frame(team_source, years, ("year", "oe_year"))
     del team_rating_frame, team_source
 
     player_path = warehouse / "oe_player_games.parquet"
@@ -968,6 +1031,13 @@ def export_public_pack(
     source_game_ids = sorted(set(_normalized_game_uid(maps_for_records).dropna().astype(str)))
     if len(source_game_ids) != len(maps_for_records):
         raise RuntimeError("public pack source is not one row per canonical game identity")
+    if (
+        not team_profile_source.empty
+        and {"game_uid", "gameid", "oe_gameid"}.intersection(team_profile_source.columns)
+    ):
+        team_profile_source = team_profile_source[
+            _normalized_game_uid(team_profile_source).astype(str).isin(source_game_ids)
+        ].copy()
     del maps
     progress("validated canonical maps")
     # The feature-oriented maps table intentionally covers the major/public
@@ -1293,6 +1363,7 @@ def export_public_pack(
     profile_records_payload = build_profile_records(
         player_profile_frame,
         champion_image_urls=champion_image_urls,
+        team_games=team_profile_source,
         draft_metadata=_draft_metadata_from_maps(maps_for_records),
         include_archive=True,
     )

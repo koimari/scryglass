@@ -224,7 +224,7 @@ function leaderboardTable(rows: LeaderboardRow[], category: string): React.React
       }));
     return (
       <>
-        {chartRows.length ? <DataBars className={styles.chatChart} title="Team rating field" description="Adjusted published rating" rows={chartRows} axisLeft="lower" axisRight="higher" /> : null}
+        {chartRows.length ? <DataBars className={styles.chatChart} title="Team adjusted rating" description="Uncertainty-adjusted published rating" rows={chartRows} axisLeft="lower" axisRight="higher" /> : null}
         {table(
           <table className={styles.resultTable}>
             <thead><tr><th>Team</th><th>Level</th><th className={styles.numeric}>Rating</th><th>League</th><th className={styles.numeric}>Wins</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>WR</th></tr></thead>
@@ -260,7 +260,7 @@ function leaderboardTable(rows: LeaderboardRow[], category: string): React.React
     }));
   return (
     <>
-      {chartRows.length ? <DataBars className={styles.chatChart} title="Player rating field" description="Adjusted published rating" rows={chartRows} axisLeft="lower" axisRight="higher" /> : null}
+      {chartRows.length ? <DataBars className={styles.chatChart} title="Player adjusted rating" description="Uncertainty-adjusted published rating" rows={chartRows} axisLeft="lower" axisRight="higher" /> : null}
       {table(
         <table className={styles.resultTable}>
           <thead><tr><th>Player</th><th>Role</th><th>Level</th><th className={styles.numeric}>Rating</th><th className={styles.numeric}>A grades</th><th className={styles.numeric}>Games</th><th className={styles.numeric}>WR</th></tr></thead>
