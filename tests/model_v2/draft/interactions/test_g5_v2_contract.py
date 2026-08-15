@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import replace
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,20 @@ import pytest
 from lol_kills.v2.draft.interactions.g5_exploratory import (
     contract, v2_execution_approval, v2_result, v2_runner,
 )
+
+
+def _archived_review_bundle() -> dict[str, dict[str, object]]:
+    namespace = Path("data/lol/v2/models/draft-interactions/g5-exploratory")
+    bundle: dict[str, dict[str, object]] = {}
+    for name in ("v2-contract.json", "v2-review-core.json", "v2-pending-report.json"):
+        raw = (namespace / name).read_bytes()
+        artifact = json.loads(raw)
+        assert raw == v2_result.canonical_bytes(artifact) + b"\n"
+        claimed = artifact["artifact_sha256"]
+        unsigned = {key: value for key, value in artifact.items() if key != "artifact_sha256"}
+        assert v2_result.sha256(unsigned) == claimed
+        bundle[name] = artifact
+    return bundle
 
 
 def _approval(core_sha: str, contract_sha: str) -> dict[str, object]:
@@ -48,10 +63,10 @@ def _approval(core_sha: str, contract_sha: str) -> dict[str, object]:
     return {**unsigned, "approval_sha256": v2_execution_approval.sha256(unsigned)}
 
 
-def test_v2_bundle_is_stable_versioned_and_non_authorizing() -> None:
-    first = v2_runner.build_review_bundle()
-    second = v2_runner.build_review_bundle()
-    assert first == second
+def test_v2_bundle_stays_closed_after_bound_dependency_drift() -> None:
+    with pytest.raises(contract.G5PreFitError, match="bound dependency changed"):
+        v2_runner.build_review_bundle()
+    first = _archived_review_bundle()
     assert set(first) == {"v2-contract.json", "v2-review-core.json", "v2-pending-report.json"}
     contract_payload = first["v2-contract.json"]
     pending = first["v2-pending-report.json"]
@@ -89,7 +104,7 @@ def test_v2_bundle_is_stable_versioned_and_non_authorizing() -> None:
     ],
 )
 def test_v2_approval_mutations_fail(mutate) -> None:
-    bundle = v2_runner.build_review_bundle()
+    bundle = _archived_review_bundle()
     core_sha = bundle["v2-review-core.json"]["artifact_sha256"]
     contract_sha = bundle["v2-contract.json"]["artifact_sha256"]
     value = copy.deepcopy(_approval(core_sha, contract_sha))
@@ -426,7 +441,7 @@ def test_v2_ledger_earliest_completion_and_no_retry(
 def test_execute_v2_starts_before_reads_and_numerical_failure_never_selects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    bundle = v2_runner.build_review_bundle()
+    bundle = _archived_review_bundle()
     approval = _approval(
         bundle["v2-review-core.json"]["artifact_sha256"],
         bundle["v2-contract.json"]["artifact_sha256"],
