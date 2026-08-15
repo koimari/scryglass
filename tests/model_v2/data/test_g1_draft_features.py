@@ -84,7 +84,7 @@ def test_target_key_is_inaccessible_to_transform() -> None:
     class PoisonedBase(dict):
         def __getitem__(self, key):
             if key == "target":
-                raise KeyError("target must never be read")
+                raise AssertionError("target must never be read")
             return super().__getitem__(key)
 
     rows, projection = features.materialize_from_projection(base_rows=[PoisonedBase(_base())], source_rows=_source(), champion_table=_champions())
