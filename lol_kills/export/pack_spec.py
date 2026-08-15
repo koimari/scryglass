@@ -93,7 +93,10 @@ EVIDENCE_STATE_COLS = (
 RATINGS_SNAPSHOT_COLS = (
     "team",
     "team_key",
+    "mu_base_total",
     "mu_total",
+    "mu_effective",
+    "momentum_residual",
     "mu_regional",
     "mu_meta",
     "sigma",
@@ -107,7 +110,10 @@ RATINGS_SNAPSHOT_COLS = (
 
 PLAYER_RATINGS_SNAPSHOT_COLS = (
     "player",
+    "mu_base_total",
     "mu_total",
+    "mu_effective",
+    "momentum_residual",
     "mu_regional",
     "mu_meta",
     "sigma",

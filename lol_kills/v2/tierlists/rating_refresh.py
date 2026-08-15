@@ -11,12 +11,24 @@ from typing import Any
 import pandas as pd
 
 from lol_kills.etl.oe_live_source import LIVE_MAP_OUTPUT, LIVE_PLAYER_OUTPUT, LIVE_TEAM_OUTPUT
-from lol_kills.ratings.dual_elo import build_dual_ratings, lineup_hashes_from_players
+from lol_kills.ratings.dual_elo import (
+    DualEloConfig,
+    apply_team_momentum_snapshot,
+    build_dual_ratings,
+    lineup_hashes_from_players,
+)
 from lol_kills.ratings.hierarchical_bt import build_team_weekly_ranks, fit_hierarchical_bt
 from lol_kills.ratings.player_elo import (
+    PlayerEloConfig,
     build_maps_frame_from_players,
     build_player_ratings,
     build_player_weekly_ranks,
+)
+from lol_kills.ratings.momentum_config import (
+    DEFAULT_MOMENTUM_SCALE,
+    DEFAULT_MOMENTUM_WINDOW_GAMES,
+    registered_momentum_bundle,
+    selected_momentum_configuration,
 )
 
 RATING_WINDOW_START = pd.Timestamp("2025-01-01T00:00:00Z")
@@ -112,6 +124,8 @@ def refresh_ratings(
     min_games: int = 20,
     min_series: int = 5,
     previous_as_of: pd.Timestamp | None = None,
+    momentum_window_games: int = DEFAULT_MOMENTUM_WINDOW_GAMES,
+    momentum_scale: float = DEFAULT_MOMENTUM_SCALE,
 ) -> dict[str, Any]:
     repo_root = Path(root).resolve()
     team_path = repo_root / LIVE_TEAM_OUTPUT
@@ -169,12 +183,49 @@ def refresh_ratings(
     # to the isolated runtime data tree.  The default output locations in the
     # rating modules follow the process working directory, which can point at
     # the checkout and make the refresh non-reproducible.
-    build_dual_ratings(maps, lineup_by_game=lineup_hashes, output_dir=features_dir)
-    build_player_ratings(player_maps, players, output_dir=features_dir)
+    build_dual_ratings(
+        maps,
+        cfg=DualEloConfig(
+            momentum_window_games=momentum_window_games,
+            momentum_scale=momentum_scale,
+        ),
+        lineup_by_game=lineup_hashes,
+        output_dir=features_dir,
+    )
+    build_player_ratings(
+        player_maps,
+        players,
+        cfg=PlayerEloConfig(
+            momentum_window_games=momentum_window_games,
+            momentum_scale=momentum_scale,
+        ),
+        output_dir=features_dir,
+    )
     team_snapshot, team_meta = fit_hierarchical_bt(
         maps,
         write=True,
         output_dir=features_dir,
+    )
+    sequential_team_snapshot = pd.read_parquet(features_dir / "ratings_dual_snapshot.parquet")
+    team_snapshot = apply_team_momentum_snapshot(
+        team_snapshot,
+        sequential_team_snapshot,
+        DualEloConfig(
+            momentum_window_games=momentum_window_games,
+            momentum_scale=momentum_scale,
+        ),
+    )
+    team_snapshot.to_parquet(features_dir / "ratings_snapshot.parquet", index=False)
+    team_meta["momentum"] = {
+        "selected": selected_momentum_configuration(
+            window_games=momentum_window_games,
+            scale=momentum_scale,
+        ),
+        "registered": registered_momentum_bundle(),
+    }
+    (features_dir / "ratings_meta.json").write_text(
+        json.dumps(team_meta, indent=2),
+        encoding="utf-8",
     )
     team_weekly = build_team_weekly_ranks(
         maps,
@@ -242,6 +293,13 @@ def refresh_ratings(
             "weekly_locator": "features/player_weekly_ranks.json",
             "movement_baseline": str(player_weekly.get("previous_as_of") or ""),
         },
+        "momentum": {
+            "selected": selected_momentum_configuration(
+                window_games=momentum_window_games,
+                scale=momentum_scale,
+            ),
+            "registered": registered_momentum_bundle(),
+        },
         "artifacts": {
             "team_snapshot": _artifact_meta(
                 features_dir / "ratings_snapshot.parquet",
@@ -281,6 +339,18 @@ def main() -> int:
     parser.add_argument("--min-games", type=int, default=20)
     parser.add_argument("--min-series", type=int, default=5)
     parser.add_argument("--previous-as-of", default=None)
+    parser.add_argument(
+        "--momentum-window-games",
+        type=int,
+        default=DEFAULT_MOMENTUM_WINDOW_GAMES,
+        help="Explicit research momentum window in prior maps; default is zero",
+    )
+    parser.add_argument(
+        "--momentum-scale",
+        type=float,
+        default=DEFAULT_MOMENTUM_SCALE,
+        help="Explicit research momentum scale in rating points; default is zero",
+    )
     args = parser.parse_args()
     payload = refresh_ratings(
         args.root,
@@ -288,6 +358,8 @@ def main() -> int:
         min_games=args.min_games,
         min_series=args.min_series,
         previous_as_of=pd.Timestamp(args.previous_as_of) if args.previous_as_of else None,
+        momentum_window_games=args.momentum_window_games,
+        momentum_scale=args.momentum_scale,
     )
     print(json.dumps({
         "source_as_of": payload["source"]["as_of"],

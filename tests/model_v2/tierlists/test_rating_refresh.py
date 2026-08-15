@@ -48,19 +48,22 @@ def test_refresh_writes_rating_artifacts_under_runtime_root(
         path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame({"row": list(range(rows))}).to_parquet(path, index=False)
 
-    def fake_dual(_maps, *, lineup_by_game, output_dir):
+    def fake_dual(_maps, *, cfg, lineup_by_game, output_dir):
         write_frame(output_dir / "ratings.parquet")
         write_frame(output_dir / "ratings_snapshot.parquet")
+        pd.DataFrame(
+            [{"team": "Blue", "momentum_residual": 0.0}]
+        ).to_parquet(output_dir / "ratings_dual_snapshot.parquet", index=False)
         (output_dir / "ratings_meta.json").write_text("{}", encoding="utf-8")
 
-    def fake_player(_maps, _players, *, output_dir):
+    def fake_player(_maps, _players, *, cfg, output_dir):
         write_frame(output_dir / "player_ratings.parquet")
         write_frame(output_dir / "player_ratings_snapshot.parquet")
         (output_dir / "player_ratings_meta.json").write_text("{}", encoding="utf-8")
 
     def fake_hierarchical(_maps, *, write, output_dir):
         write_frame(output_dir / "ratings_snapshot.parquet")
-        return pd.DataFrame({"team": ["Blue"]}), {"model": "test"}
+        return pd.DataFrame({"team": ["Blue"], "mu_total": [1500.0]}), {"model": "test"}
 
     monkeypatch.setattr(rating_refresh, "build_maps_frame_from_players", lambda players: maps_frame)
     monkeypatch.setattr(rating_refresh, "lineup_hashes_from_players", lambda players: {})

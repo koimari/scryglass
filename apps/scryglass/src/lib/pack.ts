@@ -106,6 +106,19 @@ export type PackManifest = {
     team_rating_rows?: number;
     player_rating_rows?: number;
     claim_ceiling?: string;
+    momentum?: {
+      schema_version?: string;
+      window_games?: number;
+      scale?: number;
+      scale_unit?: string;
+      status?: string;
+      authority?: Record<string, boolean>;
+      selected?: Record<string, unknown>;
+      registered?: Record<string, unknown>;
+      active?: Record<string, unknown>;
+      candidate?: Record<string, unknown>;
+      promotion?: Record<string, unknown>;
+    };
   };
   ingest?: Record<string, unknown>;
   total_bytes: number;
@@ -117,6 +130,9 @@ export type TeamRating = {
   team: string;
   team_key?: string;
   mu_total: number;
+  mu_base_total?: number;
+  mu_effective?: number;
+  momentum_residual?: number;
   mu_regional: number;
   mu_meta: number;
   sigma: number;
@@ -167,6 +183,9 @@ export type TeamWeeklyRanks = {
 export type PlayerRating = {
   player: string;
   mu_total: number;
+  mu_base_total?: number;
+  mu_effective?: number;
+  momentum_residual?: number;
   mu_regional: number;
   mu_meta: number;
   sigma: number;
