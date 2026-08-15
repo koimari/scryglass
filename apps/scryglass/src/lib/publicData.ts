@@ -22,6 +22,19 @@ export const PUBLIC_RESPONSE_MAX_BYTES = 500 * 1024;
 const RPC_TIMEOUT_MS = 5_000;
 const PUBLIC_ROW_LIMIT = 20;
 const PUBLIC_RATINGS_ROW_LIMIT = 100;
+const PLAYER_PROFILE_CACHE_MAX_ENTRIES = 256;
+const PLAYER_PROFILE_CACHE_MAX_BYTES = 8 * 1024 * 1024;
+const PLAYER_PROFILE_CACHE_MAX_ENTRY_BYTES = 256 * 1024;
+const PLAYER_PROFILE_CACHE_TTL_MS = 30_000;
+
+type PlayerProfileCacheEntry = {
+  promise: Promise<PlayerProfileQuery>;
+  expiresAt: number;
+  sizeBytes: number;
+};
+
+const playerProfileCache = new Map<string, PlayerProfileCacheEntry>();
+let playerProfileCacheBytes = 0;
 
 export type QueryApiEnvelope<T> = {
   schema_version: typeof QUERY_API_SCHEMA;
@@ -407,7 +420,82 @@ export function getPlayerProfile(
   name: string,
   signal?: AbortSignal,
 ): Promise<PlayerProfileQuery> {
-  return publicRpc("get_scryglass_player_profile", { p_name: name }, { manifest, signal });
+  if (signal) {
+    return publicRpc("get_scryglass_player_profile", { p_name: name }, { manifest, signal });
+  }
+  const normalizedName = name.normalize("NFKC").trim().toLocaleLowerCase();
+  const cacheKey = `${manifest.pack_id}:${normalizedName}`;
+  const now = Date.now();
+  const cached = playerProfileCache.get(cacheKey);
+  if (cached) {
+    if (cached.expiresAt > now) {
+      playerProfileCache.delete(cacheKey);
+      playerProfileCache.set(cacheKey, cached);
+      return cached.promise;
+    }
+    removePlayerProfileCacheEntry(cacheKey, cached);
+  }
+  const pending = publicRpc<PlayerProfileQuery>(
+    "get_scryglass_player_profile",
+    { p_name: name },
+    { manifest },
+  );
+  const entry: PlayerProfileCacheEntry = {
+    promise: pending,
+    expiresAt: now + PLAYER_PROFILE_CACHE_TTL_MS,
+    sizeBytes: PLAYER_PROFILE_CACHE_MAX_ENTRY_BYTES,
+  };
+  playerProfileCache.set(cacheKey, entry);
+  playerProfileCacheBytes += entry.sizeBytes;
+  void pending.then(
+    (value) => finalizePlayerProfileCacheEntry(cacheKey, entry, value),
+    () => removePlayerProfileCacheEntry(cacheKey, entry),
+  );
+  trimPlayerProfileCache();
+  return pending;
+}
+
+function removePlayerProfileCacheEntry(key: string, entry: PlayerProfileCacheEntry): void {
+  if (playerProfileCache.get(key) !== entry) return;
+  playerProfileCache.delete(key);
+  playerProfileCacheBytes = Math.max(0, playerProfileCacheBytes - entry.sizeBytes);
+}
+
+function finalizePlayerProfileCacheEntry(
+  key: string,
+  entry: PlayerProfileCacheEntry,
+  value: PlayerProfileQuery,
+): void {
+  if (playerProfileCache.get(key) !== entry) return;
+  if (entry.expiresAt <= Date.now()) {
+    removePlayerProfileCacheEntry(key, entry);
+    return;
+  }
+  let sizeBytes: number;
+  try {
+    sizeBytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  } catch {
+    removePlayerProfileCacheEntry(key, entry);
+    return;
+  }
+  if (sizeBytes > PLAYER_PROFILE_CACHE_MAX_ENTRY_BYTES) {
+    removePlayerProfileCacheEntry(key, entry);
+    return;
+  }
+  playerProfileCacheBytes += sizeBytes - entry.sizeBytes;
+  entry.sizeBytes = sizeBytes;
+  trimPlayerProfileCache();
+}
+
+function trimPlayerProfileCache(): void {
+  while (
+    playerProfileCache.size > PLAYER_PROFILE_CACHE_MAX_ENTRIES
+    || playerProfileCacheBytes > PLAYER_PROFILE_CACHE_MAX_BYTES
+  ) {
+    const oldest = playerProfileCache.entries().next().value as [string, PlayerProfileCacheEntry] | undefined;
+    if (!oldest) break;
+    removePlayerProfileCacheEntry(oldest[0], oldest[1]);
+  }
 }
 
 export function getTeamProfile(
