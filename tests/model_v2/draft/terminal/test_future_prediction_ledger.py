@@ -1459,7 +1459,10 @@ def test_phase_one_collection_joins_exact_receipts_and_rebuilds_both_ledgers(
     completed = subprocess.run(
         [
             str(repo_root / "apps/scryglass/node_modules/.bin/tsx"),
-            str(repo_root / "apps/scryglass/scripts/phaseOneDraftParity.mts"),
+            str(
+                repo_root
+                / "tests/model_v2/fixtures/phase-one-ts/apps/scryglass/scripts/phaseOneDraftParity.mts"
+            ),
             str(evaluation_root),
             snapshot_locator,
         ],
