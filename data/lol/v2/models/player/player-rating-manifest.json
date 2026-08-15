@@ -2,7 +2,7 @@
   "artifact_hashes": {
     "config": "c5fdf3f246950bfd4a3240bd8a21f9b20040045e9776a09753732572a7717757",
     "fixtures": "f21cce8c4aab62a656e984efb78be2cc419e68e852b96e399a2325a803d62249",
-    "report": "b0f38dd607b53543b6482fe35ec2e107d393dd8c8879b4dfbb8defb0707958de"
+    "report": "83c1e34b8bf30859461c16ee01ae9d8f0526337427b6e5c3a0a12cd71a4e9a5b"
   },
   "artifact_id": "player-rating-development-manifest-l4-v2",
   "blockers": [
@@ -46,5 +46,5 @@
   },
   "schema_version": "2.0.0",
   "selected_candidate_id": "random_walk_no_reset+no_resource",
-  "selection_decision_sha256": "e963c441eb7610a8a6159dc10d4702dce19b3cf78e8eaba91c4b996f17a5252a"
+  "selection_decision_sha256": "a0af9cfe61f5ea96d4c40c7e4f5b64705aaebfb09c8f7fbe10dcb436e1ce926c"
 }

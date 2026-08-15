@@ -329,7 +329,10 @@ def test_public_unavailable_is_structurally_valid_but_repository_semantics_rejec
     jsonschema.Draft202012Validator(
         schemas["player-rating.schema.json"], registry=registry
     ).validate(payload)
-    with pytest.raises(ValidationFailure, match="production model authority is unavailable"):
+    with pytest.raises(
+        ValidationFailure,
+        match="output validation inputs are missing, stale, or unanchored",
+    ):
         validate_output_payload("player_rating", payload)
 
 
