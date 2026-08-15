@@ -186,7 +186,30 @@ def _patch_raw() -> bytes:
 def evaluation_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
     repo_root = Path(".").resolve()
     root = tmp_path_factory.mktemp("draft-future-ledger-root")
-    (root / "lol_kills").symlink_to(repo_root / "lol_kills", target_is_directory=True)
+    historical_patch_source = (
+        repo_root
+        / "tests/model_v2/fixtures/leaguepedia_patch_revisions_v1.py"
+    )
+    assert hashlib.sha256(historical_patch_source.read_bytes()).hexdigest() == (
+        "b9079a64c8dcba4d17c7762edda4c914a7a42b8b7680044910298b69014ebb58"
+    )
+    (root / "lol_kills/etl").mkdir(parents=True)
+    for child in (repo_root / "lol_kills").iterdir():
+        if child.name != "etl":
+            (root / "lol_kills" / child.name).symlink_to(
+                child,
+                target_is_directory=child.is_dir(),
+            )
+    for child in (repo_root / "lol_kills/etl").iterdir():
+        if child.name != "leaguepedia_patch_revisions.py":
+            (root / "lol_kills/etl" / child.name).symlink_to(
+                child,
+                target_is_directory=child.is_dir(),
+            )
+    shutil.copy2(
+        historical_patch_source,
+        root / "lol_kills/etl/leaguepedia_patch_revisions.py",
+    )
     (root / "docs").symlink_to(repo_root / "docs", target_is_directory=True)
     (root / "data/lol/v2").mkdir(parents=True)
     (root / "data/lol/v2/models").symlink_to(
