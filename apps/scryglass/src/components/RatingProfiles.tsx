@@ -248,7 +248,7 @@ export function TeamRatingProfile({
       : "These player affiliations come from the ratings snapshot. An accepted game lineup is unavailable.";
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} data-scryglass-release={manifest.pack_id}>
       <p className={styles.back}><Link className="row-link" href="/elo">← Team ratings</Link></p>
       <header className={styles.hero}>
         <div className={styles.heroIdentity}>
@@ -518,7 +518,15 @@ function CompositionEvidence({
   );
 }
 
-export function MatchRatingProfile({ game, championImages }: { game: ProfileGame; championImages: Record<string, string> }) {
+export function MatchRatingProfile({
+  game,
+  championImages,
+  releaseId,
+}: {
+  game: ProfileGame;
+  championImages: Record<string, string>;
+  releaseId: string;
+}) {
   const gradesAvailable = game.players.some((player) => player.grade?.status === "available");
   const blueWon = game.blue_win === 1;
   const winner = blueWon ? game.blue_team : game.red_team;
@@ -531,7 +539,7 @@ export function MatchRatingProfile({ game, championImages }: { game: ProfileGame
     players: game.players.filter((player) => player.side === side).sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role)),
   }));
   return (
-    <div className={styles.page}>
+    <div className={styles.page} data-scryglass-release={releaseId}>
       <p className={styles.back}><Link className="row-link" href="/matches">← Matches</Link></p>
       <header className={styles.matchHero}>
         <p className={styles.scope}>{game.league} · {fullDate(game.date)}{duration ? ` · ${duration}` : ""}</p>
@@ -607,7 +615,7 @@ export function PlayerRatingProfile({
   const role = roleLabel(record?.primary_role);
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} data-scryglass-release={manifest.pack_id}>
       <p className={styles.back}>
         <Link className="row-link" href="/elo?tab=players">← Player ratings</Link>
         {currentTeam ? <> · <Link className="row-link" href={`/elo/team/${teamSlug(currentTeam)}`}>{currentTeam}</Link></> : null}

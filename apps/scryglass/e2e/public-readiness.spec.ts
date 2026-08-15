@@ -16,6 +16,17 @@ const PUBLIC_ROUTES = [
   ["/security", "Security"],
 ] as const;
 
+const RELEASE_BOUND_ROUTES = [
+  "/elo",
+  "/elo/player/Faker",
+  "/elo/team/T1",
+  "/matches",
+  "/matches/e2e-game-1",
+  "/tiers",
+] as const;
+
+const E2E_RELEASE_ID = "v2026.08.13.000001";
+
 test("ratings load Tier 1 records and keep the initial document within budget", async ({ page, request }) => {
   const response = await request.get("/elo");
   expect(response.ok()).toBe(true);
@@ -106,6 +117,16 @@ test("HTML responses use nonce-based scripts and publish launch metadata", async
   expect(await security.text()).toContain("Canonical: https://scryglass.xyz/.well-known/security.txt");
   expect((await request.get("/robots.txt")).ok()).toBe(true);
   expect((await request.get("/sitemap.xml")).ok()).toBe(true);
+});
+
+test("every data page publishes its exact release marker", async ({ request }) => {
+  for (const route of RELEASE_BOUND_ROUTES) {
+    const response = await request.get(route);
+    expect(response.ok(), route).toBe(true);
+    expect(await response.text(), route).toContain(
+      `data-scryglass-release="${E2E_RELEASE_ID}"`,
+    );
+  }
 });
 
 test("legal, source, privacy, security, and not-found states stay reachable", async ({ page }) => {
