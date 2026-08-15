@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { ProfileGame, ProfileGrade, ProfileParticipant } from "@/lib/pack";
+import { championImageUrl } from "@/lib/championImages";
 import { TeamMark } from "./TeamMark";
 import styles from "./RatingProfiles.module.css";
 
@@ -56,12 +57,13 @@ function gradeTitle(grade: Extract<ProfileGrade, { status: "available" }>): stri
 }
 
 function ChampionPortrait({ name, imageUrl }: { name: string | null; imageUrl?: string | null }) {
+  const resolvedImageUrl = championImageUrl(name, imageUrl);
   return (
     <span className={styles.portrait} title={name ?? undefined}>
-      {imageUrl ? (
+      {resolvedImageUrl ? (
         // CommunityDragon supplies the champion portraits in the published pack.
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={imageUrl} alt={name ?? "Champion"} loading="lazy" />
+        <img src={resolvedImageUrl} alt={name ?? "Champion"} loading="lazy" />
       ) : <span aria-hidden>{name?.slice(0, 1) ?? "?"}</span>}
     </span>
   );

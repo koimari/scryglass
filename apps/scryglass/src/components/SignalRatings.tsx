@@ -76,6 +76,8 @@ type Props = {
   teamRecords: Record<string, TeamRecordView>;
   playerRecords: Record<string, PlayerRecordView>;
   movementByName: Record<string, number | null>;
+  showInactive: boolean;
+  inactiveTotal: number;
   availableLeaguesByTier: Record<CompetitionTier, string[]>;
   total: number;
   initialPage: number;
@@ -112,7 +114,8 @@ function roleLabel(role: string | null | undefined): string {
 }
 
 function rankDeltaLabel(delta: number | null | undefined): string {
-  if (delta == null || delta === 0) return "—";
+  if (delta == null) return "Pending";
+  if (delta === 0) return "0";
   return delta > 0 ? `+${delta}` : `${delta}`;
 }
 
@@ -134,6 +137,8 @@ export function SignalRatings({
   teamRecords,
   playerRecords,
   movementByName,
+  showInactive,
+  inactiveTotal,
   availableLeaguesByTier,
   total,
   initialPage,
@@ -157,6 +162,7 @@ export function SignalRatings({
   const [expanded, setExpanded] = useState(() => tab === "teams" && serverFiltered);
   const [selected, setSelected] = useState("");
   const [page, setPage] = useState(initialPage);
+  const [includeInactive, setIncludeInactive] = useState(showInactive);
 
   useEffect(() => {
     if (tab !== loadedTab) return;
@@ -168,19 +174,20 @@ export function SignalRatings({
     if ((tab === "players" || tab === "draft") && role) params.set(tab === "draft" ? "draftRole" : "role", role);
     if (tab === "players" && minGames !== 20) params.set("min", String(minGames));
     if (tab === "draft" && draftMinGames !== 5) params.set("draftMin", String(draftMinGames));
+    if (includeInactive) params.set("active", "all");
     if (sort !== "rating") params.set("sort", sort);
     if (serverFiltered && page > 1) params.set("page", String(page));
     const suffix = params.toString();
     const next = suffix ? `${pathname}?${suffix}` : pathname;
     const current = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
     if (next !== current) router.replace(next, { scroll: false });
-  }, [tab, loadedTab, query, leagues, role, minGames, draftMinGames, sort, page, serverFiltered, pathname, router, searchParams]);
+  }, [tab, loadedTab, query, leagues, role, minGames, draftMinGames, sort, page, includeInactive, serverFiltered, pathname, router, searchParams]);
 
   const teamDelta = (team: string) => movementByName[team];
   const playerDelta = (player: string) => movementByName[player];
 
   const filteredTeams = useMemo(() => {
-    const list = teams.filter((team) => isActiveRating(team) && teamMatchesQuery(team.team, query) && recordMatchesLeagues(teamRecords[team.team], leagues));
+    const list = teams.filter((team) => (includeInactive || isActiveRating(team)) && teamMatchesQuery(team.team, query) && recordMatchesLeagues(teamRecords[team.team], leagues));
     return [...list].sort((a, b) => {
       if (sort === "name") return a.team.localeCompare(b.team);
       if (sort === "games") return (b.n_maps ?? 0) - (a.n_maps ?? 0);
@@ -189,11 +196,11 @@ export function SignalRatings({
     });
   // Movement maps are immutable inputs for this render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teams, teamRecords, leagues, query, sort, movementByName]);
+  }, [teams, teamRecords, leagues, query, sort, movementByName, includeInactive]);
 
   const filteredPlayers = useMemo(() => {
     const list = players
-      .filter(isActiveRating)
+      .filter((player) => includeInactive || isActiveRating(player))
       .filter((player) => player.n_maps >= minGames)
       .filter((player) => {
         const record = playerRecords[player.player];
@@ -213,7 +220,7 @@ export function SignalRatings({
     });
   // Movement maps are immutable inputs for this render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [players, playerRecords, teamRecords, leagues, query, role, minGames, sort, movementByName]);
+  }, [players, playerRecords, teamRecords, leagues, query, role, minGames, sort, movementByName, includeInactive]);
 
   const draftRows = useMemo(() => {
     const rows = filterDraftRankings(
@@ -317,6 +324,7 @@ export function SignalRatings({
     setMinGames(20);
     setDraftMinGames(5);
     setSort("rating");
+    setIncludeInactive(false);
     setExpanded(false);
     setSelected("");
     setPage(1);
@@ -408,6 +416,7 @@ export function SignalRatings({
           {tab === "draft" ? null : <label><span>Sort</span><select value={sort} onChange={(event) => { setSort(event.target.value as Sort); setPage(1); }}><option value="rating">Rating</option><option value="movement">Movement</option><option value="games">Games</option><option value="name">Name</option></select></label>}
           {tab === "players" ? <label className={styles.minGames}><span>Min games</span><input type="number" min={5} max={10000} value={minGames} onChange={(event) => { setMinGames(Math.min(10000, Math.max(5, Number(event.target.value) || 5))); setPage(1); }} /></label> : null}
           {tab === "draft" && draftAuthorized ? <label className={styles.minGames}><span>Min games / picks</span><input type="number" min={5} max={10000} value={draftMinGames} onChange={(event) => setDraftMinGames(Math.min(10000, Math.max(5, Number(event.target.value) || 5)))} /></label> : null}
+          {tab !== "draft" ? <label className={styles.includeInactive}><input type="checkbox" checked={includeInactive} onChange={(event) => { setIncludeInactive(event.target.checked); setPage(1); setExpanded(false); }} /><span>Include inactive</span></label> : null}
         </div>
         {tab === "draft" && !draftAuthorized ? null : <div className={styles.scopeRow} role="group" aria-label="Competition level">
           <span>Level</span>
@@ -427,6 +436,7 @@ export function SignalRatings({
         <section className={styles.statusState} aria-labelledby="draft-unavailable-title">
           <p className={styles.statusKicker}>Release gate</p>
           <h2 id="draft-unavailable-title">Draft Score is unavailable</h2>
+          <p>Public Draft Score stays closed until an independent promotion receipt authorizes the model output.</p>
           <p>{draftUnavailableReason}</p>
           <Link href="/methodology#composition-signal">See the research boundary →</Link>
         </section>
@@ -488,7 +498,7 @@ export function SignalRatings({
       ) : featured ? (
         <>
           <section className={styles.summaryLine} aria-label="Rating summary" aria-live="polite">
-            <p><span>Ranked</span><strong>{serverFiltered ? total : entities.length} {tab}</strong></p>
+            <p><span>{includeInactive ? "All records" : tab === "teams" ? "Active teams" : "Active players"}</span><strong>{serverFiltered ? total : entities.length} {tab}</strong><small>{includeInactive ? "active + inactive" : inactiveTotal ? `${inactiveTotal} inactive excluded` : "active ratings"}</small></p>
             <p><span>Leader</span><strong>{entityName(entities[0])}</strong><small>{topScore?.toFixed(0)}</small></p>
             <p><span>Scope</span><strong>{scope}</strong></p>
           </section>
@@ -515,7 +525,7 @@ export function SignalRatings({
                 </div>
               </div>
               <footer>
-                <span>Published evidence</span>
+                <span>Evidence window</span>
                 <span>{tab === "teams" ? `${(featuredRecord as TeamRecordView | undefined)?.games ?? featured.n_maps ?? 0} games · ${formatWr((featuredRecord as TeamRecordView | undefined)?.wr)}` : `${(featured as PlayerRatingView).n_maps} games · ${formatWr((featuredRecord as PlayerRecordView | undefined)?.wr)}`}</span>
                 <Link href={tab === "teams" ? `/elo/team/${teamSlug(featuredName)}` : `/elo/player/${playerSlug(featuredName)}`}>Open profile →</Link>
               </footer>
@@ -532,8 +542,8 @@ export function SignalRatings({
           </section>
 
           <DataBars
-            title={`${tab === "teams" ? "Team" : "Player"} rating field`}
-            description={`Top ${ratingChartRows.length} ${tab} in ${scope.toLowerCase()} by adjusted rating`}
+            title={`${tab === "teams" ? "Team" : "Player"} adjusted rating`}
+            description={`Top ${ratingChartRows.length} ${tab} in ${scope.toLowerCase()} by uncertainty-adjusted rating`}
             rows={ratingChartRows}
             domain={ratingDomain}
             axisLeft={ratingDomain ? `${ratingDomain.min}` : "—"}
@@ -553,7 +563,7 @@ export function SignalRatings({
                     <div className={styles.cardIdentity}><TeamMark team={entityTeam} size="medium" /><div><h3>{name}</h3><p>{tab === "teams" ? formatAffiliation((record as TeamRecordView | undefined)?.current_tier, (record as TeamRecordView | undefined)?.current_league ?? (record as TeamRecordView | undefined)?.primary) : `${(record as PlayerRecordView | undefined)?.current_team ?? (entity as PlayerRatingView).last_team ?? "Independent"} · ${roleLabel((record as PlayerRecordView | undefined)?.primary_role)}`}</p></div></div>
                     <strong>{ratingOf(entity).toFixed(0)}</strong>
                     <span className={(deltaOf(name) ?? 0) > 0 ? styles.positive : (deltaOf(name) ?? 0) < 0 ? styles.negative : ""}>{rankDeltaLabel(deltaOf(name))}</span>
-                    <div className={styles.cardVisuals}><span>Published evidence</span><span>{tab === "teams" ? (record as TeamRecordView | undefined)?.games ?? entity.n_maps ?? 0 : (entity as PlayerRatingView).n_maps} games</span></div>
+                    <div className={styles.cardVisuals}><span>Evidence window</span><span>{tab === "teams" ? (record as TeamRecordView | undefined)?.games ?? entity.n_maps ?? 0 : (entity as PlayerRatingView).n_maps} games</span></div>
                   </Link>
                 );
               })}

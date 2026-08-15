@@ -682,6 +682,14 @@
 .playerGameStats dt { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: var(--text-micro); letter-spacing: 0.05em; text-transform: uppercase; }
 .teamGameStats dd,
 .playerGameStats dd { margin: 0.15rem 0 0; font-weight: 700; }
+.objectiveUnavailable,
+.objectiveLegend {
+  margin: 0.55rem 0 0;
+  color: var(--ink-muted);
+  font-size: var(--text-small);
+  line-height: 1.45;
+}
+.objectiveLegend { font-family: var(--font-mono), monospace; font-size: var(--text-micro); }
 .matchPlayer {
   display: grid;
   grid-template-columns: 3.5rem minmax(9rem, 0.75fr) minmax(24rem, 2fr) minmax(9rem, 0.8fr);

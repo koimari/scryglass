@@ -26,6 +26,7 @@ import {
   type TeamRecord,
 } from "@/lib/pack";
 import { playerPortrait, type PlayerVisualIdentity } from "@/lib/playerPortraits";
+import { championImageUrl } from "@/lib/championImages";
 import { matchTeamHref } from "@/lib/matchFilters";
 import type { DraftRankingsScope } from "@/lib/draftRankings";
 import { PlayerPortrait } from "./PlayerPortrait";
@@ -135,7 +136,7 @@ function positionChange(comparison: PlayerRankComparison | undefined): {
     };
   }
   return {
-    label: "Same",
+    label: "0",
     tone: "flat",
     title: `Held the same position since ${shortDate(comparison.as_of)}.`,
   };
@@ -196,12 +197,13 @@ function gradeSummary(games: ProfileGame[], player: string): { grade: string; tr
 }
 
 function ChampionPortrait({ name, imageUrl, size = "small" }: { name: string | null; imageUrl?: string | null; size?: "small" | "large" }) {
+  const resolvedImageUrl = championImageUrl(name, imageUrl);
   return (
     <span className={`${styles.portrait} ${size === "large" ? styles.portraitLarge : ""}`} title={name ?? undefined}>
-      {imageUrl ? (
+      {resolvedImageUrl ? (
         // The source is a small square CommunityDragon asset.
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={imageUrl} alt={name ?? "Champion"} loading="lazy" />
+        <img src={resolvedImageUrl} alt={name ?? "Champion"} loading="lazy" />
       ) : <span aria-hidden>{name?.slice(0, 1) ?? "?"}</span>}
     </span>
   );
@@ -337,20 +339,33 @@ function GradeDetails({ grade }: { grade?: ProfileGrade }) {
 }
 
 function TeamGameStats({ stats }: { stats?: ProfileTeamStats }) {
-  if (!stats) return null;
-  const values = [
-    ["Kills", stats.kills],
-    ["Gold", stats.gold == null ? null : compactNumber(stats.gold)],
-    ["Towers", stats.towers],
-    ["Dragons", stats.dragons],
-    ["Barons", stats.barons],
-    ["Grubs", stats.void_grubs],
-    ["Heralds", stats.heralds],
-    ["Atakhans", stats.atakhans],
-    ["Inhibitors", stats.inhibitors],
-  ].filter((entry) => entry[1] !== null && entry[1] !== undefined);
-  if (!values.length) return null;
-  return <dl className={styles.teamGameStats}>{values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;
+  if (!stats) return <p className={styles.objectiveUnavailable}>Team and objective totals are unavailable for this game.</p>;
+  const dash = "—";
+  const values: Array<[string, string | number]> = [
+    ["Kills", stats.kills ?? dash],
+    ["Gold", stats.gold == null ? dash : compactNumber(stats.gold)],
+    ["Towers", stats.towers ?? dash],
+    ["Dragons", stats.dragons ?? dash],
+    ["Barons", stats.barons ?? dash],
+    ["Grubs", stats.void_grubs ?? dash],
+    ["Heralds", stats.heralds ?? dash],
+    ["Atakhans", stats.atakhans ?? dash],
+    ["Inhibitors", stats.inhibitors ?? dash],
+  ];
+  const objectiveValues = values.slice(2);
+  const hasObjective = objectiveValues.some(([, value]) => value !== dash);
+  return (
+    <>
+      <dl className={styles.teamGameStats}>
+        {values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+      </dl>
+      <p className={styles.objectiveLegend}>
+        {hasObjective
+          ? "A numeric 0 is a reported count. A dash means the source did not publish that field."
+          : "Objective totals are unavailable for this game. A dash means the source did not publish that field."}
+      </p>
+    </>
+  );
 }
 
 function PlayerGameStats({ player }: { player: ProfileParticipant }) {

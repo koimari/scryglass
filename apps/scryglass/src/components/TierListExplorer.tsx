@@ -27,6 +27,7 @@ import {
   type TierRankedMode,
   type TierScope,
 } from "@/lib/tierBoard";
+import { championImageUrl } from "@/lib/championImages";
 import { publicPatchLabel } from "@/lib/patchIdentity";
 import styles from "./TierListExplorer.module.css";
 
@@ -290,12 +291,13 @@ function TierLoadingState() {
 
 function ChampionThumb({ name, imageUrl }: { name: string; imageUrl?: string | null }) {
   const [imageFailed, setImageFailed] = useState(false);
+  const resolvedImageUrl = championImageUrl(name, imageUrl);
   return (
     <span className={styles.championThumb} aria-hidden="true">
-      {imageUrl && !imageFailed ? (
+      {resolvedImageUrl && !imageFailed ? (
         // These are small square assets. Direct loading keeps the board independent of image optimization.
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={imageUrl} alt="" loading="lazy" onError={() => setImageFailed(true)} />
+        <img src={resolvedImageUrl} alt="" loading="lazy" onError={() => setImageFailed(true)} />
       ) : (
         <span>{name.slice(0, 1)}</span>
       )}
@@ -958,6 +960,8 @@ export function TierListExplorer({
   const activeRegion = regionOptions.some((candidate) => candidate.id === region) ? region : "";
   const regionalRows = serverFiltered ? rows : filterRowsByRegion(rows, scopes, activePatch, activeRegion);
   const visibleRows = filterRowsByMinimumGames(regionalRows, minimumGames);
+  const patchRowCount = regionalRows.length;
+  const noEvidenceAtFloor = patchRowCount > 0 && visibleRows.length === 0;
   const selectedRows = role ? visibleRows.filter((row) => row.role === role) : [];
   const selectedScope = role
     ? scopes.find((scope) => scope.patch === activePatch && scope.role === role)
@@ -1070,6 +1074,15 @@ export function TierListExplorer({
         {activeRegionLabel ? ` · ${activeRegionLabel}` : " · all regions"} · {minimumGames}+ games · {freshnessLabel(data)} · updated {data.as_of ?? data.generated_at}
       </div>
 
+      {noEvidenceAtFloor ? (
+        <div className={styles.unavailable} role="status">
+          <p>No champions have {minimumGames}+ accepted games in {activePatch} for this scope.</p>
+          <span>{patchRowCount} patch rows have at least one accepted game. These early rows are provisional evidence.</span>
+          {minimumGames !== 1 ? <button type="button" className={styles.button} onClick={() => setMinimumGames(1)}>Show 1+ games</button> : null}
+        </div>
+      ) : null}
+
+      {!noEvidenceAtFloor ? <>
       <nav className={styles.questionNav} aria-label="Draft questions">
         {BOARD_MODES.map((item) => (
           <button
@@ -1191,6 +1204,7 @@ export function TierListExplorer({
         <strong>How to read this board</strong>
         <span>First pick uses the patch-wide model. Blind shows the expected weakest common matchup. Good into counts favorable modeled results against five common role opponents. Minimum games uses patch-wide accepted appearances. Unpicked alternatives use structural similarity and carry no performance claim. Region filters observed appearances and keeps the patch-wide fit fixed.</span>
       </div>
+      </> : null}
     </section>
   );
 }

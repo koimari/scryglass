@@ -1488,6 +1488,11 @@
   margin: 0;
 }
 
+.unavailable .button {
+  justify-self: start;
+  margin-top: 0.45rem;
+}
+
 .movementUp { color: #087443; }
 .movementDown { color: #b13d31; }
 .movementFlat { color: var(--ink-faint); }
