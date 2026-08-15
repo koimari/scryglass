@@ -1120,7 +1120,6 @@ def evaluate_candidate(
             if filtered_side_pairs:
                 assert_side_swap(_as_prediction_map(list(all_test_predictions.values())), filtered_side_pairs)
 
-        test_predictions = test_predictions
         test_row_ids = sorted(test_predictions)
         if not test_row_ids:
             raise ValidationFailure("candidate produced no test predictions")

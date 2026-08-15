@@ -140,7 +140,6 @@ def build(path: Path) -> dict[str, Any]:
         by_frame[frame.time_ms].extend(by_time[time_ms])
     frame_groups = sorted(by_frame.items())
     baseline = game.frames[0]
-    previous_frame = baseline
     previous_team = frame_totals(game, baseline)
     previous_player = frame_players(game, baseline)
     ledger: list[dict[str, Any]] = []
@@ -185,7 +184,7 @@ def build(path: Path) -> dict[str, Any]:
                 for team in sorted(TEAMS)
             },
         })
-        previous_frame, previous_team, previous_player = frame, team_now, player_now
+        previous_team, previous_player = team_now, player_now
     return {
         "schema": LEDGER_SCHEMA,
         "source": {

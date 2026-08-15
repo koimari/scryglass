@@ -26,7 +26,6 @@ from __future__ import annotations
 import json
 import math
 import warnings
-from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -1653,10 +1652,6 @@ def build_report() -> dict[str, Any]:
     # Preferred XP add-on for "central" stays full joint; narrative uses share table.
 
     # Package totals (bounds) — preferred = scrap you get with no fight: local gold + short Touch.
-    burn_pp = burn_wiki["pre_26_11_3stack"]["wr_pp_via_gold10_logit"]
-    burn_brief_pp = burn_wiki["pre_26_11_brief_8s"]["wr_pp_via_gold10_logit"]
-    burn_brief_post_pp = burn_wiki["post_26_11_brief_8s"]["wr_pp_via_gold10_logit"]
-    burn_hunger_pp = burn_wiki["pre_26_11_20s_plus_hunger_mite"]["wr_pp_via_gold10_logit"]
     ls_burn_pp = ls_burn["early_20s_wr_pp"]
     # The extra structure damage is a conditional pressure ceiling, not cash.
     # Compute it as one probability difference rather than adding two nonlinear
@@ -2121,8 +2116,6 @@ def enrich_report_v4(d: dict[str, Any]) -> dict[str, Any]:
     b = d["intrinsic_bounds_pp_at_even"]
     preferred = float(b["preferred_gold_plus_brief_burn_pp"])
     delta_obj = preferred
-    delta_obj_joint = float(b["central_gold_plus_xp_joint_pp"])
-    delta_obj_upper = float(b["upper_joint_plus_wiki_burn_20s_pp"])
     logits = d["logits"]["gold10"]
     b0, b1 = float(logits["intercept"]), float(logits["coef"])
     leave = leave_farm_scenarios(b0, b1)
@@ -2161,17 +2154,12 @@ def enrich_report_v4(d: dict[str, Any]) -> dict[str, Any]:
     # Keep legacy packages mapped with new wave gold for any old keys
     farm_legacy = farm_opportunity_table(b0, b1)
 
-    kill_win_pp = float(d["opportunity_gold"]["median_tf_assumption"]["win_pp"])
-    kill_lose_pp = abs(float(d["opportunity_gold"]["median_tf_assumption"]["lose_pp"]))
     # refresh kill table under same logit (unchanged bounty)
     kills = kill_net_gold_table(b0, b1)
     kill_win_pp = float(next(r["wr_pp_at_even"] for r in kills if r["net_kills_for_contester"] == 2))
     kill_lose_pp = abs(float(next(r["wr_pp_at_even"] for r in kills if r["net_kills_for_contester"] == -2)))
 
-    death2 = abs(float(d["fight_swing_priors"]["structural_2_deaths_neg600g_pp"]))
-    death3 = abs(float(d["fight_swing_priors"]["structural_3_deaths_neg900g_pp"]))
     loss_2 = kill_lose_pp + delta_obj
-    loss_3 = death3 + delta_obj
 
     curves: dict[str, Any] = {}
     # Core leave-farm axis
@@ -2482,9 +2470,13 @@ def render_paper(d: dict[str, Any]) -> str:
         "",
         "## Abstract",
         "",
-        "We separate (i) an **associational scrap proxy** for mechanical bumps "
-        "(90g, optional XP, Touch→plate gold) mapped through gold@10 / xp@10 logits "
-        "from (ii) the **OE take-regime association** of ending 3–0 after early controls.",
+        "".join(
+            (
+                "We separate (i) an **associational scrap proxy** for mechanical bumps ",
+                "(90g, optional XP, Touch→plate gold) mapped through gold@10 / xp@10 logits ",
+                "from (ii) the **OE take-regime association** of ending 3–0 after early controls.",
+            )
+        ),
         f"Era sample n={d['sample']['n_era_3camp']:,}; "
         f"gold@10 fit n={d['sample'].get('n_fit_gold10', d['logits']['gold10']['n']):,}.",
         f"+90g at even → **{gold['at_even']:.2f}pp**. "

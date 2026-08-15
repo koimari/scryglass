@@ -331,7 +331,6 @@ def draft_edge_at_minute(composite: dict, minute: float) -> float:
     buckets = composite.get("buckets") or {}
     if not buckets:
         return float((composite.get("components") or {}).get("win_edge") or 0.0)
-    t = min(BUCKETS, key=lambda b: abs(b - float(minute)))
     # If before 10, use 10; after 25, use 25
     if minute < 10:
         t = 10

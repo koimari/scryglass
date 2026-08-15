@@ -132,8 +132,7 @@ def evaluate_gates(report: dict) -> dict[str, Any]:
             m.get("brier", 1) < base.get("mean_brier", 0)
             and m.get("brier", 1) <= base.get("elo_brier", 1) + 1e-6
         )
-        # Allow slight Elo tie; must beat mean
-        ok = m.get("brier", 1) < base.get("mean_brier", 1)
+        # Allow a slight Elo tie. The model must beat the mean baseline.
         details["win"] = {
             "pass": ok,
             "brier": m.get("brier"),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import numbers
 import os
 from pathlib import Path
@@ -280,11 +281,7 @@ def _optional_finite(value: Any, *, nonnegative: bool = False) -> bool:
     if isinstance(value, bool) or not isinstance(value, numbers.Real):
         return False
     number = float(value)
-    return (
-        number == number
-        and abs(number) != float("inf")
-        and (not nonnegative or number >= 0)
-    )
+    return math.isfinite(number) and (not nonnegative or number >= 0)
 
 
 def _required_finite(value: Any) -> bool:

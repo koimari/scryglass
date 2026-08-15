@@ -444,7 +444,7 @@ def fit_hierarchical_bt(
         if not team_obs.empty and pd.notna(team_obs["date"].max()):
             last_game_date = pd.Timestamp(team_obs["date"].max()).isoformat()
         bridge_gap = max(0.0, 1.0 - min(intl, cfg.bridge_target_series) / max(cfg.bridge_target_series, 1))
-        sigma = math.sqrt(sigma * sigma + (cfg.unbridged_league_sigma * bridge_gap) ** 2)
+        sigma = math.hypot(sigma, cfg.unbridged_league_sigma * bridge_gap)
         rows.append(
             {
                 "team": display_by_team.get(team, team),
