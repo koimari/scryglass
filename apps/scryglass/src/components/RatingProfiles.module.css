@@ -670,6 +670,15 @@
 .matchGradeGuide > small { grid-column: 2; color: var(--ink-muted); line-height: 1.45; }
 .matchTeams { display: grid; grid-template-columns: 1fr; gap: 2.5rem; }
 .matchTeam { min-width: 0; }
+.teamGameStatsScroll {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.teamGameStatsScroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .teamGameStats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr));
@@ -690,6 +699,13 @@
   line-height: 1.45;
 }
 .objectiveLegend { font-family: var(--font-mono), monospace; font-size: var(--text-micro); }
+.objectiveScrollHint {
+  display: none;
+  margin: 0.45rem 0 0;
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: var(--text-micro);
+}
 .matchPlayer {
   display: grid;
   grid-template-columns: 3.5rem minmax(9rem, 0.75fr) minmax(24rem, 2fr) minmax(9rem, 0.8fr);
@@ -774,6 +790,32 @@
 }
 
 @media (max-width: 520px) {
+  .teamGameStatsScroll {
+    margin-inline: -0.75rem;
+    padding-inline: 0.75rem;
+    overscroll-behavior-inline: contain;
+  }
+
+  .teamGameStats {
+    display: flex;
+    width: max-content;
+    min-width: max-content;
+  }
+
+  .teamGameStats > div,
+  .teamGameStats > div:nth-child(3n) {
+    flex: 0 0 6.75rem;
+    border-right: 1px solid var(--line);
+  }
+
+  .teamGameStats > div:last-child {
+    border-right: 0;
+  }
+
+  .objectiveScrollHint {
+    display: block;
+  }
+
   .heroIdentity {
     display: grid;
     grid-template-columns: 6.5rem minmax(0, 1fr);
