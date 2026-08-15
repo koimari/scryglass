@@ -1095,13 +1095,18 @@ def export_public_pack(
     )
     if player_maps_for_ratings.empty:
         raise RuntimeError("public pack rating source has no complete player maps")
+    team_rating_cfg = DualEloConfig(
+        momentum_window_games=momentum_window_games,
+        momentum_scale=momentum_scale,
+    )
+    player_rating_cfg = PlayerEloConfig(
+        momentum_window_games=momentum_window_games,
+        momentum_scale=momentum_scale,
+    )
     progress("building sequential team ratings")
     dual_rating_features = build_dual_ratings(
         rating_input,
-        cfg=DualEloConfig(
-            momentum_window_games=momentum_window_games,
-            momentum_scale=momentum_scale,
-        ),
+        cfg=team_rating_cfg,
         lineup_by_game=lineup_hashes_from_players(player_rating_input),
         output_dir=features_root,
     )
@@ -1109,10 +1114,7 @@ def export_public_pack(
     build_player_ratings(
         player_maps_for_ratings,
         player_rating_input,
-        cfg=PlayerEloConfig(
-            momentum_window_games=momentum_window_games,
-            momentum_scale=momentum_scale,
-        ),
+        cfg=player_rating_cfg,
         output_dir=features_root,
         player_records=player_records_payload,
     )
@@ -1135,10 +1137,7 @@ def export_public_pack(
     public_ratings = apply_team_momentum_snapshot(
         public_ratings,
         sequential_team_snapshot,
-        DualEloConfig(
-            momentum_window_games=momentum_window_games,
-            momentum_scale=momentum_scale,
-        ),
+        team_rating_cfg,
     )
     public_ratings.to_parquet(features_root / "ratings_snapshot.parquet", index=False)
     public_ratings_meta["pack_years"] = list(years)
@@ -1196,6 +1195,7 @@ def export_public_pack(
     weekly_ranks = build_player_weekly_ranks(
         player_maps_for_ratings,
         player_rating_input,
+        cfg=player_rating_cfg,
         as_of=pd.to_datetime(maps_for_records["date"], utc=True, errors="coerce").max(),
         min_games=20,
         player_records=player_records_payload,

@@ -183,22 +183,24 @@ def refresh_ratings(
     # to the isolated runtime data tree.  The default output locations in the
     # rating modules follow the process working directory, which can point at
     # the checkout and make the refresh non-reproducible.
+    team_rating_cfg = DualEloConfig(
+        momentum_window_games=momentum_window_games,
+        momentum_scale=momentum_scale,
+    )
+    player_rating_cfg = PlayerEloConfig(
+        momentum_window_games=momentum_window_games,
+        momentum_scale=momentum_scale,
+    )
     build_dual_ratings(
         maps,
-        cfg=DualEloConfig(
-            momentum_window_games=momentum_window_games,
-            momentum_scale=momentum_scale,
-        ),
+        cfg=team_rating_cfg,
         lineup_by_game=lineup_hashes,
         output_dir=features_dir,
     )
     build_player_ratings(
         player_maps,
         players,
-        cfg=PlayerEloConfig(
-            momentum_window_games=momentum_window_games,
-            momentum_scale=momentum_scale,
-        ),
+        cfg=player_rating_cfg,
         output_dir=features_dir,
     )
     team_snapshot, team_meta = fit_hierarchical_bt(
@@ -210,10 +212,7 @@ def refresh_ratings(
     team_snapshot = apply_team_momentum_snapshot(
         team_snapshot,
         sequential_team_snapshot,
-        DualEloConfig(
-            momentum_window_games=momentum_window_games,
-            momentum_scale=momentum_scale,
-        ),
+        team_rating_cfg,
     )
     team_snapshot.to_parquet(features_dir / "ratings_snapshot.parquet", index=False)
     team_meta["momentum"] = {
@@ -236,6 +235,7 @@ def refresh_ratings(
     player_weekly = build_player_weekly_ranks(
         player_maps,
         players,
+        cfg=player_rating_cfg,
         as_of=cutoff,
         min_games=min_games,
         previous_as_of=previous_as_of,
