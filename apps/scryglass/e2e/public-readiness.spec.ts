@@ -171,6 +171,20 @@ test("legal, source, privacy, security, and not-found states stay reachable", as
   await expect(page.locator('meta[name="robots"][content*="noindex"]').first()).toBeAttached();
 });
 
+test("sources page records Oracle's Elixir noncommercial terms", async ({ page }) => {
+  await page.goto("/sources");
+  await expect(page.getByRole("link", { name: "Oracle's Elixir match data", exact: true })).toHaveAttribute(
+    "href",
+    "https://lol.timsevenhuysen.com/matchdata/",
+  );
+  await expect(page.getByRole("link", { name: "official noncommercial-use record", exact: true })).toHaveAttribute(
+    "href",
+    "https://lol.timsevenhuysen.com/about/frequently-asked-questions/#comment-148",
+  );
+  await expect(page.getByText(/can only be used noncommercially/i)).toBeVisible();
+  await expect(page.getByText(/noncommercial independent research publication/i)).toBeVisible();
+});
+
 test("every public page has one named main heading and no WCAG A or AA violations", async ({ page }) => {
   for (const [route, heading] of PUBLIC_ROUTES) {
     const response = await page.goto(route, { waitUntil: "networkidle" });

@@ -8,10 +8,10 @@ This file records repeatable evidence for the public-release review. Secrets and
 
 | Field | Value |
 | --- | --- |
-| Review date | 2026-08-14 |
+| Review date | 2026-08-15 |
 | Base branch | `origin/main` |
-| Base commit | `6fa61f1d987a93adbe1e4ab6be75adea1895f211` |
-| Candidate branch | `main` after PR #238 |
+| Base commit | `a0ffce0c9e8eb5587fc48889adc5c190f2fdbe02` |
+| Candidate branch | `codex/close-oe-noncommercial-rights` |
 | Preserved visual commit | `ced2f63` |
 | Preserved source commit | `73b7dfa` on `preserve/public-readiness-ui` |
 | Initial worktree state | The 12 visual and chat paths were committed before the candidate branch was made. The candidate started from a clean `origin/main` and cherry-picked that commit. |
@@ -81,8 +81,13 @@ dependency, type, lint, build, and SBOM job. The GitHub Dependabot alert API
 returned zero open alerts for `koimari/scryglass` on 2026-08-14.
 
 The Supabase security and performance advisors returned zero lints after the
-`v2026.08.15.033633` publication on 2026-08-15. The advisor result is checked
+`v2026.08.15.170332` publication on 2026-08-15. The advisor result is checked
 again after each schema or publication change.
+
+The current CodeQL alert backlog remains open under SEC-004. A green CodeQL
+workflow result does not clear alerts that were already present on the default
+branch. The repository owner must close the three medium-or-higher security
+alerts and triage the remaining 451 records before release.
 
 ## Retired public Blob cleanup
 
@@ -94,20 +99,20 @@ Independent requests after the workflow returned `404` for the known Draft recor
 
 ## Production HOLD control
 
-Production currently serves active release `v2026.08.15.033633`. The public
-health response at 2026-08-15T04:10:18.710Z reported `status: ok`,
-`refresh_status: idle`, and `stale: false`. Authenticated diagnostics bound the
-same release to run `refresh-20260815T033633Z-7b6a10d4e335`, source observation
-`2026-08-14T18:42:36+00:00`, and worker commit
-`d7dfdc86fe74174472365fc688755403f4d65bef`.
+Production currently serves active release `v2026.08.15.170332`. The public
+health response checked at `2026-08-15T17:43:21.39747Z` reported `status: ok`,
+`refresh_status: idle`, and `stale: false`. Authenticated diagnostics bind the
+same release to run `refresh-20260815T170332Z-4792cd8e3df6`, source as-of
+`2026-08-15T11:02:09Z`, and worker commit
+`0b89411416491c0f7ebaccf4de699d4384303dde`.
 
-The Vercel production deployment `dpl_2ZyJi3fjv8renw5HrQiHFNz8a2At` is READY
-at application commit `2ffca55c9d2461dbd93a0ac135224d73835ff344`. The active
-database release and compatibility manifest both name `v2026.08.15.033633`.
-Supabase reports 22 active Storage assets, 144,592,995 bytes, zero inline
-assets, zero Draft assets, 161,445 bounded query rows, and 12 sealed dataset
-receipts. A byte-for-byte audit of all 22 deployed `/api/assets` responses
-passed. A representative retired-release asset returned `404`.
+The Vercel production deployment serving application commit
+`a0ffce0c9e8eb5587fc48889adc5c190f2fdbe02` is READY. The active database
+release and compatibility manifest both name `v2026.08.15.170332`.
+Supabase reports 22 active Storage assets, 144396917 bytes, zero inline assets,
+zero Draft assets, 161446 bounded query rows, and 12 sealed dataset receipts.
+A byte-for-byte audit of all 22 deployed `/api/assets` responses passed. A
+representative retired-release asset returned `404`.
 
 The clean worker receipt records requirements lock SHA-256
 `54c223c88fada349f883b2ed79064b96495a6de181132b723b8ba78cb4a5cc3d`,
@@ -130,7 +135,7 @@ The Production and Development Vercel values for `SCRYGLASS_SUPABASE_URL` and `S
 
 ## Regional refresh evidence
 
-The regional refresh is active in release `v2026.08.15.033633`. It records
+The regional refresh is active in release `v2026.08.15.170332`. It records
 17,544 replayed maps, a 1,223-map live window, 200 cells, 7,589 rows, and 1,105
 regional views across 40 scopes. The views cover CBLOL, INTERNATIONAL, LCK,
 LCP, LCS, LEC, LJL, LPL, PCS, TCL, and VCS. The candidate artifact SHA-256 is
@@ -166,6 +171,11 @@ Ruleset `20711858` is active on `refs/heads/main`. It requires these contexts:
 (javascript-typescript)`, `CodeQL (python)`, `Secret scan`, and `Dependency
 review`. The required checks for this evidence update passed.
 
+Ruleset `20892261`, named `Scryglass CodeQL merge protection`, is also active
+on `refs/heads/main`. It requires CodeQL `errors_and_warnings` and security
+alerts `medium_or_higher`. Ruleset `20711858` remains unchanged. SEC-004 stays
+open until the CodeQL API shows zero matching alerts at the release commit.
+
 ## Ordered query and Storage cutover
 
 1. Merge and apply additive migrations `20260813010000` and `20260814010000`.
@@ -185,7 +195,7 @@ fallback.
 - two private research-suite passes from the hashed environment with the
   approved artifact bundle mounted. The 2026-08-15 diagnostic run failed
   because one receipt-bound historical player parquet is absent;
-- source-rights records and Riot product registration;
+- Riot product registration;
 - an independent, hash-bound Draft Score promotion record;
 - a separately evaluated and promoted phase-curve record;
 - owner review of the public legal and policy text.
