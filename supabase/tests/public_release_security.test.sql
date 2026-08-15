@@ -1,5 +1,5 @@
 begin;
-select plan(39);
+select plan(43);
 
 select is(
   (select public from storage.buckets where id = 'scryglass-public'),
@@ -363,6 +363,12 @@ reset role;
 
 set local role service_role;
 select throws_ok(
+  $$delete from public.scryglass_public_query_rows where release_id='v2026.08.21.120000'$$,
+  '42501',
+  null,
+  'service role cannot delete published query rows directly'
+);
+select throws_ok(
   $$update public.scryglass_public_releases set status='superseded' where release_id='v2026.08.21.120000'$$,
   '42501',
   null,
@@ -413,6 +419,38 @@ select is(
   ),
   0,
   'inactive release IDs are absent from the public projection'
+);
+
+set local role scryglass_release_transition_owner;
+update public.scryglass_public_releases
+set status = 'superseded'
+where release_id = 'v2026.08.21.120000';
+reset role;
+
+set local role service_role;
+select lives_ok(
+  $$select public.prune_scryglass_public_releases_v2(1)$$,
+  'retention pruning removes a superseded release with sealed query rows'
+);
+reset role;
+
+select is(
+  (
+    select count(*)::integer
+    from public.scryglass_public_releases
+    where release_id = 'v2026.08.21.120000'
+  ),
+  0,
+  'retention pruning removes the superseded release row'
+);
+select is(
+  (
+    select count(*)::integer
+    from public.scryglass_public_query_rows
+    where release_id = 'v2026.08.21.120000'
+  ),
+  0,
+  'retention pruning cascades through sealed query rows'
 );
 
 select * from finish();
