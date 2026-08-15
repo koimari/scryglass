@@ -16,6 +16,12 @@ from lol_kills import pregame_roster_capture as roster_capture
 from lol_kills.v2.data.common import sha256_canonical_object
 from lol_kills.v2.draft.terminal import capture_readiness_v1
 from lol_kills.v2.draft.terminal import capture_readiness_registry_v1
+from lol_kills.v2.ratings.player.multileague_v3_capture_registry_v3 import (
+    CaptureReadinessRegistryV3Error,
+)
+from lol_kills.v2.ratings.player.multileague_source_snapshot import (
+    MultiLeagueSourceSnapshotError,
+)
 from lol_kills.v2.draft.terminal import future_prediction_ledger as ledger
 from lol_kills.v2.draft.terminal import side_neutral_prediction_v1 as side_neutral
 from lol_kills.v2.market import phase_one_collection_v1 as phase_one
@@ -1306,24 +1312,15 @@ def test_write_no_clobber_refuses_existing_path(tmp_path: Path) -> None:
         ledger.write_no_clobber(target, payload)
 
 
-def test_capture_readiness_is_empty_replayable_and_non_authorizing() -> None:
-    repo_root = Path(".").resolve()
-    payload = capture_readiness_v1.build_capture_readiness_v1(
-        root=repo_root,
-        clock=lambda: datetime(2026, 8, 2, 2, 0, 0, tzinfo=timezone.utc),
-    )
-    checked = capture_readiness_v1.validate_capture_readiness_v1(
-        payload, root=repo_root
-    )
-    assert checked["implementation"][
-        "ready_for_outcome_free_future_capture"
-    ] is True
-    assert checked["implementation"][
-        "actual_future_prediction_evidence_present"
-    ] is False
-    assert checked["ledger_state"]["entries"] == 0
-    assert checked["empty_ledger_template"]["entries"] == 0
-    assert all(item is False for item in checked["authority"].values())
+def test_capture_readiness_fails_closed_after_registered_source_drift() -> None:
+    with pytest.raises(
+        (CaptureReadinessRegistryV3Error, MultiLeagueSourceSnapshotError),
+        match="drifted",
+    ):
+        capture_readiness_v1.build_capture_readiness_v1(
+            root=Path(".").resolve(),
+            clock=lambda: datetime(2026, 8, 2, 2, 0, 0, tzinfo=timezone.utc),
+        )
 
 
 def test_capture_readiness_rejects_lock_at_future_boundary() -> None:
@@ -1331,26 +1328,25 @@ def test_capture_readiness_rejects_lock_at_future_boundary() -> None:
         capture_readiness_v1.DraftCaptureReadinessError,
         match="before the future boundary",
     ):
-        capture_readiness_v1.build_capture_readiness_v1(
-            root=Path(".").resolve(),
+        capture_readiness_v1._clock_sample(
             clock=lambda: datetime(2026, 8, 3, 0, 0, tzinfo=timezone.utc),
+            draft_protocol_time=datetime(
+                2026, 8, 2, 0, 0, 0, tzinfo=timezone.utc
+            ),
+            ratings_capture_time=datetime(
+                2026, 8, 1, 23, 58, 0, tzinfo=timezone.utc
+            ),
         )
 
 
-def test_registered_capture_readiness_is_hash_pinned() -> None:
-    checked = (
+def test_registered_capture_readiness_rejects_superseded_source_bytes() -> None:
+    with pytest.raises(
+        (CaptureReadinessRegistryV3Error, MultiLeagueSourceSnapshotError),
+        match="drifted",
+    ):
         capture_readiness_registry_v1.validate_registered_capture_readiness_v1(
             root=Path(".").resolve()
         )
-    )
-    assert (
-        checked["artifact_sha256"]
-        == capture_readiness_registry_v1.REGISTERED_CAPTURE_ARTIFACT_SHA256
-    )
-    assert (
-        checked["locked_at_utc"]
-        == capture_readiness_registry_v1.REGISTERED_CAPTURE_LOCKED_AT_UTC
-    )
 
 
 def _ensure_receipt(path: Path, payload: dict, writer) -> None:
