@@ -130,7 +130,9 @@ def test_lcc_atom_features_are_pre_match_and_live_state_is_separate() -> None:
     )
     assert features["oe_patch_token"] == "16.16"
     assert all("gold" not in key.casefold() for key in features)
-    assert isinstance(atomized_draft_features(["Aatrox"], ["Garen"]), dict)
+    atom_features = atomized_draft_features(["Aatrox"], ["Garen"])
+    assert isinstance(atom_features, dict)
+    assert any(key.startswith("lcc_depth2_d2_") for key in atom_features)
     live = live_state_features({"gold_diff": 300, "clock": 900, "objectives": {"dragon": 1}})
     assert live["source"] == "timeline_live_state"
     assert "gold_diff" in live

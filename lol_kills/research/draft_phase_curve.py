@@ -26,6 +26,11 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 
+from lol_kills.v2.champions.atoms.depth2_aggregate import (
+    DEFAULT_ARTIFACT_PATH as DEPTH2_ATOM_PATH,
+    Depth2AggregateError,
+    load_depth2_artifact,
+)
 from lol_kills.v2.patch_identity import PatchIdentityError, client_patch, public_patch
 
 
@@ -131,6 +136,8 @@ _FORBIDDEN_FRAGMENTS = (
     "game_result",
 )
 _BRIDGE_CACHE: dict[str, Mapping[str, Any]] | None = None
+_DEPTH2_CACHE: dict[str, dict[str, float]] | None = None
+_ATOM_FEATURE_PREFIXES = ("lcc_atom_", "lcc_depth2_", "atom_")
 
 
 class PhaseCurveUnavailable(RuntimeError):
@@ -146,6 +153,7 @@ def lcc_atomization_metadata() -> dict[str, Any]:
 
     bridge_sha256 = None
     receipt_sha256 = None
+    depth2_sha256 = None
     try:
         bridge = json.loads(ATOM_BRIDGE_PATH.read_text(encoding="utf-8"))
         bridge_sha256 = bridge.get("artifact_sha256")
@@ -156,16 +164,24 @@ def lcc_atomization_metadata() -> dict[str, Any]:
         receipt_sha256 = receipt.get("atom_bridge_artifact_sha256")
     except (OSError, json.JSONDecodeError, TypeError):
         receipt_sha256 = None
+    try:
+        load_depth2_artifact(DEPTH2_ATOM_PATH)
+        depth2 = json.loads(DEPTH2_ATOM_PATH.read_text(encoding="utf-8"))
+        depth2_sha256 = depth2.get("artifact_sha256")
+    except (OSError, json.JSONDecodeError, TypeError, Depth2AggregateError):
+        depth2_sha256 = None
     return {
         "status": "staged",
         "authority": "development_only",
         "public_patch": REQUIRED_PUBLIC_PATCH,
         "client_patch": REQUIRED_CLIENT_PATCH,
         "bridge": "data/lol/v2/champions/lcc-atom-bridge-26.16.json",
+        "depth2_index": "data/lol/v2/champions/atom-corpus-aggregate-v2.json",
         "depths": [2, 3, 4],
         "auc_reference": BASELINE_AUC_FLOOR,
         "bridge_sha256": bridge_sha256,
         "receipt_bridge_sha256": receipt_sha256,
+        "depth2_sha256": depth2_sha256,
     }
 
 
@@ -419,7 +435,7 @@ def prepare_phase_frame(
             elif name in row:
                 merged[name] = row[name]
         for name, value in {**row, **extra}.items():
-            if str(name).startswith(("lcc_atom_", "atom_")):
+            if str(name).startswith(_ATOM_FEATURE_PREFIXES):
                 merged[str(name)] = value
         opponent = red_by_game.get(game_key)
         for phase in PHASES:
@@ -490,7 +506,7 @@ def build_pre_match_design(frame: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     candidate_names.extend(
         str(name)
         for name in value.columns
-        if str(name).startswith(("lcc_atom_", "atom_"))
+        if str(name).startswith(_ATOM_FEATURE_PREFIXES)
     )
     assert_no_gold_leakage(candidate_names)
     for name in _NUMERIC_FEATURES:
@@ -502,7 +518,7 @@ def build_pre_match_design(frame: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     atom_names = sorted(
         str(name)
         for name in value.columns
-        if str(name).startswith(("lcc_atom_", "atom_"))
+        if str(name).startswith(_ATOM_FEATURE_PREFIXES)
     )
     assert_no_gold_leakage(atom_names)
     for name in atom_names:
@@ -608,6 +624,23 @@ def _bridge_champion_features(champion: str) -> dict[str, float]:
     return values
 
 
+def _depth2_atom_index() -> dict[str, dict[str, float]]:
+    """Load the source-pinned LCC depth-2 index."""
+
+    global _DEPTH2_CACHE
+    if _DEPTH2_CACHE is None:
+        try:
+            _DEPTH2_CACHE = load_depth2_artifact(DEPTH2_ATOM_PATH)
+        except Depth2AggregateError:
+            _DEPTH2_CACHE = {}
+    return _DEPTH2_CACHE
+
+
+def _depth2_champion_features(champion: str) -> dict[str, float]:
+    row = _depth2_atom_index().get(_bridge_slug(champion), {})
+    return {f"lcc_depth2_{key}": float(value) for key, value in row.items()}
+
+
 def lcc_atom_profile_for_champion(champion: str) -> dict[str, float]:
     """Expose the bridge profile used to place players and teams in atom space."""
 
@@ -654,6 +687,23 @@ def atomized_draft_features(
         value = blue_value - red_value
         if math.isfinite(value) and abs(value) > 1e-12:
             result[key] = value
+    depth2_keys = sorted(
+        {
+            key
+            for name in (*blue_names, *red_names)
+            for key in _depth2_champion_features(name)
+        }
+    )
+    for key in depth2_keys:
+        blue_value = float(
+            np.mean([_depth2_champion_features(name).get(key, 0.0) for name in blue_names])
+        )
+        red_value = float(
+            np.mean([_depth2_champion_features(name).get(key, 0.0) for name in red_names])
+        )
+        value = blue_value - red_value
+        if math.isfinite(value) and abs(value) > 1e-12:
+            result[key] = value
     return result
 
 
@@ -696,7 +746,7 @@ def pre_match_features_for_draft(
                 result[name] = value
             elif name == "patch":
                 result["oe_patch_token"] = value
-            elif name in _NUMERIC_FEATURES or str(name).startswith(("lcc_atom_", "atom_")):
+            elif name in _NUMERIC_FEATURES or str(name).startswith(_ATOM_FEATURE_PREFIXES):
                 result[name] = value
     assert_no_gold_leakage(list(result.keys()))
     return result

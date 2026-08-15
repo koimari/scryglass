@@ -30,6 +30,11 @@ from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 
 from lol_kills.etl.aliases import normalize_champ, normalize_team
 from lol_kills.etl.source_keys import canonical_source_game_key
+from lol_kills.v2.champions.atoms.depth2_aggregate import (
+    DEFAULT_ARTIFACT_PATH as DEPTH2_ARTIFACT_PATH,
+    Depth2AggregateError,
+    load_depth2_artifact,
+)
 
 
 SCHEMA_VERSION = "scryglass:composition-signal:v1"
@@ -221,14 +226,7 @@ def _corpus_game_features(game: Mapping[str, Any]) -> np.ndarray:
     )
 
 
-_ATOM_DEPTH2_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "data"
-    / "lol"
-    / "v2"
-    / "champions"
-    / "atom-corpus-aggregate-v2.json"
-)
+_ATOM_DEPTH2_PATH = DEPTH2_ARTIFACT_PATH
 _ATOM_DEPTH2_CACHE: dict[str, dict[str, float]] | None = None
 _ATOM_VECTOR_CACHE: dict[str, np.ndarray | None] = {}
 
@@ -238,14 +236,9 @@ def _atom_depth2_index() -> dict[str, dict[str, float]]:
     global _ATOM_DEPTH2_CACHE
     if _ATOM_DEPTH2_CACHE is None:
         try:
-            payload = json.loads(_ATOM_DEPTH2_PATH.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError):
-            payload = {}
-        _ATOM_DEPTH2_CACHE = {
-            str(key): {str(k): float(v) for k, v in dict(entry).items()}
-            for key, entry in (payload.get("champions") or {}).items()
-            if isinstance(entry, dict)
-        }
+            _ATOM_DEPTH2_CACHE = load_depth2_artifact(_ATOM_DEPTH2_PATH)
+        except Depth2AggregateError:
+            _ATOM_DEPTH2_CACHE = {}
     return _ATOM_DEPTH2_CACHE
 
 

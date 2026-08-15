@@ -182,7 +182,9 @@ fallback.
 
 ## Evidence still required
 
-- two private research-suite passes from the hashed environment with the approved artifact bundle mounted;
+- two private research-suite passes from the hashed environment with the
+  approved artifact bundle mounted. The 2026-08-15 diagnostic run failed
+  because one receipt-bound historical player parquet is absent;
 - source-rights records and Riot product registration;
 - an independent, hash-bound Draft Score promotion record;
 - a separately evaluated and promoted phase-curve record;

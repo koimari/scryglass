@@ -31,7 +31,8 @@ League Combat Calculator (external repo, read-only)
   data/atoms/atom-summary.json        champion x family presence index (173)
   data/atoms/classification-report.json  classifier totals, damage-type mix
   data/wiki-atoms/atom-relations.json    directed mechanic-interaction graph
-  data/atoms/<champion>.atoms.json       per-champion atom detail (7 tracked)
+  data/atoms/<champion>.atoms.json       per-champion atom detail (173 pinned)
+  data/atoms/v2/<champion>.atoms.v2.json numeric spine and cycle model (166)
   data/champions.json                    identity, positions, roles, ratings
           |
           |  lol_kills/v2/champions/atoms/lcc_sources.py (pin by sha256)
@@ -54,6 +55,13 @@ League Combat Calculator (external repo, read-only)
           +-- consume.py (fail-closed reader) --> L6 draft interactions,
                                                   L7 terminal Draft Score,
                                                   L9 tier lists, L5 team rating
+
+  data/lol/v2/champions/atom-corpus-aggregate-v2.json
+    23 depth-2 descriptors per covered champion,
+    canonical artifact hash, LCC commit, and 167 source-file hashes
+          |
+          +-- composition_signal.py --> static pre-match composition model
+          +-- draft_phase_curve.py   --> private pre-match phase candidate
 ```
 
 ## The two-layer champion model
@@ -104,18 +112,20 @@ a measured zero (same rule as L5 lineup synergy).
 ## Current coverage
 
 - 173/173 champions profiled (identity crosswalk complete).
-- 7 champions with full atom detail (`atom_detail`): aatrox, anivia, kayle,
-  neeko, senna, thresh, vladimir.
+- 173 champions with full level-1 atom detail (`atom_detail`).
+- 166 champions with the depth-2 numeric spine and cycle descriptors.
 - 55 mapping rows, 7 family fallbacks, 20 relation edges (from
   atom-relations.json).
-- Damage-type mix available only for the 7 detail champions (LCC limitation:
-  `damage_type` null for most atoms in the binary path; wiki pages are the
-  fix, tracked by LCC as their next iteration).
+- Depth-2 descriptors contain damage, cooldown, range, duration, state,
+  reset, ratio, damage-type, and tempo fields. Missing source values remain
+  zero-valued corpus descriptors. They are not empirical performance values.
 
 ## Regeneration
 
 ```bash
 python3 -m lol_kills.v2.champions.atoms.bridge_v1
+# depth-2 index with source hashes
+python3 -m lol_kills.v2.champions.atoms.depth2_aggregate
 # or with an alternate LCC checkout:
 SCRYGLASS_LCC_REPO=/path/to/league-combat-calculator \
   python3 -m lol_kills.v2.champions.atoms.bridge_v1
@@ -125,6 +135,11 @@ Rebuild whenever LCC data changes (patch day), write the new patch to its
 versioned artifact path, then re-run
 `tests/model_v2/champions/test_atom_bridge.py` and update this doc's coverage
 numbers if they moved.
+
+The depth-2 index must also pass
+`tests/model_v2/champions/test_depth2_aggregate.py`. A changed source hash
+requires a fresh model evaluation. The checked public authority stays closed
+until its separate promotion receipt passes.
 
 ## Draft-score evidence (R-22, development only)
 

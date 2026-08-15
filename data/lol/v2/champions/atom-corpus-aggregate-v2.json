@@ -1,6 +1,9 @@
 {
  "schema_version": "scryglass:atom-corpus-aggregate:v2",
- "generated_at": "2026-08-13",
+ "generated_at": "2026-08-15T00:00:00Z",
+ "public_patch": "26.16",
+ "client_patch": "16.16",
+ "development_only": true,
  "feature_keys": [
   "d2_ad_ratio",
   "d2_ap_ratio",
@@ -36,6 +39,181 @@
   "utility",
   "setup"
  ],
+ "provenance": {
+  "source_repository": "https://github.com/koimari/league-combat-calculator",
+  "lcc_commit": "e5917c4d7d94e6ac32fab5c7f120db4d00c3cfeb",
+  "source_schema": "data/atoms/atoms.schema.v2.json",
+  "source_glob": "data/atoms/v2/*.atoms.v2.json",
+  "file_sha256": {
+   "data/atoms/atoms.schema.v2.json": "b66abfb3def412ea0f0bc5e3887c4cabec8450011a924bb87ca72a48906179a9",
+   "data/atoms/v2/ahri.atoms.v2.json": "3c2d9926b2382a39a9e6fa044ae8036dc7aebf32dfda1185a316abb69271bf4c",
+   "data/atoms/v2/akali.atoms.v2.json": "0aec87e62985025af6358f150aec3e1aab11e12d15378033b85d38aa40d9eac7",
+   "data/atoms/v2/akshan.atoms.v2.json": "9804f7c6c2698cf93d040c0ab3c66216c236c731c29fe03320810405faba0c17",
+   "data/atoms/v2/alistar.atoms.v2.json": "7ace93acccdfc6d4e96b9bdd89bbbfdd4d26eacceca76add9dc4111675e7d663",
+   "data/atoms/v2/ambessa.atoms.v2.json": "1c9f77c9de7ab3aa785c478de11fc03354008bb22fc79731b2a48d8431c0bbe1",
+   "data/atoms/v2/amumu.atoms.v2.json": "c45cdeb2ab79d477c793d6de224c1112254d4ef1c63ea6c36b8c1400a65dcae5",
+   "data/atoms/v2/annie.atoms.v2.json": "ef162964bd58e3ad84117ec7a4beb2386f937b036cbeebe159f307f5327735e9",
+   "data/atoms/v2/aphelios.atoms.v2.json": "fc239b33589af9e79cf208020257b6adbe205207f4396eb85b62d136f01e8f58",
+   "data/atoms/v2/ashe.atoms.v2.json": "1802120ca4b734f3c9de138992855fe4a7962a85d422adee82ec4f0c852692fe",
+   "data/atoms/v2/aurelionsol.atoms.v2.json": "f2f033729db34a84f21279a9dc073bdc7225a6499c5339112a8cfa103714696d",
+   "data/atoms/v2/aurora.atoms.v2.json": "fc467c16672d1112a8228bef3a6aa50c3a50daefeee35aedc27767c8c4ccc4ec",
+   "data/atoms/v2/azir.atoms.v2.json": "78df77c30697fcbeae5e5a8ba874e7a75a7af248cac343d8a17fa6083a099d38",
+   "data/atoms/v2/bard.atoms.v2.json": "0583c40f3cfba49c828ac9a56739d153a24273afb3c0110a6ceac7fdb59600db",
+   "data/atoms/v2/belveth.atoms.v2.json": "5fb037b3809c51c2b7dd896f4670bb0bbda33f5c741d9cf63326a97ae83afb29",
+   "data/atoms/v2/blitzcrank.atoms.v2.json": "2f081c4ed66f255ed79b47a4733cfb20a0376c8077b212f963e0772790eb91ad",
+   "data/atoms/v2/brand.atoms.v2.json": "cffc032a2695e8dd8f2c86988d5c36bfa60e091bc8e906d7dc243d5e688cb30d",
+   "data/atoms/v2/braum.atoms.v2.json": "4a6aae9987318a3f79b4ac3a67b456c893ccfbfa35215173d2cbb54bd7521a87",
+   "data/atoms/v2/briar.atoms.v2.json": "84cc0037ba63f8392e69e690abeec44e3ac53b1267622fd077da9b78aa85345c",
+   "data/atoms/v2/caitlyn.atoms.v2.json": "67ff1fc60ca59beb1fd70ce5c5952a8a5d9382a6671d4fefee6c73ba723e79f4",
+   "data/atoms/v2/camille.atoms.v2.json": "4bcec5e0971d883dc7cb106eb29a2c34272f474fc3af2116a6d8686f54a70ab6",
+   "data/atoms/v2/cassiopeia.atoms.v2.json": "f781bdf5a907c80ec94e206b3d432fc832a16d2be1e814bb69e375abb178374a",
+   "data/atoms/v2/chogath.atoms.v2.json": "4c18406ff159019e16cba5d57e15f2d5738fd0121d1dce1716526046cf130b0e",
+   "data/atoms/v2/corki.atoms.v2.json": "d4933f84029f2a05dfe51052b3a51dbef79695e55b29e1b4fb7ff34adc99a7ef",
+   "data/atoms/v2/darius.atoms.v2.json": "31dca03ba8a448fef3ccf657874da3c30457ee89f729c9e91e3590db140d676e",
+   "data/atoms/v2/diana.atoms.v2.json": "2a8f2fcc5e781470c12fd3755d7f42009475d244875b5f295e95645ae1257fe4",
+   "data/atoms/v2/draven.atoms.v2.json": "e0869ba321343864f4c9cecebccfd60583820cb7402d0bb5360bc53db18b4190",
+   "data/atoms/v2/drmundo.atoms.v2.json": "8c3fab0b00cf3b11a08b9d7ddc44b3f142bfcedc47a8dea63c92a9efed058176",
+   "data/atoms/v2/ekko.atoms.v2.json": "0b604e7d9f80ff030a8c0b87b97d8626dd75a3c6f90898cdb3c8437f86e917ed",
+   "data/atoms/v2/elise.atoms.v2.json": "4bc0918a1ff2bdeb17e392643e5abe55b0b5d8c0a4556e6b4d4a3a4e8693380b",
+   "data/atoms/v2/evelynn.atoms.v2.json": "ca0867222049213dd00e684152c73a4996ea438168edfeb42a450023a6dfb3bf",
+   "data/atoms/v2/ezreal.atoms.v2.json": "061e90aff9aefc11c6077b09803ed9628dcd77b174c2169c869d45b69f5e529a",
+   "data/atoms/v2/fiddlesticks.atoms.v2.json": "eb740cbc37bb30de0a5879d4e07b2edd851315b490d27dd2b77a1552962eccfb",
+   "data/atoms/v2/fiora.atoms.v2.json": "ca2eeb7c0b16139243ff811c1090bdeff04031b2485a91a8aee4642132ae59eb",
+   "data/atoms/v2/fizz.atoms.v2.json": "9ebcaac90e6b35a8748eae40c16b73c77e35820f17db867831458e79a2368609",
+   "data/atoms/v2/galio.atoms.v2.json": "65b0a670b8d92d875a2d2d57c1e60029b85a83a848503eb6b84f41407cf8de66",
+   "data/atoms/v2/gangplank.atoms.v2.json": "8199be0badad74e2e0c72d8f134e2377a20c8dc5ba83cfdd3d76b047d28fe67f",
+   "data/atoms/v2/garen.atoms.v2.json": "e3bae4c7ddd93b0a28e32df0c0951b6df09587cd4534f904e9e6a623373843cf",
+   "data/atoms/v2/gnar.atoms.v2.json": "159e76df22ff47f11b2d441c9a71ee714c48e31b6f846fca164888b2a0a23284",
+   "data/atoms/v2/gragas.atoms.v2.json": "5cc4728af278e1bf6d169ea859bfd8a4b1d58cbb4e54d317b75ca7b07301bbe1",
+   "data/atoms/v2/graves.atoms.v2.json": "d1eb8134164bd2d4770b8cbc6a3f18a06e0156d71c4bf8cf1f6585164f88eb2c",
+   "data/atoms/v2/gwen.atoms.v2.json": "30eb4fb7c6f189ea19a5d5cc154365cbedee2ebfce3b0fa0c43678252e3f10cc",
+   "data/atoms/v2/hecarim.atoms.v2.json": "6baee73dfb44c92feb642574c9c87e4105a9335d8463171bb03555c3d3c37eaf",
+   "data/atoms/v2/heimerdinger.atoms.v2.json": "5d0cea9635cd91119f0bb981bb8edd40b1bffceed651905f5d5a66febb093a8d",
+   "data/atoms/v2/hwei.atoms.v2.json": "beafd0b64b59d0da37404175dcb6ef61262685e3472f4b794feeea10b9790df7",
+   "data/atoms/v2/illaoi.atoms.v2.json": "4083e8a1ebca0ce53d3be388f193cafebf4c60c324d5a394b193cec8f470d96c",
+   "data/atoms/v2/irelia.atoms.v2.json": "6923cf41d1fb0f899a14981d917008d1ad35520682d44fc589440519fbf3497d",
+   "data/atoms/v2/ivern.atoms.v2.json": "67b623f73a11cc3f5a47bf8ded14caf968eec3050e8385de960895637c5e52fa",
+   "data/atoms/v2/janna.atoms.v2.json": "cb49eb8fcc72dde968b73eea5131df0399a47569112d42c418dee9d0fb25e8d9",
+   "data/atoms/v2/jarvaniv.atoms.v2.json": "7a821e6d474c107ceb88863d18088f148ef70a05819d044fd613ce61962c10f1",
+   "data/atoms/v2/jax.atoms.v2.json": "d615b22dc00a9eb4ce2968991157b3393ad2402e635e8aa65a2018c51a10f5d8",
+   "data/atoms/v2/jayce.atoms.v2.json": "f70c4f4336cccbb15eaea054a7c85b96751ef9001f568fcdf411fb81ab800d6a",
+   "data/atoms/v2/jhin.atoms.v2.json": "6b45304cb6cc11323c1b8812570c51f385b88ac0aaae94230a9d05246d047109",
+   "data/atoms/v2/jinx.atoms.v2.json": "b6b0ab3d62290f2f914d8f3d1b3ae576cc645644319a880fa0ab9572f9623fec",
+   "data/atoms/v2/kaisa.atoms.v2.json": "6c5bfd773c0acaa8be96dfd6e000e86ae196cdc2985b9a48c1d092023cde2b1c",
+   "data/atoms/v2/kalista.atoms.v2.json": "b79f03402de03e45af53a465347876cdd7360e1f7cf80dae7ea5c0670b28f452",
+   "data/atoms/v2/karma.atoms.v2.json": "fad7cba7bfa72ff848676ff4fb37c6815e9645d5a6ad8268edcae99f3b6ce5ba",
+   "data/atoms/v2/karthus.atoms.v2.json": "947b81b93bc95a7a53f412d778ab6969740d88e62ff23e8f1ad6abdb0a2d7212",
+   "data/atoms/v2/kassadin.atoms.v2.json": "fc06df23fc7aad1eed76c4201123e0d5b783e841d1abb19950739c373c7767a7",
+   "data/atoms/v2/katarina.atoms.v2.json": "89c092297a703fe95fc0f398adbe3a78e4d8bffcd77c4c21c34783e7538e1855",
+   "data/atoms/v2/kayn.atoms.v2.json": "981cdfe6ca66bc9ce9bab2493860a89358d0b2c7e940ccde873069b78b4be597",
+   "data/atoms/v2/kennen.atoms.v2.json": "ebea03da4a80cda4f8fc05e8f73535ba6b7dbb06b1fb8cf77d4cbb82556c8849",
+   "data/atoms/v2/khazix.atoms.v2.json": "5d735e766c38ed4756f603b5697bfec36e5713d766f2c1e5e81441f17f178cda",
+   "data/atoms/v2/kindred.atoms.v2.json": "dc58d63651c952f51fe448f2623516949a73cfae329d7e12430552f3d91c7dbb",
+   "data/atoms/v2/kled.atoms.v2.json": "e8d9e8cee7bdca0cb5970a60e415724c4b2440d15c9a90137d9527fd7c65947a",
+   "data/atoms/v2/kogmaw.atoms.v2.json": "b1775e1858118e51ff41b4f7ec702cca643427bdee737c1cf79192795490a363",
+   "data/atoms/v2/ksante.atoms.v2.json": "af8cebd52f5ddea1603db62a8b5e7038e778923f4534d82640dd4a2a795459f0",
+   "data/atoms/v2/leblanc.atoms.v2.json": "92847eca53fcea0aa9d4db5c953a9baf34e755add23dbdbcfd5cb6898ef4b9e1",
+   "data/atoms/v2/leesin.atoms.v2.json": "edc630b8e8271589ffa2e65adff511d5374bc49d7b2f27c55aa56df4dbb1caba",
+   "data/atoms/v2/leona.atoms.v2.json": "8b005896c429fcfac120bddd8d6ec09092cd96d24f9d37e65ec3cefb445a60db",
+   "data/atoms/v2/lillia.atoms.v2.json": "1e6be58e45aedbdf4aea6ff45b73e64781cff8a38e98a4a006c57377ca0c207f",
+   "data/atoms/v2/lissandra.atoms.v2.json": "1956a76a1fa0e861be894c18b57048eb9eab6d39ad6bf3f017f40392a07c97fd",
+   "data/atoms/v2/locke.atoms.v2.json": "938361f939079b54d1e0b5278a5a5780070204239ddf7ea03ff678cc17805064",
+   "data/atoms/v2/lucian.atoms.v2.json": "8a5e1e1512f5f9bba715d1bf377985a167764947abb2dc43e8dddf08ab6958c2",
+   "data/atoms/v2/lulu.atoms.v2.json": "4da9e2301cb236b27da3eb16ac45701e9f5624fc2a50b409c6c0c660f3846077",
+   "data/atoms/v2/lux.atoms.v2.json": "40f46f7df8916b88628afc3712c7c934f37a9d5f9f3977fc1e49495afa193df9",
+   "data/atoms/v2/malphite.atoms.v2.json": "198c5613f0ef055041418fc78402101b2b4531a3123cb8f3b90279fa4374d4c1",
+   "data/atoms/v2/malzahar.atoms.v2.json": "7a0a6cf1b50ddd514842faeb36b5f5db953985623ae440708793531e98c0115e",
+   "data/atoms/v2/maokai.atoms.v2.json": "ad859ae8958a28f4d8c87f8bc9a491cdbf9b7348f78f8b2117ba91fb92641c0a",
+   "data/atoms/v2/masteryi.atoms.v2.json": "dcf28eed8da8e42ba887d8c94a1b2a5d4de62477211225ded1198f73d4d9ab42",
+   "data/atoms/v2/mel.atoms.v2.json": "8251b55223766f97d1f9d207233e60cdea7bbc003f06ce07bde56968019e4300",
+   "data/atoms/v2/milio.atoms.v2.json": "94b7d1e2a629aed12de29991cba1fc017fe51d00fba199b3327b928476b9b1d2",
+   "data/atoms/v2/missfortune.atoms.v2.json": "23feccf336f6881add7ba8f2b12e41e158ea7069e6b7d7b631ef7efbe8f95f46",
+   "data/atoms/v2/monkeyking.atoms.v2.json": "8e13fe75ce0a0fc11851baceac8073d0cf5ae70b9edfac10a32c3a37cbc7cbb1",
+   "data/atoms/v2/mordekaiser.atoms.v2.json": "62164a7f165848cfd9a7da4ac24a19cf12d3e209d52f4feadd8a6bead6eb8fe7",
+   "data/atoms/v2/morgana.atoms.v2.json": "948365862169e17930068b57a3d78015f4efb1c2162b905868be3bcceeafb599",
+   "data/atoms/v2/naafiri.atoms.v2.json": "04c9763a75841ce82d0685e4e8a26f5faf871ec03987c8ebeeab21258e6064b2",
+   "data/atoms/v2/nami.atoms.v2.json": "8205480b92cc218d807ded1e079662ed04ea74d81787d9fd194cd85401e862e8",
+   "data/atoms/v2/nasus.atoms.v2.json": "691fe34e635fa73422e9ea74672d6c363ddc4791b1c28c6080c9f910dafd5117",
+   "data/atoms/v2/nautilus.atoms.v2.json": "3c83e7a124cb775b2546fb93f626cc677279273595a3b75cf12e141e42723cc7",
+   "data/atoms/v2/nidalee.atoms.v2.json": "2d4b73b8ef5d9110cb26282b84f8f6f5eaec56eb3340f3bf908eef6b34a69638",
+   "data/atoms/v2/nilah.atoms.v2.json": "9acbc8f4b62d97181cca661f42b3db677a0f6989a183a0c78d99e11d1f501113",
+   "data/atoms/v2/nocturne.atoms.v2.json": "3708ea960c20096cc274d2a16212a17b5d6196905aae1360baf616dbfdaee08f",
+   "data/atoms/v2/nunu.atoms.v2.json": "b17787c6419c451651e0a3a235ee24818d17249a1100408ae6a029cb8dafc8ca",
+   "data/atoms/v2/olaf.atoms.v2.json": "b70679d230c676d853dc0285ce8d023a347354a96cf2d93bc9dabbfbd4aae7ca",
+   "data/atoms/v2/orianna.atoms.v2.json": "5d5d50dbd5d4eb7febf543db05fb058c6db9d50d2990f7e48ae10321391e7b0a",
+   "data/atoms/v2/ornn.atoms.v2.json": "0535b335d392bae13366d89b5c6721c7ae6fd903085f60ce8053a94460f19c86",
+   "data/atoms/v2/pantheon.atoms.v2.json": "bb54d737517b637c9ec4afa327e9b8108062316d23ae88234538a851a3e353bb",
+   "data/atoms/v2/poppy.atoms.v2.json": "61dfd15bf7ac5f928073100b649a06657d10235ba153439b47603a17679e3236",
+   "data/atoms/v2/pyke.atoms.v2.json": "3469f83bc50e63c9de220cb00ad943f26fc88b0c5c9ad8843df96f722b73943b",
+   "data/atoms/v2/qiyana.atoms.v2.json": "5c68bc65ecbbf4162b506933261a59fcf2599a41925f318cb31a0ed3c56d17e4",
+   "data/atoms/v2/quinn.atoms.v2.json": "f34a9d28358fb2792c0a2c0e360e7bb525293b52cf48710fd8065f6be544e1bf",
+   "data/atoms/v2/rakan.atoms.v2.json": "41230b70da88476507d0f0e6fac80b31e1984ef408b55bca01a402a5a01012e8",
+   "data/atoms/v2/rammus.atoms.v2.json": "0add99fbe793247b32fff106602ff0016389d97e15c3d9dd1a1f8dc2fb5853ff",
+   "data/atoms/v2/reksai.atoms.v2.json": "978570e8248b17db547f4aa4f6ad80e6cba9e38ea900584a70b7242157f0e3ad",
+   "data/atoms/v2/rell.atoms.v2.json": "50c3eebb5305ec8e600197c507f67676b333b2bbed7432d51b171e5aba2ca509",
+   "data/atoms/v2/renata.atoms.v2.json": "0320721fedfb341b7dadf4c2b32d0e97c9d140eb8fd28a9d15c519f7bee53d50",
+   "data/atoms/v2/renekton.atoms.v2.json": "9543879be093ea95c1385171ee66ff72cce28c8e5dcbeb913822b91b540007ae",
+   "data/atoms/v2/rengar.atoms.v2.json": "caf4fa0d5b249c980d37d14b7f19a8510a3accccac2a39d4dac624bd8f90b6d5",
+   "data/atoms/v2/riven.atoms.v2.json": "9990bf6c73d19af8e57df0749869eca46cf0a01f39406f0e9fbcbf413df11568",
+   "data/atoms/v2/rumble.atoms.v2.json": "5404aff78788fc9f790e54e93b0875b6144e9ab47f0efed63f3adf05e77836c2",
+   "data/atoms/v2/ryze.atoms.v2.json": "2b469ab5e85c2aa30eff5501505574a1e55546bacc6754806d6acf6e592c63d7",
+   "data/atoms/v2/samira.atoms.v2.json": "658a5c78dce04b306c36ff8ac16d7a86513c44b6bf5ee27b108d5bef8bece01f",
+   "data/atoms/v2/sejuani.atoms.v2.json": "3d54bdcf2a800dae6186abea6f664aa12439860bfefe7ce3d88194ad3d26d6dd",
+   "data/atoms/v2/seraphine.atoms.v2.json": "df99a1d11e4c3e1dff2111a222ea4beefe18ce0bdced3e0092cff0a93eed54fb",
+   "data/atoms/v2/sett.atoms.v2.json": "735819d472287a89cb19c89437a35dc70e2720100c74416ded22772576c18fed",
+   "data/atoms/v2/shaco.atoms.v2.json": "7c43ba8ba07121d18f45e76706324b9742eba87716518b50227c4f8949b6e1ab",
+   "data/atoms/v2/shen.atoms.v2.json": "7d0772d3f49d6c2f53c4a19695152b7aaca1438fea84157ee61029e911f52fa1",
+   "data/atoms/v2/shyvana.atoms.v2.json": "99da8526c136bdb0f877a8628b215387df1f56cd82ceae6930c21dbc14bfb702",
+   "data/atoms/v2/singed.atoms.v2.json": "7e71d97cb69ccc3356a702ceb743b0b44d9daa3efca2b9ae72475597f72c672e",
+   "data/atoms/v2/sion.atoms.v2.json": "3f9d8a9feeab745269617df809a21c6ce7c041a9e6bba1ed6dcdc63ee6728a33",
+   "data/atoms/v2/sivir.atoms.v2.json": "c1a180db65fd924f58714f5e5ccb3db28398b09365ffbf89ce9d734e16c132a5",
+   "data/atoms/v2/skarner.atoms.v2.json": "7e9239590ebf4f06dd5f331e2902abf0603b79cae4556cf82e76e7735fc96348",
+   "data/atoms/v2/smolder.atoms.v2.json": "32f0a349c451ecec28475cd3d7b919580c3aac772d98d6989271a37d9e47d4e9",
+   "data/atoms/v2/sona.atoms.v2.json": "3baa4244e6e9117be6929d13bba5f1845ed5bdaf3ca6443b51e534f2954733fa",
+   "data/atoms/v2/soraka.atoms.v2.json": "9184890557dbf7d90f031ddc9c9bcbf8920b3a490819ce17025f05d8001d283e",
+   "data/atoms/v2/swain.atoms.v2.json": "2e08a4b4f598f200d35b838d41149ce6927e74281c02c384d8678a85374ea90f",
+   "data/atoms/v2/sylas.atoms.v2.json": "d67f30b2d58cf205a1e81e9766fc6116a1949d0a19d23bc268154b3459ddc213",
+   "data/atoms/v2/syndra.atoms.v2.json": "cb2a03349bc6176595076add320039ffabaebe6ebf7bd6f7e040ff426baa17af",
+   "data/atoms/v2/tahmkench.atoms.v2.json": "1d89a82941511e6d341ec9d882da3e2c21d5f094a450c8be8aefbe699d1d034e",
+   "data/atoms/v2/taliyah.atoms.v2.json": "7fba7b2f71d54a8061cc2fdba1dc6cb9b9e908b46ca75778945dafc413ea231a",
+   "data/atoms/v2/talon.atoms.v2.json": "c9bf1d3484be4f6c33f07dc2c740d0b33a86353a0f32766f3b799a89ab5bb009",
+   "data/atoms/v2/taric.atoms.v2.json": "e83e224b2a715db7d301e5f5b4a6323aa0e1f69c6f5a13c4eec5b8e3d10b4c73",
+   "data/atoms/v2/teemo.atoms.v2.json": "468f303032733e1d0fe6d1eff289ba08427a94f1e8cc23ed1cb43957e7ff2c22",
+   "data/atoms/v2/tristana.atoms.v2.json": "7be7ec308b8b6d5102170cafe2830ecdc573aa3c8142761afb903dcdd025fab8",
+   "data/atoms/v2/trundle.atoms.v2.json": "29a249c8bb6ed1d70dcfe0d7895c273a8ebc8b3287a891915670d18eb581d28e",
+   "data/atoms/v2/tryndamere.atoms.v2.json": "0679887aa7afde74ccb8efc24e4b63066c3feb478ea1b8e6066865d6e8e8727c",
+   "data/atoms/v2/twistedfate.atoms.v2.json": "6385b421472798a268d32522b5eaf79d0142e2d7e7db5d4e6484be8be527aeb0",
+   "data/atoms/v2/twitch.atoms.v2.json": "8f24fa60ad2c5c300eca746640a80a1002b27464c0f82e19046346059bc7b3ee",
+   "data/atoms/v2/udyr.atoms.v2.json": "5471c66c8618aff9115a346b6268922d21b13102596982ba974bf798533602ae",
+   "data/atoms/v2/urgot.atoms.v2.json": "540177d28c33bdc702734901700e0107e43fc82503b3ee80600c17ed3ef3f00f",
+   "data/atoms/v2/varus.atoms.v2.json": "40cc1ba0900fbe9238bae36cb3d24e69c5411c6e5ad4565534f2f163af83852c",
+   "data/atoms/v2/vayne.atoms.v2.json": "14c56f063ef4dd7a32bdc433aa138bcd727e3994205457351933a10babe21b7d",
+   "data/atoms/v2/veigar.atoms.v2.json": "b19e6ffdb148ed77c8437ded9794cf8d4e476c28829d2ab5aa323649ee4b6b60",
+   "data/atoms/v2/velkoz.atoms.v2.json": "f1a19e832df513c8225a06c645a7b3fbd1cf44ea378b159e509fe5e258f000f5",
+   "data/atoms/v2/vex.atoms.v2.json": "22e4d1f61f6db6876ecee5f5530da922680a0b9a4e2df0acbe095dc1db106e86",
+   "data/atoms/v2/vi.atoms.v2.json": "16a3b1e1a92537922ae04f2218d3f0a0219f21405e8b09f02bc739d61a6dd527",
+   "data/atoms/v2/viego.atoms.v2.json": "76ebe28e1448e7e0e3b14196be6e4a65edd605ac23b447e669080b6bc1e238d8",
+   "data/atoms/v2/viktor.atoms.v2.json": "db428ccfee71958fe4718e7779c59fb2eb03bd5aa898dca7a46dd2f7d8d52e2b",
+   "data/atoms/v2/volibear.atoms.v2.json": "3fcba7b4aed7965f72c5ce116ba4cbdfc5d74f590ec9a4eb1fa908964f9b475c",
+   "data/atoms/v2/warwick.atoms.v2.json": "7eaa5dfeef1848988db7e4a67b133c4f179ef8ee652b276bb04a3988e681bae8",
+   "data/atoms/v2/xayah.atoms.v2.json": "c44912dec21f08fe0b15b650dd01633f33c6eb98f3311d7b61043b3d16057e5a",
+   "data/atoms/v2/xerath.atoms.v2.json": "d95d9231c8327c8021efd65b2295cb3abc09f42f327778632142bb5ad5680c2e",
+   "data/atoms/v2/xinzhao.atoms.v2.json": "b12fa914506f736550f392a9bd2a4464f05319c7238fe0af4ee808b6a62d35a6",
+   "data/atoms/v2/yasuo.atoms.v2.json": "d05da98302383c1c1347baa0d3a024a72c31b71c11d8158388a9906cece665be",
+   "data/atoms/v2/yone.atoms.v2.json": "d6d7fabedc1db14679110f11290d454a49fa5778da0c114e3c8cdaecfdbc6200",
+   "data/atoms/v2/yorick.atoms.v2.json": "0b507e68b7437c502869940c8cafc486e9eec635517c54e43ace9cb1cd44c549",
+   "data/atoms/v2/yunara.atoms.v2.json": "834e203299a4453618c9753655935c7e1c65e8ee92a2e441b51156e06ee32f46",
+   "data/atoms/v2/yuumi.atoms.v2.json": "bc066f90a5bd29e4b70352c276807b1294f2fbfb7832ba0fb40f7de7919fc43e",
+   "data/atoms/v2/zaahen.atoms.v2.json": "5bec911991ceb7377d252cfe078b04cfaf36cd8d4e374bd78f4ffa22ea4c094e",
+   "data/atoms/v2/zac.atoms.v2.json": "16ef11eb9f588809592d72cdc70993fef6fa5e1226753b603f6684bb4e6a036a",
+   "data/atoms/v2/zed.atoms.v2.json": "a882b6d554d0d48c2fe2ee1e8a3b0645091814543dc2d795db00e8adf6388758",
+   "data/atoms/v2/zeri.atoms.v2.json": "68b1ea89d700b11e516b565a517219b457651f5e8acf81d2cf46edef2e03af52",
+   "data/atoms/v2/ziggs.atoms.v2.json": "e402b0651e3fc1f21a0c5c408bc09340b2c91ca8b7c1e798701136b056190f77",
+   "data/atoms/v2/zilean.atoms.v2.json": "b914f5066123f9466c57c1b70efd18c81f56d3be6cecf3add42e8f4316024f42",
+   "data/atoms/v2/zoe.atoms.v2.json": "71c8b6af81b0ef069f3405d65f06bd51b37cc1602db8052b0cba16390c128ac4",
+   "data/atoms/v2/zyra.atoms.v2.json": "bb7eee29ddff9779de0d83cabb628cc701abd15d379a8d6f48168798b3e58ae2"
+  }
+ },
  "champions": {
   "ahri": {
    "d2_burst": 975.0,
@@ -213,7 +391,7 @@
    "d2_tempo_setup": 12.0
   },
   "aphelios": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 4.108571428912026,
    "d2_mean_range": 7942.5,
@@ -338,7 +516,7 @@
    "d2_tempo_setup": 0.0
   },
   "bard": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 1.2571428571428571,
    "d2_mean_range": 8304.347826086956,
@@ -363,7 +541,7 @@
    "d2_tempo_setup": 2.0
   },
   "belveth": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 6.862068965517241,
    "d2_mean_range": 1473.695652173913,
@@ -388,7 +566,7 @@
    "d2_tempo_setup": 1.0
   },
   "blitzcrank": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 5.111111111111111,
    "d2_mean_range": 1152.5,
@@ -963,7 +1141,7 @@
    "d2_tempo_setup": 6.0
   },
   "gnar": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 13.17,
    "d2_mean_range": 10645.833333333334,
@@ -1013,7 +1191,7 @@
    "d2_tempo_setup": 3.0
   },
   "graves": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 9.162162162162161,
    "d2_mean_range": 7558.304001464844,
@@ -1038,7 +1216,7 @@
    "d2_tempo_setup": 6.0
   },
   "gwen": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 5.307142857196076,
    "d2_mean_range": 556.25,
@@ -1063,7 +1241,7 @@
    "d2_tempo_setup": 5.0
   },
   "hecarim": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 36.146341463414636,
    "d2_mean_range": 9610.416666666666,
@@ -1113,7 +1291,7 @@
    "d2_tempo_setup": 0.0
   },
   "hwei": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 8.709677419354838,
    "d2_mean_range": 850.0,
@@ -1138,7 +1316,7 @@
    "d2_tempo_setup": 0.0
   },
   "illaoi": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 9.1875,
    "d2_mean_range": 4364.583333333333,
@@ -1538,7 +1716,7 @@
    "d2_tempo_setup": 1.0
   },
   "kennen": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 28.08695652173913,
    "d2_mean_range": 2333.3333333333335,
@@ -1563,7 +1741,7 @@
    "d2_tempo_setup": 5.0
   },
   "khazix": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 10.555555555555555,
    "d2_mean_range": 16894.444444444445,
@@ -1588,7 +1766,7 @@
    "d2_tempo_setup": 6.0
   },
   "kindred": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 23.964285714285715,
    "d2_mean_range": 6116.279069767442,
@@ -2363,7 +2541,7 @@
    "d2_tempo_setup": 6.0
   },
   "olaf": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 15.185185185185185,
    "d2_mean_range": 548.6842105263158,
@@ -2388,7 +2566,7 @@
    "d2_tempo_setup": 0.0
   },
   "orianna": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 14.321428571428571,
    "d2_mean_range": 3517.3684210526317,
@@ -2413,7 +2591,7 @@
    "d2_tempo_setup": 0.0
   },
   "ornn": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 42.015625,
    "d2_mean_range": 13237.1875,
@@ -2888,7 +3066,7 @@
    "d2_tempo_setup": 7.0
   },
   "sett": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 10.19047619047619,
    "d2_mean_range": 74.73333333333333,
@@ -2913,7 +3091,7 @@
    "d2_tempo_setup": 0.0
   },
   "shaco": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 5.891891891891892,
    "d2_mean_range": 40.175925925925924,
@@ -2938,7 +3116,7 @@
    "d2_tempo_setup": 0.0
   },
   "shen": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 27.53125,
    "d2_mean_range": 350.0,
@@ -3688,7 +3866,7 @@
    "d2_tempo_setup": 4.0
   },
   "viego": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 11.617021276595745,
    "d2_mean_range": 11727.67857142857,
@@ -3938,7 +4116,7 @@
    "d2_tempo_setup": 0.0
   },
   "yunara": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 1.6226415094339623,
    "d2_mean_range": 18040.78947368421,
@@ -3963,7 +4141,7 @@
    "d2_tempo_setup": 0.0
   },
   "yuumi": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 14.3,
    "d2_mean_range": 8700.0,
@@ -3988,7 +4166,7 @@
    "d2_tempo_setup": 3.0
   },
   "zaahen": {
-   "d2_burst": 0.0,
+   "d2_burst": 0,
    "d2_dps": 0.0,
    "d2_mean_cd": 5.25,
    "d2_mean_range": 8277.35294117647,
@@ -4187,5 +4365,6 @@
    "d2_tempo_utility": 0.0,
    "d2_tempo_setup": 7.0
   }
- }
+ },
+ "artifact_sha256": "b5f12b3d63fdf4f14c48434185fdf12ccc2cc89e7856d85938f6a9da40ae5f06"
 }

@@ -52,3 +52,4 @@ def test_checked_in_reference_receipt_is_valid() -> None:
     phase = json.loads((root / "data/lol/models/draft_phase_curve.json").read_text())
     assert phase["authority"] == "unavailable"
     assert phase["lcc_atomization"]["public_patch"] == "26.16"
+    assert len(phase["lcc_atomization"]["depth2_sha256"]) == 64
