@@ -110,6 +110,19 @@ def test_staging_cleanup_is_locked_and_service_only() -> None:
     )[1]
 
 
+def test_query_retention_cascade_allows_only_internal_table_owner() -> None:
+    migration = (
+        MIGRATIONS / "20260815010000_query_retention_cascade_guard.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "pg_advisory_xact_lock" in migration
+    assert "'scryglass_release_retention_owner'" in migration
+    assert "'scryglass_release_transition_owner'" in migration
+    assert "'postgres'" in migration
+    assert "release.status = 'superseded'" in migration
+    assert "from public, anon, authenticated, service_role" in migration
+
+
 def test_live_oe_import_schema_drift_is_forward_compatible() -> None:
     migration = (
         MIGRATIONS / "20260814161000_oe_import_patch_receipts.sql"
