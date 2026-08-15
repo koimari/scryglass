@@ -692,25 +692,33 @@ export function compactPlayerRatings(players: PlayerRating[]): PlayerRating[] {
         player.evidence_disconnected !== 1 &&
         player.evidence_state?.toLowerCase() !== "disconnected",
     )
-    .map((player) => ({
-      player: player.player,
-      mu_total: player.mu_total,
-      mu_regional: player.mu_regional,
-      mu_meta: player.mu_meta,
-      sigma: player.sigma,
-      n_maps: player.n_maps,
-      last_team: player.last_team,
-      evidence_interval_width: player.evidence_interval_width,
-      evidence_precision_ratio: player.evidence_precision_ratio,
-      evidence_stability: player.evidence_stability,
-      evidence_freshness_days: player.evidence_freshness_days,
-      evidence_support_coverage: player.evidence_support_coverage,
-      evidence_fallback: player.evidence_fallback,
-      evidence_active: player.evidence_active,
-      evidence_disconnected: player.evidence_disconnected,
-      evidence_ood: player.evidence_ood,
-      evidence_state: player.evidence_state,
-    }))
+    .map((player) => {
+      const compact: PlayerRating = {
+        player: player.player,
+        mu_total: player.mu_total,
+        mu_regional: player.mu_regional,
+        mu_meta: player.mu_meta,
+        sigma: player.sigma,
+        n_maps: player.n_maps,
+        last_team: player.last_team,
+        evidence_interval_width: player.evidence_interval_width,
+        evidence_precision_ratio: player.evidence_precision_ratio,
+        evidence_stability: player.evidence_stability,
+        evidence_freshness_days: player.evidence_freshness_days,
+        evidence_support_coverage: player.evidence_support_coverage,
+        evidence_fallback: player.evidence_fallback,
+        evidence_active: player.evidence_active,
+        evidence_disconnected: player.evidence_disconnected,
+        evidence_ood: player.evidence_ood,
+        evidence_state: player.evidence_state,
+      };
+      if (player.mu_base_total !== undefined) compact.mu_base_total = player.mu_base_total;
+      if (player.mu_effective !== undefined) compact.mu_effective = player.mu_effective;
+      if (player.momentum_residual !== undefined) {
+        compact.momentum_residual = player.momentum_residual;
+      }
+      return compact;
+    })
     .sort(
       (a, b) =>
         softMu(b.mu_total, b.sigma, PLAYER_SIGMA_MIN) -
