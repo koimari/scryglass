@@ -18,7 +18,7 @@ This ledger refresh was started from `origin/main` at the current main commit.
 
 ## Release rule
 
-Public release requires every confirmed finding in this register to be closed and verified. A scanner result can close as a false positive only when the register contains the evidence. Draft probabilities also require a separate, hash-bound promotion record.
+Public release requires every confirmed finding in this register to be closed and verified. A scanner result can close as a false positive only when the register contains the evidence. Public Draft probabilities, betting, odds, and recommendations require separate, hash-bound authority and promotion records.
 
 ## Closure register
 
@@ -39,7 +39,7 @@ Public release requires every confirmed finding in this register to be closed an
 | DEP-001 | High | Vulnerable transitive packages can process crafted build or image input. | Scryglass and Elemental Drakes npm graphs; former GitHub alerts for `sharp`, `postcss`, and `nanoid`. | Web | Upgrade Next.js and refresh both lockfiles. | Full and production `npm audit` return zero findings in both apps. | Closed and verified. Scryglass and Elemental Drakes full and production audits return zero findings. The GitHub Dependabot alert endpoint returns zero open alerts for this repository on 2026-08-14. PR #239 passed Dependency review. |
 | DEP-002 | High | Mutable Python dependency ranges can change worker code without review. | Worker and CI Python environments. | Operations | Use hashed release and CI locks. Install with `--require-hashes` and record the lock digest. | Install, marker, digest, and `pip check` gates. | Closed and verified. The active run records requirements lock SHA-256 `54c223c88fada349f883b2ed79064b96495a6de181132b723b8ba78cb4a5cc3d`. |
 | CI-001 | High | Built output can escape a source-only public-boundary scan. | GitHub validation workflow. | CI | Run the boundary scan before and after the production build. | A forbidden built fixture makes the post-build job fail. | Closed and verified on main. The current Validate Scryglass run passed the source and post-build boundary checks. |
-| CI-002 | High | Main can merge without browser, Supabase, security, or second Python-suite gates. | GitHub Actions and ruleset `20711858`. | CI and repository owner | Add stable jobs, then require them on protected `main`. | Clean-checkout workflow run with every job green. | Ruleset closed. Active ruleset `20711858` requires app, rankings-data, Vercel, browser, Supabase clean replay, workflow and shell security, Elemental Drakes, both CodeQL scans, secret scan, and dependency review. Validate run `31907363092` and Security run `31907363120` passed at main commit `098347f92261cc0c2d040a2fcf47a1587aa9e419`. The separate private research suite is still running under its receipt gate. |
+| CI-002 | High | Main can merge without browser, Supabase, security, or second Python-suite gates. | GitHub Actions and ruleset `20711858`. | CI and repository owner | Add stable jobs, then require them on protected `main`. | Clean-checkout workflow run with every job green. | Ruleset closed. Active ruleset `20711858` requires app, rankings-data, Vercel, browser, Supabase clean replay, workflow and shell security, Elemental Drakes, both CodeQL scans, secret scan, and dependency review. Validate run `31907363092` and Security run `31907363120` passed at main commit `098347f92261cc0c2d040a2fcf47a1587aa9e419`. The private research suite passed two clean passes in the receipt-bound environment. |
 | API-001 | High | Serverless instances can each reset a process-local chat request budget. | `/api/chat/*` and `/api/data-published`. | Web operations | Keep local budgets and enforce the reviewed Vercel Firewall rules. | Boundary, burst, method, body, and multi-request probes. | Closed externally. The production WAF has active 60-per-minute chat and 6-per-minute publication rules. A 65-request production probe returned 60 responses with `200` and 5 edge denials. |
 | API-002 | Medium | Oversize, malformed, or slow public questions can consume parser and function time. | Chat handlers. | Web | Enforce 500-character questions, 100-character names, 8 KB bodies, content types, bounded results, and five-second handlers. | Stable `413`, `415`, `422`, `429`, and timeout cases. | Closed and verified. The PR #238 browser job passed the malformed method, content-type, body, query, burst, and bounded-load probes. |
 | API-003 | High | A buffered asset response exceeds the Vercel function response limit. | `/api/assets/*`; active files include multi-megabyte match and profile assets. | Web | Stream the verified Storage body and preserve exact length, MIME type, and ETag. | A lazy 5 MB response streams without calling `arrayBuffer()`. | Closed and verified. Production returned the 15,274,801-byte profile asset with `200`, exact `Content-Length`, and the release-bound ETag. The full 22-asset crosscheck passed. |
@@ -59,8 +59,8 @@ Public release requires every confirmed finding in this register to be closed an
 | SEC-003 | High | Live GRID state can be written below Next.js `public/`. | `live_snapshots.py` and build boundary. | Research worker | Require an explicit private runtime root and ban `public/live`. | Default path and boundary-scan fixtures fail closed. | Closed and verified on main. The private runtime-root check and public-boundary fixtures pass. |
 | SEC-004 | High | CodeQL quality findings can hide a security finding or block protected-branch checks. | GitHub Code Scanning API on `refs/heads/main` at `098347f92261cc0c2d040a2fcf47a1587aa9e419`. The current API snapshot reports 341 open note-level alerts, 0 warnings, 0 errors, and 0 security-severity alerts. | CI and repository owner | Keep the security and merge-protection gates active. Record the note-level maintenance backlog and its source-contract evidence. | The CodeQL API must report zero open medium-or-higher security alerts and zero open errors or warnings at the release commit. Run path-specific tests and a fresh CodeQL scan after each fix. | Closed for the release security gate. The 341 note alerts remain in the follow-up ledger at `docs/security/codeql-notes-triage-20260815.md`; they do not include security-severity findings, warnings, or errors. Ruleset `20892261` passes its `errors_and_warnings` and `medium_or_higher` requirements on main. |
 | LEGAL-001 | High | Oracle's Elixir reuse authority is absent. | Published aggregates derived from OE data. | Repository owner | Record the provider's official noncommercial-use statement, classify the current product as noncommercial, keep raw source rows private, and require a new review before monetization or changed terms. | Rights register review plus a public source-page attribution test. | **Closed for the current noncommercial product.** The 2026-08-15 record links the official downloads page and the exact FAQ comment stating that the data can only be used noncommercially. This closure reopens before monetization or if the provider changes its terms. |
-| LEGAL-002 | High | Riot product registration evidence is absent. | Public Scryglass product. | Repository owner | Complete or record Riot Developer Portal registration and audit status. | Registration receipt review. | Open external gate. |
-| LEGAL-003 | Medium | Public privacy, source, legal, and disclosure notices are incomplete. | Public information pages, `security.txt`, sitemap, and robots. | Web and repository owner | Publish fixed routes, attribution, contact, and policy text. | Route, link, metadata, and browser checks. | Implemented on main; owner review and production check pending. The source page now shows the OE attribution and its exact noncommercial-use record. |
+| LEGAL-002 | Advisory | Riot product registration evidence is absent. | Public Scryglass product. | Repository owner | Record Riot Developer Portal registration and audit status if the product scope or terms require it. | Registration receipt review. | Optional governance note. It is not a release blocker for the current noncommercial product. |
+| LEGAL-003 | Advisory | Formal owner review of public policy text is not recorded. | Public information pages, `security.txt`, sitemap, and robots. | Web and repository owner | Keep the deployed privacy, source, legal, and disclosure routes current. | Route, link, metadata, and browser checks. | Optional owner-review note. The routes and OE attribution are implemented on main. |
 
 ## Required production receipt
 
@@ -89,9 +89,23 @@ Current production evidence for `v2026.08.15.170332`:
 - requirements lock SHA-256: `54c223c88fada349f883b2ed79064b96495a6de181132b723b8ba78cb4a5cc3d`;
 - rollback evidence: both prior verified releases passed the full release-bound route and asset probe set before this cutover.
 
-The release stays on HOLD while Riot registration, owner legal and policy
-review, the private research-suite receipt, independent Draft Score promotion,
-independent phase-curve promotion, and momentum promotion remain incomplete.
-Momentum remains research-only with the active default at zero. Draft Score,
-phase-curve, and momentum public outputs remain fail-closed until their
-independent promotion records exist.
+Private research-suite receipt:
+
+- path: `/private/tmp/scryglass-private-evidence/private-suite-final-497f0ec-two-pass.json`;
+- status: `passed`;
+- code commit: `497f0ecc33a67e40df7de366ff470ced521fc4ab`;
+- passes: `2`;
+- current shards: `6`;
+- parallel workers: `8`;
+- test files: `240`;
+- requirements CI lock SHA-256: `bc1af12da8b1adb9b2e456dad20a100619ae32d17be13e2ffeeb1360510412bf`;
+- current test inventory SHA-256: `aecd8f4ab4ef57bb046c8869a5e65ba09bbb4903e62123f59a0378e1c0d19db0`;
+- receipt SHA-256: `2d5b6af9d6abe21683166d267e8455f4bd0325a6d608946d6ad2eb61a463f29f`;
+- completed at (UTC): `2026-08-15T21:22:47.085978+00:00`.
+
+The release stays on HOLD while independent Draft Score promotion, independent
+phase-curve promotion, and momentum promotion remain incomplete. Momentum
+remains research-only with the active default at zero. Public Draft
+probability, betting, odds, and recommendation outputs remain fail-closed until
+their independent authority and promotion records exist. Riot registration and
+formal owner legal-policy review remain optional follow-up notes.

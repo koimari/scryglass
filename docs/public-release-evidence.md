@@ -200,15 +200,26 @@ RPC returns parsed server JSON only. It never serves bytes or reuses the source
 digest as a response ETag. Phase 3 removes this RPC and every large-asset page
 fallback.
 
+## Private research-suite receipt
+
+The required two-pass private research suite completed successfully. The
+receipt is `/private/tmp/scryglass-private-evidence/private-suite-final-497f0ec-two-pass.json`.
+
+| Field | Value |
+| --- | --- |
+| Status | `passed` |
+| Current code commit | `497f0ecc33a67e40df7de366ff470ced521fc4ab` |
+| Passes | `2` |
+| Current shards | `6` |
+| Parallel workers | `8` |
+| Test files | `240` |
+| Requirements CI lock SHA-256 | `bc1af12da8b1adb9b2e456dad20a100619ae32d17be13e2ffeeb1360510412bf` |
+| Current test inventory SHA-256 | `aecd8f4ab4ef57bb046c8869a5e65ba09bbb4903e62123f59a0378e1c0d19db0` |
+| Receipt SHA-256 | `2d5b6af9d6abe21683166d267e8455f4bd0325a6d608946d6ad2eb61a463f29f` |
+| Completed at (UTC) | `2026-08-15T21:22:47.085978+00:00` |
+
 ## Evidence still required
 
-- two private research-suite passes from the hashed environment with the
-  approved artifact bundle mounted. The current two-pass run is still in
-  progress at `/private/tmp/scryglass-private-evidence/private-suite-final-497f0ec-two-pass.json` and is bound to code commit
-  `497f0ecc33a67e40df7de366ff470ced521fc4ab`. Do not mark this gate complete
-  until the receipt exists and both pass results are successful;
-- Riot product registration;
-- owner review of the public legal and policy text;
 - an independent, hash-bound Draft Score promotion record;
 - a separately evaluated and promoted phase-curve record;
 - an independent momentum promotion record. Momentum stays research-only with
@@ -222,3 +233,11 @@ retired tier probe, release-bound page checks, and the complete rollback probe.
 The current active release has passed the full 22-asset deployed hash audit.
 Supabase security and performance advisors return zero findings. The release
 remains on HOLD until the outstanding evidence above is complete.
+
+## Optional follow-up notes
+
+Riot product registration and formal owner review of public legal and policy
+text are governance follow-ups. They are not practical release blockers for
+the current noncommercial product. Public Draft probability, betting, odds, and
+recommendation outputs remain unavailable until the required authority and
+promotion records pass.
