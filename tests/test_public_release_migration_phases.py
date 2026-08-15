@@ -151,6 +151,17 @@ def test_trusted_retention_cascade_skips_the_per_row_lock() -> None:
     assert "from public, anon, authenticated, service_role" in migration
 
 
+def test_retention_rpc_has_a_bounded_api_timeout_exception() -> None:
+    migration = (
+        MIGRATIONS / "20260815040000_retention_timeout_budget.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "alter function public.prune_scryglass_public_releases_v2(integer)" in migration
+    assert "set statement_timeout to '60s'" in migration
+    assert "alter role" not in migration
+    assert "alter database" not in migration
+
+
 def test_live_oe_import_schema_drift_is_forward_compatible() -> None:
     migration = (
         MIGRATIONS / "20260814161000_oe_import_patch_receipts.sql"
