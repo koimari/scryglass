@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 import os
 from pathlib import Path
@@ -853,10 +854,17 @@ def test_immutable_writer_rejects_partial_mismatch_symlink_hardlink_and_rolls_ba
     assert not first.exists() and not second.exists()
 
 
-def test_runner_review_bundle_binds_dependencies_and_remains_no_read_pending() -> None:
-    bundle = runner.build_runner_review_bundle()
-    core = bundle["execution-review-core.json"]
-    pending = bundle["execution-pending-report.json"]
+def test_runner_review_bundle_stays_closed_after_bound_dependency_drift() -> None:
+    with pytest.raises(runner.G5RunnerError, match="frozen dependency identity mismatch"):
+        runner.build_runner_review_bundle()
+
+    namespace = Path("data/lol/v2/models/draft-interactions/g5-exploratory")
+    core = json.loads((namespace / "execution-review-core.json").read_bytes())
+    pending = json.loads((namespace / "execution-pending-report.json").read_bytes())
+    for artifact in (core, pending):
+        claimed = artifact["artifact_sha256"]
+        unsigned = {key: value for key, value in artifact.items() if key != "artifact_sha256"}
+        assert result.sha256(unsigned) == claimed
     assert set(core["review_subject_bytes"]) == {
         "runner", "result", "approval_contract", "focused_test", "approval_test"
     }
