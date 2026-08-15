@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import warnings
-
 import numpy as np
 import pytest
 
@@ -385,15 +383,13 @@ def test_unseen_champion_role_is_explicit_prior_only() -> None:
 def test_v1_failure_signature_fixture_is_caught_before_v2_selection() -> None:
     x = np.full((2, 1), 1e308)
     beta = np.array([1e308])
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
+    with np.errstate(over="ignore", invalid="ignore"):
         z = x @ beta
         residual = np.array([1.0, -1.0])
-        _gradient = x.T @ residual
-        _hessian = x.T @ x
-    messages = " ".join(str(item.message) for item in caught)
-    assert "overflow" in messages or "invalid" in messages
+        gradient = x.T @ residual
+        hessian = x.T @ x
     assert not np.all(np.isfinite(z))
+    assert not np.all(np.isfinite(gradient)) or not np.all(np.isfinite(hessian))
     with pytest.raises(v2_math.V2NumericalUnavailable, match="EXCESS_EXPOSURE"):
         v2_math.validate_problem(
             x, np.array([0.0, 1.0]), np.zeros(2), np.ones(1)
