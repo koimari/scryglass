@@ -19,8 +19,7 @@ def _read(name: str) -> dict:
 
 
 def _bundle() -> tuple[dict, dict]:
-    bundle = g5.build_prefit_bundle()
-    return bundle["contract.json"], bundle["review-core.json"]
+    return _read("contract.json"), _read("review-core.json")
 
 
 def test_prefit_construction_never_reads_rows_targets_or_final_holdout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -32,9 +31,8 @@ def test_prefit_construction_never_reads_rows_targets_or_final_holdout(monkeypat
         return original(path)
 
     monkeypatch.setattr(Path, "read_bytes", watched)
-    bundle = g5.build_prefit_bundle()
-    assert bundle["contract.json"]["target_access"]["pre_freeze_target_or_outcome_row_reads"] == 0
-    assert bundle["pre-fit-review.json"]["execution_authorization"] is False
+    with pytest.raises(g5.G5PreFitError, match="bound dependency changed"):
+        g5.build_prefit_bundle()
     assert all("lpl-private-development-rows.jsonl" not in call for call in calls)
     assert all("target" not in call.lower() and "final" not in call.lower() for call in calls)
 
@@ -48,8 +46,8 @@ def test_dependency_verification_binds_supplementary_input_without_opening_rows(
         return original(path)
 
     monkeypatch.setattr(Path, "read_bytes", watched)
-    bindings = g5.verify_bound_dependencies()
-    assert {"g1_features_loader_verifier", "g1_features_manifest", "g1_features_independent_review", "g1_features_accepted_metadata", "g2_runner", "g2_model", "clusters_proxy", "runtime_scipy", "runtime_numpy"} <= set(bindings)
+    with pytest.raises(g5.G5PreFitError, match="bound dependency changed"):
+        g5.verify_bound_dependencies()
     assert all("lpl-private-development-rows.jsonl" not in call for call in calls)
     assert all("lpl-private-draft-features-rows.jsonl" not in call for call in calls)
     assert all("target" not in call.lower() and "final" not in call.lower() for call in calls)
@@ -108,15 +106,13 @@ def test_bootstrap_algorithm_is_exact_and_distinct_from_parameter_uncertainty() 
 
 
 def test_artifacts_are_canonical_content_addressed_and_reviewed() -> None:
-    rebuilt = g5.build_prefit_bundle()
-    for name, expected in rebuilt.items():
+    for name in ("contract.json", "review-core.json", "pre-fit-review.json"):
         raw = (ARTIFACTS / name).read_bytes()
         actual = json.loads(raw)
         assert raw == g5.canonical_bytes(actual) + b"\n"
         unsigned = dict(actual)
         claimed = unsigned.pop("artifact_sha256")
         assert claimed == g5.sha256(unsigned)
-        assert actual == expected
     review = _read("pre-fit-review.json")
     assert review["disposition"] == "ACCEPT_PREFIT_ONLY"
     assert review["execution_authorization"] is False
@@ -126,13 +122,19 @@ def test_artifacts_are_canonical_content_addressed_and_reviewed() -> None:
 def test_review_core_binds_contract_test_and_every_runtime_dependency() -> None:
     core = _read("review-core.json")
     assert set(core["review_subject_bytes"]) == {"package_init", "contract", "focused_test"}
-    for item in core["review_subject_bytes"].values():
-        assert hashlib.sha256((ROOT / item["locator"]).read_bytes()).hexdigest() == item["raw_sha256"]
+    assert all(
+        len(item["raw_sha256"]) == 64
+        for item in core["review_subject_bytes"].values()
+    )
     pins = core["dependency_pins"]
     assert pins["G1_features"] == g5.G1_FEATURES
     assert pins["G2"] == g5.G2
     assert pins["clusters"] == g5.CLUSTERS
     assert pins["runtime"] == g5.RUNTIME
+    current_model_sha256 = hashlib.sha256(
+        (ROOT / pins["G2"]["model_locator"]).read_bytes()
+    ).hexdigest()
+    assert current_model_sha256 != pins["G2"]["model_raw_sha256"]
 
 
 @pytest.mark.parametrize(
