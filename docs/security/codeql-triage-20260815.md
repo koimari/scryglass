@@ -194,7 +194,7 @@ dismissal API.
 
 ## Verification record
 
-Checks completed before the branch push:
+Local checks completed before the branch push:
 
 - `python3 -m pytest -q tests/test_codex_import.py`: 1 passed.
 - `python3 -m pytest -q tests/test_codex_import.py tests/model_v2/evaluation/test_benchmark_contract.py`: 87 passed.
@@ -209,4 +209,10 @@ files absent from this clean worktree:
 `data/lol/v2/snapshots/real-v1/lpl-private-development-rows.jsonl` and its
 manifest. The changed module tests pass.
 
-The pushed-branch CodeQL run is the final check for alert #399 closure.
+The PR #267 security workflow `31901301774` completed green for merge commit
+`ef535f2f80d8180c24d58d48acfe568b548ccffe`. Its Python analysis `1623922225`
+and JavaScript and TypeScript analysis `1623919886` each reported
+`results_count: 0`. The required PR checks also completed green for app,
+browser, elemental-drakes, rankings-data, Supabase clean replay, workflow and
+shell security, secret scan, and dependency review. The branch has no new
+CodeQL findings, and alert #399 is closed by the context-manager change.
