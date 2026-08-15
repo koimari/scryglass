@@ -24,4 +24,3 @@ test("keeps missing champion names unavailable", () => {
   assert.equal(championImageUrl(null), null);
   assert.equal(championImageUrl("   "), null);
 });
-

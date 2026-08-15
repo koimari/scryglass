@@ -28,4 +28,3 @@ test("fails closed for malformed movement payloads", () => {
   assert.equal(playerPositionDeltas(null, "tier1"), undefined);
   assert.equal(playerPositionDeltas({ tier1: null }, "tier1"), undefined);
 });
-

@@ -34,4 +34,3 @@ export function championImageUrl(
   if (!key) return null;
   return `https://cdn.communitydragon.org/latest/champion/${encodeURIComponent(key)}/square`;
 }
-
