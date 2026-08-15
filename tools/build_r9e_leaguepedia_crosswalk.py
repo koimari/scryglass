@@ -41,7 +41,14 @@ def _time(value: Any) -> datetime:
     text = str(value or "").strip()
     if not text:
         raise CrosswalkError("empty source timestamp")
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%SZ"):
+    if text.endswith("Z"):
+        try:
+            parsed = datetime.fromisoformat(text[:-1] + "+00:00")
+        except ValueError:
+            parsed = None
+        if parsed is not None and parsed.tzinfo is not None:
+            return parsed.astimezone(timezone.utc)
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
         try:
             return datetime.strptime(text[:19], fmt).replace(tzinfo=timezone.utc)
         except ValueError:

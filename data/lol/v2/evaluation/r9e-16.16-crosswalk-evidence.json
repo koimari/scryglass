@@ -1,0 +1,123 @@
+{
+  "artifact_sha256": "60bdf79cca7d55753469a632757dc514143bf2c0bcd65c8509031cbd62f2c377",
+  "ambiguity_policy": "reject",
+  "authority": "private_source_backed_crosswalk",
+  "captured_at": "2026-08-15T00:00:00Z",
+  "counts": {
+    "issues": 0,
+    "mapped_rows": 7,
+    "mapped_series": 3,
+    "oe_rows": 7,
+    "schedule_rows": 4,
+    "scoreboard_rows": 9
+  },
+  "crosswalk_sha256": "906873d20b952d479eb840bfd4ba48aceed5f596cac55a888c72e27357612e8e",
+  "outcome_inference": false,
+  "public_draft_authorized": false,
+  "public_patch": "26.16",
+  "public_probability_authorized": false,
+  "rows": [
+    {
+      "game_time_delta_seconds": 5.0,
+      "oe_date": "2026-08-14 15:07:55",
+      "oe_gameid": "LOLTMNT05_218045",
+      "oe_patch_token": "16.16",
+      "oe_team_set": ["shifters", "sk gaming"],
+      "scoreboard_game_id": "LEC/2026 Season/Summer Season_Week 4_1_1",
+      "scoreboard_game_order": 1,
+      "series_id": "LEC/2026 Season/Summer Season_Week 4_1",
+      "series_patch": "26.16",
+      "series_team_set": ["shifters", "sk gaming"]
+    },
+    {
+      "game_time_delta_seconds": 54.0,
+      "oe_date": "2026-08-14 15:54:54",
+      "oe_gameid": "LOLTMNT05_217037",
+      "oe_patch_token": "16.16",
+      "oe_team_set": ["shifters", "sk gaming"],
+      "scoreboard_game_id": "LEC/2026 Season/Summer Season_Week 4_1_2",
+      "scoreboard_game_order": 2,
+      "series_id": "LEC/2026 Season/Summer Season_Week 4_1",
+      "series_patch": "26.16",
+      "series_team_set": ["shifters", "sk gaming"]
+    },
+    {
+      "game_time_delta_seconds": 2.0,
+      "oe_date": "2026-08-14 17:02:02",
+      "oe_gameid": "LOLTMNT05_218052",
+      "oe_patch_token": "16.16",
+      "oe_team_set": ["giantx", "team vitality"],
+      "scoreboard_game_id": "LEC/2026 Season/Summer Season_Week 4_2_1",
+      "scoreboard_game_order": 1,
+      "series_id": "LEC/2026 Season/Summer Season_Week 4_2",
+      "series_patch": "26.16",
+      "series_team_set": ["giantx", "team vitality"]
+    },
+    {
+      "game_time_delta_seconds": 14.0,
+      "oe_date": "2026-08-14 17:48:14",
+      "oe_gameid": "LOLTMNT05_218053",
+      "oe_patch_token": "16.16",
+      "oe_team_set": ["giantx", "team vitality"],
+      "scoreboard_game_id": "LEC/2026 Season/Summer Season_Week 4_2_2",
+      "scoreboard_game_order": 2,
+      "series_id": "LEC/2026 Season/Summer Season_Week 4_2",
+      "series_patch": "26.16",
+      "series_team_set": ["giantx", "team vitality"]
+    },
+    {
+      "game_time_delta_seconds": 36.0,
+      "oe_date": "2026-08-14 18:42:36",
+      "oe_gameid": "LOLTMNT05_218055",
+      "oe_patch_token": "16.16",
+      "oe_team_set": ["giantx", "team vitality"],
+      "scoreboard_game_id": "LEC/2026 Season/Summer Season_Week 4_2_3",
+      "scoreboard_game_order": 3,
+      "series_id": "LEC/2026 Season/Summer Season_Week 4_2",
+      "series_patch": "26.16",
+      "series_team_set": ["giantx", "team vitality"]
+    },
+    {
+      "game_time_delta_seconds": 14.0,
+      "oe_date": "2026-08-15 15:07:14",
+      "oe_gameid": "LOLTMNT05_218159",
+      "oe_patch_token": "16.16",
+      "oe_team_set": ["fnatic", "sk gaming"],
+      "scoreboard_game_id": "LEC/2026 Season/Summer Season_Week 4_3_1",
+      "scoreboard_game_order": 1,
+      "series_id": "LEC/2026 Season/Summer Season_Week 4_3",
+      "series_patch": "26.16",
+      "series_team_set": ["fnatic", "sk gaming"]
+    },
+    {
+      "game_time_delta_seconds": 3.0,
+      "oe_date": "2026-08-15 15:58:57",
+      "oe_gameid": "LOLTMNT05_218180",
+      "oe_patch_token": "16.16",
+      "oe_team_set": ["fnatic", "sk gaming"],
+      "scoreboard_game_id": "LEC/2026 Season/Summer Season_Week 4_3_2",
+      "scoreboard_game_order": 2,
+      "series_id": "LEC/2026 Season/Summer Season_Week 4_3",
+      "series_patch": "26.16",
+      "series_team_set": ["fnatic", "sk gaming"]
+    }
+  ],
+  "schema_version": "scryglass:r9e-16.16-crosswalk-evidence:v1",
+  "source_pages": [
+    {
+      "bytes": 3102,
+      "file": "raw/scoreboardgames-lec-2026-08-14-15.json",
+      "locator": "https://lol.fandom.com/wiki/Special:CargoExport?tables=ScoreboardGames&fields=ScoreboardGames.GameId%2CScoreboardGames.Team1%2CScoreboardGames.Team2%2CScoreboardGames.DateTime_UTC%2CScoreboardGames.Tournament%2CScoreboardGames.OverviewPage%2CScoreboardGames.Patch&where=ScoreboardGames.OverviewPage%3D%22LEC%2F2026+Season%2FSummer+Season%22+AND+ScoreboardGames.DateTime_UTC+%3E%3D+%222026-08-14+00%3A00%3A00%22+AND+ScoreboardGames.DateTime_UTC+%3C+%222026-08-16+00%3A00%3A00%22&order_by=ScoreboardGames.DateTime_UTC+ASC&limit=500&format=json",
+      "rows": 9,
+      "sha256": "0c4dbaf92d0619bf0d6d71f7149ea88398a4fff0559dbdffa250b9932b3f9645"
+    },
+    {
+      "bytes": 1863,
+      "file": "raw/matchschedule-lec-2026-08-14-15.json",
+      "locator": "https://lol.fandom.com/wiki/Special:CargoExport?tables=MatchSchedule&fields=MatchSchedule.MatchId%2CMatchSchedule.OverviewPage%2CMatchSchedule.Patch%2CMatchSchedule.Tab%2CMatchSchedule.N_MatchInTab%2CMatchSchedule.N_Page%2CMatchSchedule.N_MatchInPage%2CMatchSchedule.Team1%2CMatchSchedule.Team2%2CMatchSchedule.DateTime_UTC%2C_pageName&where=MatchSchedule.OverviewPage%3D%22LEC%2F2026+Season%2FSummer+Season%22+AND+MatchSchedule.DateTime_UTC+%3E%3D+%222026-08-14+00%3A00%3A00%22+AND+MatchSchedule.DateTime_UTC+%3C+%222026-08-16+00%3A00%3A00%22&order_by=MatchSchedule.DateTime_UTC+ASC&limit=500&format=json",
+      "rows": 4,
+      "sha256": "6359c4a9751b407879c0a4b76a55956f5993e86725242ea87bfc7fe140b884c6"
+    }
+  ],
+  "source_patch_token": "16.16"
+}

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from tools.build_r9e_leaguepedia_crosswalk import build_crosswalk
+from tools.build_r9e_leaguepedia_crosswalk import _time, build_crosswalk
+
+
+def test_crosswalk_time_parser_accepts_space_and_iso_z_timestamps() -> None:
+    expected = (2026, 8, 14, 15, 7, 55)
+    assert _time("2026-08-14 15:07:55").timetuple()[:6] == expected
+    assert _time("2026-08-14T15:07:55Z").timetuple()[:6] == expected
 
 
 def _evidence_rows() -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
