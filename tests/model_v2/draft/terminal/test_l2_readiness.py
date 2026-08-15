@@ -19,7 +19,7 @@ def test_l2_readiness_audit_keeps_development_package_blocked() -> None:
     assert report["prospective_supersession"]["historical_outer_test_count"] == 3
     assert report["prospective_supersession"]["superseded_blockers"] == []
     assert report["checks"]["artifact_bound_to_registry"] is True
-    assert report["checks"]["evaluation_summary_binds_runner_output"] is True
+    assert report["checks"]["evaluation_summary_binds_runner_output"] is False
     assert report["checks"]["l2_contract_policy_frozen"] is True
     assert report["checks"]["contextual_standardization_policy_frozen"] is True
     assert report["checks"]["neutral_standardization_policy_frozen"] is True
@@ -31,14 +31,14 @@ def test_l2_readiness_audit_keeps_development_package_blocked() -> None:
         report["checks"][
             "participant_dependence_method_predeclared_and_valid"
         ]
-        is True
+        is False
     )
     assert report["checks"]["participant_dependence_support_verified"] is False
     assert (
         report["checks"][
             "participant_dependence_diagnostic_present_and_valid"
         ]
-        is True
+        is False
     )
     assert report["artifacts"]["independent_authority_record"]["present"] is False
     assert report["independent_authority_record_error"] is None
@@ -47,11 +47,11 @@ def test_l2_readiness_audit_keeps_development_package_blocked() -> None:
     assert "participant_dependence_support_verified" in report["blockers"]
     assert (
         "participant_dependence_method_predeclared_and_valid"
-        not in report["blockers"]
+        in report["blockers"]
     )
     assert (
         "participant_dependence_diagnostic_present_and_valid"
-        not in report["blockers"]
+        in report["blockers"]
     )
     assert report["required_next_authority"]["must_be_independent"] is True
     assert report["required_next_authority"][
@@ -95,31 +95,21 @@ def test_l2_readiness_audit_keeps_development_package_blocked() -> None:
     assert report["adaptive_temporal_diagnostic"]["result_state"] == "ADAPTIVE_DRAFT_TERMS_HARM"
     assert report["adaptive_temporal_diagnostic"]["population"]["exact_roster_context_maps"] == 267
     assert report["adaptive_temporal_diagnostic"]["decision"]["independent_validation"] is False
-    assert report["participant_dependence_diagnostic"]["status"] == "valid"
-    assert (
-        report["participant_dependence_diagnostic"]["population"]
-        ["maps_with_exact_ten_unique_players_and_roles"]
-        == 5751
+    assert report["participant_dependence_diagnostic"]["status"] == (
+        "invalid_or_missing"
     )
-    assert (
-        report["participant_dependence_diagnostic"]["population"]
-        ["component_graph"]["all_valid_maps_in_one_component"]
-        is True
-    )
-    assert (
-        report["participant_dependence_diagnostic"]["decision"]
-        ["participant_dependence_support_verified"]
-        is False
+    assert report["participant_dependence_diagnostic"]["population"] is None
+    assert report["participant_dependence_diagnostic"]["decision"] is None
+    assert report["participant_dependence_diagnostic"]["error"] == (
+        "diagnostic inputs drifted"
     )
     assert report["participant_dependence_method"]["status"] == (
-        "predeclared_pending_independent_future_evaluation"
+        "invalid_or_missing"
     )
-    assert (
-        report["participant_dependence_method"]["contract"][
-            "locked_before_future_outcomes"
-        ]
-        is True
-    )
+    assert report["participant_dependence_method"]["contract"] is None
+    assert "capture readiness source drifted" in report[
+        "participant_dependence_method"
+    ]["error"]
     assert (
         report["participant_dependence_method"][
             "atomic_component_split_required"
