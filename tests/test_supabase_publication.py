@@ -758,6 +758,51 @@ def test_client_repr_redacts_secret_key() -> None:
     assert "<redacted>" in repr(client)
 
 
+def test_retention_prunes_one_release_per_database_call() -> None:
+    client = supabase_publication.SupabasePublicData(
+        "https://example.supabase.co",
+        "sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    responses = iter(
+        [
+            {"deleted_count": 1, "storage_paths": ["v2026.08.10.120000/a.json"]},
+            {"deleted_count": 1, "storage_paths": ["v2026.08.11.120000/b.json"]},
+            {"deleted_count": 0, "storage_paths": []},
+        ]
+    )
+    requests: list[tuple[str, str, object]] = []
+    deleted: list[list[str]] = []
+    acknowledged: list[list[str]] = []
+
+    def request(method, path, payload=None, **_kwargs):
+        requests.append((method, path, payload))
+        return next(responses)
+
+    def delete_storage_objects(paths):
+        deleted.append(list(paths))
+
+    def acknowledge_storage_cleanup(paths):
+        acknowledged.append(list(paths))
+        return len(paths)
+
+    client._request = request  # type: ignore[method-assign]
+    client.delete_storage_objects = delete_storage_objects  # type: ignore[method-assign]
+    client.ack_storage_cleanup = acknowledge_storage_cleanup  # type: ignore[method-assign]
+
+    assert client.prune(3) == 2
+    assert requests == [
+        ("POST", "rpc/prune_scryglass_public_releases_v2", {"p_keep": 3}),
+        ("POST", "rpc/prune_scryglass_public_releases_v2", {"p_keep": 3}),
+        ("POST", "rpc/prune_scryglass_public_releases_v2", {"p_keep": 3}),
+    ]
+    assert deleted == [
+        ["v2026.08.10.120000/a.json"],
+        ["v2026.08.11.120000/b.json"],
+        [],
+    ]
+    assert acknowledged == deleted
+
+
 def test_rollback_requires_the_canonical_release_id() -> None:
     assert (
         supabase_publication._rollback_release_id("v2026.08.13.183000")
