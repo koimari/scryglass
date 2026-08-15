@@ -5,6 +5,7 @@ import {
   boundedRowLimit,
   getMatchFacets,
   getMatches,
+  getPlayerProfile,
   getRatings,
   getTierFacets,
   getTierScope,
@@ -70,6 +71,77 @@ test("ratings RPC uses publishable auth and caps exact-name comparisons at 20 ro
       limit: 500,
     });
     assert.equal(result.limit, 20);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;
+    else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+    else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
+  }
+});
+
+test("player profiles reuse release-bound cache entries", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
+  const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+  process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
+  process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
+  let calls = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    calls += 1;
+    assert.equal(String(input), "https://abcdef.supabase.co/rest/v1/rpc/get_scryglass_player_profile");
+    return Response.json({
+      schema_version: "scryglass:query-api:v1",
+      release_id: RELEASE_ID,
+      row: null,
+      team_row: null,
+      champions: [],
+      recent_games: [],
+      champion_images: {},
+      standing: null,
+    });
+  }) as typeof fetch;
+  try {
+    const first = await getPlayerProfile(queryManifest(), "Cache Probe");
+    const second = await getPlayerProfile(queryManifest(), " cache probe ");
+    assert.strictEqual(first, second);
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;
+    else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+    else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
+  }
+});
+
+test("player profile cache removes release-mismatched responses", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
+  const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+  process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
+  process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return Response.json({
+      schema_version: "scryglass:query-api:v1",
+      release_id: calls === 1 ? "v2026.08.13.183001" : RELEASE_ID,
+      row: null,
+      team_row: null,
+      champions: [],
+      recent_games: [],
+      champion_images: {},
+      standing: null,
+    });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(
+      getPlayerProfile(queryManifest(), "Rejected Cache Probe"),
+      /different release/,
+    );
+    await getPlayerProfile(queryManifest(), "Rejected Cache Probe");
+    assert.equal(calls, 2);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;

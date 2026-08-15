@@ -22,6 +22,8 @@ export const PUBLIC_RESPONSE_MAX_BYTES = 500 * 1024;
 const RPC_TIMEOUT_MS = 5_000;
 const PUBLIC_ROW_LIMIT = 20;
 const PUBLIC_RATINGS_ROW_LIMIT = 100;
+const PLAYER_PROFILE_CACHE_MAX_ENTRIES = 256;
+const playerProfileCache = new Map<string, Promise<PlayerProfileQuery>>();
 
 export type QueryApiEnvelope<T> = {
   schema_version: typeof QUERY_API_SCHEMA;
@@ -407,7 +409,32 @@ export function getPlayerProfile(
   name: string,
   signal?: AbortSignal,
 ): Promise<PlayerProfileQuery> {
-  return publicRpc("get_scryglass_player_profile", { p_name: name }, { manifest, signal });
+  if (signal) {
+    return publicRpc("get_scryglass_player_profile", { p_name: name }, { manifest, signal });
+  }
+  const normalizedName = name.normalize("NFKC").trim().toLocaleLowerCase();
+  const cacheKey = `${manifest.pack_id}:${normalizedName}`;
+  const cached = playerProfileCache.get(cacheKey);
+  if (cached) {
+    playerProfileCache.delete(cacheKey);
+    playerProfileCache.set(cacheKey, cached);
+    return cached;
+  }
+  const pending = publicRpc<PlayerProfileQuery>(
+    "get_scryglass_player_profile",
+    { p_name: name },
+    { manifest },
+  ).catch((error) => {
+    if (playerProfileCache.get(cacheKey) === pending) playerProfileCache.delete(cacheKey);
+    throw error;
+  });
+  playerProfileCache.set(cacheKey, pending);
+  while (playerProfileCache.size > PLAYER_PROFILE_CACHE_MAX_ENTRIES) {
+    const oldest = playerProfileCache.keys().next().value;
+    if (oldest === undefined) break;
+    playerProfileCache.delete(oldest);
+  }
+  return pending;
 }
 
 export function getTeamProfile(

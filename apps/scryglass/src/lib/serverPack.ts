@@ -6,9 +6,13 @@ import { hasPromotedDraftAuthority } from "./pack";
 
 const packJsonCache = new Map<string, Promise<unknown>>();
 const PACK_CACHE_SECONDS = 21_600;
+const PACK_MANIFEST_CACHE_TIMEOUT_MS = 3_000;
+const PACK_MANIFEST_FRESH_TIMEOUT_MS = 5_000;
 export const PACK_MANIFEST_CACHE_TAG = "scryglass-pack-manifest";
 export const MAX_STORAGE_ASSET_BYTES = 120 * 1024 * 1024;
 export const PUBLIC_ASSET_CONTENT_TYPE = "application/json";
+
+let validatedManifestFallback: PackManifest | null = null;
 
 export const PUBLIC_ASSET_PATHS = new Set([
   "features/ratings_snapshot.json",
@@ -387,6 +391,7 @@ export async function readVerifiedAssetBytes(
 async function readSupabaseManifest(
   cache: "no-store" | "cached",
   signal?: AbortSignal,
+  timeoutMs = PACK_MANIFEST_CACHE_TIMEOUT_MS,
 ): Promise<PackManifest> {
   const config = supabaseConfig();
   if (!config) throw new Error("Supabase public data is not configured");
@@ -397,7 +402,7 @@ async function readSupabaseManifest(
       ...(cache === "no-store"
         ? { cache: "no-store" as const }
         : { next: { revalidate: PACK_CACHE_SECONDS, tags: [PACK_MANIFEST_CACHE_TAG] } }),
-      signal: boundedSignal(signal, 10_000),
+      signal: boundedSignal(signal, timeoutMs),
     },
   );
   if (!response.ok) throw new Error(`Supabase release ${response.status}`);
@@ -415,6 +420,28 @@ async function readSupabaseManifest(
     throw new Error("The active release has no bounded public query API");
   }
   return manifest;
+}
+
+function rememberValidatedManifest(manifest: PackManifest): PackManifest {
+  validatedManifestFallback = manifest;
+  return manifest;
+}
+
+function readValidatedManifestFallback(): PackManifest | null {
+  if (!validatedManifestFallback) return null;
+  try {
+    validatePublicManifest(validatedManifestFallback);
+    if (
+      validatedManifestFallback.query_api?.schema_version !== "scryglass:query-api:v1"
+      || validatedManifestFallback.query_api.status !== "available"
+    ) {
+      throw new Error("The cached release has no bounded public query API");
+    }
+    return validatedManifestFallback;
+  } catch {
+    validatedManifestFallback = null;
+    return null;
+  }
 }
 
 export type PublicRefreshHealth = {
@@ -473,7 +500,9 @@ export async function readPrivateRefreshHealth(): Promise<PrivateRefreshHealth |
 
 /** Read the active Supabase release without a bundled fallback. */
 export async function readRemotePackManifest(): Promise<PackManifest> {
-  return readSupabaseManifest("no-store");
+  return rememberValidatedManifest(
+    await readSupabaseManifest("no-store", undefined, PACK_MANIFEST_FRESH_TIMEOUT_MS),
+  );
 }
 
 export function publicPackManifest(manifest: PackManifest) {
@@ -511,7 +540,15 @@ export function publicPackManifest(manifest: PackManifest) {
 /** Read the active remote release, except for the explicit local E2E fixture. */
 export async function readPackManifest(signal?: AbortSignal): Promise<PackManifest> {
   if (e2eLocalPackRoot()) return readLocalManifest();
-  return readSupabaseManifest("cached", signal);
+  try {
+    return rememberValidatedManifest(
+      await readSupabaseManifest("cached", signal, PACK_MANIFEST_CACHE_TIMEOUT_MS),
+    );
+  } catch (error) {
+    const fallback = readValidatedManifestFallback();
+    if (fallback) return fallback;
+    throw error;
+  }
 }
 
 async function readSupabaseAsset<T>(

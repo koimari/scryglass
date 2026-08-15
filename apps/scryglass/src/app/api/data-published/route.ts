@@ -36,14 +36,16 @@ export async function POST(request: Request) {
       { status: 422, headers: { "Cache-Control": "private, no-store" } },
     );
   }
-  revalidateTag(PACK_MANIFEST_CACHE_TAG, { expire: 0 });
-  for (const target of REVALIDATED_TARGETS) revalidateReleasePath(target.path, target.type);
   const manifest = await readRemotePackManifest();
   const servedReleaseId = manifest.pack_id;
   const matches = servedReleaseId === body.release_id;
+  if (matches) {
+    revalidateTag(PACK_MANIFEST_CACHE_TAG, { expire: 0 });
+    for (const target of REVALIDATED_TARGETS) revalidateReleasePath(target.path, target.type);
+  }
   return NextResponse.json(
     {
-      revalidated: true,
+      revalidated: matches,
       requested_release_id: body.release_id,
       served_release_id: servedReleaseId,
       matches,

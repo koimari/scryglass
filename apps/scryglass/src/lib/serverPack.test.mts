@@ -8,6 +8,7 @@ import {
   publicPackManifest,
   readActivePublicAsset,
   readPackJson,
+  readPackManifest,
   readPrivateRefreshHealth,
   readRemotePackManifest,
   safeRelativePath,
@@ -57,6 +58,15 @@ function manifest(): PackManifest & {
   };
 }
 
+function queryManifest(): PackManifest & {
+  release: { release_id: string; artifact_hashes: Record<string, string> };
+} {
+  return {
+    ...manifest(),
+    query_api: { schema_version: "scryglass:query-api:v1", status: "available" },
+  };
+}
+
 test("remote manifests fail closed without the bounded query API", async () => {
   const previousFetch = globalThis.fetch;
   const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
@@ -75,6 +85,41 @@ test("remote manifests fail closed without the bounded query API", async () => {
     else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
     if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
     else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
+  }
+});
+
+test("cached manifests fall back only to a validated release", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
+  const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+  const previousE2e = process.env.SCRYGLASS_E2E_LOCAL_PACK;
+  process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
+  process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
+  delete process.env.SCRYGLASS_E2E_LOCAL_PACK;
+  let available = true;
+  globalThis.fetch = (async () => {
+    if (!available) throw new Error("temporary release read failure");
+    return Response.json([{
+      release_id: RELEASE_ID,
+      status: "active",
+      manifest: queryManifest(),
+    }]);
+  }) as typeof fetch;
+  try {
+    const first = await readPackManifest();
+    available = false;
+    const fallback = await readPackManifest();
+    assert.equal(first.pack_id, RELEASE_ID);
+    assert.equal(fallback.pack_id, RELEASE_ID);
+    assert.equal(fallback.query_api?.status, "available");
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;
+    else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+    else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
+    if (previousE2e === undefined) delete process.env.SCRYGLASS_E2E_LOCAL_PACK;
+    else process.env.SCRYGLASS_E2E_LOCAL_PACK = previousE2e;
   }
 });
 
