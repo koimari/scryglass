@@ -8,7 +8,6 @@ import zipfile
 
 import numpy as np
 import pandas as pd
-import lol_kills.research.elemental_drakes as elemental_drakes
 
 from lol_kills.research.elemental_drake_model import (
     ELEMENTS,
@@ -20,14 +19,7 @@ from lol_kills.research.elemental_drake_model import (
     pregame_strengths,
 )
 from lol_kills.research.elemental_drake_audit import audit_compact_cohort
-from lol_kills.research.elemental_drakes import (
-    _composition_fit,
-    build_artifact,
-    load_role_catalog,
-    normalize_dragon_type,
-    parse_normalized_grid,
-    summarize_cohort,
-)
+from lol_kills.research import elemental_drakes
 
 
 def test_series_discovery_keeps_grid_key_out_of_curl_argv_and_files(
@@ -86,11 +78,11 @@ def test_series_discovery_keeps_grid_key_out_of_curl_argv_and_files(
 
 
 def test_normalize_dragon_type_covers_riot_labels() -> None:
-    assert normalize_dragon_type("fire") == "infernal"
-    assert normalize_dragon_type("EarthDragon") == "mountain"
-    assert normalize_dragon_type("OceanDrake") == "ocean"
-    assert normalize_dragon_type("air") == "cloud"
-    assert normalize_dragon_type("baron") is None
+    assert elemental_drakes.normalize_dragon_type("fire") == "infernal"
+    assert elemental_drakes.normalize_dragon_type("EarthDragon") == "mountain"
+    assert elemental_drakes.normalize_dragon_type("OceanDrake") == "ocean"
+    assert elemental_drakes.normalize_dragon_type("air") == "cloud"
+    assert elemental_drakes.normalize_dragon_type("baron") is None
 
 
 def test_parse_normalized_grid_keeps_state_before_outcome(tmp_path) -> None:
@@ -202,7 +194,7 @@ def test_parse_normalized_grid_keeps_state_before_outcome(tmp_path) -> None:
             "\n".join(json.dumps(row) for row in envelopes),
         )
 
-    games = parse_normalized_grid(archive)
+    games = elemental_drakes.parse_normalized_grid(archive)
 
     assert len(games) == 1
     assert games[0]["complete"] is True
@@ -242,7 +234,7 @@ def test_parse_normalized_grid_keeps_state_before_outcome(tmp_path) -> None:
 
 
 def test_cohort_summary_does_not_turn_counts_into_effects() -> None:
-    summary = summarize_cohort(
+    summary = elemental_drakes.summarize_cohort(
         [
                 {
                     "complete": True,
@@ -282,7 +274,7 @@ def test_public_artifact_embeds_exact_hashed_explorer_model(tmp_path) -> None:
     )
     raw = model_path.read_bytes()
 
-    artifact = build_artifact(
+    artifact = elemental_drakes.build_artifact(
         raw_dir=tmp_path,
         explorer_model_path=model_path,
         audit_path=tmp_path / "missing-audit.json",
@@ -306,7 +298,7 @@ def test_composition_fit_treats_all_five_champions_as_recipients() -> None:
         {"champion": "Lulu"},
     ]
 
-    fit = _composition_fit(composition)
+    fit = elemental_drakes._composition_fit(composition)
 
     for annotation in fit.values():
         assert annotation["recipients"] == [
@@ -355,7 +347,7 @@ def test_role_catalog_projects_only_aggregate_role_counts(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    catalog = load_role_catalog(source)
+    catalog = elemental_drakes.load_role_catalog(source)
 
     assert catalog["status"] == "ready"
     assert catalog["appearances"] == 3
