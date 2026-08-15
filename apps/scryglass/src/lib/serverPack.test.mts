@@ -18,6 +18,8 @@ import type { PackManifest } from "./pack";
 import { GET as getPublicAsset } from "../app/api/assets/[...path]/route";
 
 const RELEASE_ID = "v2026.08.13.183000";
+const ROTATION_RELEASE_ID = "v2026.08.13.183001";
+const PROMOTED_RELEASE_ID = "v2026.08.13.183002";
 const PATH = "features/team_records.json";
 const RAW = new TextEncoder().encode('{"teams":{}}');
 const SHA256 = createHash("sha256").update(RAW).digest("hex");
@@ -36,11 +38,16 @@ test("local E2E data needs its exact flag and can never activate on Vercel", () 
   }
 });
 
-function manifest(): PackManifest & {
+function manifest(
+  releaseId = RELEASE_ID,
+  options: { queryApi?: boolean; draftStatus?: "unavailable" | "promoted" } = {},
+): PackManifest & {
   release: { release_id: string; artifact_hashes: Record<string, string> };
 } {
-  return {
-    pack_id: RELEASE_ID,
+  const result: PackManifest & {
+    release: { release_id: string; artifact_hashes: Record<string, string> };
+  } = {
+    pack_id: releaseId,
     schema_version: "scryglass:public-pack:v1",
     created_utc: "2026-08-13T18:30:00Z",
     filters: { years: [2026], leagues: "all" },
@@ -49,20 +56,34 @@ function manifest(): PackManifest & {
     base_url: null,
     data_backend: "supabase",
     release: {
-      release_id: RELEASE_ID,
+      release_id: releaseId,
       artifact_hashes: { [PATH]: SHA256 },
     },
     total_bytes: RAW.byteLength,
     total_files: 1,
     files: [{ path: PATH, bytes: RAW.byteLength, rows: 0, cols: 0, sha256: SHA256 }],
   };
+  if (options.queryApi) {
+    result.query_api = { schema_version: "scryglass:query-api:v1", status: "available" };
+  }
+  if (options.draftStatus) {
+    result.draft_authority = {
+      schema_version: "scryglass:draft-authority:v1",
+      status: options.draftStatus,
+      release_id: releaseId,
+      model_version: options.draftStatus === "promoted" ? "test-model" : null,
+      receipt_sha256: options.draftStatus === "promoted" ? "a".repeat(64) : null,
+      reason: options.draftStatus === "promoted" ? null : "model_not_promoted",
+    };
+  }
+  return result;
 }
 
-function queryManifest(): PackManifest & {
+function queryManifest(releaseId = RELEASE_ID): PackManifest & {
   release: { release_id: string; artifact_hashes: Record<string, string> };
 } {
   return {
-    ...manifest(),
+    ...manifest(releaseId),
     query_api: { schema_version: "scryglass:query-api:v1", status: "available" },
   };
 }
@@ -98,7 +119,7 @@ test("cached manifests fall back only to a validated release", async () => {
   delete process.env.SCRYGLASS_E2E_LOCAL_PACK;
   let available = true;
   globalThis.fetch = (async () => {
-    if (!available) throw new Error("temporary release read failure");
+    if (!available) throw new TypeError("temporary release read failure");
     return Response.json([{
       release_id: RELEASE_ID,
       status: "active",
@@ -120,6 +141,137 @@ test("cached manifests fall back only to a validated release", async () => {
     else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
     if (previousE2e === undefined) delete process.env.SCRYGLASS_E2E_LOCAL_PACK;
     else process.env.SCRYGLASS_E2E_LOCAL_PACK = previousE2e;
+  }
+});
+
+test("manifest rotation never falls back after a validation failure", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
+  const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+  process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
+  process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
+  let rotated = false;
+  globalThis.fetch = (async () => {
+    if (!rotated) {
+      return Response.json([{
+        release_id: RELEASE_ID,
+        status: "active",
+        manifest: queryManifest(),
+      }]);
+    }
+    return Response.json([{
+      release_id: ROTATION_RELEASE_ID,
+      status: "active",
+      manifest: manifest(ROTATION_RELEASE_ID),
+    }]);
+  }) as typeof fetch;
+  try {
+    assert.equal((await readPackManifest()).pack_id, RELEASE_ID);
+    rotated = true;
+    await assert.rejects(readPackManifest(), /bounded public query API/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;
+    else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+    else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
+  }
+});
+
+test("a Draft authority downgrade during rotation never serves the old release", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
+  const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+  process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
+  process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
+  let rotated = false;
+  globalThis.fetch = (async () => {
+    if (!rotated) {
+      return Response.json([{
+        release_id: PROMOTED_RELEASE_ID,
+        status: "active",
+        manifest: manifest(PROMOTED_RELEASE_ID, { queryApi: true, draftStatus: "promoted" }),
+      }]);
+    }
+    const downgraded = manifest(ROTATION_RELEASE_ID, { queryApi: true, draftStatus: "unavailable" });
+    downgraded.release.artifact_hashes[PATH] = "b".repeat(64);
+    return Response.json([{
+      release_id: ROTATION_RELEASE_ID,
+      status: "active",
+      manifest: downgraded,
+    }]);
+  }) as typeof fetch;
+  try {
+    assert.equal((await readPackManifest()).pack_id, PROMOTED_RELEASE_ID);
+    rotated = true;
+    await assert.rejects(readPackManifest(), /file inventory/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;
+    else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+    else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
+  }
+});
+
+test("promoted Draft authority never survives a transient manifest failure", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
+  const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+  process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
+  process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
+  let available = true;
+  globalThis.fetch = (async () => {
+    if (!available) throw new TypeError("temporary network failure");
+    return Response.json([{
+      release_id: PROMOTED_RELEASE_ID,
+      status: "active",
+      manifest: manifest(PROMOTED_RELEASE_ID, { queryApi: true, draftStatus: "promoted" }),
+    }]);
+  }) as typeof fetch;
+  try {
+    assert.equal((await readPackManifest()).pack_id, PROMOTED_RELEASE_ID);
+    available = false;
+    await assert.rejects(readPackManifest(), /temporary network failure/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;
+    else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+    else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
+  }
+});
+
+test("validated manifest fallback expires after its short grace period", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousNow = Date.now;
+  const previousUrl = process.env.SCRYGLASS_SUPABASE_URL;
+  const previousKey = process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+  process.env.SCRYGLASS_SUPABASE_URL = "https://abcdef.supabase.co";
+  process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
+  let now = 1_000_000;
+  Date.now = () => now;
+  let available = true;
+  globalThis.fetch = (async () => {
+    if (!available) throw new TypeError("temporary network failure");
+    return Response.json([{
+      release_id: ROTATION_RELEASE_ID,
+      status: "active",
+      manifest: queryManifest(ROTATION_RELEASE_ID),
+    }]);
+  }) as typeof fetch;
+  try {
+    assert.equal((await readPackManifest()).pack_id, ROTATION_RELEASE_ID);
+    available = false;
+    now += 16_000;
+    await assert.rejects(readPackManifest(), /temporary network failure/);
+  } finally {
+    Date.now = previousNow;
+    globalThis.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.SCRYGLASS_SUPABASE_URL;
+    else process.env.SCRYGLASS_SUPABASE_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY;
+    else process.env.SCRYGLASS_SUPABASE_PUBLISHABLE_KEY = previousKey;
   }
 });
 

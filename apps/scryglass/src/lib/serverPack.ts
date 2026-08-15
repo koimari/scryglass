@@ -8,11 +8,17 @@ const packJsonCache = new Map<string, Promise<unknown>>();
 const PACK_CACHE_SECONDS = 21_600;
 const PACK_MANIFEST_CACHE_TIMEOUT_MS = 3_000;
 const PACK_MANIFEST_FRESH_TIMEOUT_MS = 5_000;
+const PACK_MANIFEST_FALLBACK_MAX_AGE_MS = 15_000;
 export const PACK_MANIFEST_CACHE_TAG = "scryglass-pack-manifest";
 export const MAX_STORAGE_ASSET_BYTES = 120 * 1024 * 1024;
 export const PUBLIC_ASSET_CONTENT_TYPE = "application/json";
 
-let validatedManifestFallback: PackManifest | null = null;
+type ValidatedManifestFallback = {
+  manifest: PackManifest;
+  validatedAt: number;
+};
+
+let validatedManifestFallback: ValidatedManifestFallback | null = null;
 
 export const PUBLIC_ASSET_PATHS = new Set([
   "features/ratings_snapshot.json",
@@ -405,7 +411,12 @@ async function readSupabaseManifest(
       signal: boundedSignal(signal, timeoutMs),
     },
   );
-  if (!response.ok) throw new Error(`Supabase release ${response.status}`);
+  if (!response.ok) {
+    if (response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500) {
+      throw new ManifestTransportError(`Supabase release ${response.status}`);
+    }
+    throw new Error(`Supabase release ${response.status}`);
+  }
   const rows = (await response.json()) as Array<{ release_id?: string; manifest?: ManifestWithRelease }>;
   const row = rows[0];
   const manifest = row?.manifest;
@@ -422,22 +433,52 @@ async function readSupabaseManifest(
   return manifest;
 }
 
+class ManifestTransportError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ManifestTransportError";
+  }
+}
+
+function isTransientManifestError(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return false;
+  if (error instanceof ManifestTransportError || error instanceof TypeError) return true;
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "name" in error
+    && (error as { name?: unknown }).name === "TimeoutError",
+  );
+}
+
 function rememberValidatedManifest(manifest: PackManifest): PackManifest {
-  validatedManifestFallback = manifest;
+  validatedManifestFallback = { manifest, validatedAt: Date.now() };
   return manifest;
 }
 
 function readValidatedManifestFallback(): PackManifest | null {
   if (!validatedManifestFallback) return null;
+  if (Date.now() - validatedManifestFallback.validatedAt > PACK_MANIFEST_FALLBACK_MAX_AGE_MS) {
+    validatedManifestFallback = null;
+    return null;
+  }
+  const manifest = validatedManifestFallback.manifest;
   try {
-    validatePublicManifest(validatedManifestFallback);
+    validatePublicManifest(manifest);
     if (
-      validatedManifestFallback.query_api?.schema_version !== "scryglass:query-api:v1"
-      || validatedManifestFallback.query_api.status !== "available"
+      manifest.query_api?.schema_version !== "scryglass:query-api:v1"
+      || manifest.query_api.status !== "available"
+      || (
+        manifest.draft_authority
+        && (
+          manifest.draft_authority.release_id !== manifest.pack_id
+          || manifest.draft_authority.status === "promoted"
+        )
+      )
     ) {
       throw new Error("The cached release has no bounded public query API");
     }
-    return validatedManifestFallback;
+    return manifest;
   } catch {
     validatedManifestFallback = null;
     return null;
@@ -545,6 +586,7 @@ export async function readPackManifest(signal?: AbortSignal): Promise<PackManife
       await readSupabaseManifest("cached", signal, PACK_MANIFEST_CACHE_TIMEOUT_MS),
     );
   } catch (error) {
+    if (!isTransientManifestError(error, signal)) throw error;
     const fallback = readValidatedManifestFallback();
     if (fallback) return fallback;
     throw error;
