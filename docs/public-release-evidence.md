@@ -59,7 +59,13 @@ Allowed publication paths come from one code-owned specification. Each active ro
 
 ## Static scan record
 
-Semgrep OSS scanned 978 tracked files with the `security-audit`, `python`, and `typescript` rules on 2026-08-13. It reported 22 pattern matches. Twenty-one matches are guarded HTTPS requests or an argument-list subprocess with `shell=False`; the exact guards have focused tests. One Oracle's Elixir metadata request lacked the shared host guard and was fixed. Semgrep timed out on selected rules in 13 large research files, so CodeQL and Bandit remain required independent gates.
+Semgrep OSS 1.173.0 scanned 1,921 tracked targets with the `security-audit`,
+`python`, and `typescript` configurations on 2026-08-15. It used a 300-second
+per-file timeout and completed with zero errors or timeouts. The scan reported
+19 pattern matches. The written triage is in
+[`security/semgrep-triage-20260815.md`](security/semgrep-triage-20260815.md).
+Its JSON receipt SHA-256 is
+`fd55a60f19a007d1f5a43c8008d18fa9d60620cd915c3d83dfeb56e70aa8e3e9`.
 
 Bandit reports no high-severity findings after the subprocess fix. The Python release lock reports no known vulnerabilities through `pip-audit`.
 
@@ -95,7 +101,8 @@ same release to run `refresh-20260815T033633Z-7b6a10d4e335`, source observation
 `2026-08-14T18:42:36+00:00`, and worker commit
 `d7dfdc86fe74174472365fc688755403f4d65bef`.
 
-The Vercel production deployment is READY at the same commit. The active
+The Vercel production deployment `dpl_2ZyJi3fjv8renw5HrQiHFNz8a2At` is READY
+at application commit `2ffca55c9d2461dbd93a0ac135224d73835ff344`. The active
 database release and compatibility manifest both name `v2026.08.15.033633`.
 Supabase reports 22 active Storage assets, 144,592,995 bytes, zero inline
 assets, zero Draft assets, 161,445 bounded query rows, and 12 sealed dataset
@@ -108,7 +115,16 @@ input fingerprint
 `55286da3f632527cbb7cb6de9182f2f85376545c5521cd598c9d4bffd718b0ea`,
 and source SHA-256
 `f00aa5aa4aa4fa595a81eec954cc4ac71e99e3582b2cc80826f20491b48b8e27`.
-The current Vercel deployment has no error or fatal logs after activation.
+The current Vercel deployment has no error or fatal logs after deployment.
+
+PR #252 added exact release markers to the ratings, match, tier, player, team,
+and match-detail pages. A production rollback drill moved all page and API
+families to `v2026.08.15.025550`, verified the smallest manifest asset by byte
+count and SHA-256, then returned every family to `v2026.08.15.033633`. Both
+cache callbacks confirmed the requested and served release IDs. PR #253 fixed
+the Data API timeout found during the first return attempt. Both activation and
+restore now have a 120-second function budget. The repeated drill passed in
+both directions.
 
 The Production and Development Vercel values for `SCRYGLASS_SUPABASE_URL` and `SCRYGLASS_SUPABASE_PUBLISHABLE_KEY` contained a literal `\\n` suffix. Both environments now contain canonical values. The Preview values were already canonical. The web project keeps the publication service key outside Vercel and holds only the public key plus the separate diagnostic credential.
 
@@ -166,18 +182,16 @@ fallback.
 
 ## Evidence still required
 
-- release-bound checks for every cached page family;
-- a complete post-rollback route-family receipt bound to the restored release ID;
 - two private research-suite passes from the hashed environment with the approved artifact bundle mounted;
 - source-rights records and Riot product registration;
 - an independent, hash-bound Draft Score promotion record;
 - a separately evaluated and promoted phase-curve record;
-- completion or documented replacement of the timed-out Semgrep rules on 13 large research files;
 - owner review of the public legal and policy text.
 
 The merged application, zero-state Supabase replay, browser, security, asset,
 HTML budget, and public-boundary checks are recorded in the protected checks.
-PRs #249 and #250 closed resumable large-asset uploads and the retired tier
-probe. The current active release has passed the full 22-asset deployed hash
-audit. Supabase security and performance advisors return zero findings. The
-release remains on HOLD until the outstanding evidence above is complete.
+PRs #249, #250, #252, and #253 closed resumable large-asset uploads, the
+retired tier probe, release-bound page checks, and the complete rollback probe.
+The current active release has passed the full 22-asset deployed hash audit.
+Supabase security and performance advisors return zero findings. The release
+remains on HOLD until the outstanding evidence above is complete.
