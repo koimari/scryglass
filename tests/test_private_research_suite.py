@@ -37,3 +37,13 @@ def test_private_suite_frozen_commits_and_runtime_are_exact() -> None:
 def test_private_suite_rejects_missing_frozen_test() -> None:
     with pytest.raises(suite.PrivateSuiteError, match="frozen test inventory"):
         suite._partition_tests(())
+
+
+def test_private_suite_preserves_virtual_environment_symlink(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "python-target"
+    target.write_text("")
+    virtual_python = tmp_path / "venv-python"
+    virtual_python.symlink_to(target)
+    assert suite._absolute_executable(virtual_python) == virtual_python

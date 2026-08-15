@@ -110,6 +110,12 @@ def _test_files(root: Path) -> tuple[str, ...]:
     )
 
 
+def _absolute_executable(path: Path) -> Path:
+    """Keep virtual-environment symlinks while making the path absolute."""
+
+    return Path(os.path.abspath(os.fspath(path)))
+
+
 def _partition_tests(all_tests: Sequence[str]) -> tuple[str, ...]:
     frozen = set(FROZEN_RUNTIME_TESTS) | set(HISTORICAL_CONTRACT_TESTS)
     missing = frozen - set(all_tests)
@@ -223,8 +229,8 @@ def main() -> int:
     current_root = args.current_root.resolve()
     contract_root = args.historical_contract_root.resolve()
     market_root = args.historical_market_root.resolve()
-    current_python = args.current_python.resolve()
-    frozen_python = args.frozen_python.resolve()
+    current_python = _absolute_executable(args.current_python)
+    frozen_python = _absolute_executable(args.frozen_python)
     lcc_root = args.lcc_root.resolve()
     receipt = args.receipt.resolve()
     current_tests, frozen_versions = _verify_inputs(
