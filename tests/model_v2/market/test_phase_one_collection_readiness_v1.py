@@ -98,18 +98,13 @@ def test_readiness_cli_exposes_no_user_lock_timestamp(
     assert "--timestamp" not in help_text
 
 
-def test_registered_readiness_is_hash_pinned_and_empty(
+def test_registered_readiness_stays_closed_after_source_inventory_drift(
     historical_capture_root: Path,
 ) -> None:
-    checked = registry.validate_registered_phase_one_collection_readiness_v1(
-        root=historical_capture_root
-    )
-    assert (
-        checked["artifact_sha256"]
-        == registry.REGISTERED_READINESS_ARTIFACT_SHA256
-    )
-    assert checked["locked_at_utc"] == registry.REGISTERED_READINESS_LOCKED_AT_UTC
-    assert checked["locked_empty_collection_state"]["plans"] == 0
-    assert checked["locked_empty_collection_state"]["event_bundles"] == 0
-    assert checked["locked_empty_collection_state"]["joint_snapshots"] == 0
-    assert all(value is False for value in checked["authority"].values())
+    with pytest.raises(
+        registry.PhaseOneCollectionReadinessRegistryError,
+        match="source inventory drifted",
+    ):
+        registry.validate_registered_phase_one_collection_readiness_v1(
+            root=historical_capture_root
+        )
