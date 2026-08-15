@@ -221,7 +221,6 @@ for path in \
   /matches \
   /tiers \
   /chat \
-  /api/public-data/tierlists \
   '/api/chat/leaderboards?category=rating&limit=1' \
   '/api/chat/leaderboards?category=teams_draft&limit=1' \
   '/api/chat/tier?limit=1' \

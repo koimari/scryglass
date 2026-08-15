@@ -34,7 +34,7 @@ A data refresh does not start a Vercel deployment. A code deployment does not ac
 | `/elo` and rating profiles | Active release manifest plus `features/ratings_snapshot.json`, player rating files, record files, metadata, and weekly ranks | Accepted OE snapshot |
 | `/matches` and match profiles | Active release `features/match_index.json` plus quarter-split `features/match_records_{year}_q{n}.json` (legacy packs keep the single year file) | The same accepted OE snapshot used for ratings |
 | `/tiers` | Active release `rankings/tierlists-latest.json` | Patch-wide tier derivation from the accepted OE snapshot |
-| `/api/public-data/tierlists` | Active release tier asset | None at request time |
+| `/api/public-data/tierlists` | Retired compatibility route. It returns HTTP 410 and points clients to `/tiers`. | None |
 | `/api/health` | Active release manifest and sanitized public refresh health | Latest completed refresh receipt |
 | Static team marks and player portraits | Versioned files in `apps/scryglass/public` | Identity build committed through GitHub |
 
