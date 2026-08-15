@@ -926,7 +926,7 @@ class DraftInteractionModel:
 
             if family.include_ally_exact or family.include_ally_sparse or family.include_factorization:
                 for (role_a, champ_a), (role_b, champ_b) in combinations(side_roles, 2):
-                    (ordered_role_a, ordered_champ_a), (ordered_role_b, ordered_champ_b), _orientation = _ordered_pair(
+                    (ordered_role_a, ordered_champ_a), (ordered_role_b, ordered_champ_b), _ = _ordered_pair(
                         role_a,
                         champ_a,
                         role_b,
@@ -1130,7 +1130,7 @@ class DraftInteractionModel:
                     (
                         (left_role, left_champ, left_side),
                         (right_role, right_champ, right_side),
-                        _orientation,
+                        _,
                     ) = _ordered_cross_pair(role_a, champ_a, "A", role_b, champ_b, "B")
                     ordered_roles = [left_role, right_role]
                     ordered_champs = [left_champ, right_champ]

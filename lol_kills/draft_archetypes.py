@@ -169,13 +169,9 @@ ARCHETYPE_TAGS: dict[str, set[str]] = {
     "Graves": {"early_snowball", "skirmisher"},
     "Kindred": {"scaling_late", "skirmisher", "hypercarry_adc"},
     "Fiddlesticks": {"engage", "pick", "teamfight_aoe"},
-    "Nocturne": {"engage", "assassin"},
     # --- Mid divers / oddballs ---
     "Corki": {"poke_siege", "early_snowball"},
     "Ziggs": {"poke_siege", "siege_specialist", "scaling_late"},
-    "Ezreal": {"poke_siege", "skirmisher"},
-    "Kai'Sa": {"hypercarry_adc", "skirmisher"},
-    "Yuumi": {"peel_enchanter", "scaling_late"},
     "Taric": {"peel_enchanter", "engage", "tank_frontline"},
     "Braun": {"peel_enchanter", "tank_frontline"},
     "Braum": {"peel_enchanter", "tank_frontline"},

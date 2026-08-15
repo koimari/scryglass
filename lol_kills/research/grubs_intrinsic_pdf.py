@@ -1139,8 +1139,8 @@ def write_tex(d: dict, fight: dict, fig1: Path, fig2: Path, fig3: Path, fig4: Pa
     sq_cash_ci = sq["cash_90g_wald_95_ci"]
     sq_90g_neutral = float(delta_pp(sq["intercept"], sq["coef_per_gold"], 0.0, 90.0))
     pro_minus_sq = float(pro_cash_ci["estimate_pp"] - sq_90g_neutral)
-    pro_minus_sq_se = math.sqrt(
-        float(pro_cash_ci["se_pp"]) ** 2 + float(sq_cash_ci["se_pp"]) ** 2
+    pro_minus_sq_se = math.hypot(
+        float(pro_cash_ci["se_pp"]), float(sq_cash_ci["se_pp"])
     )
     pro_minus_sq_lo = pro_minus_sq - 1.96 * pro_minus_sq_se
     pro_minus_sq_hi = pro_minus_sq + 1.96 * pro_minus_sq_se

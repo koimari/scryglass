@@ -26,6 +26,7 @@ import math
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -35,7 +36,7 @@ from lol_kills.etl.aliases import normalize_team
 from lol_kills.etl.competition import canonicalize_competition_frame, is_team_affiliation_league
 from lol_kills.etl.paths import FEATURES_DIR, PARQUET_DIR
 from lol_kills.etl.source_keys import canonical_source_game_key
-from lol_kills.ratings.dual_elo import DualEloConfig, _is_intl, expected_score
+from lol_kills.ratings.dual_elo import _is_intl, expected_score
 from lol_kills.ratings.momentum_config import (
     DEFAULT_MOMENTUM_SCALE,
     DEFAULT_MOMENTUM_WINDOW_GAMES,
@@ -391,7 +392,7 @@ def _apply_bridge_uncertainty(
         row["global_bridge_sigma"] = bridge_sigma
         row["sigma"] = min(
             160.0,
-            math.sqrt(float(row.get("sigma") or cfg.sigma0) ** 2 + bridge_sigma**2),
+            math.hypot(float(row.get("sigma") or cfg.sigma0), bridge_sigma),
         )
         output.append(row)
     return output
@@ -482,7 +483,7 @@ def _run_player_elo(
         )
         mu_b, _, _, det_b = _aggregate(states, blue_lu, cfg)
         mu_r, _, _, det_r = _aggregate(states, red_lu, cfg)
-        sig = math.sqrt(sig_b**2 + sig_r**2)
+        sig = math.hypot(sig_b, sig_r)
         p_base = expected_score(base_mu_b, base_mu_r)
         p = expected_score(mu_b, mu_r)
         shrink = 1.0 / (1.0 + (sig / 130.0) ** 2)
@@ -870,7 +871,6 @@ def build_maps_frame_from_players(players: pd.DataFrame) -> pd.DataFrame:
 # Module caches — board hot path (avoid re-reading parquet / remapping teamnames)
 _PLAYERS_CACHE: pd.DataFrame | None = None
 _ROSTER_CACHE: dict[str, list[tuple[str, str]]] = {}
-_SNAPSHOT_BY: dict | None = None
 
 
 def load_players_cached() -> pd.DataFrame:
@@ -881,10 +881,8 @@ def load_players_cached() -> pd.DataFrame:
     return _PLAYERS_CACHE
 
 
+@lru_cache(maxsize=1)
 def _snapshot_by_player() -> dict:
-    global _SNAPSHOT_BY
-    if _SNAPSHOT_BY is not None:
-        return _SNAPSHOT_BY
     path = FEATURES_DIR / "player_ratings_snapshot.parquet"
     snap = pd.read_parquet(path) if path.exists() else pd.DataFrame()
     by: dict = {}
@@ -919,7 +917,6 @@ def _snapshot_by_player() -> dict:
                 last_team=last_team,
                 momentum_residual=float(momentum_residual),
             )
-    _SNAPSHOT_BY = by
     return by
 
 
@@ -958,7 +955,7 @@ def score_player_lineups(
     base_mu_r, sig_r, known_r, _ = _aggregate(by, red, cfg, include_momentum=False)
     mu_b, _, _, det_b = _aggregate(by, blu, cfg)
     mu_r, _, _, det_r = _aggregate(by, red, cfg)
-    sig = math.sqrt(sig_b**2 + sig_r**2)
+    sig = math.hypot(sig_b, sig_r)
     mu_diff = mu_b - mu_r
     p = expected_score(mu_b, mu_r)
     shrink = 1.0 / (1.0 + (sig / 130.0) ** 2)
@@ -972,6 +969,7 @@ def score_player_lineups(
             p_cal = calibrated_player_p(mu_diff, cal)
             p_shrunk = 0.5 + (p_cal - 0.5) * shrink
     except Exception:
+        # Calibration is optional. Keep the descriptive uncalibrated score.
         pass
     return {
         "player_mu_blue": round(mu_b, 2),

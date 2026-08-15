@@ -25,7 +25,6 @@ authorization, rank_eligibility stays False.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from lol_kills.v2.champions.atoms.consume import AtomBridge
@@ -112,8 +111,6 @@ def policy_weight_estimand(
         ref = float(reference_weights[role])
         if not math.isfinite(share) or share < 0 or not math.isfinite(ref) or ref <= 0:
             raise EstimandError("resource shares and reference weights must be positive finite")
-        if ref <= 0:
-            raise EstimandError("reference weight must be positive")
         deviation = max(-2.0, min(2.0, (share - ref) / ref))
         deviations[role] = deviation
         raw_weights[role] = ref * math.exp(kappa * deviation)
@@ -197,7 +194,6 @@ def identification_audit(
             removal_deltas[dropped] = 0.0
             continue
         sub_weights = {r: w for r, w in policy["weights"].items() if r != dropped}
-        sub_span = {r: s for r, s in zip(roles, [0.0] * len(roles))}
         # reuse the full span values via a minimal re-estimate
         try:
             sub = lineup_synergy_estimand(

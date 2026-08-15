@@ -25,6 +25,7 @@ from lol_kills.v2.champions.atoms.schema import (
     CHAMPION_ATOM_FAMILIES,
     DIMENSION_LABELS,
     canonical_sha256,
+    require_number,
 )
 
 def _artifact() -> dict:
@@ -141,6 +142,12 @@ def test_consume_rejects_tampered_artifact(tmp_path):
     path.write_text(json.dumps(artifact))
     with pytest.raises(AtomBridgeError):
         AtomBridge.load(path)
+
+
+@pytest.mark.parametrize("value", (float("nan"), float("inf"), float("-inf")))
+def test_require_number_rejects_nonfinite_values(value: float) -> None:
+    with pytest.raises(AtomBridgeError, match="finite"):
+        require_number(value, "value")
 
 
 @pytest.mark.skipif(

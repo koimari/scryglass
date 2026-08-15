@@ -438,6 +438,7 @@ def time_series_eval(df: pd.DataFrame) -> dict:
             try:
                 aucs[name].append(float(roc_auc_score(y[te], p)))
             except ValueError:
+                # A single-class fold has no defined ROC AUC.
                 pass
 
     def summarize(xs):
@@ -573,12 +574,6 @@ def main() -> None:
     print("[draft_wr_study] calibration / strata / dynamics / CV…")
     y = df["y_blue_win"].astype(float).values
     p_d = df["_p_draft_raw"].values
-    p_joint = _sigmoid(
-        fit["model_intercept"]
-        + fit["model_elo_coef"] * (df["elo_diff"].values / 400.0)
-        + df["_draft_logit"].values  # approx — actual joint uses champ design; use logistic proxy
-    )
-    # Better joint p from elo+draft logistic
     lr = LogisticRegression(C=0.8, max_iter=300)
     lr.fit(
         np.column_stack([df["elo_diff"].values / 400.0, df["_draft_logit"].values]),

@@ -186,7 +186,7 @@ def build_dual_ratings(
         momentum_b = cfg.momentum_scale * _momentum_residual(sb, cfg)
         momentum_r = cfg.momentum_scale * _momentum_residual(sr, cfg)
         mu_b, mu_r = base_mu_b + momentum_b, base_mu_r + momentum_r
-        sig = math.sqrt(sb.sigma**2 + sr.sigma**2)
+        sig = math.hypot(sb.sigma, sr.sigma)
         p_base = expected_score(base_mu_b, base_mu_r)
         p = expected_score(mu_b, mu_r)
         # uncertainty shrink toward 0.5

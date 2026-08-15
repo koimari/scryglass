@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from typing import Any, Mapping
 
@@ -77,7 +78,7 @@ def require_number(value: object, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise AtomBridgeError(f"{label} must be numeric")
     number = float(value)
-    if number != number or number in (float("inf"), float("-inf")):
+    if not math.isfinite(number):
         raise AtomBridgeError(f"{label} must be finite")
     return number
 
