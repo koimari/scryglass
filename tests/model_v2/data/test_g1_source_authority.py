@@ -53,7 +53,7 @@ def test_committed_receipt_exactly_replays_pinned_sources_and_catalog() -> None:
     assert authority.validate_g1_source_authority_receipt(payload) == expected
     assert authority.canonical_receipt_bytes(payload) == RECEIPT_PATH.read_bytes()
     assert payload["receipt_sha256"] == (
-        "d85d504e25a23d4853f4e0201849b9e5b953fa0e769458a7d8bb2f810d98de59"
+        "a1c4c95b3ebfbe0fc53945d381c1c5ce722880efd504bde3825a31c255898ca4"
     )
 
 

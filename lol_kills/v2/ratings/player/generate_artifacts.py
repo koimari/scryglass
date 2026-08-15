@@ -99,7 +99,6 @@ def rebuild_owned_artifacts(root: Path = ROOT) -> dict:
     # re-pinned foundation freeze does not leave the bundle stale.
     from .model import C1_EXPECTED  # local import to avoid cycles
 
-    identity = json.loads(identity_path.read_text(encoding="utf-8"))
     identity["c1_expected_identity"] = C1_EXPECTED
     _write_json(identity_path, identity)
     return {

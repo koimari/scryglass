@@ -891,7 +891,7 @@ def test_b1_golden_hashes_are_independently_recomputed() -> None:
         training_payload["source_manifest_object_sha256"]
     )
     assert sha256_canonical_object_hash(training_payload) == (
-        "8f056c8100ccb9771779338879b05242938b91c5ad0017057a8eed8c570d25c2"
+        "895219d6a56fa2fa98b41408b8056ed19a3118e59b6b1958db765948a5b62691"
     )
     assert sha256_raw_bytes_hash(
         (BASE_DIR / "environment-lock-passb1.txt").read_bytes()

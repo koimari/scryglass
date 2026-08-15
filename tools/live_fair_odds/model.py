@@ -209,7 +209,17 @@ def _private_market_authority(
     *, league: str, market_type: str, as_of: datetime
 ) -> dict[str, Any]:
     """Load a receipt only when its digest is independently pinned in the environment."""
-    artifact_sha256 = _model_binding_sha256(market_type)
+    try:
+        artifact_sha256 = _model_binding_sha256(market_type)
+    except OSError:
+        result = unavailable_authority("market_model_binding_unavailable")
+        return {
+            **result,
+            "model_artifact_sha256": None,
+            "registered_authority_sha256": os.environ.get(
+                AUTHORITY_SHA_ENV[market_type]
+            ),
+        }
     path = AUTHORITY_FILES[market_type]
     expected_sha256 = os.environ.get(AUTHORITY_SHA_ENV[market_type])
     if not path.exists():

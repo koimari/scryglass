@@ -15,9 +15,6 @@ from lol_kills.v2.market.match_winner_future_protocol_registry_v1 import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[3]
-
-
 def test_bounded_recalibration_uses_exact_protocol_optimizer() -> None:
     raw = np.tile([0.20, 0.40, 0.60, 0.80], 100).tolist()
     outcomes = np.tile([0, 0, 1, 1], 100).tolist()
@@ -37,7 +34,7 @@ def test_recalibration_rejects_one_class_or_out_of_domain_inputs() -> None:
         recalibration.fit_bounded_recalibration([0.0, 0.6], [0, 1])
 
 
-def artifact() -> dict:
+def artifact(root: Path) -> dict:
     fit = recalibration.fit_bounded_recalibration(
         np.tile([0.20, 0.40, 0.60, 0.80], 50).tolist(),
         np.tile([0, 0, 1, 1], 50).tolist(),
@@ -66,7 +63,7 @@ def artifact() -> dict:
             "locator": REGISTERED_PROTOCOL_LOCATOR.as_posix(),
             "raw_sha256": REGISTERED_PROTOCOL_RAW_SHA256,
             "artifact_sha256": REGISTERED_PROTOCOL_ARTIFACT_SHA256,
-            "recalibration_contract": recalibration._validate_protocol(ROOT)[
+            "recalibration_contract": recalibration._validate_protocol(root)[
                 "recalibration"
             ],
         },
@@ -99,8 +96,10 @@ def artifact() -> dict:
     return payload
 
 
-def test_recalibration_artifact_replays_bounds_and_convergence() -> None:
-    value = artifact()
+def test_recalibration_artifact_replays_bounds_and_convergence(
+    historical_capture_root: Path,
+) -> None:
+    value = artifact(historical_capture_root)
     checked = recalibration.validate_phase_one_recalibration_artifact(value)
     assert checked["models"]["ratings_plus_draft"]["convergence"]["success"] is True
     assert all(authority is False for authority in checked["authority"].values())

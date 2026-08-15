@@ -186,7 +186,7 @@
       "selectable": true
     },
     {
-      "brier": 0.214621990205238,
+      "brier": 0.214621990205239,
       "candidate_id": "mean_reversion+lagged_pre_map_policy",
       "decay_candidate_id": "mean_reversion",
       "eligible_origin_count": 4,
@@ -661,7 +661,7 @@
   "resource_causal_holding_equal_claim": false,
   "schema_version": "2.0.0",
   "selected_candidate_id": "random_walk_no_reset+no_resource",
-  "selection_decision_sha256": "e963c441eb7610a8a6159dc10d4702dce19b3cf78e8eaba91c4b996f17a5252a",
+  "selection_decision_sha256": "a0af9cfe61f5ea96d4c40c7e4f5b64705aaebfb09c8f7fbe10dcb436e1ce926c",
   "status": "synthetic_mechanics_selection",
   "verified_selectable_origin_sha256": "49aecb70d00d028291e9150a1a1a141544f329fb01ee8196ea70170c1f868881"
 }

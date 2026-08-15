@@ -10,7 +10,6 @@ from typing import Any
 
 from .match_winner_future_protocol_v1 import (
     DEFAULT_OUTPUT,
-    MatchWinnerFutureProtocolError,
     validate_match_winner_future_protocol_v1,
 )
 
@@ -53,7 +52,7 @@ def validate_registered_match_winner_future_protocol_v1(
         )
     try:
         checked = validate_match_winner_future_protocol_v1(payload, root=root)
-    except (MatchWinnerFutureProtocolError, OSError, ValueError) as exc:
+    except (RuntimeError, OSError, ValueError) as exc:
         raise MatchWinnerFutureProtocolRegistryError(str(exc)) from exc
     if (
         checked.get("artifact_sha256") != REGISTERED_PROTOCOL_ARTIFACT_SHA256
@@ -84,4 +83,3 @@ __all__ = [
     "REGISTERED_SETTLEMENT_CONTRACT_SHA256",
     "validate_registered_match_winner_future_protocol_v1",
 ]
-

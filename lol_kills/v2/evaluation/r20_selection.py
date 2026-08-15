@@ -2659,6 +2659,8 @@ def _make_selection_authority_api() -> tuple[type, Any, Any]:
         if not isinstance(function, function_type) or id(function) in recursive_functions:
             return
         recursive_functions[id(function)] = function
+        if not function.__module__.startswith("lol_kills."):
+            return
         for name in function.__code__.co_names:
             dependency = function.__globals__.get(name)
             if isinstance(dependency, function_type):

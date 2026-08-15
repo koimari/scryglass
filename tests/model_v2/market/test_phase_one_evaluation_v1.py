@@ -7,14 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from lol_kills.v2.market import (
+    phase_one_collection_readiness_registry_v1 as collection_registry,
+)
 from lol_kills.v2.market import phase_one_evaluation_v1 as evaluation
 from lol_kills.v2.market import phase_one_evaluation_readiness_v1 as readiness
-from lol_kills.v2.market import phase_one_evaluation_readiness_registry_v1 as readiness_registry
 from lol_kills.v2.market import phase_one_evaluation_registry_v1 as result_registry
 from lol_kills.v2.market import phase_one_opening_v1 as opening
-
-
-ROOT = Path(__file__).resolve().parents[3]
 
 
 def _rows() -> list[dict[str, object]]:
@@ -286,22 +285,17 @@ def test_opening_authority_requires_two_distinct_reviewers_and_exact_bindings() 
         opening.validate_opening_authority(payload, expected_bindings=expected)
 
 
-def test_pre_boundary_evaluation_readiness_builds_with_zero_future_artifacts() -> None:
-    payload = readiness.build_phase_one_evaluation_readiness_v1(
-        root=ROOT,
-        clock=lambda: datetime(2026, 8, 2, 4, 0, tzinfo=timezone.utc),
-    )
-    checked = readiness.validate_phase_one_evaluation_readiness_v1(
-        payload, root=ROOT
-    )
-    assert checked["result_state"] == readiness.RESULT_STATE
-    assert checked["locked_empty_state"]["outcomes_accessed"] is False
-    assert all(value is False for value in checked["authority"].values())
-
-    registered = readiness_registry.validate_registered_phase_one_evaluation_readiness_v1(
-        root=ROOT
-    )
-    assert registered["artifact_sha256"] == readiness_registry.REGISTERED_READINESS_ARTIFACT_SHA256
+def test_pre_boundary_evaluation_readiness_stays_closed_after_collection_drift(
+    historical_capture_root: Path,
+) -> None:
+    with pytest.raises(
+        collection_registry.PhaseOneCollectionReadinessRegistryError,
+        match="source inventory drifted",
+    ):
+        readiness.build_phase_one_evaluation_readiness_v1(
+            root=historical_capture_root,
+            clock=lambda: datetime(2026, 8, 2, 4, 0, tzinfo=timezone.utc),
+        )
 
 
 def test_independent_result_registry_preserves_pass_without_opening_phase_two() -> None:

@@ -12,6 +12,7 @@ from lol_kills.v2.draft.interactions.series_cluster_proxy import (
     PINNED_PREFLIGHT_PAYLOAD_SHA256,
     DEFAULT_ARTIFACT_PATH,
     DependenceClusterProxyError,
+    _generator_identity,
     analyze_frame,
     assert_rolling_folds_do_not_split_cluster,
     canonical_bytes,
@@ -478,6 +479,7 @@ def test_production_loader_rejects_rehashed_embedded_source_pin(
     tmp_path: Path,
 ) -> None:
     payload = json.loads(DEFAULT_ARTIFACT_PATH.read_text(encoding="utf-8"))
+    payload["generator"] = _generator_identity()
     payload["source"]["maps"]["raw_sha256"] = "0" * 64
     payload.pop("artifact_sha256")
     payload["artifact_sha256"] = canonical_sha256(payload)

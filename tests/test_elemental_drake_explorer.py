@@ -318,9 +318,9 @@ def test_pre_post_inventory_is_legal_and_soul_is_explicit() -> None:
     assert soul.iloc[0]["pre_own_total"] == 3
     assert soul.iloc[0]["post_own_total"] == 4
     assert soul.iloc[0]["own_soul_element_after"] == "hextech"
-    assert soul.iloc[0]["opp_soul_element_after"] is None
+    assert pd.isna(soul.iloc[0]["opp_soul_element_after"])
     assert soul.iloc[1]["opp_soul_element_after"] == "hextech"
-    assert soul.iloc[1]["own_soul_element_after"] is None
+    assert pd.isna(soul.iloc[1]["own_soul_element_after"])
     for element in ELEMENTS:
         assert soul[f"pre_own_count_{element}"].between(0, 4).all()
         assert soul[f"post_own_count_{element}"].between(0, 4).all()

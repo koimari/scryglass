@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -16,6 +15,12 @@ from lol_kills import pregame_roster_capture as roster_capture
 from lol_kills.v2.data.common import sha256_canonical_object
 from lol_kills.v2.draft.terminal import capture_readiness_v1
 from lol_kills.v2.draft.terminal import capture_readiness_registry_v1
+from lol_kills.v2.ratings.player.multileague_v3_capture_registry_v3 import (
+    CaptureReadinessRegistryV3Error,
+)
+from lol_kills.v2.ratings.player.multileague_source_snapshot import (
+    MultiLeagueSourceSnapshotError,
+)
 from lol_kills.v2.draft.terminal import future_prediction_ledger as ledger
 from lol_kills.v2.draft.terminal import side_neutral_prediction_v1 as side_neutral
 from lol_kills.v2.market import phase_one_collection_v1 as phase_one
@@ -180,7 +185,30 @@ def _patch_raw() -> bytes:
 def evaluation_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
     repo_root = Path(".").resolve()
     root = tmp_path_factory.mktemp("draft-future-ledger-root")
-    (root / "lol_kills").symlink_to(repo_root / "lol_kills", target_is_directory=True)
+    historical_patch_source = (
+        repo_root
+        / "tests/model_v2/fixtures/leaguepedia_patch_revisions_v1.py"
+    )
+    assert hashlib.sha256(historical_patch_source.read_bytes()).hexdigest() == (
+        "b9079a64c8dcba4d17c7762edda4c914a7a42b8b7680044910298b69014ebb58"
+    )
+    (root / "lol_kills/etl").mkdir(parents=True)
+    for child in (repo_root / "lol_kills").iterdir():
+        if child.name != "etl":
+            (root / "lol_kills" / child.name).symlink_to(
+                child,
+                target_is_directory=child.is_dir(),
+            )
+    for child in (repo_root / "lol_kills/etl").iterdir():
+        if child.name != "leaguepedia_patch_revisions.py":
+            (root / "lol_kills/etl" / child.name).symlink_to(
+                child,
+                target_is_directory=child.is_dir(),
+            )
+    shutil.copy2(
+        historical_patch_source,
+        root / "lol_kills/etl/leaguepedia_patch_revisions.py",
+    )
     (root / "docs").symlink_to(repo_root / "docs", target_is_directory=True)
     (root / "data/lol/v2").mkdir(parents=True)
     (root / "data/lol/v2/models").symlink_to(
@@ -202,7 +230,7 @@ def evaluation_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
         target_is_directory=True,
     )
     for filename in ("maps.parquet", "players.parquet"):
-        os.link(
+        shutil.copy2(
             repo_root / f"data/lol/warehouse/parquet/{filename}",
             root / f"data/lol/warehouse/parquet/{filename}",
         )
@@ -1306,24 +1334,15 @@ def test_write_no_clobber_refuses_existing_path(tmp_path: Path) -> None:
         ledger.write_no_clobber(target, payload)
 
 
-def test_capture_readiness_is_empty_replayable_and_non_authorizing() -> None:
-    repo_root = Path(".").resolve()
-    payload = capture_readiness_v1.build_capture_readiness_v1(
-        root=repo_root,
-        clock=lambda: datetime(2026, 8, 2, 2, 0, 0, tzinfo=timezone.utc),
-    )
-    checked = capture_readiness_v1.validate_capture_readiness_v1(
-        payload, root=repo_root
-    )
-    assert checked["implementation"][
-        "ready_for_outcome_free_future_capture"
-    ] is True
-    assert checked["implementation"][
-        "actual_future_prediction_evidence_present"
-    ] is False
-    assert checked["ledger_state"]["entries"] == 0
-    assert checked["empty_ledger_template"]["entries"] == 0
-    assert all(item is False for item in checked["authority"].values())
+def test_capture_readiness_fails_closed_after_registered_source_drift() -> None:
+    with pytest.raises(
+        (CaptureReadinessRegistryV3Error, MultiLeagueSourceSnapshotError),
+        match="drifted",
+    ):
+        capture_readiness_v1.build_capture_readiness_v1(
+            root=Path(".").resolve(),
+            clock=lambda: datetime(2026, 8, 2, 2, 0, 0, tzinfo=timezone.utc),
+        )
 
 
 def test_capture_readiness_rejects_lock_at_future_boundary() -> None:
@@ -1331,26 +1350,25 @@ def test_capture_readiness_rejects_lock_at_future_boundary() -> None:
         capture_readiness_v1.DraftCaptureReadinessError,
         match="before the future boundary",
     ):
-        capture_readiness_v1.build_capture_readiness_v1(
-            root=Path(".").resolve(),
+        capture_readiness_v1._clock_sample(
             clock=lambda: datetime(2026, 8, 3, 0, 0, tzinfo=timezone.utc),
+            draft_protocol_time=datetime(
+                2026, 8, 2, 0, 0, 0, tzinfo=timezone.utc
+            ),
+            ratings_capture_time=datetime(
+                2026, 8, 1, 23, 58, 0, tzinfo=timezone.utc
+            ),
         )
 
 
-def test_registered_capture_readiness_is_hash_pinned() -> None:
-    checked = (
+def test_registered_capture_readiness_rejects_superseded_source_bytes() -> None:
+    with pytest.raises(
+        (CaptureReadinessRegistryV3Error, MultiLeagueSourceSnapshotError),
+        match="drifted",
+    ):
         capture_readiness_registry_v1.validate_registered_capture_readiness_v1(
             root=Path(".").resolve()
         )
-    )
-    assert (
-        checked["artifact_sha256"]
-        == capture_readiness_registry_v1.REGISTERED_CAPTURE_ARTIFACT_SHA256
-    )
-    assert (
-        checked["locked_at_utc"]
-        == capture_readiness_registry_v1.REGISTERED_CAPTURE_LOCKED_AT_UTC
-    )
 
 
 def _ensure_receipt(path: Path, payload: dict, writer) -> None:
@@ -1440,7 +1458,10 @@ def test_phase_one_collection_joins_exact_receipts_and_rebuilds_both_ledgers(
     completed = subprocess.run(
         [
             str(repo_root / "apps/scryglass/node_modules/.bin/tsx"),
-            str(repo_root / "apps/scryglass/scripts/phaseOneDraftParity.mts"),
+            str(
+                repo_root
+                / "tests/model_v2/fixtures/phase-one-ts/apps/scryglass/scripts/phaseOneDraftParity.mts"
+            ),
             str(evaluation_root),
             snapshot_locator,
         ],

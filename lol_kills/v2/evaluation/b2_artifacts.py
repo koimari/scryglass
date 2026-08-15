@@ -36,10 +36,10 @@ REGISTRAR_TRUST_ROOT_OBJECT_SHA256 = (
 # Updated only when the accepted, registrar-authorized synthetic registry bytes
 # are intentionally regenerated.
 FROZEN_SYNTHETIC_REGISTRY_RAW_SHA256 = (
-    "76ce7642e9dd21a24da5909971efb7520c1950441b496d65f21bf729c3d400e7"
+    "824ebc1db08c7a7d35001515cfbe19a0d3d6543f1886dd4fefe43121d8391455"
 )
 FROZEN_SYNTHETIC_REGISTRY_OBJECT_SHA256 = (
-    "97c6b1d451db763ef65775d96dba597aea5cf8f0c7ee9ef0b1744fa0004ba17d"
+    "3f215b05b2e5717b116216df2e170e0e35fe53ca0a4edb825c35d72f61a887c2"
 )
 
 _EXPECTED_FAMILIES = {

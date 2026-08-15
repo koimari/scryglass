@@ -13,6 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from lol_kills.v2.ratings.player.multileague_v3_capture_registry_v3 import (
+    CaptureReadinessRegistryV3Error,
+)
+
 from .adaptive_temporal_diagnostic import (
     AdaptiveTemporalDiagnosticError,
     validate_adaptive_temporal_diagnostic,
@@ -303,7 +307,12 @@ def inspect_l2_readiness(
         future_capture_sha256 = _sha256(
             (repo_root / FUTURE_CAPTURE_LOCATOR).read_bytes()
         )
-    except (OSError, ValueError, DraftCaptureReadinessRegistryError) as exc:
+    except (
+        OSError,
+        ValueError,
+        DraftCaptureReadinessRegistryError,
+        CaptureReadinessRegistryV3Error,
+    ) as exc:
         future_capture_error = str(exc)
     grid_source_readiness: dict[str, Any] | None = None
     grid_source_readiness_sha256: str | None = None

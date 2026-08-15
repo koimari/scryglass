@@ -8,6 +8,7 @@ import pytest
 
 from lol_kills.v2.ratings.player import multileague_v3_capture_readiness_v3 as readiness
 from lol_kills.v2.ratings.player.multileague_v3_capture_registry_v3 import (
+    CaptureReadinessRegistryV3Error,
     validate_registered_capture_readiness_v3,
 )
 
@@ -73,8 +74,10 @@ def test_capture_readiness_v3_rejects_clock_loophole_or_authority() -> None:
         )
 
 
-def test_registered_capture_readiness_v3_replays_with_empty_ledger() -> None:
-    payload = validate_registered_capture_readiness_v3(root=Path(".").resolve())
+def test_registered_capture_readiness_v3_replays_with_empty_ledger(
+    historical_capture_root: Path,
+) -> None:
+    payload = validate_registered_capture_readiness_v3(root=historical_capture_root)
     assert payload["result_state"] == readiness.RESULT_STATE
     assert payload["capture_contract"][
         "prediction_cli_user_timestamp_argument_present"
@@ -85,3 +88,11 @@ def test_registered_capture_readiness_v3_replays_with_empty_ledger() -> None:
     assert payload["implementation"]["ready_for_pre_event_capture"] is True
     assert payload["ledger_state"]["entries"] == 0
     assert all(value is False for value in payload["authority"].values())
+
+
+def test_registered_capture_readiness_v3_rejects_current_source_drift() -> None:
+    with pytest.raises(
+        CaptureReadinessRegistryV3Error,
+        match="capture readiness source drifted",
+    ):
+        validate_registered_capture_readiness_v3(root=Path(".").resolve())

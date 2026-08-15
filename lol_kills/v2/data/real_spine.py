@@ -34,6 +34,8 @@ PRIVATE_RIGHTS_STATUS = "PRIVATE_REVIEWED"
 PRIVATE_TARGET_STATUS = "PRIVATE_VERIFIED"
 SEALED_FINAL_STATUS = "SEALED_UNREAD"
 KOI_MARI_AUTHORITY_RAW_SHA256 = "b1d0a6e37abb9a74dee8689dc19ab54d30fd15516bd4ee454906a075d8f20788"
+KOI_MARI_AUTHORITY_LOCATOR = "data/lol/v2/models/draft-interactions/oe-private-target-authority-2026-07-29.json"
+LEGACY_KOI_MARI_AUTHORITY_LOCATOR = "data/lol/v2/models/draft-interactions/oe-private-target-authority.json"
 KOI_MARI_EVIDENCE_PAYLOAD_SHA256 = "6697ed142324f86e9b233c4a2b36dd501584e7e64449bb6cd9404f6a367d74f9"
 KOI_MARI_SPLIT_PAYLOAD_SHA256 = "469c8d2c568a6a4480db277bf41f7eacf72964e33997f0a4e1f53f60285cd3e4"
 EXPECTED_LPL_PRIVATE_PARTITION_COUNTS = {"TRAIN": 805, "DEVELOPMENT": 214, "VALIDATION": 207}
@@ -395,9 +397,15 @@ def _validate_target_receipts(values: Any, source_receipts: Mapping[str, Mapping
         _require_sha256(raw["target_payload_sha256"], "target_payload_sha256")
         _require_time(raw["target_available_at"], "target_available_at")
         authority_locator = _safe_relative_path(raw["authority_locator"], "authority_locator")
+        authority_raw_sha256 = _require_sha256(
+            raw["authority_raw_sha256"], "authority_raw_sha256"
+        )
         authority = validate_koi_mari_authority(
-            _safe_receipt_file(REPO_ROOT, authority_locator),
-            expected_raw_sha256=_require_sha256(raw["authority_raw_sha256"], "authority_raw_sha256"),
+            _resolve_koi_mari_authority_path(
+                authority_locator,
+                expected_raw_sha256=authority_raw_sha256,
+            ),
+            expected_raw_sha256=authority_raw_sha256,
         )
         if authority.get("evidence_payload_sha256") != _require_sha256(raw["evidence_payload_sha256"], "evidence_payload_sha256"):
             raise RealSpineError("target authority evidence payload binding mismatch")
@@ -432,6 +440,21 @@ def validate_koi_mari_authority(authority_path: Path, *, expected_raw_sha256: st
     if not all(authority.get(key) is True for key in ("source_rights_reviewed", "target_semantics_reviewed", "temporal_leakage_reviewed", "fixed_boundaries_reviewed", "independent_from_generator")) or authority.get("generator_authored") is not False:
         raise RealSpineError("target authority independent-review conditions are incomplete")
     return dict(authority)
+
+
+def _resolve_koi_mari_authority_path(
+    locator: str,
+    *,
+    expected_raw_sha256: str,
+) -> Path:
+    """Resolve the archived July receipt for its frozen legacy locator."""
+
+    if (
+        locator == LEGACY_KOI_MARI_AUTHORITY_LOCATOR
+        and expected_raw_sha256 == KOI_MARI_AUTHORITY_RAW_SHA256
+    ):
+        locator = KOI_MARI_AUTHORITY_LOCATOR
+    return _safe_receipt_file(REPO_ROOT, locator)
 
 
 def _validate_record(
@@ -847,7 +870,7 @@ def extract_lpl_private_development_snapshot(
     output_rows_path: Path,
     output_manifest_path: Path,
     target_rows_path: Path = REPO_ROOT / "data/lol/warehouse/private_v2/draft-interactions/oe-target-rows.parquet",
-    authority_path: Path = REPO_ROOT / "data/lol/v2/models/draft-interactions/oe-private-target-authority.json",
+    authority_path: Path = REPO_ROOT / KOI_MARI_AUTHORITY_LOCATOR,
     target_evidence_path: Path = REPO_ROOT / "data/lol/v2/models/draft-interactions/oe-private-target-evidence.json",
     cutoff_local_naive: str = "2026-06-01T00:00:00",
 ) -> dict[str, Any]:
@@ -1171,7 +1194,11 @@ def main(argv: Iterable[str] | None = None) -> int:
     lpl_build.add_argument("--maps", type=Path, default=REPO_ROOT / "data/lol/warehouse/parquet/maps.parquet")
     lpl_build.add_argument("--player-games", type=Path, default=REPO_ROOT / "data/lol/warehouse/parquet/oe_player_games.parquet")
     lpl_build.add_argument("--target-rows", type=Path, default=REPO_ROOT / "data/lol/warehouse/private_v2/draft-interactions/oe-target-rows.parquet")
-    lpl_build.add_argument("--authority", type=Path, default=REPO_ROOT / "data/lol/v2/models/draft-interactions/oe-private-target-authority.json")
+    lpl_build.add_argument(
+        "--authority",
+        type=Path,
+        default=REPO_ROOT / KOI_MARI_AUTHORITY_LOCATOR,
+    )
     lpl_build.add_argument("--target-evidence", type=Path, default=REPO_ROOT / "data/lol/v2/models/draft-interactions/oe-private-target-evidence.json")
     lpl_build.add_argument("--rows-output", type=Path, required=True)
     lpl_build.add_argument("--manifest-output", type=Path, required=True)
@@ -1201,13 +1228,15 @@ def main(argv: Iterable[str] | None = None) -> int:
                 cutoff_local_naive=args.cutoff_local_naive,
             )
             result = {"manifest_sha256": manifest["manifest_sha256"], "rows_sha256": manifest["rows_sha256"], "claim_scope": manifest["claim_scope"]["state"]}
-        else:
+        elif args.command == "lpl-verify":
             manifest = verify_lpl_private_development_snapshot(
                 rows_path=args.rows,
                 manifest_path=args.manifest,
                 expected_manifest_sha256=args.expected_manifest_sha256,
             )
             result = {"manifest_sha256": manifest["manifest_sha256"], "rows_sha256": manifest["rows_sha256"], "verified": True}
+        else:
+            raise RealSpineError(f"unsupported command: {args.command}")
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, RealSpineError) as error:
         parser.error(str(error))
     print(json.dumps(result, sort_keys=True))

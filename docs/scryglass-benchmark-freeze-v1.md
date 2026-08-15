@@ -303,9 +303,11 @@ ledger service.
 The sole human-authority reuse recorded for the future G1 handoff is
 `oe_target_evidence.require_exact_human_authority->representation_rank_private_runner`
 with reviewer `KOI_MARI` and approval scope
-`private_retrospective_oe_target_v1`. The manifest-bound handoff reopens
-`data/lol/v2/models/draft-interactions/oe-private-target-authority.json` at raw
-SHA-256
+`private_retrospective_oe_target_v1`. The manifest-bound handoff reopens the
+archived receipt at
+`data/lol/v2/models/draft-interactions/oe-private-target-authority-2026-07-29.json`.
+Frozen legacy manifests retain the former unversioned locator. The resolver
+uses the archived receipt only when they also supply raw SHA-256
 `b1d0a6e37abb9a74dee8689dc19ab54d30fd15516bd4ee454906a075d8f20788`.
 Its only approved actions are `model_fit` and `rank_selection`, and the
 artifact must retain `final_temporal_holdout_sealed=true`. It excludes

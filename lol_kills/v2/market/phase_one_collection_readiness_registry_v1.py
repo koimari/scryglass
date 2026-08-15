@@ -10,7 +10,6 @@ from typing import Any
 
 from .phase_one_collection_readiness_v1 import (
     DEFAULT_OUTPUT,
-    PhaseOneCollectionReadinessError,
     validate_phase_one_collection_readiness_v1,
 )
 
@@ -49,7 +48,7 @@ def validate_registered_phase_one_collection_readiness_v1(
         checked = validate_phase_one_collection_readiness_v1(
             payload, root=root
         )
-    except (PhaseOneCollectionReadinessError, OSError, ValueError) as exc:
+    except (RuntimeError, OSError, ValueError) as exc:
         raise PhaseOneCollectionReadinessRegistryError(str(exc)) from exc
     if (
         checked.get("artifact_sha256")

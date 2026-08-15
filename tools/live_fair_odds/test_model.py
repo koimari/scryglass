@@ -135,6 +135,17 @@ class LiveTotalsTests(unittest.TestCase):
 
 
 class IntegrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        context = {
+            "teams": [
+                {"team": "Bilibili Gaming", "league": "LPL"},
+                {"team": "LGD Gaming", "league": "LPL"},
+            ]
+        }
+        context_patch = patch.object(model, "_context", return_value=context)
+        context_patch.start()
+        self.addCleanup(context_patch.stop)
+
     def test_registered_roster_does_not_self_authorize_missing_ratings(self) -> None:
         registered = {
             "status": "registered",
@@ -197,10 +208,8 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertIsNone(result["live_win"]["p_blue"])
         self.assertEqual(result["winner_reprice"]["mode"], "unavailable")
-        self.assertEqual(
-            result["pregame_win"]["draft_score"]["model_kind"],
-            "canonical_terminal_neutral",
-        )
+        self.assertFalse(result["pregame_win"]["available"])
+        self.assertNotIn("draft_score", result["pregame_win"])
         self.assertFalse(
             result["pregame_win"]["strength_expectation"]["team_rating_authorized"]
         )
@@ -209,13 +218,18 @@ class IntegrationTests(unittest.TestCase):
         )
         self.assertEqual(
             result["winner_reprice"]["component_authority"]["draft_score"]["status"],
-            "development_only",
+            "unavailable",
+        )
+        self.assertIn(
+            "independent_l2_authority_unavailable",
+            result["winner_reprice"]["component_authority"]["draft_score"][
+                "blockers"
+            ],
         )
         self.assertFalse(
             result["winner_reprice"]["component_authority"]["team_rating"]["authorized"]
         )
-        self.assertIsNotNone(result["pregame_win"]["draft_score"]["blue"])
-        self.assertIsNone(result["pregame_win"]["p_blue"])
+        self.assertNotIn("p_blue", result["pregame_win"])
         self.assertIsNone(result["winner_reprice"]["diagnostic_p_blue"])
         self.assertIsNone(result["winner_reprice"]["blue"]["probability"])
         self.assertIsNone(result["winner_reprice"]["blue"]["expected_return_pct"])

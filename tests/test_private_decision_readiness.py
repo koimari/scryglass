@@ -38,7 +38,11 @@ def test_current_rating_and_total_artifacts_remain_fail_closed(monkeypatch) -> N
     assert report["ratings"]["checks"]["warehouse_source_pins_match_current_files"] is True
     assert report["ratings"]["checks"][
         "prospective_source_snapshot_replaces_mutable_warehouse_dependency"
-    ] is True
+    ] is False
+    assert (
+        "prospective_source_snapshot_replaces_mutable_warehouse_dependency"
+        in report["ratings"]["blockers"]
+    )
     assert report["ratings"]["checks"][
         "semantic_output_contract_trust_root_current_and_valid"
     ] is False
@@ -98,10 +102,10 @@ def test_current_rating_and_total_artifacts_remain_fail_closed(monkeypatch) -> N
     ] is False
     assert report["ratings"]["checks"][
         "v3_pre_event_prediction_ledger_capture_ready"
-    ] is True
+    ] is False
     assert report["ratings"]["checks"][
         "v3_prediction_and_ledger_system_clock_hardened"
-    ] is True
+    ] is False
     assert report["ratings"]["checks"][
         "v3_pre_event_prediction_ledger_has_eligible_entries"
     ] is False
@@ -159,14 +163,14 @@ def test_current_rating_and_total_artifacts_remain_fail_closed(monkeypatch) -> N
         "v3_capture_readiness_v2_superseded"
     ]["qualifies_as_current_implementation_evidence"] is False
     assert report["ratings"]["artifacts"]["v3_capture_readiness"][
+        "present_and_valid"
+    ] is False
+    assert report["ratings"]["artifacts"]["v3_capture_readiness"][
         "result_state"
-    ] == "SYSTEM_CLOCKED_PRE_EVENT_CAPTURE_IMPLEMENTATION_READY_EMPTY_LEDGER"
-    assert report["ratings"]["artifacts"]["v3_capture_readiness"][
-        "clock_attestation"
-    ]["user_supplied_timestamp_allowed"] is False
-    assert report["ratings"]["artifacts"]["v3_capture_readiness"][
-        "implementation"
-    ]["ready_for_pre_event_capture"] is True
+    ] is None
+    assert "capture readiness source drifted" in report["ratings"]["artifacts"][
+        "v3_capture_readiness"
+    ]["error"]
     assert report["ratings"]["checks"]["v2_protocol_lock_present_and_valid"] is True
     assert report["ratings"]["checks"]["v2_protocol_artifact_integrity_valid"] is True
     assert report["ratings"]["checks"]["v2_protocol_source_replay_valid"] is True
@@ -269,16 +273,17 @@ def test_current_rating_and_total_artifacts_remain_fail_closed(monkeypatch) -> N
         ]
         is False
     )
-    assert report["match_winner_market"]["protocol"]["present_and_valid"] is True
-    assert report["match_winner_market"]["protocol"]["result_state"] == (
-        "TWO_STAGE_PROSPECTIVE_MARKET_PROTOCOL_LOCKED_EMPTY"
-    )
+    assert report["match_winner_market"]["protocol"]["present_and_valid"] is False
+    assert report["match_winner_market"]["protocol"]["result_state"] is None
+    assert "capture readiness source drifted" in report["match_winner_market"][
+        "protocol"
+    ]["error"]
     assert report["match_winner_market"]["checks"][
         "future_market_protocol_locked_and_valid"
-    ] is True
+    ] is False
     assert report["match_winner_market"]["checks"][
         "phase_one_future_outcomes_still_sealed"
-    ] is True
+    ] is False
     assert report["match_winner_market"]["checks"][
         "outcome_free_phase_one_collection_contract_present"
     ] is True
@@ -348,13 +353,13 @@ def test_current_rating_and_total_artifacts_remain_fail_closed(monkeypatch) -> N
     ] is False
     assert report["match_winner_market"]["checks"][
         "phase_one_collection_readiness_locked_empty_and_valid"
-    ] is True
+    ] is False
     assert report["match_winner_market"]["phase_one_collection"][
         "registered_readiness"
-    ]["present_and_valid"] is True
+    ]["present_and_valid"] is False
     assert report["match_winner_market"]["phase_one_collection"][
         "registered_readiness"
-    ]["locked_empty_collection_state"]["plans"] == 0
+    ]["locked_empty_collection_state"] is None
     assert report["match_winner_market"]["phase_one_collection"]["inventory"][
         "unvalidated_event_bundle_files"
     ] == 0
@@ -363,25 +368,25 @@ def test_current_rating_and_total_artifacts_remain_fail_closed(monkeypatch) -> N
     ] is False
     assert report["match_winner_market"]["checks"][
         "phase_one_evaluation_readiness_locked_empty_and_valid"
-    ] is True
+    ] is False
     assert report["match_winner_market"]["phase_one_evaluation"][
         "registered_readiness"
-    ]["present_and_valid"] is True
+    ]["present_and_valid"] is False
     assert report["match_winner_market"]["phase_one_evaluation"][
         "registered_readiness"
-    ]["locked_empty_state"]["outcomes_accessed"] is False
+    ]["locked_empty_state"] is None
     assert report["match_winner_market"]["phase_one_evaluation"][
         "independent_registry"
     ]["present_and_valid"] is False
     assert report["match_winner_market"]["checks"][
         "post_pass_probability_pipeline_implementation_frozen_pre_boundary"
-    ] is True
+    ] is False
     assert report["match_winner_market"]["post_pass_probability_pipeline"][
         "registered_readiness"
-    ]["present_and_valid"] is True
+    ]["present_and_valid"] is False
     assert report["match_winner_market"]["post_pass_probability_pipeline"][
         "registered_readiness"
-    ]["locked_empty_state"]["outcomes_accessed"] is False
+    ]["locked_empty_state"] is None
     assert report["match_winner_market"]["post_pass_probability_pipeline"][
         "independent_registry"
     ]["present_and_valid"] is False
@@ -390,10 +395,10 @@ def test_current_rating_and_total_artifacts_remain_fail_closed(monkeypatch) -> N
     ] is False
     assert report["match_winner_market"]["checks"][
         "phase_two_not_started_before_phase_one"
-    ] is True
+    ] is False
     assert report["match_winner_market"]["checks"][
         "quote_builder_time_not_misrepresented_as_transport_time"
-    ] is True
+    ] is False
     assert report["match_winner_market"]["checks"][
         "public_bookmaker_terms_snapshot_locked_and_valid"
     ] is True
@@ -402,16 +407,16 @@ def test_current_rating_and_total_artifacts_remain_fail_closed(monkeypatch) -> N
     ] is True
     assert report["match_winner_market"]["checks"][
         "source_specific_quote_adapter_candidate_locked_and_valid"
-    ] is True
+    ] is False
     assert report["match_winner_market"]["checks"][
         "source_specific_quote_adapter_independently_registered"
     ] is False
     assert report["match_winner_market"]["source_specific_quote_adapter"][
         "candidate"
-    ]["present_and_valid"] is True
+    ]["present_and_valid"] is False
     assert report["match_winner_market"]["source_specific_quote_adapter"][
         "candidate"
-    ]["registration"]["independently_registered"] is False
+    ]["registration"] is None
     assert report["match_winner_market"]["source_specific_quote_adapter"][
         "independent_registry"
     ]["present_and_valid"] is False
@@ -494,7 +499,7 @@ def test_current_rating_and_total_artifacts_remain_fail_closed(monkeypatch) -> N
     )
     assert (
         "match_winner_market:source_specific_quote_adapter_candidate_locked_and_valid"
-        not in report["blockers"]
+        in report["blockers"]
     )
 
 

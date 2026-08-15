@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,7 +16,24 @@ from lol_kills.v2.ratings.player.multileague_v3_temporal_failure_registry import
 OBSERVED_AT = "2026-08-01T23:48:55.873475+00:00"
 
 
-def test_future_dated_receipts_are_rejected_without_future_outcomes() -> None:
+def _use_recorded_creation_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_read_target = failure._read_target
+    recorded_epoch = datetime.fromisoformat(OBSERVED_AT).timestamp() - 1
+
+    def read_target(root: Path, spec: dict[str, str]) -> tuple[object, dict]:
+        _path, payload = original_read_target(root, spec)
+        historical_path = SimpleNamespace(
+            stat=lambda: SimpleNamespace(st_birthtime=recorded_epoch)
+        )
+        return historical_path, payload
+
+    monkeypatch.setattr(failure, "_read_target", read_target)
+
+
+def test_future_dated_receipts_are_rejected_without_future_outcomes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_recorded_creation_time(monkeypatch)
     payload = failure.build_temporal_failure_receipt(
         observed_at=OBSERVED_AT,
         root=Path(".").resolve(),
@@ -30,7 +49,10 @@ def test_future_dated_receipts_are_rejected_without_future_outcomes() -> None:
     assert all(value is False for value in payload["authority"].values())
 
 
-def test_temporal_failure_rejects_rehabilitation_or_authority() -> None:
+def test_temporal_failure_rejects_rehabilitation_or_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_recorded_creation_time(monkeypatch)
     payload = failure.build_temporal_failure_receipt(
         observed_at=OBSERVED_AT,
         root=Path(".").resolve(),

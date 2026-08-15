@@ -1,7 +1,7 @@
 {
   "schema_version": "g0-candidate-registry-v1.4",
   "registry_id": "scryglass:candidate-registry:v1.4",
-  "contract_set_sha256": "22e8a93a650987026da8980309435a44207529dc42f049333f4a427732bac471",
+  "contract_set_sha256": "810f87c89a93431dddcd970fd0c1a4fc4f55d6df2969c7a771b5f11087cd1977",
   "final_labels_read": false,
   "wcr_evidence_binding_contract": {
     "input_row_fields": [
@@ -59,7 +59,7 @@
     "reviewer_identity": "KOI_MARI",
     "approval_scope": "private_retrospective_oe_target_v1",
     "authority_artifact": {
-      "relative_path": "data/lol/v2/models/draft-interactions/oe-private-target-authority.json",
+      "relative_path": "data/lol/v2/models/draft-interactions/oe-private-target-authority-2026-07-29.json",
       "raw_sha256": "b1d0a6e37abb9a74dee8689dc19ab54d30fd15516bd4ee454906a075d8f20788"
     },
     "approved_actions": [

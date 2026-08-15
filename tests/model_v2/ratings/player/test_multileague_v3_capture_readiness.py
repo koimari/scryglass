@@ -18,10 +18,12 @@ def _resign(payload: dict) -> None:
     )
 
 
-def test_capture_implementation_is_ready_while_ledger_remains_empty() -> None:
+def test_capture_implementation_is_ready_while_ledger_remains_empty(
+    historical_capture_root: Path,
+) -> None:
     payload = readiness.build_capture_readiness(
         locked_at="2026-08-02T00:10:00Z",
-        root=Path(".").resolve(),
+        root=historical_capture_root,
     )
     assert payload["result_state"] == readiness.RESULT_STATE
     assert payload["implementation"]["ready_for_pre_event_capture"] is True
@@ -32,10 +34,12 @@ def test_capture_implementation_is_ready_while_ledger_remains_empty() -> None:
     assert all(value is None for value in payload["decision_outputs"].values())
 
 
-def test_capture_readiness_rejects_fabricated_evidence_or_authority() -> None:
+def test_capture_readiness_rejects_fabricated_evidence_or_authority(
+    historical_capture_root: Path,
+) -> None:
     payload = readiness.build_capture_readiness(
         locked_at="2026-08-02T00:10:00Z",
-        root=Path(".").resolve(),
+        root=historical_capture_root,
     )
     forged_evidence = deepcopy(payload)
     forged_evidence["implementation"]["actual_future_prediction_evidence_present"] = True
@@ -43,7 +47,7 @@ def test_capture_readiness_rejects_fabricated_evidence_or_authority() -> None:
     with pytest.raises(readiness.CaptureReadinessError, match="status changed"):
         readiness.validate_capture_readiness(
             forged_evidence,
-            root=Path(".").resolve(),
+            root=historical_capture_root,
         )
 
     forged_authority = deepcopy(payload)
@@ -52,17 +56,18 @@ def test_capture_readiness_rejects_fabricated_evidence_or_authority() -> None:
     with pytest.raises(readiness.CaptureReadinessError, match="exceeds authority"):
         readiness.validate_capture_readiness(
             forged_authority,
-            root=Path(".").resolve(),
+            root=historical_capture_root,
         )
 
 
-def test_future_dated_v1_capture_receipt_is_reissued_on_current_sources() -> None:
-    """After the 2026-08-07 refresh regeneration the v1 capture implementation
-    was re-locked on the current canonical sources and replays as valid
-    (pre-event, empty ledger).  The earlier 'remains rejected' expectation
-    encoded the historical stale receipt, which no longer exists."""
-    payload = validate_registered_capture_readiness(root=Path(".").resolve())
+def test_v1_capture_receipt_replays_only_on_archived_sources(
+    historical_capture_root: Path,
+    private_test_root: Path,
+) -> None:
+    payload = validate_registered_capture_readiness(root=historical_capture_root)
     assert payload["result_state"] == readiness.RESULT_STATE
     assert payload["implementation"]["ready_for_pre_event_capture"] is True
     assert payload["ledger_state"]["entries"] == 0
     assert all(value is False for value in payload["authority"].values())
+    with pytest.raises(CaptureReadinessRegistryError, match="source drifted"):
+        validate_registered_capture_readiness(root=private_test_root)

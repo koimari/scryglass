@@ -14,15 +14,7 @@ import pytest
 import pandas as pd
 import pyarrow as pa
 
-from lol_kills.v2.data.real_spine import (
-    EMBARGO_HOURS,
-    RealSpineError,
-    build_real_v1_packet,
-    canonical_packet_bytes,
-    extract_lpl_private_development_snapshot,
-    verify_lpl_private_development_snapshot,
-    write_real_v1_packet,
-)
+import lol_kills.v2.data.real_spine as spine
 
 
 def _sha(value: bytes = b"evidence") -> str:
@@ -170,12 +162,12 @@ def _payload() -> dict[str, object]:
         "records": [record],
         "split_assignments": [{"source_series_id": "11995", "partition": "TRAIN"}],
         "final_holdout": {"status": "SEALED_UNREAD", "cutoff": "2026-06-01T00:00:00Z", "receipt_sha256": "e" * 64},
-        "availability_policy": {"kind": "RETROSPECTIVE_FIXED_EMBARGO", "embargo_hours": EMBARGO_HOURS, "development_only": True},
+        "availability_policy": {"kind": "RETROSPECTIVE_FIXED_EMBARGO", "embargo_hours": spine.EMBARGO_HOURS, "development_only": True},
     }
 
 
 def test_lpl_source_family_url_and_ordinal_are_accepted_without_a_time_heuristic() -> None:
-    packet = build_real_v1_packet(_payload())
+    packet = spine.build_real_v1_packet(_payload())
     assert packet["coverage"]["map_count"] == 1
     assert packet["coverage"]["source_series_family_count"] == 1
     assert packet["coverage"]["prior_map_eligible_after_embargo_count"] == 1
@@ -189,11 +181,28 @@ def test_lpl_source_family_url_and_ordinal_are_accepted_without_a_time_heuristic
     }
 
 
+def test_legacy_authority_locator_resolves_only_to_the_exact_archived_receipt() -> None:
+    archived = spine._resolve_koi_mari_authority_path(
+        spine.LEGACY_KOI_MARI_AUTHORITY_LOCATOR,
+        expected_raw_sha256=spine.KOI_MARI_AUTHORITY_RAW_SHA256,
+    )
+    assert archived == spine.REPO_ROOT / spine.KOI_MARI_AUTHORITY_LOCATOR
+    assert spine._raw_file_sha256(archived) == spine.KOI_MARI_AUTHORITY_RAW_SHA256
+
+    current = spine.REPO_ROOT / spine.LEGACY_KOI_MARI_AUTHORITY_LOCATOR
+    assert spine._raw_file_sha256(current) != spine.KOI_MARI_AUTHORITY_RAW_SHA256
+    unresolved = spine._resolve_koi_mari_authority_path(
+        spine.LEGACY_KOI_MARI_AUTHORITY_LOCATOR,
+        expected_raw_sha256="f" * 64,
+    )
+    assert unresolved == current
+
+
 def test_future_prior_mutation_never_becomes_eligible_for_an_earlier_map() -> None:
-    first = build_real_v1_packet(_payload())
+    first = spine.build_real_v1_packet(_payload())
     payload = _payload()
     payload["records"][0]["prior_map_receipts"][1]["value_sha256"] = "f" * 64
-    second = build_real_v1_packet(payload)
+    second = spine.build_real_v1_packet(payload)
     assert first["coverage"]["prior_map_eligible_after_embargo_count"] == 1
     assert second["coverage"]["prior_map_eligible_after_embargo_count"] == 1
     assert second["coverage"]["prior_map_excluded_by_embargo_count"] == 1
@@ -214,21 +223,21 @@ def test_future_prior_mutation_never_becomes_eligible_for_an_earlier_map() -> No
 def test_identity_roster_series_time_and_target_escape_routes_fail_closed(mutate, match: str) -> None:
     payload = _payload()
     mutate(payload)
-    with pytest.raises(RealSpineError, match=match):
-        build_real_v1_packet(payload)
+    with pytest.raises(spine.RealSpineError, match=match):
+        spine.build_real_v1_packet(payload)
 
 
 def test_source_series_cannot_cross_partitions() -> None:
     payload = _payload()
     payload["split_assignments"].append({"source_series_id": "11995", "partition": "VALIDATION"})
-    with pytest.raises(RealSpineError, match="crosses split"):
-        build_real_v1_packet(payload)
+    with pytest.raises(spine.RealSpineError, match="crosses split"):
+        spine.build_real_v1_packet(payload)
 
 
 def test_same_source_series_prior_is_explicitly_excluded() -> None:
     payload = _payload()
     payload["records"][0]["prior_map_receipts"][0]["origin_source_series_id"] = "11995"
-    packet = build_real_v1_packet(payload)
+    packet = spine.build_real_v1_packet(payload)
     assert packet["coverage"]["prior_map_eligible_after_embargo_count"] == 0
     assert packet["coverage"]["prior_map_excluded_same_source_series_count"] == 1
 
@@ -254,13 +263,13 @@ def test_receipt_path_and_hash_attacks_fail_closed(tmp_path: Path, kind: str) ->
         payload["source_receipts"][0]["evidence_locator"] = "receipts/hard.json"
     else:
         payload["source_receipts"][0]["evidence_sha256"] = "0" * 64
-    with pytest.raises(RealSpineError):
-        build_real_v1_packet(payload, evidence_root=root)
+    with pytest.raises(spine.RealSpineError):
+        spine.build_real_v1_packet(payload, evidence_root=root)
 
 
 def test_packet_is_byte_identical_across_fresh_processes_and_rejects_tampering(tmp_path: Path) -> None:
     payload = _payload()
-    local = build_real_v1_packet(payload)
+    local = spine.build_real_v1_packet(payload)
     payload_path = tmp_path / "payload.json"
     payload_path.write_text(json.dumps(payload), encoding="utf-8")
     code = (
@@ -272,20 +281,20 @@ def test_packet_is_byte_identical_across_fresh_processes_and_rejects_tampering(t
     command = [sys.executable, "-c", code, str(payload_path)]
     first = subprocess.run(command, cwd=Path(__file__).parents[3], check=True, capture_output=True).stdout
     second = subprocess.run(command, cwd=Path(__file__).parents[3], check=True, capture_output=True).stdout
-    assert first == second == canonical_packet_bytes(local)
+    assert first == second == spine.canonical_packet_bytes(local)
     tampered = dict(local)
     tampered["claim_scope"] = {"state": "PUBLIC"}
-    with pytest.raises(RealSpineError, match="packet_sha256"):
-        canonical_packet_bytes(tampered)
+    with pytest.raises(spine.RealSpineError, match="packet_sha256"):
+        spine.canonical_packet_bytes(tampered)
     output = tmp_path / "packet.json"
-    assert write_real_v1_packet(local, output) == _sha(output.read_bytes())
+    assert spine.write_real_v1_packet(local, output) == _sha(output.read_bytes())
 
 
 @pytest.mark.parametrize("kind", ("symlink", "hardlink"))
 def test_output_path_aliases_are_rejected_before_any_packet_write(tmp_path: Path, kind: str) -> None:
     """A readiness packet must not overwrite an attacker-selected alias."""
 
-    packet = build_real_v1_packet(_payload())
+    packet = spine.build_real_v1_packet(_payload())
     backing = tmp_path / "backing.json"
     backing.write_bytes(b"leave-me-alone")
     output = tmp_path / f"{kind}.json"
@@ -294,9 +303,21 @@ def test_output_path_aliases_are_rejected_before_any_packet_write(tmp_path: Path
     else:
         os.link(backing, output)
     before = backing.read_bytes()
-    with pytest.raises(RealSpineError, match="symlink|hard-linked|regular"):
-        write_real_v1_packet(packet, output)
+    with pytest.raises(spine.RealSpineError, match="symlink|hard-linked|regular"):
+        spine.write_real_v1_packet(packet, output)
     assert backing.read_bytes() == before
+
+
+def test_cli_rejects_an_unrecognized_command_before_printing_a_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        spine.argparse.ArgumentParser,
+        "parse_args",
+        lambda _parser, _argv: spine.argparse.Namespace(command="future-command"),
+    )
+    with pytest.raises(SystemExit):
+        spine.main([])
 
 
 def _adapter_tables() -> tuple[pa.Table, pa.Table]:
@@ -354,8 +375,6 @@ def _adapter_target_rows(*, split: str = "validation", outcome: int = 1) -> pa.T
 
 def _patch_g2_private_authority(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate adapter-shape attacks; real authority is checked separately."""
-
-    import lol_kills.v2.data.real_spine as spine
 
     monkeypatch.setattr(spine, "_repo_relative_locator", lambda path: Path(path).name)
     monkeypatch.setattr(spine, "_safe_repo_input_file", lambda path, _name: Path(path))
@@ -417,7 +436,7 @@ def test_g2_adapter_pushes_nonfinal_target_filter_and_uses_frozen_target_split(
     (tmp_path / "target.parquet").write_bytes(b"adapter-target-test")
     (tmp_path / "authority.json").write_bytes(b"authority")
     (tmp_path / "evidence.json").write_bytes(b"evidence")
-    manifest = extract_lpl_private_development_snapshot(
+    manifest = spine.extract_lpl_private_development_snapshot(
         maps_path=tmp_path / "maps.parquet",
         player_games_path=tmp_path / "players.parquet",
         output_rows_path=rows,
@@ -492,8 +511,8 @@ def test_g2_target_escape_routes_fail_closed(
     _patch_g2_private_authority(monkeypatch)
     for name in ("maps.parquet", "players.parquet", "target.parquet", "authority.json", "evidence.json"):
         (tmp_path / name).write_bytes(b"test")
-    with pytest.raises(RealSpineError, match=match):
-        extract_lpl_private_development_snapshot(
+    with pytest.raises(spine.RealSpineError, match=match):
+        spine.extract_lpl_private_development_snapshot(
             maps_path=tmp_path / "maps.parquet",
             player_games_path=tmp_path / "players.parquet",
             target_rows_path=tmp_path / "target.parquet",
@@ -544,8 +563,8 @@ def test_g2_source_family_cannot_cross_frozen_target_partitions(
     _patch_g2_private_authority(monkeypatch)
     for name in ("maps.parquet", "players.parquet", "target.parquet", "authority.json", "evidence.json"):
         (tmp_path / name).write_bytes(b"test")
-    with pytest.raises(RealSpineError, match="family crosses"):
-        extract_lpl_private_development_snapshot(
+    with pytest.raises(spine.RealSpineError, match="family crosses"):
+        spine.extract_lpl_private_development_snapshot(
             maps_path=tmp_path / "maps.parquet",
             player_games_path=tmp_path / "players.parquet",
             target_rows_path=tmp_path / "target.parquet",
@@ -579,8 +598,8 @@ def test_g2_preflights_all_output_destinations_before_replacing_either(
     backing_manifest.write_bytes(b"manifest-before")
     manifest_alias = tmp_path / "manifest.json"
     manifest_alias.symlink_to(backing_manifest)
-    with pytest.raises(RealSpineError, match="symlink|regular"):
-        extract_lpl_private_development_snapshot(
+    with pytest.raises(spine.RealSpineError, match="symlink|regular"):
+        spine.extract_lpl_private_development_snapshot(
             maps_path=tmp_path / "maps.parquet",
             player_games_path=tmp_path / "players.parquet",
             target_rows_path=tmp_path / "target.parquet",
@@ -597,7 +616,7 @@ def test_persisted_g2_artifact_has_exact_authorized_counts_and_no_final_rows() -
     root = Path(__file__).parents[3]
     rows_path = root / "data/lol/v2/snapshots/real-v1/lpl-private-development-rows.jsonl"
     manifest_path = root / "data/lol/v2/snapshots/real-v1/lpl-private-development-manifest.json"
-    manifest = verify_lpl_private_development_snapshot(
+    manifest = spine.verify_lpl_private_development_snapshot(
         rows_path=rows_path,
         manifest_path=manifest_path,
         expected_manifest_sha256="3af87fffb2b32fd95aeb920409abe0254fa158b3dc7f079650b3472731d4ff72",
@@ -646,8 +665,6 @@ def test_persisted_g2_artifact_is_byte_identical_across_fresh_process_verificati
 def test_g2_input_receipt_aliases_are_rejected(kind: str) -> None:
     """All authority/source inputs must be direct repository-owned files."""
 
-    import lol_kills.v2.data.real_spine as spine
-
     root = Path(__file__).parents[3]
     with tempfile.TemporaryDirectory(dir=root) as temporary:
         directory = Path(temporary)
@@ -658,7 +675,7 @@ def test_g2_input_receipt_aliases_are_rejected(kind: str) -> None:
             alias.symlink_to(regular)
         else:
             os.link(regular, alias)
-        with pytest.raises(RealSpineError, match="symlink|hard-linked"):
+        with pytest.raises(spine.RealSpineError, match="symlink|hard-linked"):
             spine._safe_repo_input_file(alias, "authority_path")
 
 
@@ -676,12 +693,11 @@ def test_g2_verifier_rejects_a_self_rehashed_manifest(tmp_path: Path, monkeypatc
     manifest["rows_sha256"] = _sha(mutated_rows)
     unsigned = dict(manifest)
     unsigned.pop("manifest_sha256")
-    import lol_kills.v2.data.real_spine as spine
     monkeypatch.setattr(spine, "_safe_repo_input_file", lambda path, _name: Path(path))
     manifest["manifest_sha256"] = spine.sha256_bytes(spine.canonical_json_bytes(unsigned))
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    with pytest.raises(RealSpineError, match="independently pinned"):
-        verify_lpl_private_development_snapshot(
+    with pytest.raises(spine.RealSpineError, match="independently pinned"):
+        spine.verify_lpl_private_development_snapshot(
             rows_path=rows_path,
             manifest_path=manifest_path,
             expected_manifest_sha256="3af87fffb2b32fd95aeb920409abe0254fa158b3dc7f079650b3472731d4ff72",
