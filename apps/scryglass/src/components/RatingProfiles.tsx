@@ -357,7 +357,6 @@ function TeamGameStats({ stats, patch, team }: { stats?: ProfileTeamStats; patch
           {values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
         </dl>
       </div>
-      <p className={styles.objectiveScrollHint}>Swipe sideways for more statistics.</p>
       <p className={styles.objectiveLegend}>
         {hasObjective
           ? "A numeric 0 is a reported count. A dash means the source did not publish that field."
