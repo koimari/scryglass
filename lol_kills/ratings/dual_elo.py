@@ -153,7 +153,10 @@ def build_dual_ratings(
     states: dict[str, TeamState] = defaultdict(lambda: TeamState(sigma=cfg.sigma0))
 
     rows = []
-    for _, row in df.iterrows():
+    # ``iterrows`` constructs a pandas Series for every map.  Numerical
+    # replay runs score the same history many times, so use plain records
+    # while keeping the existing row.get access contract.
+    for row in df.to_dict(orient="records"):
         bt = normalize_team(str(row.get("blue_team") or ""))
         rt = normalize_team(str(row.get("red_team") or ""))
         d = pd.Timestamp(row["date"]) if pd.notna(row.get("date")) else None
