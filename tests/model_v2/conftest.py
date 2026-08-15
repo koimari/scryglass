@@ -11,6 +11,13 @@ from lol_kills.v2.draft.terminal import future_prediction_ledger as ledger
 
 
 @pytest.fixture(scope="session")
+def private_test_root() -> Path:
+    return Path(
+        os.environ.get("SCRYGLASS_PRIVATE_TEST_ROOT", Path(".").resolve())
+    ).resolve()
+
+
+@pytest.fixture(scope="session")
 def historical_capture_root(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Path:
