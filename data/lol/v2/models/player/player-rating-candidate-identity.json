@@ -43,10 +43,10 @@
     },
     {
       "artifact_id": "l4-player-model-source-v3",
-      "canonical_sha256": "cd7f6938eb69ae6e1edbe46bb20b67f861e466597ea9042eb3501dce33df6f45",
+      "canonical_sha256": "c9f6c6ab1f6147a351002c175c4ea1e50a8fef8cca4a5b3a15c09fa5a5e39fe4",
       "locator": "lol_kills/v2/ratings/player/model.py",
       "media_type": "text/x-python",
-      "raw_sha256": "cd7f6938eb69ae6e1edbe46bb20b67f861e466597ea9042eb3501dce33df6f45",
+      "raw_sha256": "c9f6c6ab1f6147a351002c175c4ea1e50a8fef8cca4a5b3a15c09fa5a5e39fe4",
       "role": "model_source"
     },
     {
@@ -99,10 +99,10 @@
     },
     {
       "artifact_id": "scryglass:c1:foundation-freeze-authority:v1",
-      "canonical_sha256": "507619937e28723eb3d4133bd9c0370cf615b3025c5eccd36caff9fe29b55a8d",
+      "canonical_sha256": "d4221d3925cb04f94f3e9748fb8e54d13d7947227ed5584058a0f2232f97b076",
       "locator": "data/lol/v2/evaluation/b2/checkpoint-c1-authority.json",
       "media_type": "application/json",
-      "raw_sha256": "507619937e28723eb3d4133bd9c0370cf615b3025c5eccd36caff9fe29b55a8d",
+      "raw_sha256": "d4221d3925cb04f94f3e9748fb8e54d13d7947227ed5584058a0f2232f97b076",
       "role": "c1_authority"
     }
   ],
@@ -111,9 +111,9 @@
     "artifact_id": "scryglass:c1:foundation-freeze-authority:v1",
     "authority_scope": "wave_1_foundation_freeze_only",
     "decision_kind": "foundation_freeze",
-    "input_closure_sha256": "d9fbc5e3e77e74843358ab5abfbab589ccca3a8a30ebb75f289265dd501ae980",
+    "input_closure_sha256": "416214f2656b9a838738d67ff5a9f9b6efd9159bb2d3d706a76f3fcb98a9f4f2",
     "locator": "data/lol/v2/evaluation/b2/checkpoint-c1-authority.json",
-    "raw_sha256": "507619937e28723eb3d4133bd9c0370cf615b3025c5eccd36caff9fe29b55a8d",
+    "raw_sha256": "d4221d3925cb04f94f3e9748fb8e54d13d7947227ed5584058a0f2232f97b076",
     "schema_version": "checkpoint-c1-foundation-freeze-authority-v1"
   },
   "claim_ceiling": {

@@ -70,12 +70,12 @@ CLAIM_CEILING = {
 }
 C1_EXPECTED = {
     "locator": C1_AUTHORITY_LOCATOR,
-    "raw_sha256": "507619937e28723eb3d4133bd9c0370cf615b3025c5eccd36caff9fe29b55a8d",
+    "raw_sha256": "d4221d3925cb04f94f3e9748fb8e54d13d7947227ed5584058a0f2232f97b076",
     "artifact_id": "scryglass:c1:foundation-freeze-authority:v1",
     "schema_version": "checkpoint-c1-foundation-freeze-authority-v1",
     "decision_kind": "foundation_freeze",
     "authority_scope": "wave_1_foundation_freeze_only",
-    "input_closure_sha256": "d9fbc5e3e77e74843358ab5abfbab589ccca3a8a30ebb75f289265dd501ae980",
+    "input_closure_sha256": "416214f2656b9a838738d67ff5a9f9b6efd9159bb2d3d706a76f3fcb98a9f4f2",
 }
 INDEPENDENT_L4_AUTHORITY_PRESENT = False
 POSTERIOR_PREDICTIVE_DOMAIN = {
