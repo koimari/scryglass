@@ -71,13 +71,21 @@ def test_capture_readiness_v2_rejects_fabricated_evidence_or_authority() -> None
         )
 
 
-def test_v2_capture_receipt_is_reissued_on_current_sources() -> None:
-    """After the 2026-08-07 refresh regeneration the v2 clock-corrected capture
-    implementation was re-issued on the current canonical sources and replays
-    as valid (pre-event, empty ledger, superseding the re-issued v1 receipt)."""
-    payload = validate_registered_capture_readiness_v2(root=Path(".").resolve())
+def test_v2_capture_receipt_replays_on_sealed_sources(
+    historical_capture_root: Path,
+) -> None:
+    """Replay the archived receipt only against its sealed source bytes."""
+    payload = validate_registered_capture_readiness_v2(root=historical_capture_root)
     assert payload["result_state"] == readiness.RESULT_STATE
     assert payload["clock_attestation"]["user_supplied_timestamp_allowed"] is False
     assert payload["supersession"]["rejected_capture_qualifies_as_future_evidence"] is False
     assert payload["implementation"]["ready_for_pre_event_capture"] is True
     assert all(value is False for value in payload["authority"].values())
+
+
+def test_v2_capture_receipt_rejects_current_source_drift() -> None:
+    with pytest.raises(
+        CaptureReadinessRegistryV2Error,
+        match="capture readiness source drifted",
+    ):
+        validate_registered_capture_readiness_v2(root=Path(".").resolve())
