@@ -46,6 +46,12 @@ def historical_capture_root(
         historical_patch_source,
         root / "lol_kills/etl/leaguepedia_patch_revisions.py",
     )
+    phase_one_ts = repo_root / "tests/model_v2/fixtures/phase-one-ts"
+    for source in phase_one_ts.rglob("*"):
+        if source.is_file():
+            destination = root / source.relative_to(phase_one_ts)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
 
     (root / "docs").symlink_to(repo_root / "docs", target_is_directory=True)
     (root / "data/lol/v2").mkdir(parents=True)
