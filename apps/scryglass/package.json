@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --import tsx --test src/lib/*.test.mts",
+    "test": "node --import tsx --test src/lib/*.test.mts scripts/*.test.mjs",
     "e2e:pack": "node e2e/fixtures/generate-pack.mjs",
     "test:e2e": "playwright test",
     "identities:build": "node scripts/build-visual-identities.mjs",

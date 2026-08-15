@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readOnlyCachedJson } from "./identity-cache.mjs";
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const teamOutputPath = path.join(appRoot, "src", "data", "teamVisualIdentities.json");
@@ -103,22 +104,6 @@ function cargoUrl({ tables, fields, joinOn, where, offset = 0 }) {
   return url.toString();
 }
 
-async function cachedJson(fileName, url) {
-  if (cacheDir) {
-    try {
-      return JSON.parse(await fs.readFile(path.join(cacheDir, fileName), "utf8"));
-    } catch {
-      // Fetch below when the optional local cache does not contain this page.
-    }
-  }
-  const payload = await fetchJson(url);
-  if (cacheDir) {
-    await fs.mkdir(cacheDir, { recursive: true });
-    await fs.writeFile(path.join(cacheDir, fileName), `${JSON.stringify(payload)}\n`, "utf8");
-  }
-  return payload;
-}
-
 function originalPngUrl(url) {
   return text(url).replace(/\?.*$/, "?format=original");
 }
@@ -136,7 +121,12 @@ async function resolveWikiImageUrls(fileNames) {
     url.searchParams.set("format", "json");
     url.searchParams.set("origin", "*");
     const signature = createHash("md5").update(chunk.join("\n")).digest("hex");
-    const payload = await cachedJson(`image-info-${signature}.json`, url.toString());
+    const payload = await readOnlyCachedJson({
+      cacheDir,
+      fileName: `image-info-${signature}.json`,
+      url: url.toString(),
+      fetchJson,
+    });
     for (const page of Object.values(payload.query?.pages ?? {})) {
       const file = text(page.title).replace(/^File:/i, "");
       const info = page.imageinfo?.[0];
@@ -149,7 +139,12 @@ async function resolveWikiImageUrls(fileNames) {
 async function cargoPages(name, query) {
   const rows = [];
   for (let offset = 0; ; offset += 5000) {
-    const page = await cachedJson(`${name}-${offset}.json`, cargoUrl({ ...query, offset }));
+    const page = await readOnlyCachedJson({
+      cacheDir,
+      fileName: `${name}-${offset}.json`,
+      url: cargoUrl({ ...query, offset }),
+      fetchJson,
+    });
     rows.push(...page);
     if (page.length < 5000) break;
   }

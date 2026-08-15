@@ -1378,11 +1378,13 @@ def write_immutable_receipt(path: Path, payload: Mapping[str, Any]) -> str:
             raise ImmutableReceiptConflict(
                 f"immutable receipt already contains different bytes: {path}"
             )
+        if stat.S_IMODE(current_stat.st_mode) != 0o600:
+            os.chmod(path, 0o600, follow_symlinks=False)
         return hashlib.sha256(data).hexdigest()
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
-    descriptor = os.open(path, flags, 0o644)
+    descriptor = os.open(path, flags, 0o600)
     try:
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(data)
