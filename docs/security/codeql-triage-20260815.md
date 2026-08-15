@@ -128,7 +128,7 @@ query-specific decision. Each entry has a path-specific action.
 | #127 | `lol_kills/research/grubs_ranked_contest_proof.py:511,521` | `b` is calculated from the gold difference at line 511 and overwritten by `bin_gold(g)` at line 521 before the first value is read. | needs follow-up | Remove the first calculation after report-byte and source-digest review. |
 | #128, #129 | `lol_kills/research/grubs_intrinsic_value.py:2164-2165,2168-2169` | Legacy kill values are loaded from the artifact and overwritten by the current `kill_net_gold_table` values before downstream use. | needs follow-up | Remove the legacy assignments after the intrinsic-value artifact review. Preserve all generated numbers. |
 | #130 | `lol_kills/v2/draft/interactions/model.py:929` | `_ordered_pair` returns an orientation value. The function uses the ordered role and champion values, while `_orientation` has no read. | needs follow-up | Replace the unused binding with `_` after the model source-digest review. |
-| #131 | `tests/model_v2/evaluation/test_evaluation_harness.py:388,394-395` | The test computes the test-window end twice. The second computation is the value appended to `test_windows`. | intentional negative test | Remove the first test-only assignment or keep a path-specific test dismissal. The assertion coverage stays the same. |
+| #131 | `tests/model_v2/evaluation/test_evaluation_harness.py:388,394-395` | The test computes the test-window end twice. The second computation is the value appended to `test_windows`. | needs follow-up | Remove the first test-only assignment or keep a path-specific test dismissal. The assertion coverage stays the same. |
 
 ### `py/pythagorean` warnings
 
