@@ -289,6 +289,15 @@ def test_publish_release_stages_then_activates_complete_snapshot() -> None:
 def test_publish_release_omits_unpromoted_draft_asset() -> None:
     with TemporaryDirectory() as temporary:
         pack, manifest, tier = _fixture(Path(temporary))
+        manifest["draft_authority"] = {
+            "schema_version": "scryglass:draft-authority:v1",
+            "status": "unavailable",
+            "release_id": manifest["pack_id"],
+            "model_version": None,
+            "receipt_sha256": None,
+            "issued_utc": None,
+            "reason": "model_not_promoted",
+        }
         _add_manifest_asset(
             pack,
             manifest,
@@ -318,6 +327,7 @@ def test_publish_release_omits_unpromoted_draft_asset() -> None:
     }
     assert supabase_publication.DRAFT_ASSET_PATH not in published["release"]["artifact_hashes"]
     assert published["draft_authority"]["status"] == "unavailable"
+    assert published["draft_authority"]["reason"] == "model_not_promoted"
 
 
 def test_publish_release_rejects_promoted_draft_until_independent_verification() -> None:

@@ -17,9 +17,11 @@ from lol_kills.export.public_pack import (
     _attach_published_draft_pools,
     _champion_image_urls,
     _complete_player_game_ids,
+    _draft_publication_decision,
     _ensure_year_column,
     _filter_years,
     _public_player_rating_rows,
+    _withhold_unpromoted_draft_fields,
     _validate_public_composition_records,
     _validate_public_record_tiers,
     build_draft_records_payload,
@@ -54,6 +56,57 @@ def test_build_draft_records_payload() -> None:
         signals, games + [{"game_uid": "g2", "date": "2026-08-02"}], None
     )
     assert "g2" not in payload2["games"]
+
+
+def test_failed_draft_promotion_keeps_factual_profile_rows_publishable() -> None:
+    profile = {
+        "draft_pool_audit": {"quality_games": 12},
+        "games": {
+            "game-1": {
+                "kills": 8,
+                "draft_contribution": {"status": "available"},
+                "draft_pool": {"status": "complete"},
+            }
+        },
+    }
+
+    decision = _draft_publication_decision(
+        {"promotion_gate": {"composition_candidate_passes": False}}
+    )
+    _withhold_unpromoted_draft_fields(profile)
+
+    assert decision == {
+        "status": "unavailable",
+        "reason": "model_not_promoted",
+    }
+    assert profile["games"]["game-1"]["kills"] == 8
+    assert "draft_pool_audit" not in profile
+    assert "draft_contribution" not in profile["games"]["game-1"]
+    assert "draft_pool" not in profile["games"]["game-1"]
+
+
+def test_passing_candidate_stays_closed_without_independent_receipt() -> None:
+    decision = _draft_publication_decision(
+        {"promotion_gate": {"composition_candidate_passes": True}}
+    )
+
+    assert decision == {
+        "status": "unavailable",
+        "reason": "model_not_promoted",
+    }
+
+
+@pytest.mark.parametrize(
+    "evaluation",
+    [
+        {},
+        {"promotion_gate": None},
+        {"promotion_gate": {"composition_candidate_passes": "true"}},
+    ],
+)
+def test_malformed_draft_promotion_evaluation_fails_closed(evaluation) -> None:
+    with pytest.raises(CompositionSignalError):
+        _draft_publication_decision(evaluation)
 
 
 def test_public_team_ratings_receive_evidence_fields() -> None:

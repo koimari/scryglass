@@ -73,10 +73,6 @@ from lol_kills.research.composition_signal import (
     MODEL_VERSION,
     CompositionSignalError,
     _composition_code_digest,
-    build_composition_games,
-    evaluate_composition_signal,
-    score_games_temporally,
-    write_evaluation_report,
     validate_public_signal,
 )
 from lol_kills.v2.tierlists.patch_mapping import normalize_oe_token
@@ -437,6 +433,43 @@ def build_draft_records_payload(
             "draft_edge": draft_edge,
         }
     return payload
+
+
+def _draft_publication_decision(
+    composition_evaluation: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Return the public Draft decision without treating research as authority.
+
+    The composition evaluation is a candidate report.  It is not an
+    independently issued release receipt.  A passing candidate therefore
+    stays closed until the publication boundary has a verified receipt.
+    A failed candidate also stays closed, while factual pack records remain
+    publishable.
+    """
+
+    if composition_evaluation is None:
+        return {
+            "status": "unavailable",
+            "reason": "model_not_promoted",
+        }
+
+    if not isinstance(composition_evaluation, Mapping):
+        raise CompositionSignalError("composition evaluation is malformed")
+    promotion_gate = composition_evaluation.get("promotion_gate")
+    if not isinstance(promotion_gate, Mapping):
+        raise CompositionSignalError("composition evaluation promotion gate is malformed")
+    candidate_passes = promotion_gate.get("composition_candidate_passes")
+    if type(candidate_passes) is not bool:
+        raise CompositionSignalError(
+            "composition evaluation promotion gate is contradictory"
+        )
+
+    return {
+        "status": "unavailable",
+        # Candidate evaluation details stay private.  The public contract
+        # reports only that no promotion authority is available.
+        "reason": "model_not_promoted",
+    }
 
 
 def _withhold_unpromoted_draft_fields(payload: Mapping[str, Any]) -> None:
@@ -1179,7 +1212,7 @@ def export_public_pack(
         momentum_scale=momentum_scale,
     )
     progress("building sequential team ratings")
-    dual_rating_features = build_dual_ratings(
+    build_dual_ratings(
         rating_input,
         cfg=team_rating_cfg,
         lineup_by_game=lineup_hashes_from_players(player_rating_input),
@@ -1367,13 +1400,9 @@ def export_public_pack(
         draft_metadata=_draft_metadata_from_maps(maps_for_records),
         include_archive=True,
     )
-    progress("building composition evidence")
+    progress("checking composition publication authority")
     composition_source_digest = source_identity_sha256(source_game_ids)
     composition_worker_commit = resolve_worker_commit(project)
-    composition_games = build_composition_games(
-        player_profile_frame,
-        strength_features=dual_rating_features,
-    )
     composition_model_dir = runtime / "data" / "lol" / "models" / "composition_signal"
     composition_evaluation_path = composition_model_dir / "evaluation.json"
     composition_evaluation: dict[str, Any] | None = None
@@ -1394,63 +1423,10 @@ def export_public_pack(
                 composition_evaluation = candidate_evaluation
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             composition_evaluation = None
-    if composition_evaluation is None:
-        progress("evaluating composition evidence")
-        composition_evaluation = evaluate_composition_signal(
-            composition_games,
-            source_hash=composition_source_digest,
-            canonical_game_identity_sha256=composition_source_digest,
-            worker_commit=composition_worker_commit,
-        )
-        composition_evaluation = dict(composition_evaluation)
-        composition_evaluation["code_digest"] = _composition_code_digest()
-        write_evaluation_report(composition_evaluation, composition_evaluation_path)
-    promotion_gate = composition_evaluation.get("promotion_gate") or {}
-    if promotion_gate.get("composition_candidate_passes") is not True:
-        raise CompositionSignalError(
-            "composition signal promotion gate did not pass; public release remains on the previous pack"
-        )
-    composition_result = score_games_temporally(
-        composition_games,
-        target_game_ids=None,
-        cache_dir=composition_model_dir,
-        source_digest=composition_source_digest,
-        worker_commit=composition_worker_commit,
-    )
-    composition_audit = dict(composition_result.audit)
-    composition_audit["source_as_of"] = source_as_of.isoformat().replace("+00:00", "Z")
-    composition_audit["canonical_game_identity_sha256"] = composition_source_digest
-    composition_audit["evaluation"] = {
-        "status": "passed",
-        "source_hash": composition_evaluation.get("source_hash"),
-        "canonical_game_identity_sha256": composition_evaluation.get(
-            "canonical_game_identity_sha256"
-        ),
-        "fit_through": composition_evaluation.get("fit_through"),
-        "worker_commit": composition_evaluation.get("worker_commit"),
-        "promotion_gate_passed": True,
-    }
-    draft_records_payload = build_draft_records_payload(
-        composition_result, composition_games, composition_evaluation
-    )
-    for game_id, signal in composition_result.signals.items():
-        if game_id in profile_records_payload.get("games", {}):
-            profile_records_payload["games"][game_id]["draft_contribution"] = signal
-        archive_candidate = profile_records_payload.get("_archive_games", {}).get(game_id)
-        if isinstance(archive_candidate, dict):
-            archive_candidate["draft_contribution"] = signal
-    tier_payload: Mapping[str, Any] | None = None
-    tier_path = project / "apps" / "scryglass" / "public" / "rankings" / "tierlists.json"
-    try:
-        candidate_tier_payload = json.loads(tier_path.read_text(encoding="utf-8"))
-        if isinstance(candidate_tier_payload, Mapping):
-            tier_payload = candidate_tier_payload
-    except (OSError, UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError):
-        tier_payload = None
-    _attach_published_draft_pools(profile_records_payload, tier_payload)
-    archive_payload = profile_records_payload.get("_archive_games")
-    if isinstance(archive_payload, dict):
-        _attach_published_draft_pools({"games": archive_payload}, tier_payload)
+    draft_publication = _draft_publication_decision(composition_evaluation)
+    # Keep all composition and draft fields out of this release.  A candidate
+    # evaluation, including one whose gate passes, is not an authority receipt.
+    # This lets factual ratings and match records continue through publication.
     archive_games = merge_accepted_profile_games(
         profile_records_payload.pop("_archive_games", {}),
         _accepted_profile_games(project),
@@ -1466,41 +1442,6 @@ def export_public_pack(
             for identity, game_ids in profile_records_payload.get(index_name, {}).items()
             if any(game_id in profile_game_ids for game_id in game_ids)
         }
-    # Compute the public coverage audit only from games that survive the
-    # accepted-profile bridge. Candidate archive rows can be dropped when no
-    # accepted KDA or grade record exists for the same identity.
-    draft_pool_audit = _attach_published_draft_pools(
-        {"games": profile_records_payload["games"]},
-        tier_payload,
-    )
-    for game_id, entry in draft_records_payload.get("games", {}).items():
-        profile_game = profile_records_payload.get("games", {}).get(game_id)
-        if not isinstance(profile_game, Mapping):
-            profile_game = archive_games.get(game_id)
-        if isinstance(profile_game, Mapping) and isinstance(profile_game.get("draft_pool"), Mapping):
-            entry["draft_pool"] = profile_game["draft_pool"]
-    profile_records_payload["draft_pool_audit"] = {
-        "schema_version": "scryglass:draft-pool-audit:v1",
-        "source": "Oracle's Elixir bans and pick order plus published patch tier list",
-        "scope": "published profile window after accepted-profile bridge",
-        **draft_pool_audit,
-    }
-    published_composition = _validate_public_composition_records(profile_records_payload)
-    composition_audit.update(
-        {
-            "published_games": published_composition["games"],
-            "published_available_games": published_composition["available"],
-            "published_limited_games": published_composition["limited"],
-            "published_unavailable_games": published_composition["unavailable"],
-            "published_status": (
-                "available"
-                if published_composition["available"]
-                else "limited"
-                if published_composition["limited"]
-                else "unavailable"
-            ),
-        }
-    )
     _withhold_unpromoted_draft_fields(profile_records_payload)
     _withhold_unpromoted_draft_fields({"games": archive_games})
     del player_profile_frame
@@ -1835,8 +1776,6 @@ def export_public_pack(
             },
         },
         "attribution": spec.ATTRIBUTION,
-        "composition_signal": composition_audit,
-        "draft_pool": draft_pool_audit,
         "draft_authority": {
             "schema_version": "scryglass:draft-authority:v1",
             "status": "unavailable",
@@ -1844,7 +1783,7 @@ def export_public_pack(
             "model_version": None,
             "receipt_sha256": None,
             "issued_utc": None,
-            "reason": "model_not_promoted",
+            "reason": draft_publication["reason"],
         },
         "query_api": query_api_manifest,
         "excluded": [
