@@ -19,6 +19,7 @@ HISTORICAL_CONTRACT_COMMIT = "94e5cec16adcf77a45f429e666fb3b5f54f40bd9"
 HISTORICAL_MARKET_COMMIT = "87bcff462f6005269b94fd9e604c9e8b2b5ec9c0"
 
 FROZEN_RUNTIME_TESTS = (
+    "tests/model_v2/evaluation/test_b3_coverage.py",
     "tests/model_v2/draft/interactions/test_oe_nuisance_baseline.py",
     "tests/model_v2/draft/interactions/test_representation_rank_assay.py",
     "tests/model_v2/draft/terminal/test_development_evaluation.py",
