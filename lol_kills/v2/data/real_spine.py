@@ -1228,13 +1228,15 @@ def main(argv: Iterable[str] | None = None) -> int:
                 cutoff_local_naive=args.cutoff_local_naive,
             )
             result = {"manifest_sha256": manifest["manifest_sha256"], "rows_sha256": manifest["rows_sha256"], "claim_scope": manifest["claim_scope"]["state"]}
-        else:
+        elif args.command == "lpl-verify":
             manifest = verify_lpl_private_development_snapshot(
                 rows_path=args.rows,
                 manifest_path=args.manifest,
                 expected_manifest_sha256=args.expected_manifest_sha256,
             )
             result = {"manifest_sha256": manifest["manifest_sha256"], "rows_sha256": manifest["rows_sha256"], "verified": True}
+        else:
+            raise RealSpineError(f"unsupported command: {args.command}")
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, RealSpineError) as error:
         parser.error(str(error))
     print(json.dumps(result, sort_keys=True))

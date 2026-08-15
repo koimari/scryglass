@@ -308,6 +308,18 @@ def test_output_path_aliases_are_rejected_before_any_packet_write(tmp_path: Path
     assert backing.read_bytes() == before
 
 
+def test_cli_rejects_an_unrecognized_command_before_printing_a_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        spine.argparse.ArgumentParser,
+        "parse_args",
+        lambda _parser, _argv: spine.argparse.Namespace(command="future-command"),
+    )
+    with pytest.raises(SystemExit):
+        spine.main([])
+
+
 def _adapter_tables() -> tuple[pa.Table, pa.Table]:
     maps = pa.Table.from_pylist(
         [
