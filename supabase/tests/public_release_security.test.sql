@@ -1,5 +1,5 @@
 begin;
-select plan(43);
+select plan(45);
 
 select is(
   (select public from storage.buckets where id = 'scryglass-public'),
@@ -105,6 +105,22 @@ select is(
   ),
   true,
   'restore is security definer'
+);
+select ok(
+  (
+    select proconfig @> array['statement_timeout=120s']
+    from pg_proc
+    where oid = 'public.activate_scryglass_public_release(text)'::regprocedure
+  ),
+  'activation has enough time for the sealed query integrity scan'
+);
+select ok(
+  (
+    select proconfig @> array['statement_timeout=120s']
+    from pg_proc
+    where oid = 'public.restore_scryglass_public_release(text)'::regprocedure
+  ),
+  'restore has enough time for the sealed query integrity scan'
 );
 select is(
   (
