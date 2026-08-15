@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from types import SimpleNamespace
 import warnings
 import zipfile
 
 import numpy as np
 import pandas as pd
+import lol_kills.research.elemental_drakes as elemental_drakes
 
 from lol_kills.research.elemental_drake_model import (
     ELEMENTS,
@@ -26,6 +28,61 @@ from lol_kills.research.elemental_drakes import (
     parse_normalized_grid,
     summarize_cohort,
 )
+
+
+def test_series_discovery_keeps_grid_key_out_of_curl_argv_and_files(
+    monkeypatch,
+) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+    secret = "grid-test-secret"
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        output = argv[argv.index("--output") + 1]
+        output_path = elemental_drakes.Path(output)
+        output_path.write_text(
+            json.dumps(
+                {
+                    "data": {
+                        "allSeries": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "edges": [
+                                {
+                                    "node": {
+                                        "id": "series-1",
+                                        "type": elemental_drakes.ALLOWED_SERIES_TYPE,
+                                        "startTimeScheduled": "2026-01-01T00:00:00Z",
+                                        "tournament": {"id": "tournament-1", "name": "LCK"},
+                                        "teams": [
+                                            {"baseInfo": {"name": "Blue Team"}},
+                                            {"baseInfo": {"name": "Red Team"}},
+                                        ],
+                                    }
+                                }
+                            ],
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(elemental_drakes.subprocess, "run", fake_run)
+
+    rows = elemental_drakes._series_rows_fast(
+        secret,
+        "2026-01-01T00:00:00Z",
+        "2026-01-02T00:00:00Z",
+        1,
+    )
+
+    assert rows[0]["id"] == "series-1"
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert argv[argv.index("--config") + 1] == "-"
+    assert secret not in " ".join(argv)
+    assert secret in kwargs["input"]
 
 
 def test_normalize_dragon_type_covers_riot_labels() -> None:

@@ -1858,18 +1858,16 @@ def _series_rows_fast(
     """
     with tempfile.TemporaryDirectory(prefix="grid-series-discovery-") as temp_dir:
         temp = Path(temp_dir)
-        config_path = temp / "curl.conf"
         payload_path = temp / "payload.json"
         output_path = temp / "response.json"
-        config_path.write_text(
-            "\n".join(
-                [
-                    f'header = "x-api-key: {key}"',
-                    'header = "Content-Type: application/json"',
-                    'header = "Accept: application/json"',
-                ]
-            ),
-            encoding="utf-8",
+        # Keep the provider key in process memory.  curl reads its config from
+        # stdin, so the key is absent from both argv and the temporary files.
+        curl_config = "\n".join(
+            [
+                f'header = "x-api-key: {key}"',
+                'header = "Content-Type: application/json"',
+                'header = "Accept: application/json"',
+            ]
         )
         while len(rows) < limit:
             payload_path.write_text(
@@ -1880,7 +1878,7 @@ def _series_rows_fast(
                 [
                     "curl",
                     "--config",
-                    str(config_path),
+                    "-",
                     "--fail",
                     "--silent",
                     "--show-error",
@@ -1899,6 +1897,7 @@ def _series_rows_fast(
                     str(output_path),
                     GRAPHQL_ENDPOINT,
                 ],
+                input=curl_config,
                 text=True,
                 capture_output=True,
                 timeout=120,

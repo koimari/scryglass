@@ -476,6 +476,7 @@ def test_immutable_receipt_is_idempotent_but_never_overwritten(
     second = foundation.write_immutable_receipt(path, {"value": 1})
 
     assert first == second
+    assert path.stat().st_mode & 0o777 == 0o600
     with pytest.raises(foundation.ImmutableReceiptConflict):
         foundation.write_immutable_receipt(path, {"value": 2})
 
