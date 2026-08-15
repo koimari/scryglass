@@ -80,7 +80,7 @@ def test_l2_readiness_audit_keeps_development_package_blocked() -> None:
     assert report["checks"]["selected_candidate_all_validation_folds_nonharmful"] is True
     assert report["checks"]["selected_candidate_all_nested_outer_folds_nonharmful"] is False
     assert report["checks"]["future_protocol_locked_and_valid"] is True
-    assert report["checks"]["future_capture_readiness_locked_and_valid"] is True
+    assert report["checks"]["future_capture_readiness_locked_and_valid"] is False
     assert (
         report["checks"][
             "grid_terminal_draft_source_readiness_locked_and_valid"
@@ -134,6 +134,7 @@ def test_l2_readiness_audit_keeps_development_package_blocked() -> None:
     )
     assert "selected_candidate_all_nested_outer_folds_nonharmful" in report["blockers"]
     assert "future_holdout_support_met" in report["blockers"]
+    assert "future_capture_readiness_locked_and_valid" in report["blockers"]
     assert "future_prediction_ledger_present_and_valid" in report["blockers"]
     assert "future_protocol_independent_review_present" in report["blockers"]
     assert "semantic_terminal_draft_authority_active" in report["blockers"]
@@ -141,9 +142,10 @@ def test_l2_readiness_audit_keeps_development_package_blocked() -> None:
     assert report["future_protocol"]["future_holdout"]["status"] == "EMPTY_NOT_YET_ACQUIRED"
     assert report["future_protocol"]["locked_candidate"]["variant_id"] == "m0-role-additive@ridge-0.05"
     assert report["future_protocol"]["estimands"]["neutral_output_directly_outcome_calibrated"] is False
-    assert report["future_capture_readiness"]["status"] == "valid"
-    assert report["future_capture_readiness"]["ledger_state_at_lock"]["entries"] == 0
-    assert report["future_capture_readiness"]["implementation"]["ready_for_outcome_free_future_capture"] is True
+    assert report["future_capture_readiness"]["status"] == "invalid_or_missing"
+    assert report["future_capture_readiness"]["ledger_state_at_lock"] is None
+    assert report["future_capture_readiness"]["implementation"] is None
+    assert "capture readiness source drifted" in report["future_capture_readiness"]["error"]
     assert report["grid_source_readiness"]["status"] == "valid"
     assert (
         report["grid_source_readiness"]["capability_conclusion"][
@@ -158,7 +160,8 @@ def test_l2_readiness_audit_keeps_development_package_blocked() -> None:
         is False
     )
     assert report["future_prediction_ledger"]["status"] == "missing"
-    assert report["artifacts"]["future_capture_readiness"]["present"] is True
+    assert report["artifacts"]["future_capture_readiness"]["present"] is False
+    assert "capture readiness source drifted" in report["artifacts"]["future_capture_readiness"]["error"]
     assert report["artifacts"]["grid_source_readiness"]["present"] is True
     assert report["artifacts"]["future_prediction_ledger"]["present"] is False
     assert report["artifacts"]["semantic_draft_authority"][
