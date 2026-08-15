@@ -162,6 +162,18 @@ def test_retention_rpc_has_a_bounded_api_timeout_exception() -> None:
     assert "alter database" not in migration
 
 
+def test_release_transition_rpcs_cover_the_full_integrity_scan() -> None:
+    migration = (
+        MIGRATIONS / "20260815045431_release_transition_timeout_budget.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "alter function public.activate_scryglass_public_release(text)" in migration
+    assert "alter function public.restore_scryglass_public_release(text)" in migration
+    assert migration.count("set statement_timeout to '120s'") == 2
+    assert "alter role" not in migration
+    assert "alter database" not in migration
+
+
 def test_live_oe_import_schema_drift_is_forward_compatible() -> None:
     migration = (
         MIGRATIONS / "20260814161000_oe_import_patch_receipts.sql"
