@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import functools
 import hashlib
 import json
 import math
@@ -42,11 +43,30 @@ ROOT = Path(__file__).resolve().parents[3]
 REGISTRY = ROOT / "data/lol/v2/evaluation/b2/calibration-candidate-registry.json"
 
 
+@functools.lru_cache(maxsize=None)
 def _bundle(regime: str = "nonlinear"):
     config = build_outer_calibration_config(REGISTRY.read_bytes(), regime=regime)
     rows = build_outer_calibration_rows(config)
     report = build_outer_calibration_selection_report(config, rows)
     return config, rows, report
+
+
+def test_cached_bundle_reuses_only_byte_exact_frozen_inputs():
+    first = _bundle()
+    second = _bundle()
+    assert first is second
+    assert [canonical_json(value) for value in first] == [
+        canonical_json(value) for value in second
+    ]
+    regenerated_config = build_outer_calibration_config(REGISTRY.read_bytes())
+    regenerated_rows = build_outer_calibration_rows(regenerated_config)
+    regenerated_report = build_outer_calibration_selection_report(
+        regenerated_config, regenerated_rows
+    )
+    assert [canonical_json(value) for value in first] == [
+        canonical_json(value)
+        for value in (regenerated_config, regenerated_rows, regenerated_report)
+    ]
 
 
 def test_generator_is_exactly_deterministic_and_separates_truth_observation_inputs():
