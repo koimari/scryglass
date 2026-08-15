@@ -74,9 +74,9 @@ Dependency review, workflow and shell security, and the Elemental Drakes
 dependency, type, lint, build, and SBOM job. The GitHub Dependabot alert API
 returned zero open alerts for `koimari/scryglass` on 2026-08-14.
 
-The Supabase security and performance advisors returned zero lints on
-2026-08-14. The advisor result is checked again after each schema or
-publication change.
+The Supabase security and performance advisors returned zero lints after the
+`v2026.08.15.033633` publication on 2026-08-15. The advisor result is checked
+again after each schema or publication change.
 
 ## Retired public Blob cleanup
 
@@ -88,43 +88,47 @@ Independent requests after the workflow returned `404` for the known Draft recor
 
 ## Production HOLD control
 
-Production currently serves active release `v2026.08.14.181106`. The public health response at
-2026-08-14T20:43:37.530Z reported `status: ok`, `refresh_status: idle`, and
-`stale: false`. Authenticated diagnostics bound the same release to run
-`refresh-20260814T193826Z-1a385de262e2`, source observation
-`2026-08-14T09:09:44+00:00`, and worker commit
-`dace1bb60d5b9f49144d7602457a6e10c822b5ad`.
+Production currently serves active release `v2026.08.15.033633`. The public
+health response at 2026-08-15T04:10:18.710Z reported `status: ok`,
+`refresh_status: idle`, and `stale: false`. Authenticated diagnostics bound the
+same release to run `refresh-20260815T033633Z-7b6a10d4e335`, source observation
+`2026-08-14T18:42:36+00:00`, and worker commit
+`d7dfdc86fe74174472365fc688755403f4d65bef`.
 
-The active database release and manifest both name `v2026.08.14.181106`.
-Supabase reports 22 active Storage assets, 145,019,319 bytes, zero inline
-assets, zero Draft assets, and zero invalid metadata rows. A byte-for-byte
-audit of all 22 deployed `/api/assets` responses passed.
+The Vercel production deployment is READY at the same commit. The active
+database release and compatibility manifest both name `v2026.08.15.033633`.
+Supabase reports 22 active Storage assets, 144,592,995 bytes, zero inline
+assets, zero Draft assets, 161,445 bounded query rows, and 12 sealed dataset
+receipts. A byte-for-byte audit of all 22 deployed `/api/assets` responses
+passed. A representative retired-release asset returned `404`.
 
-The worker checkout currently has a later clean commit than the commit recorded
-by the active receipt. The worker proof stays open until a clean, lock-bound
-refresh records the same worker commit required by the final receipt.
+The clean worker receipt records requirements lock SHA-256
+`54c223c88fada349f883b2ed79064b96495a6de181132b723b8ba78cb4a5cc3d`,
+input fingerprint
+`55286da3f632527cbb7cb6de9182f2f85376545c5521cd598c9d4bffd718b0ea`,
+and source SHA-256
+`f00aa5aa4aa4fa595a81eec954cc4ac71e99e3582b2cc80826f20491b48b8e27`.
+The current Vercel deployment has no error or fatal logs after activation.
 
 The Production and Development Vercel values for `SCRYGLASS_SUPABASE_URL` and `SCRYGLASS_SUPABASE_PUBLISHABLE_KEY` contained a literal `\\n` suffix. Both environments now contain canonical values. The Preview values were already canonical. The web project keeps the publication service key outside Vercel and holds only the public key plus the separate diagnostic credential.
 
 ## Regional refresh evidence
 
-The regional refresh completed as a deferred production build in the worker
-runtime. The current receipt is
-`tierlist-live-refresh-20260814T052013765685Z-7427f9957fe5fc9b.json`. It
-records 17,503 replayed maps, a 1,182-map live window, 195 cells, 7,546 rows,
-and 1,100 regional views across 39 scopes. The views cover CBLOL,
-INTERNATIONAL, LCK, LCP, LCS, LEC, LJL, LPL, PCS, TCL, and VCS. The production
-index raw digest is
-`e8c5aab7bd365ec440c531b44b4a18c7b500218c3c69a132abc1f2ea2f7d8954`; its
-embedded artifact digest is
-`db4dc5b457d0f81a8e15ca003c105df69e1170c53e83ade8ca24fa3fba008592`. The
-latest accepted source is public patch `26.15`; the output contains no
-client-only `16.xx` labels. Publication stays deferred until the ordered
-release checks pass.
+The regional refresh is active in release `v2026.08.15.033633`. It records
+17,544 replayed maps, a 1,223-map live window, 200 cells, 7,589 rows, and 1,105
+regional views across 40 scopes. The views cover CBLOL, INTERNATIONAL, LCK,
+LCP, LCS, LEC, LJL, LPL, PCS, TCL, and VCS. The candidate artifact SHA-256 is
+`fc598f7c4aeba73b91cc69671f8563dd6b35e20b7963d06d1237cb1bd0e4970a`.
+The production index raw SHA-256 is
+`c921357a6a686cb3ad2f91df2eaf39a9588b45826ed4f97a8a01bdd31d2095b3`.
 
-The 26.16 atom bridge is a development input. The current accepted OE source
-has no 16.16 game rows, so the regional model continues to use the audited
-26.15 bridge. This keeps patch identity and atom provenance aligned.
+The latest public patch is `26.16`. The accepted OE source keeps its exact
+`16.16` token. The public projection maps that token to season patch `26.16`.
+Five accepted LEC maps from 2026-08-14 carry that patch. The production browser
+shows `latest (26.16)`, preserves 26.15 as a separate option, and exposes the
+LEC regional view. The default five-game evidence rule yields no ranked
+champion because no champion has five appearances. The 1+ evidence view shows
+41 champions across the five roles.
 
 ## Active Vercel firewall rules
 
@@ -162,15 +166,18 @@ fallback.
 
 ## Evidence still required
 
-- two public release Python-suite passes from the hashed Python 3.12 environment;
+- release-bound checks for every cached page family;
+- a complete post-rollback route-family receipt bound to the restored release ID;
 - two private research-suite passes from the hashed environment with the approved artifact bundle mounted;
 - source-rights records and Riot product registration;
 - an independent, hash-bound Draft Score promotion record;
-- a clean worker checkout and lock digest bound to the active receipt;
-- a production rollback drill with all route-family and release-ID probes;
-- the final aligned production receipt.
+- a separately evaluated and promoted phase-curve record;
+- completion or documented replacement of the timed-out Semgrep rules on 13 large research files;
+- owner review of the public legal and policy text.
 
 The merged application, zero-state Supabase replay, browser, security, asset,
-HTML budget, and public-boundary checks are recorded in PR #238. The current
-active release has passed the full 22-asset deployed hash audit. The release
-remains on HOLD until the outstanding evidence above is complete.
+HTML budget, and public-boundary checks are recorded in the protected checks.
+PRs #249 and #250 closed resumable large-asset uploads and the retired tier
+probe. The current active release has passed the full 22-asset deployed hash
+audit. Supabase security and performance advisors return zero findings. The
+release remains on HOLD until the outstanding evidence above is complete.
