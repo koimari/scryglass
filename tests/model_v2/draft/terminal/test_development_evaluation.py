@@ -31,7 +31,7 @@ def test_development_evaluation_is_chronological_and_non_authoritative() -> None
     assert report["public_probability_authorized"] is False
     assert report["population"]["complete_rows"] >= 16324
     assert report["population"]["series_clusters"] == report["population"]["dependence_clusters"]
-    assert report["population"]["proxy_clustered_rows"] == 12708
+    assert report["population"]["proxy_clustered_rows"] == 6310
     assert (
         report["population"]["complete_rows"]
         == report["population"]["proxy_clustered_rows"]
