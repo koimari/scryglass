@@ -276,6 +276,15 @@ def _inventory_sha256(tests: Sequence[str]) -> str:
     return hashlib.sha256(_canonical_json({"tests": sorted(tests)})).hexdigest()
 
 
+def _is_current_lane(name: str) -> bool:
+    return name == "current" or name.startswith("current-shard-")
+
+
+LEGACY_CHECKPOINT_LANES = frozenset(
+    {"frozen-runtime", "historical-contract", "historical-market"}
+)
+
+
 def _signed_payload(payload: dict, field: str) -> dict:
     unsigned = dict(payload)
     unsigned.pop(field, None)
@@ -507,10 +516,7 @@ def _load_checkpoint(
         raise PrivateSuiteError(f"lane checkpoint lane binding mismatch: {path}")
     if lane.get("pass_number") != pass_number:
         raise PrivateSuiteError(f"lane checkpoint pass binding mismatch: {path}")
-    if payload.get("test_inventory_sha256") != _inventory_sha256(
-        tuple(lane.get("tests", ()))
-    ):
-        raise PrivateSuiteError(f"lane checkpoint test inventory digest mismatch: {path}")
+    legacy_inventory_checkpoint = "test_inventory_sha256" not in payload
     if lane.get("log_path") != str(expected_log_path):
         raise PrivateSuiteError(f"lane checkpoint log binding mismatch: {path}")
     if payload.get("source_root") != str(spec.source_root):
@@ -550,6 +556,17 @@ def _load_checkpoint(
         raise PrivateSuiteError(f"lane checkpoint command changed: {path}")
     if tuple(lane.get("tests", ())) != spec.tests:
         raise PrivateSuiteError(f"lane checkpoint test selection changed: {path}")
+    if legacy_inventory_checkpoint:
+        if _is_current_lane(spec.name):
+            raise PrivateSuiteError(
+                f"monolithic current checkpoint is incompatible with sharded specs: {path}"
+            )
+        if spec.name not in LEGACY_CHECKPOINT_LANES:
+            raise PrivateSuiteError(f"legacy checkpoint is incompatible with this lane: {path}")
+    elif payload.get("test_inventory_sha256") != _inventory_sha256(
+        tuple(lane.get("tests", ()))
+    ):
+        raise PrivateSuiteError(f"lane checkpoint test inventory digest mismatch: {path}")
     return LaneReceipt(
         name=lane["name"],
         pass_number=lane["pass_number"],
@@ -588,6 +605,13 @@ def _run_pass(
         for spec in specs:
             checkpoint = _checkpoint_path(receipt, pass_number, spec.name)
             lane_log = _lane_log_path(receipt, pass_number, spec.name)
+            if spec.name.startswith("current-shard-"):
+                monolithic = _checkpoint_path(receipt, pass_number, "current")
+                if monolithic.exists():
+                    raise PrivateSuiteError(
+                        "monolithic current checkpoint is incompatible with sharded specs: "
+                        f"{monolithic}"
+                    )
             if checkpoint.exists():
                 if not resume:
                     raise PrivateSuiteError(

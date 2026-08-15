@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -314,3 +316,107 @@ def test_private_suite_resumes_green_shards_after_later_failure(
     assert resumed[0].resumed_from_checkpoint is True
     assert calls.count("current-shard-01") == 1
     assert calls.count("current-shard-02") == 2
+
+
+def test_private_suite_accepts_legacy_non_current_checkpoint_after_full_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roots = [tmp_path / name for name in ("current", "contract", "market")]
+    for root in roots:
+        root.mkdir()
+        (root / "requirements-ci.lock").write_text("lock")
+    monkeypatch.setattr(suite, "_git_head", lambda _root: "head")
+    monkeypatch.setattr(
+        suite,
+        "_runtime_versions",
+        lambda _python: dict(suite.FROZEN_VERSIONS),
+    )
+    monkeypatch.setattr(suite, "_sha256", lambda _path: "a" * 64)
+    receipt = tmp_path / "suite.json"
+    log_path = tmp_path / "suite-pass-1-frozen-runtime.log"
+    log_path.write_text("passed")
+    spec = suite.LaneSpec(
+        name="frozen-runtime",
+        source_root=roots[0],
+        python=Path("/python"),
+        tests=("tests/frozen.py",),
+        extra_args=(),
+    )
+    lane = suite.LaneReceipt(
+        name=spec.name,
+        pass_number=1,
+        cwd=str(tmp_path / "lane-copy"),
+        python=str(spec.python),
+        tests=spec.tests,
+        command=(str(spec.python), "-m", "pytest", "-q", *spec.tests),
+        elapsed_seconds=1.0,
+        log_path=str(log_path),
+        log_bytes=log_path.stat().st_size,
+        log_sha256="a" * 64,
+    )
+    payload = suite._checkpoint_payload(
+        receipt=receipt,
+        pass_number=1,
+        spec=spec,
+        lane_receipt=lane,
+        current_root=roots[0],
+        historical_contract_root=roots[1],
+        historical_market_root=roots[2],
+        frozen_versions=dict(suite.FROZEN_VERSIONS),
+    )
+    payload.pop("test_inventory_sha256")
+    payload["checkpoint_sha256"] = hashlib.sha256(
+        suite._canonical_json(
+            {key: value for key, value in payload.items() if key != "checkpoint_sha256"}
+        )
+    ).hexdigest()
+    checkpoint = suite._checkpoint_path(receipt, 1, spec.name)
+    checkpoint.write_text(json.dumps(payload))
+    loaded = suite._load_checkpoint(
+        path=checkpoint,
+        receipt=receipt,
+        expected_log_path=log_path,
+        pass_number=1,
+        spec=spec,
+        current_root=roots[0],
+        historical_contract_root=roots[1],
+        historical_market_root=roots[2],
+        frozen_versions=dict(suite.FROZEN_VERSIONS),
+    )
+    assert loaded.resumed_from_checkpoint is True
+    assert loaded.tests == spec.tests
+
+
+def test_private_suite_rejects_legacy_current_checkpoint_for_sharded_spec(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roots = [tmp_path / name for name in ("current", "contract", "market")]
+    for root in roots:
+        root.mkdir()
+        (root / "requirements-ci.lock").write_text("lock")
+    receipt = tmp_path / "suite.json"
+    monolithic = suite._checkpoint_path(receipt, 1, "current")
+    monolithic.write_text("sealed")
+    spec = suite.LaneSpec(
+        name="current-shard-01",
+        source_root=roots[0],
+        python=Path("/python"),
+        tests=("tests/test_a.py",),
+        extra_args=(),
+    )
+    with pytest.raises(suite.PrivateSuiteError, match="monolithic current checkpoint"):
+        suite._run_pass(
+            pass_number=1,
+            specs=(spec,),
+            receipt=receipt,
+            current_root=roots[0],
+            historical_contract_root=roots[1],
+            historical_market_root=roots[2],
+            frozen_versions=dict(suite.FROZEN_VERSIONS),
+            lcc_root=tmp_path,
+            base_environment={},
+            workers=1,
+            resume=True,
+        )
