@@ -38,7 +38,11 @@ def test_current_rating_and_total_artifacts_remain_fail_closed(monkeypatch) -> N
     assert report["ratings"]["checks"]["warehouse_source_pins_match_current_files"] is True
     assert report["ratings"]["checks"][
         "prospective_source_snapshot_replaces_mutable_warehouse_dependency"
-    ] is True
+    ] is False
+    assert (
+        "prospective_source_snapshot_replaces_mutable_warehouse_dependency"
+        in report["ratings"]["blockers"]
+    )
     assert report["ratings"]["checks"][
         "semantic_output_contract_trust_root_current_and_valid"
     ] is False
