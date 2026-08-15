@@ -12,6 +12,8 @@ from tools import run_private_research_suite as suite
 def test_private_suite_partitions_every_test_file() -> None:
     root = Path(__file__).resolve().parents[1]
     all_tests = set(suite._test_files(root))
+    assert "tools/live_fair_odds/test_model.py" in all_tests
+    suite._validate_declared_test_inventory(tuple(sorted(all_tests)))
     frozen = set(suite.FROZEN_RUNTIME_TESTS) | set(
         suite.HISTORICAL_CONTRACT_TESTS
     )
@@ -119,6 +121,37 @@ def test_private_suite_current_shard_names_and_commands(
     assert sorted(path for item in expanded for path in item.tests) == sorted(
         spec.tests
     )
+
+
+def test_private_suite_keeps_existing_shards_and_adds_declared_current_extra(
+    tmp_path: Path,
+) -> None:
+    root_tests = tuple(f"tests/test_{letter}.py" for letter in "ab")
+    for path in root_tests:
+        file_path = tmp_path / path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text("def test_ok(): pass\n")
+    spec = suite.LaneSpec(
+        name="current",
+        source_root=tmp_path,
+        python=Path("/python"),
+        tests=(*root_tests, *suite.DECLARED_TEST_FILES),
+        extra_args=(),
+    )
+    expanded = suite._expand_current_spec(spec=spec, root=tmp_path, shard_count=2)
+    assert tuple(item.name for item in expanded) == (
+        "current-shard-01",
+        "current-shard-02",
+        "current-extra",
+    )
+    assert expanded[-1].tests == suite.DECLARED_TEST_FILES
+
+
+def test_private_suite_rejects_undeclared_test_paths(tmp_path: Path) -> None:
+    with pytest.raises(suite.PrivateSuiteError, match="undeclared"):
+        suite._validate_declared_test_inventory(
+            ("tests/test_ok.py", "research/test_extra.py")
+        )
 
 
 def test_private_suite_lane_copy_does_not_share_regular_file_writes(

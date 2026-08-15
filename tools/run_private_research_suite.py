@@ -43,6 +43,9 @@ HISTORICAL_MARKET_TESTS = (
     "tests/model_v2/market/test_phase_one_collection_readiness_v1.py",
 )
 
+DECLARED_TEST_ROOTS = ("tests",)
+DECLARED_TEST_FILES = ("tools/live_fair_odds/test_model.py",)
+
 FROZEN_VERSIONS = {
     "python": "3.9.6",
     "numpy": "2.0.2",
@@ -123,13 +126,28 @@ def _runtime_versions(python: Path) -> dict[str, str]:
 
 
 def _test_files(root: Path) -> tuple[str, ...]:
-    return tuple(
-        sorted(
-            path.relative_to(root).as_posix()
-            for path in (root / "tests").rglob("test_*.py")
-            if path.is_file()
-        )
+    excluded_parts = {".git", "__pycache__", "node_modules", ".venv"}
+    paths = {
+        path.relative_to(root).as_posix()
+        for pattern in ("test_*.py", "*_test.py")
+        for path in root.rglob(pattern)
+        if path.is_file()
+        and not excluded_parts.intersection(path.relative_to(root).parts)
+    }
+    return tuple(sorted(paths))
+
+
+def _validate_declared_test_inventory(all_tests: Sequence[str]) -> None:
+    unexpected = tuple(
+        path
+        for path in all_tests
+        if not any(path == root or path.startswith(f"{root}/") for root in DECLARED_TEST_ROOTS)
+        and path not in DECLARED_TEST_FILES
     )
+    if unexpected:
+        raise PrivateSuiteError(
+            f"test inventory contains undeclared test paths: {list(unexpected)!r}"
+        )
 
 
 def _absolute_executable(path: Path) -> Path:
@@ -241,12 +259,24 @@ def _expand_current_spec(
 ) -> tuple[LaneSpec, ...]:
     if spec.name != "current":
         return (spec,)
-    partitions = _partition_current_tests(
-        root=root,
-        tests=spec.tests,
-        shard_count=shard_count,
+    extra_tests = tuple(path for path in spec.tests if path in DECLARED_TEST_FILES)
+    root_tests = tuple(
+        path
+        for path in spec.tests
+        if any(path == root or path.startswith(f"{root}/") for root in DECLARED_TEST_ROOTS)
     )
-    return tuple(
+    if len(root_tests) + len(extra_tests) != len(spec.tests):
+        raise PrivateSuiteError("current test inventory contains an undeclared path")
+    partitions = (
+        _partition_current_tests(
+            root=root,
+            tests=root_tests,
+            shard_count=shard_count,
+        )
+        if root_tests
+        else ()
+    )
+    expanded = tuple(
         LaneSpec(
             name=f"current-shard-{index:02d}",
             source_root=spec.source_root,
@@ -256,6 +286,17 @@ def _expand_current_spec(
         )
         for index, tests in enumerate(partitions, start=1)
     )
+    if extra_tests:
+        expanded += (
+            LaneSpec(
+                name="current-extra",
+                source_root=spec.source_root,
+                python=spec.python,
+                tests=tuple(sorted(extra_tests)),
+                extra_args=(),
+            ),
+        )
+    return expanded
 
 
 def _checkpoint_path(receipt: Path, pass_number: int, lane_name: str) -> Path:
@@ -381,6 +422,7 @@ def _verify_inputs(
         check=True,
     )
     all_tests = _test_files(current_root)
+    _validate_declared_test_inventory(all_tests)
     current_tests = _partition_tests(all_tests)
     return current_tests, frozen_versions
 
@@ -798,6 +840,7 @@ def main() -> int:
         "completed_at_utc": datetime.now(timezone.utc).isoformat(),
         "passes": args.passes,
         "current_shards": current_shards,
+        "current_extra_files": list(DECLARED_TEST_FILES),
         "parallel_workers": workers,
         "resumed": args.resume,
         "current_commit": _git_head(current_root),
