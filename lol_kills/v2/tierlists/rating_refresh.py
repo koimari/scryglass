@@ -28,6 +28,7 @@ from lol_kills.ratings.momentum_config import (
     DEFAULT_MOMENTUM_SCALE,
     DEFAULT_MOMENTUM_WINDOW_GAMES,
     registered_momentum_bundle,
+    require_public_momentum_disabled,
     selected_momentum_configuration,
 )
 
@@ -127,6 +128,11 @@ def refresh_ratings(
     momentum_window_games: int = DEFAULT_MOMENTUM_WINDOW_GAMES,
     momentum_scale: float = DEFAULT_MOMENTUM_SCALE,
 ) -> dict[str, Any]:
+    require_public_momentum_disabled(
+        window_games=momentum_window_games,
+        scale=momentum_scale,
+        entrypoint="refresh_ratings",
+    )
     repo_root = Path(root).resolve()
     team_path = repo_root / LIVE_TEAM_OUTPUT
     player_path = repo_root / LIVE_PLAYER_OUTPUT

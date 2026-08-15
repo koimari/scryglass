@@ -16,6 +16,29 @@ CANDIDATE_MOMENTUM_WINDOW_GAMES = 7
 CANDIDATE_MOMENTUM_SCALE = 80.0
 
 
+class PublicMomentumAuthorityError(ValueError):
+    """Raised when a public entry point is asked to publish research momentum."""
+
+
+def require_public_momentum_disabled(
+    *,
+    window_games: int,
+    scale: float,
+    entrypoint: str,
+) -> None:
+    """Keep public and scheduled builds fail-closed until promotion exists.
+
+    Private research builders may select the registered candidate directly.
+    Public pack and refresh entry points accept only the active zero state.
+    """
+
+    if window_games != DEFAULT_MOMENTUM_WINDOW_GAMES or scale != DEFAULT_MOMENTUM_SCALE:
+        raise PublicMomentumAuthorityError(
+            f"{entrypoint} accepts only zero momentum until an independently "
+            "verified promotion contract exists"
+        )
+
+
 def momentum_configuration(*, window_games: int, scale: float, status: str) -> dict[str, Any]:
     """Return the canonical, serializable configuration record."""
 

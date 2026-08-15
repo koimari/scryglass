@@ -8,7 +8,7 @@ import pyarrow as pa
 import pytest
 
 from lol_kills.export.pack_spec import RATINGS_SNAPSHOT_COLS
-from lol_kills.export.public_pack import serialize_rating_snapshot_rows
+from lol_kills.export.public_pack import export_public_pack, serialize_rating_snapshot_rows
 from lol_kills.ratings.dual_elo import (
     DualEloConfig,
     apply_team_momentum_snapshot,
@@ -19,7 +19,9 @@ from lol_kills.ratings.momentum_config import (
     CANDIDATE_MOMENTUM_WINDOW_GAMES,
     DEFAULT_MOMENTUM_SCALE,
     DEFAULT_MOMENTUM_WINDOW_GAMES,
+    PublicMomentumAuthorityError,
     registered_momentum_bundle,
+    require_public_momentum_disabled,
 )
 from lol_kills.ratings.player_elo import (
     PlayerEloConfig,
@@ -167,6 +169,58 @@ def test_candidate_bundle_is_research_only() -> None:
     assert bundle["candidate"]["scale"] == 80.0
     assert all(value is False for value in bundle["candidate"]["authority"].values())
     assert bundle["promotion"]["status"] == "unavailable"
+
+
+def test_public_pack_rejects_research_momentum_before_touching_sources(tmp_path: Path) -> None:
+    with pytest.raises(PublicMomentumAuthorityError, match="promotion contract"):
+        export_public_pack(
+            project_root=tmp_path,
+            runtime_root=tmp_path,
+            out_root=tmp_path / "output",
+            momentum_window_games=CANDIDATE_MOMENTUM_WINDOW_GAMES,
+            momentum_scale=CANDIDATE_MOMENTUM_SCALE,
+        )
+
+
+def test_scheduled_refresh_rejects_research_momentum_before_reading_sources(tmp_path: Path) -> None:
+    from lol_kills.v2.tierlists.rating_refresh import refresh_ratings
+
+    with pytest.raises(PublicMomentumAuthorityError, match="promotion contract"):
+        refresh_ratings(
+            tmp_path,
+            momentum_window_games=CANDIDATE_MOMENTUM_WINDOW_GAMES,
+            momentum_scale=CANDIDATE_MOMENTUM_SCALE,
+        )
+
+
+def test_public_entry_guard_accepts_only_active_zero_state() -> None:
+    assert require_public_momentum_disabled(
+        window_games=DEFAULT_MOMENTUM_WINDOW_GAMES,
+        scale=DEFAULT_MOMENTUM_SCALE,
+        entrypoint="test",
+    ) is None
+
+
+def test_public_pack_zero_momentum_reaches_source_validation(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        export_public_pack(
+            project_root=tmp_path,
+            runtime_root=tmp_path,
+            out_root=tmp_path / "output",
+            momentum_window_games=DEFAULT_MOMENTUM_WINDOW_GAMES,
+            momentum_scale=DEFAULT_MOMENTUM_SCALE,
+        )
+
+
+def test_scheduled_refresh_zero_momentum_reaches_source_validation(tmp_path: Path) -> None:
+    from lol_kills.v2.tierlists.rating_refresh import refresh_ratings
+
+    with pytest.raises(FileNotFoundError):
+        refresh_ratings(
+            tmp_path,
+            momentum_window_games=DEFAULT_MOMENTUM_WINDOW_GAMES,
+            momentum_scale=DEFAULT_MOMENTUM_SCALE,
+        )
 
 
 @pytest.mark.parametrize(

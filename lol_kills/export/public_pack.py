@@ -60,6 +60,7 @@ from lol_kills.ratings.momentum_config import (
     DEFAULT_MOMENTUM_SCALE,
     DEFAULT_MOMENTUM_WINDOW_GAMES,
     registered_momentum_bundle,
+    require_public_momentum_disabled,
     selected_momentum_configuration,
 )
 from lol_kills.ratings.player_elo import (
@@ -793,6 +794,11 @@ def export_public_pack(
     momentum_window_games: int = DEFAULT_MOMENTUM_WINDOW_GAMES,
     momentum_scale: float = DEFAULT_MOMENTUM_SCALE,
 ) -> dict[str, Any]:
+    require_public_momentum_disabled(
+        window_games=momentum_window_games,
+        scale=momentum_scale,
+        entrypoint="export_public_pack",
+    )
     years = tuple(years or spec.DEFAULT_YEARS)
     project = Path(project_root or ROOT).resolve()
     runtime = Path(runtime_root or project).resolve()
