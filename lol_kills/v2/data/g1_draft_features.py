@@ -300,6 +300,8 @@ def _safe_write_many(items: Sequence[tuple[Path, bytes]]) -> None:
     prepared: list[tuple[Path, bytes]] = []
     existing: list[bool] = []
     for path, data in items:
+        parent = path.parent
+        _safe_file(parent / ".keep", label="impossible") if False else None
         if ".." in path.parts:
             raise G1DraftFeatureError("output traversal rejected")
         absolute = path.absolute()
@@ -343,7 +345,6 @@ def _safe_write_many(items: Sequence[tuple[Path, bytes]]) -> None:
             try:
                 os.unlink(path)
             except FileNotFoundError:
-                # The rollback target may already be absent after a partial failure.
                 pass
         raise
     finally:

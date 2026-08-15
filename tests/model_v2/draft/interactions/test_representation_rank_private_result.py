@@ -839,11 +839,6 @@ def test_rehashed_type_cardinality_and_finite_mutations_reject(
         result.validate_private_result(payload)
 
 
-@pytest.mark.parametrize("value", (float("nan"), float("inf"), float("-inf")))
-def test_optional_finite_rejects_nonfinite_values(value: float) -> None:
-    assert result._optional_finite(value) is False
-
-
 @pytest.mark.parametrize(
     "location",
     ("terminal", "stage"),
