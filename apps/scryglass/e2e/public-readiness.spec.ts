@@ -74,7 +74,7 @@ test("match objectives follow patch support and remain reachable on mobile", asy
   const currentStats = page.getByTestId("team-objective-stats").first();
   await expect(currentStats).toContainText("Towers");
   await expect(currentStats).toContainText("Inhibitors");
-  await expect(currentStats.locator("dt", { hasText: "Atakhans" })).toHaveCount(0);
+  await expect(currentStats.locator("dt", { hasText: "Atakhan" })).toHaveCount(0);
   await expect(currentStats.locator("dt", { hasText: "Heralds" }).locator("..").locator("dd")).toHaveText("—");
   await expect(currentStats.locator("dt", { hasText: "Inhibitors" }).locator("..").locator("dd")).toHaveText("0");
   const currentScroll = await currentStrip.evaluate((node) => ({
@@ -88,8 +88,8 @@ test("match objectives follow patch support and remain reachable on mobile", asy
 
   await page.goto("/matches/e2e-game-25");
   const legacyStats = page.getByTestId("team-objective-stats").first();
-  await expect(legacyStats.locator("dt", { hasText: "Atakhans" })).toBeVisible();
-  await expect(legacyStats.locator("dt", { hasText: "Atakhans" }).locator("..").locator("dd")).toHaveText("0");
+  await expect(legacyStats.locator("dt", { hasText: "Atakhan" })).toBeVisible();
+  await expect(legacyStats.locator("dt", { hasText: "Atakhan" }).locator("..").locator("dd")).toHaveText("0");
   await expect(legacyStats.locator("dt", { hasText: "Inhibitors" })).toBeVisible();
 });
 

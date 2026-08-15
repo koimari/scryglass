@@ -15,7 +15,7 @@ export const TEAM_OBJECTIVE_FIELDS: ReadonlyArray<{ key: TeamObjectiveKey; label
   { key: "barons", label: "Barons" },
   { key: "void_grubs", label: "Grubs" },
   { key: "heralds", label: "Heralds" },
-  { key: "atakhans", label: "Atakhans" },
+  { key: "atakhans", label: "Atakhan" },
   { key: "inhibitors", label: "Inhibitors" },
 ];
 
