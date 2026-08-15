@@ -758,6 +758,64 @@ def test_client_repr_redacts_secret_key() -> None:
     assert "<redacted>" in repr(client)
 
 
+def test_query_staging_retries_transient_idempotent_batches(monkeypatch) -> None:
+    client = supabase_publication.SupabasePublicData(
+        "https://example.supabase.co",
+        "sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    attempts = 0
+    sleeps: list[float] = []
+
+    def request(_method, _path, _payload=None, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts < supabase_publication.MAX_QUERY_STAGE_ATTEMPTS:
+            try:
+                raise TimeoutError("transient TLS timeout")
+            except TimeoutError as cause:
+                raise supabase_publication.SupabasePublicationError(
+                    "Supabase request failed"
+                ) from cause
+        return 0
+
+    client._request = request  # type: ignore[method-assign]
+    monkeypatch.setattr(supabase_publication.time, "sleep", sleeps.append)
+
+    assert client._stage_query_rows("v2026.08.15.120000", "players", []) == 0
+    assert attempts == supabase_publication.MAX_QUERY_STAGE_ATTEMPTS
+    assert sleeps == [0.5, 1.0, 2.0]
+
+
+def test_query_staging_retries_gateway_520(monkeypatch) -> None:
+    client = supabase_publication.SupabasePublicData(
+        "https://example.supabase.co",
+        "sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    attempts = 0
+
+    def request(_method, _path, _payload=None, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            cause = supabase_publication.urllib.error.HTTPError(
+                "https://example.supabase.co/rest/v1/rpc/stage_scryglass_query_rows",
+                520,
+                "gateway error",
+                None,
+                None,
+            )
+            raise supabase_publication.SupabasePublicationError(
+                "Supabase request failed with HTTP 520"
+            ) from cause
+        return 0
+
+    client._request = request  # type: ignore[method-assign]
+    monkeypatch.setattr(supabase_publication.time, "sleep", lambda _seconds: None)
+
+    assert client._stage_query_rows("v2026.08.15.120000", "players", []) == 0
+    assert attempts == 2
+
+
 def test_retention_prunes_one_release_per_database_call() -> None:
     client = supabase_publication.SupabasePublicData(
         "https://example.supabase.co",

@@ -47,6 +47,10 @@ PUBLIC_ASSET_PATH_SET = frozenset(PUBLIC_ASSET_PATHS)
 PACK_ID_RE = re.compile(r"^v\d{4}\.\d{2}\.\d{2}\.\d{6}$")
 REQUEST_TIMEOUT_SECONDS = 150.0
 MAX_RETENTION_PRUNE_CALLS = 20
+MAX_QUERY_STAGE_ATTEMPTS = 4
+RETRYABLE_QUERY_STAGE_HTTP_CODES = frozenset(
+    {408, 425, 429, 500, 502, 503, 504, 520, 522, 524}
+)
 QUERY_STAGE_BATCH_ROWS = 500
 QUERY_STAGE_BATCH_BYTES = 3_200_000
 PUBLIC_ASSET_CONTENT_TYPE = "application/json"
@@ -873,25 +877,13 @@ class SupabasePublicData:
                     len(pending) >= QUERY_STAGE_BATCH_ROWS
                     or pending_bytes + row_bytes > QUERY_STAGE_BATCH_BYTES
                 ):
-                    staged = self._request(
-                        "POST",
-                        "rpc/stage_scryglass_query_rows",
-                        {"p_release_id": release_id, "p_dataset": dataset, "p_rows": pending},
-                    )
-                    if type(staged) is not int:
-                        raise SupabasePublicationError("Supabase query row staging is malformed")
+                    self._stage_query_rows(release_id, dataset, pending)
                     pending = []
                     pending_bytes = 0
                 pending.append(row)
                 pending_bytes += row_bytes
             if pending:
-                staged = self._request(
-                    "POST",
-                    "rpc/stage_scryglass_query_rows",
-                    {"p_release_id": release_id, "p_dataset": dataset, "p_rows": pending},
-                )
-                if type(staged) is not int:
-                    raise SupabasePublicationError("Supabase query row staging is malformed")
+                self._stage_query_rows(release_id, dataset, pending)
             sealed = self._request(
                 "POST",
                 "rpc/seal_scryglass_query_dataset",
@@ -909,6 +901,42 @@ class SupabasePublicData:
                     f"Supabase query receipt seal failed: {dataset}"
                 )
         return reused
+
+    def _stage_query_rows(
+        self,
+        release_id: str,
+        dataset: str,
+        rows: list[dict[str, Any]],
+    ) -> int:
+        """Retry one idempotent query-row batch after transient transport faults."""
+
+        payload = {
+            "p_release_id": release_id,
+            "p_dataset": dataset,
+            "p_rows": rows,
+        }
+        for attempt in range(MAX_QUERY_STAGE_ATTEMPTS):
+            try:
+                staged = self._request(
+                    "POST",
+                    "rpc/stage_scryglass_query_rows",
+                    payload,
+                )
+            except SupabasePublicationError as error:
+                cause = error.__cause__
+                retryable = isinstance(cause, (urllib.error.URLError, TimeoutError))
+                if isinstance(cause, urllib.error.HTTPError):
+                    retryable = cause.code in RETRYABLE_QUERY_STAGE_HTTP_CODES
+                if not retryable or attempt + 1 >= MAX_QUERY_STAGE_ATTEMPTS:
+                    raise
+                time.sleep(0.5 * (2**attempt))
+                continue
+            if type(staged) is not int:
+                raise SupabasePublicationError(
+                    "Supabase query row staging is malformed"
+                )
+            return staged
+        raise AssertionError("query staging retry loop did not return")
 
     def activate(self, release_id: str) -> dict[str, Any]:
         release_id = _release_id(release_id)
