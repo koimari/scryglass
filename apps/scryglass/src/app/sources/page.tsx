@@ -17,7 +17,7 @@ export default function SourcesPage() {
       <div className="method-content">
         <section>
           <h2>Completed Games</h2>
-          <p><a className="row-link" href="https://oracleselixir.com/tools/downloads" target="_blank" rel="noreferrer">Oracle&apos;s Elixir</a> supplies public professional match data. Scryglass publishes derived ratings and summaries. Raw source rows stay outside the public pack.</p>
+          <p><a className="row-link" href="https://lol.timsevenhuysen.com/matchdata/" target="_blank" rel="noreferrer">Oracle&apos;s Elixir match data</a> supplies public professional game facts. Its <a className="row-link" href="https://lol.timsevenhuysen.com/about/frequently-asked-questions/#comment-148" target="_blank" rel="noreferrer">official noncommercial-use record</a> says the data can only be used noncommercially. Scryglass is a noncommercial independent research publication. It publishes derived ratings and summaries while raw source rows stay outside the public pack.</p>
         </section>
         <section>
           <h2>Schedules And Identities</h2>
