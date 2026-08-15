@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import urllib.error
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -74,7 +75,11 @@ class FakeSupabase:
         for asset in assets:
             key = (asset["release_id"], asset["path"])
             prior = self.assets.get(key)
-            if prior and prior.get("bytes") == asset["bytes"] and prior.get("sha256") == asset["sha256"]:
+            if (
+                prior
+                and prior.get("bytes") == asset["bytes"]
+                and prior.get("sha256") == asset["sha256"]
+            ):
                 reused += 1
                 continue
             if prior:
@@ -177,9 +182,7 @@ def _fixture(root: Path):
         "total_bytes": sum(item["bytes"] for item in files),
         "release": {
             "release_id": release_id,
-            "artifact_hashes": {
-                item["path"]: item["sha256"] for item in files
-            },
+            "artifact_hashes": {item["path"]: item["sha256"] for item in files},
         },
     }
     tier = root / "tierlists.json"
@@ -247,11 +250,15 @@ def test_publish_release_stages_then_activates_complete_snapshot() -> None:
 
     assert result["status"] == "activated_pending_health"
     assert result["release_id"] == manifest["pack_id"]
-    assert result["assets"] == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 2
+    assert (
+        result["assets"] == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 2
+    )
     assert result["reused_assets"] == 0
     assert client.stale_discard_limits == [1]
     assert client.active_id == manifest["pack_id"]
-    assert len(client.assets) == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 2
+    assert (
+        len(client.assets) == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 2
+    )
     assert list(client.storage) == [
         *[
             f"v2026.08.10.153000/{path}"
@@ -260,7 +267,9 @@ def test_publish_release_stages_then_activates_complete_snapshot() -> None:
         "v2026.08.10.153000/rankings/tierlists.json",
         "v2026.08.10.153000/rankings/tierlists-latest.json",
     ]
-    assert client.releases[manifest["pack_id"]]["manifest"]["data_backend"] == "supabase"
+    assert (
+        client.releases[manifest["pack_id"]]["manifest"]["data_backend"] == "supabase"
+    )
     assert client.releases[manifest["pack_id"]]["manifest"]["tier"] == {
         "status": "available",
         "as_of": None,
@@ -311,15 +320,23 @@ def test_publish_release_omits_unpromoted_draft_asset() -> None:
 
     published = client.releases[manifest["pack_id"]]["manifest"]
     assert isinstance(published, dict)
-    assert (manifest["pack_id"], supabase_publication.DRAFT_ASSET_PATH) not in client.assets
+    assert (
+        manifest["pack_id"],
+        supabase_publication.DRAFT_ASSET_PATH,
+    ) not in client.assets
     assert supabase_publication.DRAFT_ASSET_PATH not in {
         item["path"] for item in published["files"]
     }
-    assert supabase_publication.DRAFT_ASSET_PATH not in published["release"]["artifact_hashes"]
+    assert (
+        supabase_publication.DRAFT_ASSET_PATH
+        not in published["release"]["artifact_hashes"]
+    )
     assert published["draft_authority"]["status"] == "unavailable"
 
 
-def test_publish_release_rejects_promoted_draft_until_independent_verification() -> None:
+def test_publish_release_rejects_promoted_draft_until_independent_verification() -> (
+    None
+):
     with TemporaryDirectory() as temporary:
         pack, manifest, tier = _fixture(Path(temporary))
         model_version = "draft-promoted-v1"
@@ -380,7 +397,9 @@ def test_publish_release_includes_optional_schedule_when_present() -> None:
     with TemporaryDirectory() as temporary:
         pack, manifest, tier = _fixture(Path(temporary))
         path = "features/schedule.json"
-        raw = json.dumps({"schema_version": "scryglass:public-schedule:v1", "upcoming": []}).encode()
+        raw = json.dumps(
+            {"schema_version": "scryglass:public-schedule:v1", "upcoming": []}
+        ).encode()
         destination = pack / path
         destination.write_bytes(raw)
         manifest["files"].append(
@@ -404,7 +423,9 @@ def test_publish_release_includes_optional_schedule_when_present() -> None:
             client=client,
         )
 
-    assert result["assets"] == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 3
+    assert (
+        result["assets"] == len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 3
+    )
     assert (manifest["pack_id"], path) in client.assets
 
 
@@ -489,7 +510,9 @@ def test_publish_release_adds_latest_view_to_existing_active_release() -> None:
             client=client,
         )
         latest_key = (manifest["pack_id"], supabase_publication.TIER_LATEST_ASSET_PATH)
-        latest_storage = f"{manifest['pack_id']}/{supabase_publication.TIER_LATEST_ASSET_PATH}"
+        latest_storage = (
+            f"{manifest['pack_id']}/{supabase_publication.TIER_LATEST_ASSET_PATH}"
+        )
         del client.assets[latest_key]
         del client.storage[latest_storage]
 
@@ -640,10 +663,9 @@ def test_post_activation_readback_failure_restores_previous_release() -> None:
         def fail_after_activation(storage_path: str):
             nonlocal reads
             reads += 1
-            if (
-                reads > len(supabase_publication.PUBLIC_RATING_REQUIRED_FILES) + 2
-                and storage_path.endswith("rankings/tierlists.json")
-            ):
+            if reads > len(
+                supabase_publication.PUBLIC_RATING_REQUIRED_FILES
+            ) + 2 and storage_path.endswith("rankings/tierlists.json"):
                 return {"size": -1, "metadata": {}}
             return original(storage_path)
 
@@ -955,6 +977,114 @@ def test_storage_upload_sends_base64_custom_metadata() -> None:
     assert headers["x-upsert"] == "false"
 
 
+def test_large_storage_upload_uses_resumable_chunks(monkeypatch) -> None:
+    raw = b"x" * (supabase_publication.RESUMABLE_UPLOAD_THRESHOLD_BYTES + 3)
+    digest = hashlib.sha256(raw).hexdigest()
+    requests = []
+
+    class Response:
+        def __init__(self, body=b"", headers=None):
+            self.body = body
+            self.headers = headers or {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return self.body
+
+    class Opener:
+        failed_first_chunk = False
+
+        def open(self, request, *, timeout):
+            requests.append(request)
+            if request.method == "POST":
+                assert timeout == supabase_publication.REQUEST_TIMEOUT_SECONDS
+                return Response(
+                    headers={"Location": "/storage/v1/upload/resumable/upload-id"}
+                )
+            if request.method == "PATCH":
+                assert timeout == supabase_publication.REQUEST_TIMEOUT_SECONDS
+                offset = int(request.headers["Upload-offset"])
+                if not self.failed_first_chunk:
+                    self.failed_first_chunk = True
+                    raise urllib.error.HTTPError(
+                        request.full_url,
+                        544,
+                        "gateway timeout",
+                        {},
+                        None,
+                    )
+                return Response(
+                    headers={"Upload-Offset": str(offset + len(request.data or b""))}
+                )
+            if request.method == "HEAD":
+                return Response(
+                    headers={
+                        "Upload-Offset": str(
+                            supabase_publication.RESUMABLE_UPLOAD_CHUNK_BYTES
+                        )
+                    }
+                )
+            if "/object/info/authenticated/" in request.full_url:
+                return Response(
+                    json.dumps(
+                        {
+                            "size": len(raw),
+                            "metadata": {
+                                "sha256": digest,
+                                "bytes": len(raw),
+                                "content_type": "application/json",
+                            },
+                        }
+                    ).encode("utf-8")
+                )
+            if "/object/authenticated/" in request.full_url:
+                return Response(raw)
+            raise AssertionError(request.full_url)
+
+    monkeypatch.setattr(supabase_publication.time, "sleep", lambda _delay: None)
+    client = supabase_publication.SupabasePublicData(
+        "https://example.supabase.co",
+        "sb_secret_abcdefghijklmnopqrstuvwxyz",
+        opener=Opener(),
+    )
+
+    client.put_storage_object(
+        "v2026.08.10.153000/features/profile_records.json",
+        raw,
+        sha256=digest,
+        content_type="application/json",
+    )
+
+    create = requests[0]
+    assert create.full_url == (
+        "https://example.storage.supabase.co/storage/v1/upload/resumable"
+    )
+    create_headers = {key.lower(): value for key, value in create.headers.items()}
+    assert create_headers["tus-resumable"] == "1.0.0"
+    assert create_headers["upload-length"] == str(len(raw))
+    assert create_headers["x-upsert"] == "false"
+    decoded_metadata = {
+        key: base64.b64decode(value).decode("utf-8")
+        for key, value in (
+            item.split(" ", 1) for item in create_headers["upload-metadata"].split(",")
+        )
+    }
+    assert decoded_metadata["bucketName"] == "scryglass-public"
+    assert decoded_metadata["objectName"].endswith("/features/profile_records.json")
+    assert json.loads(decoded_metadata["metadata"]) == {
+        "sha256": digest,
+        "bytes": len(raw),
+        "content_type": "application/json",
+    }
+    assert [request.method for request in requests].count("PATCH") == 2
+    assert [request.method for request in requests].count("HEAD") == 1
+
+
 def test_latest_tier_payload_keeps_only_newest_patch_and_all_views() -> None:
     payload = {
         "status": "available",
@@ -984,8 +1114,18 @@ def test_latest_tier_payload_separates_role_scopes_with_shared_patch_id() -> Non
         "status": "available",
         "options": {"patches": ["26.14"]},
         "rows": [
-            {"scope_id": "patch:26.14", "patch": "26.14", "role": "mid", "champion": "Galio"},
-            {"scope_id": "patch:26.14", "patch": "26.14", "role": "top", "champion": "Galio"},
+            {
+                "scope_id": "patch:26.14",
+                "patch": "26.14",
+                "role": "mid",
+                "champion": "Galio",
+            },
+            {
+                "scope_id": "patch:26.14",
+                "patch": "26.14",
+                "role": "top",
+                "champion": "Galio",
+            },
         ],
         "scopes": [
             {"scope_id": "patch:26.14", "patch": "26.14", "role": "mid"},
@@ -996,7 +1136,10 @@ def test_latest_tier_payload_separates_role_scopes_with_shared_patch_id() -> Non
     latest = supabase_publication.latest_tier_payload(payload)
 
     assert {row["scope_id"] for row in latest["rows"]} == {"26.14-mid", "26.14-top"}
-    assert {scope["scope_id"] for scope in latest["scopes"]} == {"26.14-mid", "26.14-top"}
+    assert {scope["scope_id"] for scope in latest["scopes"]} == {
+        "26.14-mid",
+        "26.14-top",
+    }
 
 
 def test_refresh_ledger_migration_keeps_private_rows_private() -> None:
@@ -1006,13 +1149,22 @@ def test_refresh_ledger_migration_keeps_private_rows_private() -> None:
 
     assert "create table public.scryglass_refresh_runs" in migration
     assert "create table public.scryglass_public_health" in migration
-    assert "alter table public.scryglass_refresh_runs enable row level security" in migration
-    assert "alter table public.scryglass_public_health enable row level security" in migration
+    assert (
+        "alter table public.scryglass_refresh_runs enable row level security"
+        in migration
+    )
+    assert (
+        "alter table public.scryglass_public_health enable row level security"
+        in migration
+    )
     assert (
         "revoke all on public.scryglass_refresh_runs "
         "from public, anon, authenticated, service_role"
     ) in migration
-    assert "grant select on public.scryglass_public_health to anon, authenticated" in migration
+    assert (
+        "grant select on public.scryglass_public_health to anon, authenticated"
+        in migration
+    )
     assert "grant select on public.scryglass_refresh_runs to anon" not in migration
 
 
@@ -1027,7 +1179,9 @@ def test_refresh_ledger_migration_restricts_release_functions() -> None:
         "prune_scryglass_public_releases(integer)",
     ):
         assert f"alter function public.{function} security invoker" in migration
-        assert f"grant execute on function public.{function} to service_role" in migration
+        assert (
+            f"grant execute on function public.{function} to service_role" in migration
+        )
     assert "security definer" not in migration
 
 
@@ -1069,25 +1223,40 @@ def test_database_allowlist_matches_publication_contract() -> None:
     ]
     assert activation_migrations, "no activation migration found"
     activation = activation_migrations[-1].read_text(encoding="utf-8")
-    required_section = activation.split("required_assets constant text[] := array[", 1)[1].split("];", 1)[0]
-    for path in (*supabase_publication.PUBLIC_RATING_REQUIRED_FILES, supabase_publication.TIER_ASSET_PATH):
+    required_section = activation.split("required_assets constant text[] := array[", 1)[
+        1
+    ].split("];", 1)[0]
+    for path in (
+        *supabase_publication.PUBLIC_RATING_REQUIRED_FILES,
+        supabase_publication.TIER_ASSET_PATH,
+    ):
         assert f"'{path}'" in required_section
     assert "'features/schedule.json'" not in required_section
 
 
 def test_phase_one_publication_migration_keeps_compatibility_boundaries() -> None:
     migration = (
-        ROOT
-        / "supabase/migrations/20260813010000_public_release_security_hardening.sql"
-    ).read_text(encoding="utf-8").lower()
+        (
+            ROOT
+            / "supabase/migrations/20260813010000_public_release_security_hardening.sql"
+        )
+        .read_text(encoding="utf-8")
+        .lower()
+    )
 
     assert 'create policy "read active scryglass storage assets"' in migration
     assert "release.status = 'active'" in migration
     assert "asset.storage_path = storage.objects.name" in migration
     assert "body is null" in migration
     assert "artifact_hashes" in migration
-    assert "grant select on public.scryglass_public_releases to anon, authenticated" in migration
-    assert "grant select on public.scryglass_public_assets to anon, authenticated" in migration
+    assert (
+        "grant select on public.scryglass_public_releases to anon, authenticated"
+        in migration
+    )
+    assert (
+        "grant select on public.scryglass_public_assets to anon, authenticated"
+        in migration
+    )
     assert "set public = false" not in migration
 
 
@@ -1103,8 +1272,10 @@ def test_quarantine_reason_migration_keeps_details_private() -> None:
 
 def test_rls_auto_enable_migration_removes_public_execution() -> None:
     migration = (
-        ROOT / "supabase/migrations/20260811193736_restrict_rls_auto_enable.sql"
-    ).read_text(encoding="utf-8").lower()
+        (ROOT / "supabase/migrations/20260811193736_restrict_rls_auto_enable.sql")
+        .read_text(encoding="utf-8")
+        .lower()
+    )
 
     assert "revoke all on function public.rls_auto_enable()" in migration
     assert "from public, anon, authenticated, service_role" in migration

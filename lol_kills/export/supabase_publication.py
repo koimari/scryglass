@@ -51,6 +51,12 @@ MAX_QUERY_STAGE_ATTEMPTS = 4
 RETRYABLE_QUERY_STAGE_HTTP_CODES = frozenset(
     {408, 425, 429, 500, 502, 503, 504, 520, 522, 524}
 )
+RESUMABLE_UPLOAD_THRESHOLD_BYTES = 6 * 1024 * 1024
+RESUMABLE_UPLOAD_CHUNK_BYTES = 6 * 1024 * 1024
+MAX_STORAGE_UPLOAD_ATTEMPTS = 4
+RETRYABLE_STORAGE_HTTP_CODES = frozenset(
+    {408, 425, 429, 500, 502, 503, 504, 520, 522, 524, 544}
+)
 QUERY_STAGE_BATCH_ROWS = 500
 QUERY_STAGE_BATCH_BYTES = 3_200_000
 PUBLIC_ASSET_CONTENT_TYPE = "application/json"
@@ -141,7 +147,10 @@ def _public_asset_path(value: object) -> str:
 def _storage_path(value: object) -> str:
     storage_path = str(value or "")
     release_id, separator, path = storage_path.partition("/")
-    if not separator or _release_id(release_id) + "/" + _public_asset_path(path) != storage_path:
+    if (
+        not separator
+        or _release_id(release_id) + "/" + _public_asset_path(path) != storage_path
+    ):
         raise SupabasePublicationError("Supabase Storage path is invalid")
     return storage_path
 
@@ -151,9 +160,7 @@ def _retention_storage_path(value: object) -> str:
     release_id, separator, path = storage_path.partition("/")
     if (
         not separator
-        or not (
-            PACK_ID_RE.fullmatch(release_id)
-        )
+        or not (PACK_ID_RE.fullmatch(release_id))
         or f"{release_id}/{_public_asset_path(path)}" != storage_path
     ):
         raise SupabasePublicationError("retained Supabase Storage path is invalid")
@@ -198,7 +205,9 @@ def _query_projection_path(pack_dir: Path) -> Path:
     try:
         candidate.relative_to(root)
     except ValueError as error:
-        raise SupabasePublicationError("query projection path leaves the pack") from error
+        raise SupabasePublicationError(
+            "query projection path leaves the pack"
+        ) from error
     if not candidate.is_file():
         raise SupabasePublicationError("query projection is missing")
     return candidate
@@ -215,7 +224,9 @@ def _prepare_query_datasets(
     query_api = manifest.get("query_api")
     if query_api is None:
         return {}, None
-    projection_metadata = query_api.get("projection") if isinstance(query_api, dict) else None
+    projection_metadata = (
+        query_api.get("projection") if isinstance(query_api, dict) else None
+    )
     if (
         not isinstance(query_api, dict)
         or query_api.get("schema_version") != QUERY_API_SCHEMA
@@ -226,10 +237,9 @@ def _prepare_query_datasets(
         raise SupabasePublicationError("query API manifest is invalid")
     path = _query_projection_path(pack_dir)
     raw = path.read_bytes()
-    if (
-        projection_metadata.get("bytes") != len(raw)
-        or projection_metadata.get("sha256") != _sha256(raw)
-    ):
+    if projection_metadata.get("bytes") != len(raw) or projection_metadata.get(
+        "sha256"
+    ) != _sha256(raw):
         raise SupabasePublicationError("query projection checksum failed")
     try:
         parsed = json.loads(raw.decode("utf-8"))
@@ -276,7 +286,11 @@ def _project_url(value: str) -> str:
 
 def _secret_key(value: str) -> str:
     key = value.strip()
-    if not key.startswith("sb_secret_") or len(key) < 24 or any(character.isspace() for character in key):
+    if (
+        not key.startswith("sb_secret_")
+        or len(key) < 24
+        or any(character.isspace() for character in key)
+    ):
         raise ValueError("Supabase secret key is malformed")
     return key
 
@@ -312,7 +326,9 @@ class SupabasePublicData:
             "Accept": "application/json",
         }
         if payload is not None:
-            body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            body = json.dumps(
+                payload, ensure_ascii=False, separators=(",", ":")
+            ).encode("utf-8")
             headers["Content-Type"] = "application/json"
         if prefer:
             headers["Prefer"] = prefer
@@ -323,7 +339,9 @@ class SupabasePublicData:
             headers=headers,
         )
         try:
-            with self._opener.open(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            with self._opener.open(
+                request, timeout=REQUEST_TIMEOUT_SECONDS
+            ) as response:
                 raw = response.read()
         except urllib.error.HTTPError as error:
             detail = ""
@@ -366,7 +384,9 @@ class SupabasePublicData:
             "?status=eq.active&select=release_id,status,manifest,source_as_of,activated_at&limit=1",
         )
         if not isinstance(rows, list):
-            raise SupabasePublicationError("Supabase active release response is malformed")
+            raise SupabasePublicationError(
+                "Supabase active release response is malformed"
+            )
         return rows[0] if rows and isinstance(rows[0], dict) else None
 
     def asset(self, release_id: str, path: str) -> dict[str, Any] | None:
@@ -395,9 +415,7 @@ class SupabasePublicData:
         if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
             raise SupabasePublicationError("Supabase asset inventory is malformed")
         return {
-            str(row["path"]): row
-            for row in rows
-            if isinstance(row.get("path"), str)
+            str(row["path"]): row for row in rows if isinstance(row.get("path"), str)
         }
 
     def query_receipts(self, release_id: str) -> dict[str, dict[str, Any]]:
@@ -409,7 +427,9 @@ class SupabasePublicData:
             "&select=dataset,row_count,source_bytes,source_sha256,row_digest_sha256,storage_bytes,storage_sha256",
         )
         if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
-            raise SupabasePublicationError("Supabase query receipt response is malformed")
+            raise SupabasePublicationError(
+                "Supabase query receipt response is malformed"
+            )
         return {
             str(row["dataset"]): row
             for row in rows
@@ -473,7 +493,9 @@ class SupabasePublicData:
         )
 
     def write_diagnostic_credential(self, token: str) -> None:
-        if not 32 <= len(token) <= 512 or any(character.isspace() for character in token):
+        if not 32 <= len(token) <= 512 or any(
+            character.isspace() for character in token
+        ):
             raise SupabasePublicationError("diagnostic token is malformed")
         self._request(
             "POST",
@@ -490,7 +512,9 @@ class SupabasePublicData:
 
     def storage_object(self, storage_path: str) -> bytes:
         storage_path = _storage_path(storage_path)
-        encoded = "/".join(urllib.parse.quote(part, safe="") for part in storage_path.split("/"))
+        encoded = "/".join(
+            urllib.parse.quote(part, safe="") for part in storage_path.split("/")
+        )
         request = urllib.request.Request(
             f"{self.project_url}/storage/v1/object/authenticated/scryglass-public/{encoded}",
             method="GET",
@@ -501,7 +525,9 @@ class SupabasePublicData:
         last_error: Exception | None = None
         for attempt in range(3):
             try:
-                with self._opener.open(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                with self._opener.open(
+                    request, timeout=REQUEST_TIMEOUT_SECONDS
+                ) as response:
                     return response.read()
             except Exception as error:  # noqa: BLE001
                 last_error = error
@@ -515,7 +541,9 @@ class SupabasePublicData:
         metadata instead of being downloaded back (cached-egress cost).
         """
         storage_path = _storage_path(storage_path)
-        encoded = "/".join(urllib.parse.quote(part, safe="") for part in storage_path.split("/"))
+        encoded = "/".join(
+            urllib.parse.quote(part, safe="") for part in storage_path.split("/")
+        )
         request = urllib.request.Request(
             f"{self.project_url}/storage/v1/object/info/authenticated/scryglass-public/{encoded}",
             method="GET",
@@ -524,10 +552,14 @@ class SupabasePublicData:
             },
         )
         try:
-            with self._opener.open(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            with self._opener.open(
+                request, timeout=REQUEST_TIMEOUT_SECONDS
+            ) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except Exception as error:  # noqa: BLE001
-            raise SupabasePublicationError("Supabase Storage metadata read failed") from error
+            raise SupabasePublicationError(
+                "Supabase Storage metadata read failed"
+            ) from error
         if not isinstance(payload, dict):
             raise SupabasePublicationError("Supabase Storage metadata is malformed")
         return payload
@@ -545,12 +577,22 @@ class SupabasePublicData:
             raise SupabasePublicationError("Supabase Storage upload digest is invalid")
         if content_type != PUBLIC_ASSET_CONTENT_TYPE:
             raise SupabasePublicationError("Supabase Storage content type is invalid")
-        encoded = "/".join(urllib.parse.quote(part, safe="") for part in storage_path.split("/"))
+        encoded = "/".join(
+            urllib.parse.quote(part, safe="") for part in storage_path.split("/")
+        )
         custom_metadata = {
             "sha256": sha256,
             "bytes": len(raw),
             "content_type": content_type,
         }
+        if len(raw) > RESUMABLE_UPLOAD_THRESHOLD_BYTES:
+            self._put_resumable_storage_object(
+                storage_path,
+                raw,
+                custom_metadata=custom_metadata,
+                content_type=content_type,
+            )
+            return
         metadata = base64.b64encode(
             json.dumps(custom_metadata, separators=(",", ":")).encode("utf-8")
         ).decode("ascii")
@@ -589,10 +631,187 @@ class SupabasePublicData:
             or existing_custom.get("bytes") != len(raw)
             or existing_custom.get("content_type") != content_type
         ):
-            raise SupabasePublicationError("existing Supabase Storage metadata is different")
+            raise SupabasePublicationError(
+                "existing Supabase Storage metadata is different"
+            )
         existing = self.storage_object(storage_path)
         if len(existing) != len(raw) or _sha256(existing) != _sha256(raw):
-            raise SupabasePublicationError("existing Supabase Storage object has different content")
+            raise SupabasePublicationError(
+                "existing Supabase Storage object has different content"
+            )
+
+    def _put_resumable_storage_object(
+        self,
+        storage_path: str,
+        raw: bytes,
+        *,
+        custom_metadata: dict[str, Any],
+        content_type: str,
+    ) -> None:
+        """Upload one large immutable object through Supabase's TUS endpoint."""
+
+        project = urllib.parse.urlsplit(self.project_url)
+        project_ref = (project.hostname or "").removesuffix(".supabase.co")
+        endpoint = (
+            f"https://{project_ref}.storage.supabase.co/storage/v1/upload/resumable"
+        )
+        upload_metadata = {
+            "bucketName": "scryglass-public",
+            "objectName": storage_path,
+            "contentType": content_type,
+            "cacheControl": "31536000",
+            "metadata": json.dumps(custom_metadata, separators=(",", ":")),
+        }
+        metadata_header = ",".join(
+            f"{key} {base64.b64encode(value.encode('utf-8')).decode('ascii')}"
+            for key, value in upload_metadata.items()
+        )
+        location = None
+        for attempt in range(MAX_STORAGE_UPLOAD_ATTEMPTS):
+            create = urllib.request.Request(
+                endpoint,
+                data=b"",
+                method="POST",
+                headers={
+                    "apikey": self._api_key,
+                    "Tus-Resumable": "1.0.0",
+                    "Upload-Length": str(len(raw)),
+                    "Upload-Metadata": metadata_header,
+                    "x-upsert": "false",
+                },
+            )
+            try:
+                with self._opener.open(
+                    create, timeout=REQUEST_TIMEOUT_SECONDS
+                ) as response:
+                    location = response.headers.get("Location")
+                break
+            except urllib.error.HTTPError as error:
+                if error.code in {400, 409}:
+                    self._verify_existing_storage_object(
+                        storage_path, raw, custom_metadata
+                    )
+                    return
+                retryable = error.code in RETRYABLE_STORAGE_HTTP_CODES
+                if not retryable or attempt + 1 >= MAX_STORAGE_UPLOAD_ATTEMPTS:
+                    raise SupabasePublicationError(
+                        f"Supabase resumable upload creation failed with HTTP {error.code}"
+                    ) from error
+            except (urllib.error.URLError, TimeoutError) as error:
+                if attempt + 1 >= MAX_STORAGE_UPLOAD_ATTEMPTS:
+                    raise SupabasePublicationError(
+                        "Supabase resumable upload creation failed"
+                    ) from error
+            time.sleep(0.5 * (2**attempt))
+        if not isinstance(location, str) or not location:
+            raise SupabasePublicationError("Supabase resumable upload URL is missing")
+        upload_url = urllib.parse.urljoin(endpoint, location)
+        parsed_upload = urllib.parse.urlsplit(upload_url)
+        if (
+            parsed_upload.scheme != "https"
+            or parsed_upload.hostname != f"{project_ref}.storage.supabase.co"
+            or parsed_upload.port not in {None, 443}
+            or parsed_upload.username is not None
+            or parsed_upload.password is not None
+            or not parsed_upload.path.startswith("/storage/v1/upload/resumable/")
+        ):
+            raise SupabasePublicationError("Supabase resumable upload URL is invalid")
+
+        offset = 0
+        while offset < len(raw):
+            chunk = raw[offset : offset + RESUMABLE_UPLOAD_CHUNK_BYTES]
+            for attempt in range(MAX_STORAGE_UPLOAD_ATTEMPTS):
+                request = urllib.request.Request(
+                    upload_url,
+                    data=chunk,
+                    method="PATCH",
+                    headers={
+                        "apikey": self._api_key,
+                        "Tus-Resumable": "1.0.0",
+                        "Upload-Offset": str(offset),
+                        "Content-Type": "application/offset+octet-stream",
+                    },
+                )
+                try:
+                    with self._opener.open(
+                        request, timeout=REQUEST_TIMEOUT_SECONDS
+                    ) as response:
+                        next_offset = response.headers.get("Upload-Offset")
+                except Exception as error:  # noqa: BLE001
+                    retryable = isinstance(error, (urllib.error.URLError, TimeoutError))
+                    if isinstance(error, urllib.error.HTTPError):
+                        retryable = error.code in RETRYABLE_STORAGE_HTTP_CODES
+                    if not retryable or attempt + 1 >= MAX_STORAGE_UPLOAD_ATTEMPTS:
+                        raise SupabasePublicationError(
+                            "Supabase resumable upload chunk failed"
+                        ) from error
+                    time.sleep(0.5 * (2**attempt))
+                    offset = self._resumable_upload_offset(upload_url)
+                    if offset >= len(raw):
+                        break
+                    chunk = raw[offset : offset + RESUMABLE_UPLOAD_CHUNK_BYTES]
+                    continue
+                expected_offset = offset + len(chunk)
+                if next_offset != str(expected_offset):
+                    raise SupabasePublicationError(
+                        "Supabase resumable upload offset is invalid"
+                    )
+                offset = expected_offset
+                break
+            else:
+                raise AssertionError("resumable upload retry loop did not finish")
+        self._verify_existing_storage_object(storage_path, raw, custom_metadata)
+
+    def _resumable_upload_offset(self, upload_url: str) -> int:
+        request = urllib.request.Request(
+            upload_url,
+            method="HEAD",
+            headers={
+                "apikey": self._api_key,
+                "Tus-Resumable": "1.0.0",
+            },
+        )
+        try:
+            with self._opener.open(
+                request, timeout=REQUEST_TIMEOUT_SECONDS
+            ) as response:
+                offset = response.headers.get("Upload-Offset")
+        except Exception as error:  # noqa: BLE001
+            raise SupabasePublicationError(
+                "Supabase resumable upload offset read failed"
+            ) from error
+        if not isinstance(offset, str) or not offset.isdigit():
+            raise SupabasePublicationError(
+                "Supabase resumable upload offset is invalid"
+            )
+        return int(offset)
+
+    def _verify_existing_storage_object(
+        self,
+        storage_path: str,
+        raw: bytes,
+        custom_metadata: dict[str, Any],
+    ) -> None:
+        existing_metadata = self.storage_object_metadata(storage_path)
+        existing_custom = existing_metadata.get("metadata")
+        if isinstance(existing_custom, str):
+            try:
+                existing_custom = json.loads(existing_custom)
+            except json.JSONDecodeError:
+                existing_custom = None
+        if (
+            int(existing_metadata.get("size") or -1) != len(raw)
+            or not isinstance(existing_custom, dict)
+            or existing_custom != custom_metadata
+        ):
+            raise SupabasePublicationError(
+                "existing Supabase Storage metadata is different"
+            )
+        existing = self.storage_object(storage_path)
+        if len(existing) != len(raw) or _sha256(existing) != _sha256(raw):
+            raise SupabasePublicationError(
+                "existing Supabase Storage object has different content"
+            )
 
     def delete_storage_objects(self, storage_paths: list[str]) -> None:
         prefixes = [_retention_storage_path(path) for path in storage_paths]
@@ -609,10 +828,14 @@ class SupabasePublicData:
             },
         )
         try:
-            with self._opener.open(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            with self._opener.open(
+                request, timeout=REQUEST_TIMEOUT_SECONDS
+            ) as response:
                 response.read()
         except Exception as error:  # noqa: BLE001
-            raise SupabasePublicationError("Supabase Storage retention delete failed") from error
+            raise SupabasePublicationError(
+                "Supabase Storage retention delete failed"
+            ) from error
 
     def ack_storage_cleanup(self, storage_paths: list[str]) -> int:
         paths = [_retention_storage_path(path) for path in storage_paths]
@@ -777,7 +1000,9 @@ class SupabasePublicData:
             if storage_path is not None:
                 expected_storage_path = f"{release_id}/{asset['path']}"
                 if _storage_path(storage_path) != expected_storage_path:
-                    raise SupabasePublicationError("public asset Storage path does not match")
+                    raise SupabasePublicationError(
+                        "public asset Storage path does not match"
+                    )
             prior = existing.get(str(asset["path"]))
             if (
                 prior
@@ -812,18 +1037,22 @@ class SupabasePublicData:
         ]
         for asset, raw in uploads:
             if raw is None:
-                raise SupabasePublicationError("large public asset has no storage payload")
+                raise SupabasePublicationError(
+                    "large public asset has no storage payload"
+                )
         if uploads:
             with ThreadPoolExecutor(max_workers=min(6, len(uploads))) as executor:
-                list(executor.map(
-                    lambda item: self.put_storage_object(
-                        str(item[0]["storage_path"]),
-                        item[1],
-                        sha256=str(item[0]["sha256"]),
-                        content_type=str(item[0]["content_type"]),
-                    ),
-                    uploads,
-                ))
+                list(
+                    executor.map(
+                        lambda item: self.put_storage_object(
+                            str(item[0]["storage_path"]),
+                            item[1],
+                            sha256=str(item[0]["sha256"]),
+                            content_type=str(item[0]["content_type"]),
+                        ),
+                        uploads,
+                    )
+                )
         return reused
 
     def stage_query_datasets(
@@ -869,8 +1098,12 @@ class SupabasePublicData:
                     "release_id": release_id,
                     "dataset": dataset,
                     "row_sha256": source.get("row_sha256"),
-                    "source_json": canonical_query_bytes(source_without_digest).decode("utf-8"),
-                    "payload_json": canonical_query_bytes(source.get("payload")).decode("utf-8"),
+                    "source_json": canonical_query_bytes(source_without_digest).decode(
+                        "utf-8"
+                    ),
+                    "payload_json": canonical_query_bytes(source.get("payload")).decode(
+                        "utf-8"
+                    ),
                 }
                 row_bytes = len(canonical_query_bytes(row))
                 if pending and (
@@ -953,8 +1186,12 @@ class SupabasePublicData:
         release_id = _rollback_release_id(release_id)
         candidate = self.release(release_id)
         manifest = candidate.get("manifest") if isinstance(candidate, dict) else None
-        release_metadata = manifest.get("release") if isinstance(manifest, dict) else None
-        draft_authority = manifest.get("draft_authority") if isinstance(manifest, dict) else None
+        release_metadata = (
+            manifest.get("release") if isinstance(manifest, dict) else None
+        )
+        draft_authority = (
+            manifest.get("draft_authority") if isinstance(manifest, dict) else None
+        )
         query_api = manifest.get("query_api") if isinstance(manifest, dict) else None
         raw_files = manifest.get("files") if isinstance(manifest, dict) else None
         artifact_hashes = (
@@ -976,16 +1213,22 @@ class SupabasePublicData:
             or not isinstance(raw_files, list)
             or not isinstance(artifact_hashes, dict)
         ):
-            raise SupabasePublicationError("Supabase rollback release binding is invalid")
+            raise SupabasePublicationError(
+                "Supabase rollback release binding is invalid"
+            )
         inventory = self.asset_metadata(release_id)
         expected_assets: list[dict[str, Any]] = []
         seen: set[str] = set()
         for item in raw_files:
             if not isinstance(item, dict):
-                raise SupabasePublicationError("Supabase rollback manifest inventory is invalid")
+                raise SupabasePublicationError(
+                    "Supabase rollback manifest inventory is invalid"
+                )
             path = _public_asset_path(item.get("path"))
             if path in seen or path == DRAFT_ASSET_PATH:
-                raise SupabasePublicationError("Supabase rollback manifest inventory is invalid")
+                raise SupabasePublicationError(
+                    "Supabase rollback manifest inventory is invalid"
+                )
             seen.add(path)
             raw_bytes = item.get("bytes")
             sha256 = item.get("sha256")
@@ -996,7 +1239,9 @@ class SupabasePublicData:
                 or not SHA256_RE.fullmatch(sha256)
                 or artifact_hashes.get(path) != sha256
             ):
-                raise SupabasePublicationError("Supabase rollback manifest inventory is invalid")
+                raise SupabasePublicationError(
+                    "Supabase rollback manifest inventory is invalid"
+                )
             expected_assets.append(
                 {
                     "release_id": release_id,
@@ -1009,7 +1254,9 @@ class SupabasePublicData:
                 }
             )
         if set(inventory) != seen or set(artifact_hashes) != seen:
-            raise SupabasePublicationError("Supabase rollback manifest inventory is not exact")
+            raise SupabasePublicationError(
+                "Supabase rollback manifest inventory is not exact"
+            )
         _verify_release_assets(
             self,
             release_id,
@@ -1047,7 +1294,11 @@ class SupabasePublicData:
             replaced_release_id = result.get("replaced_release_id") or result.get(
                 "previous_release_id"
             )
-            if _recover and isinstance(replaced_release_id, str) and replaced_release_id:
+            if (
+                _recover
+                and isinstance(replaced_release_id, str)
+                and replaced_release_id
+            ):
                 try:
                     self.restore(replaced_release_id, _recover=False)
                 except Exception as recovery_error:
@@ -1059,7 +1310,9 @@ class SupabasePublicData:
 
     def prune(self, keep: int = 3) -> int:
         if keep < 1 or keep > 10:
-            raise SupabasePublicationError("Supabase retention must be between one and ten")
+            raise SupabasePublicationError(
+                "Supabase retention must be between one and ten"
+            )
         deleted_total = 0
         for _attempt in range(MAX_RETENTION_PRUNE_CALLS):
             result = self._request(
@@ -1071,10 +1324,14 @@ class SupabasePublicData:
                 result.get("deleted_count") if isinstance(result, dict) else None
             )
             if type(deleted_count) is not int or deleted_count not in (0, 1):
-                raise SupabasePublicationError("Supabase retention response is malformed")
+                raise SupabasePublicationError(
+                    "Supabase retention response is malformed"
+                )
             has_more = result.get("has_more")
             if type(has_more) is not bool:
-                raise SupabasePublicationError("Supabase retention response is malformed")
+                raise SupabasePublicationError(
+                    "Supabase retention response is malformed"
+                )
             storage_paths = result.get("storage_paths")
             if not isinstance(storage_paths, list) or any(
                 not isinstance(path, str) for path in storage_paths
@@ -1096,7 +1353,9 @@ def _asset(path: str, raw: bytes, release_id: str) -> dict[str, Any]:
     try:
         body = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise SupabasePublicationError(f"public asset is invalid JSON: {path}") from error
+        raise SupabasePublicationError(
+            f"public asset is invalid JSON: {path}"
+        ) from error
     return {
         "release_id": release_id,
         "path": path,
@@ -1206,8 +1465,12 @@ def latest_tier_payload(tier_body: dict[str, Any]) -> dict[str, Any]:
     normalized_patches = options["patches"]
     latest_patch = max(normalized_patches, key=_patch_order)
     latest = dict(normalized)
-    latest["rows"] = [row for row in normalized["rows"] if row.get("patch") == latest_patch]
-    latest["scopes"] = [scope for scope in normalized["scopes"] if scope.get("patch") == latest_patch]
+    latest["rows"] = [
+        row for row in normalized["rows"] if row.get("patch") == latest_patch
+    ]
+    latest["scopes"] = [
+        scope for scope in normalized["scopes"] if scope.get("patch") == latest_patch
+    ]
     latest["latest_patch"] = latest_patch
     if not latest["rows"] or not latest["scopes"]:
         raise SupabasePublicationError("latest tier-list patch has no public data")
@@ -1237,13 +1500,19 @@ def prepare_release(
             raise SupabasePublicationError(f"manifest repeats public asset: {path}")
         manifest_files[path] = item
     if manifest.get("total_files") != len(manifest_entries):
-        raise SupabasePublicationError("manifest file total does not match its inventory")
+        raise SupabasePublicationError(
+            "manifest file total does not match its inventory"
+        )
     try:
         manifest_total_bytes = sum(int(item["bytes"]) for item in manifest_entries)
     except (KeyError, TypeError, ValueError) as error:
-        raise SupabasePublicationError("manifest byte inventory is malformed") from error
+        raise SupabasePublicationError(
+            "manifest byte inventory is malformed"
+        ) from error
     if manifest.get("total_bytes") != manifest_total_bytes:
-        raise SupabasePublicationError("manifest byte total does not match its inventory")
+        raise SupabasePublicationError(
+            "manifest byte total does not match its inventory"
+        )
 
     release_metadata = manifest.get("release")
     if not isinstance(release_metadata, dict):
@@ -1257,7 +1526,9 @@ def prepare_release(
     if isinstance(bound_hashes, dict) and not set(manifest_files).issubset(
         set(map(str, bound_hashes))
     ):
-        raise SupabasePublicationError("manifest artifact hashes do not match its file inventory")
+        raise SupabasePublicationError(
+            "manifest artifact hashes do not match its file inventory"
+        )
 
     assets: list[dict[str, Any]] = []
     storage_objects: dict[str, bytes] = {}
@@ -1269,7 +1540,9 @@ def prepare_release(
         if len(raw) != metadata.get("bytes") or _sha256(raw) != metadata.get("sha256"):
             raise SupabasePublicationError(f"public asset checksum failed: {path}")
         if isinstance(bound_hashes, dict) and bound_hashes.get(path) != _sha256(raw):
-            raise SupabasePublicationError(f"manifest release hash conflicts with file: {path}")
+            raise SupabasePublicationError(
+                f"manifest release hash conflicts with file: {path}"
+            )
         asset = _asset(path, raw, release_id)
         storage_path = f"{release_id}/{path}"
         asset["body"] = None
@@ -1285,9 +1558,13 @@ def prepare_release(
             continue
         raw = _pack_asset_path(pack_dir, path).read_bytes()
         if len(raw) != metadata.get("bytes") or _sha256(raw) != metadata.get("sha256"):
-            raise SupabasePublicationError(f"optional public asset checksum failed: {path}")
+            raise SupabasePublicationError(
+                f"optional public asset checksum failed: {path}"
+            )
         if isinstance(bound_hashes, dict) and bound_hashes.get(path) != _sha256(raw):
-            raise SupabasePublicationError(f"manifest release hash conflicts with file: {path}")
+            raise SupabasePublicationError(
+                f"manifest release hash conflicts with file: {path}"
+            )
         asset = _asset(path, raw, release_id)
         storage_path = f"{release_id}/{path}"
         asset["body"] = None
@@ -1347,14 +1624,13 @@ def prepare_release(
         published_manifest["query_api"] = published_query_api
     else:
         published_manifest.pop("query_api", None)
-    artifact_hashes = {
-        str(asset["path"]): str(asset["sha256"])
-        for asset in assets
-    }
+    artifact_hashes = {str(asset["path"]): str(asset["sha256"]) for asset in assets}
     published_manifest["release"] = {
         **release_metadata,
         "release_id": release_id,
-        "tier_list_version": str(tier_body.get("schema_version") or "rankings-tierlists-v2"),
+        "tier_list_version": str(
+            tier_body.get("schema_version") or "rankings-tierlists-v2"
+        ),
         "artifact_hashes": artifact_hashes,
     }
     public_files = [
