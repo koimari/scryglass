@@ -231,6 +231,7 @@ def refresh_ratings(
         as_of=cutoff,
         min_series=min_series,
         previous_as_of=previous_as_of,
+        current=team_snapshot,
     )
     player_weekly = build_player_weekly_ranks(
         player_maps,
