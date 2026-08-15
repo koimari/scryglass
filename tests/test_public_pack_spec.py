@@ -15,6 +15,7 @@ from lol_kills.export.pack_records import (
 from lol_kills.export.public_pack import (
     _attach_public_team_evidence,
     _attach_published_draft_pools,
+    _champion_image_urls,
     _complete_player_game_ids,
     _ensure_year_column,
     _filter_years,
@@ -233,6 +234,79 @@ def test_profile_records_normalize_recent_games_without_raw_tables() -> None:
     assert inspired["vision_score"] == 31
     assert inspired["grade"]["status"] == "unavailable"
     assert payload["champion_images"]["Ivern"] == "https://example.test/ivern.png"
+
+
+def test_profile_records_use_authoritative_team_objectives_for_each_side() -> None:
+    roles = ("top", "jng", "mid", "bot", "sup")
+    player_rows = []
+    for game_id, date in (("game-1", "2026-08-09T12:00:00Z"), ("game-2", "2026-08-10T12:00:00Z")):
+        for side, team, result in (("Blue", f"Blue-{game_id}", 1), ("Red", f"Red-{game_id}", 0)):
+            for role in roles:
+                player_rows.append(
+                    {
+                        "game_uid": game_id,
+                        "date": date,
+                        "league": "LCS",
+                        "side": side,
+                        "teamname": team,
+                        "playername": f"{team}-{role}",
+                        "position": role,
+                        "champion": f"Champion-{role}",
+                        "result": result,
+                        "kills": 1,
+                        "deaths": 1,
+                        "assists": 5,
+                        # Player rows can contain stale or zero aggregates.
+                        "dragons": None,
+                        "heralds": None,
+                        "void_grubs": None,
+                        "barons": 0,
+                        "atakhans": 0,
+                        "towers": 0,
+                        "inhibitors": 0,
+                    }
+                )
+
+    objective_values = {
+        ("game-1", "Blue"): {"dragons": 4, "heralds": 1, "void_grubs": 2, "barons": 1, "atakhans": 1, "towers": 9, "inhibitors": 1},
+        ("game-1", "Red"): {"dragons": 2, "heralds": 0, "void_grubs": 1, "barons": 0, "atakhans": 0, "towers": 3, "inhibitors": 0},
+        ("game-2", "Blue"): {"dragons": 1, "heralds": 2, "void_grubs": 5, "barons": 2, "atakhans": 0, "towers": 7, "inhibitors": 2},
+        ("game-2", "Red"): {"dragons": 3, "heralds": 1, "void_grubs": 0, "barons": 1, "atakhans": 1, "towers": 5, "inhibitors": 1},
+    }
+    team_rows = []
+    for (game_id, side), values in objective_values.items():
+        team_rows.append(
+            {
+                "game_uid": game_id,
+                "side": side,
+                "position": "team",
+                **values,
+            }
+        )
+
+    payload = build_profile_records(
+        pd.DataFrame(player_rows),
+        team_games=pd.DataFrame(team_rows),
+    )
+
+    for game_id, expected in (("game-1", objective_values), ("game-2", objective_values)):
+        game = payload["games"][game_id]
+        for side in ("Blue", "Red"):
+            actual = game["team_stats"][side]
+            source = expected[(game_id, side)]
+            assert {field: actual[field] for field in source} == source
+
+
+def test_champion_image_urls_fall_back_to_pinned_crosswalk(tmp_path) -> None:
+    crosswalk_path = tmp_path / "data/lol/v2/champions/champion-id-crosswalk-v1.json"
+    crosswalk_path.parent.mkdir(parents=True)
+    crosswalk_path.write_text(
+        '{"entries":[{"oe_name":"Galio","riot_display_name":"Galio","riot_numeric_id":3}]}'
+    )
+
+    assert _champion_image_urls(tmp_path) == {
+        "Galio": "https://cdn.communitydragon.org/latest/champion/3/square"
+    }
 
 
 def test_profile_records_keep_public_composition_evidence_optional() -> None:

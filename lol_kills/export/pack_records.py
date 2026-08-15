@@ -41,6 +41,15 @@ PUBLIC_ROLE_ALIASES = {
 }
 
 DRAFT_PICK_SLOTS = (1, 2, 3, 4, 5)
+PROFILE_OBJECTIVE_FIELDS = (
+    "dragons",
+    "heralds",
+    "void_grubs",
+    "barons",
+    "atakhans",
+    "towers",
+    "inhibitors",
+)
 
 
 def _draft_text(value: Any) -> str:
@@ -662,6 +671,57 @@ def _profile_game_identity(game: Mapping[str, Any]) -> tuple[object, ...]:
     )
 
 
+def _team_objective_lookup(
+    team_games: pd.DataFrame | None,
+) -> dict[tuple[str, str], dict[str, float | int]]:
+    """Read objective totals from authoritative OE team rows.
+
+    Player rows repeat some aggregate fields, but those values are not the
+    source of truth for team objectives. Keep a side-specific lookup so a
+    legitimate zero remains distinct from a missing value.
+    """
+
+    if team_games is None or team_games.empty:
+        return {}
+    frame = team_games.copy()
+    if "position" in frame.columns:
+        frame = frame[frame["position"].astype(str).str.casefold().eq("team")]
+    if frame.empty or "side" not in frame.columns:
+        return {}
+    identity_source = frame.get("game_uid", frame.get("gameid"))
+    if identity_source is None:
+        return {}
+    fallback = frame["gameid"] if "gameid" in frame.columns else None
+    frame["_objective_game_id"] = [
+        canonical_source_game_key(
+            value,
+            fallback.loc[index] if fallback is not None else None,
+        )
+        for index, value in identity_source.items()
+    ]
+    frame["_objective_side"] = frame["side"].astype(str).str.title()
+    frame = frame[
+        frame["_objective_game_id"].notna()
+        & frame["_objective_game_id"].astype(str).str.strip().ne("")
+        & frame["_objective_side"].isin({"Blue", "Red"})
+    ]
+    lookup: dict[tuple[str, str], dict[str, float | int]] = {}
+    for (game_id, side), group in frame.groupby(
+        ["_objective_game_id", "_objective_side"], sort=False
+    ):
+        first = group.iloc[0]
+        values: dict[str, float | int] = {}
+        for field in PROFILE_OBJECTIVE_FIELDS:
+            if field not in group.columns:
+                continue
+            number = _profile_number(first.get(field))
+            if number is not None:
+                values[field] = number
+        if values:
+            lookup[(str(game_id), str(side))] = values
+    return lookup
+
+
 def profile_game_has_complete_stats(game: Mapping[str, Any]) -> bool:
     players = game.get("players")
     if not isinstance(players, list) or len(players) != 10:
@@ -724,6 +784,7 @@ def build_profile_records(
     players: pd.DataFrame,
     *,
     champion_image_urls: Mapping[str, str] | None = None,
+    team_games: pd.DataFrame | None = None,
     composition_signals: Mapping[str, Mapping[str, Any]] | None = None,
     draft_metadata: Mapping[str, Mapping[str, Any]] | None = None,
     recent_limit: int = 10,
@@ -860,6 +921,7 @@ def build_profile_records(
     }
     frame = frame[frame["_game_id"].astype(str).isin(selected)].copy()
     game_frame = archive_frame if archive_frame is not None else frame
+    team_objectives = _team_objective_lookup(team_games)
 
     games: dict[str, dict[str, Any]] = {}
     images = champion_image_urls or {}
@@ -918,16 +980,25 @@ def build_profile_records(
         team_stats: dict[str, dict[str, Any]] = {}
         for side_name, side_frame in (("Blue", blue), ("Red", red)):
             first = side_frame.iloc[0]
+            authoritative_objectives = team_objectives.get(
+                (str(game_id), side_name), {}
+            )
+
+            def objective_value(field: str) -> float | int | None:
+                if field in authoritative_objectives:
+                    return authoritative_objectives[field]
+                return _profile_number(first.get(field))
+
             team_stats[side_name] = {
                 "kills": _profile_number(first.get("teamkills")),
                 "gold": _profile_number(pd.to_numeric(side_frame.get("totalgold"), errors="coerce").sum(min_count=1)) if "totalgold" in side_frame.columns else None,
-                "dragons": _profile_number(first.get("dragons")),
-                "heralds": _profile_number(first.get("heralds")),
-                "void_grubs": _profile_number(first.get("void_grubs")),
-                "barons": _profile_number(first.get("barons")),
-                "atakhans": _profile_number(first.get("atakhans")),
-                "towers": _profile_number(first.get("towers")),
-                "inhibitors": _profile_number(first.get("inhibitors")),
+                "dragons": objective_value("dragons"),
+                "heralds": objective_value("heralds"),
+                "void_grubs": objective_value("void_grubs"),
+                "barons": objective_value("barons"),
+                "atakhans": objective_value("atakhans"),
+                "towers": objective_value("towers"),
+                "inhibitors": objective_value("inhibitors"),
             }
         key = str(game_id)
         game_draft_metadata = (draft_metadata or {}).get(key)

@@ -152,6 +152,7 @@ def test_query_projection_is_bounded_release_bound_and_draft_free() -> None:
     assert projection["datasets"]["players"][0]["grade_a_games"] == 1
     assert projection["datasets"]["teams"][0]["adjusted_rating"] is not None
     assert projection["datasets"]["games"][0]["game_id"] == "game-1"
+    assert projection["datasets"]["games"][0]["payload"]["players"][0]["champion_image_url"] == "https://cdn.communitydragon.org/galio.png"
     assert len(projection["datasets"]["identity_games"]) == 3
     assert projection["datasets"]["player_champions"][0]["score"] is not None
     assert any(
@@ -174,6 +175,23 @@ def test_query_projection_is_bounded_release_bound_and_draft_free() -> None:
         for row in rows:
             source = {key: value for key, value in row.items() if key != "row_sha256"}
             assert row["row_sha256"] == hashlib.sha256(canonical_query_bytes(source)).hexdigest()
+
+
+def test_player_movement_uses_the_current_tier_nested_delta() -> None:
+    projection = _projection(
+        player_weekly_ranks={
+            "by_player": {
+                "Faker": {
+                    "tier1": {"rank": 2, "delta": -3},
+                    "all": {"rank": 5, "delta": 7},
+                }
+            }
+        }
+    )
+
+    row = projection["datasets"]["players"][0]
+    assert row["movement"] == -3
+    assert row["payload"]["weekly"]["tier1"]["delta"] == -3
 
 
 def test_query_projection_rejects_any_nested_draft_field() -> None:

@@ -175,6 +175,39 @@ def _finite(value: object) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _movement_delta(value: Mapping[str, Any], scope: object = None) -> float | None:
+    """Read a typed rank delta from either weekly-rank shape.
+
+    Team weekly ranks store ``delta`` at the top level. Player weekly ranks
+    store one rank and delta object per competition scope. Keep the complete
+    nested weekly payload in the row while exposing one typed value for table
+    sorting and the public movement column.
+    """
+
+    direct = _finite(
+        value.get("movement")
+        if value.get("movement") is not None
+        else value.get("delta")
+    )
+    if direct is not None:
+        return direct
+    requested = str(scope or "").strip().casefold()
+    scopes = [requested] if requested else []
+    scopes.extend(scope_name for scope_name in ("all", "tier1", "tier2", "tier3") if scope_name not in scopes)
+    for scope_name in scopes:
+        scoped = value.get(scope_name)
+        if not isinstance(scoped, Mapping):
+            continue
+        scoped_delta = _finite(
+            scoped.get("movement")
+            if scoped.get("movement") is not None
+            else scoped.get("delta")
+        )
+        if scoped_delta is not None:
+            return scoped_delta
+    return None
+
+
 def _public_image_url(value: object) -> str | None:
     url = str(value or "").strip()
     if not url:
@@ -326,11 +359,7 @@ def _player_rows(
         player_metadata = dict(metadata_by_key.get(key, (name, {}))[1] or {})
         board = dict(board_by_key.get(key, (name, {}))[1] or {})
         movement = dict(weekly_by_key.get(key, (name, {}))[1] or {})
-        movement_value = _finite(
-            movement.get("movement")
-            if movement.get("movement") is not None
-            else movement.get("delta")
-        )
+        movement_value = _movement_delta(movement, record.get("current_tier"))
         search_key = search_keys[name]
         player_id = hashlib.sha256(
             f"player\0{search_key}".encode("utf-8")
@@ -577,8 +606,14 @@ def _champion_rows(
 def _game_rows(
     games: Mapping[str, Any],
     team_ids: Mapping[str, str],
+    champion_images: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    image_by_key = {
+        normalize_public_key(name): _public_image_url(url)
+        for name, url in (champion_images or {}).items()
+        if normalize_public_key(name) and str(url).strip()
+    }
     for raw_game_id in sorted(games):
         raw = games[raw_game_id]
         if not isinstance(raw, Mapping):
@@ -589,10 +624,22 @@ def _game_rows(
             continue
         blue_team = str(game.get("blue_team") or "").strip()
         red_team = str(game.get("red_team") or "").strip()
+        players: list[dict[str, Any]] = []
+        for raw_player in game.get("players", []):
+            if not isinstance(raw_player, Mapping):
+                continue
+            player = dict(raw_player)
+            champion = str(player.get("champion") or "").strip()
+            if champion:
+                player["champion_image_url"] = image_by_key.get(
+                    normalize_public_key(champion)
+                )
+            players.append(player)
+        game["players"] = players
         champions = [
             str(player.get("champion") or "").strip()
-            for player in game.get("players", [])
-            if isinstance(player, Mapping) and str(player.get("champion") or "").strip()
+            for player in players
+            if str(player.get("champion") or "").strip()
         ]
         played_at = str(game.get("date") or "").strip()
         year = _integer(played_at[:4]) if len(played_at) >= 4 else 0
@@ -796,7 +843,7 @@ def build_public_query_projection(
         player_ids,
         images,
     )
-    games = _game_rows(archive_games, team_ids)
+    games = _game_rows(archive_games, team_ids, images)
     game_ids = {str(row["game_id"]) for row in games}
     identity_games = _identity_game_rows(
         profile_records,
