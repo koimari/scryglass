@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import math
 import tempfile
 import warnings
 from pathlib import Path
@@ -906,12 +907,8 @@ def build_artifact(
             "the baseline omits team and player strength by design",
             "unseen categorical levels receive zero contribution",
             "monthly expanding folds sacrifice early rows and may reflect temporal drift",
-            "".join(
-                (
-                    "regularization and intercept-only fallback are selected once from ",
-                    "train-only inner OOF predictions and frozen before development and validation",
-                )
-            ),
+            "regularization and intercept-only fallback are selected once from "
+            "train-only inner OOF predictions and frozen before development and validation",
             "proper scores and calibration are descriptive and do not authorize rank selection",
             "outer development and validation outcomes never switch predictions after the fact",
             "the sealed final temporal holdout remains wholly unevaluated",
