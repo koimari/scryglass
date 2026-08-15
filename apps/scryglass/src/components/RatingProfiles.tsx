@@ -27,6 +27,7 @@ import {
 } from "@/lib/pack";
 import { playerPortrait, type PlayerVisualIdentity } from "@/lib/playerPortraits";
 import { championImageUrl } from "@/lib/championImages";
+import { objectiveFieldsForPatch } from "@/lib/objectiveSupport";
 import { matchTeamHref } from "@/lib/matchFilters";
 import type { DraftRankingsScope } from "@/lib/draftRankings";
 import { PlayerPortrait } from "./PlayerPortrait";
@@ -338,27 +339,25 @@ function GradeDetails({ grade }: { grade?: ProfileGrade }) {
   );
 }
 
-function TeamGameStats({ stats }: { stats?: ProfileTeamStats }) {
+function TeamGameStats({ stats, patch, team }: { stats?: ProfileTeamStats; patch?: string | null; team: string }) {
   if (!stats) return <p className={styles.objectiveUnavailable}>Team and objective totals are unavailable for this game.</p>;
   const dash = "—";
+  const objectiveFields = objectiveFieldsForPatch(patch);
   const values: Array<[string, string | number]> = [
     ["Kills", stats.kills ?? dash],
     ["Gold", stats.gold == null ? dash : compactNumber(stats.gold)],
-    ["Towers", stats.towers ?? dash],
-    ["Dragons", stats.dragons ?? dash],
-    ["Barons", stats.barons ?? dash],
-    ["Grubs", stats.void_grubs ?? dash],
-    ["Heralds", stats.heralds ?? dash],
-    ["Atakhans", stats.atakhans ?? dash],
-    ["Inhibitors", stats.inhibitors ?? dash],
+    ...objectiveFields.map(({ key, label }) => [label, stats[key] ?? dash] as [string, string | number]),
   ];
   const objectiveValues = values.slice(2);
   const hasObjective = objectiveValues.some(([, value]) => value !== dash);
   return (
     <>
-      <dl className={styles.teamGameStats}>
-        {values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
-      </dl>
+      <div className={styles.teamGameStatsScroll} data-testid="team-objective-scroll" tabIndex={0} role="region" aria-label={`${team} game and objective statistics`}>
+        <dl className={styles.teamGameStats} data-testid="team-objective-stats">
+          {values.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+        </dl>
+      </div>
+      <p className={styles.objectiveScrollHint}>Swipe sideways for more statistics.</p>
       <p className={styles.objectiveLegend}>
         {hasObjective
           ? "A numeric 0 is a reported count. A dash means the source did not publish that field."
@@ -583,7 +582,7 @@ export function MatchRatingProfile({
         {sides.map((side) => (
           <section className={styles.matchTeam} key={side.side}>
             <div className={styles.sectionHeader}><div><p>{side.side} side</p><h2><Link className="row-link" href={`/elo/team/${teamSlug(side.team)}`}>{side.team}</Link></h2></div><span>{side.won ? "Winner" : "Defeat"}</span></div>
-            <TeamGameStats stats={game.team_stats?.[side.side]} />
+            <TeamGameStats patch={game.patch} stats={game.team_stats?.[side.side]} team={side.team} />
             {side.players.map((player) => (
               <article className={styles.matchPlayer} key={`${side.side}-${player.role}-${player.player}`}>
                 <ChampionPortrait name={player.champion} imageUrl={player.champion ? championImages[player.champion] : null} size="large" />

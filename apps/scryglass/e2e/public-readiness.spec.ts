@@ -7,6 +7,7 @@ const PUBLIC_ROUTES = [
   ["/elo/team/T1", "T1"],
   ["/matches", "Matches"],
   ["/matches/e2e-game-1", "T1 defeated Gen.G"],
+  ["/matches/e2e-game-25", "T1 defeated Gen.G"],
   ["/tiers", "Tier Lists"],
   ["/methodology", "What the rankings mean"],
   ["/chat", "Ask Scryglass"],
@@ -22,6 +23,7 @@ const RELEASE_BOUND_ROUTES = [
   "/elo/team/T1",
   "/matches",
   "/matches/e2e-game-1",
+  "/matches/e2e-game-25",
   "/tiers",
 ] as const;
 
@@ -62,6 +64,33 @@ test("rating tabs support arrow keys, direct URLs, filters, and fail-closed draf
   const draftGate = page.getByRole("heading", { name: "Draft Score is unavailable" }).locator("..");
   await expect(draftGate).toBeVisible();
   await expect(draftGate).toContainText("independent promotion receipt");
+});
+
+test("match objectives follow patch support and remain reachable on mobile", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/matches/e2e-game-1");
+
+  const currentStrip = page.getByTestId("team-objective-scroll").first();
+  const currentStats = page.getByTestId("team-objective-stats").first();
+  await expect(currentStats).toContainText("Towers");
+  await expect(currentStats).toContainText("Inhibitors");
+  await expect(currentStats.locator("dt", { hasText: "Atakhans" })).toHaveCount(0);
+  await expect(currentStats.locator("dt", { hasText: "Heralds" }).locator("..").locator("dd")).toHaveText("—");
+  await expect(currentStats.locator("dt", { hasText: "Inhibitors" }).locator("..").locator("dd")).toHaveText("0");
+  const currentScroll = await currentStrip.evaluate((node) => ({
+    clientWidth: node.clientWidth,
+    scrollWidth: node.scrollWidth,
+  }));
+  expect(currentScroll.scrollWidth).toBeGreaterThan(currentScroll.clientWidth);
+  await currentStrip.focus();
+  await currentStrip.evaluate((node) => { node.scrollLeft = node.scrollWidth; });
+  await expect(currentStats.locator("dt", { hasText: "Inhibitors" })).toBeVisible();
+
+  await page.goto("/matches/e2e-game-25");
+  const legacyStats = page.getByTestId("team-objective-stats").first();
+  await expect(legacyStats.locator("dt", { hasText: "Atakhans" })).toBeVisible();
+  await expect(legacyStats.locator("dt", { hasText: "Atakhans" }).locator("..").locator("dd")).toHaveText("0");
+  await expect(legacyStats.locator("dt", { hasText: "Inhibitors" })).toBeVisible();
 });
 
 test("HTML responses use nonce-based scripts and publish launch metadata", async ({ request }) => {

@@ -137,14 +137,14 @@ const game = {
   date: "2026-08-12T18:00:00Z",
   league: "LCK",
   competition_tier: "tier1",
-  patch: "16.15",
+  patch: "16.16",
   blue_team: "T1",
   red_team: "Gen.G",
   blue_win: 1,
   duration_seconds: 1_932,
   team_stats: {
-    Blue: { kills: 15, gold: 62_000, dragons: 3, heralds: 1, barons: 1, towers: 9 },
-    Red: { kills: 9, gold: 56_000, dragons: 1, heralds: 0, barons: 0, towers: 4 },
+    Blue: { kills: 15, gold: 62_000, dragons: 3, heralds: null, barons: 1, towers: 9, void_grubs: 0, inhibitors: 0, atakhans: 0 },
+    Red: { kills: 9, gold: 56_000, dragons: 1, heralds: 0, barons: 0, towers: 4, void_grubs: 2, inhibitors: 1, atakhans: 0 },
   },
   players: [
     participant("Doran", "Blue", "top", "Kennen"),
@@ -158,6 +158,17 @@ const game = {
     participant("Ruler", "Red", "bot", "Kai'Sa"),
     participant("Duro", "Red", "support", "Rakan"),
   ],
+};
+
+const legacyGame = {
+  ...game,
+  game_id: "e2e-game-25",
+  date: "2025-08-12T18:00:00Z",
+  patch: "15.24",
+  team_stats: {
+    Blue: { kills: 15, gold: 62_000, dragons: 3, heralds: 1, barons: 1, towers: 9, void_grubs: 0, inhibitors: 0, atakhans: 0 },
+    Red: { kills: 9, gold: 56_000, dragons: 1, heralds: 0, barons: 0, towers: 4, void_grubs: 2, inhibitors: 1, atakhans: 1 },
+  },
 };
 
 const assets = {
@@ -252,23 +263,23 @@ const assets = {
     grade_contract: "scryglass:player-map-grade:v2",
     window_days: 120,
     champion_images: {},
-    games: { [game.game_id]: game },
+    games: { [game.game_id]: game, [legacyGame.game_id]: legacyGame },
     players: {
-      "Chovy": [game.game_id],
-      "Faker": [game.game_id],
+      "Chovy": [game.game_id, legacyGame.game_id],
+      "Faker": [game.game_id, legacyGame.game_id],
       "Inspired": [],
       "Bdd": [],
     },
     teams: {
-      "T1": [game.game_id],
-      "Gen.G": [game.game_id],
+      "T1": [game.game_id, legacyGame.game_id],
+      "Gen.G": [game.game_id, legacyGame.game_id],
       "LYON": [],
       "KT Rolster": [],
     },
   },
   "features/match_index.json": {
     schema_version: "scryglass:match-index:v1",
-    years: [2026],
+    years: [2025, 2026],
     games: [{
       game_id: game.game_id,
       date: game.date,
@@ -278,6 +289,16 @@ const assets = {
       red_team: game.red_team,
       blue_win: game.blue_win,
       champions: game.players.map((row) => row.champion),
+      grades_available: 2,
+    }, {
+      game_id: legacyGame.game_id,
+      date: legacyGame.date,
+      league: legacyGame.league,
+      competition_tier: legacyGame.competition_tier,
+      blue_team: legacyGame.blue_team,
+      red_team: legacyGame.red_team,
+      blue_win: legacyGame.blue_win,
+      champions: legacyGame.players.map((row) => row.champion),
       grades_available: 2,
     }],
   },
@@ -366,7 +387,7 @@ const manifest = {
   pack_id: releaseId,
   schema_version: "scryglass:e2e-public-pack:v1",
   created_utc: "2026-08-13T00:00:01Z",
-  filters: { years: [2026], leagues: "compact_deterministic_e2e" },
+  filters: { years: [2025, 2026], leagues: "compact_deterministic_e2e" },
   attribution: "Synthetic Scryglass browser-test fixture.",
   excluded: ["real game rows", "research artifacts", "predictive output", "Draft data"],
   base_url: null,
@@ -383,7 +404,7 @@ const manifest = {
   ratings: {
     source_mode: "synthetic_e2e",
     source_as_of: "2026-08-12T18:00:00Z",
-    window_years: [2026],
+    window_years: [2025, 2026],
     team_rating_rows: assets["features/ratings_snapshot.json"].length,
     player_rating_rows: assets["features/player_ratings_snapshot.json"].length,
     claim_ceiling: "descriptive_test_fixture",
