@@ -8,11 +8,9 @@ from typing import Iterator, Sequence
 from pathlib import Path
 import json
 import unittest
-from unittest.mock import patch
 
 from lol_kills.v2.evaluation import (
     CandidateComparison,
-    MatchPrediction,
     TransferComparison,
     Decision,
     EvalRow,
@@ -378,20 +376,17 @@ class EvaluationHarnessTests(unittest.TestCase):
             self.assertFalse(validation_ids & test_ids)
             self.assertFalse(calibration_ids & test_ids)
 
-            fold_train_start = min(row_by_id[row_id].event_start.timestamp() for row_id in fold.train_row_ids)
             fold_train_end = max(row_by_id[row_id].event_start.timestamp() for row_id in fold.train_row_ids)
             fold_validation_start = min(row_by_id[row_id].event_start.timestamp() for row_id in fold.validation_row_ids)
             fold_validation_end = max(row_by_id[row_id].event_start.timestamp() for row_id in fold.validation_row_ids)
             fold_calibration_start = min(row_by_id[row_id].event_start.timestamp() for row_id in fold.calibration_row_ids)
             fold_calibration_end = max(row_by_id[row_id].event_start.timestamp() for row_id in fold.calibration_row_ids)
             fold_test_start = min(row_by_id[row_id].event_start.timestamp() for row_id in fold.test_row_ids)
-            fold_test_end = max(row_by_id[row_id].event_start.timestamp() for row_id in fold.test_row_ids)
 
             self.assertLess(fold_train_end, fold_validation_start)
             self.assertLess(fold_validation_end, fold_calibration_start)
             self.assertLess(fold_calibration_end, fold_test_start)
 
-            fold_test_start = min(row_by_id[row_id].event_start.timestamp() for row_id in fold.test_row_ids)
             fold_test_end = max(row_by_id[row_id].event_start.timestamp() for row_id in fold.test_row_ids)
             test_windows.append((fold_test_start, fold_test_end, fold.name))
 

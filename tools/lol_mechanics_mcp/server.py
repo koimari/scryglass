@@ -102,6 +102,7 @@ def _index_patch(path: Path) -> str:
         if isinstance(payload, Mapping) and isinstance(payload.get("patch"), str):
             return str(payload["patch"]).strip("/")
     except (OSError, UnicodeError, json.JSONDecodeError):
+        # A malformed index is rejected while its legacy path fallback remains available.
         pass
     # A malformed index must not become a candidate just because its parent is
     # named like a patch; the caller will still fail when compiling it.  The
@@ -411,9 +412,6 @@ class LeagueMechanicsServer:
                 load_fn = _component("load_fastpack")
             if configured_path is None and compile_fn is None:
                 compile_fn = _component("compile_fastpack")
-            configured_path = (
-                configured_path
-            )
             if configured_path is not None:
                 # Explicit configuration is fail-closed: if it is missing or
                 # malformed, startup fails instead of selecting an older patch.

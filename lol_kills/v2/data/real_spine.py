@@ -1239,6 +1239,9 @@ def main(argv: Iterable[str] | None = None) -> int:
             raise RealSpineError(f"unsupported command: {args.command}")
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, RealSpineError) as error:
         parser.error(str(error))
+        # argparse.error normally raises SystemExit(2). Keep the failure path
+        # explicit so a test double or alternate parser cannot reach the result print.
+        return 2
     print(json.dumps(result, sort_keys=True))
     return 0
 

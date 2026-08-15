@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import math
 from functools import lru_cache
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -64,7 +63,6 @@ def _maps() -> pd.DataFrame:
             "red_kills",
             "ckpm",
         ]
-        if True
     ]
     # read then filter existing
     raw = pd.read_parquet(path)

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from lol_kills.v2.data import g1_draft_features_v3 as features
@@ -34,4 +32,3 @@ def test_v3_manifest_claim_mutation_fails_closed(tmp_path) -> None:
     rows.write_bytes(features.OUTPUT_ROWS.read_bytes())
     with pytest.raises(features.G1DraftFeatureV3Error):
         features.verify(rows_path=rows, manifest_path=path, expected_manifest_sha256=altered["manifest_sha256"])
-

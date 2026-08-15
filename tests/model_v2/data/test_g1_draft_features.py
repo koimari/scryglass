@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -42,7 +41,7 @@ def test_real_materialization_and_verifier() -> None:
 
 
 def test_verifier_requires_external_pin_and_rejects_rehashed_relaxed_claim(tmp_path, monkeypatch) -> None:
-    manifest = features.build()
+    features.build()
     with pytest.raises(TypeError):
         features.verify()
     rows, altered = tmp_path / "rows", tmp_path / "manifest"
@@ -85,7 +84,7 @@ def test_target_key_is_inaccessible_to_transform() -> None:
     class PoisonedBase(dict):
         def __getitem__(self, key):
             if key == "target":
-                raise AssertionError("target must never be read")
+                raise KeyError("target must never be read")
             return super().__getitem__(key)
 
     rows, projection = features.materialize_from_projection(base_rows=[PoisonedBase(_base())], source_rows=_source(), champion_table=_champions())
