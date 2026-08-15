@@ -11,7 +11,6 @@ from .phase_one_evaluation_readiness_v1 import (
     DEFAULT_OUTPUT,
     RESULT_STATE,
     SCHEMA_VERSION,
-    PhaseOneEvaluationReadinessError,
     validate_phase_one_evaluation_readiness_v1,
 )
 
@@ -46,7 +45,7 @@ def validate_registered_phase_one_evaluation_readiness_v1(
     try:
         payload = json.loads(raw)
         checked = validate_phase_one_evaluation_readiness_v1(payload, root=root)
-    except (json.JSONDecodeError, PhaseOneEvaluationReadinessError) as exc:
+    except (RuntimeError, OSError, ValueError) as exc:
         raise RegisteredPhaseOneEvaluationReadinessError(
             "registered phase-one evaluation readiness is invalid"
         ) from exc

@@ -11,7 +11,6 @@ from .probability_pipeline_readiness_v1 import (
     DEFAULT_OUTPUT,
     RESULT_STATE,
     SCHEMA_VERSION,
-    ProbabilityPipelineReadinessError,
     validate_probability_pipeline_readiness_v1,
 )
 
@@ -48,7 +47,7 @@ def validate_registered_probability_pipeline_readiness_v1(
         checked = validate_probability_pipeline_readiness_v1(
             payload, root=root
         )
-    except (json.JSONDecodeError, ProbabilityPipelineReadinessError) as exc:
+    except (RuntimeError, OSError, ValueError) as exc:
         raise RegisteredProbabilityPipelineReadinessError(
             "registered probability-pipeline readiness is invalid"
         ) from exc
