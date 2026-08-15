@@ -38,7 +38,7 @@ def test_l2_readiness_audit_keeps_development_package_blocked() -> None:
         report["checks"][
             "participant_dependence_diagnostic_present_and_valid"
         ]
-        is False
+        is True
     )
     assert report["artifacts"]["independent_authority_record"]["present"] is False
     assert report["independent_authority_record_error"] is None
@@ -51,7 +51,7 @@ def test_l2_readiness_audit_keeps_development_package_blocked() -> None:
     )
     assert (
         "participant_dependence_diagnostic_present_and_valid"
-        in report["blockers"]
+        not in report["blockers"]
     )
     assert report["required_next_authority"]["must_be_independent"] is True
     assert report["required_next_authority"][
@@ -95,14 +95,14 @@ def test_l2_readiness_audit_keeps_development_package_blocked() -> None:
     assert report["adaptive_temporal_diagnostic"]["result_state"] == "ADAPTIVE_DRAFT_TERMS_HARM"
     assert report["adaptive_temporal_diagnostic"]["population"]["exact_roster_context_maps"] == 267
     assert report["adaptive_temporal_diagnostic"]["decision"]["independent_validation"] is False
-    assert report["participant_dependence_diagnostic"]["status"] == (
-        "invalid_or_missing"
-    )
-    assert report["participant_dependence_diagnostic"]["population"] is None
-    assert report["participant_dependence_diagnostic"]["decision"] is None
-    assert report["participant_dependence_diagnostic"]["error"] == (
-        "diagnostic inputs drifted"
-    )
+    assert report["participant_dependence_diagnostic"]["status"] == "valid"
+    assert report["participant_dependence_diagnostic"]["population"][
+        "component_graph"
+    ]["all_valid_maps_in_one_component"] is True
+    assert report["participant_dependence_diagnostic"]["decision"][
+        "participant_dependence_support_verified"
+    ] is False
+    assert report["participant_dependence_diagnostic"]["error"] is None
     assert report["participant_dependence_method"]["status"] == (
         "invalid_or_missing"
     )
