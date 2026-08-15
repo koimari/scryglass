@@ -825,6 +825,15 @@ def test_public_release_probes_cover_each_cache_family(tmp_path: Path) -> None:
     ]
 
 
+def test_public_release_probes_skip_the_retired_tier_artifact_route() -> None:
+    assert "/tiers" in public_refresh.PUBLIC_RELEASE_PROBES
+    assert "/api/chat/tier?limit=1" in public_refresh.PUBLIC_RELEASE_PROBES
+    assert (
+        "/api/public-data/tierlists?view=latest"
+        not in public_refresh.PUBLIC_RELEASE_PROBES
+    )
+
+
 def test_health_alignment_failure_restores_previous_supabase_release(
     tmp_path: Path,
 ) -> None:

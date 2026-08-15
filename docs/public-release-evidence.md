@@ -44,7 +44,7 @@ Public data and service routes:
 
 - `/api/health`;
 - `/api/assets/[...path]`;
-- `/api/public-data/tierlists`;
+- `/api/public-data/tierlists` as a retired HTTP 410 compatibility route;
 - `/api/chat/*`;
 - `/packs/manifest.json`;
 - `/robots.txt`, `/sitemap.xml`, `/.well-known/security.txt`.

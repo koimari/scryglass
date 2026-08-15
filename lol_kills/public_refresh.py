@@ -64,7 +64,6 @@ PUBLIC_RELEASE_PROBES = (
     "/legal",
     "/security",
     "/packs/manifest.json",
-    "/api/public-data/tierlists?view=latest",
     "/api/chat/navigation",
     "/api/chat/leaderboards?category=rating&limit=1",
     "/api/chat/leaderboards?category=teams&limit=1",
