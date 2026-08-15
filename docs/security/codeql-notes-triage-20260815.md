@@ -6,7 +6,7 @@
 
 This inventory covers the open CodeQL alerts with note severity on `refs/heads/main`. The alert API returned 341 open CodeQL alerts: 341 notes, 0 warnings, and 0 errors. No security-severity alert is included in this document.
 
-The latest Python CodeQL analysis is `1623973516` at `45e2ab0bb754599d0128f4d7a9b6845c59b533dd`. It reported `374` Python results. The JavaScript/TypeScript analysis at the same commit reported `0` results. The checkout and `origin/main` are `45e2ab0bb754599d0128f4d7a9b6845c59b533dd`.
+The latest Python CodeQL analysis is `1624098912` at `497f0ecc33a67e40df7de366ff470ced521fc4ab`. It reported `382` Python results. The JavaScript/TypeScript analysis is `1624095471` at the same commit and reported `0` results. The Security workflow run `31906806848` completed successfully. The checkout and `origin/main` are `497f0ecc33a67e40df7de366ff470ced521fc4ab`.
 
 The read-only API query was:
 
@@ -35,7 +35,7 @@ The report uses the alert number, current analysis path, analysis line, finding 
 
 ## Closed historical note alerts
 
-The `state=all` query returned 46 historical note alerts with state `fixed`. These are excluded from the live inventory. They are listed here to show the stale records checked during the audit.
+The `state=all` query returned `463` records: `341` open, `81` fixed, and `41` dismissed. Fixed and dismissed records are excluded from the live inventory. The table below preserves the 46 fixed note alerts recorded in the earlier snapshot. It is a historical subset, not the complete fixed-alert list.
 
 | Closed alert | Rule | Analysis commit | Path:line | Fixed at |
 | ---: | --- | --- | --- | --- |
@@ -86,11 +86,28 @@ The `state=all` query returned 46 historical note alerts with state `fixed`. The
 | 453 | `py/empty-except` | `b1f25594314a304820d189896346ee85066c58a5` | `tools/lol_mechanics_mcp/server.py:104` | 2026-08-15T18:53:04Z |
 | 467 | `py/unused-import` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/ratings/player_elo.py:38` | 2026-08-15T19:07:01Z |
 
-The current live set has 341 open note alerts. Each live instance has analysis commit `45e2ab0bb754599d0128f4d7a9b6845c59b533dd`; no fixed record is counted as live.
+## Evidence-bound false-positive dismissals
+
+The eight source-contract alerts below are dismissed as `false positive` in the CodeQL API. Each dismissal is bound to commit `497f0ecc33a67e40df7de366ff470ced521fc4ab`. The source bytes are frozen by the authority records. The evidence listed here was checked before dismissal.
+
+| Alert | Rule | Location | Evidence and reason |
+| ---: | --- | --- | --- |
+| #19 | `py/unused-local-variable` | `lol_kills/v2/data/g1_draft_features.py:303` | `parent` is retained by the frozen G1 source digest. G1 v1, v3, and pre-event receipt tests passed: 26 tests. |
+| #417 | `py/constant-conditional-expression` | `lol_kills/v2/data/g1_draft_features.py:304` | The constant-false branch is a frozen G1 sentinel. Removing it changes the authority-bound source bytes. The same 26 G1 tests passed. |
+| #434 | `py/empty-except` | `lol_kills/v2/data/g1_draft_features.py:347` | The empty `pass` intentionally ignores an already-absent rollback target. G1 rollback and receipt tests passed. |
+| #41 | `py/unused-local-variable` | `lol_kills/v2/draft/interactions/model.py:1133` | `_orientation` is retained in the frozen L6 source digest. L6 artifact replay passed: 10 tests. |
+| #130 | `py/multiple-definition` | `lol_kills/v2/draft/interactions/model.py:929` | The duplicate binding is part of the frozen L6 source identity. L6 artifact replay passed: 10 tests. |
+| #141 | `py/implicit-string-concatenation-in-list` | `lol_kills/v2/draft/interactions/oe_nuisance_baseline.py:910` | The adjacent string literal is valid Python and part of the frozen OE source identity. OE nuisance replay passed: 20 tests. |
+| #316 | `py/unused-import` | `lol_kills/v2/draft/interactions/oe_nuisance_baseline.py:15` | The unused `math` import is harmless and part of the frozen OE source identity. OE nuisance replay passed: 20 tests. |
+| #149 | `py/comparison-of-identical-expressions` | `lol_kills/v2/draft/interactions/representation_rank_private_result.py:284` | `number == number` rejects NaN while preserving the frozen source bytes. The finite-value guard covers NaN, positive infinity, and negative infinity. The private result and guard suite passed: 137 tests. |
+
+The private runner also verified the restored source against the frozen artifact. No receipt, artifact, manifest, authority file, or hash changed. The dismissed alert count is 41, with the eight records above included in that count.
+
+The current live set has 341 open note alerts. Each live instance has analysis commit `497f0ecc33a67e40df7de366ff470ced521fc4ab`; no fixed or dismissed record is counted as live.
 
 ## Live inventory
 
-Classification values are `confirmed cleanup`, `intentional/test-only`, `generated/false positive`, `cyclic architecture`, and `deferred source-contract review`. Release impact describes the risk of changing the code before the contract check. Closure actions are triage actions. This document does not call the dismissal API.
+Classification values are `confirmed cleanup`, `intentional/test-only`, `generated/false positive`, `cyclic architecture`, and `deferred source-contract review`. Release impact describes the risk of changing the code before the contract check. Closure actions are triage actions. This document records API dismissals. It does not perform them.
 
 ### `py/catch-base-exception`: BaseException catch with explicit interrupt re-raise (1)
 
