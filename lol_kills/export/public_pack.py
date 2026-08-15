@@ -450,7 +450,7 @@ def _draft_publication_decision(
     if composition_evaluation is None:
         return {
             "status": "unavailable",
-            "reason": "promotion_receipt_unavailable",
+            "reason": "model_not_promoted",
         }
 
     if not isinstance(composition_evaluation, Mapping):
@@ -466,11 +466,9 @@ def _draft_publication_decision(
 
     return {
         "status": "unavailable",
-        "reason": (
-            "promotion_receipt_unavailable"
-            if candidate_passes
-            else "promotion_gate_failed"
-        ),
+        # Candidate evaluation details stay private.  The public contract
+        # reports only that no promotion authority is available.
+        "reason": "model_not_promoted",
     }
 
 

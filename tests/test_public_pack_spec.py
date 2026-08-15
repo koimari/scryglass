@@ -77,7 +77,7 @@ def test_failed_draft_promotion_keeps_factual_profile_rows_publishable() -> None
 
     assert decision == {
         "status": "unavailable",
-        "reason": "promotion_gate_failed",
+        "reason": "model_not_promoted",
     }
     assert profile["games"]["game-1"]["kills"] == 8
     assert "draft_pool_audit" not in profile
@@ -92,7 +92,7 @@ def test_passing_candidate_stays_closed_without_independent_receipt() -> None:
 
     assert decision == {
         "status": "unavailable",
-        "reason": "promotion_receipt_unavailable",
+        "reason": "model_not_promoted",
     }
 
 

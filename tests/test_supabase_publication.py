@@ -296,7 +296,7 @@ def test_publish_release_omits_unpromoted_draft_asset() -> None:
             "model_version": None,
             "receipt_sha256": None,
             "issued_utc": None,
-            "reason": "promotion_gate_failed",
+            "reason": "model_not_promoted",
         }
         _add_manifest_asset(
             pack,
@@ -327,7 +327,7 @@ def test_publish_release_omits_unpromoted_draft_asset() -> None:
     }
     assert supabase_publication.DRAFT_ASSET_PATH not in published["release"]["artifact_hashes"]
     assert published["draft_authority"]["status"] == "unavailable"
-    assert published["draft_authority"]["reason"] == "promotion_gate_failed"
+    assert published["draft_authority"]["reason"] == "model_not_promoted"
 
 
 def test_publish_release_rejects_promoted_draft_until_independent_verification() -> None:
