@@ -123,6 +123,20 @@ def test_query_retention_cascade_allows_only_internal_table_owner() -> None:
     assert "from public, anon, authenticated, service_role" in migration
 
 
+def test_retention_prunes_one_query_release_per_transaction() -> None:
+    migration = (
+        MIGRATIONS / "20260815020000_bounded_retention_prune.sql"
+    ).read_text(encoding="utf-8")
+
+    fast_path = "if tg_op = 'DELETE' and current_user = 'postgres' then"
+    assert fast_path in migration
+    assert migration.index(fast_path) < migration.index("pg_advisory_xact_lock")
+    assert "limit 1" in migration
+    assert "'has_more', has_more" in migration
+    assert "owner to scryglass_release_retention_owner" in migration
+    assert "grant execute on function public.prune_scryglass_public_releases_v2(integer)" in migration
+
+
 def test_live_oe_import_schema_drift_is_forward_compatible() -> None:
     migration = (
         MIGRATIONS / "20260814161000_oe_import_patch_receipts.sql"

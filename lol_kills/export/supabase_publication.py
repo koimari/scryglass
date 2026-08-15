@@ -46,6 +46,7 @@ DRAFT_RECORDS_SCHEMA = "scryglass:draft-records:v1"
 PUBLIC_ASSET_PATH_SET = frozenset(PUBLIC_ASSET_PATHS)
 PACK_ID_RE = re.compile(r"^v\d{4}\.\d{2}\.\d{2}\.\d{6}$")
 REQUEST_TIMEOUT_SECONDS = 150.0
+MAX_RETENTION_PRUNE_CALLS = 20
 QUERY_STAGE_BATCH_ROWS = 500
 QUERY_STAGE_BATCH_BYTES = 3_200_000
 PUBLIC_ASSET_CONTENT_TYPE = "application/json"
@@ -1031,21 +1032,36 @@ class SupabasePublicData:
     def prune(self, keep: int = 3) -> int:
         if keep < 1 or keep > 10:
             raise SupabasePublicationError("Supabase retention must be between one and ten")
-        result = self._request(
-            "POST",
-            "rpc/prune_scryglass_public_releases_v2",
-            {"p_keep": keep},
+        deleted_total = 0
+        for _attempt in range(MAX_RETENTION_PRUNE_CALLS):
+            result = self._request(
+                "POST",
+                "rpc/prune_scryglass_public_releases_v2",
+                {"p_keep": keep},
+            )
+            deleted_count = (
+                result.get("deleted_count") if isinstance(result, dict) else None
+            )
+            if type(deleted_count) is not int or deleted_count not in (0, 1):
+                raise SupabasePublicationError("Supabase retention response is malformed")
+            has_more = result.get("has_more")
+            if type(has_more) is not bool:
+                raise SupabasePublicationError("Supabase retention response is malformed")
+            storage_paths = result.get("storage_paths")
+            if not isinstance(storage_paths, list) or any(
+                not isinstance(path, str) for path in storage_paths
+            ):
+                raise SupabasePublicationError(
+                    "Supabase retention Storage inventory is malformed"
+                )
+            self.delete_storage_objects(storage_paths)
+            self.ack_storage_cleanup(storage_paths)
+            deleted_total += deleted_count
+            if not has_more:
+                return deleted_total
+        raise SupabasePublicationError(
+            "Supabase retention exceeded the bounded prune calls"
         )
-        if not isinstance(result, dict) or type(result.get("deleted_count")) is not int:
-            raise SupabasePublicationError("Supabase retention response is malformed")
-        storage_paths = result.get("storage_paths")
-        if not isinstance(storage_paths, list) or any(
-            not isinstance(path, str) for path in storage_paths
-        ):
-            raise SupabasePublicationError("Supabase retention Storage inventory is malformed")
-        self.delete_storage_objects(storage_paths)
-        self.ack_storage_cleanup(storage_paths)
-        return int(result["deleted_count"])
 
 
 def _asset(path: str, raw: bytes, release_id: str) -> dict[str, Any]:
