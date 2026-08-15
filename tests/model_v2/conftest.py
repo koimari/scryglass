@@ -76,7 +76,7 @@ def historical_capture_root(
             destination = root / source.relative_to(private_data_root)
             destination.parent.mkdir(parents=True, exist_ok=True)
             if not destination.exists():
-                os.link(source, destination)
+                shutil.copy2(source, destination)
     market_root = Path("data/lol/v2/evaluation/match-winner-market-v1")
     (root / market_root.parent).mkdir(parents=True, exist_ok=True)
     shutil.copytree(repo_root / market_root, root / market_root)
@@ -87,7 +87,7 @@ def historical_capture_root(
         target_is_directory=True,
     )
     for filename in ("maps.parquet", "players.parquet"):
-        os.link(
+        shutil.copy2(
             private_data_root / f"data/lol/warehouse/parquet/{filename}",
             root / f"data/lol/warehouse/parquet/{filename}",
         )
