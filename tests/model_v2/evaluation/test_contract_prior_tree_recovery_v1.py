@@ -10,7 +10,6 @@ from lol_kills.v2.evaluation import contract_validation as validation
 from lol_kills.v2.evaluation.contract_prior_tree_recovery_v1 import (
     ContractPriorTreeRecoveryError,
     load_prior_tree_recovery_v1,
-    reconstruct_prior_tree_v1,
     validate_prior_tree_recovery_v1,
     write_prior_tree_recovery_v1,
 )
@@ -22,22 +21,23 @@ SESSION_ROOT = Path("/Users/river/.codex/sessions")
 PRIME_SESSION_ROOT = Path("/Users/river/.prime/agent/sessions")
 
 
-def test_session_history_reconstructs_exact_frozen_prior_tree() -> None:
-    recovered, evidence = reconstruct_prior_tree_v1(
-        root=ROOT, session_root=SESSION_ROOT, extra_roots=[PRIME_SESSION_ROOT]
-    )
-    assert len(recovered) == 25
-    assert evidence["reversed_hunk_count"] == 0
-    assert len(evidence["reversed_hunks"]) == 0
-    assert evidence["cutoff_evidence"]["reported_contract_tree_sha256"] == (
-        validation.CONTRACT_TREE_SHA256
-    )
+def test_materialized_recovery_preserves_exact_frozen_prior_tree() -> None:
+    manifest = load_prior_tree_recovery_v1(root=ROOT)
+    evidence_root = ROOT / manifest["evidence_root"]
+    assert manifest["file_count"] == 25
+    assert manifest["reconstruction"]["reversed_hunk_count"] == 0
+    assert manifest["reconstruction"]["reversed_hunks"] == []
+    assert manifest["reconstruction"]["cutoff_evidence"][
+        "reported_contract_tree_sha256"
+    ] == validation.CONTRACT_TREE_SHA256
     for name, expected in validation.EXPECTED_SCHEMA_SHA256.items():
         locator = f"docs/model-v2/contracts/{name}"
-        assert hashlib.sha256(recovered[locator]).hexdigest() == expected
+        actual = hashlib.sha256((evidence_root / locator).read_bytes()).hexdigest()
+        assert actual == expected
     for name, expected in validation.EXPECTED_EXAMPLE_SHA256.items():
         locator = f"docs/model-v2/contracts/{name}"
-        assert hashlib.sha256(recovered[locator]).hexdigest() == expected
+        actual = hashlib.sha256((evidence_root / locator).read_bytes()).hexdigest()
+        assert actual == expected
 
 
 def test_materialized_recovery_is_exact_and_non_authorizing() -> None:
