@@ -135,6 +135,17 @@ class LiveTotalsTests(unittest.TestCase):
 
 
 class IntegrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        context = {
+            "teams": [
+                {"team": "Bilibili Gaming", "league": "LPL"},
+                {"team": "LGD Gaming", "league": "LPL"},
+            ]
+        }
+        context_patch = patch.object(model, "_context", return_value=context)
+        context_patch.start()
+        self.addCleanup(context_patch.stop)
+
     def test_registered_roster_does_not_self_authorize_missing_ratings(self) -> None:
         registered = {
             "status": "registered",
