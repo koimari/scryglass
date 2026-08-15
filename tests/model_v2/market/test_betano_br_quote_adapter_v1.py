@@ -189,6 +189,7 @@ class ScriptedFetcher:
 
 def capture(
     *,
+    root: Path,
     receipt: dict | None = None,
     fetcher: ScriptedFetcher | None = None,
     clocks: list[datetime] | None = None,
@@ -203,7 +204,7 @@ def capture(
         map_number=1,
         participant_bindings=PARTICIPANT_BINDINGS,
         fetcher=ScriptedFetcher() if fetcher is None else fetcher,
-        root=ROOT,
+        root=root,
         clock=lambda: next(clock_values),
         monotonic_ns=lambda: next(monotonic_values),
     )
@@ -319,9 +320,13 @@ def test_close_time_ambiguity_participant_drift_and_outcome_fail_closed() -> Non
         )
 
 
-def test_capture_binds_exact_body_transport_prediction_and_generic_receipt() -> None:
-    value = capture()
-    checked = adapter.validate_betano_map_winner_quote_v1(value, root=ROOT)
+def test_capture_binds_exact_body_transport_prediction_and_generic_receipt(
+    historical_capture_root: Path,
+) -> None:
+    value = capture(root=historical_capture_root)
+    checked = adapter.validate_betano_map_winner_quote_v1(
+        value, root=historical_capture_root
+    )
     assert checked["transport"]["monotonic_transport_duration_ns"] == 200_000_000
     assert checked["transport"]["response_body_bytes"] == len(response_body())
     assert checked["prediction_binding"]["prediction_to_response_seconds"] == 1.2
@@ -333,29 +338,49 @@ def test_capture_binds_exact_body_transport_prediction_and_generic_receipt() -> 
     assert all(authority is False for authority in checked["authority"].values())
 
 
-def test_capture_rejects_late_prediction_bad_transport_and_clock_drift() -> None:
+def test_capture_rejects_late_prediction_bad_transport_and_clock_drift(
+    historical_capture_root: Path,
+) -> None:
     with pytest.raises(adapter.BetanoQuoteAdapterError, match="predates"):
-        capture(receipt=probability_receipt(captured_at=REQUEST_TIME + timedelta(seconds=1)))
+        capture(
+            root=historical_capture_root,
+            receipt=probability_receipt(
+                captured_at=REQUEST_TIME + timedelta(seconds=1)
+            ),
+        )
     too_old = probability_receipt(captured_at=RESPONSE_TIME - timedelta(seconds=31))
     with pytest.raises(adapter.BetanoQuoteAdapterError, match="window exceeded"):
-        capture(receipt=too_old)
+        capture(root=historical_capture_root, receipt=too_old)
     with pytest.raises(adapter.BetanoQuoteAdapterError, match="redirected"):
-        capture(fetcher=ScriptedFetcher(final_url="https://www.betano.bet.br/"))
+        capture(
+            root=historical_capture_root,
+            fetcher=ScriptedFetcher(final_url="https://www.betano.bet.br/"),
+        )
     with pytest.raises(adapter.BetanoQuoteAdapterError, match="content type"):
-        capture(fetcher=ScriptedFetcher(content_type="application/json"))
+        capture(
+            root=historical_capture_root,
+            fetcher=ScriptedFetcher(content_type="application/json"),
+        )
     with pytest.raises(adapter.BetanoQuoteAdapterError, match="durations diverge"):
-        capture(monotonic=[1_000_000_000, 3_000_000_000])
+        capture(
+            root=historical_capture_root,
+            monotonic=[1_000_000_000, 3_000_000_000],
+        )
 
 
-def test_bundle_tampering_is_detected_by_hash_and_replay() -> None:
-    value = capture()
+def test_bundle_tampering_is_detected_by_hash_and_replay(
+    historical_capture_root: Path,
+) -> None:
+    value = capture(root=historical_capture_root)
     changed = deepcopy(value)
     changed["generic_quote_receipt"]["prices"]["winner:lyon"] = 1.4
     unsigned = dict(changed)
     unsigned.pop("artifact_sha256")
     changed["artifact_sha256"] = adapter.sha256_json(unsigned)
     with pytest.raises(adapter.BetanoQuoteAdapterError, match="quote receipt"):
-        adapter.validate_betano_map_winner_quote_v1(changed, root=ROOT)
+        adapter.validate_betano_map_winner_quote_v1(
+            changed, root=historical_capture_root
+        )
 
     changed = deepcopy(value)
     raw = base64.b64decode(
@@ -368,15 +393,21 @@ def test_bundle_tampering_is_detected_by_hash_and_replay() -> None:
     unsigned.pop("artifact_sha256")
     changed["artifact_sha256"] = adapter.sha256_json(unsigned)
     with pytest.raises(adapter.BetanoQuoteAdapterError, match="quote receipt"):
-        adapter.validate_betano_map_winner_quote_v1(changed, root=ROOT)
+        adapter.validate_betano_map_winner_quote_v1(
+            changed, root=historical_capture_root
+        )
 
 
-def test_candidate_manifest_is_source_locked_and_non_authorizing() -> None:
+def test_candidate_manifest_is_source_locked_and_non_authorizing(
+    historical_capture_root: Path,
+) -> None:
     locked_at = datetime(2026, 8, 2, 2, 0, tzinfo=timezone.utc)
     value = adapter.build_betano_quote_adapter_candidate_v1(
-        root=ROOT, clock=lambda: locked_at
+        root=historical_capture_root, clock=lambda: locked_at
     )
-    checked = adapter.validate_betano_quote_adapter_candidate_v1(value, root=ROOT)
+    checked = adapter.validate_betano_quote_adapter_candidate_v1(
+        value, root=historical_capture_root
+    )
     assert checked["locked_at_utc"] == locked_at.isoformat()
     assert checked["registration"]["independently_registered"] is False
     assert checked["live_capture"]["first_phase_two_quote_created"] is False
