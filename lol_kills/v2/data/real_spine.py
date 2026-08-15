@@ -21,7 +21,7 @@ import stat
 import tempfile
 from typing import Any, Iterable, Mapping
 
-from .common import ROLES, canonical_json_bytes, parse_rfc3339, sha256_bytes, to_rfc3339
+from .common import ROLES, canonical_json_bytes, parse_rfc3339, sha256_bytes
 from .identity import IdentityCrosswalkRow, IdentityRegistry
 from .rosters import RosterRegistry, RosterRow
 
