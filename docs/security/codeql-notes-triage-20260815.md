@@ -4,9 +4,9 @@
 
 ## Scope and snapshot
 
-This inventory covers the open CodeQL alerts with note severity on `refs/heads/main`. The alert API returned 384 open CodeQL alerts: 356 notes, 27 warnings, and 1 error. No security-severity alert is included in this document.
+This inventory covers the open CodeQL alerts with note severity on `refs/heads/main`. The alert API returned 341 open CodeQL alerts: 341 notes, 0 warnings, and 0 errors. No security-severity alert is included in this document.
 
-The latest Python CodeQL analysis is `1623951755` at `2108f9809c9d55c6a08adf14a78ef85e89907326`. It reported `416` Python results. The JavaScript/TypeScript analysis at the same commit reported 0 results. The checkout and `origin/main` are `2108f9809c9d55c6a08adf14a78ef85e89907326`.
+The latest Python CodeQL analysis is `1623973516` at `45e2ab0bb754599d0128f4d7a9b6845c59b533dd`. It reported `374` Python results. The JavaScript/TypeScript analysis at the same commit reported `0` results. The checkout and `origin/main` are `45e2ab0bb754599d0128f4d7a9b6845c59b533dd`.
 
 The read-only API query was:
 
@@ -20,38 +20,52 @@ The report uses the alert number, current analysis path, analysis line, finding 
 
 | Rule | Notes | Unique paths |
 | --- | ---: | ---: |
-| `py/unused-import` | 137 | 104 |
+| `py/unused-import` | 135 | 101 |
 | `py/cyclic-import` | 74 | 44 |
-| `py/unused-local-variable` | 61 | 41 |
-| `py/empty-except` | 32 | 22 |
-| `py/unused-global-variable` | 19 | 16 |
+| `py/unused-local-variable` | 51 | 38 |
+| `py/empty-except` | 30 | 20 |
+| `py/unused-global-variable` | 18 | 15 |
 | `py/import-and-import-from` | 12 | 11 |
 | `py/ineffectual-statement` | 12 | 4 |
 | `py/unnecessary-lambda` | 5 | 5 |
 | `py/imprecise-assert` | 2 | 2 |
 | `py/catch-base-exception` | 1 | 1 |
 | `py/unexpected-raise-in-special-method` | 1 | 1 |
-| **Total** | **356** | **210** |
+| **Total** | **341** | **205** |
 
 ## Closed historical note alerts
 
-The `state=all` query returned 29 historical note alerts with state `fixed`. These are excluded from the live inventory. They are listed here to show the stale records checked during the audit.
+The `state=all` query returned 46 historical note alerts with state `fixed`. These are excluded from the live inventory. They are listed here to show the stale records checked during the audit.
 
 | Closed alert | Rule | Analysis commit | Path:line | Fixed at |
 | ---: | --- | --- | --- | --- |
+| 18 | `py/unused-local-variable` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/v2/ratings/team/estimands_v1.py:200` | 2026-08-15T19:07:01Z |
 | 19 | `py/unused-local-variable` | `b1f25594314a304820d189896346ee85066c58a5` | `lol_kills/v2/data/g1_draft_features.py:303` | 2026-08-15T18:53:04Z |
+| 23 | `py/unused-local-variable` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/research/grubs_intrinsic_value.py:1656` | 2026-08-15T19:07:01Z |
+| 24 | `py/unused-local-variable` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/research/grubs_intrinsic_value.py:1657` | 2026-08-15T19:07:01Z |
+| 25 | `py/unused-local-variable` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/research/grubs_intrinsic_value.py:1658` | 2026-08-15T19:07:01Z |
+| 26 | `py/unused-local-variable` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/research/grubs_intrinsic_value.py:1659` | 2026-08-15T19:07:01Z |
+| 27 | `py/unused-local-variable` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/research/grubs_intrinsic_value.py:2124` | 2026-08-15T19:07:01Z |
+| 28 | `py/unused-local-variable` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/research/grubs_intrinsic_value.py:2125` | 2026-08-15T19:07:01Z |
+| 29 | `py/unused-local-variable` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/research/grubs_intrinsic_value.py:2171` | 2026-08-15T19:07:01Z |
+| 30 | `py/unused-local-variable` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/research/grubs_intrinsic_value.py:2174` | 2026-08-15T19:07:01Z |
+| 41 | `py/unused-local-variable` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/v2/draft/interactions/model.py:1133` | 2026-08-15T19:07:01Z |
 | 61 | `py/unused-local-variable` | `b1f25594314a304820d189896346ee85066c58a5` | `tests/model_v2/evaluation/test_evaluation_harness.py:381` | 2026-08-15T18:53:04Z |
 | 62 | `py/unused-local-variable` | `b1f25594314a304820d189896346ee85066c58a5` | `tests/model_v2/data/test_g1_draft_features.py:45` | 2026-08-15T18:53:04Z |
 | 63 | `py/unused-local-variable` | `97e58ec98b1809ffbbf3156f12d883c1eb092472` | `tests/model_v2/draft/interactions/test_g5_v2_math.py:392` | 2026-08-15T18:16:02Z |
 | 64 | `py/unused-local-variable` | `97e58ec98b1809ffbbf3156f12d883c1eb092472` | `tests/model_v2/draft/interactions/test_g5_v2_math.py:393` | 2026-08-15T18:16:02Z |
+| 116 | `py/unused-global-variable` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/ratings/player_elo.py:922` | 2026-08-15T19:07:01Z |
 | 183 | `py/cyclic-import` | `97e58ec98b1809ffbbf3156f12d883c1eb092472` | `lol_kills/v2/market/match_winner_future_protocol_registry_v1.py:11` | 2026-08-15T18:16:02Z |
 | 190 | `py/cyclic-import` | `97e58ec98b1809ffbbf3156f12d883c1eb092472` | `lol_kills/v2/market/phase_one_evaluation_readiness_registry_v1.py:10` | 2026-08-15T18:16:02Z |
 | 225 | `py/cyclic-import` | `47f608fd2f3f09aa6bc88421ae25231564fbe7fa` | `lol_kills/v2/tierlists/pooled_candidate.py:49` | 2026-08-14T23:09:00Z |
 | 244 | `py/import-and-import-from` | `97e58ec98b1809ffbbf3156f12d883c1eb092472` | `tests/model_v2/data/test_real_spine.py:358` | 2026-08-15T18:16:02Z |
 | 245 | `py/import-and-import-from` | `97e58ec98b1809ffbbf3156f12d883c1eb092472` | `tests/model_v2/data/test_real_spine.py:649` | 2026-08-15T18:16:02Z |
 | 246 | `py/import-and-import-from` | `97e58ec98b1809ffbbf3156f12d883c1eb092472` | `tests/model_v2/data/test_real_spine.py:679` | 2026-08-15T18:16:02Z |
+| 258 | `py/unused-import` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/v2/tierlists/champion_elo.py:21` | 2026-08-15T19:07:01Z |
 | 277 | `py/unused-import` | `a502b453fd2b1b9cf86a9f539f92a2f4855b27f5` | `lol_kills/ratings/dual_elo.py:13` | 2026-08-15T14:33:44Z |
 | 278 | `py/unused-import` | `a502b453fd2b1b9cf86a9f539f92a2f4855b27f5` | `lol_kills/ratings/dual_elo.py:16` | 2026-08-15T14:33:44Z |
+| 279 | `py/unused-import` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/v2/ratings/team/estimands_v1.py:28` | 2026-08-15T19:07:01Z |
+| 294 | `py/unused-import` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/research/grubs_intrinsic_value.py:29` | 2026-08-15T19:07:01Z |
 | 295 | `py/unused-import` | `b1f25594314a304820d189896346ee85066c58a5` | `lol_kills/research/grubs_ranked_contest_proof.py:27` | 2026-08-15T18:53:04Z |
 | 301 | `py/unused-import` | `b1f25594314a304820d189896346ee85066c58a5` | `lol_kills/live_oe_prior.py:16` | 2026-08-15T18:53:04Z |
 | 316 | `py/unused-import` | `b1f25594314a304820d189896346ee85066c58a5` | `lol_kills/v2/draft/interactions/oe_nuisance_baseline.py:15` | 2026-08-15T18:53:04Z |
@@ -64,12 +78,15 @@ The `state=all` query returned 29 historical note alerts with state `fixed`. The
 | 371 | `py/unused-import` | `b1f25594314a304820d189896346ee85066c58a5` | `tests/model_v2/data/test_g1_draft_features_v3.py:3` | 2026-08-15T18:53:04Z |
 | 378 | `py/unused-import` | `97e58ec98b1809ffbbf3156f12d883c1eb092472` | `tests/model_v2/ratings/player/test_multileague_v3_capture_readiness.py:9` | 2026-08-15T18:16:02Z |
 | 379 | `py/unused-import` | `97e58ec98b1809ffbbf3156f12d883c1eb092472` | `tests/model_v2/ratings/player/test_multileague_v3_capture_readiness_v2.py:10` | 2026-08-15T18:16:02Z |
+| 430 | `py/empty-except` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/research/draft_wr_study.py:440` | 2026-08-15T19:07:01Z |
 | 434 | `py/empty-except` | `b1f25594314a304820d189896346ee85066c58a5` | `lol_kills/v2/data/g1_draft_features.py:347` | 2026-08-15T18:53:04Z |
 | 438 | `py/empty-except` | `b1f25594314a304820d189896346ee85066c58a5` | `lol_kills/live_snapshots.py:204` | 2026-08-15T18:53:04Z |
 | 439 | `py/empty-except` | `3426bedf2bda4c324116751e9e891012d2d9c9f6` | `lol_kills/export/pack_records.py:61` | 2026-08-15T17:06:17Z |
+| 440 | `py/empty-except` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/ratings/player_elo.py:974` | 2026-08-15T19:07:01Z |
 | 453 | `py/empty-except` | `b1f25594314a304820d189896346ee85066c58a5` | `tools/lol_mechanics_mcp/server.py:104` | 2026-08-15T18:53:04Z |
+| 467 | `py/unused-import` | `2108f9809c9d55c6a08adf14a78ef85e89907326` | `lol_kills/ratings/player_elo.py:38` | 2026-08-15T19:07:01Z |
 
-The current live set has 356 open note alerts. Each live instance has analysis commit `2108f9809c9d55c6a08adf14a78ef85e89907326`; no fixed record is counted as live.
+The current live set has 341 open note alerts. Each live instance has analysis commit `45e2ab0bb754599d0128f4d7a9b6845c59b533dd`; no fixed record is counted as live.
 
 ## Live inventory
 
@@ -99,7 +116,7 @@ Classification values are `confirmed cleanup`, `intentional/test-only`, `generat
 - **#166** `lol_kills/v2/draft/terminal/capture_readiness_registry_v1.py:11` — source evidence `11: from .capture_readiness_v1 import ( / 12: DEFAULT_OUTPUT,` — finding: Import of module terminal.capture_readiness_v1 begins an import cycle. Import of module lol_kills.v2.draft.terminal.capture_readiness_v1 begins an import cycle.
 - **#167** `lol_kills/v2/draft/terminal/capture_readiness_v1.py:26` — source evidence `26: from .future_prediction_ledger import ( / 27: AUTHORITY_KEYS,` — finding: Import of module terminal.future_prediction_ledger begins an import cycle. Import of module lol_kills.v2.draft.terminal.future_prediction_ledger begins an import cycle.
 - **#168** `lol_kills/v2/draft/terminal/capture_readiness_v1.py:35` — source evidence `35: from .future_protocol_registry_v1 import ( / 36: REGISTERED_PROTOCOL_ARTIFACT_SHA256,` — finding: Import of module lol_kills.v2.draft.terminal.future_protocol_registry_v1 begins an import cycle. Import of module terminal.future_protocol_registry_v1 begins an import cycle.
-- **#169** `lol_kills/v2/tierlists/champion_elo.py:1103` — source evidence `1103: from .pooled_candidate import build_pooled_candidate / 1104:` — finding: Import of module lol_kills.v2.tierlists.pooled_candidate begins an import cycle.
+- **#169** `lol_kills/v2/tierlists/champion_elo.py:965` — source evidence `965: from .pooled_candidate import build_pooled_candidate / 966:` — finding: Import of module lol_kills.v2.tierlists.pooled_candidate begins an import cycle.
 - **#170** `lol_kills/v2/draft/terminal/development_artifact_v3.py:42` — source evidence `42: from .model import TerminalDraft, TerminalModel, score_terminal_draft / 43:` — finding: Import of module lol_kills.v2.draft.terminal.model begins an import cycle. Import of module terminal.model begins an import cycle.
 - **#171** `lol_kills/v2/market/event_probability_registry_v2.py:12` — source evidence `12: from . import event_probability_v2 as probability / 13: from . import phase_one_evaluation_v1 as evaluation` — finding: Import of module lol_kills.v2.market.event_probability_v2 begins an import cycle.
 - **#172** `lol_kills/v2/market/event_probability_v2.py:16` — source evidence `16: from . import phase_two_opening_v1 as opening / 17: from .match_winner_future_protocol_registry_v1 import (` — finding: Import of module lol_kills.v2.market.phase_two_opening_v1 begins an import cycle.
@@ -173,7 +190,7 @@ Classification values are `confirmed cleanup`, `intentional/test-only`, `generat
 - **#454** `lol_kills/ml/train.py:496` — source evidence `496: except Exception: / 497: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
 - **#455** `lol_kills/ml/train.py:532` — source evidence `532: except Exception: / 533: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
 
-### `py/empty-except`: Empty exception body used for fallback or best-effort cleanup (30)
+### `py/empty-except`: Empty exception body used for fallback or best-effort cleanup (28)
 
 - Classification: **intentional/test-only**
 - Release impact: Low to moderate runtime impact. Most rows are deliberate cleanup, parse fallback, or optional-artifact behavior. Broad catches can hide a degraded result.
@@ -187,14 +204,12 @@ Classification values are `confirmed cleanup`, `intentional/test-only`, `generat
 - **#427** `lol_kills/draft_dynamics.py:227` — source evidence `227: except Exception: / 228: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
 - **#428** `lol_kills/draft_tierlist.py:156` — source evidence `156: except Exception: / 157: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
 - **#429** `lol_kills/draft_tierlist.py:174` — source evidence `174: except Exception: / 175: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
-- **#430** `lol_kills/research/draft_wr_study.py:440` — source evidence `440: except ValueError: / 441: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
 - **#431** `lol_kills/research/elemental_drakes.py:1997` — source evidence `1997: except (OSError, json.JSONDecodeError): / 1998: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
 - **#432** `lol_kills/research/elemental_drakes.py:2108` — source evidence `2108: except (OSError, json.JSONDecodeError): / 2109: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
 - **#433** `lol_kills/research/elemental_drakes.py:2128` — source evidence `2128: except (OSError, json.JSONDecodeError): / 2129: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
 - **#435** `lol_kills/v2/evaluation/generate_checkpoint_c1_artifacts.py:100` — source evidence `100: except FileNotFoundError: / 101: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
 - **#436** `lol_kills/etl/grid_patch_receipts.py:85` — source evidence `85: except (TypeError, ValueError): / 86: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
 - **#437** `lol_kills/knowledge/league_wiki_vault.py:151` — source evidence `151: except ValueError: / 152: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
-- **#440** `lol_kills/ratings/player_elo.py:974` — source evidence `974: except Exception: / 975: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
 - **#441** `lol_kills/postgame_sync.py:150` — source evidence `150: except (OSError, ValueError, RuntimeError): / 151: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
 - **#442** `lol_kills/postgame_sync.py:159` — source evidence `159: except (OSError, ValueError, RuntimeError, TypeError, KeyError): / 160: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
 - **#443** `lol_kills/export/public_pack.py:676` — source evidence `676: except (TypeError, ValueError): / 677: pass` — finding: 'except' clause does nothing but pass and there is no explanatory comment.
@@ -305,9 +320,9 @@ Classification values are `confirmed cleanup`, `intentional/test-only`, `generat
 - **#114** `lol_kills/v2/market/phase_one_evaluation_v1.py:51` — source evidence `51: OUTPUT_PREFIX = PurePosixPath( / 52: "data/lol/v2/evaluation/match-winner-market-v1/phase-one/evaluations"` — finding: The global variable 'OUTPUT_PREFIX' is not used.
 - **#117** `lol_kills/v2/ratings/player/post_validation_refit_v1.py:49` — source evidence `49: SOURCE_LOCATOR = "lol_kills/v2/ratings/player/post_validation_refit_v1.py" / 50: SOURCE_SNAPSHOT_SCHEMA_VERSION = (` — finding: The global variable 'SOURCE_LOCATOR' is not used.
 - **#118** `lol_kills/v2/ratings/player/post_validation_refit_v1.py:61` — source evidence `61: ROLES = ("top", "jungle", "mid", "bot", "support") / 62: SIDES = ("blue", "red")` — finding: The global variable 'ROLES' is not used.
-- **#119** `lol_kills/v2/champions/atoms/schema.py:42` — source evidence `42: DIMENSIONS: tuple[str, ...] = tuple(DIMENSION_LABELS) / 43:` — finding: The global variable 'DIMENSIONS' is not used.
+- **#119** `lol_kills/v2/champions/atoms/schema.py:43` — source evidence `43: DIMENSIONS: tuple[str, ...] = tuple(DIMENSION_LABELS) / 44:` — finding: The global variable 'DIMENSIONS' is not used.
 
-### `py/unused-global-variable`: Module-level cache or authority hook is consumed through global state (3)
+### `py/unused-global-variable`: Module-level cache or authority hook is consumed through global state (2)
 
 - Classification: **generated/false positive**
 - Release impact: Potentially high impact if treated as dead. These names participate in cache lookup or runtime integrity behavior.
@@ -315,9 +330,8 @@ Classification values are `confirmed cleanup`, `intentional/test-only`, `generat
 
 - **#103** `lol_kills/research/composition_signal.py:149` — source evidence `149: _ATOM_CORPUS = payload / 150: return payload` — finding: The global variable '_ATOM_CORPUS' is not used.
 - **#104** `lol_kills/research/composition_signal.py:277` — source evidence `277: _DEPTH4_KEYS = ( / 278: "d4_dmg_cd", "d4_burst_cd", "d4_cd_uptime", "d4_cd_x_uptime",` — finding: The global variable '_DEPTH4_KEYS' is not used.
-- **#116** `lol_kills/ratings/player_elo.py:922` — source evidence `922: _SNAPSHOT_BY = by / 923: return by` — finding: The global variable '_SNAPSHOT_BY' is not used.
 
-### `py/unused-import`: Imported binding is not read (137)
+### `py/unused-import`: Imported binding is not read (135)
 
 - Classification: **confirmed cleanup**
 - Release impact: Low direct runtime impact. Test rows affect test collection only. Production rows can add import cost or hide an incomplete refactor.
@@ -333,7 +347,6 @@ Classification values are `confirmed cleanup`, `intentional/test-only`, `generat
 - **#255** `lol_kills/research/champ_impact.py:26` — source evidence `26: from pathlib import Path / 27:` — finding: Import of 'Path' is not used.
 - **#256** `lol_kills/research/champ_oe_lenses.py:33` — source evidence `33: from pathlib import Path / 34:` — finding: Import of 'Path' is not used.
 - **#257** `lol_kills/research/champ_tierlist_blade_chest.py:41` — source evidence `41: from pathlib import Path / 42:` — finding: Import of 'Path' is not used.
-- **#258** `lol_kills/v2/tierlists/champion_elo.py:21` — source evidence `21: from datetime import datetime, timezone / 22: from pathlib import Path` — finding: Import of 'datetime' is not used. Import of 'timezone' is not used.
 - **#259** `tools/codex_import.py:25` — source evidence `25: import hashlib / 26: import json` — finding: Import of 'hashlib' is not used.
 - **#260** `lol_kills/v2/draft/interactions/real_v1_g4/contract.py:12` — source evidence `12: from datetime import datetime / 13: import hashlib` — finding: Import of 'datetime' is not used.
 - **#261** `lol_kills/v2/evaluation/contract_validation.py:7` — source evidence `7: from datetime import datetime, timezone / 8: import hashlib` — finding: Import of 'timezone' is not used.
@@ -352,7 +365,6 @@ Classification values are `confirmed cleanup`, `intentional/test-only`, `generat
 - **#274** `lol_kills/draft_recommendation.py:35` — source evidence `35: from lol_kills.export.pack_records import build_player_records, build_team_records / 36: from lol_kills.draft_archetypes import ARCHETYPE_NAMES, champ_tags` — finding: Import of 'build_player_records' is not used. Import of 'build_team_records' is not used.
 - **#275** `lol_kills/research/draft_score_autoresearch.py:23` — source evidence `23: from typing import Any, Callable, Iterable, Mapping / 24:` — finding: Import of 'Iterable' is not used. Import of 'Callable' is not used.
 - **#276** `lol_kills/draft_tierlist.py:20` — source evidence `20: from pathlib import Path / 21:` — finding: Import of 'Path' is not used.
-- **#279** `lol_kills/v2/ratings/team/estimands_v1.py:28` — source evidence `28: from dataclasses import dataclass / 29: from typing import Any, Mapping, Sequence` — finding: Import of 'dataclass' is not used.
 - **#280** `lol_kills/v2/market/fast_event_uncertainty_v1.py:24` — source evidence `24: from lol_kills.v2.draft.terminal import future_prediction_ledger as draft_ledger / 25: from lol_kills.v2.draft.terminal.development_evaluation import (` — finding: Import of 'draft_ledger' is not used.
 - **#281** `lol_kills/v2/tierlists/filters.py:8` — source evidence `8: from typing import Any, Mapping, Sequence / 9:` — finding: Import of 'Sequence' is not used.
 - **#282** `lol_kills/v2/evaluation/fixtures.py:9` — source evidence `9: from typing import Any, Mapping, Sequence / 10:` — finding: Import of 'Any' is not used.
@@ -367,7 +379,6 @@ Classification values are `confirmed cleanup`, `intentional/test-only`, `generat
 - **#291** `lol_kills/grid_market_foundation.py:20` — source evidence `20: from typing import Any, Iterable, Iterator, Mapping, Sequence / 21:` — finding: Import of 'Iterable' is not used.
 - **#292** `lol_kills/research/grubs_contest_study.py:39` — source evidence `39: from lol_kills.etl.riot_timelines import cache_path, load_cached, summarize_map_grubs / 40: from lol_kills.research.side_objective_edges import engineer` — finding: Import of 'cache_path' is not used.
 - **#293** `lol_kills/research/grubs_decision_report.py:6` — source evidence `6: from pathlib import Path / 7:` — finding: Import of 'Path' is not used.
-- **#294** `lol_kills/research/grubs_intrinsic_value.py:29` — source evidence `29: from pathlib import Path / 30: from typing import Any, Optional` — finding: Import of 'Path' is not used.
 - **#296** `lol_kills/v2/champions/id_crosswalk.py:21` — source evidence `21: from typing import Any, Mapping / 22:` — finding: Import of 'Any' is not used.
 - **#297** `lol_kills/v2/ratings/team/last_observed_real_v1.py:22` — source evidence `22: from typing import Any, Mapping, Sequence / 23:` — finding: Import of 'Sequence' is not used.
 - **#298** `lol_kills/v2/champions/atoms/lcc_sources.py:19` — source evidence `19: from .schema import AtomBridgeError, require_object / 20:` — finding: Import of 'require_object' is not used.
@@ -459,9 +470,10 @@ Classification values are `confirmed cleanup`, `intentional/test-only`, `generat
 - **#395** `lol_kills/export/warehouse_snapshot.py:11` — source evidence `11: import io / 12: import json` — finding: Import of 'io' is not used.
 - **#396** `lol_kills/export/warehouse_snapshot.py:15` — source evidence `15: from datetime import datetime, timezone / 16: from pathlib import Path` — finding: Import of 'datetime' is not used. Import of 'timezone' is not used.
 - **#464** `lol_kills/v2/tierlists/pooled_candidate.py:50` — source evidence `50: from .champion_elo import ( / 51: ATOM_BRIDGE_LOCATORS,` — finding: Import of 'SOURCE_LOCATOR' is not used.
-- **#467** `lol_kills/ratings/player_elo.py:38` — source evidence `38: from lol_kills.ratings.dual_elo import DualEloConfig, _is_intl, expected_score / 39: from lol_kills.ratings.momentum_config import (` — finding: Import of 'DualEloConfig' is not used.
+- **#474** `lol_kills/v2/tierlists/champion_elo.py:27` — source evidence `27: from scipy.special import expit, ndtr / 28:` — finding: Import of 'ndtr' is not used.
+- **#475** `lol_kills/v2/tierlists/champion_elo.py:30` — source evidence `30: from lol_kills.v2.champions.atoms.consume import AtomBridge / 31:` — finding: Import of 'AtomBridge' is not used.
 
-### `py/unused-local-variable`: Local result or temporary binding is not read (47)
+### `py/unused-local-variable`: Local result or temporary binding is not read (38)
 
 - Classification: **confirmed cleanup**
 - Release impact: Low direct runtime impact for pure expressions. A right-hand side can still perform validation or file work, so removal must preserve that call.
@@ -475,17 +487,8 @@ Classification values are `confirmed cleanup`, `intentional/test-only`, `generat
 - **#15** `lol_kills/v2/draft/terminal/development_artifact.py:62` — source evidence `62: train_logits = composition_logits(train_rows, fit) / 63: calibration_logits = composition_logits(calibration_rows, fit)` — finding: Variable train_logits is not used.
 - **#16** `lol_kills/research/draft_advantage_matrix.py:498` — source evidence `498: old = live_win_prob( / 499: p_pre=p_pre,` — finding: Variable old is not used.
 - **#17** `lol_kills/draft_recommendation.py:410` — source evidence `410: fold_validation_games = games[fold_train_end:fold_validation_end] / 411: fold_train_matrix = development_matrix[:fold_train_end]` — finding: Variable fold_validation_games is not used.
-- **#18** `lol_kills/v2/ratings/team/estimands_v1.py:200` — source evidence `200: sub_span = {r: s for r, s in zip(roles, [0.0] * len(roles))} / 201: # reuse the full span values via a minimal re-estimate` — finding: Variable sub_span is not used.
 - **#21** `lol_kills/v2/provenance/g1_source_authority.py:191` — source evidence `191: metadata = os.lstat(current) / 192: except FileNotFoundError as error:` — finding: Variable metadata is not used.
 - **#22** `benchmarks/lol-oracle-v1/generate_benchmark.py:455` — source evidence `455: items = sorted( / 456: [` — finding: Variable items is not used.
-- **#23** `lol_kills/research/grubs_intrinsic_value.py:1656` — source evidence `1656: burn_pp = burn_wiki["pre_26_11_3stack"]["wr_pp_via_gold10_logit"] / 1657: burn_brief_pp = burn_wiki["pre_26_11_brief_8s"]["wr_pp_via_gold10_logit"]` — finding: Variable burn_pp is not used.
-- **#24** `lol_kills/research/grubs_intrinsic_value.py:1657` — source evidence `1657: burn_brief_pp = burn_wiki["pre_26_11_brief_8s"]["wr_pp_via_gold10_logit"] / 1658: burn_brief_post_pp = burn_wiki["post_26_11_brief_8s"]["wr_pp_via_gold10_logit"]` — finding: Variable burn_brief_pp is not used.
-- **#25** `lol_kills/research/grubs_intrinsic_value.py:1658` — source evidence `1658: burn_brief_post_pp = burn_wiki["post_26_11_brief_8s"]["wr_pp_via_gold10_logit"] / 1659: burn_hunger_pp = burn_wiki["pre_26_11_20s_plus_hunger_mite"]["wr_pp_via_gold10_logit"]` — finding: Variable burn_brief_post_pp is not used.
-- **#26** `lol_kills/research/grubs_intrinsic_value.py:1659` — source evidence `1659: burn_hunger_pp = burn_wiki["pre_26_11_20s_plus_hunger_mite"]["wr_pp_via_gold10_logit"] / 1660: ls_burn_pp = ls_burn["early_20s_wr_pp"]` — finding: Variable burn_hunger_pp is not used.
-- **#27** `lol_kills/research/grubs_intrinsic_value.py:2124` — source evidence `2124: delta_obj_joint = float(b["central_gold_plus_xp_joint_pp"]) / 2125: delta_obj_upper = float(b["upper_joint_plus_wiki_burn_20s_pp"])` — finding: Variable delta_obj_joint is not used.
-- **#28** `lol_kills/research/grubs_intrinsic_value.py:2125` — source evidence `2125: delta_obj_upper = float(b["upper_joint_plus_wiki_burn_20s_pp"]) / 2126: logits = d["logits"]["gold10"]` — finding: Variable delta_obj_upper is not used.
-- **#29** `lol_kills/research/grubs_intrinsic_value.py:2171` — source evidence `2171: death2 = abs(float(d["fight_swing_priors"]["structural_2_deaths_neg600g_pp"])) / 2172: death3 = abs(float(d["fight_swing_priors"]["structural_3_deaths_neg900g_pp"]))` — finding: Variable death2 is not used.
-- **#30** `lol_kills/research/grubs_intrinsic_value.py:2174` — source evidence `2174: loss_3 = death3 + delta_obj / 2175:` — finding: Variable loss_3 is not used.
 - **#31** `lol_kills/etl/join.py:153` — source evidence `153: bi = pd.to_numeric(m.get("blue_inhibitors"), errors="coerce") / 154: ri = pd.to_numeric(m.get("red_inhibitors"), errors="coerce")` — finding: Variable bi is not used.
 - **#32** `lol_kills/etl/join.py:154` — source evidence `154: ri = pd.to_numeric(m.get("red_inhibitors"), errors="coerce") / 155: # OE may not have first-inhib; leave NaN unless we can infer asymmetry early — skip inference` — finding: Variable ri is not used.
 - **#33** `lol_kills/export/leaderboards.py:316` — source evidence `316: wins = int(record.get("wins") or 0) / 317: wr = _number(record.get("wr"))` — finding: Variable wins is not used.
@@ -532,13 +535,12 @@ Classification values are `confirmed cleanup`, `intentional/test-only`, `generat
 - **#56** `lol_kills/research/temporal_draft_runtime.py:1063` — source evidence `1063: game = games_by_id.get(fixture_id) or _target_game(run) / 1064: lineup_status, lineup_evidence = _lineup_status(` — finding: Variable game is not used.
 - **#69** `lol_kills/ml/train.py:176` — source evidence `176: calibrated = False / 177:` — finding: Variable calibrated is not used.
 
-### `py/unused-local-variable`: Local binding exists for a validation or negative-path test (4)
+### `py/unused-local-variable`: Local binding exists for a validation or negative-path test (3)
 
 - Classification: **intentional/test-only**
 - Release impact: Low release impact. The expression or class declaration exercises a validation boundary.
 - Exact closure action: Keep the validation call or class declaration. Discard the result explicitly or add a short rationale so the intentional unused binding is clear.
 
-- **#41** `lol_kills/v2/draft/interactions/model.py:1133` — source evidence `1133: _orientation, / 1134: ) = _ordered_cross_pair(role_a, champ_a, "A", role_b, champ_b, "B")` — finding: Variable _orientation is not used.
 - **#49** `lol_kills/v2/ratings/player/private_development_runner.py:350` — source evidence `350: folds = _folds_by_id(input_data) / 351: recomputed_player_observations = sum(len(observation.player_observations) for fold in input_data.folds for observation in fold.map_observations)` — finding: Variable folds is not used.
 - **#66** `tests/model_v2/evaluation/test_r20_foundation.py:85` — source evidence `85: class ForgedAuthority(VerifiedFoundationAuthority): / 86: pass` — finding: Variable ForgedAuthority is not used.
 - **#68** `tests/model_v2/ratings/team/test_team_rating_publication.py:134` — source evidence `134: league = LeagueRating.from_mapping( / 135: fixtures["global"]["league_rating"]` — finding: Variable league is not used.
@@ -547,23 +549,23 @@ Classification values are `confirmed cleanup`, `intentional/test-only`, `generat
 
 The following manifest is the live set used to generate the inventory. The validator compared it with the API response by alert number.
 
-`9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29`
-`30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49`
-`50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 65, 66, 67, 68, 69, 70, 71, 72, 73`
-`74, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 138`
-`142, 143, 144, 145, 146, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173`
-`174, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185, 186, 187, 188, 189, 191, 192, 193, 194, 195`
-`196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215`
-`216, 217, 218, 219, 220, 221, 222, 223, 224, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236`
-`237, 238, 239, 240, 241, 242, 243, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259`
-`260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 279, 280, 281`
-`282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 296, 297, 298, 299, 300, 302, 303`
-`304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 317, 318, 319, 320, 321, 323, 325, 326`
-`327, 328, 329, 330, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347`
-`348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 369`
-`372, 373, 374, 375, 376, 377, 380, 381, 382, 383, 384, 385, 386, 387, 388, 389, 390, 391, 392, 393`
-`394, 395, 396, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 419, 420, 421, 422, 423`
-`424, 425, 426, 427, 428, 429, 430, 431, 432, 433, 435, 436, 437, 440, 441, 442, 443, 444, 445, 446`
-`447, 448, 449, 450, 451, 452, 454, 455, 456, 459, 463, 464, 467, 470, 472, 473`
+`9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 31, 32, 33, 34, 35, 36, 37, 38`
+`39, 40, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59`
+`60, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 102, 103, 104, 105, 106, 107, 108, 109, 110`
+`111, 112, 113, 114, 115, 117, 118, 119, 138, 142, 143, 144, 145, 146, 159, 160, 161, 162, 163, 164`
+`165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 184, 185`
+`186, 187, 188, 189, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206`
+`207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 226, 227`
+`228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 247, 248, 249, 250`
+`251, 252, 253, 254, 255, 256, 257, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271`
+`272, 273, 274, 275, 276, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 296`
+`297, 298, 299, 300, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 317, 318`
+`319, 320, 321, 323, 325, 326, 327, 328, 329, 330, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341`
+`342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361`
+`362, 363, 364, 365, 366, 369, 372, 373, 374, 375, 376, 377, 380, 381, 382, 383, 384, 385, 386, 387`
+`388, 389, 390, 391, 392, 393, 394, 395, 396, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413`
+`414, 419, 420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 431, 432, 433, 435, 436, 437, 441, 442`
+`443, 444, 445, 446, 447, 448, 449, 450, 451, 452, 454, 455, 456, 459, 463, 464, 470, 472, 473, 474`
+`475`
 
-Coverage result: 356 live IDs listed, 356 unique, 0 duplicates, 0 omissions. Rule counts above sum to 356.
+Coverage result: 341 live IDs listed, 341 unique, 0 duplicates, 0 omissions. Rule counts above sum to 341.
