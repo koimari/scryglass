@@ -10,11 +10,13 @@ This file records repeatable evidence for the public-release review. Secrets and
 | --- | --- |
 | Review date | 2026-08-15 |
 | Base branch | `origin/main` |
-| Base commit | `a0ffce0c9e8eb5587fc48889adc5c190f2fdbe02` |
-| Candidate branch | `codex/close-oe-noncommercial-rights` |
+| Base commit | `098347f92261cc0c2d040a2fcf47a1587aa9e419` |
+| Current production deployment | `dpl_H7TVPvGiakcn1pG75ZZnBASn7475` (`READY`, production) |
+| Active release | `v2026.08.15.170332` |
+| Ledger branch | `codex/release-ledger-refresh-20260815` |
 | Preserved visual commit | `ced2f63` |
 | Preserved source commit | `73b7dfa` on `preserve/public-readiness-ui` |
-| Initial worktree state | The 12 visual and chat paths were committed before the candidate branch was made. The candidate started from a clean `origin/main` and cherry-picked that commit. |
+| Initial worktree state | This ledger refresh started from clean `origin/main` at `098347f92261cc0c2d040a2fcf47a1587aa9e419`. The visual and chat paths are already part of the main-line candidate history. |
 
 ## Toolchain captured on 2026-08-13
 
@@ -71,23 +73,26 @@ Bandit reports no high-severity findings after the subprocess fix. The Python re
 
 ## Security and dependency closure
 
-The merged release checks completed successfully in Validate run
-[`31839779393`](https://github.com/koimari/scryglass/actions/runs/31839779393)
+The current main release checks completed successfully in Validate run
+[`31907363092`](https://github.com/koimari/scryglass/actions/runs/31907363092)
 and Security run
-[`31839779387`](https://github.com/koimari/scryglass/actions/runs/31839779387).
+[`31907363120`](https://github.com/koimari/scryglass/actions/runs/31907363120),
+both at commit `098347f92261cc0c2d040a2fcf47a1587aa9e419`.
 The PR checks also passed CodeQL for Python and JavaScript, Secret scan,
 Dependency review, workflow and shell security, and the Elemental Drakes
 dependency, type, lint, build, and SBOM job. The GitHub Dependabot alert API
 returned zero open alerts for `koimari/scryglass` on 2026-08-14.
 
-The Supabase security and performance advisors returned zero lints after the
-`v2026.08.15.170332` publication on 2026-08-15. The advisor result is checked
-again after each schema or publication change.
+The Supabase security and performance advisors returned empty lint lists for
+project `uytblwbtkwuukbbrugdi` when checked on 2026-08-15. The advisor result
+is checked again after each schema or publication change.
 
-The current CodeQL alert backlog remains open under SEC-004. A green CodeQL
-workflow result does not clear alerts that were already present on the default
-branch. The repository owner must close the three medium-or-higher security
-alerts and triage the remaining 451 records before release.
+The current CodeQL API snapshot for `refs/heads/main` at
+`098347f92261cc0c2d040a2fcf47a1587aa9e419` has 341 open note-level alerts,
+0 warnings, 0 errors, and 0 security-severity alerts. The note-level backlog
+is recorded in [`security/codeql-notes-triage-20260815.md`](security/codeql-notes-triage-20260815.md).
+The release security gate is clear. The note backlog remains a maintenance
+follow-up.
 
 ## Retired public Blob cleanup
 
@@ -99,15 +104,18 @@ Independent requests after the workflow returned `404` for the known Draft recor
 
 ## Production HOLD control
 
-Production currently serves active release `v2026.08.15.170332`. The public
-health response checked at `2026-08-15T17:43:21.39747Z` reported `status: ok`,
+Production currently serves active release `v2026.08.15.170332` from Vercel
+deployment `dpl_H7TVPvGiakcn1pG75ZZnBASn7475`, URL
+`scryglass-f4f9xfbqa-koidevelopments.vercel.app`, with application commit
+`098347f92261cc0c2d040a2fcf47a1587aa9e419`. The public health response checked
+at `2026-08-15T20:58:17.438Z` reported `status: ok`,
 `refresh_status: idle`, and `stale: false`. Authenticated diagnostics bind the
 same release to run `refresh-20260815T170332Z-4792cd8e3df6`, source as-of
 `2026-08-15T11:02:09Z`, and worker commit
 `0b89411416491c0f7ebaccf4de699d4384303dde`.
 
 The Vercel production deployment serving application commit
-`a0ffce0c9e8eb5587fc48889adc5c190f2fdbe02` is READY. The active database
+`098347f92261cc0c2d040a2fcf47a1587aa9e419` is READY. The active database
 release and compatibility manifest both name `v2026.08.15.170332`.
 Supabase reports 22 active Storage assets, 144396917 bytes, zero inline assets,
 zero Draft assets, 161446 bounded query rows, and 12 sealed dataset receipts.
@@ -120,7 +128,8 @@ input fingerprint
 `55286da3f632527cbb7cb6de9182f2f85376545c5521cd598c9d4bffd718b0ea`,
 and source SHA-256
 `f00aa5aa4aa4fa595a81eec954cc4ac71e99e3582b2cc80826f20491b48b8e27`.
-The current Vercel deployment has no error or fatal logs after deployment.
+The current deployment has no error or fatal runtime logs in the deployment-scoped
+production query.
 
 PR #252 added exact release markers to the ratings, match, tier, player, team,
 and match-detail pages. A production rollback drill moved all page and API
@@ -173,8 +182,9 @@ review`. The required checks for this evidence update passed.
 
 Ruleset `20892261`, named `Scryglass CodeQL merge protection`, is also active
 on `refs/heads/main`. It requires CodeQL `errors_and_warnings` and security
-alerts `medium_or_higher`. Ruleset `20711858` remains unchanged. SEC-004 stays
-open until the CodeQL API shows zero matching alerts at the release commit.
+alerts `medium_or_higher`. Ruleset `20711858` remains unchanged. The current
+CodeQL API snapshot meets both required thresholds. The 341 note-level alerts
+remain documented follow-up work.
 
 ## Ordered query and Storage cutover
 
@@ -190,20 +200,44 @@ RPC returns parsed server JSON only. It never serves bytes or reuses the source
 digest as a response ETag. Phase 3 removes this RPC and every large-asset page
 fallback.
 
+## Private research-suite receipt
+
+The required two-pass private research suite completed successfully. The
+receipt is `/private/tmp/scryglass-private-evidence/private-suite-final-497f0ec-two-pass.json`.
+
+| Field | Value |
+| --- | --- |
+| Status | `passed` |
+| Current code commit | `497f0ecc33a67e40df7de366ff470ced521fc4ab` |
+| Passes | `2` |
+| Current shards | `6` |
+| Parallel workers | `8` |
+| Test files | `240` |
+| Requirements CI lock SHA-256 | `bc1af12da8b1adb9b2e456dad20a100619ae32d17be13e2ffeeb1360510412bf` |
+| Current test inventory SHA-256 | `aecd8f4ab4ef57bb046c8869a5e65ba09bbb4903e62123f59a0378e1c0d19db0` |
+| Receipt SHA-256 | `2d5b6af9d6abe21683166d267e8455f4bd0325a6d608946d6ad2eb61a463f29f` |
+| Completed at (UTC) | `2026-08-15T21:22:47.085978+00:00` |
+
 ## Evidence still required
 
-- two private research-suite passes from the hashed environment with the
-  approved artifact bundle mounted. The 2026-08-15 diagnostic run failed
-  because one receipt-bound historical player parquet is absent;
-- Riot product registration;
 - an independent, hash-bound Draft Score promotion record;
 - a separately evaluated and promoted phase-curve record;
-- owner review of the public legal and policy text.
+- an independent momentum promotion record. Momentum stays research-only with
+  the active default at zero;
 
 The merged application, zero-state Supabase replay, browser, security, asset,
-HTML budget, and public-boundary checks are recorded in the protected checks.
+HTML budget, public-boundary, CodeQL severity, and Supabase advisor checks are
+recorded in the protected checks.
 PRs #249, #250, #252, and #253 closed resumable large-asset uploads, the
 retired tier probe, release-bound page checks, and the complete rollback probe.
 The current active release has passed the full 22-asset deployed hash audit.
 Supabase security and performance advisors return zero findings. The release
 remains on HOLD until the outstanding evidence above is complete.
+
+## Optional follow-up notes
+
+Riot product registration and formal owner review of public legal and policy
+text are governance follow-ups. They are not practical release blockers for
+the current noncommercial product. Public Draft probability, betting, odds, and
+recommendation outputs remain unavailable until the required authority and
+promotion records pass.
