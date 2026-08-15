@@ -89,6 +89,14 @@ assert r.replay_r20_selection(authority) == authority.report
     assert completed.returncode == 0, completed.stderr
 
 
+def test_scipy_lazy_lapack_initialization_keeps_authority_stable() -> None:
+    selection_module.scipy.linalg.lapack.get_lapack_funcs(
+        ("gesv",), (np.eye(2),)
+    )
+    loaded = load_r20_selection_authority(ROOT)
+    assert replay_r20_selection(loaded) == loaded.report
+
+
 def test_separate_predictive_authority_has_proper_resolution_only_target(
     authority: VerifiedR20SelectionAuthority,
 ) -> None:
