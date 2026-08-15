@@ -163,14 +163,14 @@ def test_current_rating_and_total_artifacts_remain_fail_closed(monkeypatch) -> N
         "v3_capture_readiness_v2_superseded"
     ]["qualifies_as_current_implementation_evidence"] is False
     assert report["ratings"]["artifacts"]["v3_capture_readiness"][
+        "present_and_valid"
+    ] is False
+    assert report["ratings"]["artifacts"]["v3_capture_readiness"][
         "result_state"
-    ] == "SYSTEM_CLOCKED_PRE_EVENT_CAPTURE_IMPLEMENTATION_READY_EMPTY_LEDGER"
-    assert report["ratings"]["artifacts"]["v3_capture_readiness"][
-        "clock_attestation"
-    ]["user_supplied_timestamp_allowed"] is False
-    assert report["ratings"]["artifacts"]["v3_capture_readiness"][
-        "implementation"
-    ]["ready_for_pre_event_capture"] is True
+    ] is None
+    assert "capture readiness source drifted" in report["ratings"]["artifacts"][
+        "v3_capture_readiness"
+    ]["error"]
     assert report["ratings"]["checks"]["v2_protocol_lock_present_and_valid"] is True
     assert report["ratings"]["checks"]["v2_protocol_artifact_integrity_valid"] is True
     assert report["ratings"]["checks"]["v2_protocol_source_replay_valid"] is True
