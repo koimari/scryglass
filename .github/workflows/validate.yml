@@ -442,6 +442,7 @@ jobs:
             tests/test_patch_identity.py \
             tests/test_lcc_atom_refresh_receipt.py \
             tests/model_v2/champions/test_atom_bridge.py \
+            tests/model_v2/champions/test_depth2_aggregate.py \
             tests/model_v2/champions/test_atom_seed_v1.py \
             tests/model_v2/tierlists/test_live_refresh.py \
             tests/model_v2/tierlists/test_production_bundle.py \
@@ -471,6 +472,7 @@ jobs:
             tests/test_patch_identity.py \
             tests/test_lcc_atom_refresh_receipt.py \
             tests/model_v2/champions/test_atom_bridge.py \
+            tests/model_v2/champions/test_depth2_aggregate.py \
             tests/model_v2/champions/test_atom_seed_v1.py \
             tests/model_v2/tierlists/test_live_refresh.py \
             tests/model_v2/tierlists/test_production_bundle.py \

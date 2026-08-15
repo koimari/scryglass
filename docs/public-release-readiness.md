@@ -84,4 +84,6 @@ Current production evidence for `v2026.08.15.033633`:
 
 The release stays on HOLD while the source-rights records, Riot registration,
 private research-suite receipt, legal text review, and independent Draft Score
-and phase-curve promotion records remain incomplete.
+and phase-curve promotion records remain incomplete. The first private-suite
+diagnostic found one missing receipt-bound historical player parquet. The two
+required clean passes have not started.

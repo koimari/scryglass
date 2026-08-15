@@ -49,6 +49,6 @@ def test_role_positions_and_profile_basis_are_public() -> None:
     by_name = {profile["champion"]: profile for profile in library["champions"]}
 
     assert "mid" in by_name["Ziggs"]["positions"]
-    assert by_name["Ziggs"]["profile_status"] == "family_only"
+    assert by_name["Ziggs"]["profile_status"] == "atom_detail"
     assert by_name["Anivia"]["profile_status"] == "atom_detail"
     assert by_name["Ziggs"]["traits"]
