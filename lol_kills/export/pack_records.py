@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Mapping
 
 import pandas as pd
@@ -18,8 +21,15 @@ from lol_kills.etl.competition import (
 )
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.player_map_grades import GRADE_CONTRACT, compute_player_map_grades, grade_payload
-from lol_kills.v2.patch_identity import public_patch
-from lol_kills.v2.tierlists.patch_mapping import normalize_oe_token
+from lol_kills.v2.patch_identity import corrected_oe_patch_token, public_patch
+from lol_kills.v2.tierlists.patch_mapping import (
+    DEFAULT_MAPPING_PATH,
+    MappingArtifact,
+    PatchMappingError,
+    load_mapping,
+    normalize_oe_token,
+    resolve_oe_patch,
+)
 
 
 PUBLIC_TEAM_RATING_EXCLUSIONS = frozenset({"los-ratones"})
@@ -41,6 +51,7 @@ PUBLIC_ROLE_ALIASES = {
 }
 
 DRAFT_PICK_SLOTS = (1, 2, 3, 4, 5)
+OE_PATCH_TOKEN_RE = re.compile(r"^(?P<major>\d{2})\.(?P<minor>\d{1,2})(?:\.\d+)?$")
 PROFILE_OBJECTIVE_FIELDS = (
     "dragons",
     "heralds",
@@ -52,6 +63,115 @@ PROFILE_OBJECTIVE_FIELDS = (
 )
 
 
+@lru_cache(maxsize=1)
+def _static_patch_mapping() -> MappingArtifact | None:
+    """Load the audited patch intervals without binding the live parquet.
+
+    Pack projection runs after the source frame has been read. The source
+    watermark is checked by the refresh pipeline. Projection still needs the
+    immutable audited intervals to disambiguate float-like OE tokens such as
+    ``16.1``.
+    """
+
+    mapping_path = Path(__file__).resolve().parents[2] / DEFAULT_MAPPING_PATH
+    try:
+        return load_mapping(
+            mapping_path,
+            repo_root=mapping_path.parents[4],
+            bind_live_source=False,
+        )
+    except (OSError, PatchMappingError, ValueError):
+        return None
+
+
+def _patch_as_of(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        timestamp = pd.Timestamp(value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(timestamp):
+        return None
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("UTC")
+    else:
+        timestamp = timestamp.tz_convert("UTC")
+    return timestamp.isoformat().replace("+00:00", "Z")
+
+
+def public_patch_for_source(
+    value: Any,
+    *,
+    event_time: Any | None = None,
+    realm_patch: Any | None = None,
+    realm_kind: Any | None = None,
+    mapping: MappingArtifact | None = None,
+) -> str:
+    """Return a time-safe public patch label for one OE source token.
+
+    A one-digit OE minor is ambiguous after a float-like CSV round trip. The
+    audited interval resolves it when a game timestamp is available. Explicit
+    realm evidence can resolve the value directly. An ambiguous value with no
+    evidence stays unavailable.
+    """
+
+    text = _draft_text(value)
+    if not text:
+        return ""
+    match = OE_PATCH_TOKEN_RE.fullmatch(text)
+    if match is None:
+        try:
+            return public_patch(text)
+        except (TypeError, ValueError):
+            return ""
+
+    major = int(match.group("major"))
+    minor_text = match.group("minor")
+    is_ambiguous_source_token = major in {15, 16} and len(minor_text) == 1
+    as_of = _patch_as_of(event_time)
+    explicit_realm = _draft_text(realm_patch)
+
+    if is_ambiguous_source_token:
+        if explicit_realm:
+            try:
+                return public_patch(explicit_realm)
+            except (TypeError, ValueError):
+                pass
+        if as_of:
+            artifact = mapping or _static_patch_mapping()
+            if artifact is not None:
+                resolution = resolve_oe_patch(
+                    text,
+                    as_of,
+                    mapping=artifact,
+                    verify_source_hashes=False,
+                )
+                if resolution.exact_official_patch:
+                    return str(resolution.official_patch)
+        return ""
+
+    if as_of and (explicit_realm or _draft_text(realm_kind)):
+        corrected, correction = corrected_oe_patch_token(
+            text,
+            as_of,
+            realm_patch=explicit_realm or None,
+            realm_kind=realm_kind,
+        )
+        if correction is not None:
+            try:
+                return public_patch(corrected)
+            except (TypeError, ValueError):
+                return ""
+    try:
+        return public_patch(text)
+    except (TypeError, ValueError):
+        try:
+            return public_patch(normalize_oe_token(text))
+        except (TypeError, ValueError):
+            return ""
+
+
 def _draft_text(value: Any) -> str:
     if value is None:
         return ""
@@ -61,6 +181,13 @@ def _draft_text(value: Any) -> str:
     except (TypeError, ValueError):
         pass
     return str(value).strip()
+
+
+def _first_nonempty(*values: Any) -> Any:
+    for value in values:
+        if _draft_text(value):
+            return value
+    return None
 
 
 def _draft_champion_key(value: Any) -> str:
@@ -173,9 +300,23 @@ def _public_draft_payload(
                     }
                 )
 
-    patch = _public_patch((metadata or {}).get("patch"))
-    if not patch and "patch" in group.columns:
-        patch = _public_patch(group.iloc[0].get("patch"))
+    first = group.iloc[0]
+    source_patch = _first_nonempty(
+        (metadata or {}).get("oe_patch_token"),
+        (metadata or {}).get("patch"),
+        first.get("oe_patch_token"),
+        first.get("patch"),
+    )
+    patch = _public_patch(
+        source_patch,
+        event_time=_first_nonempty(first.get("date"), first.get("_date")),
+        realm_patch=_first_nonempty(
+            (metadata or {}).get("realm_patch"), first.get("server_patch")
+        ),
+        realm_kind=_first_nonempty(
+            (metadata or {}).get("realm_kind"), first.get("patch_realm")
+        ),
+    )
     complete_bans = all(len(bans.get(side, [])) == 5 for side in ("Blue", "Red"))
     complete_picks = len(picked) == 10 and len({_draft_champion_key(item.get("champion")) for item in picked}) == 10
     complete_order = complete_picks and all(item.get("order") is not None for item in picked)
@@ -192,19 +333,23 @@ def _public_draft_payload(
     }
 
 
-def _public_patch(value: Any) -> str:
-    """Convert source/client patch tokens to the public Riot label."""
+def _public_patch(
+    value: Any,
+    *,
+    event_time: Any | None = None,
+    realm_patch: Any | None = None,
+    realm_kind: Any | None = None,
+    mapping: MappingArtifact | None = None,
+) -> str:
+    """Convert one source/client token to the public Riot label."""
 
-    text = _draft_text(value)
-    if not text:
-        return ""
-    try:
-        return public_patch(normalize_oe_token(text))
-    except (TypeError, ValueError):
-        try:
-            return public_patch(text)
-        except (TypeError, ValueError):
-            return ""
+    return public_patch_for_source(
+        value,
+        event_time=event_time,
+        realm_patch=realm_patch,
+        realm_kind=realm_kind,
+        mapping=mapping,
+    )
 
 
 def _wr(wins: int, games: int) -> float | None:
@@ -274,6 +419,8 @@ def build_maps_frame_from_team_games(team_games: pd.DataFrame) -> pd.DataFrame:
         c
         for c in (
             "_game_uid", "date", "league", "tournament", "result", "teamname", "grid_series_id",
+            "oe_patch_token", "server_patch", "game_patch", "realm_patch",
+            "authoritative_patch", "patch_realm", "realm_kind", "server_kind",
             *draft_columns,
         )
         if c in blue.columns
@@ -722,6 +869,33 @@ def _team_objective_lookup(
     return lookup
 
 
+def _patch_version(value: Any) -> tuple[int, int] | None:
+    text = _draft_text(value)
+    match = re.fullmatch(r"(?P<major>\d{2})\.(?P<minor>\d{2})", text)
+    if match is None:
+        return None
+    return int(match.group("major")), int(match.group("minor"))
+
+
+def _sanitize_profile_objectives(
+    team_stats: dict[str, dict[str, Any]],
+    *,
+    patch: str,
+) -> None:
+    """Keep only objective values supported by the source and patch."""
+
+    for field in ("dragons", "inhibitors"):
+        values = [team_stats.get(side, {}).get(field) for side in ("Blue", "Red")]
+        if values == [0, 0]:
+            for side in ("Blue", "Red"):
+                team_stats[side][field] = None
+
+    patch_version = _patch_version(patch)
+    if patch_version is not None and patch_version >= (26, 1):
+        for side in ("Blue", "Red"):
+            team_stats[side]["atakhans"] = None
+
+
 def profile_game_has_complete_stats(game: Mapping[str, Any]) -> bool:
     players = game.get("players")
     if not isinstance(players, list) or len(players) != 10:
@@ -840,6 +1014,14 @@ def build_profile_records(
             "towers",
             "inhibitors",
             "patch",
+            "oe_patch_token",
+            "server_patch",
+            "game_patch",
+            "realm_patch",
+            "authoritative_patch",
+            "patch_realm",
+            "realm_kind",
+            "server_kind",
             "ban1",
             "ban2",
             "ban3",
@@ -1004,12 +1186,39 @@ def build_profile_records(
         game_draft_metadata = (draft_metadata or {}).get(key)
         if not isinstance(game_draft_metadata, Mapping):
             game_draft_metadata = None
+        first_row = group.iloc[0]
+        source_patch = _first_nonempty(
+            (game_draft_metadata or {}).get("oe_patch_token"),
+            first_row.get("oe_patch_token"),
+            (game_draft_metadata or {}).get("patch"),
+            first_row.get("patch"),
+        )
+        realm_patch = _first_nonempty(
+            (game_draft_metadata or {}).get("realm_patch"),
+            first_row.get("server_patch"),
+            first_row.get("game_patch"),
+            first_row.get("realm_patch"),
+            first_row.get("authoritative_patch"),
+        )
+        realm_kind = _first_nonempty(
+            (game_draft_metadata or {}).get("realm_kind"),
+            first_row.get("patch_realm"),
+            first_row.get("realm_kind"),
+            first_row.get("server_kind"),
+        )
+        game_patch = _public_patch(
+            source_patch,
+            event_time=date,
+            realm_patch=realm_patch,
+            realm_kind=realm_kind,
+        )
+        _sanitize_profile_objectives(team_stats, patch=game_patch)
         games[key] = {
             "game_id": key,
             "date": date.isoformat().replace("+00:00", "Z"),
             "league": league,
             "competition_tier": tier,
-            "patch": _public_patch((game_draft_metadata or {}).get("patch")) or _public_patch(group.iloc[0].get("patch")) or None,
+            "patch": game_patch or None,
             "blue_team": blue_team,
             "red_team": red_team,
             "blue_win": int(blue_result),

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import urllib.parse
 from datetime import datetime, timezone
@@ -33,6 +34,7 @@ from lol_kills.export.pack_records import (
     build_team_records,
     filter_public_team_rating_maps,
     merge_accepted_profile_games,
+    public_patch_for_source,
     public_team_affiliation,
     summarize_player_affiliations,
 )
@@ -75,9 +77,6 @@ from lol_kills.research.composition_signal import (
     _composition_code_digest,
     validate_public_signal,
 )
-from lol_kills.v2.tierlists.patch_mapping import normalize_oe_token
-from lol_kills.v2.patch_identity import public_patch
-
 ROOT = Path(__file__).resolve().parents[2]
 WAREHOUSE = ROOT / "data" / "lol" / "warehouse" / "parquet"
 LIVE_WAREHOUSE = WAREHOUSE / "oe_live"
@@ -212,6 +211,33 @@ def _champion_image_urls(project: Path) -> dict[str, str]:
             if not name or champion_key(name) in existing_keys:
                 continue
             urls[name] = f"https://cdn.communitydragon.org/latest/champion/{numeric_id}/square"
+            existing_keys.add(champion_key(name))
+
+    # The older OE crosswalk has 171 entries.  The current canonical
+    # 26.16 ontology contains the two newer standard champions as well.
+    ontology_path = (
+        project
+        / "data"
+        / "lol"
+        / "v2"
+        / "champions"
+        / "champion-ontology-seed-26.16.json"
+    )
+    try:
+        ontology = json.loads(ontology_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        ontology = {}
+    champions = ontology.get("champions") if isinstance(ontology, dict) else None
+    if isinstance(champions, list):
+        for champion in champions:
+            if not isinstance(champion, dict):
+                continue
+            name = normalize_champ(str(champion.get("display_name") or "").strip())
+            champion_id = str(champion.get("champion_id") or "").strip()
+            match = re.fullmatch(r"riot:champion:(\d+)", champion_id)
+            if not name or match is None or champion_key(name) in existing_keys:
+                continue
+            urls[name] = f"https://cdn.communitydragon.org/latest/champion/{match.group(1)}/square"
             existing_keys.add(champion_key(name))
     return dict(sorted(urls.items()))
 
@@ -658,10 +684,31 @@ def _draft_metadata_from_maps(frame: pd.DataFrame) -> dict[str, dict[str, Any]]:
         )
         if not game_id:
             continue
+        source_patch = clean(row.get("oe_patch_token")) or clean(row.get("patch"))
+        event_time = row.get("date")
+        realm_patch = (
+            clean(row.get("server_patch"))
+            or clean(row.get("game_patch"))
+            or clean(row.get("realm_patch"))
+            or clean(row.get("authoritative_patch"))
+        )
+        realm_kind = (
+            clean(row.get("patch_realm"))
+            or clean(row.get("realm_kind"))
+            or clean(row.get("server_kind"))
+        )
         value: dict[str, Any] = {
             # OE stores the source token in the client namespace (16.x). The
             # public pack uses Riot's 26.x label.
-            "patch": _draft_patch(clean(row.get("patch"))) or None,
+            "patch": public_patch_for_source(
+                source_patch,
+                event_time=event_time,
+                realm_patch=realm_patch or None,
+                realm_kind=realm_kind or None,
+            ) or None,
+            "oe_patch_token": source_patch or None,
+            "realm_patch": realm_patch or None,
+            "realm_kind": realm_kind or None,
             "blue_bans": [
                 clean(row.get(f"blue_ban{slot}"))
                 for slot in range(1, 6)
@@ -692,19 +739,21 @@ def _draft_key(value: Any) -> str:
     return normalize_champ(str(value or "").strip()).casefold()
 
 
-def _draft_patch(value: Any) -> str:
+def _draft_patch(
+    value: Any,
+    *,
+    event_time: Any | None = None,
+    realm_patch: Any | None = None,
+    realm_kind: Any | None = None,
+) -> str:
     """Return Riot's public patch label for an OE or client patch token."""
 
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    try:
-        return public_patch(normalize_oe_token(text))
-    except (TypeError, ValueError):
-        try:
-            return public_patch(text)
-        except (TypeError, ValueError):
-            return ""
+    return public_patch_for_source(
+        value,
+        event_time=event_time,
+        realm_patch=realm_patch,
+        realm_kind=realm_kind,
+    )
 
 
 def _draft_role(value: Any) -> str:
@@ -768,7 +817,12 @@ def _attach_published_draft_pools(
                 "schema_version": "scryglass:draft-pool:v1",
                 "status": "unavailable",
                 "source": "oracle-elixir",
-                "patch": _draft_patch(game.get("patch")) or None,
+                "patch": _draft_patch(
+                    game.get("patch"),
+                    event_time=game.get("date"),
+                    realm_patch=game.get("realm_patch"),
+                    realm_kind=game.get("realm_kind"),
+                ) or None,
                 "bans": {"Blue": [], "Red": []},
                 "picked": [],
                 "unpicked": [],
@@ -794,7 +848,12 @@ def _attach_published_draft_pools(
             and sorted(orders) == list(range(1, 11))
         )
         complete_order += int(order_complete)
-        patch = _draft_patch(pool.get("patch") or game.get("patch"))
+        patch = _draft_patch(
+            pool.get("patch") or game.get("patch"),
+            event_time=game.get("date"),
+            realm_patch=game.get("realm_patch"),
+            realm_kind=game.get("realm_kind"),
+        )
         picked_keys = {_draft_key(item.get("champion")) for item in picked if item.get("champion")}
         universe = {
             row["key"]: row["champion"]
@@ -941,7 +1000,9 @@ def export_public_pack(
             *(f"blue_pick{slot}" for slot in range(1, 6)),
             *(f"red_pick{slot}" for slot in range(1, 6)),
             "dragons", "heralds", "void_grubs", "barons", "atakhans",
-            "towers", "inhibitors",
+            "towers", "inhibitors", "oe_patch_token", "server_patch",
+            "game_patch", "realm_patch", "authoritative_patch", "patch_realm",
+            "realm_kind", "server_kind",
         ),
         team_available,
     )
@@ -1017,6 +1078,8 @@ def export_public_pack(
     # the canonical map frame before profile records are built.
     draft_metadata_columns = [
         "patch",
+        "oe_patch_token", "server_patch", "game_patch", "realm_patch",
+        "authoritative_patch", "patch_realm", "realm_kind", "server_kind",
         "blue_firstPick", "red_firstPick",
         *(f"blue_ban{slot}" for slot in range(1, 6)),
         *(f"red_ban{slot}" for slot in range(1, 6)),
@@ -1368,7 +1431,9 @@ def export_public_pack(
             "gameid", "game_uid", "date", "year", "oe_year", "league",
             "league_source", "tournament", "result", "side", "position",
             "teamname", "playername", "champion", "kills", "deaths", "assists",
-            "patch", "grid_series_id",
+            "patch", "oe_patch_token", "server_patch", "game_patch", "realm_patch",
+            "authoritative_patch", "patch_realm", "realm_kind", "server_kind",
+            "grid_series_id",
             "teamkills", "gamelength", "dpm", "damageshare", "totalgold",
             "total cs", "minionkills", "monsterkills", "cspm", "visionscore",
             "wardsplaced", "wpm", "wcpm", "golddiffat10", "dragons",
