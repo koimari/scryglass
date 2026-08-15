@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -231,7 +230,7 @@ def evaluation_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
         target_is_directory=True,
     )
     for filename in ("maps.parquet", "players.parquet"):
-        os.link(
+        shutil.copy2(
             repo_root / f"data/lol/warehouse/parquet/{filename}",
             root / f"data/lol/warehouse/parquet/{filename}",
         )
