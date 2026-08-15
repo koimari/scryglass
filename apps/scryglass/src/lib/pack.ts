@@ -106,6 +106,19 @@ export type PackManifest = {
     team_rating_rows?: number;
     player_rating_rows?: number;
     claim_ceiling?: string;
+    momentum?: {
+      schema_version?: string;
+      window_games?: number;
+      scale?: number;
+      scale_unit?: string;
+      status?: string;
+      authority?: Record<string, boolean>;
+      selected?: Record<string, unknown>;
+      registered?: Record<string, unknown>;
+      active?: Record<string, unknown>;
+      candidate?: Record<string, unknown>;
+      promotion?: Record<string, unknown>;
+    };
   };
   ingest?: Record<string, unknown>;
   total_bytes: number;
@@ -117,6 +130,9 @@ export type TeamRating = {
   team: string;
   team_key?: string;
   mu_total: number;
+  mu_base_total?: number;
+  mu_effective?: number;
+  momentum_residual?: number;
   mu_regional: number;
   mu_meta: number;
   sigma: number;
@@ -167,6 +183,9 @@ export type TeamWeeklyRanks = {
 export type PlayerRating = {
   player: string;
   mu_total: number;
+  mu_base_total?: number;
+  mu_effective?: number;
+  momentum_residual?: number;
   mu_regional: number;
   mu_meta: number;
   sigma: number;
@@ -673,25 +692,33 @@ export function compactPlayerRatings(players: PlayerRating[]): PlayerRating[] {
         player.evidence_disconnected !== 1 &&
         player.evidence_state?.toLowerCase() !== "disconnected",
     )
-    .map((player) => ({
-      player: player.player,
-      mu_total: player.mu_total,
-      mu_regional: player.mu_regional,
-      mu_meta: player.mu_meta,
-      sigma: player.sigma,
-      n_maps: player.n_maps,
-      last_team: player.last_team,
-      evidence_interval_width: player.evidence_interval_width,
-      evidence_precision_ratio: player.evidence_precision_ratio,
-      evidence_stability: player.evidence_stability,
-      evidence_freshness_days: player.evidence_freshness_days,
-      evidence_support_coverage: player.evidence_support_coverage,
-      evidence_fallback: player.evidence_fallback,
-      evidence_active: player.evidence_active,
-      evidence_disconnected: player.evidence_disconnected,
-      evidence_ood: player.evidence_ood,
-      evidence_state: player.evidence_state,
-    }))
+    .map((player) => {
+      const compact: PlayerRating = {
+        player: player.player,
+        mu_total: player.mu_total,
+        mu_regional: player.mu_regional,
+        mu_meta: player.mu_meta,
+        sigma: player.sigma,
+        n_maps: player.n_maps,
+        last_team: player.last_team,
+        evidence_interval_width: player.evidence_interval_width,
+        evidence_precision_ratio: player.evidence_precision_ratio,
+        evidence_stability: player.evidence_stability,
+        evidence_freshness_days: player.evidence_freshness_days,
+        evidence_support_coverage: player.evidence_support_coverage,
+        evidence_fallback: player.evidence_fallback,
+        evidence_active: player.evidence_active,
+        evidence_disconnected: player.evidence_disconnected,
+        evidence_ood: player.evidence_ood,
+        evidence_state: player.evidence_state,
+      };
+      if (player.mu_base_total !== undefined) compact.mu_base_total = player.mu_base_total;
+      if (player.mu_effective !== undefined) compact.mu_effective = player.mu_effective;
+      if (player.momentum_residual !== undefined) {
+        compact.momentum_residual = player.momentum_residual;
+      }
+      return compact;
+    })
     .sort(
       (a, b) =>
         softMu(b.mu_total, b.sigma, PLAYER_SIGMA_MIN) -

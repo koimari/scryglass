@@ -25,7 +25,7 @@ import json
 import math
 from collections import defaultdict
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -36,6 +36,12 @@ from lol_kills.etl.competition import canonicalize_competition_frame, is_team_af
 from lol_kills.etl.paths import FEATURES_DIR, PARQUET_DIR
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.dual_elo import DualEloConfig, _is_intl, expected_score
+from lol_kills.ratings.momentum_config import (
+    DEFAULT_MOMENTUM_SCALE,
+    DEFAULT_MOMENTUM_WINDOW_GAMES,
+    registered_momentum_bundle,
+    selected_momentum_configuration,
+)
 from lol_kills.ratings.global_player_bt import (
     GlobalPlayerBTConfig,
     GlobalPlayerRatingError,
@@ -65,6 +71,8 @@ class PlayerState:
     n_maps: int = 0
     last_team: str | None = None
     home_league: str | None = None
+    momentum_history: list[float] = field(default_factory=list)
+    momentum_residual: float = 0.0
 
 
 @dataclass
@@ -82,10 +90,44 @@ class PlayerEloConfig:
     bridge_support_scale: float = 10.0
     # Blend toward prior when <5 known starters
     prior_mu: float = 1500.0
+    momentum_window_games: int = DEFAULT_MOMENTUM_WINDOW_GAMES
+    momentum_scale: float = DEFAULT_MOMENTUM_SCALE
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.momentum_window_games, bool)
+            or not isinstance(self.momentum_window_games, int)
+            or self.momentum_window_games < 0
+        ):
+            raise ValueError("momentum_window_games must be a non-negative integer")
+        try:
+            scale = float(self.momentum_scale)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("momentum_scale must be a finite non-negative value") from exc
+        if not math.isfinite(scale) or scale < 0:
+            raise ValueError("momentum_scale must be a finite non-negative value")
+        self.momentum_scale = scale
 
 
 def total_mu(st: PlayerState) -> float:
     return st.mu_regional + st.mu_meta
+
+
+def _momentum_residual(st: PlayerState, cfg: PlayerEloConfig) -> float:
+    if cfg.momentum_window_games <= 0:
+        return 0.0
+    if st.momentum_history:
+        return float(np.mean(st.momentum_history[-cfg.momentum_window_games :]))
+    return float(st.momentum_residual)
+
+
+def _append_momentum(st: PlayerState, residual: float, cfg: PlayerEloConfig) -> None:
+    if cfg.momentum_window_games <= 0:
+        return
+    st.momentum_history.append(float(residual))
+    if len(st.momentum_history) > cfg.momentum_window_games:
+        del st.momentum_history[:-cfg.momentum_window_games]
+    st.momentum_residual = float(np.mean(st.momentum_history))
 
 
 def _norm_role(r: str) -> str:
@@ -171,6 +213,8 @@ def _aggregate(
     states: dict[str, PlayerState],
     lineup: list[tuple[str, str]],
     cfg: PlayerEloConfig,
+    *,
+    include_momentum: bool = True,
 ) -> tuple[float, float, int, list[dict]]:
     """Return (mu, sigma_mean, n_known, per-player detail)."""
     if not lineup:
@@ -184,13 +228,28 @@ def _aggregate(
         st = states.get(name)
         w = _role_w(role, cfg)
         if st is None:
-            mu = cfg.prior_mu
+            mu_base = cfg.prior_mu
+            momentum_residual = 0.0
             sig = cfg.sigma0
         else:
-            mu = total_mu(st)
+            mu_base = total_mu(st)
+            momentum_residual = _momentum_residual(st, cfg)
             sig = st.sigma
             known += 1
-        details.append({"player": name, "role": role, "mu": round(mu, 2), "sigma": round(sig, 2), "w": w})
+        momentum_points = cfg.momentum_scale * momentum_residual if include_momentum else 0.0
+        mu = mu_base + momentum_points
+        details.append(
+            {
+                "player": name,
+                "role": role,
+                "mu": round(mu, 2),
+                "mu_base": round(mu_base, 2),
+                "momentum_residual": round(momentum_residual, 5),
+                "momentum_points": round(momentum_points, 2),
+                "sigma": round(sig, 2),
+                "w": w,
+            }
+        )
         mu_acc += w * mu
         sig_acc += w * sig
         w_sum += w
@@ -208,7 +267,9 @@ def _aggregate(
 def _snapshot_rows(
     states: dict[str, PlayerState],
     recent_mus: dict[str, list[float]] | None = None,
+    cfg: PlayerEloConfig | None = None,
 ) -> list[dict[str, object]]:
+    cfg = cfg or PlayerEloConfig()
     recent = recent_mus or {}
     rows = []
     for name, st in states.items():
@@ -220,7 +281,10 @@ def _snapshot_rows(
         rows.append(
             {
                 "player": name,
-                "mu_total": total_mu(st),
+                "mu_base_total": total_mu(st),
+                "mu_total": total_mu(st) + cfg.momentum_scale * _momentum_residual(st, cfg),
+                "mu_effective": total_mu(st) + cfg.momentum_scale * _momentum_residual(st, cfg),
+                "momentum_residual": _momentum_residual(st, cfg),
                 "mu_regional": st.mu_regional,
                 "mu_meta": st.mu_meta,
                 "sigma": st.sigma,
@@ -237,9 +301,11 @@ def _snapshot_rows(
 def _apply_global_scale(
     rows: list[dict[str, object]],
     global_snapshot: pd.DataFrame,
+    cfg: PlayerEloConfig | None = None,
 ) -> list[dict[str, object]]:
     """Replace local-pool means with the connected global results scale."""
 
+    cfg = cfg or PlayerEloConfig()
     by_player = {
         str(row["player"]): row
         for _, row in global_snapshot.iterrows()
@@ -253,7 +319,9 @@ def _apply_global_scale(
         row["rating_model"] = "regularized_global_player_bt"
         if connected:
             rating = float(global_row["global_rating"])
-            row["mu_total"] = rating
+            row["mu_base_total"] = rating
+            row["mu_total"] = rating + cfg.momentum_scale * float(row.get("momentum_residual") or 0.0)
+            row["mu_effective"] = row["mu_total"]
             row["mu_regional"] = rating
             row["mu_meta"] = 0.0
             row["global_component_size"] = int(global_row["global_component_size"])
@@ -341,7 +409,6 @@ def _run_player_elo(
     # player regional/meta updates cannot drift from the public team contract.
     df = canonicalize_competition_frame(maps).copy()
     df["date"] = pd.to_datetime(df.get("date"), errors="coerce", utc=True).dt.tz_localize(None)
-    df = df.sort_values("date").reset_index(drop=True)
     if "game_uid" in df.columns:
         fallback = df["gameid"] if "gameid" in df.columns else None
         df["game_uid"] = [
@@ -353,6 +420,7 @@ def _run_player_elo(
     else:
         raise ValueError("player Elo maps have no game identity column")
     df = df[df["game_uid"].str.strip().ne("")].copy()
+    df = df.sort_values(["date", "game_uid"], kind="mergesort").reset_index(drop=True)
     lineups = _lineups_by_game(players)
     states: dict[str, PlayerState] = {}
     recent_mus: dict[str, list[float]] = {}
@@ -364,7 +432,7 @@ def _run_player_elo(
         nonlocal target_idx
         while target_idx < len(targets) and (date is None or date > targets[target_idx]):
             target = targets[target_idx]
-            checkpoints[target] = _snapshot_rows(states)
+            checkpoints[target] = _snapshot_rows(states, cfg=cfg)
             target_idx += 1
 
     # Pre-extract the columns the sequential loop reads (avoids per-row pandas access).
@@ -406,9 +474,16 @@ def _run_player_elo(
                 st.sigma = min(160.0, st.sigma + cfg.team_switch_sigma_bump)
             states[name] = st
 
-        mu_b, sig_b, known_b, det_b = _aggregate(states, blue_lu, cfg)
-        mu_r, sig_r, known_r, det_r = _aggregate(states, red_lu, cfg)
+        base_mu_b, sig_b, known_b, _ = _aggregate(
+            states, blue_lu, cfg, include_momentum=False
+        )
+        base_mu_r, sig_r, known_r, _ = _aggregate(
+            states, red_lu, cfg, include_momentum=False
+        )
+        mu_b, _, _, det_b = _aggregate(states, blue_lu, cfg)
+        mu_r, _, _, det_r = _aggregate(states, red_lu, cfg)
         sig = math.sqrt(sig_b**2 + sig_r**2)
+        p_base = expected_score(base_mu_b, base_mu_r)
         p = expected_score(mu_b, mu_r)
         shrink = 1.0 / (1.0 + (sig / 130.0) ** 2)
         p_shrunk = 0.5 + (p - 0.5) * shrink
@@ -422,6 +497,11 @@ def _run_player_elo(
                 "player_mu_blue": mu_b,
                 "player_mu_red": mu_r,
                 "player_mu_diff": mu_b - mu_r,
+                "player_mu_base_blue": base_mu_b,
+                "player_mu_base_red": base_mu_r,
+                "player_momentum_blue": mu_b - base_mu_b,
+                "player_momentum_red": mu_r - base_mu_r,
+                "player_momentum_diff": (mu_b - base_mu_b) - (mu_r - base_mu_r),
                 "player_sigma_blue": sig_b,
                 "player_sigma_red": sig_r,
                 "player_sigma_pair": sig,
@@ -429,6 +509,10 @@ def _run_player_elo(
                 "player_known_red": known_r,
                 "p_player_elo": p_shrunk,
                 "p_player_elo_raw": p,
+                "p_player_elo_base": 0.5 + (p_base - 0.5) * shrink,
+                "p_player_elo_base_raw": p_base,
+                "player_momentum_window_games": cfg.momentum_window_games,
+                "player_momentum_scale": cfg.momentum_scale,
             }
         )
 
@@ -452,7 +536,7 @@ def _run_player_elo(
         if pd.notna(g10) and length:
             mov = 1.0 + cfg.mov_scale * math.tanh(float(g10) / (200.0 * max(float(length), 1.0)))
 
-        exp_b = expected_score(mu_b, mu_r)
+        exp_b = p
 
         for name, role in blue_lu[:5]:
             st = states.setdefault(name, PlayerState(sigma=cfg.sigma0))
@@ -469,6 +553,7 @@ def _run_player_elo(
             league = str(_league_arr[i] or "")
             if is_team_affiliation_league(league):
                 st.home_league = league
+            _append_momentum(st, y - p_base, cfg)
             states[name] = st
         for name, role in red_lu[:5]:
             st = states.setdefault(name, PlayerState(sigma=cfg.sigma0))
@@ -485,6 +570,7 @@ def _run_player_elo(
             league = str(_league_arr[i] or "")
             if is_team_affiliation_league(league):
                 st.home_league = league
+            _append_momentum(st, (1 - y) - (1 - p_base), cfg)
             states[name] = st
 
         # Stability history: keep the last 10 posterior totals per player so
@@ -496,7 +582,7 @@ def _run_player_elo(
 
     while target_idx < len(targets):
         target = targets[target_idx]
-        checkpoints[target] = _snapshot_rows(states)
+        checkpoints[target] = _snapshot_rows(states, cfg=cfg)
         target_idx += 1
     return pd.DataFrame(rows), states, checkpoints, recent_mus
 
@@ -518,7 +604,9 @@ def build_player_ratings(
     out.to_parquet(path, index=False)
 
     global_snapshot, global_meta = fit_global_player_bt(maps, players)
-    snap = _apply_global_scale(_snapshot_rows(states, recent_mus), global_snapshot)
+    snap = _apply_global_scale(
+        _snapshot_rows(states, recent_mus, cfg), global_snapshot, cfg
+    )
     if player_records is not None:
         for row in snap:
             record = player_records.get(str(row["player"]))
@@ -527,7 +615,7 @@ def build_player_ratings(
             row["last_team"] = record.get("current_team")
             row["home_league"] = record.get("current_league") or "UNKNOWN"
         snap = _apply_bridge_uncertainty(snap, players, player_records, cfg)
-    snap_df = pd.DataFrame(snap).sort_values("mu_total", ascending=False)
+    snap_df = pd.DataFrame(snap).sort_values("mu_effective", ascending=False)
     snap_df.to_parquet(destination / "player_ratings_snapshot.parquet", index=False)
     (destination / "player_ratings_meta.json").write_text(
         json.dumps(
@@ -535,6 +623,11 @@ def build_player_ratings(
                 "n_maps": len(out),
                 "n_players": len(snap),
                 "config": cfg.__dict__,
+                "momentum": selected_momentum_configuration(
+                    window_games=cfg.momentum_window_games,
+                    scale=cfg.momentum_scale,
+                ),
+                "registered_momentum": registered_momentum_bundle(),
                 "global_rating": global_meta,
                 "note": (
                     "PUBLIC RESULTS RATING: one regularized Bradley-Terry fit uses every "
@@ -641,7 +734,7 @@ def build_player_weekly_ranks(
 
     current_records = dict(player_records) if player_records is not None else build_player_records(players)
     current_rows = _apply_bridge_uncertainty(
-        _apply_global_scale(_snapshot_rows(states), current_global),
+        _apply_global_scale(_snapshot_rows(states, cfg=cfg), current_global, cfg),
         players,
         current_records,
         cfg,
@@ -662,7 +755,7 @@ def build_player_weekly_ranks(
         except GlobalPlayerRatingError:
             return []
         return _apply_bridge_uncertainty(
-            _apply_global_scale(snapshot, historical_global),
+            _apply_global_scale(snapshot, historical_global, cfg),
             players,
             current_records,
             cfg,
@@ -804,13 +897,19 @@ def _snapshot_by_player() -> dict:
         last_team_col = (
             snap["last_team"] if "last_team" in snap.columns else pd.Series([None] * len(snap))
         )
-        for player, mu_r, mu_m, sig, n_maps, last_team in zip(
+        momentum_col = (
+            snap["momentum_residual"].astype(float)
+            if "momentum_residual" in snap.columns
+            else pd.Series([0.0] * len(snap))
+        )
+        for player, mu_r, mu_m, sig, n_maps, last_team, momentum_residual in zip(
             snap["player"].astype(str),
             snap["mu_regional"].astype(float),
             snap["mu_meta"].astype(float),
             snap["sigma"].astype(float),
             n_maps_col,
             last_team_col,
+            momentum_col,
         ):
             by[player] = PlayerState(
                 mu_regional=float(mu_r),
@@ -818,6 +917,7 @@ def _snapshot_by_player() -> dict:
                 sigma=float(sig),
                 n_maps=int(n_maps),
                 last_team=last_team,
+                momentum_residual=float(momentum_residual),
             )
     _SNAPSHOT_BY = by
     return by
@@ -830,9 +930,10 @@ def score_player_lineups(
     blue_roles: list[str] | None = None,
     red_roles: list[str] | None = None,
     snapshot: pd.DataFrame | None = None,
+    cfg: PlayerEloConfig | None = None,
 ) -> dict:
     """Score a concrete roster from the player-rating snapshot (roster moves travel)."""
-    cfg = PlayerEloConfig()
+    cfg = cfg or PlayerEloConfig()
     if snapshot is None:
         by = _snapshot_by_player()
     else:
@@ -845,6 +946,7 @@ def score_player_lineups(
                     sigma=float(r["sigma"]),
                     n_maps=int(r.get("n_maps") or 0),
                     last_team=r.get("last_team"),
+                    momentum_residual=float(r.get("momentum_residual") or 0.0),
                 )
                 for _, r in snapshot.iterrows()
             }
@@ -852,8 +954,10 @@ def score_player_lineups(
     rr = red_roles or ["top", "jng", "mid", "bot", "sup"]
     blu = list(zip([str(x) for x in blue_players], br[: len(blue_players)]))
     red = list(zip([str(x) for x in red_players], rr[: len(red_players)]))
-    mu_b, sig_b, known_b, det_b = _aggregate(by, blu, cfg)
-    mu_r, sig_r, known_r, det_r = _aggregate(by, red, cfg)
+    base_mu_b, sig_b, known_b, _ = _aggregate(by, blu, cfg, include_momentum=False)
+    base_mu_r, sig_r, known_r, _ = _aggregate(by, red, cfg, include_momentum=False)
+    mu_b, _, _, det_b = _aggregate(by, blu, cfg)
+    mu_r, _, _, det_r = _aggregate(by, red, cfg)
     sig = math.sqrt(sig_b**2 + sig_r**2)
     mu_diff = mu_b - mu_r
     p = expected_score(mu_b, mu_r)
@@ -873,6 +977,13 @@ def score_player_lineups(
         "player_mu_blue": round(mu_b, 2),
         "player_mu_red": round(mu_r, 2),
         "player_mu_diff": round(mu_diff, 2),
+        "player_mu_base_blue": round(base_mu_b, 2),
+        "player_mu_base_red": round(base_mu_r, 2),
+        "player_momentum_blue": round(mu_b - base_mu_b, 2),
+        "player_momentum_red": round(mu_r - base_mu_r, 2),
+        "player_momentum_diff": round((mu_b - base_mu_b) - (mu_r - base_mu_r), 2),
+        "player_momentum_window_games": cfg.momentum_window_games,
+        "player_momentum_scale": cfg.momentum_scale,
         "p_player_elo": round(p_shrunk, 4),
         "player_known_blue": known_b,
         "player_known_red": known_r,

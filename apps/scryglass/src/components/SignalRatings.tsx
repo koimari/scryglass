@@ -31,11 +31,27 @@ export type { DraftPlayerRow, DraftTeamRow } from "@/lib/draftRankings";
 
 export type TeamRatingView = Pick<
   TeamRating,
-  "team" | "mu_total" | "sigma" | "rating_p10" | "n_maps" | "evidence_active"
+  | "team"
+  | "mu_total"
+  | "mu_base_total"
+  | "mu_effective"
+  | "momentum_residual"
+  | "sigma"
+  | "rating_p10"
+  | "n_maps"
+  | "evidence_active"
 >;
 export type PlayerRatingView = Pick<
   PlayerRating,
-  "player" | "mu_total" | "sigma" | "n_maps" | "last_team" | "evidence_active"
+  | "player"
+  | "mu_total"
+  | "mu_base_total"
+  | "mu_effective"
+  | "momentum_residual"
+  | "sigma"
+  | "n_maps"
+  | "last_team"
+  | "evidence_active"
 >;
 export type TeamRecordView = Pick<
   TeamRecord,

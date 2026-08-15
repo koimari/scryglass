@@ -140,6 +140,9 @@ test("compact player ratings preserve the public evidence contract", () => {
   const row: PlayerRating = {
     player: "Chovy",
     mu_total: 1706.6,
+    mu_base_total: 1698.6,
+    mu_effective: 1706.6,
+    momentum_residual: 0.1,
     mu_regional: 1696.8,
     mu_meta: 9.8,
     sigma: 28,

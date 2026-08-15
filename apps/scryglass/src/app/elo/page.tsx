@@ -83,6 +83,9 @@ function compactTeamRating(row: TeamRating): TeamRatingView {
   return {
     team: row.team,
     mu_total: row.mu_total,
+    mu_base_total: row.mu_base_total,
+    mu_effective: row.mu_effective,
+    momentum_residual: row.momentum_residual,
     sigma: row.sigma,
     rating_p10: row.rating_p10,
     n_maps: row.n_maps,
@@ -94,6 +97,9 @@ function compactPlayerRating(row: PlayerRating): PlayerRatingView {
   return {
     player: row.player,
     mu_total: row.mu_total,
+    mu_base_total: row.mu_base_total,
+    mu_effective: row.mu_effective,
+    momentum_residual: row.momentum_residual,
     sigma: row.sigma,
     n_maps: row.n_maps,
     last_team: row.last_team,

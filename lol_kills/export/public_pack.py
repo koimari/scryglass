@@ -48,10 +48,22 @@ from lol_kills.export.public_query_projection import (
 from lol_kills.etl.competition import TAXONOMY_VERSION, canonicalize_competition_frame, competition_tier
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.refresh_ledger import worker_commit as resolve_worker_commit
-from lol_kills.ratings.dual_elo import build_dual_ratings, lineup_hashes_from_players
+from lol_kills.ratings.dual_elo import (
+    DualEloConfig,
+    apply_team_momentum_snapshot,
+    build_dual_ratings,
+    lineup_hashes_from_players,
+)
 from lol_kills.ratings.evidence import attach_player_evidence, attach_team_evidence
 from lol_kills.ratings.hierarchical_bt import build_team_weekly_ranks, fit_hierarchical_bt
+from lol_kills.ratings.momentum_config import (
+    DEFAULT_MOMENTUM_SCALE,
+    DEFAULT_MOMENTUM_WINDOW_GAMES,
+    momentum_manifest_metadata,
+    require_public_momentum_disabled,
+)
 from lol_kills.ratings.player_elo import (
+    PlayerEloConfig,
     build_maps_frame_from_players,
     build_player_ratings,
     build_player_weekly_ranks,
@@ -151,6 +163,19 @@ def _champion_image_urls(project: Path) -> dict[str, str]:
 def _present(cols: Sequence[str], available: Iterable[str]) -> list[str]:
     avail = set(available)
     return [c for c in cols if c in avail]
+
+
+def serialize_rating_snapshot_rows(
+    table: pa.Table,
+    columns: Sequence[str],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Select the public rating contract while retaining enabled momentum."""
+
+    selected = _present(columns, table.column_names)
+    if not selected:
+        raise ValueError("rating snapshot has no public columns")
+    selected_table = table.select(selected)
+    return selected_table.to_pylist(), selected
 
 
 def _public_player_rating_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -765,7 +790,14 @@ def export_public_pack(
     project_root: Path | None = None,
     runtime_root: Path | None = None,
     allowed_game_ids: Sequence[str] | None = None,
+    momentum_window_games: int = DEFAULT_MOMENTUM_WINDOW_GAMES,
+    momentum_scale: float = DEFAULT_MOMENTUM_SCALE,
 ) -> dict[str, Any]:
+    require_public_momentum_disabled(
+        window_games=momentum_window_games,
+        scale=momentum_scale,
+        entrypoint="export_public_pack",
+    )
     years = tuple(years or spec.DEFAULT_YEARS)
     project = Path(project_root or ROOT).resolve()
     runtime = Path(runtime_root or project).resolve()
@@ -1068,9 +1100,18 @@ def export_public_pack(
     )
     if player_maps_for_ratings.empty:
         raise RuntimeError("public pack rating source has no complete player maps")
+    team_rating_cfg = DualEloConfig(
+        momentum_window_games=momentum_window_games,
+        momentum_scale=momentum_scale,
+    )
+    player_rating_cfg = PlayerEloConfig(
+        momentum_window_games=momentum_window_games,
+        momentum_scale=momentum_scale,
+    )
     progress("building sequential team ratings")
     dual_rating_features = build_dual_ratings(
         rating_input,
+        cfg=team_rating_cfg,
         lineup_by_game=lineup_hashes_from_players(player_rating_input),
         output_dir=features_root,
     )
@@ -1078,6 +1119,7 @@ def export_public_pack(
     build_player_ratings(
         player_maps_for_ratings,
         player_rating_input,
+        cfg=player_rating_cfg,
         output_dir=features_root,
         player_records=player_records_payload,
     )
@@ -1096,11 +1138,22 @@ def export_public_pack(
         write=True,
         output_dir=features_root,
     )
+    sequential_team_snapshot = pd.read_parquet(features_root / "ratings_dual_snapshot.parquet")
+    public_ratings = apply_team_momentum_snapshot(
+        public_ratings,
+        sequential_team_snapshot,
+        team_rating_cfg,
+    )
+    public_ratings.to_parquet(features_root / "ratings_snapshot.parquet", index=False)
     public_ratings_meta["pack_years"] = list(years)
     public_ratings_meta["rating_window"] = "full canonical OE team-game window as this pack"
     public_ratings_meta["source_as_of"] = source_as_of.isoformat().replace("+00:00", "Z")
     public_ratings_meta["source_mode"] = "oe_live" if live_source else "warehouse"
     public_ratings_meta["evidence_contract"] = "2026-08-09.1"
+    public_ratings_meta["momentum"] = momentum_manifest_metadata(
+        window_games=momentum_window_games,
+        scale=momentum_scale,
+    )
     features_root.mkdir(parents=True, exist_ok=True)
     (features_root / "ratings_meta.json").write_text(
         json.dumps(public_ratings_meta, indent=2),
@@ -1144,6 +1197,7 @@ def export_public_pack(
     weekly_ranks = build_player_weekly_ranks(
         player_maps_for_ratings,
         player_rating_input,
+        cfg=player_rating_cfg,
         as_of=pd.to_datetime(maps_for_records["date"], utc=True, errors="coerce").max(),
         min_games=20,
         player_records=player_records_payload,
@@ -1572,9 +1626,8 @@ def export_public_pack(
             continue
         else:
             t = pq.read_table(src)
-        t = t.select(_present(cols, t.column_names))
+        rows, serialized_columns = serialize_rating_snapshot_rows(t, cols)
         dest = feat_dir / out_name
-        rows = t.to_pylist()
         if out_name == "player_ratings_snapshot.json":
             rows = _public_player_rating_rows(rows)
             for row in rows:
@@ -1583,10 +1636,10 @@ def export_public_pack(
         register(
             {
                 "rows": len(rows),
-                "cols": t.num_columns,
+                "cols": len(serialized_columns),
                 "bytes": dest.stat().st_size,
                 "sha256": _sha256(dest),
-                "columns": t.column_names,
+                "columns": serialized_columns,
             },
             f"features/{dest.name}",
         )
@@ -1741,6 +1794,10 @@ def export_public_pack(
             "player_model": player_model_manifest,
             "affiliation_audit": affiliation_audit,
             "artifacts": rating_artifact_paths,
+            "momentum": momentum_manifest_metadata(
+                window_games=momentum_window_games,
+                scale=momentum_scale,
+            ),
             "claim_ceiling": "Source-bound descriptive ratings and historical rank movement only.",
         },
         "base_url": None,  # filled by upload / atlas config
@@ -1772,6 +1829,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Override pack id (default vYYYY.MM.DD.HHMMSS)",
     )
     ap.add_argument("--warehouse-root", type=Path, default=None, help="Use a source-root overlay for live refreshes")
+    ap.add_argument(
+        "--momentum-window-games",
+        type=int,
+        default=DEFAULT_MOMENTUM_WINDOW_GAMES,
+        help="Explicit research momentum window in prior maps; default is zero",
+    )
+    ap.add_argument(
+        "--momentum-scale",
+        type=float,
+        default=DEFAULT_MOMENTUM_SCALE,
+        help="Explicit research momentum scale in rating points; default is zero",
+    )
     args = ap.parse_args(argv)
     years = tuple(int(x.strip()) for x in args.years.split(",") if x.strip())
     man = export_public_pack(
@@ -1779,6 +1848,8 @@ def main(argv: list[str] | None = None) -> int:
         out_root=args.out,
         pack_id=args.pack_id,
         warehouse_root=args.warehouse_root,
+        momentum_window_games=args.momentum_window_games,
+        momentum_scale=args.momentum_scale,
     )
     mb = man["total_bytes"] / (1024 * 1024)
     print(f"Wrote pack {man['pack_id']} → {args.out / man['pack_id']}")
