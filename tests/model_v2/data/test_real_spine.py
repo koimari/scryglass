@@ -320,6 +320,20 @@ def test_cli_rejects_an_unrecognized_command_before_printing_a_result(
         spine.main([])
 
 
+def test_cli_error_path_returns_without_printing_if_parser_error_returns(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        spine.argparse.ArgumentParser,
+        "parse_args",
+        lambda _parser, _argv: spine.argparse.Namespace(command="future-command"),
+    )
+    monkeypatch.setattr(spine.argparse.ArgumentParser, "error", lambda _parser, _message: None)
+
+    assert spine.main([]) == 2
+    assert capsys.readouterr().out == ""
+
+
 def _adapter_tables() -> tuple[pa.Table, pa.Table]:
     maps = pa.Table.from_pylist(
         [

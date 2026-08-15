@@ -21,7 +21,7 @@ import stat
 import tempfile
 from typing import Any, Iterable, Mapping
 
-from .common import ROLES, canonical_json_bytes, parse_rfc3339, sha256_bytes, to_rfc3339
+from .common import ROLES, canonical_json_bytes, parse_rfc3339, sha256_bytes
 from .identity import IdentityCrosswalkRow, IdentityRegistry
 from .rosters import RosterRegistry, RosterRow
 
@@ -1239,6 +1239,9 @@ def main(argv: Iterable[str] | None = None) -> int:
             raise RealSpineError(f"unsupported command: {args.command}")
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, RealSpineError) as error:
         parser.error(str(error))
+        # argparse.error normally raises SystemExit(2). Keep the failure path
+        # explicit so a test double or alternate parser cannot reach the result print.
+        return 2
     print(json.dumps(result, sort_keys=True))
     return 0
 

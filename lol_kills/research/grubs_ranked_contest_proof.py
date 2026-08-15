@@ -24,7 +24,6 @@ import os
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
-from pathlib import Path
 
 import numpy as np
 import requests
@@ -508,9 +507,6 @@ def main() -> None:
     # Contested vs free sweeper WR
     by_bin = defaultdict(lambda: {"contested": [], "free": []})
     for r in all3:
-        b = bin_gold(r.get("gold8_diff_blue") if r["all3_blue"] else (
-            -r["gold8_diff_blue"] if r.get("gold8_diff_blue") is not None else None
-        ))
         # gold from sweeper POV
         if r["all3_blue"] and r.get("gold8_diff_blue") is not None:
             g = r["gold8_diff_blue"]
@@ -636,10 +632,14 @@ def main() -> None:
         "",
         "## Why ranked",
         "",
-        "OE pro `LOLTMNT*` gameids are unavailable through a personal Match-V5 key. "
-        "This is therefore a distinct ranked SOLO queue layer, not a pro dataset. "
-        "It samples Diamond and Masters+ anchors separately across all supported platforms; "
-        "ranks below Diamond are excluded from the sampling frame.",
+        "".join(
+            (
+                "OE pro `LOLTMNT*` gameids are unavailable through a personal Match-V5 key. ",
+                "This is therefore a distinct ranked SOLO queue layer, not a pro dataset. ",
+                "It samples Diamond and Masters+ anchors separately across all supported platforms; ",
+                "ranks below Diamond are excluded from the sampling frame.",
+            )
+        ),
         "",
         "## Results",
         "",

@@ -8,6 +8,7 @@ writes immutable snapshots plus short-lived pointers to an explicit private path
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,7 +42,7 @@ def _number(value: Any) -> float | None:
         number = float(value)
     except (TypeError, ValueError):
         return None
-    return number if number == number and abs(number) != float("inf") else None
+    return number if math.isfinite(number) else None
 
 
 def _int(value: Any) -> int | None:
@@ -202,6 +203,7 @@ def default_ratings_path() -> Path:
                 if candidate.is_file():
                     return candidate
         except (OSError, json.JSONDecodeError):
+            # A stale or partially written latest pointer uses the stable fallback.
             pass
     return PUBLIC_ROOT / "packs" / "v2026.07.25" / "features" / "ratings_snapshot.json"
 

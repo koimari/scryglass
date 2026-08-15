@@ -1889,7 +1889,7 @@ export function DrakeStudy({ study }: { study: StudyArtifact }) {
 
   function handleTabKey(event: React.KeyboardEvent<HTMLButtonElement>) {
     const current = TABS.indexOf(tab);
-    let next = current;
+    let next: number;
     if (event.key === "ArrowLeft") next = (current + TABS.length - 1) % TABS.length;
     else if (event.key === "ArrowRight") next = (current + 1) % TABS.length;
     else if (event.key === "Home") next = 0;

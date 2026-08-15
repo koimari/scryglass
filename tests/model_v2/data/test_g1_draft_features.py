@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -42,7 +41,7 @@ def test_real_materialization_and_verifier() -> None:
 
 
 def test_verifier_requires_external_pin_and_rejects_rehashed_relaxed_claim(tmp_path, monkeypatch) -> None:
-    manifest = features.build()
+    features.build()
     with pytest.raises(TypeError):
         features.verify()
     rows, altered = tmp_path / "rows", tmp_path / "manifest"
