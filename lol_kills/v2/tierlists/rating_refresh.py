@@ -27,9 +27,8 @@ from lol_kills.ratings.player_elo import (
 from lol_kills.ratings.momentum_config import (
     DEFAULT_MOMENTUM_SCALE,
     DEFAULT_MOMENTUM_WINDOW_GAMES,
-    registered_momentum_bundle,
+    momentum_manifest_metadata,
     require_public_momentum_disabled,
-    selected_momentum_configuration,
 )
 
 RATING_WINDOW_START = pd.Timestamp("2025-01-01T00:00:00Z")
@@ -221,13 +220,10 @@ def refresh_ratings(
         team_rating_cfg,
     )
     team_snapshot.to_parquet(features_dir / "ratings_snapshot.parquet", index=False)
-    team_meta["momentum"] = {
-        "selected": selected_momentum_configuration(
-            window_games=momentum_window_games,
-            scale=momentum_scale,
-        ),
-        "registered": registered_momentum_bundle(),
-    }
+    team_meta["momentum"] = momentum_manifest_metadata(
+        window_games=momentum_window_games,
+        scale=momentum_scale,
+    )
     (features_dir / "ratings_meta.json").write_text(
         json.dumps(team_meta, indent=2),
         encoding="utf-8",
@@ -300,13 +296,10 @@ def refresh_ratings(
             "weekly_locator": "features/player_weekly_ranks.json",
             "movement_baseline": str(player_weekly.get("previous_as_of") or ""),
         },
-        "momentum": {
-            "selected": selected_momentum_configuration(
-                window_games=momentum_window_games,
-                scale=momentum_scale,
-            ),
-            "registered": registered_momentum_bundle(),
-        },
+        "momentum": momentum_manifest_metadata(
+            window_games=momentum_window_games,
+            scale=momentum_scale,
+        ),
         "artifacts": {
             "team_snapshot": _artifact_meta(
                 features_dir / "ratings_snapshot.parquet",

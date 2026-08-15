@@ -113,3 +113,15 @@ def registered_momentum_bundle() -> dict[str, Any]:
             "ev": False,
         },
     }
+
+
+def momentum_manifest_metadata(*, window_games: int, scale: float) -> dict[str, Any]:
+    """Return the shared metadata written to every rating release boundary."""
+
+    return {
+        "selected": selected_momentum_configuration(
+            window_games=window_games,
+            scale=scale,
+        ),
+        "registered": registered_momentum_bundle(),
+    }

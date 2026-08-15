@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -7,7 +8,7 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
-from lol_kills.export.pack_spec import RATINGS_SNAPSHOT_COLS
+from lol_kills.export.pack_spec import PLAYER_RATINGS_SNAPSHOT_COLS, RATINGS_SNAPSHOT_COLS
 from lol_kills.export.public_pack import export_public_pack, serialize_rating_snapshot_rows
 from lol_kills.ratings.dual_elo import (
     DualEloConfig,
@@ -20,11 +21,14 @@ from lol_kills.ratings.momentum_config import (
     DEFAULT_MOMENTUM_SCALE,
     DEFAULT_MOMENTUM_WINDOW_GAMES,
     PublicMomentumAuthorityError,
+    momentum_manifest_metadata,
     registered_momentum_bundle,
     require_public_momentum_disabled,
 )
 from lol_kills.ratings.player_elo import (
     PlayerEloConfig,
+    _lineups_by_game,
+    _run_player_elo,
     build_maps_frame_from_players,
     build_player_ratings,
 )
@@ -118,6 +122,38 @@ def test_player_candidate_preserves_base_and_effective_snapshot_values(monkeypat
         snapshot = pd.read_parquet(Path(directory) / "player_ratings_snapshot.parquet")
     assert {"mu_base_total", "mu_total", "mu_effective", "momentum_residual"}.issubset(snapshot.columns)
     assert (snapshot["mu_total"] == snapshot["mu_effective"]).all()
+    assert snapshot["momentum_residual"].abs().max() > 0.0
+    assert (snapshot["mu_total"] != snapshot["mu_base_total"]).any()
+    rows, columns = serialize_rating_snapshot_rows(
+        pa.Table.from_pandas(snapshot, preserve_index=False),
+        PLAYER_RATINGS_SNAPSHOT_COLS,
+    )
+    assert {"mu_base_total", "mu_total", "mu_effective", "momentum_residual"}.issubset(columns)
+    assert any(row["mu_total"] != row["mu_base_total"] for row in rows)
+
+
+def test_player_replay_preserves_five_player_sides_roles_and_order() -> None:
+    players = _players().sample(frac=1, random_state=42).reset_index(drop=True)
+    lineups = _lineups_by_game(players)
+    expected_blue = [(f"A{index}", role) for index, role in enumerate(("top", "jng", "mid", "bot", "sup"))]
+    expected_red = [(f"B{index}", role) for index, role in enumerate(("top", "jng", "mid", "bot", "sup"))]
+    assert lineups["g1"]["Blue"] == expected_blue
+    assert lineups["g1"]["Red"] == expected_red
+    assert all(len(lineups[game][side]) == 5 for game in ("g1", "g2", "g3") for side in ("Blue", "Red"))
+
+    replay, _states, _checkpoints, _recent = _run_player_elo(
+        build_maps_frame_from_players(players),
+        players,
+        PlayerEloConfig(
+            momentum_window_games=CANDIDATE_MOMENTUM_WINDOW_GAMES,
+            momentum_scale=CANDIDATE_MOMENTUM_SCALE,
+        ),
+    )
+    assert replay["game_uid"].tolist() == ["g1", "g2", "g3"]
+    assert replay["blue_team"].tolist() == ["A", "A", "A"]
+    assert replay["red_team"].tolist() == ["B", "B", "B"]
+    assert replay["player_known_blue"].tolist() == [5, 5, 5]
+    assert replay["player_known_red"].tolist() == [5, 5, 5]
 
 
 def test_production_serializer_keeps_enabled_mu_total_and_mu_base_total() -> None:
@@ -169,6 +205,19 @@ def test_candidate_bundle_is_research_only() -> None:
     assert bundle["candidate"]["scale"] == 80.0
     assert all(value is False for value in bundle["candidate"]["authority"].values())
     assert bundle["promotion"]["status"] == "unavailable"
+
+
+def test_public_manifest_momentum_metadata_is_release_safe() -> None:
+    metadata = momentum_manifest_metadata(
+        window_games=DEFAULT_MOMENTUM_WINDOW_GAMES,
+        scale=DEFAULT_MOMENTUM_SCALE,
+    )
+    manifest = {"ratings": {"momentum": metadata}}
+    round_trip = json.loads(json.dumps(manifest))
+    assert round_trip["ratings"]["momentum"]["selected"]["window_games"] == 0
+    assert round_trip["ratings"]["momentum"]["selected"]["scale"] == 0.0
+    assert round_trip["ratings"]["momentum"]["registered"]["candidate"]["scale"] == 80.0
+    assert round_trip["ratings"]["momentum"]["registered"]["promotion"]["status"] == "unavailable"
 
 
 def test_public_pack_rejects_research_momentum_before_touching_sources(tmp_path: Path) -> None:

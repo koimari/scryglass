@@ -59,9 +59,8 @@ from lol_kills.ratings.hierarchical_bt import build_team_weekly_ranks, fit_hiera
 from lol_kills.ratings.momentum_config import (
     DEFAULT_MOMENTUM_SCALE,
     DEFAULT_MOMENTUM_WINDOW_GAMES,
-    registered_momentum_bundle,
+    momentum_manifest_metadata,
     require_public_momentum_disabled,
-    selected_momentum_configuration,
 )
 from lol_kills.ratings.player_elo import (
     PlayerEloConfig,
@@ -1151,13 +1150,10 @@ def export_public_pack(
     public_ratings_meta["source_as_of"] = source_as_of.isoformat().replace("+00:00", "Z")
     public_ratings_meta["source_mode"] = "oe_live" if live_source else "warehouse"
     public_ratings_meta["evidence_contract"] = "2026-08-09.1"
-    public_ratings_meta["momentum"] = {
-        "selected": selected_momentum_configuration(
-            window_games=momentum_window_games,
-            scale=momentum_scale,
-        ),
-        "registered": registered_momentum_bundle(),
-    }
+    public_ratings_meta["momentum"] = momentum_manifest_metadata(
+        window_games=momentum_window_games,
+        scale=momentum_scale,
+    )
     features_root.mkdir(parents=True, exist_ok=True)
     (features_root / "ratings_meta.json").write_text(
         json.dumps(public_ratings_meta, indent=2),
@@ -1798,13 +1794,10 @@ def export_public_pack(
             "player_model": player_model_manifest,
             "affiliation_audit": affiliation_audit,
             "artifacts": rating_artifact_paths,
-            "momentum": {
-                "selected": selected_momentum_configuration(
-                    window_games=momentum_window_games,
-                    scale=momentum_scale,
-                ),
-                "registered": registered_momentum_bundle(),
-            },
+            "momentum": momentum_manifest_metadata(
+                window_games=momentum_window_games,
+                scale=momentum_scale,
+            ),
             "claim_ceiling": "Source-bound descriptive ratings and historical rank movement only.",
         },
         "base_url": None,  # filled by upload / atlas config

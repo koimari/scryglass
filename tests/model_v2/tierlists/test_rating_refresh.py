@@ -83,4 +83,16 @@ def test_refresh_writes_rating_artifacts_under_runtime_root(
         for item in payload["artifacts"].values()
     )
     assert not (worker_cwd / "data").exists()
-    json.loads(expected.read_text(encoding="utf-8"))
+    written_manifest = json.loads(expected.read_text(encoding="utf-8"))
+    ratings_meta = json.loads(
+        (runtime_root / rating_refresh.FEATURES_RELATIVE / "ratings_meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    for metadata in (payload, written_manifest, ratings_meta):
+        assert metadata["momentum"]["selected"]["window_games"] == 0
+        assert metadata["momentum"]["selected"]["scale"] == 0.0
+        assert metadata["momentum"]["registered"]["active"]["window_games"] == 0
+        assert metadata["momentum"]["registered"]["candidate"]["window_games"] == 7
+        assert metadata["momentum"]["registered"]["candidate"]["scale"] == 80.0
+        assert metadata["momentum"]["registered"]["promotion"]["status"] == "unavailable"
