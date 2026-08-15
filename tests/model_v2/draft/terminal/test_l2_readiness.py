@@ -107,9 +107,9 @@ def test_l2_readiness_audit_keeps_development_package_blocked() -> None:
         "invalid_or_missing"
     )
     assert report["participant_dependence_method"]["contract"] is None
-    assert "capture readiness source drifted" in report[
-        "participant_dependence_method"
-    ]["error"]
+    assert report["participant_dependence_method"]["error"] == (
+        "registered phase-one evaluation readiness is invalid"
+    )
     assert (
         report["participant_dependence_method"][
             "atomic_component_split_required"
