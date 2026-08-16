@@ -537,6 +537,18 @@ def test_query_projection_omits_draft_fields_when_authority_is_unavailable() -> 
     )
 
 
+def test_query_game_payload_omits_observed_and_final_gold_fields() -> None:
+    game = _descriptive_game()
+    game["players"][0]["gold"] = 12345
+    game["players"][0]["gold_diff_at_10"] = 321
+    game["team_stats"] = {"Blue": {"gold": 1000, "kills": 3}}
+    projection = _projection(archive_games={"game-1": game})
+    payload = projection["datasets"]["games"][0]["payload"]
+    assert "gold" not in payload["players"][0]
+    assert "gold_diff_at_10" not in payload["players"][0]
+    assert "gold" not in payload["team_stats"]["Blue"]
+
+
 def test_query_projection_rejects_archive_signal_outside_draft_records() -> None:
     complete = _descriptive_game()
     extra = _descriptive_game()
