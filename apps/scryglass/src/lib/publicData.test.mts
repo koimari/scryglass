@@ -41,6 +41,7 @@ function descriptiveManifest(): PackManifest {
       authority: "descriptive",
       release_id: RELEASE_ID,
       model_version: "draft-descriptive-v1",
+      artifact_sha256: "c".repeat(64),
       receipt_sha256: "a".repeat(64),
       issued_utc: "2026-08-13T18:31:17Z",
     },

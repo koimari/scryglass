@@ -72,7 +72,7 @@ export default async function PlayerEloPage({ params }: Props) {
         manifest={man}
         draftMetric={hasPublishedDraftAuthority(man) && profile.draft_metric?.best_available_rate != null ? {
           bestAvailableRate: profile.draft_metric.best_available_rate,
-          draftScore: profile.draft_metric.draft_score ?? null,
+          pickContribution: profile.draft_metric.pick_contribution ?? null,
           games: profile.draft_metric.games,
           poolDefinition: profile.draft_metric.pool_definition ?? null,
           banCoverage: profile.draft_metric.ban_coverage ?? null,
@@ -145,7 +145,7 @@ export default async function PlayerEloPage({ params }: Props) {
       manifest={man}
       draftMetric={draftMetric?.best_available_rate != null && draftProfile ? {
         bestAvailableRate: draftMetric.best_available_rate,
-        draftScore: draftMetric.draft_score ?? null,
+        pickContribution: draftMetric.pick_contribution ?? null,
         games: draftMetric.games,
         poolDefinition: "Best available champion in the published unbanned role pool",
         banCoverage: null,

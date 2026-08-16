@@ -1,3 +1,4 @@
+import hashlib
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -22,6 +23,8 @@ from lol_kills.export.public_pack import (
     _champion_image_urls,
     _complete_player_game_ids,
     _draft_publication_decision,
+    _gate_published_draft_contributions,
+    _load_tier_payload,
     _ensure_year_column,
     _filter_years,
     _public_player_rating_rows,
@@ -33,6 +36,37 @@ from lol_kills.export.public_pack import (
 )
 from lol_kills.export.pack_records import _public_draft_payload
 from lol_kills.research.composition_signal import CompositionSignalError
+
+
+def test_tier_payload_loader_prefers_generated_runtime_and_rejects_empty_board(tmp_path: Path) -> None:
+    runtime_path = tmp_path / "runtime/apps/scryglass/public/rankings/tierlists.json"
+    runtime_path.parent.mkdir(parents=True)
+    runtime_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "rankings-tierlists-v2",
+                "status": "available",
+                "rows": [{"patch": "26.16", "role": "mid", "champion": "Ahri", "rank": 1}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload, digest, source = _load_tier_payload(tmp_path, runtime_path.parents[4])
+    assert payload is not None
+    assert digest == hashlib.sha256(runtime_path.read_bytes()).hexdigest()
+    assert source == str(runtime_path.resolve())
+
+    runtime_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "rankings-tierlists-v2",
+                "status": "available",
+                "rows": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert _load_tier_payload(tmp_path, runtime_path.parents[4]) == (None, None, None)
 
 
 def test_build_draft_records_payload() -> None:
@@ -55,6 +89,7 @@ def test_build_draft_records_payload() -> None:
     )
     assert payload["games"]["g1"]["draft_edge"] == 0.3
     assert payload["games"]["g1"]["blue_team"] == "Team A"
+    assert payload["player_comfort"]["status"] == "unavailable"
     signals["g2"] = {"status": "unavailable", "blue": {"signal": None}, "red": {"signal": None}}
     payload2 = build_draft_records_payload(
         signals, games + [{"game_uid": "g2", "date": "2026-08-02"}], None
@@ -87,6 +122,60 @@ def test_failed_draft_promotion_keeps_factual_profile_rows_publishable() -> None
     assert "draft_pool_audit" not in profile
     assert "draft_contribution" not in profile["games"]["game-1"]
     assert "draft_pool" not in profile["games"]["game-1"]
+
+
+def test_descriptive_draft_publication_binds_schema_and_artifact() -> None:
+    decision = _draft_publication_decision(
+        None,
+        descriptive_authority={
+            "status": "descriptive",
+            "estimand": "composition_only",
+            "model_version": "draft-recommendation-static-v2",
+            "artifact_sha256": "a" * 64,
+        },
+        receipt_sha256="b" * 64,
+        release_id="v2026.08.15.120000",
+    )
+
+    assert decision["schema_version"] == "scryglass:draft-authority:v1"
+    assert decision["artifact_sha256"] == "a" * 64
+    assert decision["receipt_sha256"] == "b" * 64
+
+
+def test_incomplete_published_pool_removes_draft_score_from_raw_projections() -> None:
+    profile = {
+        "games": {
+            "complete": {
+                "draft_contribution": {"status": "available"},
+                "draft_pool": {
+                    "status": "complete",
+                    "picked": [{} for _ in range(10)],
+                    "evaluated_picks": 10,
+                },
+            },
+            "incomplete": {
+                "draft_contribution": {"status": "available"},
+                "draft_pool": {
+                    "status": "limited",
+                    "picked": [{} for _ in range(10)],
+                    "evaluated_picks": 9,
+                },
+            },
+        }
+    }
+    draft_records = {
+        "games": {
+            "complete": {"draft_edge": 0.2},
+            "incomplete": {"draft_edge": 0.4},
+        }
+    }
+
+    result = _gate_published_draft_contributions(profile, draft_records)
+
+    assert result == {"eligible_games": 1, "removed_games": 1}
+    assert "draft_contribution" in profile["games"]["complete"]
+    assert "draft_contribution" not in profile["games"]["incomplete"]
+    assert set(draft_records["games"]) == {"complete"}
 
 
 def test_passing_candidate_stays_closed_without_independent_receipt() -> None:

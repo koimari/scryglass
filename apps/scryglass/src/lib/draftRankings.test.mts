@@ -86,8 +86,8 @@ test("derives team and player rankings when the leaderboard asset is missing", (
     { team: "Team B", games: 5, draft_edge: -0.4, positive_edge_rate: 0, league: "LCK", tier: "tier1" },
   ]);
   assert.deepEqual(result.players, [
-    { player: "BlueMid", games: 5, draft_score: 0.2, best_available_rate: 1, role: "mid", team: "Team A", league: "LCK", tier: "tier1" },
-    { player: "RedMid", games: 5, draft_score: -0.1, best_available_rate: 1, role: "mid", team: "Team B", league: "LCK", tier: "tier1" },
+    { player: "BlueMid", games: 5, pick_contribution: 0.2, best_available_rate: 1, role: "mid", team: "Team A", league: "LCK", tier: "tier1" },
+    { player: "RedMid", games: 5, pick_contribution: -0.1, best_available_rate: 1, role: "mid", team: "Team B", league: "LCK", tier: "tier1" },
   ]);
 });
 

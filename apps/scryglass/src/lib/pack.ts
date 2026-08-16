@@ -84,6 +84,7 @@ export type PackManifest = {
     authority?: "unavailable" | "descriptive" | "promoted";
     release_id: string;
     model_version: string | null;
+    artifact_sha256?: string | null;
     receipt_sha256: string | null;
     issued_utc?: string | null;
     reason?: string | null;
@@ -304,12 +305,18 @@ export type DraftContribution = {
   status: "available" | "limited" | "unavailable";
   model_version: string;
   fit_through: string | null;
+  archetype_interaction_source?: {
+    id: string;
+    status: string;
+    lcc_atoms: "excluded";
+    reason: string;
+  };
   blue: {
     signal: number | null;
     prior_role_games: number;
     components?: {
       base: number | null;
-      atomized_archetypes: number | null;
+      archetype_interactions: number | null;
       ally_synergy: number | null;
       enemy_counter: number | null;
       same_role: number | null;
@@ -320,7 +327,7 @@ export type DraftContribution = {
     prior_role_games: number;
     components?: {
       base: number | null;
-      atomized_archetypes: number | null;
+      archetype_interactions: number | null;
       ally_synergy: number | null;
       enemy_counter: number | null;
       same_role: number | null;
@@ -328,7 +335,7 @@ export type DraftContribution = {
   };
   edge_components?: {
     base: number | null;
-    atomized_archetypes: number | null;
+    archetype_interactions: number | null;
     ally_synergy: number | null;
     enemy_counter: number | null;
     same_role: number | null;
@@ -352,7 +359,7 @@ export type DraftContribution = {
     available_count?: number | null;
     components?: {
       base?: number | null;
-      atomized_archetypes?: number | null;
+      archetype_interactions?: number | null;
       ally_synergy?: number | null;
       enemy_counter?: number | null;
       same_role?: number | null;
@@ -647,6 +654,7 @@ export function findRecordByName<T>(
 export type DraftAuthorityStatus = "unavailable" | "descriptive" | "promoted";
 
 const DRAFT_RECEIPT_SHA256 = /^[a-f0-9]{64}$/;
+const DRAFT_ISSUED_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
 
 function declaredDraftAuthority(
   manifest: PackManifest,
@@ -673,10 +681,13 @@ function hasBoundDraftReceipt(manifest: PackManifest): boolean {
     && authority.release_id === manifest.pack_id
     && typeof authority.model_version === "string"
     && authority.model_version.trim().length > 0
+    && typeof authority.artifact_sha256 === "string"
+    && DRAFT_RECEIPT_SHA256.test(authority.artifact_sha256)
     && typeof authority.receipt_sha256 === "string"
     && DRAFT_RECEIPT_SHA256.test(authority.receipt_sha256)
     && typeof authority.issued_utc === "string"
-    && authority.issued_utc.trim().length > 0
+    && DRAFT_ISSUED_UTC.test(authority.issued_utc)
+    && Number.isFinite(Date.parse(authority.issued_utc))
   );
 }
 

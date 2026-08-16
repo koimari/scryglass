@@ -77,6 +77,7 @@ test("draft authority stays closed until an independent receipt verifier exists"
       authority: "descriptive" as const,
       release_id: manifest.pack_id,
       model_version: "draft-descriptive-v1",
+      artifact_sha256: "c".repeat(64),
       receipt_sha256: "b".repeat(64),
       issued_utc: "2026-08-13T18:31:17Z",
     },
@@ -90,6 +91,14 @@ test("draft authority stays closed until an independent receipt verifier exists"
   assert.equal(hasDescriptiveDraftAuthority({
     ...descriptive,
     draft_authority: { ...descriptive.draft_authority, receipt_sha256: "not-a-sha" },
+  }), false);
+  assert.equal(hasDescriptiveDraftAuthority({
+    ...descriptive,
+    draft_authority: { ...descriptive.draft_authority, issued_utc: "2026-99-99T18:31:17Z" },
+  }), false);
+  assert.equal(hasDescriptiveDraftAuthority({
+    ...descriptive,
+    draft_authority: { ...descriptive.draft_authority, issued_utc: "2026-08-13T18:31:17+00:00" },
   }), false);
 });
 

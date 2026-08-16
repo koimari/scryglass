@@ -13,7 +13,7 @@ export type DraftTeamRow = {
 export type DraftPlayerRow = {
   player: string;
   games: number;
-  draft_score: number | null;
+  pick_contribution: number | null;
   /** Share of evaluated picks that were the highest-ranked available pick. */
   best_available_rate?: number | null;
   role?: string | null;
@@ -204,8 +204,8 @@ function aggregatePlayerRows(rows: DraftPlayerRow[]): DraftPlayerRow[] {
       teams: new Map(),
     };
     aggregate.games += row.games;
-    if (finite(row.draft_score)) {
-      aggregate.score += row.draft_score * row.games;
+    if (finite(row.pick_contribution)) {
+      aggregate.score += row.pick_contribution * row.games;
       aggregate.scoreGames += row.games;
     }
     if (finite(row.best_available_rate)) {
@@ -220,7 +220,7 @@ function aggregatePlayerRows(rows: DraftPlayerRow[]): DraftPlayerRow[] {
     .map(([player, aggregate]) => ({
       player,
       games: aggregate.games,
-      draft_score: aggregate.scoreGames ? round(aggregate.score / aggregate.scoreGames) : null,
+      pick_contribution: aggregate.scoreGames ? round(aggregate.score / aggregate.scoreGames) : null,
       best_available_rate: aggregate.evaluatedPicks ? round(aggregate.bestAvailablePicks / aggregate.evaluatedPicks) : null,
       role: mostCommon(aggregate.roles),
       team: mostCommon(aggregate.teams),
@@ -228,7 +228,7 @@ function aggregatePlayerRows(rows: DraftPlayerRow[]): DraftPlayerRow[] {
     .sort((left, right) => (
       (right.best_available_rate ?? -Infinity) - (left.best_available_rate ?? -Infinity)
       || right.games - left.games
-      || (right.draft_score ?? -Infinity) - (left.draft_score ?? -Infinity)
+      || (right.pick_contribution ?? -Infinity) - (left.pick_contribution ?? -Infinity)
       || left.player.localeCompare(right.player)
     ));
 }
@@ -352,7 +352,7 @@ export function draftRankingsFromProfile(records: ProfileRecords): DraftRankings
     .map((aggregate) => ({
       player: aggregate.player,
       games: aggregate.evaluatedPicks,
-      draft_score: aggregate.scores.length ? round(average(aggregate.scores)) : null,
+      pick_contribution: aggregate.scores.length ? round(average(aggregate.scores)) : null,
       best_available_rate: round(aggregate.bestAvailablePicks / aggregate.evaluatedPicks),
       role: mostCommon(aggregate.roles),
       team: mostCommon(aggregate.teams),
@@ -362,7 +362,7 @@ export function draftRankingsFromProfile(records: ProfileRecords): DraftRankings
     .sort((left, right) => (
       (right.best_available_rate ?? -Infinity) - (left.best_available_rate ?? -Infinity)
       || right.games - left.games
-      || (right.draft_score ?? -Infinity) - (left.draft_score ?? -Infinity)
+      || (right.pick_contribution ?? -Infinity) - (left.pick_contribution ?? -Infinity)
       || left.player.localeCompare(right.player)
     ));
 

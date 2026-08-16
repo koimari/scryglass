@@ -15,7 +15,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from lol_kills.etl.oe_ingest import OeDownloadError
 from lol_kills.etl.oe_ingest import load_refresh_receipt
@@ -537,11 +537,22 @@ def _sleep_before_retry(attempt: int) -> None:
     time.sleep(min(60.0, 2.0**attempt))
 
 
-def _run_with_source_retries(config: RefreshConfig, now: datetime, *, force: bool) -> dict[str, Any]:
+def _run_with_source_retries(
+    config: RefreshConfig,
+    now: datetime,
+    *,
+    force: bool,
+    prepare_tier_fn: Any | None = None,
+) -> dict[str, Any]:
     last_error: Exception | None = None
     for attempt in range(config.attempts):
         try:
-            return sync_once(config.sync, now=now, force=force)
+            return sync_once(
+                config.sync,
+                now=now,
+                force=force,
+                prepare_tier_fn=prepare_tier_fn,
+            )
         except RETRYABLE_ERRORS as error:
             last_error = error
             if attempt + 1 >= config.attempts:
@@ -580,6 +591,114 @@ def _run_tier_refresh(config: RefreshConfig, expected_live_as_of: str) -> dict[s
             "tier-list refresh did not promote: " + str(receipt.get("status") or "unknown")
         )
     return receipt
+
+
+def _tier_publication_for_source(
+    config: RefreshConfig,
+    receipt: Mapping[str, Any],
+    *,
+    source_observed_through: str | None,
+    source: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Bind the generated tier board to the exact source accepted by the pack."""
+
+    expected_status = (
+        "production_built"
+        if config.publication_backend == "supabase"
+        else "production_promoted"
+    )
+    if receipt.get("status") != expected_status:
+        raise PublicRefreshError(
+            "tier-list refresh did not produce a publishable artifact: "
+            + str(receipt.get("status") or "unknown")
+        )
+    if not isinstance(source_observed_through, str) or not source_observed_through.strip():
+        raise PublicRefreshError("tier-list binding has no accepted source watermark")
+    source_identity = str(source.get("identity_sha256") or "")
+    if not supabase_publication.SHA256_RE.fullmatch(source_identity):
+        raise PublicRefreshError("tier-list binding has no accepted source identity digest")
+
+    payload_path = (
+        config.runtime_root
+        / "apps"
+        / "scryglass"
+        / "public"
+        / "rankings"
+        / "tierlists.json"
+    ).resolve()
+    runtime_root = config.runtime_root.resolve()
+    try:
+        payload_path.relative_to(runtime_root)
+    except ValueError as error:
+        raise PublicRefreshError("tier-list payload escaped the runtime root") from error
+    try:
+        raw = payload_path.read_bytes()
+        payload = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PublicRefreshError("tier-list production payload is unavailable") from error
+    if not isinstance(payload, Mapping):
+        raise PublicRefreshError("tier-list production payload is malformed")
+    if payload.get("schema_version") != "rankings-tierlists-v2" or payload.get("status") != "available":
+        raise PublicRefreshError("tier-list production payload is not available")
+    rows = payload.get("rows")
+    if not isinstance(rows, list) or not rows:
+        raise PublicRefreshError("tier-list production payload has no rows")
+    roles_by_patch: dict[str, set[str]] = {}
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise PublicRefreshError("tier-list production row is malformed")
+        patch = str(row.get("patch") or "").strip()
+        role = str(row.get("role") or "").strip().casefold()
+        if not patch or role not in {"top", "jungle", "mid", "bot", "support"}:
+            raise PublicRefreshError("tier-list production row has an invalid patch or role")
+        roles_by_patch.setdefault(patch, set()).add(role)
+    if not roles_by_patch or any(len(roles) != 5 for roles in roles_by_patch.values()):
+        raise PublicRefreshError("tier-list production payload lacks a complete five-role scope")
+
+    receipt_sha256 = str(receipt.get("receipt_canonical_sha256") or "")
+    if not supabase_publication.SHA256_RE.fullmatch(receipt_sha256):
+        raise PublicRefreshError("tier-list refresh receipt has no canonical digest")
+    payload_sha256 = hashlib.sha256(raw).hexdigest()
+    candidate = receipt.get("candidate")
+    if not isinstance(candidate, Mapping):
+        raise PublicRefreshError("tier-list refresh receipt has no candidate binding")
+    candidate_artifact = str(candidate.get("artifact_sha256") or "")
+    if not supabase_publication.SHA256_RE.fullmatch(candidate_artifact):
+        raise PublicRefreshError("tier-list candidate has no artifact digest")
+
+    def timestamp(value: object) -> datetime | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed.astimezone(timezone.utc)
+
+    expected_time = timestamp(source_observed_through)
+    receipt_time = timestamp(receipt.get("source_observed_through"))
+    candidate_time = timestamp(receipt.get("candidate_expected_live_as_of"))
+    if expected_time is None or receipt_time != expected_time or candidate_time != expected_time:
+        raise PublicRefreshError("tier-list source watermark does not match the accepted source")
+    as_of = str(payload.get("as_of") or "")
+    if timestamp(as_of) is None:
+        raise PublicRefreshError("tier-list payload has no valid as-of timestamp")
+
+    return {
+        "schema_version": "scryglass:tier-publication:v1",
+        "status": "available",
+        "production_status": expected_status,
+        "tier_schema_version": payload["schema_version"],
+        "payload_path": str(payload_path),
+        "payload_sha256": payload_sha256,
+        "receipt_sha256": receipt_sha256,
+        "candidate_artifact_sha256": candidate_artifact,
+        "source_observed_through": source_observed_through,
+        "as_of": as_of,
+        "source_identity_sha256": source_identity,
+        "patches": sorted(roles_by_patch),
+        "scope_count": len(roles_by_patch),
+    }
 
 
 def _http_bytes(
@@ -1178,8 +1297,32 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
         failure_stage = "ratings"
         if ledger is not None:
             ledger.advance("derive")
-        ratings = _run_with_source_retries(config, checked_at, force=force)
+        def prepare_tier(
+            source_observed_through: str | None,
+            source: Mapping[str, Any],
+        ) -> Mapping[str, Any]:
+            nonlocal failure_stage, tier, tier_publication
+            failure_stage = "tier"
+            expected = str(source_observed_through or _iso(checked_at))
+            tier = _run_tier_refresh(config, expected)
+            tier_publication = _tier_publication_for_source(
+                config,
+                tier,
+                source_observed_through=source_observed_through,
+                source=source,
+            )
+            return tier_publication
+
+        ratings = _run_with_source_retries(
+            config,
+            checked_at,
+            force=force,
+            prepare_tier_fn=prepare_tier,
+        )
         publication = ratings.get("publication") if isinstance(ratings.get("publication"), dict) else None
+        reported_tier_publication = ratings.get("tier_publication")
+        if isinstance(reported_tier_publication, Mapping):
+            tier_publication = dict(reported_tier_publication)
         tier_error: str | None = None
         active_manifest = _load_json(config.public_root / "manifest.json")
         active_tier = active_manifest.get("tier")
@@ -1189,7 +1332,9 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             and active_tier.get("status") == "available"
         )
         should_run_tier = bool(
-            ratings.get("status") == "published"
+            tier_publication is None
+            and (
+                ratings.get("status") == "published"
             or force
             or (
                 config.publication_backend == "supabase"
@@ -1201,6 +1346,7 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
                     not previous_public_state.get("tier")
                     or previous_public_state.get("tier_error")
                 )
+                )
             )
         )
         if should_run_tier:
@@ -1208,7 +1354,16 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             expected = str(ratings.get("source_observed_through") or _iso(checked_at))
             try:
                 tier = _run_tier_refresh(config, expected)
-                tier_publication = _tier_publication(tier)
+                source_identity = str(ratings.get("source_identity_sha256") or "")
+                if source_identity:
+                    tier_publication = _tier_publication_for_source(
+                        config,
+                        tier,
+                        source_observed_through=ratings.get("source_observed_through"),
+                        source={"identity_sha256": source_identity},
+                    )
+                else:
+                    tier_publication = _tier_publication(tier)
             except Exception as error:  # noqa: BLE001
                 tier_error = f"{type(error).__name__}: {str(error)[:500]}"
         if tier_error and config.publication_backend == "supabase":
@@ -1290,6 +1445,7 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             "continuity_bootstrap": continuity_bootstrap,
             "ratings": ratings,
             "tier": tier,
+            "tier_publication": tier_publication,
             "tier_error": tier_error,
             "database_publication": database_publication,
             "cache_invalidation": cache,

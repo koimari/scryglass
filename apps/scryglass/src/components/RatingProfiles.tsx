@@ -55,7 +55,7 @@ type TeamDraftMetric = {
 
 type PlayerDraftMetric = {
   bestAvailableRate: number;
-  draftScore?: number | null;
+  pickContribution?: number | null;
   games: number;
   poolDefinition?: string | null;
   banCoverage?: number | null;
@@ -406,7 +406,7 @@ function edgeComponentRows(components: DraftContribution["edge_components"]): Ar
   if (!components) return [];
   return [
     ["Base", componentLabel(components.base)],
-    ["Atomized archetypes", componentLabel(components.atomized_archetypes)],
+    ["Archetype interactions", componentLabel(components.archetype_interactions)],
     ["Ally synergy", componentLabel(components.ally_synergy)],
     ["Enemy counter", componentLabel(components.enemy_counter)],
     ["Same-role evidence", componentLabel(components.same_role)],
@@ -418,7 +418,7 @@ function sideComponentRows(components: DraftContribution["blue"]["components"]):
   if (!components) return [];
   return [
     ["Base champion + role", componentLabel(components.base)],
-    ["Atomized archetypes", componentLabel(components.atomized_archetypes)],
+    ["Archetype interactions", componentLabel(components.archetype_interactions)],
     ["Ally synergy", componentLabel(components.ally_synergy)],
     ["Enemy counter", componentLabel(components.enemy_counter)],
     ["Same-role evidence", componentLabel(components.same_role)],
@@ -737,6 +737,13 @@ export function PlayerRatingProfile({
           <dd title="Best-available rate: share of evaluated picks that were the highest-ranked unbanned champion available for the role">
             {draftAuthorized ? (draftMetric ? `${Math.round(draftMetric.bestAvailableRate * 100)}%` : "—") : "Unavailable"}
             <small>{draftAuthorized ? (draftMetric ? `${draftMetric.games} evaluated picks · best-available rate · ${draftMetric.scope === "whole_archive" ? "whole archive" : "profile window"}${draftMetric.banCoverage == null ? "" : ` · ${Math.round(draftMetric.banCoverage * 100)}% ban coverage`}` : "Published best-available evidence unavailable") : "Receipt required"}</small>
+          </dd>
+        </div>
+        <div>
+          <dt>Pick contribution</dt>
+          <dd title="Mean base champion contribution for the player's evaluated picks. It is separate from best-available rate and match strength.">
+            {draftAuthorized ? (draftMetric ? componentLabel(draftMetric.pickContribution) : "—") : "Unavailable"}
+            <small>{draftAuthorized ? "Mean base champion contribution · model units" : "Receipt required"}</small>
           </dd>
         </div>
         <div><dt>Updated</dt><dd>{packUpdatedLabel(manifest)}</dd></div>

@@ -73,6 +73,7 @@ function manifest(
       authority: options.draftStatus,
       release_id: releaseId,
       model_version: options.draftStatus === "unavailable" ? null : "test-model",
+      artifact_sha256: options.draftStatus === "unavailable" ? null : "b".repeat(64),
       receipt_sha256: options.draftStatus === "unavailable" ? null : "a".repeat(64),
       issued_utc: options.draftStatus === "unavailable" ? null : "2026-08-13T18:31:17Z",
       reason: options.draftStatus === "promoted" ? null : "model_not_promoted",

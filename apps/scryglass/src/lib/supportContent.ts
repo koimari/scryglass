@@ -29,7 +29,7 @@ export const METHODOLOGY_SECTIONS: Record<MethodologyTopic, { title: string; bod
   },
   draft: {
     title: "Draft Score",
-    body: "Draft Score has a descriptive composition edge in model units after an independent release-bound receipt. It shows the base, atomized archetype, synergy, counter, and same-role components from the draft. Match strength, player comfort, phase, and pace are separate evidence. Calibrated probability stays unavailable until its own authority passes.",
+    body: "Draft Score has a descriptive composition edge in model units after an independent release-bound receipt. It shows the base, archetype interaction, synergy, counter, and same-role components from the draft. Match strength, player comfort, phase, and pace are separate evidence. Calibrated probability stays unavailable until its own authority passes.",
   },
   matches: {
     title: "Matches",

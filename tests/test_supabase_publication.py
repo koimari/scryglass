@@ -280,6 +280,7 @@ def test_publish_release_stages_then_activates_complete_snapshot() -> None:
         "status": "unavailable",
         "release_id": manifest["pack_id"],
         "model_version": None,
+        "artifact_sha256": None,
         "receipt_sha256": None,
         "issued_utc": None,
         "reason": "model_not_promoted",
@@ -328,6 +329,124 @@ def test_publish_release_omits_unpromoted_draft_asset() -> None:
     assert supabase_publication.DRAFT_ASSET_PATH not in published["release"]["artifact_hashes"]
     assert published["draft_authority"]["status"] == "unavailable"
     assert published["draft_authority"]["reason"] == "model_not_promoted"
+
+
+def test_descriptive_draft_asset_rejects_r9e_and_strength_fields() -> None:
+    payload = {
+        "schema_version": "scryglass:draft-records:v1",
+        "authority": "descriptive",
+        "estimand": "composition_only",
+        "model_version": "draft-recommendation-static-v2",
+        "games": {"game-1": {"draft_edge": 0.1, "r9e": {"score": 0.2}}},
+    }
+    with pytest.raises(
+        supabase_publication.SupabasePublicationError,
+        match="contains predictive fields",
+    ):
+        supabase_publication._validate_descriptive_draft_records(payload)
+
+
+@pytest.mark.parametrize("issued_utc", ["2026-99-99T15:30:00Z", "2026-08-10T15:30:00+00:00"])
+def test_descriptive_draft_authority_rejects_invalid_utc_timestamp(issued_utc: str) -> None:
+    manifest = {
+        "draft_authority": {
+            "schema_version": "scryglass:draft-authority:v1",
+            "status": "descriptive",
+            "authority": "descriptive",
+            "release_id": "v2026.08.10.153000",
+            "model_version": "draft-recommendation-static-v2",
+            "artifact_sha256": "a" * 64,
+            "receipt_sha256": "b" * 64,
+            "issued_utc": issued_utc,
+            "estimand": "composition_only",
+            "probability_authority": False,
+            "recommendation_authority": False,
+            "betting_authority": False,
+            "reason": None,
+        }
+    }
+    with pytest.raises(
+        supabase_publication.SupabasePublicationError,
+        match="authority is invalid",
+    ):
+        supabase_publication._draft_authority(manifest, "v2026.08.10.153000")
+
+
+def test_descriptive_authority_migration_binds_timestamp_and_model_length() -> None:
+    migration = (
+        ROOT / "supabase" / "migrations" / "20260815060000_descriptive_draft_authority.sql"
+    ).read_text(encoding="utf-8")
+    assert "octet_length(" in migration
+    assert "draft_authority,model_version" in migration
+    assert "draft_authority,issued_utc" in migration
+    assert "::timestamptz" in migration
+    assert "([.][0-9]{1,6})?Z$" in migration
+
+
+def test_descriptive_draft_asset_rejects_zero_usable_games() -> None:
+    payload = {
+        "schema_version": "scryglass:draft-records:v1",
+        "authority": "descriptive",
+        "estimand": "composition_only",
+        "model_version": "draft-recommendation-static-v2",
+        "games": {},
+    }
+    with pytest.raises(
+        supabase_publication.SupabasePublicationError,
+        match="no usable games",
+    ):
+        supabase_publication._validate_descriptive_draft_records(payload)
+
+
+def test_descriptive_draft_asset_requires_complete_pool_and_ten_valid_picks() -> None:
+    picks = [
+        {
+            "side": "Blue" if index <= 5 else "Red",
+            "role": ("top", "jungle", "mid", "bot", "support")[(index - 1) % 5],
+            "champion": f"Champion {index}",
+            "order": index,
+            "best_available": True,
+            "tier_rank": index,
+            "available_count": 10,
+        }
+        for index in range(1, 11)
+    ]
+    payload = {
+        "schema_version": "scryglass:draft-records:v1",
+        "authority": "descriptive",
+        "estimand": "composition_only",
+        "model_version": "draft-recommendation-static-v2",
+        "games": {
+            "game-1": {
+                "draft_edge": 0.1,
+                "draft_pool": {
+                    "status": "complete",
+                    "patch": "26.16",
+                    "bans": {
+                        "Blue": [f"Blue ban {index}" for index in range(1, 6)],
+                        "Red": [f"Red ban {index}" for index in range(1, 6)],
+                    },
+                    "picked": picks,
+                    "evaluated_picks": 10,
+                },
+            }
+        },
+    }
+    supabase_publication._validate_descriptive_draft_records(payload)
+
+    payload["games"]["game-1"]["draft_pool"]["evaluated_picks"] = 9
+    with pytest.raises(
+        supabase_publication.SupabasePublicationError,
+        match="pool evaluation is incomplete",
+    ):
+        supabase_publication._validate_descriptive_draft_records(payload)
+
+    payload["games"]["game-1"] = {"draft_edge": 0.1, "mu_diff": 14}
+    with pytest.raises(
+        supabase_publication.SupabasePublicationError,
+        match="contains predictive fields",
+    ):
+        supabase_publication._validate_descriptive_draft_records(payload)
 
 
 def test_publish_release_rejects_promoted_draft_until_independent_verification() -> None:

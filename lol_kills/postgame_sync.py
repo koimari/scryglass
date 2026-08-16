@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import pandas as pd
 import pyarrow.parquet as pq
@@ -759,6 +759,7 @@ def sync_once(
     validate_live_fn: Callable[..., dict[str, Any]] = validate_live_source,
     validate_pack_fn: Callable[..., dict[str, Any]] = validate_pack,
     publish_pack_fn: Callable[..., dict[str, Any]] = publish_pack,
+    prepare_tier_fn: Callable[[str | None, Mapping[str, Any]], Mapping[str, Any]] | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     checked_at = now or datetime.now(timezone.utc)
@@ -873,15 +874,23 @@ def sync_once(
         }
         continuity = validate_source_continuity(baseline_ids, source, published_source)
         pack_id = f"v{checked_at.strftime('%Y.%m.%d.%H%M%S')}"
-        manifest = export_pack_fn(
-            years=config.years,
-            out_root=config.output_root,
-            pack_id=pack_id,
-            project_root=config.root,
-            runtime_root=config.data_root,
-            warehouse_root=config.data_root / "data/lol/warehouse/parquet/oe_live",
-            allowed_game_ids=publish_ids,
-        )
+        tier_publication: Mapping[str, Any] | None = None
+        if prepare_tier_fn is not None:
+            tier_publication = prepare_tier_fn(source_observed_through, source)
+            if not isinstance(tier_publication, Mapping):
+                raise RefreshValidationError("tier preparation did not return a publication binding")
+        export_kwargs: dict[str, Any] = {
+            "years": config.years,
+            "out_root": config.output_root,
+            "pack_id": pack_id,
+            "project_root": config.root,
+            "runtime_root": config.data_root,
+            "warehouse_root": config.data_root / "data/lol/warehouse/parquet/oe_live",
+            "allowed_game_ids": publish_ids,
+        }
+        if tier_publication is not None:
+            export_kwargs["tier_publication"] = tier_publication
+        manifest = export_pack_fn(**export_kwargs)
         files = manifest.get("files") if isinstance(manifest, dict) else None
         artifact_hashes = {
             str(item["path"]): str(item["sha256"])
@@ -918,6 +927,15 @@ def sync_once(
                 import_counts.get("quarantined_games", len(continuity["quarantined_game_ids"]))
             ),
         }
+        if tier_publication is not None:
+            manifest["release"].update(
+                {
+                    "tier_list_version": tier_publication.get("tier_schema_version"),
+                    "tier_payload_sha256": tier_publication.get("payload_sha256"),
+                    "tier_receipt_sha256": tier_publication.get("receipt_sha256"),
+                    "tier_source_observed_through": tier_publication.get("source_observed_through"),
+                }
+            )
         _atomic_json(config.output_root / pack_id / "manifest.json", manifest)
         validation = validate_pack_fn(config.output_root / pack_id, manifest, source)
         publication = publish_pack_fn(config.output_root / pack_id, manifest, config.public_root)
@@ -928,7 +946,9 @@ def sync_once(
             "pending_game_ids": pending_ids,
             "pack_id": pack_id,
             "source_observed_through": source_observed_through,
+            "source_identity_sha256": source["identity_sha256"],
             "source_file_sha256": source_file_sha256 or None,
+            "tier_publication": dict(tier_publication) if tier_publication is not None else None,
             "validation": validation,
             "publication": publication,
         }

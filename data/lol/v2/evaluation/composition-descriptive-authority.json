@@ -1,0 +1,109 @@
+{
+  "schema_version": "scryglass:draft-authority:v1",
+  "authority_id": "scryglass-descriptive-draft-v1",
+  "status": "descriptive",
+  "estimand": "composition_only",
+  "model_version": "draft-recommendation-static-v2",
+  "issued_utc": "2026-08-15T00:00:00Z",
+  "recipe_path": "data/lol/v2/evaluation/composition-descriptive-recipe.json",
+  "recipe_sha256": "7d176731dcb45d2398aa59ab52288df6b2d69a9ee879bef634d9e1905f11cf81",
+  "artifact_path": "data/lol/models/draft_recommendation.json",
+  "artifact_sha256": "3a42542710e8a61f11f740ff85965d7f4541724575c3dc7fd063872b7a0c71fe",
+  "artifact_commit": "87bcff462f6005269b94fd9e604c9e8b2b5ec9c0",
+  "scorer_code_path": "lol_kills/research/descriptive_draft_score.py",
+  "scorer_code_sha256": "b9428e042af2aab8412b1a709f6d5ef2091b7c9317da3fbf83eb5da6eaaa956b",
+  "feature_schema": {
+    "id": "scryglass:draft-descriptive-features:v1",
+    "sha256": null,
+    "status": "unavailable",
+    "reason": "The legacy artifact has no separate serialized feature-schema file."
+  },
+  "source_snapshot": {
+    "id": "oracle-elixir-professional-maps-2025-2026",
+    "sha256": null,
+    "status": "unavailable",
+    "reason": "The source parquet snapshot used to fit the artifact is not distributed with this release."
+  },
+  "release_source_binding": {
+    "id": "canonical-accepted-public-pack-game-identities",
+    "sha256": null,
+    "status": "per_release_manifest",
+    "binding_field": "manifest.draft.source_identity_sha256",
+    "reason": "The current release digest is computed from accepted canonical rows during export. It is separate from the unavailable fit snapshot."
+  },
+  "included_terms": [
+    "champion_effects",
+    "role_conditioned_champion_effects",
+    "ally_synergy",
+    "archetype_interactions",
+    "enemy_counter",
+    "same_role",
+    "archetype_synergy",
+    "archetype_counters"
+  ],
+  "archetype_interaction_source": {
+    "id": "legacy-manual-archetype-tags-v1",
+    "status": "bound_in_artifact",
+    "lcc_atoms": "excluded",
+    "reason": "LCC-derived atoms remain research-only and are not part of this descriptive release."
+  },
+  "excluded_terms": [
+    "team_controls",
+    "player_controls",
+    "team_rating",
+    "player_rating",
+    "elo",
+    "pace",
+    "kill_beta",
+    "phase_curve",
+    "live_state",
+    "outcome_probability",
+    "r9e",
+    "development_composite",
+    "match_probability",
+    "match_win_expectation",
+    "odds",
+    "ev"
+  ],
+  "probability_authority": false,
+  "recommendation_authority": false,
+  "betting_authority": false,
+  "benchmark": {
+    "auc": 0.70606,
+    "status": "mixed controlled R9E benchmark only",
+    "source_commit": "fdf8dd15",
+    "holdout_rows": 13682,
+    "source_as_of": "2026-08-13T17:26:34Z",
+    "patch_ceiling": "source 16.15",
+    "composition_only_status": "unverified"
+  },
+  "source_patch_binding": {
+    "oracle_elixir_tokens": ["16.15", "16.16"],
+    "public_patches": ["26.15", "26.16"]
+  },
+  "component_contract": {
+    "base": true,
+    "archetype_interactions": true,
+    "ally_synergy": true,
+    "enemy_counter": true,
+    "same_role": true,
+    "total": true,
+    "player_comfort": {
+      "status": "unavailable",
+      "contribution": null,
+      "source": null,
+      "sha256": null,
+      "reason": "No player familiarity input is included in the frozen static artifact."
+    }
+  },
+  "evaluation": {
+    "split": "Three rolling-origin development folds through the first 85%; final 15% chronological evaluation",
+    "regional_holdout": "unavailable: artifact report has no regional holdout",
+    "patch_holdout": "unavailable: artifact report has no patch holdout",
+    "roster_change_holdout": "unavailable: artifact report has no roster-change holdout",
+    "composition_only_auc": "unverified",
+    "artifact_auc": 0.687456,
+    "benchmark_auc": 0.70606,
+    "benchmark_status": "mixed controlled R9E benchmark only"
+  }
+}

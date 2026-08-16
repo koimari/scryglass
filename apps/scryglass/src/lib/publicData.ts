@@ -151,7 +151,7 @@ export type TeamDraftMetric = {
 export type PlayerDraftMetric = {
   best_available_rate: number | null;
   games: number;
-  draft_score?: number | null;
+  pick_contribution?: number | null;
   pool_definition?: string | null;
   ban_coverage?: number | null;
   scope?: "whole_archive" | "profile_window" | string | null;
