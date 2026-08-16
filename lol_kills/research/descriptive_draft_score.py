@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import math
 from decimal import Decimal, ROUND_HALF_EVEN
 from pathlib import Path
 from typing import Any, Mapping
@@ -77,7 +78,7 @@ def _number(value: Any, default: float = 0.0) -> float:
         parsed = float(value)
     except (TypeError, ValueError):
         return default
-    return parsed if parsed == parsed and abs(parsed) != float("inf") else default
+    return parsed if math.isfinite(parsed) else default
 
 
 def _round_signal(value: float | None) -> float | None:
@@ -258,7 +259,6 @@ def score_game(
         "same_role": same_role_edge,
     }
     edge_components["total"] = sum(edge_components.values())
-    cross_blue = (counter_edge + same_role_edge) / 2.0
     archetype_cross_blue = archetype_counter_edge / 2.0
     side_components = {
         "blue": {
