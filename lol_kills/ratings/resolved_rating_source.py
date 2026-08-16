@@ -976,6 +976,13 @@ def _availability(value: Any) -> float:
     return number
 
 
+def _declared_availability(
+    values: Mapping[str, Any], field: str, default: float
+) -> float:
+    raw = values.get(field)
+    return default if raw is None else _availability(raw)
+
+
 def _field_token(value: Any) -> str:
     return "".join(ch for ch in str(value).casefold() if ch.isalnum())
 
@@ -1132,33 +1139,21 @@ def _build_strict(
         map_timestamp=map_dt,
         expected_game_id=normalized_game_id,
     )
-    if "rating_source_available" in rating_values and _availability(
-        rating_values["rating_source_available"]
-    ) == 0.0:
+    if _declared_availability(rating_values, "rating_source_available", 1.0) == 0.0:
         raise ResolvedRatingSourceError("rating row declares source unavailable")
-    if "rating_values_available" in rating_values and _availability(
-        rating_values["rating_values_available"]
-    ) == 0.0:
+    if _declared_availability(rating_values, "rating_values_available", 1.0) == 0.0:
         normalized_values = {field: None for field in RATING_VALUE_FIELDS}
-    if "team_rating_available" in rating_values and _availability(
-        rating_values["team_rating_available"]
-    ) == 0.0:
+    if _declared_availability(rating_values, "team_rating_available", 1.0) == 0.0:
         normalized_values["base_team_logit"] = None
         normalized_values["team_rating_diff_scaled"] = None
-    if "player_rating_available" in rating_values and _availability(
-        rating_values["player_rating_available"]
-    ) == 0.0:
+    if _declared_availability(rating_values, "player_rating_available", 1.0) == 0.0:
         normalized_values["base_player_logit"] = None
         normalized_values["player_rating_diff_scaled"] = None
         normalized_values["player_lineup_complete"] = None
-    if "team_rating_missing" in rating_values and _availability(
-        rating_values["team_rating_missing"]
-    ) == 1.0:
+    if _declared_availability(rating_values, "team_rating_missing", 0.0) == 1.0:
         normalized_values["base_team_logit"] = None
         normalized_values["team_rating_diff_scaled"] = None
-    if "player_rating_missing" in rating_values and _availability(
-        rating_values["player_rating_missing"]
-    ) == 1.0:
+    if _declared_availability(rating_values, "player_rating_missing", 0.0) == 1.0:
         normalized_values["base_player_logit"] = None
         normalized_values["player_rating_diff_scaled"] = None
         normalized_values["player_lineup_complete"] = None
