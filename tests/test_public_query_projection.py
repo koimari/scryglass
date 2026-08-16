@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 
@@ -37,6 +38,26 @@ def _draft_authority(release_id: str = "v2026.08.13.120000") -> dict:
         "probability_authority": False,
         "recommendation_authority": False,
         "betting_authority": False,
+    }
+
+
+def _draft_records(
+    games: dict[str, dict],
+    release_id: str = "v2026.08.13.120000",
+) -> dict:
+    return {
+        "schema_version": "scryglass:draft-records:v1",
+        "authority": "descriptive",
+        "estimand": "composition_only",
+        "release_id": release_id,
+        "model_version": "descriptive-draft-score-v1",
+        "artifact_sha256": _ARTIFACT_SHA256,
+        "authority_receipt_sha256": _RECEIPT_SHA256,
+        "games": {
+            game_id: {"draft_pool": copy.deepcopy(game.get("draft_pool"))}
+            for game_id, game in games.items()
+            if "draft_contribution" in game
+        },
     }
 
 
@@ -259,6 +280,12 @@ def _projection(**overrides: object) -> dict:
         },
     }
     arguments.update(overrides)
+    if (
+        "draft_records" not in overrides
+        and isinstance(arguments.get("draft_authority"), dict)
+        and arguments["draft_authority"].get("status") == "descriptive"
+    ):
+        arguments["draft_records"] = _draft_records(arguments["archive_games"])
     return build_public_query_projection(**arguments)
 
 
@@ -422,6 +449,41 @@ def test_query_projection_binds_descriptive_rows_to_the_active_release_authority
 
 
 @pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("release_id", "v2026.08.13.999999"),
+        ("model_version", "different-model"),
+        ("artifact_sha256", "c" * 64),
+        ("authority_receipt_sha256", "d" * 64),
+    ],
+)
+def test_query_projection_rejects_unbound_draft_records(
+    field: str,
+    value: str,
+) -> None:
+    game = _descriptive_game()
+    records = _draft_records({"game-1": game})
+    records[field] = value
+
+    with pytest.raises(PublicQueryProjectionError, match="do not match"):
+        _projection(
+            archive_games={"game-1": game},
+            draft_authority=_draft_authority(),
+            draft_records=records,
+        )
+
+
+def test_query_projection_requires_draft_records_for_descriptive_authority() -> None:
+    game = _descriptive_game()
+    with pytest.raises(PublicQueryProjectionError, match="records are required"):
+        _projection(
+            archive_games={"game-1": game},
+            draft_authority=_draft_authority(),
+            draft_records=None,
+        )
+
+
+@pytest.mark.parametrize(
     ("mutation", "message"),
     [
         (lambda metric: metric.pop("best_available_rate"), "keys are not exact"),
@@ -475,22 +537,50 @@ def test_query_projection_omits_draft_fields_when_authority_is_unavailable() -> 
     )
 
 
-def test_player_draft_metric_uses_one_complete_pool_denominator() -> None:
+def test_query_projection_rejects_archive_signal_outside_draft_records() -> None:
     complete = _descriptive_game()
-    incomplete = _descriptive_game()
-    incomplete["game_id"] = "game-2"
-    incomplete["date"] = "2026-08-13T18:00:00Z"
-    incomplete["draft_pool"]["evaluated_picks"] = 9
-    faker_pick = next(
-        pick
-        for pick in incomplete["draft_contribution"]["picks"]
-        if pick["side"] == "Blue" and pick["role"] == "mid"
-    )
-    faker_pick["contribution"] = 0.9
+    extra = _descriptive_game()
+    extra["game_id"] = "game-2"
+    extra["date"] = "2026-08-13T18:00:00Z"
 
+    with pytest.raises(PublicQueryProjectionError, match="outside the validated record set"):
+        _projection(
+            archive_games={"game-1": complete, "game-2": extra},
+            draft_authority=_draft_authority(),
+            draft_records=_draft_records({"game-1": complete}),
+        )
+
+
+def test_query_projection_rejects_incomplete_or_absent_authorized_pool() -> None:
+    incomplete = _descriptive_game()
+    incomplete["draft_pool"]["evaluated_picks"] = 9
+
+    with pytest.raises(PublicQueryProjectionError, match="matching complete pool"):
+        _projection(
+            archive_games={"game-1": incomplete},
+            draft_authority=_draft_authority(),
+            draft_records=_draft_records({"game-1": incomplete}),
+        )
+
+    absent = _descriptive_game()
+    absent.pop("draft_pool")
+    with pytest.raises(PublicQueryProjectionError, match="matching complete pool"):
+        _projection(
+            archive_games={"game-1": absent},
+            draft_authority=_draft_authority(),
+            draft_records=_draft_records({"game-1": absent}),
+        )
+
+
+def test_query_projection_uses_exact_complete_pool_record_set() -> None:
+    complete = _descriptive_game()
+    unrelated = _game()
+    unrelated["game_id"] = "game-2"
+    records = _draft_records({"game-1": complete})
     projection = _projection(
-        archive_games={"game-1": complete, "game-2": incomplete},
+        archive_games={"game-1": complete, "game-2": unrelated},
         draft_authority=_draft_authority(),
+        draft_records=records,
     )
 
     player = next(
@@ -500,13 +590,26 @@ def test_player_draft_metric_uses_one_complete_pool_denominator() -> None:
     assert metric["games"] == 1
     assert metric["best_available_rate"] == 1.0
     assert metric["pick_contribution"] == 0.06
-    assert metric["ban_coverage"] == 0.5
-    games = {
-        row["game_id"]: row["payload"]
+    assert metric["ban_coverage"] == 1.0
+    projected_ids = {
+        row["game_id"]
         for row in projection["datasets"]["games"]
+        if "draft_contribution" in row["payload"]
     }
-    assert "draft_contribution" in games["game-1"]
-    assert "draft_contribution" not in games["game-2"]
+    assert projected_ids == set(records["games"])
+
+
+def test_query_projection_rejects_record_without_archive_signal() -> None:
+    complete = _descriptive_game()
+    without_signal = copy.deepcopy(complete)
+    without_signal.pop("draft_contribution")
+
+    with pytest.raises(PublicQueryProjectionError, match="no archive signal"):
+        _projection(
+            archive_games={"game-1": without_signal},
+            draft_authority=_draft_authority(),
+            draft_records=_draft_records({"game-1": complete}),
+        )
 
 
 def test_player_draft_metrics_preserve_case_distinct_source_identities() -> None:

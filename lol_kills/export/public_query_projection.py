@@ -563,6 +563,58 @@ def _validated_pool_picks(
     return output if len(output) == 10 else None
 
 
+def _validated_draft_record_games(
+    draft_records: Mapping[str, Any] | None,
+    *,
+    authority: Mapping[str, Any] | None,
+) -> dict[str, Mapping[str, Any]]:
+    """Return the receipt-bound complete-pool game authority set."""
+
+    if authority is None:
+        if draft_records is not None:
+            raise PublicQueryProjectionError(
+                "descriptive Draft records have no active authority"
+            )
+        return {}
+    if not isinstance(draft_records, Mapping):
+        raise PublicQueryProjectionError(
+            "descriptive Draft records are required by the active authority"
+        )
+    _reject_forbidden_draft_content(draft_records, "draft_records")
+    if (
+        draft_records.get("schema_version") != "scryglass:draft-records:v1"
+        or draft_records.get("authority") != "descriptive"
+        or draft_records.get("estimand") != "composition_only"
+        or draft_records.get("release_id") != authority["release_id"]
+        or draft_records.get("model_version") != authority["model_version"]
+        or draft_records.get("artifact_sha256") != authority["artifact_sha256"]
+        or draft_records.get("authority_receipt_sha256")
+        != authority["receipt_sha256"]
+    ):
+        raise PublicQueryProjectionError(
+            "descriptive Draft records do not match the active authority"
+        )
+    raw_games = draft_records.get("games")
+    if not isinstance(raw_games, Mapping) or not raw_games:
+        raise PublicQueryProjectionError(
+            "descriptive Draft records have no complete-pool games"
+        )
+    games: dict[str, Mapping[str, Any]] = {}
+    for raw_game_id, record in raw_games.items():
+        game_id = str(raw_game_id).strip()
+        if (
+            not game_id
+            or len(game_id) > 200
+            or game_id in games
+            or not isinstance(record, Mapping)
+        ):
+            raise PublicQueryProjectionError(
+                "descriptive Draft record game identity is invalid"
+            )
+        games[game_id] = record
+    return games
+
+
 def _finite(value: object) -> float | None:
     if isinstance(value, bool) or value is None:
         return None
@@ -1013,8 +1065,11 @@ def _game_rows(
     team_ids: Mapping[str, str],
     champion_images: Mapping[str, Any] | None = None,
     draft_authority: Mapping[str, Any] | None = None,
+    draft_record_games: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    authorized_draft_games = dict(draft_record_games or {})
+    projected_draft_game_ids: set[str] = set()
     image_by_key = {
         normalize_public_key(name): _public_image_url(url)
         for name, url in (champion_images or {}).items()
@@ -1027,6 +1082,7 @@ def _game_rows(
         game = dict(raw)
         raw_signal = game.pop("draft_contribution", None)
         raw_pool = game.pop("draft_pool", None)
+        game_id = str(game.get("game_id") or raw_game_id).strip()
         for key in game:
             normalized = str(key).strip().casefold()
             if normalized in _DRAFT_KEYS:
@@ -1034,16 +1090,32 @@ def _game_rows(
                     f"game contains an unapproved Draft field: {key}"
                 )
         if draft_authority is not None and raw_signal is not None:
+            if game_id not in authorized_draft_games:
+                raise PublicQueryProjectionError(
+                    "archive Draft signal is outside the validated record set"
+                )
             sanitized_signal = _sanitize_descriptive_signal(
                 raw_signal,
                 authority=draft_authority,
             )
             _validate_signal_game_binding(sanitized_signal, game)
-            if _validated_pool_picks(raw_pool, sanitized_signal) is not None:
-                game["draft_contribution"] = sanitized_signal
+            archive_pool = _validated_pool_picks(raw_pool, sanitized_signal)
+            record_pool = _validated_pool_picks(
+                authorized_draft_games[game_id].get("draft_pool"),
+                sanitized_signal,
+            )
+            if archive_pool is None or record_pool is None or archive_pool != record_pool:
+                raise PublicQueryProjectionError(
+                    "authorized Draft signal does not have one matching complete pool"
+                )
+            game["draft_contribution"] = sanitized_signal
+            projected_draft_game_ids.add(game_id)
         elif raw_signal is not None:
             _reject_forbidden_draft_content(raw_signal)
-        game_id = str(game.get("game_id") or raw_game_id).strip()
+        elif draft_authority is not None and game_id in authorized_draft_games:
+            raise PublicQueryProjectionError(
+                "validated Draft record has no archive signal"
+            )
         if not game_id:
             continue
         blue_team = str(game.get("blue_team") or "").strip()
@@ -1088,6 +1160,12 @@ def _game_rows(
                 blue_win=_integer(game.get("blue_win")),
                 champions=champions,
             )
+        )
+    if draft_authority is not None and projected_draft_game_ids != set(
+        authorized_draft_games
+    ):
+        raise PublicQueryProjectionError(
+            "query Draft signal game IDs do not equal validated Draft record game IDs"
         )
     return rows
 
@@ -1147,6 +1225,7 @@ def _attach_draft_summaries(
     teams: list[dict[str, Any]],
     games: Sequence[Mapping[str, Any]],
     source_games: Mapping[str, Any],
+    draft_record_games: Mapping[str, Mapping[str, Any]],
     authority: Mapping[str, Any] | None,
 ) -> None:
     if authority is None:
@@ -1178,15 +1257,24 @@ def _attach_draft_summaries(
         if red_team:
             team_values.setdefault(red_team, []).append(-edge)
 
-    for game_id, raw_game in source_games.items():
+    for game_id, record in draft_record_games.items():
+        raw_game = source_games.get(game_id)
         if not isinstance(raw_game, Mapping):
-            continue
+            raise PublicQueryProjectionError(
+                "validated Draft record has no source game"
+            )
         raw_signal = raw_game.get("draft_contribution")
         if raw_signal is None:
-            continue
+            raise PublicQueryProjectionError(
+                "validated Draft record has no source signal"
+            )
         signal = _sanitize_descriptive_signal(raw_signal, authority=authority)
         _validate_signal_game_binding(signal, raw_game)
-        pool_values = _validated_pool_picks(raw_game.get("draft_pool"), signal)
+        pool_values = _validated_pool_picks(record.get("draft_pool"), signal)
+        if pool_values is None:
+            raise PublicQueryProjectionError(
+                "validated Draft record has no complete pool"
+            )
         pick_values = {
             (
                 str(pick.get("side") or "").strip().title(),
@@ -1505,10 +1593,15 @@ def build_public_query_projection(
     player_metadata: Mapping[str, Any],
     leaderboards: Mapping[str, Any],
     draft_authority: Mapping[str, Any] | None = None,
+    draft_records: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return every row needed by the bounded public read APIs."""
 
     authority = _descriptive_authority(draft_authority, release_id=release_id)
+    draft_record_games = _validated_draft_record_games(
+        draft_records,
+        authority=authority,
+    )
     profile_games = profile_records.get("games")
     if isinstance(profile_games, Mapping):
         for game_id, raw_game in profile_games.items():
@@ -1521,6 +1614,10 @@ def build_public_query_projection(
                         signal, f"profile.games.{game_id}"
                     )
                 else:
+                    if str(game_id).strip() not in draft_record_games:
+                        raise PublicQueryProjectionError(
+                            "profile Draft signal is outside the validated record set"
+                        )
                     _sanitize_descriptive_signal(signal, authority=authority)
     players, player_ids = _player_rows(
         player_ratings,
@@ -1551,12 +1648,14 @@ def build_public_query_projection(
         team_ids,
         images,
         draft_authority=authority,
+        draft_record_games=draft_record_games,
     )
     _attach_draft_summaries(
         players=players,
         teams=teams,
         games=games,
         source_games=archive_games,
+        draft_record_games=draft_record_games,
         authority=authority,
     )
     game_ids = {str(row["game_id"]) for row in games}
