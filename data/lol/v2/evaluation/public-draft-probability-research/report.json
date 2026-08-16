@@ -1,0 +1,1448 @@
+{
+  "allowed_inputs": [
+    "ten champion picks and roles",
+    "role-conditioned champion effects",
+    "exact ally synergy",
+    "exact enemy counters",
+    "same-role terms",
+    "LCC-derived atomized archetype interactions",
+    "patch, region, and tournament calibration",
+    "declared pre-event champion comfort as pick-count familiarity only"
+  ],
+  "authority": "unavailable",
+  "development_selection": {
+    "candidate_count": 10,
+    "results": [
+      {
+        "config": {
+          "ally": true,
+          "atom_interactions": true,
+          "atoms": true,
+          "c": 0.03,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": true,
+          "counter": true,
+          "name": "full_composition_comfort",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": true,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "folds": [
+          {
+            "auc": 0.559180267817168,
+            "brier": 0.25435059179568065,
+            "calibration": {
+              "intercept": 0.07010414545857156,
+              "slope": 0.34797270530291763
+            },
+            "ece": 0.07469884246882813,
+            "fold": 1,
+            "log_loss": 0.704408252764538,
+            "n": 3999,
+            "positive_rate": 0.5333833458364591
+          },
+          {
+            "auc": 0.5784731790660504,
+            "brier": 0.2518405847288279,
+            "calibration": {
+              "intercept": 0.03249828504074564,
+              "slope": 0.42042522685449957
+            },
+            "ece": 0.07198630760725566,
+            "fold": 2,
+            "log_loss": 0.6997908009493466,
+            "n": 2257,
+            "positive_rate": 0.5259193619849357
+          },
+          {
+            "auc": 0.5951784472179651,
+            "brier": 0.2495395865188861,
+            "calibration": {
+              "intercept": 0.0657121578970871,
+              "slope": 0.4554510857331215
+            },
+            "ece": 0.0626840004698043,
+            "fold": 3,
+            "log_loss": 0.6957345873187067,
+            "n": 3472,
+            "positive_rate": 0.5250576036866359
+          }
+        ],
+        "mean_auc": 0.5776106313670611,
+        "mean_log_loss": 0.6999778803441972,
+        "vocabulary_sizes": [
+          3722,
+          6578,
+          7752
+        ]
+      },
+      {
+        "config": {
+          "ally": false,
+          "atom_interactions": false,
+          "atoms": false,
+          "c": 0.1,
+          "calibration": false,
+          "champion_role": true,
+          "comfort": false,
+          "counter": false,
+          "name": "role_champion",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": false,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "folds": [
+          {
+            "auc": 0.5323073490683079,
+            "brier": 0.2517454510984598,
+            "calibration": {
+              "intercept": 0.0794921371019123,
+              "slope": 0.29416215011421915
+            },
+            "ece": 0.0383615524856818,
+            "fold": 1,
+            "log_loss": 0.6972859272774815,
+            "n": 3999,
+            "positive_rate": 0.5333833458364591
+          },
+          {
+            "auc": 0.5595131053704856,
+            "brier": 0.2471479025782243,
+            "calibration": {
+              "intercept": -0.005452307592035121,
+              "slope": 0.6818155108647276
+            },
+            "ece": 0.02735737007522785,
+            "fold": 2,
+            "log_loss": 0.6875595029876582,
+            "n": 2257,
+            "positive_rate": 0.5259193619849357
+          },
+          {
+            "auc": 0.547392042984212,
+            "brier": 0.24998506939267343,
+            "calibration": {
+              "intercept": 0.03468130374881445,
+              "slope": 0.4605500135143443
+            },
+            "ece": 0.04537837513637139,
+            "fold": 3,
+            "log_loss": 0.6932990578337613,
+            "n": 3472,
+            "positive_rate": 0.5250576036866359
+          }
+        ],
+        "mean_auc": 0.5464041658076685,
+        "mean_log_loss": 0.6927148293663005,
+        "vocabulary_sizes": [
+          142,
+          178,
+          194
+        ]
+      },
+      {
+        "config": {
+          "ally": false,
+          "atom_interactions": true,
+          "atoms": true,
+          "c": 0.03,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": false,
+          "counter": false,
+          "name": "composition_atoms",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": false,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "folds": [
+          {
+            "auc": 0.5327872271039135,
+            "brier": 0.25036927769963174,
+            "calibration": {
+              "intercept": 0.07460417427984506,
+              "slope": 0.35624222409599104
+            },
+            "ece": 0.02996150139565312,
+            "fold": 1,
+            "log_loss": 0.6941715567959083,
+            "n": 3999,
+            "positive_rate": 0.5333833458364591
+          },
+          {
+            "auc": 0.5560920879622704,
+            "brier": 0.2472254979525172,
+            "calibration": {
+              "intercept": 0.0019121620015173386,
+              "slope": 0.7221595920442992
+            },
+            "ece": 0.016513839048784576,
+            "fold": 2,
+            "log_loss": 0.6876431397992648,
+            "n": 2257,
+            "positive_rate": 0.5259193619849357
+          },
+          {
+            "auc": 0.5481448388574401,
+            "brier": 0.24871177273757117,
+            "calibration": {
+              "intercept": 0.06096613443410595,
+              "slope": 0.556216504980385
+            },
+            "ece": 0.03161149287936119,
+            "fold": 3,
+            "log_loss": 0.6905933600784233,
+            "n": 3472,
+            "positive_rate": 0.5250576036866359
+          }
+        ],
+        "mean_auc": 0.5456747179745413,
+        "mean_log_loss": 0.6908026855578654,
+        "vocabulary_sizes": [
+          255,
+          303,
+          332
+        ]
+      },
+      {
+        "config": {
+          "ally": false,
+          "atom_interactions": true,
+          "atoms": true,
+          "c": 0.03,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": false,
+          "counter": false,
+          "name": "composition_atoms_calibrated",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": false,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "folds": [
+          {
+            "auc": 0.5327872271039135,
+            "brier": 0.25036927769963174,
+            "calibration": {
+              "intercept": 0.07460417427984506,
+              "slope": 0.35624222409599104
+            },
+            "ece": 0.02996150139565312,
+            "fold": 1,
+            "log_loss": 0.6941715567959083,
+            "n": 3999,
+            "positive_rate": 0.5333833458364591
+          },
+          {
+            "auc": 0.5560920879622704,
+            "brier": 0.2472254979525172,
+            "calibration": {
+              "intercept": 0.0019121620015173386,
+              "slope": 0.7221595920442992
+            },
+            "ece": 0.016513839048784576,
+            "fold": 2,
+            "log_loss": 0.6876431397992648,
+            "n": 2257,
+            "positive_rate": 0.5259193619849357
+          },
+          {
+            "auc": 0.5481448388574401,
+            "brier": 0.24871177273757117,
+            "calibration": {
+              "intercept": 0.06096613443410595,
+              "slope": 0.556216504980385
+            },
+            "ece": 0.03161149287936119,
+            "fold": 3,
+            "log_loss": 0.6905933600784233,
+            "n": 3472,
+            "positive_rate": 0.5250576036866359
+          }
+        ],
+        "mean_auc": 0.5456747179745413,
+        "mean_log_loss": 0.6908026855578654,
+        "vocabulary_sizes": [
+          255,
+          303,
+          332
+        ]
+      },
+      {
+        "config": {
+          "ally": false,
+          "atom_interactions": false,
+          "atoms": false,
+          "c": 0.1,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": false,
+          "counter": false,
+          "name": "role_champion_calibrated",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": false,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "folds": [
+          {
+            "auc": 0.5335125715483077,
+            "brier": 0.2523407817865377,
+            "calibration": {
+              "intercept": 0.0855642924553428,
+              "slope": 0.2796996102578779
+            },
+            "ece": 0.046568280456324725,
+            "fold": 1,
+            "log_loss": 0.6985668320000681,
+            "n": 3999,
+            "positive_rate": 0.5333833458364591
+          },
+          {
+            "auc": 0.5543764615106016,
+            "brier": 0.24814036851204493,
+            "calibration": {
+              "intercept": 0.0173991671958064,
+              "slope": 0.5855151135951431
+            },
+            "ece": 0.029867351414169244,
+            "fold": 2,
+            "log_loss": 0.6896148640846285,
+            "n": 2257,
+            "positive_rate": 0.5259193619849357
+          },
+          {
+            "auc": 0.5470018399089593,
+            "brier": 0.2501408418015169,
+            "calibration": {
+              "intercept": 0.06726723955879466,
+              "slope": 0.4496141977073313
+            },
+            "ece": 0.044107414575543104,
+            "fold": 3,
+            "log_loss": 0.6936282846362325,
+            "n": 3472,
+            "positive_rate": 0.5250576036866359
+          }
+        ],
+        "mean_auc": 0.5449636243226229,
+        "mean_log_loss": 0.6939366602403098,
+        "vocabulary_sizes": [
+          170,
+          218,
+          247
+        ]
+      },
+      {
+        "config": {
+          "ally": true,
+          "atom_interactions": false,
+          "atoms": false,
+          "c": 0.03,
+          "calibration": false,
+          "champion_role": true,
+          "comfort": false,
+          "counter": true,
+          "name": "role_ally_counter",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": true,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "folds": [
+          {
+            "auc": 0.5286489699706898,
+            "brier": 0.25794544551994103,
+            "calibration": {
+              "intercept": 0.09671632647289692,
+              "slope": 0.20681440426910008
+            },
+            "ece": 0.07556600311912239,
+            "fold": 1,
+            "log_loss": 0.7111342073621687,
+            "n": 3999,
+            "positive_rate": 0.5333833458364591
+          },
+          {
+            "auc": 0.534871544536214,
+            "brier": 0.2601301181659594,
+            "calibration": {
+              "intercept": 0.06536616870540404,
+              "slope": 0.21928315382761374
+            },
+            "ece": 0.08507373355070863,
+            "fold": 2,
+            "log_loss": 0.7170923703382315,
+            "n": 2257,
+            "positive_rate": 0.5259193619849357
+          },
+          {
+            "auc": 0.5213914781378165,
+            "brier": 0.2637088870558553,
+            "calibration": {
+              "intercept": 0.08120312701940012,
+              "slope": 0.11726277574693399
+            },
+            "ece": 0.09926605020025318,
+            "fold": 3,
+            "log_loss": 0.7250603231130271,
+            "n": 3472,
+            "positive_rate": 0.5250576036866359
+          }
+        ],
+        "mean_auc": 0.5283039975482401,
+        "mean_log_loss": 0.7177623002711425,
+        "vocabulary_sizes": [
+          3603,
+          6447,
+          7608
+        ]
+      },
+      {
+        "config": {
+          "ally": true,
+          "atom_interactions": true,
+          "atoms": true,
+          "c": 0.03,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": false,
+          "counter": true,
+          "name": "full_composition",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": true,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "folds": [
+          {
+            "auc": 0.5300808154811167,
+            "brier": 0.2581897892854684,
+            "calibration": {
+              "intercept": 0.09721846185492239,
+              "slope": 0.21401154604192152
+            },
+            "ece": 0.08018711302963555,
+            "fold": 1,
+            "log_loss": 0.7117435151418419,
+            "n": 3999,
+            "positive_rate": 0.5333833458364591
+          },
+          {
+            "auc": 0.531987496949035,
+            "brier": 0.261103767216674,
+            "calibration": {
+              "intercept": 0.06929171226154304,
+              "slope": 0.20044666746691664
+            },
+            "ece": 0.09018770778201048,
+            "fold": 2,
+            "log_loss": 0.7194034342241684,
+            "n": 2257,
+            "positive_rate": 0.5259193619849357
+          },
+          {
+            "auc": 0.5206942354730855,
+            "brier": 0.2639545765418208,
+            "calibration": {
+              "intercept": 0.09115922075060505,
+              "slope": 0.11508707804485993
+            },
+            "ece": 0.09634592431442077,
+            "fold": 3,
+            "log_loss": 0.7253122078390654,
+            "n": 3472,
+            "positive_rate": 0.5250576036866359
+          }
+        ],
+        "mean_auc": 0.5275875159677458,
+        "mean_log_loss": 0.7188197190683585,
+        "vocabulary_sizes": [
+          3716,
+          6572,
+          7746
+        ]
+      },
+      {
+        "config": {
+          "ally": true,
+          "atom_interactions": false,
+          "atoms": false,
+          "c": 0.03,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": false,
+          "counter": true,
+          "name": "role_ally_counter_calibrated",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": true,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "folds": [
+          {
+            "auc": 0.529889618002009,
+            "brier": 0.2581348155360685,
+            "calibration": {
+              "intercept": 0.09737762468667625,
+              "slope": 0.21363126492001175
+            },
+            "ece": 0.07900916993382884,
+            "fold": 1,
+            "log_loss": 0.7116211747787441,
+            "n": 3999,
+            "positive_rate": 0.5333833458364591
+          },
+          {
+            "auc": 0.5322961364942642,
+            "brier": 0.26098531874019454,
+            "calibration": {
+              "intercept": 0.06896540683701213,
+              "slope": 0.20248043484756573
+            },
+            "ece": 0.09196020994102144,
+            "fold": 2,
+            "log_loss": 0.719137622438965,
+            "n": 2257,
+            "positive_rate": 0.5259193619849357
+          },
+          {
+            "auc": 0.5205195921529596,
+            "brier": 0.26391628551265306,
+            "calibration": {
+              "intercept": 0.09122529336612269,
+              "slope": 0.1143456801186646
+            },
+            "ece": 0.09640021007138753,
+            "fold": 3,
+            "log_loss": 0.7252179076586517,
+            "n": 3472,
+            "positive_rate": 0.5250576036866359
+          }
+        ],
+        "mean_auc": 0.5275684488830775,
+        "mean_log_loss": 0.7186589016254535,
+        "vocabulary_sizes": [
+          3631,
+          6487,
+          7661
+        ]
+      },
+      {
+        "config": {
+          "ally": true,
+          "atom_interactions": true,
+          "atoms": true,
+          "c": 0.03,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": false,
+          "counter": true,
+          "name": "full_composition_strict",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": true,
+          "support": 40,
+          "tournament_calibration": true
+        },
+        "folds": [
+          {
+            "auc": 0.5263807297060584,
+            "brier": 0.2570206700991704,
+            "calibration": {
+              "intercept": 0.10155128905401906,
+              "slope": 0.19475853321185468
+            },
+            "ece": 0.07551144068297962,
+            "fold": 1,
+            "log_loss": 0.7088878058829791,
+            "n": 3999,
+            "positive_rate": 0.5333833458364591
+          },
+          {
+            "auc": 0.5338322481084018,
+            "brier": 0.25878413599820405,
+            "calibration": {
+              "intercept": 0.06640246204371364,
+              "slope": 0.2215025467188505
+            },
+            "ece": 0.08532725276800794,
+            "fold": 2,
+            "log_loss": 0.7138264801001588,
+            "n": 2257,
+            "positive_rate": 0.5259193619849357
+          },
+          {
+            "auc": 0.5213252800031403,
+            "brier": 0.26246405619806035,
+            "calibration": {
+              "intercept": 0.09055201788827902,
+              "slope": 0.12488318772556811
+            },
+            "ece": 0.09419267868872876,
+            "fold": 3,
+            "log_loss": 0.7216528753556928,
+            "n": 3472,
+            "positive_rate": 0.5250576036866359
+          }
+        ],
+        "mean_auc": 0.5271794192725335,
+        "mean_log_loss": 0.7147890537796102,
+        "vocabulary_sizes": [
+          1847,
+          3969,
+          5015
+        ]
+      },
+      {
+        "config": {
+          "ally": true,
+          "atom_interactions": true,
+          "atoms": true,
+          "c": 0.1,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": false,
+          "counter": true,
+          "name": "full_composition_regularized",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": true,
+          "support": 40,
+          "tournament_calibration": true
+        },
+        "folds": [
+          {
+            "auc": 0.5232409203809478,
+            "brier": 0.27259090720440665,
+            "calibration": {
+              "intercept": 0.11527794413774699,
+              "slope": 0.10750718818527581
+            },
+            "ece": 0.12927766761016238,
+            "fold": 1,
+            "log_loss": 0.7489570538618286,
+            "n": 3999,
+            "positive_rate": 0.5333833458364591
+          },
+          {
+            "auc": 0.5246966750387768,
+            "brier": 0.27858993573251867,
+            "calibration": {
+              "intercept": 0.08249865404066088,
+              "slope": 0.10915554513472121
+            },
+            "ece": 0.15359638732157874,
+            "fold": 2,
+            "log_loss": 0.7679652344837155,
+            "n": 2257,
+            "positive_rate": 0.5259193619849357
+          },
+          {
+            "auc": 0.5122182130029769,
+            "brier": 0.2827328806223824,
+            "calibration": {
+              "intercept": 0.0955788220281226,
+              "slope": 0.0502123770197002
+            },
+            "ece": 0.14895132594206298,
+            "fold": 3,
+            "log_loss": 0.77720403931642,
+            "n": 3472,
+            "positive_rate": 0.5250576036866359
+          }
+        ],
+        "mean_auc": 0.5200519361409005,
+        "mean_log_loss": 0.7647087758873213,
+        "vocabulary_sizes": [
+          1847,
+          3969,
+          5015
+        ]
+      }
+    ],
+    "selected": {
+      "ally": true,
+      "atom_interactions": true,
+      "atoms": true,
+      "c": 0.03,
+      "calibration": true,
+      "champion_role": true,
+      "comfort": true,
+      "counter": true,
+      "name": "full_composition_comfort",
+      "patch_calibration": true,
+      "region_calibration": true,
+      "same_role": true,
+      "support": 20,
+      "tournament_calibration": true
+    },
+    "workers": 8
+  },
+  "estimand": "pre_match_composition_probability",
+  "excluded_inputs": [
+    "baron",
+    "dragon",
+    "elo",
+    "form",
+    "gold",
+    "history",
+    "inhibitor",
+    "momentum",
+    "mu_diff",
+    "objective",
+    "outcome",
+    "r9e",
+    "rating",
+    "sigma",
+    "tower"
+  ],
+  "final": {
+    "ablations": {
+      "selected": {
+        "config": {
+          "ally": true,
+          "atom_interactions": true,
+          "atoms": true,
+          "c": 0.03,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": true,
+          "counter": true,
+          "name": "full_composition_comfort",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": true,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "metrics": {
+          "auc": 0.6171567336026385,
+          "brier": 0.24188366666751188,
+          "calibration": {
+            "intercept": 0.12020530944350806,
+            "slope": 0.5830170461753778
+          },
+          "ece": 0.06151606366860174,
+          "log_loss": 0.6779925138026994,
+          "n": 4064,
+          "positive_rate": 0.5423228346456693
+        },
+        "vocabulary_size": 9572
+      },
+      "without_ally": {
+        "config": {
+          "ally": false,
+          "atom_interactions": true,
+          "atoms": true,
+          "c": 0.03,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": true,
+          "counter": true,
+          "name": "without_ally",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": true,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "metrics": {
+          "auc": 0.6290898269031868,
+          "brier": 0.236380040473795,
+          "calibration": {
+            "intercept": 0.09321340660691008,
+            "slope": 0.7699298263172023
+          },
+          "ece": 0.03276968105840515,
+          "log_loss": 0.6651273948932958,
+          "n": 4064,
+          "positive_rate": 0.5423228346456693
+        },
+        "vocabulary_size": 4319
+      },
+      "without_atoms": {
+        "config": {
+          "ally": true,
+          "atom_interactions": false,
+          "atoms": false,
+          "c": 0.03,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": true,
+          "counter": true,
+          "name": "without_atoms",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": true,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "metrics": {
+          "auc": 0.6168786468395684,
+          "brier": 0.24189990762636132,
+          "calibration": {
+            "intercept": 0.12006703791698828,
+            "slope": 0.5834731745657511
+          },
+          "ece": 0.05982602920438012,
+          "log_loss": 0.6779961448853505,
+          "n": 4064,
+          "positive_rate": 0.5423228346456693
+        },
+        "vocabulary_size": 9487
+      },
+      "without_calibration": {
+        "config": {
+          "ally": true,
+          "atom_interactions": true,
+          "atoms": true,
+          "c": 0.03,
+          "calibration": false,
+          "champion_role": true,
+          "comfort": true,
+          "counter": true,
+          "name": "without_calibration",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": true,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "metrics": {
+          "auc": 0.6173340748980348,
+          "brier": 0.2413967159151241,
+          "calibration": {
+            "intercept": 0.0980250265400751,
+            "slope": 0.5879660043144272
+          },
+          "ece": 0.05985722169623394,
+          "log_loss": 0.6768731178584707,
+          "n": 4064,
+          "positive_rate": 0.5423228346456693
+        },
+        "vocabulary_size": 9507
+      },
+      "without_comfort": {
+        "config": {
+          "ally": true,
+          "atom_interactions": true,
+          "atoms": true,
+          "c": 0.03,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": false,
+          "counter": true,
+          "name": "without_comfort",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": true,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "metrics": {
+          "auc": 0.5459201744628535,
+          "brier": 0.2559339124000883,
+          "calibration": {
+            "intercept": 0.14795804108744515,
+            "slope": 0.28649253409837006
+          },
+          "ece": 0.07802193408726563,
+          "log_loss": 0.7074392980923649,
+          "n": 4064,
+          "positive_rate": 0.5423228346456693
+        },
+        "vocabulary_size": 9566
+      },
+      "without_counters": {
+        "config": {
+          "ally": true,
+          "atom_interactions": true,
+          "atoms": true,
+          "c": 0.03,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": true,
+          "counter": false,
+          "name": "without_counters",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": false,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "metrics": {
+          "auc": 0.6211045898952052,
+          "brier": 0.2393736346548994,
+          "calibration": {
+            "intercept": 0.11895350573221439,
+            "slope": 0.6689021664743167
+          },
+          "ece": 0.04499232624081279,
+          "log_loss": 0.6721023428116315,
+          "n": 4064,
+          "positive_rate": 0.5423228346456693
+        },
+        "vocabulary_size": 5628
+      },
+      "without_patch_calibration": {
+        "config": {
+          "ally": true,
+          "atom_interactions": true,
+          "atoms": true,
+          "c": 0.03,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": true,
+          "counter": true,
+          "name": "without_patch_calibration",
+          "patch_calibration": false,
+          "region_calibration": true,
+          "same_role": true,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "metrics": {
+          "auc": 0.6171623441250513,
+          "brier": 0.24179899496484691,
+          "calibration": {
+            "intercept": 0.11713999125740494,
+            "slope": 0.5839385735466878
+          },
+          "ece": 0.06175229283636831,
+          "log_loss": 0.6778018060208759,
+          "n": 4064,
+          "positive_rate": 0.5423228346456693
+        },
+        "vocabulary_size": 9541
+      },
+      "without_region_calibration": {
+        "config": {
+          "ally": true,
+          "atom_interactions": true,
+          "atoms": true,
+          "c": 0.03,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": true,
+          "counter": true,
+          "name": "without_region_calibration",
+          "patch_calibration": true,
+          "region_calibration": false,
+          "same_role": true,
+          "support": 20,
+          "tournament_calibration": true
+        },
+        "metrics": {
+          "auc": 0.6172406475030736,
+          "brier": 0.24171270528965708,
+          "calibration": {
+            "intercept": 0.118288717437781,
+            "slope": 0.5872150924477956
+          },
+          "ece": 0.059991642586106925,
+          "log_loss": 0.6775054859116758,
+          "n": 4064,
+          "positive_rate": 0.5423228346456693
+        },
+        "vocabulary_size": 9558
+      },
+      "without_tournament_calibration": {
+        "config": {
+          "ally": true,
+          "atom_interactions": true,
+          "atoms": true,
+          "c": 0.03,
+          "calibration": true,
+          "champion_role": true,
+          "comfort": true,
+          "counter": true,
+          "name": "without_tournament_calibration",
+          "patch_calibration": true,
+          "region_calibration": true,
+          "same_role": true,
+          "support": 20,
+          "tournament_calibration": false
+        },
+        "metrics": {
+          "auc": 0.6171503912729543,
+          "brier": 0.24188988820638552,
+          "calibration": {
+            "intercept": 0.12033673934327546,
+            "slope": 0.5829818971241097
+          },
+          "ece": 0.06094028269390988,
+          "log_loss": 0.6780036147908655,
+          "n": 4064,
+          "positive_rate": 0.5423228346456693
+        },
+        "vocabulary_size": 9552
+      }
+    },
+    "auc_floor_0_70_passes": false,
+    "config": {
+      "ally": true,
+      "atom_interactions": true,
+      "atoms": true,
+      "c": 0.03,
+      "calibration": true,
+      "champion_role": true,
+      "comfort": true,
+      "counter": true,
+      "name": "full_composition_comfort",
+      "patch_calibration": true,
+      "region_calibration": true,
+      "same_role": true,
+      "support": 20,
+      "tournament_calibration": true
+    },
+    "metrics": {
+      "auc": 0.6171567336026385,
+      "bootstrap_95": {
+        "auc": {
+          "lower": 0.5979335736121436,
+          "mean": 0.6164480776402029,
+          "upper": 0.6361088403550694
+        },
+        "brier": {
+          "lower": 0.23639664396993218,
+          "mean": 0.2420561797432337,
+          "upper": 0.24706626946175994
+        },
+        "log_loss": {
+          "lower": 0.6659138609169856,
+          "mean": 0.6782268054861829,
+          "upper": 0.6894421904551268
+        },
+        "reps": 200
+      },
+      "brier": 0.24188366666751188,
+      "by_event_kind": {
+        "TIER1": {
+          "auc": null,
+          "brier": 0.30698578235315005,
+          "calibration": {
+            "intercept": null,
+            "slope": null
+          },
+          "ece": 0.5510982714845181,
+          "log_loss": 0.8091478022479918,
+          "n": 2,
+          "positive_rate": 0.0
+        },
+        "TIER2": {
+          "auc": null,
+          "brier": 0.305867992779119,
+          "calibration": {
+            "intercept": null,
+            "slope": null
+          },
+          "ece": 0.5401655678648911,
+          "log_loss": 0.8062715108614683,
+          "n": 4,
+          "positive_rate": 0.0
+        },
+        "UNKNOWN": {
+          "auc": 0.6174849787676422,
+          "brier": 0.24178851104015414,
+          "calibration": {
+            "intercept": 0.12359527659773249,
+            "slope": 0.5840118813664983
+          },
+          "ece": 0.061495545822538855,
+          "log_loss": 0.677801427906907,
+          "n": 4058,
+          "positive_rate": 0.5431246919664859
+        }
+      },
+      "by_patch": {
+        "16.07": {
+          "auc": 0.8295454545454546,
+          "brier": 0.17589321395641605,
+          "calibration": {
+            "intercept": null,
+            "slope": null
+          },
+          "ece": 0.13180799809556393,
+          "log_loss": 0.527449320841642,
+          "n": 19,
+          "positive_rate": 0.5789473684210527
+        },
+        "16.08": {
+          "auc": 0.6167874678512977,
+          "brier": 0.24024406249774186,
+          "calibration": {
+            "intercept": 0.07730841298367082,
+            "slope": 0.6144137635234684
+          },
+          "ece": 0.08780117333027528,
+          "log_loss": 0.6738202234636528,
+          "n": 508,
+          "positive_rate": 0.5374015748031497
+        },
+        "16.09": {
+          "auc": 0.6091901925235259,
+          "brier": 0.24443384580956892,
+          "calibration": {
+            "intercept": 0.0780683693241213,
+            "slope": 0.5421590370992532
+          },
+          "ece": 0.061554736403912055,
+          "log_loss": 0.684001740925658,
+          "n": 747,
+          "positive_rate": 0.5301204819277109
+        },
+        "16.10": {
+          "auc": 0.6041186453557588,
+          "brier": 0.24466988836428913,
+          "calibration": {
+            "intercept": -0.005271563996683207,
+            "slope": 0.5746050444424011
+          },
+          "ece": 0.06922068749447036,
+          "log_loss": 0.6828212833801811,
+          "n": 795,
+          "positive_rate": 0.5119496855345912
+        },
+        "16.11": {
+          "auc": 0.6148912437255996,
+          "brier": 0.24272323256533782,
+          "calibration": {
+            "intercept": 0.24865464999475476,
+            "slope": 0.5343915026567583
+          },
+          "ece": 0.0952573812058207,
+          "log_loss": 0.6806145474411046,
+          "n": 383,
+          "positive_rate": 0.5744125326370757
+        },
+        "16.12": {
+          "auc": 0.6611111111111111,
+          "brier": 0.2427997756076402,
+          "calibration": {
+            "intercept": null,
+            "slope": null
+          },
+          "ece": 0.10977446317342299,
+          "log_loss": 0.6866814225902745,
+          "n": 27,
+          "positive_rate": 0.4444444444444444
+        },
+        "16.13": {
+          "auc": 0.6324573457002176,
+          "brier": 0.23822592179734597,
+          "calibration": {
+            "intercept": 0.21057455112967968,
+            "slope": 0.6195108602496286
+          },
+          "ece": 0.07603856306288828,
+          "log_loss": 0.6715334133654504,
+          "n": 377,
+          "positive_rate": 0.5649867374005305
+        },
+        "16.14": {
+          "auc": 0.610812041351974,
+          "brier": 0.24518864951987238,
+          "calibration": {
+            "intercept": 0.10038541250243439,
+            "slope": 0.5236818946480839
+          },
+          "ece": 0.061500143091388876,
+          "log_loss": 0.6860559620926452,
+          "n": 548,
+          "positive_rate": 0.5364963503649635
+        },
+        "16.15": {
+          "auc": 0.6283052079745916,
+          "brier": 0.23811837047323461,
+          "calibration": {
+            "intercept": 0.23432267258755698,
+            "slope": 0.636707305600373
+          },
+          "ece": 0.06048863651938538,
+          "log_loss": 0.6692354474794657,
+          "n": 653,
+          "positive_rate": 0.5696784073506891
+        },
+        "16.16": {
+          "auc": 1.0,
+          "brier": 0.1914545808490324,
+          "calibration": {
+            "intercept": null,
+            "slope": null
+          },
+          "ece": 0.3056678123846984,
+          "log_loss": 0.5562661957739051,
+          "n": 7,
+          "positive_rate": 0.8571428571428571
+        }
+      },
+      "by_region": {
+        "AMERICAS": {
+          "auc": 0.5961449676823638,
+          "brier": 0.24364802339781352,
+          "calibration": {
+            "intercept": 0.35906861309959814,
+            "slope": 0.5331949659045784
+          },
+          "ece": 0.07538665195752497,
+          "log_loss": 0.6814549138500567,
+          "n": 190,
+          "positive_rate": 0.6
+        },
+        "CN": {
+          "auc": 0.5996621621621622,
+          "brier": 0.25056361699170554,
+          "calibration": {
+            "intercept": -0.059130649826185044,
+            "slope": 0.4562690442355237
+          },
+          "ece": 0.0901970865995259,
+          "log_loss": 0.6999025355226612,
+          "n": 292,
+          "positive_rate": 0.5068493150684932
+        },
+        "EMEA": {
+          "auc": 0.6256875147324585,
+          "brier": 0.2378763358260297,
+          "calibration": {
+            "intercept": 0.08063078446982441,
+            "slope": 0.6211191096830582
+          },
+          "ece": 0.06595343720125263,
+          "log_loss": 0.6692774818150108,
+          "n": 642,
+          "positive_rate": 0.5545171339563862
+        },
+        "KR": {
+          "auc": 0.5769767965758054,
+          "brier": 0.2531855966624145,
+          "calibration": {
+            "intercept": 0.1504740371007304,
+            "slope": 0.382566044551573
+          },
+          "ece": 0.11311153140097117,
+          "log_loss": 0.704020728964955,
+          "n": 423,
+          "positive_rate": 0.5437352245862884
+        },
+        "OTHER": {
+          "auc": 0.627965723313642,
+          "brier": 0.2387235303502288,
+          "calibration": {
+            "intercept": 0.10579980306848183,
+            "slope": 0.6540691240524443
+          },
+          "ece": 0.05343587009452736,
+          "log_loss": 0.670535743043743,
+          "n": 2164,
+          "positive_rate": 0.5360443622920518
+        },
+        "PACIFIC": {
+          "auc": 0.6084427401533863,
+          "brier": 0.24687163190707664,
+          "calibration": {
+            "intercept": 0.2583115166351156,
+            "slope": 0.5472698538798642
+          },
+          "ece": 0.09751887895370767,
+          "log_loss": 0.6883777406967979,
+          "n": 353,
+          "positive_rate": 0.5552407932011332
+        }
+      },
+      "by_roster_change": {
+        "changed": {
+          "auc": 0.6280095491965614,
+          "brier": 0.24010399359205634,
+          "calibration": {
+            "intercept": 0.07447941747705433,
+            "slope": 0.6243352601891446
+          },
+          "ece": 0.060809668927796386,
+          "log_loss": 0.6744960645709261,
+          "n": 612,
+          "positive_rate": 0.5245098039215687
+        },
+        "stable_or_first": {
+          "auc": 0.6150478586879959,
+          "brier": 0.2421991822880735,
+          "calibration": {
+            "intercept": 0.12876079200363574,
+            "slope": 0.5748292990748454
+          },
+          "ece": 0.061698191071251476,
+          "log_loss": 0.6786123941415887,
+          "n": 3452,
+          "positive_rate": 0.5454808806488992
+        }
+      },
+      "calibration": {
+        "intercept": 0.12020530944350806,
+        "slope": 0.5830170461753778
+      },
+      "ece": 0.06151606366860174,
+      "log_loss": 0.6779925138026994,
+      "n": 4064,
+      "positive_rate": 0.5423228346456693,
+      "sparse_evidence": {
+        "definition": "at least one role-champion or interaction term was unseen in development",
+        "dense": {
+          "auc": 0.6514196726061133,
+          "brier": 0.23471732732236494,
+          "calibration": {
+            "intercept": -0.1423823672936174,
+            "slope": 0.6898815448572472
+          },
+          "ece": 0.10134457393836639,
+          "log_loss": 0.6624774608070837,
+          "n": 333,
+          "positive_rate": 0.46846846846846846
+        },
+        "dense_n": 333,
+        "sparse": {
+          "auc": 0.6135641223819073,
+          "brier": 0.24252327830030038,
+          "calibration": {
+            "intercept": 0.1442508127465559,
+            "slope": 0.5686421269536314
+          },
+          "ece": 0.06423202750783517,
+          "log_loss": 0.6793772665894966,
+          "n": 3731,
+          "positive_rate": 0.5489145001340123
+        },
+        "sparse_n": 3731
+      }
+    },
+    "patch_transfer": {
+      "metrics": {
+        "auc": 1.0,
+        "brier": 0.1914545808490324,
+        "calibration": {
+          "intercept": null,
+          "slope": null
+        },
+        "ece": 0.3056678123846984,
+        "log_loss": 0.5562661957739051,
+        "n": 7,
+        "positive_rate": 0.8571428571428571
+      },
+      "public_patch": "26.16",
+      "source_patch": "16.16"
+    },
+    "vocabulary_size": 9572
+  },
+  "model_version": "public-draft-probability-composition-v1",
+  "public_probability": false,
+  "reproducibility": {
+    "atom_file_sha256": "bff75179d93a6c5d9bf4bc3927e1ca7b12f31335cef9249449f2595093ed1942",
+    "code_sha256": "5bd7863ea2a1d26e80f79829f6b80e01405f2169be887f6be7a200372a3d47cf",
+    "command": "python3 -m lol_kills.research.public_draft_probability --players <path> --atom-path <path> --output-dir <path>",
+    "source_file_sha256": "0fb9aff49feed1b5ed2fe5c2d21cd5587f7a7cc9d60783a75f4da8a8846cfeb0"
+  },
+  "schema_version": "scryglass:public-draft-probability-research:v1",
+  "source": {
+    "atom_artifact_sha256": "e5d37ddf4a20fcbdc1e2fc90fb0bd988be82b3563a8ec8bc3a21792313a239a8",
+    "atom_path": "data/lol/v2/champions/lcc-atom-bridge-26.16.json",
+    "atom_sha256": "e5d37ddf4a20fcbdc1e2fc90fb0bd988be82b3563a8ec8bc3a21792313a239a8",
+    "date_max": "2026-08-15 15:58:57+00:00",
+    "date_min": "2025-01-11 11:11:24+00:00",
+    "patch_counts": {
+      "15.01": 967,
+      "15.02": 728,
+      "15.03": 569,
+      "15.04": 371,
+      "15.05": 214,
+      "15.06": 464,
+      "15.07": 820,
+      "15.08": 796,
+      "15.09": 875,
+      "15.11": 445,
+      "15.12": 166,
+      "15.13": 385,
+      "15.14": 598,
+      "15.15": 637,
+      "15.16": 613,
+      "15.17": 622,
+      "15.18": 180,
+      "15.19": 378,
+      "15.21": 60,
+      "15.22": 19,
+      "15.23": 56,
+      "15.24": 78,
+      "16.01": 433,
+      "16.02": 546,
+      "16.03": 623,
+      "16.04": 320,
+      "16.05": 306,
+      "16.06": 326,
+      "16.07": 730,
+      "16.08": 700,
+      "16.09": 747,
+      "16.10": 795,
+      "16.11": 383,
+      "16.12": 27,
+      "16.13": 377,
+      "16.14": 548,
+      "16.15": 653,
+      "16.16": 7
+    },
+    "players_path": "/Users/river/Library/Application Support/Scryglass Worker/runtime/data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
+    "players_sha256": "0fb9aff49feed1b5ed2fe5c2d21cd5587f7a7cc9d60783a75f4da8a8846cfeb0",
+    "prepared_games": 17552,
+    "source_games": 17562,
+    "source_patch_public_map": {
+      "16.16": "26.16"
+    },
+    "source_rows": 175620
+  },
+  "split": {
+    "development_date_max": "2026-04-22 23:24:35+00:00",
+    "development_date_min": "2025-01-11 11:11:24+00:00",
+    "development_folds": [
+      {
+        "train_n": 3760,
+        "train_through": "2025-04-27 23:47:01+00:00",
+        "validation_n": 3999,
+        "validation_through": "2025-08-14 23:52:07+00:00"
+      },
+      {
+        "train_n": 7759,
+        "train_through": "2025-08-14 23:52:07+00:00",
+        "validation_n": 2257,
+        "validation_through": "2025-12-24 12:51:49+00:00"
+      },
+      {
+        "train_n": 10016,
+        "train_through": "2025-12-24 12:51:49+00:00",
+        "validation_n": 3472,
+        "validation_through": "2026-04-22 23:24:35+00:00"
+      }
+    ],
+    "development_n": 13488,
+    "final_date_max": "2026-08-15 15:58:57+00:00",
+    "final_date_min": "2026-04-23 05:08:13+00:00",
+    "final_holdout_n": 4064,
+    "final_holdout_sealed_during_selection": true,
+    "protocol": "chronological_expanding_development_and_sealed_final_holdout"
+  },
+  "window_bug_fix": {
+    "rule": "attach each history candidate to the local window payload",
+    "source": "lol_kills/research/composition_signal.py",
+    "status": "fixed"
+  }
+}

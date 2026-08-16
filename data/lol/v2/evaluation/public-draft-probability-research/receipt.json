@@ -1,0 +1,91 @@
+{
+  "schema_version": "scryglass:public-draft-probability-research-receipt:v1",
+  "status": "exploratory_result",
+  "authority": "unavailable",
+  "research_only": true,
+  "promotion_status": "blocked_auc_floor",
+  "auc_floor": {
+    "threshold": 0.7,
+    "passes": false
+  },
+  "selection": {
+    "candidate_count": 10,
+    "selected_config": "full_composition_comfort",
+    "selected_on": "three expanding chronological development folds",
+    "development_mean_auc": 0.5776106313670611,
+    "development_mean_log_loss": 0.6999778803441972,
+    "workers": 8
+  },
+  "sealed_final_holdout": {
+    "consumed": true,
+    "n": 4064,
+    "date_min": "2026-04-23 05:08:13+00:00",
+    "date_max": "2026-08-15 15:58:57+00:00",
+    "auc": 0.6171567336026385,
+    "brier": 0.24188366666751188,
+    "log_loss": 0.6779925138026994,
+    "ece": 0.06151606366860174,
+    "bootstrap_reps": 200,
+    "bootstrap_95": {
+      "auc": {
+        "lower": 0.5979335736121436,
+        "mean": 0.6164480776402029,
+        "upper": 0.6361088403550694
+      },
+      "brier": {
+        "lower": 0.23639664396993218,
+        "upper": 0.24706626946175994
+      },
+      "log_loss": {
+        "lower": 0.6659138609169856,
+        "upper": 0.6894421904551268
+      }
+    }
+  },
+  "patch_transfer": {
+    "source_patch": "16.16",
+    "public_patch": "26.16",
+    "n": 7,
+    "auc": 1.0,
+    "brier": 0.1914545808490324,
+    "log_loss": 0.5562661957739051,
+    "ece": 0.3056678123846984,
+    "inference": "too_sparse_for_promotion"
+  },
+  "ablation_status": {
+    "status": "exploratory_posthoc",
+    "holdout_consumed": true,
+    "selection_was_frozen_before_ablation": true,
+    "atoms_removed_auc": 0.6168786468395684,
+    "ally_terms_removed_auc": 0.6290898269031868,
+    "counter_terms_removed_auc": 0.6211045898952052,
+    "comfort_removed_auc": 0.5459201744628535,
+    "interpretation": "posthoc diagnostics only; no new selection"
+  },
+  "scope_checks": {
+    "window_assignment_bug": "fixed_and_tested",
+    "forbidden_strength_live_state_segments": "absent_from_feature_contract",
+    "outcome_or_r9e_features": "excluded_by_contract",
+    "final_holdout_used_for_selection": false,
+    "final_holdout_used_for_posthoc_diagnostics": true
+  },
+  "source": {
+    "players_sha256": "0fb9aff49feed1b5ed2fe5c2d21cd5587f7a7cc9d60783a75f4da8a8846cfeb0",
+    "source_rows": 175620,
+    "source_games": 17562,
+    "prepared_games": 17552,
+    "source_date_min": "2025-01-11 11:11:24+00:00",
+    "source_date_max": "2026-08-15 15:58:57+00:00",
+    "source_16_16_maps": 7,
+    "atom_file_sha256": "bff75179d93a6c5d9bf4bc3927e1ca7b12f31335cef9249449f2595093ed1942",
+    "atom_artifact_sha256": "e5d37ddf4a20fcbdc1e2fc90fb0bd988be82b3563a8ec8bc3a21792313a239a8"
+  },
+  "execution": {
+    "report_sha256": "329cd99965a0f2bb77b377ec7d1a39477d12f5be4bdafef4a833d868d8a0fda0",
+    "posthoc_sha256": "84f430bccb52b44cca9247b6763c13eb3407894e8da4d3c5c6ade24724e35e90",
+    "run_code_sha256": "5bd7863ea2a1d26e80f79829f6b80e01405f2169be887f6be7a200372a3d47cf",
+    "current_code_sha256": "65061347c29a206d95d7595d7ca81bc0253723a844858d5fa40ef606b469201b",
+    "window_bug_fix_source_sha256": "41a60709926cc81c3c8e3b115d5af23d0783e47b4a0a9142c1b0c64443635ced"
+  },
+  "next_valid_step": "Keep this holdout consumed. Define a later prospective holdout, freeze the candidate protocol before opening it, and use a declared comfort receipt or remove historical pick-count comfort before any promotion decision."
+}
