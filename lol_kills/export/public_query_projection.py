@@ -205,6 +205,20 @@ def _contains_draft_field(value: object) -> bool:
     return False
 
 
+def _without_gold_fields(value: object) -> object:
+    """Remove observed and final gold values from public game payloads."""
+
+    if isinstance(value, Mapping):
+        return {
+            str(key): _without_gold_fields(child)
+            for key, child in value.items()
+            if not str(key).strip().casefold().startswith("gold")
+        }
+    if isinstance(value, list):
+        return [_without_gold_fields(child) for child in value]
+    return value
+
+
 def reject_draft_fields(value: object) -> None:
     """Reject predictive Draft fields at the publication boundary."""
 
@@ -1141,7 +1155,7 @@ def _game_rows(
         year = _integer(played_at[:4]) if len(played_at) >= 4 else 0
         payload = {
             "schema_version": "scryglass:game-query-row:v1",
-            **game,
+            **_without_gold_fields(game),
         }
         rows.append(
             _row(
