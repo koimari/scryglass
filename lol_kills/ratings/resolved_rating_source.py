@@ -349,12 +349,33 @@ def _safe_artifact_path(value: Path, allowed_root: Path | str | None) -> Path:
     return path
 
 
-def _streaming_file_sha256(path: Path) -> str:
+def _streaming_file_sha256(path: Path, *, allowed_root: Path | None = None) -> str:
     try:
-        descriptor = os.open(
-            str(path),
-            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
-        )
+        if allowed_root is None:
+            descriptor = os.open(
+                str(path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            )
+        else:
+            descriptor = os.open(
+                str(allowed_root),
+                os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0),
+            )
+            parts = path.relative_to(allowed_root).parts
+            for part in parts[:-1]:
+                next_descriptor = os.open(
+                    part,
+                    os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=descriptor,
+                )
+                os.close(descriptor)
+                descriptor = next_descriptor
+            final_descriptor = os.open(
+                parts[-1],
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=descriptor,
+            )
+            os.close(descriptor)
+            descriptor = final_descriptor
     except OSError as exc:
         raise ResolvedRatingSourceError(
             "rating source artifact is unavailable"
@@ -393,7 +414,10 @@ def _source_artifact_sha256(
         return sha256_bytes(value)
     if isinstance(value, (Path, os.PathLike, str)):
         path = _safe_artifact_path(Path(value), allowed_root)
-        return _streaming_file_sha256(path)
+        return _streaming_file_sha256(
+            path,
+            allowed_root=Path(allowed_root).absolute() if allowed_root is not None else None,
+        )
     if isinstance(value, Mapping) or isinstance(value, list):
         return canonical_sha256(value)
     raise ResolvedRatingSourceError(
@@ -473,6 +497,11 @@ def _timestamp(value: Any, field: str) -> tuple[str, datetime]:
         parsed = value
     elif isinstance(value, str) and value.strip():
         text = value.strip()
+        if not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+            text,
+        ):
+            raise ResolvedRatingSourceError(f"{field} must be RFC-3339")
         fraction = re.search(r"\.(\d+)(?=(?:Z|[+-]\d{2}:?\d{2})$)", text)
         if fraction:
             digits = fraction.group(1)
@@ -1088,19 +1117,51 @@ def _build_strict(
     batch_timestamp: Any | None = None,
     batch_game_ids: Sequence[Any] | None = None,
     batch_receipt_sha256: str | None = None,
+    source_sha256: str | None = None,
 ) -> dict[str, Any]:
     normalized_game_id = _game_id(None, game_id)
     map_timestamp, map_dt = _timestamp(game_timestamp, "map.timestamp")
     identity = _source_identity(source_identity)
-    source_sha256 = _source_artifact_sha256(
-        source_artifact,
-        allowed_root=allowed_root,
-    )
+    if source_sha256 is None:
+        source_sha256 = _source_artifact_sha256(
+            source_artifact,
+            allowed_root=allowed_root,
+        )
     normalized_values, rating_timestamp, _ = _rating_values(
         rating_values,
         map_timestamp=map_dt,
         expected_game_id=normalized_game_id,
     )
+    if "rating_source_available" in rating_values and _availability(
+        rating_values["rating_source_available"]
+    ) == 0.0:
+        raise ResolvedRatingSourceError("rating row declares source unavailable")
+    if "rating_values_available" in rating_values and _availability(
+        rating_values["rating_values_available"]
+    ) == 0.0:
+        normalized_values = {field: None for field in RATING_VALUE_FIELDS}
+    if "team_rating_available" in rating_values and _availability(
+        rating_values["team_rating_available"]
+    ) == 0.0:
+        normalized_values["base_team_logit"] = None
+        normalized_values["team_rating_diff_scaled"] = None
+    if "player_rating_available" in rating_values and _availability(
+        rating_values["player_rating_available"]
+    ) == 0.0:
+        normalized_values["base_player_logit"] = None
+        normalized_values["player_rating_diff_scaled"] = None
+        normalized_values["player_lineup_complete"] = None
+    if "team_rating_missing" in rating_values and _availability(
+        rating_values["team_rating_missing"]
+    ) == 1.0:
+        normalized_values["base_team_logit"] = None
+        normalized_values["team_rating_diff_scaled"] = None
+    if "player_rating_missing" in rating_values and _availability(
+        rating_values["player_rating_missing"]
+    ) == 1.0:
+        normalized_values["base_player_logit"] = None
+        normalized_values["player_rating_diff_scaled"] = None
+        normalized_values["player_lineup_complete"] = None
     roster_payload = _roster_payload(
         game_id=normalized_game_id,
         timestamp=map_timestamp,
@@ -1109,6 +1170,9 @@ def _build_strict(
     )
     roster_sha256 = canonical_sha256(roster_payload)
     normalized_batch_timestamp = batch_timestamp or map_timestamp
+    _, batch_dt = _timestamp(normalized_batch_timestamp, "batch.timestamp")
+    if batch_dt != map_dt:
+        raise ResolvedRatingSourceError("batch timestamp must equal map timestamp")
     if batch_game_ids is None:
         batch_game_ids = (normalized_game_id,)
     expected_batch_receipt = build_rating_batch_receipt_sha256(
@@ -1355,10 +1419,8 @@ def enrich_rating_frame(
         source_sha256 = None
     output: list[dict[str, Any]] = []
     for raw_map, game_id, timestamp, timestamp_error in map_context:
-        row = {
-            "game_uid": game_id,
-            "date": timestamp,
-        }
+        row = dict(raw_map)
+        row.update({"game_uid": game_id, "date": timestamp})
         try:
             if not game_id:
                 raise ResolvedRatingSourceError("map row has no game ID")
@@ -1404,6 +1466,7 @@ def enrich_rating_frame(
                 batch_timestamp=timestamp,
                 batch_game_ids=batches[timestamp],
                 batch_receipt_sha256=batch_receipts[timestamp],
+                source_sha256=source_sha256,
             )
         except ResolvedRatingSourceError as exc:
             if strict:

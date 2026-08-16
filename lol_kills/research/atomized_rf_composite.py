@@ -305,14 +305,18 @@ def _side(value: Any) -> str:
 
 
 def _player_id(row: Mapping[str, Any]) -> str:
-    value = str(row.get("playerid") or row.get("player_id") or "").strip()
+    value = str(
+        row.get("playerid") or row.get("player_id") or row.get("player") or ""
+    ).strip()
     if not value.startswith("oe:player:"):
         raise AtomizedResearchError("stable OE player ID is required")
     return value
 
 
 def _team_id(row: Mapping[str, Any]) -> str:
-    value = str(row.get("teamid") or "").strip()
+    value = str(
+        row.get("teamid") or row.get("team_id") or row.get("team") or ""
+    ).strip()
     if not value.startswith("oe:team:"):
         raise AtomizedResearchError("stable OE team ID is required")
     return value
@@ -500,10 +504,17 @@ def _resolved_roster_sha256(
     seen_slots: set[tuple[str, str]] = set()
     for row in rows:
         side = _side(row.get("side")).casefold()
-        role = str(row.get("position") or row.get("role") or "").strip().casefold()
+        role = str(
+            row.get("position")
+            or row.get("position_name")
+            or row.get("role")
+            or ""
+        ).strip().casefold()
         team = _team_id(row)
         player = _player_id(row)
-        champion = str(row.get("champion") or "").strip().casefold()
+        champion = str(
+            row.get("champion") or row.get("champion_name") or ""
+        ).strip().casefold()
         if role not in RATING_ROLES or not champion:
             raise AtomizedResearchError("rating roster role or champion is invalid")
         if (side, role) in seen_slots or player in seen_players or champion in seen_champions:
@@ -1236,10 +1247,12 @@ def build_layer_a_matrix(
     player_groups = {key: value.copy() for key, value in players.groupby("game_uid", sort=False)}
     team_groups = {key: value.copy() for key, value in teams.groupby("game_uid", sort=False)}
     base_by_id = base.set_index("game_uid", drop=False)
-    base_team_probability_by_id = {
-        str(row["game_uid"]): float(1.0 / (1.0 + math.exp(-float(row["base_team_logit"]))))
-        for row in base.to_dict("records")
-    }
+    base_team_probability_by_id = {}
+    for row in base.to_dict("records"):
+        logit = _finite(row.get("base_team_logit"))
+        base_team_probability_by_id[str(row["game_uid"])] = (
+            0.5 if logit is None else float(1.0 / (1.0 + math.exp(-logit)))
+        )
     base_player_probability_by_id = {
         str(row["game_uid"]): float(
             1.0 / (1.0 + math.exp(-float(row["base_player_logit"])))
