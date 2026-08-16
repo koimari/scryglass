@@ -1,44 +1,78 @@
 {
-  "schema_version": "scryglass:public-draft-probability-research-receipt:v1",
-  "status": "exploratory_result",
+  "schema_version": "scryglass:public-draft-probability-research-receipt:v2",
+  "status": "consumed_holdout_reproducibility_only",
   "authority": "unavailable",
   "research_only": true,
-  "promotion_status": "blocked_auc_floor",
-  "auc_floor": {
-    "threshold": 0.7,
-    "passes": false
+  "promotion_eligible": false,
+  "promotion_status": "blocked",
+  "audit_corrections": {
+    "false_window_bug_claim_removed": true,
+    "composition_antisymmetric": true,
+    "draft_intercept": 0.0,
+    "context_block_separate": true,
+    "canonical_maps_deduplicated_before_features": true,
+    "stable_player_ids_required": true,
+    "equal_timestamps_batched": true,
+    "comfort_excluded": true,
+    "atom_snapshots_routed_by_source_patch": true,
+    "bootstrap_unit": "series",
+    "duplicate_candidate_configs_removed": true,
+    "holdout_fraction_honored_when_no_fixed_cutoff_is_supplied": true,
+    "subgroup_fields_kept_separate": true,
+    "feature_prefix_allowlist_enforced": true,
+    "bootstrap_center_label": "median",
+    "tests_are_behavioral": true
   },
-  "selection": {
-    "candidate_count": 10,
-    "selected_config": "full_composition_comfort",
-    "selected_on": "three expanding chronological development folds",
-    "development_mean_auc": 0.5776106313670611,
-    "development_mean_log_loss": 0.6999778803441972,
-    "workers": 8
+  "source": {
+    "players_sha256": "0fb9aff49feed1b5ed2fe5c2d21cd5587f7a7cc9d60783a75f4da8a8846cfeb0",
+    "source_rows": 175620,
+    "canonical_maps_seen": 17562,
+    "canonical_maps_accepted": 16567,
+    "prepared_games": 16567,
+    "missing_stable_player_id_maps_excluded": 985,
+    "ambiguous_maps_excluded": 10,
+    "duplicate_rows_removed": 0,
+    "atom_manifest_sha256": "4860a3f3982561956ba8e6b80bc24af716da224638218b2c909274e543e9bcd7"
   },
-  "sealed_final_holdout": {
+  "development_selection": {
+    "development_n": 12794,
+    "candidate_count": 7,
+    "workers": 8,
+    "selected_config": "role_champion_context",
+    "mean_auc": 0.5436993488404169,
+    "mean_log_loss": 0.6951860393081898,
+    "atom_candidates": "unavailable_no_supported_development_maps"
+  },
+  "consumed_holdout": {
+    "fixed_start": "2026-04-23T05:08:13Z",
     "consumed": true,
-    "n": 4064,
+    "selection_or_tuning_permitted": false,
+    "n": 3773,
     "date_min": "2026-04-23 05:08:13+00:00",
     "date_max": "2026-08-15 15:58:57+00:00",
-    "auc": 0.6171567336026385,
-    "brier": 0.24188366666751188,
-    "log_loss": 0.6779925138026994,
-    "ece": 0.06151606366860174,
+    "auc": 0.563856976696731,
+    "brier": 0.24618747728489138,
+    "log_loss": 0.6855739999391955,
+    "ece": 0.03794418078640432,
+    "draft_component_auc": 0.5642367487881302,
+    "context_component_auc": 0.5005058904351849,
+    "series_clusters": 1691,
     "bootstrap_reps": 200,
     "bootstrap_95": {
       "auc": {
-        "lower": 0.5979335736121436,
-        "mean": 0.6164480776402029,
-        "upper": 0.6361088403550694
+        "lower": 0.5458980449482342,
+        "median": 0.5658419788776601,
+        "upper": 0.5804057558579604
       },
       "brier": {
-        "lower": 0.23639664396993218,
-        "upper": 0.24706626946175994
+        "lower": 0.24358034528540584,
+        "median": 0.24596425070277358,
+        "upper": 0.2489692581520127
       },
       "log_loss": {
-        "lower": 0.6659138609169856,
-        "upper": 0.6894421904551268
+        "lower": 0.6802033643742009,
+        "median": 0.6850803329806092,
+        "upper": 0.6912607663376845
       }
     }
   },
@@ -46,46 +80,36 @@
     "source_patch": "16.16",
     "public_patch": "26.16",
     "n": 7,
-    "auc": 1.0,
-    "brier": 0.1914545808490324,
-    "log_loss": 0.5562661957739051,
-    "ece": 0.3056678123846984,
-    "inference": "too_sparse_for_promotion"
+    "atom_status": "available",
+    "auc": 0.8333333333333334,
+    "brier": 0.2233676468353188,
+    "log_loss": 0.6392841548098688,
+    "ece": 0.3341995979829182,
+    "inference": "too_sparse_for_selection_or_promotion"
   },
-  "ablation_status": {
-    "status": "exploratory_posthoc",
-    "holdout_consumed": true,
-    "selection_was_frozen_before_ablation": true,
-    "atoms_removed_auc": 0.6168786468395684,
-    "ally_terms_removed_auc": 0.6290898269031868,
-    "counter_terms_removed_auc": 0.6211045898952052,
-    "comfort_removed_auc": 0.5459201744628535,
-    "interpretation": "posthoc diagnostics only; no new selection"
+  "runtime": {
+    "wall_seconds": 17.01,
+    "user_cpu_seconds": 45.86,
+    "system_cpu_seconds": 2.58,
+    "workers": 8
   },
-  "scope_checks": {
-    "window_assignment_bug": "fixed_and_tested",
-    "forbidden_strength_live_state_segments": "absent_from_feature_contract",
-    "outcome_or_r9e_features": "excluded_by_contract",
-    "final_holdout_used_for_selection": false,
-    "final_holdout_used_for_posthoc_diagnostics": true
+  "verification": {
+    "tests": "45 passed",
+    "python_compile": "passed",
+    "identical_replays": 2,
+    "reports_byte_identical": true,
+    "report_sha256": "a87cc3be36f02e1be1361b8aa3d50b7e59e42612375251d3db83f2526499982f",
+    "code_sha256": "98adbfae686ba110815b744053309f2c8695aef710a1f3ef739ec73d758ff4ef",
+    "test_sha256": "fa171f4719b5b3bedf9ba2ab3b848a89fec72cef5bf95ee3b657ff9cd8df31f5"
   },
-  "source": {
-    "players_sha256": "0fb9aff49feed1b5ed2fe5c2d21cd5587f7a7cc9d60783a75f4da8a8846cfeb0",
-    "source_rows": 175620,
-    "source_games": 17562,
-    "prepared_games": 17552,
-    "source_date_min": "2025-01-11 11:11:24+00:00",
-    "source_date_max": "2026-08-15 15:58:57+00:00",
-    "source_16_16_maps": 7,
-    "atom_file_sha256": "bff75179d93a6c5d9bf4bc3927e1ca7b12f31335cef9249449f2595093ed1942",
-    "atom_artifact_sha256": "e5d37ddf4a20fcbdc1e2fc90fb0bd988be82b3563a8ec8bc3a21792313a239a8"
-  },
-  "execution": {
-    "report_sha256": "329cd99965a0f2bb77b377ec7d1a39477d12f5be4bdafef4a833d868d8a0fda0",
-    "posthoc_sha256": "84f430bccb52b44cca9247b6763c13eb3407894e8da4d3c5c6ade24724e35e90",
-    "run_code_sha256": "5bd7863ea2a1d26e80f79829f6b80e01405f2169be887f6be7a200372a3d47cf",
-    "current_code_sha256": "65061347c29a206d95d7595d7ca81bc0253723a844858d5fa40ef606b469201b",
-    "window_bug_fix_source_sha256": "41a60709926cc81c3c8e3b115d5af23d0783e47b4a0a9142c1b0c64443635ced"
-  },
-  "next_valid_step": "Keep this holdout consumed. Define a later prospective holdout, freeze the candidate protocol before opening it, and use a declared comfort receipt or remove historical pick-count comfort before any promotion decision."
+  "remaining_blockers": [
+    "The final holdout is consumed. A later prospective holdout must be frozen before further model selection.",
+    "Development AUC is 0.54370. The consumed-holdout diagnostic AUC is 0.56386. Both are below the 0.70 research floor.",
+    "No development map has a supported hash-bound atom snapshot. Atom candidates cannot enter development selection.",
+    "The 16.16 atom transfer has seven maps. This is too sparse for inference.",
+    "The stable identity receipt is absent. Player champion comfort remains excluded.",
+    "The source has no event, tier, or competition-scope labels for all 3773 consumed-holdout maps.",
+    "Stable player IDs are missing on 985 canonical maps. Those maps remain excluded."
+  ],
+  "next_valid_step": "Freeze a later prospective holdout after stable identity coverage and source-patch atom coverage improve. Select candidates on development data only. Open the prospective holdout once."
 }

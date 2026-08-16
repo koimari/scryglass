@@ -2791,14 +2791,11 @@ def evaluate_composition_signal(
                 shrink=history_calibrate_shrink,
                 fold_c=history_c,
             )
-        # Attach the history candidate to the window just evaluated.  Using
-        # windows[-1] here silently overwrote the last window on every pass,
-        # which made pooled reports contain only the final holdout.
-        window_payload["draft_plus_team_history"] = _metrics(y, history_probabilities)
-        window_payload["draft_plus_team_history"]["probabilities"] = [
+        windows[-1]["draft_plus_team_history"] = _metrics(y, history_probabilities)
+        windows[-1]["draft_plus_team_history"]["probabilities"] = [
             float(value) for value in history_probabilities
         ]
-        window_payload["draft_plus_team_history"]["outcomes"] = list(y)
+        windows[-1]["draft_plus_team_history"]["outcomes"] = list(y)
     if not windows:
         raise CompositionSignalError("chronological evaluation did not produce a valid holdout")
     bootstrap = _match_delta_intervals(
