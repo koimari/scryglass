@@ -21,7 +21,7 @@ import math
 import re
 import subprocess
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, MutableMapping, Sequence
@@ -35,8 +35,8 @@ from sklearn.metrics import brier_score_loss, log_loss, mean_squared_error, roc_
 from lol_kills.etl.aliases import normalize_team
 
 
-SCHEMA_VERSION = "scryglass:atomized-rf-composite-research:v1"
-FEATURE_SCHEMA_VERSION = "scryglass:atomized-rf-layer-a:v1"
+SCHEMA_VERSION = "scryglass:atomized-rf-composite-research:v2"
+FEATURE_SCHEMA_VERSION = "scryglass:atomized-rf-layer-a:v2"
 MECHANICS_SCHEMA_VERSION = "scryglass:exact-lcc-mechanics-atoms:v1"
 TRAIN_END = pd.Timestamp("2026-05-01", tz="UTC")
 VALIDATION_END = pd.Timestamp("2026-07-01", tz="UTC")
@@ -54,6 +54,17 @@ LCC_26_15_SEED_COMMIT = "f0718a98c29dcf5559ffa98c46a487cd52d9c9e3"
 RAW_2026_IDENTITY_SHA256 = "9467bb8d3f15571a2445a4728d2d38290fa78079c4fe6b2d1037b54d0b988a65"
 RAW_2026_DRIVE_REVISION = "0B_SP330uQdQ_cHhDN1h6RVI3NUkraUNyZWprQnVDSThEeE5jPQ"
 SMOOTHING_PRIOR_GAMES = 5.0
+
+FEATURE_COVERAGE_THRESHOLDS: dict[str, float] = {
+    "team_rating": 0.95,
+    "player_rating": 0.95,
+    "player_exact_performance": 0.50,
+    "exact_ally_enemy_pairs": 0.35,
+    "checkpoint_forecasts": 0.50,
+    "parity_conditioned_performance": 0.20,
+    "team_momentum": 0.50,
+    "patch_exact_performance": 0.35,
+}
 
 HISTORICAL_METRICS: dict[str, str] = {
     **{
@@ -99,11 +110,18 @@ def _metric_columns(prefixes: Sequence[str], *, checkpoints: Sequence[int] | Non
 
 
 GROUP_COLUMNS: dict[str, tuple[str, ...]] = {
-    "team_rating": ("base_team_logit", "team_rating_diff_scaled"),
+    "team_rating": (
+        "base_team_logit",
+        "team_rating_diff_scaled",
+        "team_rating_available",
+        "team_rating_missing",
+    ),
     "player_rating": (
         "base_player_logit",
         "player_rating_diff_scaled",
         "player_lineup_complete",
+        "player_rating_available",
+        "player_rating_missing",
     ),
     "player_exact_performance": _metric_columns(("history_player_champion",)),
     "exact_ally_enemy_pairs": _metric_columns(
@@ -115,8 +133,14 @@ GROUP_COLUMNS: dict[str, tuple[str, ...]] = {
         for value in (
             f"forecast_gold_diff_{checkpoint}",
             f"forecast_gold_support_{checkpoint}",
+            f"forecast_gold_player_coverage_{checkpoint}",
+            f"forecast_gold_available_{checkpoint}",
+            f"forecast_gold_missing_{checkpoint}",
             f"forecast_xp_diff_{checkpoint}",
             f"forecast_xp_support_{checkpoint}",
+            f"forecast_xp_player_coverage_{checkpoint}",
+            f"forecast_xp_available_{checkpoint}",
+            f"forecast_xp_missing_{checkpoint}",
         )
     )
     + tuple(
@@ -124,7 +148,12 @@ GROUP_COLUMNS: dict[str, tuple[str, ...]] = {
         for first, second in zip(CHECKPOINTS, CHECKPOINTS[1:])
         for value in (f"forecast_gold_slope_{first}_{second}", f"forecast_xp_slope_{first}_{second}")
     )
-    + ("forecast_peak_checkpoint", "forecast_peak_magnitude"),
+    + (
+        "forecast_peak_checkpoint_signed",
+        "forecast_peak_magnitude",
+        "forecast_curve_available",
+        "forecast_curve_missing",
+    ),
     "parity_conditioned_performance": _metric_columns(
         ("parity_player_champion",), checkpoints=CHECKPOINTS
     ),
@@ -132,8 +161,13 @@ GROUP_COLUMNS: dict[str, tuple[str, ...]] = {
         "team_momentum_points_diff",
         "player_momentum_points_diff",
         "team_momentum_count_difference",
+        "team_momentum_coverage",
+        "team_momentum_available",
+        "team_momentum_missing",
         "player_momentum_count_difference",
         "player_momentum_coverage",
+        "player_momentum_available",
+        "player_momentum_missing",
     ),
     "patch_exact_performance": _metric_columns(
         ("patch_player_champion", "patch_champion")
@@ -142,6 +176,9 @@ GROUP_COLUMNS: dict[str, tuple[str, ...]] = {
 MODEL_COLUMNS = ("blue_side",) + tuple(
     column for columns in GROUP_COLUMNS.values() for column in columns
 )
+FEATURE_AVAILABILITY_COLUMNS = {
+    group: f"availability_{group}" for group in GROUP_COLUMNS
+}
 TARGET_PREFIX = "target_"
 LOCKED_BASELINE_COLUMNS = (
     "base_team_logit",
@@ -299,6 +336,166 @@ def _side_difference(
     return blue - red, min(blue_n, red_n)
 
 
+def _equal_weight_team_forecast(
+    state: Mapping[Any, RunningStat], keys: Iterable[Any]
+) -> tuple[float, int, float, int]:
+    """Return a five-player team total with one equal term per current player."""
+
+    keys = list(keys)
+    values = [state.get(key) for key in keys]
+    observed = [value for value in values if value is not None and value.count]
+    coverage = len(observed) / len(keys) if keys else 0.0
+    support = min((value.count for value in observed), default=0)
+    if not keys or len(observed) != len(keys):
+        return 0.0, support, coverage, 1
+    return float(sum(value.mean for value in observed)), support, coverage, 0
+
+
+def _phase_curve_features(
+    gold_differences: Sequence[float],
+    xp_differences: Sequence[float],
+    *,
+    available: bool,
+) -> dict[str, float]:
+    """Derive side-antisymmetric curve fields from team-total forecasts."""
+
+    if len(gold_differences) != len(CHECKPOINTS) or len(xp_differences) != len(
+        CHECKPOINTS
+    ):
+        raise AtomizedResearchError("phase curve needs every checkpoint")
+    output: dict[str, float] = {}
+    if not available:
+        for first, second in zip(CHECKPOINTS, CHECKPOINTS[1:]):
+            output[f"forecast_gold_slope_{first}_{second}"] = 0.0
+            output[f"forecast_xp_slope_{first}_{second}"] = 0.0
+        output.update(
+            {
+                "forecast_peak_checkpoint_signed": 0.0,
+                "forecast_peak_magnitude": 0.0,
+                "forecast_curve_available": 0.0,
+                "forecast_curve_missing": 1.0,
+            }
+        )
+        return output
+    for index, (first, second) in enumerate(zip(CHECKPOINTS, CHECKPOINTS[1:])):
+        span = float(second - first)
+        output[f"forecast_gold_slope_{first}_{second}"] = (
+            float(gold_differences[index + 1]) - float(gold_differences[index])
+        ) / span
+        output[f"forecast_xp_slope_{first}_{second}"] = (
+            float(xp_differences[index + 1]) - float(xp_differences[index])
+        ) / span
+    curve = np.asarray(gold_differences, dtype=float) / 1000.0 + np.asarray(
+        xp_differences, dtype=float
+    ) / 1000.0
+    peak_index = int(np.argmax(np.abs(curve)))
+    peak = float(curve[peak_index])
+    output.update(
+        {
+            "forecast_peak_checkpoint_signed": float(
+                math.copysign(CHECKPOINTS[peak_index], peak)
+            )
+            if peak
+            else 0.0,
+            "forecast_peak_magnitude": peak,
+            "forecast_curve_available": 1.0,
+            "forecast_curve_missing": 0.0,
+        }
+    )
+    return output
+
+
+def _unique_player_map_support(
+    state: Mapping[tuple[str, str], set[str]], keys: Iterable[tuple[str, str]]
+) -> int:
+    """Count distinct prior player-map observations once across metric families."""
+
+    observations = {
+        (player, game_uid)
+        for player, champion in keys
+        for game_uid in state.get((player, champion), set())
+    }
+    return len(observations)
+
+
+def _locked_rating_authority(
+    base_row: Mapping[str, Any], *, identity_recovered: bool
+) -> dict[str, float]:
+    """Gate locked ratings when their player identities differ from Layer A."""
+
+    team_values = [
+        _finite(base_row.get("base_team_logit")),
+        _finite(base_row.get("team_rating_diff_scaled")),
+    ]
+    player_values = [
+        _finite(base_row.get("base_player_logit")),
+        _finite(base_row.get("player_rating_diff_scaled")),
+    ]
+    lineup_complete = _finite(base_row.get("player_lineup_complete")) == 1.0
+    team_available = all(value is not None for value in team_values)
+    player_available = (
+        not identity_recovered
+        and lineup_complete
+        and all(value is not None for value in player_values)
+    )
+    return {
+        "base_team_logit": float(team_values[0]) if team_available else 0.0,
+        "team_rating_diff_scaled": float(team_values[1]) if team_available else 0.0,
+        "team_rating_available": float(team_available),
+        "team_rating_missing": float(not team_available),
+        "base_player_logit": float(player_values[0]) if player_available else 0.0,
+        "player_rating_diff_scaled": float(player_values[1]) if player_available else 0.0,
+        "player_lineup_complete": float(player_available),
+        "player_rating_available": float(player_available),
+        "player_rating_missing": float(not player_available),
+    }
+
+
+def _momentum_features(
+    team_history: Mapping[str, deque[float]],
+    player_history: Mapping[str, deque[float]],
+    blue_team: str,
+    red_team: str,
+    blue_players: Sequence[str],
+    red_players: Sequence[str],
+) -> dict[str, float]:
+    """Build the seven-map scale-80 candidate from resolved Layer A IDs."""
+
+    blue_team_mean, blue_team_n = _recent_mean(team_history, blue_team)
+    red_team_mean, red_team_n = _recent_mean(team_history, red_team)
+    team_available = blue_team_n > 0 and red_team_n > 0
+    player_rows = [
+        _recent_mean(player_history, player)
+        for player in [*blue_players, *red_players]
+    ]
+    player_coverage = sum(count > 0 for _, count in player_rows) / 10.0
+    player_available = len(player_rows) == 10 and player_coverage == 1.0
+    blue_player_rows = player_rows[:5]
+    red_player_rows = player_rows[5:]
+    player_difference = (
+        float(np.mean([value for value, _ in blue_player_rows]))
+        - float(np.mean([value for value, _ in red_player_rows]))
+        if player_available
+        else 0.0
+    )
+    return {
+        "team_momentum_points_diff": MOMENTUM_SCALE
+        * (blue_team_mean - red_team_mean if team_available else 0.0),
+        "team_momentum_count_difference": float(blue_team_n - red_team_n),
+        "team_momentum_coverage": float(min(blue_team_n, red_team_n) / MOMENTUM_WINDOW_GAMES),
+        "team_momentum_available": float(team_available),
+        "team_momentum_missing": float(not team_available),
+        "player_momentum_points_diff": MOMENTUM_SCALE * player_difference,
+        "player_momentum_count_difference": float(
+            sum(count for _, count in blue_player_rows)
+            - sum(count for _, count in red_player_rows)
+        ),
+        "player_momentum_coverage": float(player_coverage),
+        "player_momentum_available": float(player_available),
+        "player_momentum_missing": float(not player_available),
+    }
+
+
 def _shrunk_metric_mean(
     state: Mapping[Any, RunningStat],
     global_state: Mapping[str, RunningStat],
@@ -338,6 +535,115 @@ def _emit_metric_family(
         output[f"{prefix}_{metric}"] = blue - red
         output[f"{prefix}_{metric}_support"] = min(blue_n, red_n)
         output[f"{prefix}_{metric}_missing"] = max(blue_missing, red_missing)
+
+
+def _annotate_feature_availability(matrix: pd.DataFrame) -> pd.DataFrame:
+    """Add one explicit authority flag for each model feature group."""
+
+    matrix = matrix.copy()
+
+    def any_support(prefixes: Sequence[str]) -> pd.Series:
+        columns = [
+            column
+            for column in matrix.columns
+            if column.endswith("_support")
+            and any(column.startswith(prefix) for prefix in prefixes)
+        ]
+        if not columns:
+            return pd.Series(False, index=matrix.index)
+        return matrix[columns].max(axis=1) > 0
+
+    matrix[FEATURE_AVAILABILITY_COLUMNS["team_rating"]] = matrix[
+        "team_rating_available"
+    ].astype(float)
+    matrix[FEATURE_AVAILABILITY_COLUMNS["player_rating"]] = matrix[
+        "player_rating_available"
+    ].astype(float)
+    matrix[FEATURE_AVAILABILITY_COLUMNS["player_exact_performance"]] = (
+        matrix["history_unique_player_maps_min"] > 0
+    ).astype(float)
+    matrix[FEATURE_AVAILABILITY_COLUMNS["exact_ally_enemy_pairs"]] = (
+        any_support(("history_ally_champion_pair",))
+        & any_support(("history_enemy_champion_pair",))
+    ).astype(float)
+    matrix[FEATURE_AVAILABILITY_COLUMNS["checkpoint_forecasts"]] = matrix[
+        "forecast_curve_available"
+    ].astype(float)
+    matrix[FEATURE_AVAILABILITY_COLUMNS["parity_conditioned_performance"]] = (
+        any_support(("parity_player_champion",))
+    ).astype(float)
+    matrix[FEATURE_AVAILABILITY_COLUMNS["team_momentum"]] = (
+        (matrix["team_momentum_available"] == 1)
+        & (matrix["player_momentum_available"] == 1)
+    ).astype(float)
+    matrix[FEATURE_AVAILABILITY_COLUMNS["patch_exact_performance"]] = (
+        any_support(("patch_player_champion", "patch_champion"))
+    ).astype(float)
+    return matrix
+
+
+def feature_group_coverage_report(
+    matrix: pd.DataFrame,
+    *,
+    thresholds: Mapping[str, float] = FEATURE_COVERAGE_THRESHOLDS,
+    minimum_rows: int = 20,
+) -> dict[str, Any]:
+    """Audit model-group authority across every split and league."""
+
+    work = matrix.copy()
+    work["date"] = pd.to_datetime(work["date"], utc=True, errors="raise")
+    work["split"] = np.select(
+        [work["date"] < TRAIN_END, work["date"] < VALIDATION_END],
+        ["train", "validation"],
+        default="test",
+    )
+    missing = [
+        FEATURE_AVAILABILITY_COLUMNS[group]
+        for group in thresholds
+        if FEATURE_AVAILABILITY_COLUMNS[group] not in work.columns
+    ]
+    if missing:
+        raise AtomizedResearchError(
+            f"feature group availability columns are missing: {missing}"
+        )
+
+    rows: list[dict[str, Any]] = []
+    scopes: list[tuple[str, str, pd.DataFrame]] = [("overall", "all", work)]
+    scopes.extend(
+        ("split", str(value), group)
+        for value, group in work.groupby("split", sort=True)
+    )
+    scopes.extend(
+        ("league", str(value), group)
+        for value, group in work.groupby("league", sort=True)
+    )
+    for dimension, value, group in scopes:
+        eligible = len(group) >= minimum_rows
+        for feature_group, threshold in thresholds.items():
+            coverage = float(
+                group[FEATURE_AVAILABILITY_COLUMNS[feature_group]].mean()
+            )
+            rows.append(
+                {
+                    "dimension": dimension,
+                    "value": value,
+                    "feature_group": feature_group,
+                    "rows": int(len(group)),
+                    "coverage": coverage,
+                    "missing_rate": 1.0 - coverage,
+                    "threshold": float(threshold),
+                    "eligible_for_gate": eligible,
+                    "passed": bool(coverage >= threshold) if eligible else None,
+                }
+            )
+    failures = [row for row in rows if row["passed"] is False]
+    return {
+        "minimum_rows": minimum_rows,
+        "thresholds": dict(thresholds),
+        "rows": rows,
+        "failures": failures,
+        "passed": not failures,
+    }
 
 
 def _recent_mean(history: Mapping[str, deque[float]], key: str) -> tuple[float, int]:
@@ -500,9 +806,17 @@ def build_layer_a_matrix(
     player_groups = {key: value.copy() for key, value in players.groupby("game_uid", sort=False)}
     team_groups = {key: value.copy() for key, value in teams.groupby("game_uid", sort=False)}
     base_by_id = base.set_index("game_uid", drop=False)
-    base_probability_by_id = {
+    base_team_probability_by_id = {
         str(row["game_uid"]): float(1.0 / (1.0 + math.exp(-float(row["base_team_logit"]))))
         for row in base.to_dict("records")
+    }
+    base_player_probability_by_id = {
+        str(row["game_uid"]): float(
+            1.0 / (1.0 + math.exp(-float(row["base_player_logit"])))
+        )
+        for row in base.to_dict("records")
+        if _finite(row.get("base_player_logit")) is not None
+        and _finite(row.get("player_lineup_complete")) == 1.0
     }
     series = _series_ids(maps[maps["game_uid"].isin(base_ids)].copy())
 
@@ -514,6 +828,13 @@ def build_layer_a_matrix(
     patch_player_champion: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
     patch_champion: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
     global_metric: MutableMapping[str, RunningStat] = defaultdict(RunningStat)
+    player_champion_maps: MutableMapping[tuple[str, str], set[str]] = defaultdict(set)
+    team_momentum_history: MutableMapping[str, deque[float]] = defaultdict(
+        lambda: deque(maxlen=MOMENTUM_WINDOW_GAMES)
+    )
+    player_momentum_history: MutableMapping[str, deque[float]] = defaultdict(
+        lambda: deque(maxlen=MOMENTUM_WINDOW_GAMES)
+    )
     output: list[dict[str, Any]] = []
     rejected_lineups = 0
     exclusion_reasons: dict[str, str] = {}
@@ -618,21 +939,46 @@ def build_layer_a_matrix(
                     map_row.get("patch") or lineup.iloc[0].get("patch"), map_row["date"]
                 )
                 base_row = base_by_id.loc[game_uid].to_dict()
+                identity_recovered = game_uid in (
+                    overlay_recovered_games | raw_overlay_recovered_games
+                )
+                blue_team = _team_id(blue[0])
+                red_team = _team_id(red[0])
+                blue_players = [_player_id(row) for row in blue]
+                red_players = [_player_id(row) for row in red]
                 feature_row: dict[str, Any] = {
                     **base_row,
                     "series_id": series[game_uid],
-                    # The hash-bound momentum dataset stores outcome minus the
-                    # strictly prior base probability.  Scale 80 is applied
-                    # only after the seven-map residual window is formed.
-                    "team_momentum_points_diff": MOMENTUM_SCALE
-                    * float(base_row["team_residual_diff_g7"]),
-                    "player_momentum_points_diff": MOMENTUM_SCALE
-                    * float(base_row["player_residual_diff_g7"]),
-                    "team_momentum_count_difference": float(base_row["team_count_diff_g7"]),
-                    "player_momentum_count_difference": float(base_row["player_count_diff_g7"]),
-                    "player_momentum_coverage": float(base_row["player_coverage_g7"]),
                     "source_patch": patch,
+                    **_locked_rating_authority(
+                        base_row, identity_recovered=identity_recovered
+                    ),
+                    **_momentum_features(
+                        team_momentum_history,
+                        player_momentum_history,
+                        blue_team,
+                        red_team,
+                        blue_players,
+                        red_players,
+                    ),
                 }
+                blue_unique_player_maps = _unique_player_map_support(
+                    player_champion_maps, blue_pc
+                )
+                red_unique_player_maps = _unique_player_map_support(
+                    player_champion_maps, red_pc
+                )
+                feature_row.update(
+                    {
+                        "history_unique_player_maps_blue": float(
+                            blue_unique_player_maps
+                        ),
+                        "history_unique_player_maps_red": float(red_unique_player_maps),
+                        "history_unique_player_maps_min": float(
+                            min(blue_unique_player_maps, red_unique_player_maps)
+                        ),
+                    }
+                )
                 _emit_metric_family(
                     feature_row,
                     prefix="history_player_champion",
@@ -673,6 +1019,7 @@ def build_layer_a_matrix(
                     blue_keys=[(patch, str(row["champion"])) for row in blue],
                     red_keys=[(patch, str(row["champion"])) for row in red],
                 )
+                phase_available = True
                 for checkpoint in CHECKPOINTS:
                     for metric in ("gold", "xp"):
                         state_keys_blue = [
@@ -681,9 +1028,29 @@ def build_layer_a_matrix(
                         state_keys_red = [
                             (_player_id(row), str(row["champion"]), checkpoint, metric) for row in red
                         ]
-                        value, support = _side_difference(forecast, state_keys_blue, state_keys_red)
-                        feature_row[f"forecast_{metric}_diff_{checkpoint}"] = value
-                        feature_row[f"forecast_{metric}_support_{checkpoint}"] = support
+                        blue_total, blue_support, blue_coverage, blue_missing = (
+                            _equal_weight_team_forecast(forecast, state_keys_blue)
+                        )
+                        red_total, red_support, red_coverage, red_missing = (
+                            _equal_weight_team_forecast(forecast, state_keys_red)
+                        )
+                        available = not (blue_missing or red_missing)
+                        phase_available = phase_available and available
+                        feature_row[f"forecast_{metric}_diff_{checkpoint}"] = (
+                            blue_total - red_total if available else 0.0
+                        )
+                        feature_row[f"forecast_{metric}_support_{checkpoint}"] = min(
+                            blue_support, red_support
+                        )
+                        feature_row[
+                            f"forecast_{metric}_player_coverage_{checkpoint}"
+                        ] = min(blue_coverage, red_coverage)
+                        feature_row[f"forecast_{metric}_available_{checkpoint}"] = float(
+                            available
+                        )
+                        feature_row[f"forecast_{metric}_missing_{checkpoint}"] = float(
+                            not available
+                        )
                     _emit_metric_family(
                         feature_row,
                         prefix=f"parity_player_champion_{checkpoint}",
@@ -705,27 +1072,19 @@ def build_layer_a_matrix(
                     feature_row[f"target_xp_diff_{checkpoint}"] = _finite(
                         blue_team_row.get(f"xpdiffat{checkpoint}")
                     )
-                for first, second in zip(CHECKPOINTS, CHECKPOINTS[1:]):
-                    span = float(second - first)
-                    feature_row[f"forecast_gold_slope_{first}_{second}"] = (
-                        feature_row[f"forecast_gold_diff_{second}"]
-                        - feature_row[f"forecast_gold_diff_{first}"]
-                    ) / span
-                    feature_row[f"forecast_xp_slope_{first}_{second}"] = (
-                        feature_row[f"forecast_xp_diff_{second}"]
-                        - feature_row[f"forecast_xp_diff_{first}"]
-                    ) / span
-                curve = np.asarray(
-                    [
-                        feature_row[f"forecast_gold_diff_{checkpoint}"] / 1000.0
-                        + feature_row[f"forecast_xp_diff_{checkpoint}"] / 1000.0
-                        for checkpoint in CHECKPOINTS
-                    ],
-                    dtype=float,
+                feature_row.update(
+                    _phase_curve_features(
+                        [
+                            feature_row[f"forecast_gold_diff_{checkpoint}"]
+                            for checkpoint in CHECKPOINTS
+                        ],
+                        [
+                            feature_row[f"forecast_xp_diff_{checkpoint}"]
+                            for checkpoint in CHECKPOINTS
+                        ],
+                        available=phase_available,
+                    )
                 )
-                peak_index = int(np.argmax(curve))
-                feature_row["forecast_peak_checkpoint"] = float(CHECKPOINTS[peak_index])
-                feature_row["forecast_peak_magnitude"] = float(curve[peak_index])
                 output.append(feature_row)
             pending.append((map_row, lineup, team_rows))
 
@@ -742,21 +1101,44 @@ def build_layer_a_matrix(
             y_blue = int(map_row["y_blue_win"])
             for side in ("Blue", "Red"):
                 side_result = y_blue if side == "Blue" else 1 - y_blue
-                base_probability_blue = base_probability_by_id.get(str(map_row["game_uid"]))
-                residual = None
-                if base_probability_blue is not None:
+                game_uid = str(map_row["game_uid"])
+                base_team_probability_blue = base_team_probability_by_id.get(game_uid)
+                team_residual = None
+                if base_team_probability_blue is not None:
                     base_probability = (
-                        base_probability_blue if side == "Blue" else 1.0 - base_probability_blue
+                        base_team_probability_blue
+                        if side == "Blue"
+                        else 1.0 - base_team_probability_blue
                     )
-                    residual = float(side_result) - base_probability
+                    team_residual = float(side_result) - base_probability
+                base_player_probability_blue = base_player_probability_by_id.get(game_uid)
+                player_residual = None
+                if (
+                    base_player_probability_blue is not None
+                    and game_uid
+                    not in (overlay_recovered_games | raw_overlay_recovered_games)
+                ):
+                    base_probability = (
+                        base_player_probability_blue
+                        if side == "Blue"
+                        else 1.0 - base_player_probability_blue
+                    )
+                    player_residual = float(side_result) - base_probability
                 own_rows = by_side[side]
                 enemy_rows = by_side["Red" if side == "Blue" else "Blue"]
+                if team_residual is not None:
+                    team_momentum_history[_team_id(own_rows[0])].append(team_residual)
                 for row in own_rows:
                     player = _player_id(row)
                     champion = str(row["champion"])
+                    player_champion_maps[(player, champion)].add(
+                        str(map_row["game_uid"])
+                    )
+                    if player_residual is not None:
+                        player_momentum_history[player].append(player_residual)
                     values: dict[str, float] = {}
-                    if residual is not None:
-                        values["result_residual"] = residual
+                    if team_residual is not None:
+                        values["result_residual"] = team_residual
                     for metric, source in HISTORICAL_METRICS.items():
                         if source == "__result_residual__":
                             continue
@@ -793,7 +1175,10 @@ def build_layer_a_matrix(
                                     )
                                 ].add(value)
 
-    matrix = pd.DataFrame(output).sort_values(["date", "game_uid"], kind="stable").reset_index(drop=True)
+    matrix = pd.DataFrame(output).sort_values(
+        ["date", "game_uid"], kind="stable"
+    ).reset_index(drop=True)
+    matrix = _annotate_feature_availability(matrix)
     coverage = len(matrix) / len(base)
     if coverage < 0.85:
         raise AtomizedResearchError(
@@ -839,6 +1224,7 @@ def build_layer_a_matrix(
         for row in rows
         if row["total"] >= 20 and row["coverage"] < max(0.75, coverage - 0.15)
     ]
+    feature_coverage = feature_group_coverage_report(matrix)
     _validate_no_current_state_features(MODEL_COLUMNS)
     if matrix[list(MODEL_COLUMNS)].isna().any().any():
         raise AtomizedResearchError("model feature matrix contains missing values")
@@ -886,22 +1272,30 @@ def build_layer_a_matrix(
         },
         "coverage_bias": coverage_bias,
         "material_undercoverage": material_undercoverage,
+        "feature_group_coverage": feature_coverage,
         "evaluation_gate": (
             "test_blocked_material_coverage_bias"
             if material_undercoverage
-            else "eligible"
+            else (
+                "test_blocked_feature_group_coverage"
+                if not feature_coverage["passed"]
+                else "eligible"
+            )
         ),
         "columns": list(MODEL_COLUMNS),
         "feature_groups": {key: list(value) for key, value in GROUP_COLUMNS.items()},
         "feature_authority": {
             "team_rating": {
-                "fields": ["base_team_logit", "team_rating_diff_scaled"],
+                "fields": list(GROUP_COLUMNS["team_rating"]),
                 "source": "hash-bound locked momentum dataset",
+                "missingness": "explicit available and missing flags",
                 "temporal_cutoff": "strictly before map",
             },
             "player_rating": {
-                "fields": ["base_player_logit", "player_rating_diff_scaled", "player_lineup_complete"],
+                "fields": list(GROUP_COLUMNS["player_rating"]),
                 "source": "hash-bound locked momentum dataset",
+                "identity_rule": "unavailable when the locked rating row did not use the resolved Layer A player IDs",
+                "missingness": "neutral numeric value with an explicit missing flag",
                 "temporal_cutoff": "strictly before map",
             },
             "historical_statistical_atoms": {
@@ -925,7 +1319,13 @@ def build_layer_a_matrix(
                     for checkpoint in CHECKPOINTS
                     for metric in ("gold", "xp")
                 ],
-                "derived_outputs": ["checkpoint slopes", "peak checkpoint", "peak magnitude"],
+                "aggregation": "one equal-weight term per current player; blue team total minus red team total",
+                "derived_outputs": [
+                    "checkpoint slopes",
+                    "signed peak checkpoint",
+                    "signed peak magnitude",
+                ],
+                "availability": "explicit per checkpoint and summarized by league",
                 "current_checkpoint_use": "target only",
                 "source_sha256": sources["players"],
                 "temporal_cutoff": "strictly before map",
@@ -941,8 +1341,8 @@ def build_layer_a_matrix(
             "momentum": {
                 "fields": list(GROUP_COLUMNS["team_momentum"]),
                 "definition": "seven-map mean of outcome minus strictly prior base probability, scaled by 80",
-                "default_when_receipt_disabled": 0,
-                "receipt_enabled_in_research_matrix": True,
+                "identity_rule": "rebuilt from the same resolved team and player IDs as Layer A",
+                "missingness": "neutral numeric value with explicit coverage and missing flags",
                 "source_sha256": sources["base_dataset"],
                 "temporal_cutoff": "strictly before map",
             },
@@ -1185,45 +1585,106 @@ def _expanding_series_folds(
     return folds
 
 
+def _calibration_outer_audit(
+    fold_probabilities: Sequence[np.ndarray],
+    fold_targets: Sequence[np.ndarray],
+) -> dict[str, Any]:
+    """Accept calibration only after it improves both proper scores per outer fold."""
+
+    if len(fold_probabilities) != len(fold_targets) or len(fold_probabilities) < 2:
+        raise AtomizedResearchError("calibration audit needs two matched outer folds")
+    prior_probability: list[np.ndarray] = []
+    prior_targets: list[np.ndarray] = []
+    rows: list[dict[str, Any]] = []
+    for index, (probability, target) in enumerate(
+        zip(fold_probabilities, fold_targets)
+    ):
+        probability = np.clip(np.asarray(probability, dtype=float), 1e-5, 1 - 1e-5)
+        target = np.asarray(target, dtype=int)
+        if index:
+            fit_probability = np.concatenate(prior_probability)
+            fit_target = np.concatenate(prior_targets)
+            if len(np.unique(fit_target)) < 2:
+                rows.append(
+                    {
+                        "outer_fold": index + 1,
+                        "accepted": False,
+                        "reason": "prior calibration rows have one outcome class",
+                    }
+                )
+            else:
+                fit_logits = np.log(fit_probability / (1 - fit_probability))
+                calibrator = LogisticRegression(C=1.0, random_state=RANDOM_SEED)
+                calibrator.fit(fit_logits.reshape(-1, 1), fit_target)
+                logits = np.log(probability / (1 - probability))
+                calibrated = calibrator.predict_proba(logits.reshape(-1, 1))[:, 1]
+                raw_metrics = metric_report(target, probability)
+                calibrated_metrics = metric_report(target, calibrated)
+                accepted = bool(
+                    calibrated_metrics["brier"] < raw_metrics["brier"]
+                    and calibrated_metrics["log_loss"] < raw_metrics["log_loss"]
+                )
+                rows.append(
+                    {
+                        "outer_fold": index + 1,
+                        "accepted": accepted,
+                        "raw": raw_metrics,
+                        "calibrated": calibrated_metrics,
+                    }
+                )
+        prior_probability.append(probability)
+        prior_targets.append(target)
+    accepted = bool(rows) and all(row["accepted"] for row in rows)
+    return {
+        "accepted": accepted,
+        "acceptance_rule": "Brier score and log loss improve in every development outer fold",
+        "outer_folds": rows,
+        "learner_family": "same frozen RandomForest configuration",
+    }
+
+
 def _group_calibrator(
     train: pd.DataFrame,
     columns: Sequence[str],
     *,
     config: RFConfig,
-) -> tuple[LogisticRegression, list[dict[str, Any]]]:
-    oof: list[float] = []
-    targets: list[int] = []
-    audit: list[dict[str, Any]] = []
-    calibration_config = RFConfig(
-        n_estimators=min(config.n_estimators, 250),
-        max_depth=config.max_depth,
-        min_samples_leaf=config.min_samples_leaf,
-        max_features=config.max_features,
-        class_weight=config.class_weight,
-        bootstrap=config.bootstrap,
-        max_samples=config.max_samples,
-    )
+) -> tuple[LogisticRegression | None, dict[str, Any]]:
+    fold_probabilities: list[np.ndarray] = []
+    fold_targets: list[np.ndarray] = []
+    fold_receipts: list[dict[str, Any]] = []
     for train_index, validation_index, fold_audit in _expanding_series_folds(train):
-        model = _fit_rf(train.iloc[train_index], columns, config=calibration_config)
-        oof.extend(
-            model.predict_proba(train.iloc[validation_index][list(columns)].astype(float))[:, 1]
+        model = _fit_rf(train.iloc[train_index], columns, config=config)
+        fold_probabilities.append(
+            model.predict_proba(
+                train.iloc[validation_index][list(columns)].astype(float)
+            )[:, 1]
         )
-        targets.extend(train.iloc[validation_index]["y"].astype(int).tolist())
-        audit.append(fold_audit)
-    raw = np.clip(np.asarray(oof, dtype=float), 1e-5, 1 - 1e-5)
+        fold_targets.append(
+            train.iloc[validation_index]["y"].astype(int).to_numpy()
+        )
+        fold_receipts.append(fold_audit)
+    audit = _calibration_outer_audit(fold_probabilities, fold_targets)
+    audit["folds"] = fold_receipts
+    audit["config"] = config.as_dict()
+    if not audit["accepted"]:
+        return None, audit
+    raw = np.clip(np.concatenate(fold_probabilities), 1e-5, 1 - 1e-5)
+    targets = np.concatenate(fold_targets)
     logits = np.log(raw / (1 - raw))
     calibrator = LogisticRegression(C=1.0, random_state=RANDOM_SEED)
-    calibrator.fit(logits.reshape(-1, 1), np.asarray(targets, dtype=int))
+    calibrator.fit(logits.reshape(-1, 1), targets)
     return calibrator, audit
 
 
 def _calibrated_probability(
     model: RandomForestClassifier,
-    calibrator: LogisticRegression,
+    calibrator: LogisticRegression | None,
     frame: pd.DataFrame,
     columns: Sequence[str],
 ) -> np.ndarray:
     raw = np.clip(model.predict_proba(frame[list(columns)].astype(float))[:, 1], 1e-5, 1 - 1e-5)
+    if calibrator is None:
+        return raw
     logits = np.log(raw / (1 - raw))
     return calibrator.predict_proba(logits.reshape(-1, 1))[:, 1]
 
@@ -1321,6 +1782,12 @@ def _resource_config(config: RFConfig, trees: int) -> RFConfig:
         bootstrap=config.bootstrap,
         max_samples=config.max_samples,
     )
+
+
+def _matched_comparison_config(config: RFConfig) -> RFConfig:
+    """Keep the frozen learner and tree count for every full-model comparison."""
+
+    return config
 
 
 def _raw_fold_score(
@@ -1482,6 +1949,11 @@ def run_layer_a_experiment(
     started = time.perf_counter()
     matrix = matrix.copy()
     matrix["date"] = pd.to_datetime(matrix["date"], utc=True, errors="raise")
+    feature_coverage = feature_group_coverage_report(matrix)
+    if not feature_coverage["passed"]:
+        raise AtomizedResearchError(
+            "feature-group coverage gate blocks model fitting"
+        )
     train = _split(matrix, "train")
     validation = _split(matrix, "validation")
     test = _split(matrix, "test")
@@ -1528,7 +2000,7 @@ def run_layer_a_experiment(
             "config": selected.as_dict(),
             "columns": list(MODEL_COLUMNS),
             "splits": [name for name, _ in evaluation_parts],
-            "calibration": "expanding-series-sigmoid-v1",
+            "calibration": "expanding-series-sigmoid-v2-proper-score-gated",
         }
     )
     prediction_path = cache_dir / f"predictions-{prediction_key}.npz"
@@ -1548,22 +2020,23 @@ def run_layer_a_experiment(
             for name, part in evaluation_parts
         }
         np.savez_compressed(prediction_path, **probabilities)
-        _write_json(calibration_path, {"folds": calibration_audit})
+        _write_json(calibration_path, calibration_audit)
         prediction_cache_hit = False
     report: dict[str, Any] = {
         "schema_version": FEATURE_SCHEMA_VERSION,
         "estimand": "pre_match_map_outcome_composite",
         "features": list(MODEL_COLUMNS),
         "feature_groups": {key: list(value) for key, value in GROUP_COLUMNS.items()},
+        "feature_group_coverage": feature_coverage,
         "hyperparameters": selected.as_dict(),
         "search": search,
         "calibration": {
             "method": "expanding chronological whole-series sigmoid",
-            "folds": (
-                calibration_audit.get("folds", [])
-                if isinstance(calibration_audit, Mapping)
-                else calibration_audit
-            ),
+            **calibration_audit,
+        },
+        "comparison_learner": {
+            "rule": "full model, ablations, regional transfers, and shuffle control use the same frozen RF configuration",
+            "config": selected.as_dict(),
         },
         "prediction_cache": {
             "path": str(prediction_path),
@@ -1616,7 +2089,7 @@ def run_layer_a_experiment(
     }
     for group, removed in GROUP_COLUMNS.items():
         columns = [column for column in MODEL_COLUMNS if column not in removed]
-        ablation_config = _resource_config(selected, min(selected.n_estimators, 250))
+        ablation_config = _matched_comparison_config(selected)
         candidate = _fit_rf(train, columns, config=ablation_config)
         candidate_calibrator, _ = _group_calibrator(
             train, columns, config=ablation_config
@@ -1635,7 +2108,7 @@ def run_layer_a_experiment(
         regional_train = regional_train[regional_train["league"] != league]
         if len(regional_train) < 300:
             continue
-        transfer_config = _resource_config(selected, min(selected.n_estimators, 250))
+        transfer_config = _matched_comparison_config(selected)
         regional_model = _fit_rf(regional_train, MODEL_COLUMNS, config=transfer_config)
         # Calibration stays group-aware and excludes the held region.
         regional_calibrator, _ = _group_calibrator(
@@ -1659,7 +2132,9 @@ def run_layer_a_experiment(
             target = f"target_{metric}_diff_{checkpoint}"
             feature = f"forecast_{metric}_diff_{checkpoint}"
             phase_frame = test if test_eligible else validation
-            available = phase_frame[target].notna()
+            available = phase_frame[target].notna() & (
+                phase_frame[f"forecast_{metric}_available_{checkpoint}"] == 1
+            )
             report["phase_error"][str(checkpoint)][metric] = {
                 "split": "test" if test_eligible else "validation",
                 "n": int(available.sum()),
@@ -1685,12 +2160,7 @@ def run_layer_a_experiment(
             "status": "blocked",
             "reason": "material stable-identity coverage bias",
         }
-    support_columns = [
-        column
-        for column in MODEL_COLUMNS
-        if column.endswith("_support") and column in transfer_frame.columns
-    ]
-    support_total = transfer_frame[support_columns].sum(axis=1)
+    support_total = transfer_frame["history_unique_player_maps_min"].astype(float)
     low_cut = float(support_total.quantile(0.25))
     high_cut = float(support_total.quantile(0.75))
     for label, mask in (
@@ -1701,6 +2171,7 @@ def run_layer_a_experiment(
         if len(held) and held["y"].nunique() == 2:
             report["sparse_coverage"][label] = {
                 "split": "test" if test_eligible else "validation",
+                "support_unit": "unique prior player-map observations on the less-supported side",
                 "support_boundary": low_cut if label == "lowest_quartile" else high_cut,
                 **metric_report(held["y"], transfer_probability[mask.to_numpy()]),
             }
@@ -1710,7 +2181,7 @@ def run_layer_a_experiment(
     shuffled_model = _fit_rf(
         shuffled,
         MODEL_COLUMNS,
-        config=_resource_config(selected, min(selected.n_estimators, 250)),
+        config=_matched_comparison_config(selected),
     )
     report["shuffle_controls"] = {
         "training_labels": metric_report(

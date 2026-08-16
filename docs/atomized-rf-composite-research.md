@@ -12,16 +12,20 @@ The pre-match composite estimates map outcome from information available before 
 
 | Group | Exact inputs | Time rule |
 | --- | --- | --- |
-| Team rating | Prior team logit and scaled rating difference | Before map |
-| Player rating | Prior lineup logit, scaled lineup difference, lineup coverage | Before map |
+| Team rating | Prior team logit and scaled rating difference, with explicit authority flags | Before map |
+| Player rating | Prior lineup logit and scaled lineup difference, with identity-aligned availability flags | Before map |
 | Player and champion history | Separate gold, XP, CS, K/A/D checkpoint fields; damage, vision, jungle, and economy fields; base-probability result residual | Strictly prior games |
 | Ally and enemy pairs | Each historical field for directed player/champion ally and enemy pairs | Strictly prior games |
-| Phase forecast | Gold and XP forecasts at 10, 15, 20, and 25; interval slopes; peak checkpoint | Current checkpoints are targets only |
+| Phase forecast | Equal-weight player forecasts summed to team totals at 10, 15, 20, and 25; interval slopes; signed peak checkpoint | Current checkpoints are targets only |
 | Parity history | Each historical field when player gold and XP differences are both within 250 at a checkpoint | Strictly prior games |
-| Momentum | Seven-map mean of outcome minus prior base probability, scaled by 80 | Hash-bound research receipt |
+| Momentum | Seven-map mean of outcome minus prior base probability, rebuilt from the resolved Layer A team and player IDs and scaled by 80 | Strictly prior maps |
 | Patch history | Each field by patch/player/champion and patch/champion | Same patch, strictly prior games |
 
-Every historical estimate has a value, support count, and missing flag. Shrinkage uses five source rows of the prior global mean. Equal timestamps update together.
+Every historical estimate has a value, support count, and missing flag. Shrinkage uses five source rows of the prior global mean. Equal timestamps update together. Neutral numeric values have explicit missing flags. They do not count as available evidence.
+
+Support means unique prior player-map observations. Repeated metric columns do not add support. Phase forecasts give each current player one equal term. Five player terms form each team total. The model feature is the blue team total minus the red team total.
+
+The v2 harness checks every feature group by chronological split and league. A group below its declared coverage threshold blocks model fitting. Locked player ratings become unavailable when the locked rating row does not use the player identities that Layer A resolved. Momentum is rebuilt from those resolved identities. Team residuals use the prior team-rating probability. Player residuals use the prior lineup-rating probability. An identity-recovered map does not update player momentum when the locked lineup rating used another identity contract.
 
 The locked matrix has 1,700 maps. The refreshed OE source resolves 133 identities through canonical game ID, side, role, and champion. The accepted raw Drive revision resolves the remaining rows through timestamp, league, canonical team, side, role, and champion. Final coverage is 1,700 of 1,700.
 
@@ -43,7 +47,9 @@ Pre-match mechanics can use champion-native atoms and strictly prior build and r
 
 Random Forest is the primary estimator. The search uses expanding chronological whole-series folds. A bounded first stage uses 120 trees for 12 configurations. Four survivors use their full tree counts on validation. Selection uses validation log loss and the matched baseline AUC floor. The test set does not enter selection.
 
-Calibration uses forward-only whole-series predictions. Region, patch, sparse evidence, phase error, label shuffle, group ablation, and series-cluster bootstrap checks are part of the receipt. Full identity coverage allowed one consumed-test evaluation.
+Calibration uses forward-only whole-series predictions from the frozen Random Forest configuration. A sigmoid calibrator is accepted only when Brier score and log loss improve in every development outer fold. Raw probabilities remain when this gate fails.
+
+The full model, each feature-group ablation, regional transfer, and shuffle control use the same learner settings and tree count. Sparse evidence slices use unique player-map support. Region, patch, phase error, and series-cluster bootstrap checks are part of the receipt.
 
 ## Measured Layer A result
 
@@ -55,4 +61,6 @@ The consumed test failed. AUC was 0.61266, compared with 0.63365 for the matched
 
 The series bootstrap AUC difference was -0.02037. Its 95 percent interval was -0.06612 to +0.02282. Brier and log-loss differences also favored the baseline at their medians. Their intervals included zero.
 
-This candidate fails promotion. The test result is consumed. A later prospective holdout remains required for any new candidate.
+This candidate fails promotion. All train, validation, test, regional, patch, ablation, sparse-support, calibration, and bootstrap evidence through 2026-08-08 is consumed audit evidence. It cannot select or promote another candidate.
+
+The next evaluation must use a prospective window after 2026-08-08. Its boundary, source hashes, feature schema, identity rules, RF configuration, calibration gate, and acceptance rules must be frozen before anyone reads its outcomes. The v2 rating, momentum, phase, and feature-group coverage gates must pass before that prospective window can open.

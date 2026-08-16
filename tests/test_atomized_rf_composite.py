@@ -6,15 +6,25 @@ import pytest
 from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 
 from lol_kills.research.atomized_rf_composite import (
+    FEATURE_AVAILABILITY_COLUMNS,
     MODEL_COLUMNS,
     AtomizedResearchError,
+    RFConfig,
     RunningStat,
+    _calibration_outer_audit,
     _expanding_series_folds,
     _cluster_bootstrap_differences,
+    _equal_weight_team_forecast,
+    _locked_rating_authority,
+    _matched_comparison_config,
+    _momentum_features,
+    _phase_curve_features,
     _shrunk_metric_mean,
+    _unique_player_map_support,
     _validate_no_current_state_features,
     _write_json,
     exact_mechanic_keys,
+    feature_group_coverage_report,
     normalize_source_patch,
 )
 
@@ -144,3 +154,131 @@ def test_numpy_cluster_bootstrap_matches_dataframe_reference() -> None:
         assert actual[metric]["median"] == pytest.approx(np.median(samples))
         assert actual[metric]["lower_95"] == pytest.approx(np.quantile(samples, 0.025))
         assert actual[metric]["upper_95"] == pytest.approx(np.quantile(samples, 0.975))
+
+
+def test_unique_player_map_support_deduplicates_metric_families() -> None:
+    state = {
+        ("player-1", "Galio"): {"map-1", "map-2"},
+        ("player-2", "Ahri"): {"map-3"},
+    }
+    assert _unique_player_map_support(
+        state,
+        [("player-1", "Galio"), ("player-1", "Galio"), ("player-2", "Ahri")],
+    ) == 3
+
+
+def test_phase_forecast_weights_each_current_player_once() -> None:
+    keys = [(f"player-{index}", "champion", 10, "gold") for index in range(5)]
+    state = {
+        keys[0]: RunningStat(total=10_000.0, count=100),
+        keys[1]: RunningStat(total=20.0, count=1),
+        keys[2]: RunningStat(total=60.0, count=2),
+        keys[3]: RunningStat(total=120.0, count=3),
+        keys[4]: RunningStat(total=200.0, count=4),
+    }
+    total, support, coverage, missing = _equal_weight_team_forecast(state, keys)
+    assert total == pytest.approx(240.0)
+    assert support == 1
+    assert coverage == 1.0
+    assert missing == 0
+
+
+def test_phase_curve_is_side_swap_antisymmetric() -> None:
+    blue = _phase_curve_features(
+        [100.0, 200.0, -300.0, -900.0],
+        [50.0, 100.0, -200.0, -500.0],
+        available=True,
+    )
+    red = _phase_curve_features(
+        [-100.0, -200.0, 300.0, 900.0],
+        [-50.0, -100.0, 200.0, 500.0],
+        available=True,
+    )
+    signed = [
+        key
+        for key in blue
+        if key.startswith("forecast_") and key not in {
+            "forecast_curve_available",
+            "forecast_curve_missing",
+        }
+    ]
+    for key in signed:
+        assert red[key] == pytest.approx(-blue[key])
+
+
+def test_rating_and_momentum_missingness_is_explicit() -> None:
+    rating = _locked_rating_authority(
+        {
+            "base_team_logit": 0.2,
+            "team_rating_diff_scaled": 0.1,
+            "base_player_logit": 0.3,
+            "player_rating_diff_scaled": 0.2,
+            "player_lineup_complete": 1.0,
+        },
+        identity_recovered=True,
+    )
+    assert rating["player_rating_available"] == 0.0
+    assert rating["player_rating_missing"] == 1.0
+    assert rating["base_player_logit"] == 0.0
+
+    momentum = _momentum_features(
+        {}, {}, "blue-team", "red-team", [f"b-{i}" for i in range(5)], [f"r-{i}" for i in range(5)]
+    )
+    assert momentum["team_momentum_missing"] == 1.0
+    assert momentum["player_momentum_missing"] == 1.0
+    assert momentum["team_momentum_points_diff"] == 0.0
+
+
+def test_feature_group_coverage_gates_each_split_and_league() -> None:
+    rows = []
+    for index in range(40):
+        rows.append(
+            {
+                "date": pd.Timestamp("2026-04-01", tz="UTC")
+                if index < 20
+                else pd.Timestamp("2026-06-01", tz="UTC"),
+                "league": "LEC" if index < 20 else "LCK",
+                FEATURE_AVAILABILITY_COLUMNS["team_rating"]: 1.0
+                if index < 30
+                else 0.0,
+            }
+        )
+    report = feature_group_coverage_report(
+        pd.DataFrame(rows), thresholds={"team_rating": 0.8}
+    )
+    failures = {
+        (row["dimension"], row["value"]) for row in report["failures"]
+    }
+    assert ("split", "validation") in failures
+    assert ("league", "LCK") in failures
+
+
+def test_calibration_requires_brier_and_log_loss_improvement_in_every_fold() -> None:
+    target = np.tile(np.array([0, 1]), 100)
+    underconfident = np.where(target == 1, 0.60, 0.40)
+    accepted = _calibration_outer_audit(
+        [underconfident, underconfident, underconfident],
+        [target, target, target],
+    )
+    assert accepted["accepted"] is True
+
+    reversed_probability = 1.0 - underconfident
+    rejected = _calibration_outer_audit(
+        [underconfident, reversed_probability], [target, target]
+    )
+    assert rejected["accepted"] is False
+
+
+def test_ablation_comparison_keeps_exact_frozen_learner() -> None:
+    config = RFConfig(
+        n_estimators=600,
+        max_depth=None,
+        min_samples_leaf=20,
+        max_features=0.25,
+        class_weight=None,
+        bootstrap=True,
+        max_samples=None,
+    )
+    comparison = _matched_comparison_config(config)
+    assert comparison == config
+    assert comparison.n_estimators == 600
