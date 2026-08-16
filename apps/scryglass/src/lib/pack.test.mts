@@ -6,6 +6,8 @@ import {
   compactPlayerRatings,
   findRecordByName,
   findPlayerByRouteName,
+  draftAuthorityStatus,
+  hasDescriptiveDraftAuthority,
   hasPromotedDraftAuthority,
   isActiveRating,
   packUrl,
@@ -66,6 +68,28 @@ test("draft authority stays closed until an independent receipt verifier exists"
       model_version: "draft-v1",
       receipt_sha256: "a".repeat(64),
     },
+  }), false);
+  const descriptive = {
+    ...manifest,
+    draft_authority: {
+      schema_version: "scryglass:draft-authority:v1" as const,
+      status: "descriptive" as const,
+      authority: "descriptive" as const,
+      release_id: manifest.pack_id,
+      model_version: "draft-descriptive-v1",
+      receipt_sha256: "b".repeat(64),
+      issued_utc: "2026-08-13T18:31:17Z",
+    },
+  };
+  assert.equal(draftAuthorityStatus(descriptive), "descriptive");
+  assert.equal(hasDescriptiveDraftAuthority(descriptive), true);
+  assert.equal(hasDescriptiveDraftAuthority({
+    ...descriptive,
+    draft_authority: { ...descriptive.draft_authority, release_id: "different-release" },
+  }), false);
+  assert.equal(hasDescriptiveDraftAuthority({
+    ...descriptive,
+    draft_authority: { ...descriptive.draft_authority, receipt_sha256: "not-a-sha" },
   }), false);
 });
 

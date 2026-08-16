@@ -9,6 +9,7 @@ import {
   getRatings,
   getTierFacets,
   getTierScope,
+  validatePublicDraftResponse,
 } from "./publicData";
 import type { PackManifest } from "./pack";
 
@@ -31,6 +32,21 @@ function queryManifest(): PackManifest {
   };
 }
 
+function descriptiveManifest(): PackManifest {
+  return {
+    ...queryManifest(),
+    draft_authority: {
+      schema_version: "scryglass:draft-authority:v1",
+      status: "descriptive",
+      authority: "descriptive",
+      release_id: RELEASE_ID,
+      model_version: "draft-descriptive-v1",
+      receipt_sha256: "a".repeat(64),
+      issued_utc: "2026-08-13T18:31:17Z",
+    },
+  };
+}
+
 test("public query row limits stay inside the chat response budget", () => {
   assert.equal(boundedRowLimit(undefined, 20), 20);
   assert.equal(boundedRowLimit(1, 20), 1);
@@ -39,6 +55,22 @@ test("public query row limits stay inside the chat response budget", () => {
   assert.equal(boundedRowLimit(50, 20, 100), 50);
   assert.equal(boundedRowLimit(500, 20, 100), 100);
   assert.equal(boundedRowLimit(0, 20), 1);
+});
+
+test("descriptive Draft responses accept model-unit fields and reject probability fields", () => {
+  const manifest = descriptiveManifest();
+  assert.doesNotThrow(() => validatePublicDraftResponse({
+    authority: "descriptive",
+    draft_metric: { draft_edge: 0.25, games: 12 },
+  }, manifest));
+  assert.throws(() => validatePublicDraftResponse({
+    authority: "descriptive",
+    draft_metric: { draft_win_share: 0.61 },
+  }, manifest), /probability fields/);
+  assert.throws(() => validatePublicDraftResponse({
+    authority: "unavailable",
+    draft_metric: { draft_edge: 0.25 },
+  }, manifest), /unbound authority/);
 });
 
 test("ratings RPC uses publishable auth and caps exact-name comparisons at 20 rows", async () => {

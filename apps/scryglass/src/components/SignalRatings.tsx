@@ -334,9 +334,8 @@ export function SignalRatings({
     ? "Whole accepted archive"
     : draftWindowDays ? `Published ${draftWindowDays}-day window` : "Published profile window";
   const draftEvidenceLabel = draftEvidenceGames ? `${draftEvidenceGames.toLocaleString()} games with draft evidence` : "Published draft evidence";
-  const formatDraftWinShare = (value: number) => `${Math.round(value * 100)}%`;
+  const formatDraftEdge = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
   const formatBestAvailableRate = (value: number | null | undefined) => value == null ? "—" : `${Math.round(value * 100)}%`;
-  const draftShareBarWidth = (value: number) => Math.min(100, Math.abs(value - 0.5) * 300);
   const bestAvailableRateBarWidth = (value: number | null | undefined) => value == null ? 0 : Math.min(100, value * 100);
 
   const ratingChartRows: DataBarRow[] = entities.slice(0, 8).map((entity) => {
@@ -367,12 +366,17 @@ export function SignalRatings({
     id: `team-${row.team}-${row.league ?? "all"}-${row.tier ?? "all"}`,
     label: row.team,
     href: `/elo/team/${teamSlug(row.team)}`,
-    value: row.draft_win_share,
-    valueLabel: formatDraftWinShare(row.draft_win_share),
-    detail: `${row.games} games${row.league ? ` · ${row.league}` : ""}`,
+    value: row.draft_edge,
+    valueLabel: formatDraftEdge(row.draft_edge),
+    detail: `${row.games} games${row.league ? ` · ${row.league}` : ""}${row.positive_edge_rate == null ? "" : ` · ${Math.round(row.positive_edge_rate * 100)}% positive edge`}`,
     mark: <TeamMark team={row.team} />,
-    tone: row.draft_win_share >= 0.5 ? "positive" : "negative",
+    tone: row.draft_edge >= 0 ? "positive" : "negative",
   }));
+  const draftEdgeValues = draftTeamChartRows.map((row) => row.value);
+  const draftEdgeDomain = draftEdgeValues.length ? {
+    min: Math.min(0, Math.floor(Math.min(...draftEdgeValues) * 10) / 10),
+    max: Math.max(0.1, Math.ceil(Math.max(...draftEdgeValues) * 10) / 10),
+  } : undefined;
   const draftPlayerChartRows: DataBarRow[] = draftRows.players
     .slice(0, 8)
     .filter((row): row is typeof row & { best_available_rate: number } => row.best_available_rate != null)
@@ -442,17 +446,17 @@ export function SignalRatings({
         </section>
       ) : tab === "draft" ? (
         draftRows.teams.length || draftRows.players.length ? <>
-          <p className={styles.draftNote}>{draftScopeLabel} · {draftEvidenceLabel}. Teams use average published draft win share. Player rows use the best-available rate: the share of evaluated picks that were the highest-ranked unbanned champion available for the role.</p>
+          <p className={styles.draftNote}>{draftScopeLabel} · {draftEvidenceLabel}. Team rows use average descriptive draft edge in model units. Player rows use the best-available rate: the share of evaluated picks that were the highest-ranked unbanned champion available for the role.</p>
           <section className={styles.draftVisuals} aria-label="Draft visualizations">
             <DataBars
-              title="Team draft win share"
-              description="Average published estimate from the scored draft"
+              title="Team draft edge"
+              description="Average descriptive edge from complete drafts"
               rows={draftTeamChartRows}
-              domain={{ min: 0, max: 1 }}
-              baseline={0.5}
-              baselineLabel="50% even"
-              axisLeft="0%"
-              axisRight="100%"
+              domain={draftEdgeDomain}
+              baseline={0}
+              baselineLabel="0 even"
+              axisLeft="lower"
+              axisRight="higher"
             />
             <DataBars
               title="Player best-available rate"
@@ -466,13 +470,13 @@ export function SignalRatings({
           </section>
           <section className={styles.draftSection} aria-label="Draft rankings">
               <div className={styles.draftColumn}>
-                <header><div><h2>Teams by draft</h2><p>Average published draft win share · per-game estimate</p></div><b>{draftRows.teams.length} teams</b></header>
+                <header><div><h2>Teams by draft</h2><p>Average descriptive draft edge · model units</p></div><b>{draftRows.teams.length} teams</b></header>
                 {draftRows.teams.length ? <ol className={styles.draftList}>
                   {(expanded ? draftRows.teams : draftRows.teams.slice(0, 18)).map((row, index) => <li key={`${row.team}-${row.league ?? "all"}-${row.tier ?? "all"}`}>
                     <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
                     <span className={styles.draftIdentity}><TeamMark team={row.team} /><Link className="row-link" href={`/elo/team/${teamSlug(row.team)}`}>{row.team}</Link></span>
-                    <span className={styles.draftMetric}><b title="Average published draft win share">{formatDraftWinShare(row.draft_win_share)}</b><span className={styles.draftBarTrack} aria-hidden="true"><span className={row.draft_win_share >= 0.5 ? styles.draftBarPositive : styles.draftBarNegative} style={{ width: `${draftShareBarWidth(row.draft_win_share)}%` }} /></span></span>
-                    <small>{row.games} games</small>
+                    <span className={styles.draftMetric}><b title="Average descriptive draft edge in model units">{formatDraftEdge(row.draft_edge)}</b><span className={styles.draftBarTrack} aria-hidden="true"><span className={row.draft_edge >= 0 ? styles.draftBarPositive : styles.draftBarNegative} style={{ width: `${Math.min(100, Math.abs(row.draft_edge) * 24)}%` }} /></span></span>
+                    <small>{row.games} games{row.positive_edge_rate == null ? "" : ` · ${Math.round(row.positive_edge_rate * 100)}% positive edge`}</small>
                   </li>)}
                 </ol> : <p className={styles.empty}>No team rows meet the evidence floor.</p>}
                 {draftRows.teams.length > 18 ? <button type="button" className={styles.showAll} onClick={() => setExpanded((value) => !value)}>{expanded ? "Show fewer" : `Show all ${draftRows.teams.length} teams`}</button> : null}

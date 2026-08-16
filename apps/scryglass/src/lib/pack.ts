@@ -75,7 +75,13 @@ export type PackManifest = {
   };
   draft_authority?: {
     schema_version: "scryglass:draft-authority:v1";
-    status: "unavailable" | "promoted";
+    /**
+     * `status` is retained for release compatibility. New releases should
+     * also write `authority`. The web gate accepts the explicit authority
+     * value when both fields are present and requires them to agree.
+     */
+    status: "unavailable" | "descriptive" | "promoted";
+    authority?: "unavailable" | "descriptive" | "promoted";
     release_id: string;
     model_version: string | null;
     receipt_sha256: string | null;
@@ -294,17 +300,45 @@ export type ProfileGrade =
   | { status: "unavailable"; reason: string };
 
 export type DraftContribution = {
-  schema_version: "scryglass:composition-signal:v1";
+  schema_version: "scryglass:draft-descriptive-signal:v1";
   status: "available" | "limited" | "unavailable";
   model_version: string;
   fit_through: string | null;
   blue: {
     signal: number | null;
     prior_role_games: number;
+    components?: {
+      base: number | null;
+      atomized_archetypes: number | null;
+      ally_synergy: number | null;
+      enemy_counter: number | null;
+      same_role: number | null;
+    };
   };
   red: {
     signal: number | null;
     prior_role_games: number;
+    components?: {
+      base: number | null;
+      atomized_archetypes: number | null;
+      ally_synergy: number | null;
+      enemy_counter: number | null;
+      same_role: number | null;
+    };
+  };
+  edge_components?: {
+    base: number | null;
+    atomized_archetypes: number | null;
+    ally_synergy: number | null;
+    enemy_counter: number | null;
+    same_role: number | null;
+    total: number | null;
+  };
+  player_comfort?: {
+    status: "available" | "limited" | "unavailable" | string;
+    contribution: number | null;
+    source?: string | null;
+    reason?: string | null;
   };
   picks: Array<{
     side: "Blue" | "Red";
@@ -316,6 +350,14 @@ export type DraftContribution = {
     best_available?: boolean | null;
     tier_rank?: number | null;
     available_count?: number | null;
+    components?: {
+      base?: number | null;
+      atomized_archetypes?: number | null;
+      ally_synergy?: number | null;
+      enemy_counter?: number | null;
+      same_role?: number | null;
+      total?: number | null;
+    };
   }>;
   note: string;
   reason?: string;
@@ -602,12 +644,65 @@ export function findRecordByName<T>(
   return entry?.[1];
 }
 
-/** Draft results stay private until an independent, release-bound receipt is published. */
+export type DraftAuthorityStatus = "unavailable" | "descriptive" | "promoted";
+
+const DRAFT_RECEIPT_SHA256 = /^[a-f0-9]{64}$/;
+
+function declaredDraftAuthority(
+  manifest: PackManifest,
+): DraftAuthorityStatus | null {
+  const authority = manifest.draft_authority;
+  if (!authority || authority.schema_version !== "scryglass:draft-authority:v1") return null;
+  const status = authority.authority ?? authority.status;
+  if (authority.authority && authority.status !== authority.authority) return null;
+  if (status !== "unavailable" && status !== "descriptive" && status !== "promoted") return null;
+  return status;
+}
+
+/**
+ * Validate the release binding that is safe for the browser to verify.
+ *
+ * The browser can verify the manifest release ID and the receipt digest shape.
+ * It cannot verify the receipt contents. Probability authority therefore
+ * remains behind the independent verifier used by the private release gate.
+ */
+function hasBoundDraftReceipt(manifest: PackManifest): boolean {
+  const authority = manifest.draft_authority;
+  return Boolean(
+    authority
+    && authority.release_id === manifest.pack_id
+    && typeof authority.model_version === "string"
+    && authority.model_version.trim().length > 0
+    && typeof authority.receipt_sha256 === "string"
+    && DRAFT_RECEIPT_SHA256.test(authority.receipt_sha256)
+    && typeof authority.issued_utc === "string"
+    && authority.issued_utc.trim().length > 0
+  );
+}
+
+/** Return the manifest's verified public Draft state. */
+export function draftAuthorityStatus(manifest: PackManifest): DraftAuthorityStatus {
+  const status = declaredDraftAuthority(manifest);
+  if (!status || status === "unavailable") return "unavailable";
+  return hasBoundDraftReceipt(manifest) ? status : "unavailable";
+}
+
+/** Descriptive Draft fields may render after their release-bound receipt passes. */
+export function hasDescriptiveDraftAuthority(manifest: PackManifest): boolean {
+  return draftAuthorityStatus(manifest) === "descriptive";
+}
+
+/**
+ * Probability authority stays closed in the web client until the independent
+ * receipt verifier is available. A descriptive receipt never opens it.
+ */
 export function hasPromotedDraftAuthority(manifest: PackManifest): boolean {
-  // The current release contract has no independent receipt verifier. Keep
-  // every draft surface closed until that verifier and its issuer exist.
   void manifest;
   return false;
+}
+
+export function hasPublishedDraftAuthority(manifest: PackManifest): boolean {
+  return hasDescriptiveDraftAuthority(manifest) || hasPromotedDraftAuthority(manifest);
 }
 
 export function packUpdatedLabel(manifest: PackManifest): string {

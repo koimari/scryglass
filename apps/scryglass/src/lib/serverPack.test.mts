@@ -40,7 +40,7 @@ test("local E2E data needs its exact flag and can never activate on Vercel", () 
 
 function manifest(
   releaseId = RELEASE_ID,
-  options: { queryApi?: boolean; draftStatus?: "unavailable" | "promoted" } = {},
+  options: { queryApi?: boolean; draftStatus?: "unavailable" | "descriptive" | "promoted" } = {},
 ): PackManifest & {
   release: { release_id: string; artifact_hashes: Record<string, string> };
 } {
@@ -70,9 +70,11 @@ function manifest(
     result.draft_authority = {
       schema_version: "scryglass:draft-authority:v1",
       status: options.draftStatus,
+      authority: options.draftStatus,
       release_id: releaseId,
-      model_version: options.draftStatus === "promoted" ? "test-model" : null,
-      receipt_sha256: options.draftStatus === "promoted" ? "a".repeat(64) : null,
+      model_version: options.draftStatus === "unavailable" ? null : "test-model",
+      receipt_sha256: options.draftStatus === "unavailable" ? null : "a".repeat(64),
+      issued_utc: options.draftStatus === "unavailable" ? null : "2026-08-13T18:31:17Z",
       reason: options.draftStatus === "promoted" ? null : "model_not_promoted",
     };
   }
@@ -297,6 +299,13 @@ test("unpromoted draft records stay outside the public manifest", () => {
   candidate.total_bytes += 10;
   candidate.release.artifact_hashes[draftPath] = draftSha;
   assert.equal(publicPackManifest(candidate).files.some((file) => file.path === draftPath), false);
+
+  const descriptive = manifest(RELEASE_ID, { draftStatus: "descriptive" });
+  descriptive.files.push({ path: draftPath, bytes: 10, rows: 0, cols: 0, sha256: draftSha });
+  descriptive.total_files += 1;
+  descriptive.total_bytes += 10;
+  descriptive.release.artifact_hashes[draftPath] = draftSha;
+  assert.equal(publicPackManifest(descriptive).files.some((file) => file.path === draftPath), true);
 });
 
 test("public manifest rejects release and digest conflicts", () => {

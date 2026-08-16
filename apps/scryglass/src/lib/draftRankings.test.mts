@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { draftRankingsFromProfile, filterDraftRankings } from "./draftRankings";
-import type { ProfileRecords } from "./pack";
+import type { DraftPool, ProfileRecords } from "./pack";
 
 function game(
   id: string,
@@ -23,8 +23,31 @@ function game(
       { player: "BlueMid", side: "Blue" as const, role: "mid", champion: "Ahri", kills: null, deaths: null, assists: null },
       { player: "RedMid", side: "Red" as const, role: "mid", champion: "Azir", kills: null, deaths: null, assists: null },
     ],
+    draft_pool: {
+      schema_version: "scryglass:draft-pool:v1" as const,
+      status: "complete" as const,
+      source: "published-tier-list",
+      patch: "26.16",
+      bans: {
+        Blue: ["BanA", "BanB", "BanC", "BanD", "BanE"],
+        Red: ["BanF", "BanG", "BanH", "BanI", "BanJ"],
+      },
+      picked: [
+        { side: "Blue" as const, role: "mid", champion: "Ahri", order: 1 },
+        { side: "Red" as const, role: "mid", champion: "Azir", order: 2 },
+        { side: "Blue" as const, role: "top", champion: "Gnar", order: 3 },
+        { side: "Red" as const, role: "top", champion: "Ornn", order: 4 },
+        { side: "Blue" as const, role: "jungle", champion: "Vi", order: 5 },
+        { side: "Red" as const, role: "jungle", champion: "Sejuani", order: 6 },
+        { side: "Blue" as const, role: "bot", champion: "Jinx", order: 7 },
+        { side: "Red" as const, role: "bot", champion: "Varus", order: 8 },
+        { side: "Blue" as const, role: "support", champion: "Nautilus", order: 9 },
+        { side: "Red" as const, role: "support", champion: "Rakan", order: 10 },
+      ],
+      unpicked: [],
+    },
     draft_contribution: {
-      schema_version: "scryglass:composition-signal:v1" as const,
+      schema_version: "scryglass:draft-descriptive-signal:v1" as const,
       status,
       model_version: "test",
       fit_through: null,
@@ -59,8 +82,8 @@ test("derives team and player rankings when the leaderboard asset is missing", (
   assert.equal(result.scope, "profile_window");
   assert.equal(result.evidenceGames, 5);
   assert.deepEqual(result.teams, [
-    { team: "Team A", games: 5, draft_win_share: 0.5987, draft_edge: 0.4, league: "LCK", tier: "tier1" },
-    { team: "Team B", games: 5, draft_win_share: 0.4013, draft_edge: -0.4, league: "LCK", tier: "tier1" },
+    { team: "Team A", games: 5, draft_edge: 0.4, positive_edge_rate: 1, league: "LCK", tier: "tier1" },
+    { team: "Team B", games: 5, draft_edge: -0.4, positive_edge_rate: 0, league: "LCK", tier: "tier1" },
   ]);
   assert.deepEqual(result.players, [
     { player: "BlueMid", games: 5, draft_score: 0.2, best_available_rate: 1, role: "mid", team: "Team A", league: "LCK", tier: "tier1" },
@@ -102,15 +125,13 @@ test("ranks players by the share of best-available picks", () => {
   assert.equal(result.players.find((row) => row.player === "BlueTop")?.best_available_rate, 0);
 });
 
-test("accepts the limited status and normalizes role abbreviations", () => {
+test("normalizes role abbreviations in complete descriptive evidence", () => {
   const games = Object.fromEntries(
     Array.from({ length: 5 }, (_, index) => [
       `game-${index}`,
       game(`game-${index}`, "Team A", "Team B", 0.2, 0.1),
     ]),
   );
-  const record = games["game-0"];
-  record.draft_contribution!.status = "limited";
   for (const value of Object.values(games)) {
     value.draft_contribution!.picks[0].role = "jng";
     value.players[0].role = "jungle";
@@ -128,6 +149,25 @@ test("accepts the limited status and normalizes role abbreviations", () => {
   assert.equal(result.scope, "whole_archive");
   assert.equal(result.evidenceGames, 5);
   assert.equal(result.players[0]?.role, "jungle");
+});
+
+test("fails closed when bans, pick order, or contribution status is incomplete", () => {
+  const incomplete = game("incomplete", "Team A", "Team B", 0.5, 0.1);
+  (incomplete.draft_pool as DraftPool).status = "limited";
+  incomplete.draft_pool!.bans.Blue = incomplete.draft_pool!.bans.Blue.slice(0, 4);
+  incomplete.draft_contribution!.status = "limited";
+  const records = {
+    schema_version: "scryglass:profile-records:v2",
+    window_days: 120,
+    champion_images: {},
+    players: {},
+    teams: {},
+    games: { incomplete },
+  } satisfies ProfileRecords;
+  const result = draftRankingsFromProfile(records);
+  assert.equal(result.evidenceGames, 0);
+  assert.deepEqual(result.teams, []);
+  assert.deepEqual(result.players, []);
 });
 
 test("filters scoped rows and aggregates teams across selected leagues", () => {

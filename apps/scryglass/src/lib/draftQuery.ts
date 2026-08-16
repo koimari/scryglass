@@ -5,16 +5,17 @@ import {
   teamQueryAliases,
   type ProfileRecords,
 } from "@/lib/pack";
+import { hasCompleteDraftEvidence } from "./draftRankings";
 
 type DraftTier = "tier1" | "tier2" | "tier3" | "international" | "all";
 
 export type TeamDraftRow = {
   team: string;
-  average_score: number;
-  average_win_share: number;
+  average_edge: number;
   games: number;
-  best_score: number;
-  worst_score: number;
+  best_edge: number;
+  worst_edge: number;
+  positive_edge_rate: number | null;
 };
 
 export type TeamDraftComparison = {
@@ -22,7 +23,6 @@ export type TeamDraftComparison = {
   winner: string | null;
   direction: "higher" | "lower";
   difference: number;
-  win_share_gap: number;
 };
 
 export type TeamDraftQueryResult = {
@@ -44,7 +44,7 @@ export type TeamDraftQueryResult = {
 
 type DraftAggregate = {
   scores: number[];
-  winShares: number[];
+  positiveEdges: number;
 };
 
 const SOURCE = "features/profile_records.json";
@@ -161,10 +161,10 @@ function asksForComparison(question: string): boolean {
     || /\b(?:better|worse|higher|lower)\b/i.test(question);
 }
 
-function addDraft(aggregates: Map<string, DraftAggregate>, team: string, score: number, winShare: number): void {
-  const aggregate = aggregates.get(team) ?? { scores: [], winShares: [] };
+function addDraft(aggregates: Map<string, DraftAggregate>, team: string, score: number): void {
+  const aggregate = aggregates.get(team) ?? { scores: [], positiveEdges: 0 };
   aggregate.scores.push(score);
-  aggregate.winShares.push(winShare);
+  if (score > 0) aggregate.positiveEdges += 1;
   aggregates.set(team, aggregate);
 }
 
@@ -172,12 +172,12 @@ function average(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function percent(value: number): string {
-  return `${Math.round(value * 100)}%`;
+function edge(value: number): string {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)} model units`;
 }
 
-function percentagePointGap(first: number, second: number): string {
-  return `${Math.abs(Math.round(first * 100) - Math.round(second * 100))} percentage-point`;
+function edgeGap(first: number, second: number): string {
+  return `${Math.abs(first - second).toFixed(2)} model-unit`;
 }
 
 function scopeLabel(tier: TeamDraftQueryResult["tier"], league: string | null): string {
@@ -188,11 +188,13 @@ function scopeLabel(tier: TeamDraftQueryResult["tier"], league: string | null): 
 function toDraftRow(team: string, aggregate: DraftAggregate): TeamDraftRow {
   return {
     team,
-    average_score: average(aggregate.scores),
-    average_win_share: average(aggregate.winShares),
+    average_edge: average(aggregate.scores),
     games: aggregate.scores.length,
-    best_score: Math.max(...aggregate.scores),
-    worst_score: Math.min(...aggregate.scores),
+    best_edge: Math.max(...aggregate.scores),
+    worst_edge: Math.min(...aggregate.scores),
+    positive_edge_rate: aggregate.scores.length
+      ? aggregate.positiveEdges / aggregate.scores.length
+      : null,
   };
 }
 
@@ -207,15 +209,17 @@ function collectDraftAggregates(
     const blue = contribution?.blue.signal;
     const red = contribution?.red.signal;
     if (
+      !hasCompleteDraftEvidence(game)
+      ||
       (tier !== "all" && game.competition_tier !== tier)
       || (league && normalize(game.league) !== normalize(league))
       || contribution?.status !== "available"
       || !finite(blue)
       || !finite(red)
     ) continue;
-    const blueWinShare = 1 / (1 + Math.exp(-(blue - red)));
-    addDraft(aggregates, game.blue_team, blue, blueWinShare);
-    addDraft(aggregates, game.red_team, red, 1 - blueWinShare);
+    const draftEdge = blue - red;
+    addDraft(aggregates, game.blue_team, draftEdge);
+    addDraft(aggregates, game.red_team, -draftEdge);
   }
   return aggregates;
 }
@@ -232,8 +236,8 @@ function comparisonAnswer(
   direction: "higher" | "lower",
 ): TeamDraftQueryResult {
   const scope = scopeLabel(tier, league);
-  const basis = `Compared ${firstTeam} and ${secondTeam} in ${scope} by average published draft win share, using at least ${minimumGames} available ${minimumGames === 1 ? "draft" : "drafts"} in the active ${windowDays}-day profile window. “Historical” here means this profile window, not all seasons.`;
-  const caveat = "Draft win share is the estimated pre-game probability from the picks. It is not the team's match win rate, a stable team rating, or a prediction guarantee.";
+  const basis = `Compared ${firstTeam} and ${secondTeam} in ${scope} by average descriptive draft edge, using at least ${minimumGames} complete ${minimumGames === 1 ? "draft" : "drafts"} in the active ${windowDays}-day profile window. Historical here means this profile window, not all seasons.`;
+  const caveat = "Draft edge is a descriptive composition signal in model units. It is separate from match results, team rating, and calibrated probability.";
 
   if (!first || !second) {
     return {
@@ -250,19 +254,18 @@ function comparisonAnswer(
     };
   }
 
-  const winShareDifference = first.average_win_share - second.average_win_share;
-  const difference = first.average_score - second.average_score;
-  const winner = winShareDifference === 0
+  const difference = first.average_edge - second.average_edge;
+  const winner = difference === 0
     ? null
     : direction === "higher"
-      ? winShareDifference > 0 ? first.team : second.team
-      : winShareDifference < 0 ? first.team : second.team;
-  const shareLeader = winner ? (winner === first.team ? first : second) : null;
-  const shareOther = winner ? (winner === first.team ? second : first) : null;
+      ? difference > 0 ? first.team : second.team
+      : difference < 0 ? first.team : second.team;
+  const edgeLeader = winner ? (winner === first.team ? first : second) : null;
+  const edgeOther = winner ? (winner === first.team ? second : first) : null;
   const leaguePhrase = league ? ` in ${league}` : "";
-  const relation = shareLeader && shareOther
-    ? `${shareLeader.team} has the ${direction} average published draft win share${leaguePhrase} in the active ${windowDays}-day profile window at ${percent(shareLeader.average_win_share)} across ${shareLeader.games} games, versus ${percent(shareOther.average_win_share)} for ${shareOther.team} across ${shareOther.games} games. That is a ${percentagePointGap(shareLeader.average_win_share, shareOther.average_win_share)} edge for ${shareLeader.team}.`
-    : `${first.team} and ${second.team} have the same average published draft win share${leaguePhrase} in the active ${windowDays}-day profile window at ${percent(first.average_win_share)} across ${first.games} and ${second.games} games.`;
+  const relation = edgeLeader && edgeOther
+    ? `${edgeLeader.team} has the ${direction} average descriptive draft edge${leaguePhrase} in the active ${windowDays}-day profile window at ${edge(edgeLeader.average_edge)} across ${edgeLeader.games} games, versus ${edge(edgeOther.average_edge)} for ${edgeOther.team} across ${edgeOther.games} games. The gap is ${edgeGap(edgeLeader.average_edge, edgeOther.average_edge)} for ${edgeLeader.team}.`
+    : `${first.team} and ${second.team} have the same average descriptive draft edge${leaguePhrase} in the active ${windowDays}-day profile window at ${edge(first.average_edge)} across ${first.games} and ${second.games} games.`;
 
   return {
     kind: "team_draft_comparison",
@@ -275,7 +278,6 @@ function comparisonAnswer(
       winner,
       direction,
       difference: Math.abs(difference),
-      win_share_gap: Math.abs(winShareDifference),
     },
     proof: { sources: [SOURCE], resultCount: 2 },
   };
@@ -318,10 +320,8 @@ export function queryTeamDraftScores(records: ProfileRecords, question: string):
     .filter(([name, aggregate]) => (!team || name === team) && aggregate.scores.length >= minimumGames)
     .map(([name, aggregate]) => toDraftRow(name, aggregate))
     .sort((left, right) => {
-      const shareOrder = left.average_win_share - right.average_win_share;
-      if (shareOrder !== 0) return direction === "asc" ? shareOrder : -shareOrder;
-      const scoreOrder = left.average_score - right.average_score;
-      if (scoreOrder !== 0) return direction === "asc" ? scoreOrder : -scoreOrder;
+      const edgeOrder = left.average_edge - right.average_edge;
+      if (edgeOrder !== 0) return direction === "asc" ? edgeOrder : -edgeOrder;
       if (left.games !== right.games) return right.games - left.games;
       return left.team.localeCompare(right.team);
     });
@@ -333,8 +333,8 @@ export function queryTeamDraftScores(records: ProfileRecords, question: string):
   const leaguePhrase = league ? ` in ${league}` : "";
   const headline = first
     ? team
-      ? `${first.team}'s average published draft win share is ${percent(first.average_win_share)} in ${scope} across ${first.games} games.`
-      : `${first.team} has the ${rankWord} average published draft win share${leaguePhrase} at ${percent(first.average_win_share)} across ${first.games} games.`
+      ? `${first.team}'s average descriptive draft edge is ${edge(first.average_edge)} in ${scope} across ${first.games} games.`
+      : `${first.team} has the ${rankWord} average descriptive draft edge${leaguePhrase} at ${edge(first.average_edge)} across ${first.games} games.`
     : team
       ? `No available draft scores meet the requested sample for ${team}${league ? ` in ${league}` : ""}.`
       : "Team draft score rankings are unavailable for the active release.";
@@ -345,8 +345,8 @@ export function queryTeamDraftScores(records: ProfileRecords, question: string):
     tier,
     answer: {
       headline,
-      basis: `Ranked ${rows.length} ${rows.length === 1 ? "team" : "teams"} by average published draft win share in ${scope} with at least ${minimumGames} available ${minimumGames === 1 ? "draft" : "drafts"} in the active ${records.window_days}-day profile window.`,
-      caveat: "Draft win share is the estimated pre-game probability from the picks. It is not the team's match win rate or a stable team rating.",
+      basis: `Ranked ${rows.length} ${rows.length === 1 ? "team" : "teams"} by average descriptive draft edge in ${scope} with at least ${minimumGames} complete ${minimumGames === 1 ? "draft" : "drafts"} in the active ${records.window_days}-day profile window.`,
+      caveat: "Draft edge is a descriptive composition signal in model units. It is separate from match results, team rating, and calibrated probability.",
     },
     rows: visibleRows,
     proof: { sources: [SOURCE], resultCount: rows.length },

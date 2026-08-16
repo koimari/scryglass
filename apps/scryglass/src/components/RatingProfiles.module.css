@@ -592,6 +592,24 @@
 .compositionSignalDetail { color: var(--ink-muted); font-family: var(--font-mono), monospace; font-size: var(--text-micro); }
 .compositionEstimated { color: var(--ink-accent, #b8860b); font-weight: 600; }
 .compositionLegend { margin: 0.35rem 0 0; color: var(--ink-muted); font-size: var(--text-micro); line-height: 1.4; }
+.compositionComponents {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.35rem;
+  margin: 0.65rem 0 0;
+}
+.compositionComponents > div {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+}
+.compositionComponents dt { color: var(--ink-muted); font-size: var(--text-micro); }
+.compositionComponents dd { margin: 0; font-family: var(--font-mono), monospace; font-variant-numeric: tabular-nums; }
+.compositionSideComponents { display: grid; gap: 0.65rem; margin-top: 0.65rem; }
+.compositionSideComponents > div > strong { font-size: var(--text-micro); }
 .draftPool {
   margin: 0.55rem 0;
   padding: 0.55rem 0.65rem;

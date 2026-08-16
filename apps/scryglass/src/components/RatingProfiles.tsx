@@ -3,7 +3,7 @@ import { evidenceFields, evidenceInfo, formatEvidenceCell } from "@/lib/evidence
 import {
   adjustedRating,
   formatWr,
-  hasPromotedDraftAuthority,
+  hasPublishedDraftAuthority,
   packUpdatedLabel,
   PLAYER_SIGMA_MIN,
   playerSlug,
@@ -30,6 +30,7 @@ import { championImageUrl } from "@/lib/championImages";
 import { objectiveFieldsForPatch } from "@/lib/objectiveSupport";
 import { matchTeamHref } from "@/lib/matchFilters";
 import type { DraftRankingsScope } from "@/lib/draftRankings";
+import { hasCompleteDraftEvidence } from "@/lib/draftRankings";
 import { PlayerPortrait } from "./PlayerPortrait";
 import { RecentGames } from "./RecentGames";
 import { TeamMark } from "./TeamMark";
@@ -46,14 +47,18 @@ export type TeamRosterEntry = {
 };
 
 type TeamDraftMetric = {
-  draftWinShare: number;
+  draftEdge: number;
+  positiveEdgeRate?: number | null;
   games: number;
   scope: DraftRankingsScope;
 };
 
 type PlayerDraftMetric = {
   bestAvailableRate: number;
+  draftScore?: number | null;
   games: number;
+  poolDefinition?: string | null;
+  banCoverage?: number | null;
   scope: DraftRankingsScope;
 };
 
@@ -97,6 +102,11 @@ function compactNumber(value: number): string {
 function percentLabel(value: number): string {
   const normalized = Math.abs(value) <= 1 ? value * 100 : value;
   return `${normalized.toFixed(0)}%`;
+}
+
+function draftEdgeLabel(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
 }
 
 function signedNumber(value: number): string {
@@ -233,7 +243,7 @@ export function TeamRatingProfile({
   manifest: PackManifest;
   draftMetric?: TeamDraftMetric | null;
 }) {
-  const draftAuthorized = hasPromotedDraftAuthority(manifest);
+  const draftAuthorized = hasPublishedDraftAuthority(manifest);
   const trust = evidenceInfo(evidenceFields(team as unknown as Record<string, unknown>), team.sigma, record?.games);
   const players = [...roster].sort((a, b) => {
     return ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role);
@@ -275,10 +285,10 @@ export function TeamRatingProfile({
         <div><dt>Games</dt><dd>{record?.games ?? team.n_maps ?? "—"}</dd></div>
         <div><dt>Confidence</dt><dd>{formatEvidenceCell(trust)}</dd></div>
         <div>
-          <dt>Draft score</dt>
-          <dd title="Average published draft win share from the team's scored drafts">
-            {draftAuthorized ? (draftMetric ? `${Math.round(draftMetric.draftWinShare * 100)}%` : "—") : "Unavailable"}
-            <small>{draftAuthorized ? (draftMetric ? `${draftMetric.games} games · ${draftMetric.scope === "whole_archive" ? "whole archive" : "profile window"}` : "Published draft evidence unavailable") : "Promotion receipt required"}</small>
+          <dt>Draft edge</dt>
+          <dd title="Average descriptive draft edge from complete scored drafts. It is separate from match results and team rating.">
+            {draftAuthorized ? (draftMetric ? draftEdgeLabel(draftMetric.draftEdge) : "—") : "Unavailable"}
+            <small>{draftAuthorized ? (draftMetric ? `${draftMetric.games} complete drafts · model units · ${draftMetric.positiveEdgeRate == null ? "positive-edge rate unavailable" : `${Math.round(draftMetric.positiveEdgeRate * 100)}% positive edge`}` : "Published draft evidence unavailable") : "Receipt required"}</small>
           </dd>
         </div>
         <div><dt>Updated</dt><dd>{packUpdatedLabel(manifest)}</dd></div>
@@ -388,47 +398,55 @@ function compositionNumber(value: number | null): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
 }
 
-function draftWinShares(blue: number | null, red: number | null): { blue: string; red: string } | null {
-  if (blue == null || red == null || !Number.isFinite(blue) || !Number.isFinite(red)) return null;
-  const p = 1 / (1 + Math.exp(-(blue - red)));
-  const bluePct = Math.round(p * 1000) / 10;
-  return { blue: bluePct.toFixed(1), red: (100 - bluePct).toFixed(1) };
+function componentLabel(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(value) ? "—" : draftEdgeLabel(value);
 }
 
-/** Marginal contribution of one pick to ITS OWN team's draft win share, in percentage points.
- * A positive value always means "better for the team that made the pick". */
-function pickWinSharePoints(pick: { side: "Blue" | "Red"; contribution: number | null }, blue: number | null, red: number | null): string | null {
-  if (pick.contribution == null || blue == null || red == null) return null;
-  const delta = pick.contribution;
-  const pWith = 1 / (1 + Math.exp(-(blue - red)));
-  const pBase = pick.side === "Blue"
-    ? 1 / (1 + Math.exp(-((blue - delta) - red)))
-    : 1 / (1 + Math.exp(-(blue - (red - delta))));
-  // blue-team delta; flip the sign for red picks so +% is always the pick's own team gain
-  const points = ((pWith - pBase) * 100) * (pick.side === "Blue" ? 1 : -1);
-  if (!Number.isFinite(points)) return null;
-  const rounded = Math.round(points * 10) / 10;
-  return `${rounded >= 0 ? "+" : ""}${rounded.toFixed(1)}%`;
+function edgeComponentRows(components: DraftContribution["edge_components"]): Array<[string, string]> {
+  if (!components) return [];
+  return [
+    ["Base", componentLabel(components.base)],
+    ["Atomized archetypes", componentLabel(components.atomized_archetypes)],
+    ["Ally synergy", componentLabel(components.ally_synergy)],
+    ["Enemy counter", componentLabel(components.enemy_counter)],
+    ["Same-role evidence", componentLabel(components.same_role)],
+    ["Total", componentLabel(components.total)],
+  ];
+}
+
+function sideComponentRows(components: DraftContribution["blue"]["components"]): Array<[string, string]> {
+  if (!components) return [];
+  return [
+    ["Base champion + role", componentLabel(components.base)],
+    ["Atomized archetypes", componentLabel(components.atomized_archetypes)],
+    ["Ally synergy", componentLabel(components.ally_synergy)],
+    ["Enemy counter", componentLabel(components.enemy_counter)],
+    ["Same-role evidence", componentLabel(components.same_role)],
+  ];
 }
 
 function CompositionEvidence({
   contribution,
   draftPool,
+  completeDraft,
   blueTeam,
   redTeam,
   championImages,
 }: {
   contribution?: DraftContribution;
   draftPool?: DraftPool;
+  completeDraft: boolean;
   blueTeam: string;
   redTeam: string;
   championImages: Record<string, string>;
 }) {
-  const status: DraftContribution["status"] = contribution?.status === "available"
+  const sourceStatus: DraftContribution["status"] = contribution?.status === "available"
     || contribution?.status === "limited"
     || contribution?.status === "unavailable"
     ? contribution.status
     : "unavailable";
+  const scoreAvailable = completeDraft && sourceStatus === "available";
+  const status: DraftContribution["status"] = scoreAvailable ? "available" : sourceStatus;
   const picks = contribution?.picks ?? [];
   const pickFor = (side: "Blue" | "Red", role: string) => {
     const modelRole = role === "jungle" ? "jng" : role === "support" ? "sup" : role;
@@ -457,8 +475,12 @@ function CompositionEvidence({
           <small>{draftPool.basis ?? draftPool.reason ?? "The published draft pool is unavailable."}</small>
         </details>
       ) : null}
-      {status === "unavailable" ? (
-        <p className={styles.compositionEmpty}>{contribution?.reason ?? "The complete pre-game draft evidence is not available for this game."}</p>
+      {!scoreAvailable ? (
+        <p className={styles.compositionEmpty}>
+          {completeDraft
+            ? (contribution?.reason ?? "The descriptive draft signal is not available for this game.")
+            : "Complete pick, ban, order, patch, and tier evidence is required for the descriptive draft signal."}
+        </p>
       ) : (
         <>
           <div className={styles.compositionCompare}>
@@ -467,24 +489,51 @@ function CompositionEvidence({
               <div>
                 <strong>{blueTeam}</strong>
                 <span>Blue side</span>
-                <small className={styles.compositionSignalDetail}>{compositionNumber(contribution?.blue.signal ?? null)} draft pts</small>
+                <small className={styles.compositionSignalDetail}>{compositionNumber(contribution?.blue.signal ?? null)} model units</small>
               </div>
-              <b className={styles.compositionWinShare}>{draftWinShares(contribution?.blue.signal ?? null, contribution?.red.signal ?? null)?.blue ?? "—"}%</b>
+              <b className={styles.compositionWinShare}>{draftEdgeLabel(contribution?.blue.signal ?? null)}</b>
             </div>
             <span className={styles.compositionVs}>vs</span>
             <div className={`${styles.compositionTeam} ${styles.compositionTeamRight}`}>
-              <b className={styles.compositionWinShare}>{draftWinShares(contribution?.blue.signal ?? null, contribution?.red.signal ?? null)?.red ?? "—"}%</b>
+              <b className={styles.compositionWinShare}>{draftEdgeLabel(contribution?.red.signal ?? null)}</b>
               <div>
                 <strong>{redTeam}</strong>
                 <span>Red side</span>
-                <small className={styles.compositionSignalDetail}>{compositionNumber(contribution?.red.signal ?? null)} draft pts</small>
+                <small className={styles.compositionSignalDetail}>{compositionNumber(contribution?.red.signal ?? null)} model units</small>
               </div>
               <TeamMark team={redTeam} size="small" />
             </div>
           </div>
           <p className={styles.compositionLegend}>
-            Draft win share: the estimated probability each team wins from the draft alone (picks vs picks).
+            Draft edge is a descriptive composition signal in model units. It is separate from match results, team rating, and calibrated probability.
           </p>
+          <p className={styles.compositionLegend}>
+            Match strength covers team rating, lineup strength, uncertainty, form, and momentum in its own section. Phase and pace evidence remain separate.
+          </p>
+          {edgeComponentRows(contribution?.edge_components).length ? (
+            <dl className={styles.compositionComponents}>
+              {edgeComponentRows(contribution?.edge_components).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+            </dl>
+          ) : null}
+          {sideComponentRows(contribution?.blue.components).length || sideComponentRows(contribution?.red.components).length ? (
+            <div className={styles.compositionSideComponents}>
+              {([ [blueTeam, contribution?.blue.components], [redTeam, contribution?.red.components] ] as const).map(([team, components]) => (
+                sideComponentRows(components).length ? (
+                  <div key={team}>
+                    <strong>{team} components</strong>
+                    <dl className={styles.compositionComponents}>
+                      {sideComponentRows(components).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+                    </dl>
+                  </div>
+                ) : null
+              ))}
+            </div>
+          ) : null}
+          {contribution?.player_comfort?.status === "available" ? (
+            <p className={styles.compositionLegend}>
+              Player comfort: {componentLabel(contribution.player_comfort.contribution)} model units from {contribution.player_comfort.source ?? "declared champion-familiarity evidence"}. This is separate from player Elo and team strength.
+            </p>
+          ) : null}
           <div className={styles.compositionPicks}>
             {ROLE_ORDER.map((role) => {
               const blue = pickFor("Blue", role);
@@ -503,7 +552,7 @@ function CompositionEvidence({
                         {pick?.evidence_status === "unavailable" || pick?.evidence_status === "limited"
                           ? "Limited"
                           : pick
-                            ? `${pickWinSharePoints(pick, contribution?.blue.signal ?? null, contribution?.red.signal ?? null) ?? compositionNumber(pick.contribution)}${pick.evidence_status === "atom_estimate" ? " ≈" : ""}`
+                            ? `${componentLabel(pick.components?.total ?? pick.contribution)}${pick.evidence_status === "atom_estimate" ? " ≈" : ""}`
                             : "—"}
                       </strong>
                       <small>
@@ -545,6 +594,7 @@ export function MatchRatingProfile({
   const winner = blueWon ? game.blue_team : game.red_team;
   const loser = blueWon ? game.red_team : game.blue_team;
   const duration = durationLabel(game.duration_seconds);
+  const completeDraft = hasCompleteDraftEvidence(game);
   const sides = (["Blue", "Red"] as const).map((side) => ({
     side,
     team: side === "Blue" ? game.blue_team : game.red_team,
@@ -573,6 +623,7 @@ export function MatchRatingProfile({
       <CompositionEvidence
         contribution={game.draft_contribution}
         draftPool={game.draft_pool}
+        completeDraft={completeDraft}
         blueTeam={game.blue_team}
         redTeam={game.red_team}
         championImages={championImages}
@@ -622,7 +673,7 @@ export function PlayerRatingProfile({
   manifest: PackManifest;
   draftMetric?: PlayerDraftMetric | null;
 }) {
-  const draftAuthorized = hasPromotedDraftAuthority(manifest);
+  const draftAuthorized = hasPublishedDraftAuthority(manifest);
   const trust = evidenceInfo(evidenceFields(player as unknown as Record<string, unknown>), player.sigma, player.n_maps);
   const currentTeam = record?.current_team ?? player.last_team;
   const role = roleLabel(record?.primary_role);
@@ -682,10 +733,10 @@ export function PlayerRatingProfile({
         <div><dt>Blue / Red</dt><dd>{formatWr(record?.blue_wr)} / {formatWr(record?.red_wr)}</dd></div>
         <div><dt>Confidence</dt><dd>{formatEvidenceCell(trust)}</dd></div>
         <div>
-          <dt>Draft score</dt>
+          <dt>Draft picks</dt>
           <dd title="Best-available rate: share of evaluated picks that were the highest-ranked unbanned champion available for the role">
             {draftAuthorized ? (draftMetric ? `${Math.round(draftMetric.bestAvailableRate * 100)}%` : "—") : "Unavailable"}
-            <small>{draftAuthorized ? (draftMetric ? `${draftMetric.games} evaluated picks · best-available rate · ${draftMetric.scope === "whole_archive" ? "whole archive" : "profile window"}` : "Published best-available evidence unavailable") : "Promotion receipt required"}</small>
+            <small>{draftAuthorized ? (draftMetric ? `${draftMetric.games} evaluated picks · best-available rate · ${draftMetric.scope === "whole_archive" ? "whole archive" : "profile window"}${draftMetric.banCoverage == null ? "" : ` · ${Math.round(draftMetric.banCoverage * 100)}% ban coverage`}` : "Published best-available evidence unavailable") : "Receipt required"}</small>
           </dd>
         </div>
         <div><dt>Updated</dt><dd>{packUpdatedLabel(manifest)}</dd></div>
