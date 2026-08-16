@@ -548,7 +548,11 @@ def build_layer_a_matrix(
                             str(row.get("champion") or "").strip().casefold(),
                         )
                     )
-                    if overlay_identity is not None:
+                    needs_identity = not (
+                        str(row.get("playerid") or "").startswith("oe:player:")
+                        and str(row.get("teamid") or "").startswith("oe:team:")
+                    )
+                    if overlay_identity is not None and needs_identity:
                         row["playerid"], row["teamid"] = overlay_identity
                         overlay_recovered_games.add(game_uid)
                     raw_overlay_identity = raw_identity_overlay.get(
@@ -561,7 +565,11 @@ def build_layer_a_matrix(
                             str(row.get("champion") or "").strip().casefold(),
                         )
                     )
-                    if raw_overlay_identity is not None:
+                    needs_identity = not (
+                        str(row.get("playerid") or "").startswith("oe:player:")
+                        and str(row.get("teamid") or "").startswith("oe:team:")
+                    )
+                    if raw_overlay_identity is not None and needs_identity:
                         row["playerid"], row["teamid"] = raw_overlay_identity
                         raw_overlay_recovered_games.add(game_uid)
                 for row in rows:
