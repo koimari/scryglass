@@ -20,13 +20,13 @@ import type {
 import {
   compactPlayerRatings,
   findRecordByName,
-  hasPromotedDraftAuthority,
+  hasPublishedDraftAuthority,
   isActiveRating,
   packSourceUpdatedLabel,
   packUpdatedLabel,
   recordMatchesLeagues,
 } from "@/lib/pack";
-import type { DraftPlayerRow, DraftRankingsScope, DraftTeamRow } from "@/lib/draftRankings";
+import { draftRankingsFromProfile, filterDraftRankings, type DraftPlayerRow, type DraftRankingsScope, type DraftTeamRow } from "@/lib/draftRankings";
 import {
   getRatingFacets,
   getRatings,
@@ -174,7 +174,7 @@ export default async function EloPage({ searchParams }: PageProps) {
   const showInactive = includeInactive(first(query.active));
   const manifest = await readPackManifest();
   const sourceUpdated = packSourceUpdatedLabel(manifest);
-  const draftAuthorized = hasPromotedDraftAuthority(manifest);
+  const draftAuthorized = hasPublishedDraftAuthority(manifest);
   const boundedQueries = queryApiAvailable(manifest);
   const page = integer(first(query.page), 1, 1, 101);
   const pageSize = 100;
@@ -345,8 +345,17 @@ export default async function EloPage({ searchParams }: PageProps) {
       draftScope = "whole_archive";
       draftEvidenceGames = manifest.draft_pool?.quality_games ?? manifest.draft_pool?.games ?? null;
     } catch {
-      draftTeams = [];
-      draftPlayers = [];
+      try {
+        const profile = await readPackJson<import("@/lib/pack").ProfileRecords>(manifest, "features/profile_records.json");
+        const rankings = filterDraftRankings(draftRankingsFromProfile(profile), { leagues: [], minGames: 5 });
+        draftTeams = rankings.teams;
+        draftPlayers = rankings.players;
+        draftScope = rankings.scope;
+        draftEvidenceGames = rankings.evidenceGames;
+      } catch {
+        draftTeams = [];
+        draftPlayers = [];
+      }
     }
   }
 

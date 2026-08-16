@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { MatchRatingProfile } from "@/components/RatingProfiles";
-import { hasPromotedDraftAuthority, type MatchIndex, type MatchRecords, type ProfileGame, type ProfileRecords } from "@/lib/pack";
+import { hasPublishedDraftAuthority, type MatchIndex, type MatchRecords, type ProfileGame, type ProfileRecords } from "@/lib/pack";
 import { getMatch, queryApiAvailable } from "@/lib/publicData";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
@@ -17,7 +17,9 @@ export default async function MatchPage({ params }: Props) {
     if (!result.row) notFound();
     return (
       <MatchRatingProfile
-        game={result.row.payload}
+        game={hasPublishedDraftAuthority(manifest)
+          ? result.row.payload
+          : { ...result.row.payload, draft_pool: undefined, draft_contribution: undefined }}
         championImages={result.champion_images}
         releaseId={manifest.pack_id}
       />
@@ -35,7 +37,7 @@ export default async function MatchPage({ params }: Props) {
     game = archive.games[gameId];
   }
   if (!game) notFound();
-  const publishedGame = hasPromotedDraftAuthority(manifest)
+  const publishedGame = hasPublishedDraftAuthority(manifest)
     ? game
     : { ...game, draft_pool: undefined, draft_contribution: undefined };
   return (

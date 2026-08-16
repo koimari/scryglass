@@ -5,7 +5,7 @@ import {
   adjustedRating,
   compactPlayerRatings,
   findPlayerByRouteName,
-  hasPromotedDraftAuthority,
+  hasPublishedDraftAuthority,
   isActiveRating,
   PLAYER_SIGMA_MIN,
   softMu,
@@ -57,7 +57,12 @@ export default async function TeamEloPage({ params }: Props) {
         recentGames={profile.recent_games.map((row) => row.payload)}
         championImages={profile.champion_images}
         manifest={man}
-        draftMetric={null}
+        draftMetric={hasPublishedDraftAuthority(man) && profile.draft_metric?.draft_edge != null ? {
+          draftEdge: profile.draft_metric.draft_edge,
+          positiveEdgeRate: profile.draft_metric.positive_edge_rate ?? null,
+          games: profile.draft_metric.games,
+          scope: profile.draft_metric.scope === "whole_archive" ? "whole_archive" : "profile_window",
+        } : null}
       />
     );
   }
@@ -153,7 +158,7 @@ export default async function TeamEloPage({ params }: Props) {
       total: peers.length,
     };
   }
-  const draftProfile = hasPromotedDraftAuthority(man) && profileRecords
+  const draftProfile = hasPublishedDraftAuthority(man) && profileRecords
     ? filterDraftRankings(draftRankingsFromProfile(profileRecords), { leagues: [], minGames: 5 })
     : null;
   const draftMetric = draftProfile?.teams.find(
@@ -174,7 +179,8 @@ export default async function TeamEloPage({ params }: Props) {
       championImages={profileRecords?.champion_images ?? {}}
       manifest={man}
       draftMetric={draftMetric && draftProfile ? {
-        draftWinShare: draftMetric.draft_win_share,
+        draftEdge: draftMetric.draft_edge,
+        positiveEdgeRate: draftMetric.positive_edge_rate ?? null,
         games: draftMetric.games,
         scope: draftProfile.scope,
       } : null}

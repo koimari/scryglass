@@ -72,10 +72,18 @@ from lol_kills.ratings.player_elo import (
     build_player_weekly_ranks,
 )
 from lol_kills.research.composition_signal import (
-    MODEL_VERSION,
     CompositionSignalError,
-    _composition_code_digest,
+    build_composition_games,
     validate_public_signal,
+)
+from lol_kills.research.descriptive_draft_score import (
+    DescriptiveDraftScoreError,
+    EXCLUDED_TERMS as DESCRIPTIVE_SCORE_EXCLUDED_TERMS,
+    INCLUDED_TERMS as DESCRIPTIVE_SCORE_INCLUDED_TERMS,
+    MODEL_VERSION as DESCRIPTIVE_SCORE_MODEL_VERSION,
+    SCHEMA_VERSION as DESCRIPTIVE_SIGNAL_SCHEMA_VERSION,
+    load_model as load_descriptive_score_model,
+    score_game as score_descriptive_game,
 )
 ROOT = Path(__file__).resolve().parents[2]
 WAREHOUSE = ROOT / "data" / "lol" / "warehouse" / "parquet"
@@ -84,6 +92,16 @@ FEATURES = ROOT / "data" / "lol" / "features"
 MODELS = ROOT / "data" / "lol" / "models"
 TEAMS_JSON = ROOT / "web" / "composer" / "teams.json"
 DEFAULT_OUT = ROOT / "output" / "public_pack"
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+DRAFT_ISSUED_UTC_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
+)
+DESCRIPTIVE_AUTHORITY_PATH = (
+    ROOT / "data" / "lol" / "v2" / "evaluation" / "composition-descriptive-authority.json"
+)
+DESCRIPTIVE_RECIPE_PATH = (
+    ROOT / "data" / "lol" / "v2" / "evaluation" / "composition-descriptive-recipe.json"
+)
 
 
 def _sha256(path: Path) -> str:
@@ -413,23 +431,115 @@ def _number(value: Any) -> float | None:
         return None
 
 
+def _load_descriptive_authority(project: Path) -> tuple[dict[str, Any], str]:
+    """Load and bind the checked-in descriptive Draft Score receipt.
+
+    This receipt authorizes descriptive composition evidence only. It does not
+    authorize a probability, recommendation, odds, or betting output.
+    """
+
+    authority_path = project / DESCRIPTIVE_AUTHORITY_PATH.relative_to(ROOT)
+    recipe_path = project / DESCRIPTIVE_RECIPE_PATH.relative_to(ROOT)
+    scorer_path = project / "lol_kills" / "research" / "descriptive_draft_score.py"
+    try:
+        authority_raw = authority_path.read_bytes()
+        authority = json.loads(authority_raw.decode("utf-8"))
+        recipe_raw = recipe_path.read_bytes()
+        scorer_raw = scorer_path.read_bytes()
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, DescriptiveDraftScoreError) as error:
+        raise CompositionSignalError(
+            "descriptive Draft Score authority receipt is unavailable"
+        ) from error
+    if not isinstance(authority, dict) or not isinstance(recipe_raw, bytes):
+        raise CompositionSignalError("descriptive Draft Score authority receipt is malformed")
+    issued_utc = authority.get("issued_utc")
+    if (
+        not isinstance(issued_utc, str)
+        or not DRAFT_ISSUED_UTC_RE.fullmatch(issued_utc)
+        or _parse_issued_utc(issued_utc) is None
+    ):
+        raise CompositionSignalError("descriptive Draft Score authority timestamp is invalid")
+    if (
+        authority.get("schema_version") != "scryglass:draft-authority:v1"
+        or authority.get("status") != "descriptive"
+        or authority.get("estimand") != "composition_only"
+        or authority.get("model_version") != DESCRIPTIVE_SCORE_MODEL_VERSION
+        or authority.get("recipe_sha256") != hashlib.sha256(recipe_raw).hexdigest()
+        or authority.get("artifact_sha256") != load_descriptive_score_model()[1]
+        or authority.get("scorer_code_sha256") != hashlib.sha256(scorer_raw).hexdigest()
+        or authority.get("probability_authority") is not False
+        or authority.get("recommendation_authority") is not False
+        or authority.get("betting_authority") is not False
+        or authority.get("included_terms") != list(DESCRIPTIVE_SCORE_INCLUDED_TERMS)
+        or authority.get("excluded_terms") != list(DESCRIPTIVE_SCORE_EXCLUDED_TERMS)
+    ):
+        raise CompositionSignalError(
+            "descriptive Draft Score authority receipt does not bind the active recipe"
+        )
+    return authority, hashlib.sha256(authority_raw).hexdigest()
+
+
+def _parse_issued_utc(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None and parsed.utcoffset() == timezone.utc.utcoffset(parsed) else None
+
+
 def build_draft_records_payload(
     composition_result: Any,
     composition_games: Sequence[Mapping[str, Any]],
     composition_evaluation: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Compact whole-archive draft evidence: per-game draft edge on the
-    model's logit scale (the coefficient-sum difference between sides)."""
+    """Compact whole-archive descriptive composition evidence.
+
+    The edge stays in model units. The payload contains no probability field.
+    """
+    result_audit = getattr(composition_result, "audit", None)
+    if result_audit is None and isinstance(composition_result, Mapping):
+        result_audit = composition_result.get("audit")
+    if not isinstance(result_audit, Mapping):
+        result_audit = {}
+    metadata = composition_evaluation if isinstance(composition_evaluation, Mapping) else {}
     payload: dict[str, Any] = {
         "schema_version": "scryglass:draft-records:v1",
-        "model_version": str((composition_evaluation or {}).get("model_version") or ""),
-        "fit_through": (composition_evaluation or {}).get("fit_through"),
+        "authority": "descriptive",
+        "estimand": "composition_only",
+        "model_version": str(
+            result_audit.get("model_version")
+            or metadata.get("model_version")
+            or DESCRIPTIVE_SCORE_MODEL_VERSION
+        ),
+        "fit_through": result_audit.get("fit_through") or metadata.get("fit_through"),
+        "source_identity_sha256": result_audit.get("source_identity_sha256")
+        or metadata.get("source_identity_sha256"),
+        "artifact_sha256": result_audit.get("artifact_sha256") or metadata.get("artifact_sha256"),
+        "authority_receipt_sha256": result_audit.get("receipt_sha256")
+        or metadata.get("receipt_sha256"),
+        "archetype_interaction_source": result_audit.get("archetype_interaction_source")
+        or metadata.get("archetype_interaction_source"),
+        "source_as_of": result_audit.get("source_as_of") or metadata.get("source_as_of"),
+        "source_patch_binding": result_audit.get("source_patch_binding")
+        or metadata.get("source_patch_binding"),
+        "evaluation": result_audit.get("evaluation") or metadata.get("evaluation"),
+        "sample_window": {
+            "target_games": metadata.get("target_games") or result_audit.get("target_games"),
+            "source_as_of": result_audit.get("source_as_of") or metadata.get("source_as_of"),
+        },
+        "player_comfort": metadata.get("player_comfort") or {
+            "status": "unavailable",
+            "contribution": None,
+            "source": None,
+            "sha256": None,
+            "reason": "No release-bound player familiarity source is available.",
+        },
         "games": {},
     }
     draft_game_index = {str(game["game_uid"]): game for game in composition_games}
     signals = getattr(composition_result, "signals", None)
     if signals is None and isinstance(composition_result, Mapping):
-        signals = composition_result
+        signals = composition_result.get("signals") or composition_result
     signals = signals or {}
     for game_id, signal in signals.items():
         if not isinstance(signal, Mapping):
@@ -452,6 +562,9 @@ def build_draft_records_payload(
             "red_team": str(game.get("red_team") or ""),
             "blue_signal": blue_signal,
             "red_signal": red_signal,
+            "blue_components": signal.get("blue", {}).get("components"),
+            "red_components": signal.get("red", {}).get("components"),
+            "edge_components": signal.get("edge_components"),
             # Descriptive draft advantage on the model's logit scale (the
             # coefficient-sum difference). NOT a win probability: the public
             # signal omits the model's control terms, so it is a ranked edge,
@@ -463,15 +576,41 @@ def build_draft_records_payload(
 
 def _draft_publication_decision(
     composition_evaluation: Mapping[str, Any] | None,
+    *,
+    descriptive_authority: Mapping[str, Any] | None = None,
+    receipt_sha256: str | None = None,
+    release_id: str | None = None,
 ) -> dict[str, Any]:
-    """Return the public Draft decision without treating research as authority.
+    """Return the public Draft decision.
 
-    The composition evaluation is a candidate report.  It is not an
-    independently issued release receipt.  A passing candidate therefore
-    stays closed until the publication boundary has a verified receipt.
-    A failed candidate also stays closed, while factual pack records remain
-    publishable.
+    A descriptive receipt may authorize composition evidence. The predictive
+    promotion path remains separate and closed.
     """
+
+    if descriptive_authority is not None:
+        if (
+            descriptive_authority.get("status") != "descriptive"
+            or descriptive_authority.get("estimand") != "composition_only"
+            or descriptive_authority.get("model_version") != DESCRIPTIVE_SCORE_MODEL_VERSION
+            or not isinstance(receipt_sha256, str)
+            or not SHA256_RE.fullmatch(receipt_sha256)
+        ):
+            raise CompositionSignalError("descriptive Draft Score authority is malformed")
+        return {
+            "schema_version": "scryglass:draft-authority:v1",
+            "status": "descriptive",
+            "authority": "descriptive",
+            "release_id": release_id,
+            "model_version": DESCRIPTIVE_SCORE_MODEL_VERSION,
+            "artifact_sha256": descriptive_authority.get("artifact_sha256"),
+            "receipt_sha256": receipt_sha256,
+            "issued_utc": descriptive_authority.get("issued_utc"),
+            "estimand": "composition_only",
+            "probability_authority": False,
+            "recommendation_authority": False,
+            "betting_authority": False,
+            "reason": None,
+        }
 
     if composition_evaluation is None:
         return {
@@ -602,7 +741,7 @@ def _draft_players_from_signals(
         rows.append({
             "player": name,
             "games": evaluated,
-            "draft_score": sum(values) / len(values),
+            "pick_contribution": sum(values) / len(values),
             "best_available_rate": best_picks.get(name, 0) / evaluated,
             "role": roles.get(name),
             "team": teams.get(name),
@@ -630,6 +769,58 @@ def _validate_public_composition_records(
         counts["games"] += 1
         counts[status] += 1
     return counts
+
+
+def _gate_published_draft_contributions(
+    profile_records: Mapping[str, Any],
+    draft_records_payload: Mapping[str, Any] | None = None,
+) -> dict[str, int]:
+    """Keep Draft Score only when public pool evidence is complete.
+
+    The score and the best-available pool share one evidence boundary. A
+    signal without five bans per side, ten ordered picks, and ten evaluated
+    tier rows is removed from both public projections.
+    """
+
+    games = profile_records.get("games") if isinstance(profile_records, Mapping) else None
+    if not isinstance(games, Mapping):
+        return {"eligible_games": 0, "removed_games": 0}
+    eligible: set[str] = set()
+    removed = 0
+    for game_id, game in games.items():
+        if not isinstance(game, dict):
+            continue
+        signal = game.get("draft_contribution")
+        if not isinstance(signal, Mapping):
+            continue
+        pool = game.get("draft_pool")
+        pool_picks = pool.get("picked") if isinstance(pool, Mapping) else None
+        try:
+            evaluated_picks = int(pool.get("evaluated_picks")) if isinstance(pool, Mapping) else 0
+        except (TypeError, ValueError):
+            evaluated_picks = 0
+        complete = (
+            signal.get("status") == "available"
+            and
+            isinstance(pool, Mapping)
+            and pool.get("status") == "complete"
+            and isinstance(pool_picks, list)
+            and len(pool_picks) == 10
+            and evaluated_picks == 10
+        )
+        if complete:
+            eligible.add(str(game_id))
+        else:
+            game.pop("draft_contribution", None)
+            removed += 1
+
+    if isinstance(draft_records_payload, dict):
+        records = draft_records_payload.get("games")
+        if isinstance(records, dict):
+            for game_id in list(records):
+                if str(game_id) not in eligible:
+                    records.pop(game_id, None)
+    return {"eligible_games": len(eligible), "removed_games": removed}
 
 
 def _normalized_game_uid(frame: pd.DataFrame) -> pd.Series:
@@ -769,9 +960,82 @@ def _draft_role(value: Any) -> str:
     }.get(str(value or "").strip().casefold(), str(value or "").strip().casefold())
 
 
+def _tier_payload_candidates(
+    project: Path,
+    runtime: Path,
+    explicit_path: Path | None = None,
+) -> list[Path]:
+    """Return the generated tier artifacts that this pack may consume.
+
+    The tier board is a runtime publication input. A clean source checkout
+    does not contain a checked-in copy of the public board. An explicit path
+    is useful for local pack builds and remains subject to the same payload
+    validation as the worker-generated path.
+    """
+
+    values: list[Path] = []
+    if explicit_path is not None:
+        candidate = explicit_path.expanduser()
+        if not candidate.is_absolute():
+            candidate = project / candidate
+        values.append(candidate)
+    else:
+        values.extend(
+            (
+                runtime / "apps" / "scryglass" / "public" / "rankings" / "tierlists.json",
+                project / "apps" / "scryglass" / "public" / "rankings" / "tierlists.json",
+            )
+        )
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for value in values:
+        resolved = value.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique.append(resolved)
+    return unique
+
+
+def _load_tier_payload(
+    project: Path,
+    runtime: Path,
+    explicit_path: Path | None = None,
+) -> tuple[Mapping[str, Any] | None, str | None, str | None]:
+    """Load one available generated tier board and bind its raw digest.
+
+    The returned digest identifies the exact bytes used to evaluate the
+    published best-available pools. Invalid, staged, and empty boards are
+    ignored. The caller decides whether the release can continue without a
+    valid board.
+    """
+
+    candidates = _tier_payload_candidates(project, runtime, explicit_path)
+    for path in candidates:
+        try:
+            raw = path.read_bytes()
+            payload = json.loads(raw.decode("utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, Mapping):
+            continue
+        if payload.get("schema_version") != "rankings-tierlists-v2":
+            continue
+        if payload.get("status") != "available":
+            continue
+        rows = payload.get("rows")
+        if not isinstance(rows, list) or not rows:
+            continue
+        return payload, hashlib.sha256(raw).hexdigest(), str(path)
+    return None, None, None
+
+
 def _attach_published_draft_pools(
     profile_records: dict[str, Any],
     tier_payload: Mapping[str, Any] | None,
+    *,
+    tier_payload_sha256: str | None = None,
+    tier_receipt_sha256: str | None = None,
 ) -> dict[str, int | float]:
     """Attach ban/unpicked pools and best-available pick facts to each game.
 
@@ -903,6 +1167,10 @@ def _attach_published_draft_pools(
         quality_games += int(evaluated == 10)
         pool["status"] = "complete" if evaluated == 10 else "limited" if bans_complete or picked else "unavailable"
         pool["source"] = "published-tier-list"
+        if tier_payload_sha256 and SHA256_RE.fullmatch(tier_payload_sha256):
+            pool["tier_payload_sha256"] = tier_payload_sha256
+        if tier_receipt_sha256 and SHA256_RE.fullmatch(tier_receipt_sha256):
+            pool["tier_receipt_sha256"] = tier_receipt_sha256
         pool["basis"] = "lowest published role rank among champions not banned or picked earlier"
         pool["evaluated_picks"] = evaluated
         pool["reason"] = None if evaluated == 10 else "Best-available rate excludes picks without complete ban, order, patch, or tier evidence."
@@ -941,6 +1209,8 @@ def export_public_pack(
     warehouse_root: Path | None = None,
     project_root: Path | None = None,
     runtime_root: Path | None = None,
+    tier_payload_path: Path | None = None,
+    tier_publication: Mapping[str, Any] | None = None,
     allowed_game_ids: Sequence[str] | None = None,
     momentum_window_games: int = DEFAULT_MOMENTUM_WINDOW_GAMES,
     momentum_scale: float = DEFAULT_MOMENTUM_SCALE,
@@ -1469,33 +1739,174 @@ def export_public_pack(
     composition_source_digest = source_identity_sha256(source_game_ids)
     composition_worker_commit = resolve_worker_commit(project)
     composition_model_dir = runtime / "data" / "lol" / "models" / "composition_signal"
-    composition_evaluation_path = composition_model_dir / "evaluation.json"
-    composition_evaluation: dict[str, Any] | None = None
-    if composition_evaluation_path.exists():
+    descriptive_authority: dict[str, Any] | None = None
+    descriptive_receipt_sha256: str | None = None
+    composition_error: str | None = None
+    try:
+        descriptive_authority, descriptive_receipt_sha256 = _load_descriptive_authority(project)
+    except CompositionSignalError as error:
+        composition_error = str(error)
+
+    composition_games: list[dict[str, Any]] = []
+    composition_result: dict[str, Any] | None = None
+    draft_records_payload: dict[str, Any] | None = None
+    draft_players: list[dict[str, Any]] = []
+    composition_audit: dict[str, Any] = {
+        "schema_version": "scryglass:composition-signal-descriptive:v1",
+        "model_version": DESCRIPTIVE_SCORE_MODEL_VERSION,
+        "estimand": "composition_only",
+        "status": "unavailable",
+        "source_identity_sha256": composition_source_digest,
+        "worker_commit": composition_worker_commit,
+        "authority": "unavailable",
+        "reason": composition_error or "descriptive Draft Score authority is unavailable",
+        "probability_authority": False,
+    }
+    if descriptive_authority is not None and descriptive_receipt_sha256 is not None:
+        composition_games = build_composition_games(player_profile_frame)
+        descriptive_model, descriptive_artifact_sha256 = load_descriptive_score_model()
+        artifact_fit_through: str | None = None
         try:
-            candidate_evaluation = json.loads(
-                composition_evaluation_path.read_text(encoding="utf-8")
+            parsed_artifact_as_of = pd.to_datetime(
+                descriptive_model.get("as_of"), utc=True, errors="raise"
             )
-            if (
-                candidate_evaluation.get("model_version") == MODEL_VERSION
-                and candidate_evaluation.get("source_hash") == composition_source_digest
-                and candidate_evaluation.get("canonical_game_identity_sha256") == composition_source_digest
-                and (
-                    candidate_evaluation.get("worker_commit") == composition_worker_commit
-                    or candidate_evaluation.get("code_digest") == _composition_code_digest()
+            artifact_fit_through = parsed_artifact_as_of.isoformat().replace("+00:00", "Z")
+        except (TypeError, ValueError, OverflowError):
+            artifact_fit_through = None
+        signals: dict[str, dict[str, Any]] = {}
+        for game in composition_games:
+            try:
+                signals[str(game["game_uid"])] = score_descriptive_game(
+                    game,
+                    model=descriptive_model,
+                    artifact_sha256=descriptive_artifact_sha256,
                 )
-            ):
-                composition_evaluation = candidate_evaluation
-        except (OSError, TypeError, ValueError, json.JSONDecodeError):
-            composition_evaluation = None
-    draft_publication = _draft_publication_decision(composition_evaluation)
-    # Keep all composition and draft fields out of this release.  A candidate
-    # evaluation, including one whose gate passes, is not an authority receipt.
-    # This lets factual ratings and match records continue through publication.
+            except (KeyError, TypeError, ValueError, DescriptiveDraftScoreError):
+                continue
+        composition_audit = {
+            "schema_version": DESCRIPTIVE_SIGNAL_SCHEMA_VERSION,
+            "model_version": DESCRIPTIVE_SCORE_MODEL_VERSION,
+            "estimand": "composition_only",
+            "included_terms": list(DESCRIPTIVE_SCORE_INCLUDED_TERMS),
+            "excluded_terms": list(DESCRIPTIVE_SCORE_EXCLUDED_TERMS),
+            "training_order": "frozen static artifact; descriptive historical evidence",
+            "status": "available" if signals else "unavailable",
+            "target_games": len(composition_games),
+            "available_games": sum(signal.get("status") == "available" for signal in signals.values()),
+            "limited_games": sum(signal.get("status") == "limited" for signal in signals.values()),
+            "unavailable_games": len(composition_games) - len(signals),
+            "fit_through": artifact_fit_through,
+            "artifact_sha256": descriptive_artifact_sha256,
+            "source_identity_sha256": composition_source_digest,
+            "worker_commit": composition_worker_commit,
+            "authority": "descriptive",
+            "receipt_sha256": descriptive_receipt_sha256,
+            "probability_authority": False,
+            "recommendation_authority": False,
+            "betting_authority": False,
+        }
+        composition_audit.update(
+            {
+                "source_as_of": source_as_of.isoformat().replace("+00:00", "Z"),
+                "canonical_game_identity_sha256": composition_source_digest,
+                "authority_id": descriptive_authority.get("authority_id"),
+                "artifact_sha256": descriptive_artifact_sha256,
+                "artifact_commit": descriptive_authority.get("artifact_commit"),
+                "source_patch_binding": descriptive_authority.get("source_patch_binding"),
+                "evaluation": descriptive_authority.get("evaluation"),
+            "player_comfort": descriptive_authority.get("component_contract", {}).get("player_comfort"),
+            "archetype_interaction_source": descriptive_authority.get("archetype_interaction_source"),
+        }
+        )
+        composition_result = {"signals": signals, "audit": composition_audit}
+        draft_records_payload = build_draft_records_payload(
+            composition_result,
+            composition_games,
+            composition_audit,
+        )
+        draft_publication = _draft_publication_decision(
+            None,
+            descriptive_authority=descriptive_authority,
+            receipt_sha256=descriptive_receipt_sha256,
+            release_id=pack_id,
+        )
+        draft_records_payload.update(
+            {
+                "release_id": pack_id,
+                "artifact_sha256": draft_publication.get("artifact_sha256"),
+                "authority_receipt_sha256": draft_publication.get("receipt_sha256"),
+            }
+        )
+        for game_id, signal in signals.items():
+            if game_id in profile_records_payload.get("games", {}):
+                profile_records_payload["games"][game_id]["draft_contribution"] = signal
+            archive_candidate = profile_records_payload.get("_archive_games", {}).get(game_id)
+            if isinstance(archive_candidate, dict):
+                archive_candidate["draft_contribution"] = signal
+    else:
+        draft_publication = _draft_publication_decision(None)
+
+    tier_receipt_sha256: str | None = None
+    if tier_publication is not None:
+        if not isinstance(tier_publication, Mapping):
+            raise RuntimeError("tier publication binding is malformed")
+        publication_path = tier_publication.get("payload_path")
+        if not isinstance(publication_path, str) or not publication_path.strip():
+            raise RuntimeError("tier publication has no runtime payload path")
+        tier_payload_path = Path(publication_path)
+        tier_receipt_sha256 = str(tier_publication.get("receipt_sha256") or "") or None
+        if tier_publication.get("status") != "available":
+            raise RuntimeError("tier publication is not available")
+        if tier_publication.get("production_status") not in {"production_built", "production_promoted"}:
+            raise RuntimeError("tier publication is not production-bound")
+        if not SHA256_RE.fullmatch(str(tier_publication.get("payload_sha256") or "")):
+            raise RuntimeError("tier publication payload digest is missing")
+        if not SHA256_RE.fullmatch(str(tier_publication.get("receipt_sha256") or "")):
+            raise RuntimeError("tier publication receipt digest is missing")
+    tier_payload, tier_payload_sha256, tier_payload_source = _load_tier_payload(
+        project,
+        runtime,
+        tier_payload_path,
+    )
+    if tier_publication is not None and (
+        tier_payload is None
+        or tier_payload_sha256 != tier_publication.get("payload_sha256")
+    ):
+        raise RuntimeError("tier publication payload digest does not match the loaded bytes")
+    if tier_publication is not None:
+        expected_source_identity = str(tier_publication.get("source_identity_sha256") or "")
+        if expected_source_identity and expected_source_identity != composition_source_digest:
+            raise RuntimeError("tier publication source identity does not match the pack source")
+    if draft_publication["status"] == "descriptive":
+        _attach_published_draft_pools(
+            profile_records_payload,
+            tier_payload,
+            tier_payload_sha256=tier_payload_sha256,
+            tier_receipt_sha256=tier_receipt_sha256,
+        )
+        archive_payload = profile_records_payload.get("_archive_games")
+        if isinstance(archive_payload, dict):
+            _attach_published_draft_pools(
+                {"games": archive_payload},
+                tier_payload,
+                tier_payload_sha256=tier_payload_sha256,
+                tier_receipt_sha256=tier_receipt_sha256,
+            )
+
     archive_games = merge_accepted_profile_games(
         profile_records_payload.pop("_archive_games", {}),
         _accepted_profile_games(project),
     )
+    if draft_publication["status"] == "descriptive":
+        archive_view = {"games": archive_games}
+        _attach_published_draft_pools(
+            archive_view,
+            tier_payload,
+            tier_payload_sha256=tier_payload_sha256,
+            tier_receipt_sha256=tier_receipt_sha256,
+        )
+        _gate_published_draft_contributions(archive_view, draft_records_payload)
+        archive_games = archive_view["games"]
     profile_game_ids = set(profile_records_payload.get("games", {})).intersection(archive_games)
     profile_records_payload["games"] = {
         game_id: archive_games[game_id]
@@ -1507,8 +1918,56 @@ def export_public_pack(
             for identity, game_ids in profile_records_payload.get(index_name, {}).items()
             if any(game_id in profile_game_ids for game_id in game_ids)
         }
-    _withhold_unpromoted_draft_fields(profile_records_payload)
-    _withhold_unpromoted_draft_fields({"games": archive_games})
+    if draft_publication["status"] == "descriptive":
+        draft_pool_audit = _attach_published_draft_pools(
+            {"games": profile_records_payload["games"]},
+            tier_payload,
+            tier_payload_sha256=tier_payload_sha256,
+            tier_receipt_sha256=tier_receipt_sha256,
+        )
+        if draft_records_payload is not None:
+            for game_id, entry in draft_records_payload.get("games", {}).items():
+                profile_game = profile_records_payload.get("games", {}).get(game_id)
+                if isinstance(profile_game, Mapping) and isinstance(profile_game.get("draft_pool"), Mapping):
+                    entry["draft_pool"] = profile_game["draft_pool"]
+        _gate_published_draft_contributions(
+            profile_records_payload,
+            draft_records_payload,
+        )
+        if not tier_payload_source:
+            raise RuntimeError(
+                "descriptive Draft release requires an available generated tier payload"
+            )
+        if not draft_records_payload or not draft_records_payload.get("games"):
+            raise RuntimeError("descriptive Draft release has no usable games")
+        published_draft_ids = {
+            str(game_id) for game_id in draft_records_payload.get("games", {})
+        }
+        for game_id, game in archive_games.items():
+            if str(game_id) not in published_draft_ids and isinstance(game, dict):
+                game.pop("draft_contribution", None)
+                game.pop("draft_pool", None)
+        draft_players = _draft_players_from_signals({}, profile_records_payload)
+        profile_records_payload["draft_pool_audit"] = {
+            "schema_version": "scryglass:draft-pool-audit:v1",
+            "source": "Oracle's Elixir bans and pick order plus published patch tier list",
+                "scope": "published profile window after accepted-profile bridge",
+            "tier_payload_sha256": tier_payload_sha256,
+            "tier_payload_source": tier_payload_source,
+            **draft_pool_audit,
+        }
+        published_composition = _validate_public_composition_records(profile_records_payload)
+        composition_audit.update(
+            {
+                "published_games": published_composition["games"],
+                "published_available_games": published_composition["available"],
+                "published_limited_games": published_composition["limited"],
+                "published_unavailable_games": published_composition["unavailable"],
+            }
+        )
+    else:
+        _withhold_unpromoted_draft_fields(profile_records_payload)
+        _withhold_unpromoted_draft_fields({"games": archive_games})
     del player_profile_frame
 
     # These records are intentionally built from the same year-filtered
@@ -1571,6 +2030,23 @@ def export_public_pack(
         },
         "features/profile_records.json",
     )
+
+    if draft_records_payload is not None and draft_publication["status"] == "descriptive":
+        draft_records_dest = feat_dir / "draft_records.json"
+        draft_records_dest.write_text(
+            json.dumps(draft_records_payload, separators=(",", ":"), ensure_ascii=False),
+            encoding="utf-8",
+        )
+        register(
+            {
+                "rows": len(draft_records_payload.get("games", {})),
+                "cols": None,
+                "bytes": draft_records_dest.stat().st_size,
+                "sha256": _sha256(draft_records_dest),
+                "columns": None,
+            },
+            "features/draft_records.json",
+        )
 
     match_index_payload = {
         "schema_version": "scryglass:match-index:v1",
@@ -1741,9 +2217,9 @@ def export_public_pack(
             team_records=team_records_payload_raw,
             player_champion_records=player_champion_records_raw,
             match_index=match_index_raw,
-            draft_records=None,
-            draft_players=[],
-            draft_profile_records=None,
+            draft_records=draft_records_payload,
+            draft_players=draft_players,
+            draft_profile_records=profile_records_payload if draft_publication["status"] == "descriptive" else None,
         )
         leaderboards_dest = feat_dir / "leaderboards.json"
         leaderboards_dest.write_text(
@@ -1764,6 +2240,20 @@ def export_public_pack(
         raise RuntimeError("support-chat leaderboards could not be built") from error
 
     progress("building bounded public query projection")
+    query_archive_games = archive_games
+    if draft_publication["status"] == "descriptive" and draft_records_payload is not None:
+        published_draft_ids = {
+            str(game_id) for game_id in draft_records_payload.get("games", {})
+        }
+        query_archive_games = {}
+        for game_id, game in archive_games.items():
+            if not isinstance(game, Mapping):
+                continue
+            query_game = dict(game)
+            if str(game_id) not in published_draft_ids:
+                query_game.pop("draft_contribution", None)
+                query_game.pop("draft_pool", None)
+            query_archive_games[str(game_id)] = query_game
     query_projection = build_public_query_projection(
         release_id=pack_id,
         player_ratings=player_rating_rows,
@@ -1772,12 +2262,30 @@ def export_public_pack(
         team_records=team_records_payload,
         player_champion_records=player_champions_payload,
         profile_records=profile_records_payload,
-        archive_games=archive_games,
+        archive_games=query_archive_games,
         player_weekly_ranks=weekly_ranks,
         team_weekly_ranks=team_weekly_ranks,
         player_metadata=player_metadata,
         leaderboards=leaderboards,
+        draft_authority=draft_publication,
+        draft_records=draft_records_payload,
     )
+    if draft_publication["status"] == "descriptive" and draft_records_payload is not None:
+        expected_draft_ids = {
+            str(game_id) for game_id in draft_records_payload.get("games", {})
+        }
+        actual_draft_ids = {
+            str(row.get("game_id"))
+            for row in query_projection.get("datasets", {}).get("games", [])
+            if isinstance(row, Mapping)
+            and isinstance(row.get("payload"), Mapping)
+            and "draft_contribution" in row["payload"]
+        }
+        if actual_draft_ids != expected_draft_ids:
+            raise RuntimeError(
+                "public query Draft IDs do not match draft_records: "
+                f"expected={len(expected_draft_ids)} actual={len(actual_draft_ids)}"
+            )
     query_api_manifest = write_public_query_projection(query_projection, pack_dir)
     del archive_games, query_projection
 
@@ -1817,6 +2325,26 @@ def export_public_pack(
 
     progress("finalizing manifest")
     total_bytes = sum(f["bytes"] for f in files_meta)
+    draft_manifest = {
+        "schema_version": "scryglass:draft-authority:v1",
+        "status": draft_publication["status"],
+        "release_id": pack_id,
+        "model_version": draft_publication.get("model_version"),
+        "artifact_sha256": draft_publication.get("artifact_sha256"),
+        "receipt_sha256": draft_publication.get("receipt_sha256"),
+        "issued_utc": draft_publication.get("issued_utc"),
+        "reason": draft_publication["reason"],
+    }
+    if draft_publication["status"] == "descriptive":
+        draft_manifest.update(
+            {
+                "authority": "descriptive",
+                "estimand": "composition_only",
+                "probability_authority": False,
+                "recommendation_authority": False,
+                "betting_authority": False,
+            }
+        )
     manifest: dict[str, Any] = {
         "pack_id": pack_id,
         "schema_version": spec.SCHEMA_VERSION,
@@ -1841,15 +2369,7 @@ def export_public_pack(
             },
         },
         "attribution": spec.ATTRIBUTION,
-        "draft_authority": {
-            "schema_version": "scryglass:draft-authority:v1",
-            "status": "unavailable",
-            "release_id": pack_id,
-            "model_version": None,
-            "receipt_sha256": None,
-            "issued_utc": None,
-            "reason": draft_publication["reason"],
-        },
+        "draft_authority": draft_manifest,
         "query_api": query_api_manifest,
         "excluded": [
             "raw game rows",
@@ -1875,6 +2395,7 @@ def export_public_pack(
             ),
             "claim_ceiling": "Source-bound descriptive ratings and historical rank movement only.",
         },
+        "draft": composition_audit,
         "base_url": None,  # filled by upload / atlas config
         "total_bytes": total_bytes,
         "total_files": len(files_meta),
@@ -1905,6 +2426,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--warehouse-root", type=Path, default=None, help="Use a source-root overlay for live refreshes")
     ap.add_argument(
+        "--tier-payload",
+        type=Path,
+        default=None,
+        help="Use this generated rankings-tierlists-v2 payload for Draft pool evidence",
+    )
+    ap.add_argument(
         "--momentum-window-games",
         type=int,
         default=DEFAULT_MOMENTUM_WINDOW_GAMES,
@@ -1923,6 +2450,7 @@ def main(argv: list[str] | None = None) -> int:
         out_root=args.out,
         pack_id=args.pack_id,
         warehouse_root=args.warehouse_root,
+        tier_payload_path=args.tier_payload,
         momentum_window_games=args.momentum_window_games,
         momentum_scale=args.momentum_scale,
     )

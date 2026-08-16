@@ -116,8 +116,8 @@ def test_build_leaderboards_aggregates_all_domains() -> None:
         match_index=_match_index(),
         draft_records=_draft_records(),
         draft_players=[
-            {"player": "Alice", "games": 8, "draft_score": 0.12, "best_available_rate": 0.625, "role": "mid", "team": "Team A"},
-            {"player": "Bob", "games": 10, "draft_score": 0.08, "best_available_rate": 0.4, "role": "jng", "team": "Team B"},
+            {"player": "Alice", "games": 8, "pick_contribution": 0.12, "best_available_rate": 0.625, "role": "mid", "team": "Team A"},
+            {"player": "Bob", "games": 10, "pick_contribution": 0.08, "best_available_rate": 0.4, "role": "jng", "team": "Team B"},
         ],
     )
 
@@ -152,7 +152,8 @@ def test_build_leaderboards_aggregates_all_domains() -> None:
     assert "Orianna" in payload["indexes"]["champions"]
     assert "LCS" in payload["indexes"]["leagues"] and "LEC" in payload["indexes"]["leagues"]
     assert payload["teams_draft"][0]["team"] == "Team A"
-    assert payload["teams_draft"][0]["draft_win_share"] == 0.5987
+    assert payload["teams_draft"][0]["draft_edge"] == 0.4
+    assert "draft_win_share" not in payload["teams_draft"][0]
     assert payload["players_draft"][0]["player"] == "Alice"
     assert payload["players_draft"][0]["best_available_rate"] == 0.625
 

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { PackManifest } from "./pack";
-import { hasPromotedDraftAuthority } from "./pack";
+import { draftAuthorityStatus, hasDescriptiveDraftAuthority } from "./pack";
 
 const packJsonCache = new Map<string, Promise<unknown>>();
 const PACK_CACHE_SECONDS = 21_600;
@@ -108,7 +108,7 @@ export function safeRelativePath(relativePath: string): string {
 }
 
 function assetAuthorized(manifest: PackManifest, relativePath: string): boolean {
-  return relativePath !== "features/draft_records.json" || hasPromotedDraftAuthority(manifest);
+  return relativePath !== "features/draft_records.json" || hasDescriptiveDraftAuthority(manifest);
 }
 
 export async function readLocalManifest(): Promise<PackManifest> {
@@ -471,8 +471,14 @@ function readValidatedManifestFallback(): PackManifest | null {
       || (
         manifest.draft_authority
         && (
-          manifest.draft_authority.release_id !== manifest.pack_id
-          || manifest.draft_authority.status === "promoted"
+            manifest.draft_authority.release_id !== manifest.pack_id
+            || (
+            manifest.draft_authority.status === "promoted"
+            || (
+            manifest.draft_authority.status !== "unavailable"
+            && draftAuthorityStatus(manifest) === "unavailable"
+            )
+            )
         )
       )
     ) {

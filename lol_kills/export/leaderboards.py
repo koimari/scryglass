@@ -33,11 +33,6 @@ def _finite(value: float) -> bool:
     return math.isfinite(value)
 
 
-def _sigmoid(value: float) -> float:
-    """Map the published descriptive edge to its display win-share scale."""
-    return 1.0 / (1.0 + math.exp(-value))
-
-
 def _grade_a_games(
     profile_records: Mapping[str, Any],
 ) -> tuple[dict[str, int], dict[str, int]]:
@@ -183,13 +178,13 @@ def _champion_performers(
 
 
 def _teams_draft(draft_records: Mapping[str, Any] | None) -> list[dict[str, Any]]:
-    """Teams ranked by mean draft win share across the whole accepted archive."""
+    """Teams ranked by mean descriptive draft edge across the archive."""
     if not isinstance(draft_records, Mapping):
         return []
     games = draft_records.get("games")
     if not isinstance(games, Mapping):
         return []
-    by_team: dict[str, list[tuple[float, float]]] = {}
+    by_team: dict[str, list[float]] = {}
     for game in games.values():
         if not isinstance(game, Mapping):
             continue
@@ -199,25 +194,21 @@ def _teams_draft(draft_records: Mapping[str, Any] | None) -> list[dict[str, Any]
         if not isinstance(edge, (int, float)):
             continue
         edge_value = float(edge)
-        blue_share = _sigmoid(edge_value)
         if blue:
-            by_team.setdefault(blue, []).append((edge_value, blue_share))
+            by_team.setdefault(blue, []).append(edge_value)
         if red:
-            by_team.setdefault(red, []).append((-edge_value, 1.0 - blue_share))
+            by_team.setdefault(red, []).append(-edge_value)
     rows = []
     for team, evidence in by_team.items():
         games_n = len(evidence)
         if games_n < 5:
             continue
-        edges = [edge for edge, _ in evidence]
-        shares = [share for _, share in evidence]
         rows.append({
             "team": team,
             "games": games_n,
-            "draft_edge": round(sum(edges) / games_n, 4),
-            "draft_win_share": round(sum(shares) / games_n, 4),
+            "draft_edge": round(sum(evidence) / games_n, 4),
         })
-    rows.sort(key=lambda row: (-row["draft_win_share"], -row["draft_edge"], -row["games"], row["team"]))
+    rows.sort(key=lambda row: (-row["draft_edge"], -row["games"], row["team"]))
     return rows[:TOP_LIMIT]
 
 
@@ -227,7 +218,7 @@ def _teams_draft_from_profile(profile_records: Mapping[str, Any] | None) -> list
     games = profile_records.get("games") if isinstance(profile_records, Mapping) else None
     if not isinstance(games, Mapping):
         return []
-    by_team: dict[str, list[tuple[float, float]]] = {}
+    by_team: dict[str, list[float]] = {}
     for game in games.values():
         if not isinstance(game, Mapping):
             continue
@@ -239,13 +230,12 @@ def _teams_draft_from_profile(profile_records: Mapping[str, Any] | None) -> list
         if blue_signal is None or red_signal is None:
             continue
         edge = blue_signal - red_signal
-        share = _sigmoid(edge)
         blue = str(game.get("blue_team") or "").strip()
         red = str(game.get("red_team") or "").strip()
         if blue:
-            by_team.setdefault(blue, []).append((edge, share))
+            by_team.setdefault(blue, []).append(edge)
         if red:
-            by_team.setdefault(red, []).append((-edge, 1.0 - share))
+            by_team.setdefault(red, []).append(-edge)
     rows = []
     for team, evidence in by_team.items():
         if len(evidence) < 5:
@@ -253,10 +243,9 @@ def _teams_draft_from_profile(profile_records: Mapping[str, Any] | None) -> list
         rows.append({
             "team": team,
             "games": len(evidence),
-            "draft_edge": round(sum(edge for edge, _ in evidence) / len(evidence), 4),
-            "draft_win_share": round(sum(share for _, share in evidence) / len(evidence), 4),
+            "draft_edge": round(sum(evidence) / len(evidence), 4),
         })
-    rows.sort(key=lambda row: (-row["draft_win_share"], -row["draft_edge"], -row["games"], row["team"]))
+    rows.sort(key=lambda row: (-row["draft_edge"], -row["games"], row["team"]))
     return rows[:TOP_LIMIT]
 
 
@@ -268,14 +257,14 @@ def _players_draft(players: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]
             continue
         name = str(entry.get("player") or "").strip()
         games_n = int(entry.get("games") or 0)
-        score = _number(entry.get("draft_score"))
+        score = _number(entry.get("pick_contribution"))
         best_available_rate = _number(entry.get("best_available_rate"))
         if not name or games_n < 5:
             continue
         rows.append({
             "player": name,
             "games": games_n,
-            "draft_score": round(score, 4) if score is not None else None,
+            "pick_contribution": round(score, 4) if score is not None else None,
             "best_available_rate": round(best_available_rate, 4) if best_available_rate is not None else None,
             "role": str(entry.get("role") or "").strip() or None,
             "team": str(entry.get("team") or "").strip() or None,
@@ -283,7 +272,7 @@ def _players_draft(players: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]
     rows.sort(key=lambda row: (
         -(row["best_available_rate"] if row["best_available_rate"] is not None else float("-inf")),
         -row["games"],
-        -(row["draft_score"] if row["draft_score"] is not None else float("-inf")),
+        -(row["pick_contribution"] if row["pick_contribution"] is not None else float("-inf")),
         row["player"],
     ))
     return rows[:TOP_LIMIT]

@@ -4,6 +4,7 @@ import json
 import hashlib
 import urllib.error
 from dataclasses import replace
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -48,6 +49,80 @@ def _with_receipt_paths(config: public_refresh.RefreshConfig) -> public_refresh.
         accepted_source_receipt=source,
         accepted_import_receipt=imported,
     )
+
+
+def test_tier_publication_binds_runtime_payload_to_accepted_source(tmp_path: Path) -> None:
+    config = replace(_config(tmp_path), publication_backend="supabase")
+    payload_path = (
+        config.runtime_root
+        / "apps/scryglass/public/rankings/tierlists.json"
+    )
+    payload_path.parent.mkdir(parents=True)
+    payload_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "rankings-tierlists-v2",
+                "status": "available",
+                "as_of": "2026-08-09T17:00:00Z",
+                "rows": [
+                    {"patch": "26.16", "role": role, "champion": f"{role}-champion", "rank": 1}
+                    for role in ("top", "jungle", "mid", "bot", "support")
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    source_identity = "c" * 64
+    receipt = {
+        "status": "production_built",
+        "source_observed_through": "2026-08-09T17:00:00Z",
+        "candidate_expected_live_as_of": "2026-08-09T17:00:00Z",
+        "receipt_canonical_sha256": "d" * 64,
+        "candidate": {"artifact_sha256": "e" * 64},
+    }
+
+    binding = public_refresh._tier_publication_for_source(
+        config,
+        receipt,
+        source_observed_through="2026-08-09T17:00:00Z",
+        source={"identity_sha256": source_identity},
+    )
+
+    assert binding["status"] == "available"
+    assert binding["production_status"] == "production_built"
+    assert binding["source_identity_sha256"] == source_identity
+    assert binding["scope_count"] == 1
+    assert len(binding["payload_sha256"]) == 64
+
+
+def test_tier_publication_rejects_incomplete_role_scope(tmp_path: Path) -> None:
+    config = replace(_config(tmp_path), publication_backend="supabase")
+    payload_path = config.runtime_root / "apps/scryglass/public/rankings/tierlists.json"
+    payload_path.parent.mkdir(parents=True)
+    payload_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "rankings-tierlists-v2",
+                "status": "available",
+                "as_of": "2026-08-09T17:00:00Z",
+                "rows": [{"patch": "26.16", "role": "mid", "champion": "Ahri", "rank": 1}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(public_refresh.PublicRefreshError, match="five-role scope"):
+        public_refresh._tier_publication_for_source(
+            config,
+            {
+                "status": "production_built",
+                "source_observed_through": "2026-08-09T17:00:00Z",
+                "candidate_expected_live_as_of": "2026-08-09T17:00:00Z",
+                "receipt_canonical_sha256": "d" * 64,
+                "candidate": {"artifact_sha256": "e" * 64},
+            },
+            source_observed_through="2026-08-09T17:00:00Z",
+            source={"identity_sha256": "c" * 64},
+        )
 
 
 def test_environment_defaults_to_supabase_publication(tmp_path: Path) -> None:

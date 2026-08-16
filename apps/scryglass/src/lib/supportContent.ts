@@ -29,7 +29,7 @@ export const METHODOLOGY_SECTIONS: Record<MethodologyTopic, { title: string; bod
   },
   draft: {
     title: "Draft Score",
-    body: "Draft Score is a private research track. Public draft results stay unavailable until an independent review issues a release-bound promotion receipt.",
+    body: "Draft Score has a descriptive composition edge in model units after an independent release-bound receipt. It shows the base, archetype interaction, synergy, counter, and same-role components from the draft. Match strength, player comfort, phase, and pace are separate evidence. Calibrated probability stays unavailable until its own authority passes.",
   },
   matches: {
     title: "Matches",
@@ -41,7 +41,7 @@ export const METHODOLOGY_SECTIONS: Record<MethodologyTopic, { title: string; bod
   },
   all: {
     title: "How Scryglass works",
-    body: "Scryglass publishes team ratings, player ratings, patch-wide tier lists, and match results for professional League of Legends. Data refreshes every six hours from Oracle's Elixir. Ratings use Dual Elo, grades run from A to F per game, and tier lists cover each role across a patch. Draft Score stays unavailable until its separate promotion gate passes.",
+    body: "Scryglass publishes team ratings, player ratings, patch-wide tier lists, and match results for professional League of Legends. Data refreshes every six hours from Oracle's Elixir. Ratings use Dual Elo, grades run from A to F per game, and tier lists cover each role across a patch. Draft Score publishes a descriptive composition edge only after its separate receipt gate passes.",
   },
 };
 

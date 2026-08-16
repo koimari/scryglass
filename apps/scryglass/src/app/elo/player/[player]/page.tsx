@@ -9,7 +9,7 @@ import type {
   ProfileRecords,
   TeamRating,
 } from "@/lib/pack";
-import { compactPlayerRatings, findPlayerByRouteName, hasPromotedDraftAuthority, isActiveRating, PLAYER_SIGMA_MIN, softMu } from "@/lib/pack";
+import { compactPlayerRatings, findPlayerByRouteName, hasPublishedDraftAuthority, isActiveRating, PLAYER_SIGMA_MIN, softMu } from "@/lib/pack";
 import { draftRankingsFromProfile, filterDraftRankings } from "@/lib/draftRankings";
 import { playerPortrait } from "@/lib/playerPortraits";
 import { playerPositionDeltas } from "@/lib/playerMovement";
@@ -70,7 +70,14 @@ export default async function PlayerEloPage({ params }: Props) {
         recentGames={profile.recent_games.map((row) => row.payload)}
         championImages={profile.champion_images}
         manifest={man}
-        draftMetric={null}
+        draftMetric={hasPublishedDraftAuthority(man) && profile.draft_metric?.best_available_rate != null ? {
+          bestAvailableRate: profile.draft_metric.best_available_rate,
+          pickContribution: profile.draft_metric.pick_contribution ?? null,
+          games: profile.draft_metric.games,
+          poolDefinition: profile.draft_metric.pool_definition ?? null,
+          banCoverage: profile.draft_metric.ban_coverage ?? null,
+          scope: profile.draft_metric.scope === "whole_archive" ? "whole_archive" : "profile_window",
+        } : null}
       />
     );
   }
@@ -112,7 +119,7 @@ export default async function PlayerEloPage({ params }: Props) {
   const recentGames = gameIds
     .map((gameId) => profileRecords?.games[gameId])
     .filter((game): game is ProfileGame => Boolean(game));
-  const draftProfile = hasPromotedDraftAuthority(man) && profileRecords
+  const draftProfile = hasPublishedDraftAuthority(man) && profileRecords
     ? filterDraftRankings(draftRankingsFromProfile(profileRecords), { leagues: [], minGames: 5 })
     : null;
   const draftMetric = draftProfile?.players.find(
@@ -138,7 +145,10 @@ export default async function PlayerEloPage({ params }: Props) {
       manifest={man}
       draftMetric={draftMetric?.best_available_rate != null && draftProfile ? {
         bestAvailableRate: draftMetric.best_available_rate,
+        pickContribution: draftMetric.pick_contribution ?? null,
         games: draftMetric.games,
+        poolDefinition: "Best available champion in the published unbanned role pool",
+        banCoverage: null,
         scope: draftProfile.scope,
       } : null}
     />

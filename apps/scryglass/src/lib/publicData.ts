@@ -1,3 +1,7 @@
+import {
+  draftAuthorityStatus,
+  type DraftAuthorityStatus,
+} from "./pack";
 import type {
   MatchSummary,
   PackManifest,
@@ -39,6 +43,7 @@ let playerProfileCacheBytes = 0;
 export type QueryApiEnvelope<T> = {
   schema_version: typeof QUERY_API_SCHEMA;
   release_id: string;
+  authority?: DraftAuthorityStatus;
   rows: T[];
   limit: number;
   offset: number;
@@ -136,6 +141,22 @@ export type MatchQueryEnvelope = QueryApiEnvelope<MatchQueryRow> & {
   champion_images: Record<string, string>;
 };
 
+export type TeamDraftMetric = {
+  draft_edge: number;
+  games: number;
+  positive_edge_rate?: number | null;
+  scope?: "whole_archive" | "profile_window" | string | null;
+};
+
+export type PlayerDraftMetric = {
+  best_available_rate: number | null;
+  games: number;
+  pick_contribution?: number | null;
+  pool_definition?: string | null;
+  ban_coverage?: number | null;
+  scope?: "whole_archive" | "profile_window" | string | null;
+};
+
 export type MatchFacets = {
   schema_version: typeof QUERY_API_SCHEMA;
   release_id: string;
@@ -149,6 +170,8 @@ export type MatchFacets = {
 export type PlayerProfileQuery = {
   schema_version: typeof QUERY_API_SCHEMA;
   release_id: string;
+  authority?: DraftAuthorityStatus;
+  draft_metric?: PlayerDraftMetric | null;
   row: RatingQueryRow | null;
   team_row: RatingQueryRow | null;
   champions: PlayerChampionQueryRow[];
@@ -170,6 +193,8 @@ export type TeamProfileRosterRow = RatingQueryRow & {
 export type TeamProfileQuery = {
   schema_version: typeof QUERY_API_SCHEMA;
   release_id: string;
+  authority?: DraftAuthorityStatus;
+  draft_metric?: TeamDraftMetric | null;
   row: RatingQueryRow | null;
   roster: TeamProfileRosterRow[];
   recent_games: MatchQueryRow[];
@@ -319,6 +344,69 @@ function unwrapRpc(value: unknown): unknown {
   return value;
 }
 
+const DRAFT_PROBABILITY_KEYS = new Set([
+  "draft_probability",
+  "draft_win_share",
+  "average_win_share",
+  "p_blue",
+  "p_red",
+  "probability",
+  "fair_odds",
+  "expected_value",
+  "ev",
+]);
+
+function containsDraftProbability(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsDraftProbability);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value as Record<string, unknown>).some(([key, child]) => (
+    DRAFT_PROBABILITY_KEYS.has(key.toLowerCase()) || containsDraftProbability(child)
+  ));
+}
+
+function containsKey(value: unknown, keyName: string): boolean {
+  if (Array.isArray(value)) return value.some((entry) => containsKey(entry, keyName));
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value as Record<string, unknown>).some(([key, child]) => (
+    key.toLowerCase() === keyName || containsKey(child, keyName)
+  ));
+}
+
+function responseAuthority(value: Record<string, unknown>): DraftAuthorityStatus | null {
+  const direct = value.authority;
+  if (direct === "unavailable" || direct === "descriptive" || direct === "promoted") return direct;
+  const nested = value.draft_authority;
+  if (!nested || typeof nested !== "object") return null;
+  const record = nested as Record<string, unknown>;
+  const authority = record.authority ?? record.status;
+  return authority === "unavailable" || authority === "descriptive" || authority === "promoted"
+    ? authority
+    : null;
+}
+
+function validateDraftResponse(value: unknown, manifest: PackManifest): void {
+  if (!value || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  const authority = responseAuthority(record);
+  if (authority !== "promoted" && containsDraftProbability(value)) {
+    throw new Error("Public Draft response contains probability fields without promoted authority");
+  }
+  const declared = draftAuthorityStatus(manifest);
+  if (authority && authority !== declared) {
+    throw new Error("Public Draft response has an unbound authority");
+  }
+  if (containsKey(value, "draft_metric") || containsKey(value, "draft_pool") || containsKey(value, "draft_contribution")) {
+    if (authority !== "descriptive" || declared !== "descriptive") {
+      throw new Error("Public Draft response is missing descriptive release authority");
+    }
+  }
+}
+
+/** Validate the public Draft fields before a query response reaches a page. */
+export function validatePublicDraftResponse(value: unknown, manifest: PackManifest): void {
+  validateDraftResponse(value, manifest);
+}
+
 async function publicRpc<T>(
   name: string,
   parameters: Record<string, unknown>,
@@ -347,6 +435,7 @@ async function publicRpc<T>(
   if (envelope.schema_version !== QUERY_API_SCHEMA || envelope.release_id !== manifest.pack_id) {
     throw new Error(`Public query ${name} has a different release`);
   }
+  validateDraftResponse(value, manifest);
   return value as T;
 }
 
