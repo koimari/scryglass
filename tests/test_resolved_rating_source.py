@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
+import lol_kills.ratings.resolved_rating_source as rating_source
 from lol_kills.research.atomized_rf_composite import _resolved_roster_sha256
 from lol_kills.ratings.resolved_rating_source import (
+    EQUAL_TIMESTAMP_BATCHING_POLICY,
     SCHEMA_VERSION,
     ResolvedRatingSourceError,
+    build_rating_batch_receipt_sha256,
     build_rating_receipt_sha256,
     build_resolved_rating_source,
     build_roster_sha256,
@@ -38,7 +42,7 @@ def _roster() -> list[dict[str, str]]:
                     "position": role,
                     "teamid": team,
                     "playerid": f"oe:player:{side}-{role_index}",
-                    "champion": f"Champion{role_index}",
+                    "champion": f"{side.title()}Champion{role_index}",
                 }
             )
     return rows
@@ -58,7 +62,7 @@ def _ratings(**updates: object) -> dict[str, object]:
     return values
 
 
-def _receipt(**updates: object) -> dict[str, object]:
+def _receipt(*, strict: bool = False, **updates: object) -> dict[str, object]:
     values = _ratings(**updates)
     return build_resolved_rating_source(
         game_id="map-1",
@@ -67,6 +71,7 @@ def _receipt(**updates: object) -> dict[str, object]:
         source_artifact=SOURCE_ARTIFACT,
         roster_rows=_roster(),
         rating_values=values,
+        strict=strict,
     )
 
 
@@ -80,6 +85,13 @@ def test_receipt_is_deterministic_and_uses_the_consumer_payload() -> None:
         rating_source_available=1.0,
         rating_source_sha256=first["rating_source_sha256"],
         rating_roster_sha256=first["rating_roster_sha256"],
+        rating_values=first["rating_values"],
+        rating_timestamp=first["rating_timestamp"],
+        team_rating_available=first["team_rating_available"],
+        player_rating_available=first["player_rating_available"],
+        rating_values_available=first["rating_values_available"],
+        batching_policy=first["rating_batching_policy"],
+        batch_receipt_sha256=first["rating_batch_receipt_sha256"],
     )
     assert first["rating_receipt_schema"] == SCHEMA_VERSION
 
@@ -256,5 +268,179 @@ def test_neutral_placeholders_have_explicit_missingness() -> None:
     assert receipt["rating_values_available"] == 0.0
     assert receipt["team_rating_available"] == 0.0
     assert receipt["player_rating_available"] == 0.0
-    assert receipt["base_team_logit"] == 0.0
-    assert receipt["base_player_logit"] == 0.0
+    assert receipt["base_team_logit"] is None
+    assert receipt["base_player_logit"] is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("role", "mid"),
+        ("team_id", "oe:team:other"),
+        ("player_id", "oe:player:other"),
+        ("champion", "OtherChampion"),
+    ),
+)
+def test_conflicting_roster_aliases_fail_closed(field: str, value: str) -> None:
+    rows = _roster()
+    alias = {
+        "role": "position",
+        "team_id": "teamid",
+        "player_id": "playerid",
+        "champion": "champion_name",
+    }[field]
+    original = rows[0]["position" if field == "role" else {
+        "team_id": "teamid",
+        "player_id": "playerid",
+        "champion": "champion",
+    }[field]]
+    rows[0][field] = value
+    rows[0][alias] = original
+    with pytest.raises(ResolvedRatingSourceError, match="conflicting aliases"):
+        build_roster_sha256(
+            game_id="map-1",
+            timestamp=GAME_TIME,
+            source_identity=SOURCE_IDENTITY,
+            roster_rows=rows,
+        )
+
+
+def test_conflicting_map_and_rating_timestamp_aliases_fail_closed() -> None:
+    maps = [{"game_uid": "map-1", "date": GAME_TIME, "timestamp": "2026-08-01T12:01:00Z"}]
+    with pytest.raises(ResolvedRatingSourceError, match="conflicting aliases"):
+        enrich_rating_frame(
+            maps,
+            _roster(),
+            [_ratings()],
+            source_identity=SOURCE_IDENTITY,
+            source_artifact=SOURCE_ARTIFACT,
+            strict=True,
+        )
+    with pytest.raises(ResolvedRatingSourceError, match="conflicting aliases"):
+        _receipt(
+            strict=True,
+            rating_timestamp=RATING_TIME,
+            rating_as_of="2026-08-01T11:58:00Z",
+        )
+
+
+@pytest.mark.parametrize("field", ("champion", "playerid", "position"))
+def test_duplicate_champion_player_or_role_is_rejected(field: str) -> None:
+    rows = _roster()
+    if field == "champion":
+        rows[5][field] = rows[0][field]
+    elif field == "playerid":
+        rows[5][field] = rows[0][field]
+    else:
+        rows[1][field] = rows[0][field]
+    with pytest.raises(ResolvedRatingSourceError, match="duplicate"):
+        build_roster_sha256(
+            game_id="map-1",
+            timestamp=GAME_TIME,
+            source_identity=SOURCE_IDENTITY,
+            roster_rows=rows,
+        )
+
+
+def test_duplicate_map_ids_are_rejected_at_batch_boundary() -> None:
+    with pytest.raises(ResolvedRatingSourceError, match="duplicate map ID"):
+        enrich_rating_frame(
+            [
+                {"game_uid": "map-1", "date": GAME_TIME},
+                {"game_uid": "map-1", "date": GAME_TIME},
+            ],
+            [],
+            [],
+            source_identity=SOURCE_IDENTITY,
+            source_artifact=SOURCE_ARTIFACT,
+        )
+
+
+@pytest.mark.parametrize("field", ("y_blue_win", "map_result_flag", "winner_team_id"))
+def test_recursive_outcome_fields_are_rejected(field: str) -> None:
+    with pytest.raises(ResolvedRatingSourceError, match="forbidden"):
+        _receipt(strict=True, nested={"level": [{field: 1}]})
+
+
+def test_rating_values_and_timestamp_are_bound_by_receipt_digest() -> None:
+    base = _receipt()
+    changed_value = _receipt(base_team_logit=0.21)
+    changed_time = _receipt(rating_as_of="2026-08-01T11:59:58Z")
+    assert base["rating_receipt_sha256"] != changed_value["rating_receipt_sha256"]
+    assert base["rating_receipt_sha256"] != changed_time["rating_receipt_sha256"]
+    assert base["rating_values"]["base_team_logit"] == 0.2
+    assert base["rating_values"]["player_lineup_complete"] == 1.0
+
+
+def test_equal_timestamp_batch_receipt_is_order_invariant_and_bound() -> None:
+    first = build_rating_batch_receipt_sha256(
+        timestamp=GAME_TIME,
+        game_ids=("map-1", "map-2"),
+    )
+    second = build_rating_batch_receipt_sha256(
+        timestamp=GAME_TIME,
+        game_ids=("map-2", "map-1"),
+    )
+    assert first == second
+    assert first != build_rating_batch_receipt_sha256(
+        timestamp=GAME_TIME,
+        game_ids=("map-1",),
+    )
+    result = enrich_rating_frame(
+        [
+            {"game_uid": "map-2", "date": GAME_TIME},
+            {"game_uid": "map-1", "date": GAME_TIME},
+        ],
+        [dict(row, game_uid=game_id) for game_id in ("map-1", "map-2") for row in _roster()],
+        [dict(_ratings(game_uid=game_id)) for game_id in ("map-1", "map-2")],
+        source_identity=SOURCE_IDENTITY,
+        source_artifact=SOURCE_ARTIFACT,
+    )
+    assert set(result["rating_batch_receipt_sha256"]) == {first}
+    assert set(result["rating_batching_policy"]) == {EQUAL_TIMESTAMP_BATCHING_POLICY}
+
+
+def test_path_artifact_requires_contained_regular_non_symlink_and_streams(tmp_path: Path) -> None:
+    root = tmp_path / "allowed"
+    root.mkdir()
+    artifact = root / "ratings.bin"
+    artifact.write_bytes(SOURCE_ARTIFACT)
+    assert rating_source._source_artifact_sha256(artifact, allowed_root=root) == sha256_bytes(
+        SOURCE_ARTIFACT
+    )
+    with pytest.raises(ResolvedRatingSourceError, match="outside allowed_root"):
+        rating_source._source_artifact_sha256(tmp_path / "outside.bin", allowed_root=root)
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(SOURCE_ARTIFACT)
+    with pytest.raises(ResolvedRatingSourceError, match="outside allowed_root"):
+        rating_source._source_artifact_sha256(outside, allowed_root=root)
+    link = root / "link.bin"
+    link.symlink_to(artifact)
+    with pytest.raises(ResolvedRatingSourceError, match="symlink"):
+        rating_source._source_artifact_sha256(link, allowed_root=root)
+    with pytest.raises(ResolvedRatingSourceError, match="regular file"):
+        rating_source._source_artifact_sha256(root, allowed_root=root)
+
+
+def test_byte_nesting_item_and_row_caps_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(rating_source, "MAX_SOURCE_ARTIFACT_BYTES", 3)
+    with pytest.raises(ResolvedRatingSourceError, match="exceeds"):
+        sha256_bytes(b"1234")
+    monkeypatch.setattr(rating_source, "MAX_SOURCE_ARTIFACT_BYTES", 64 * 1024 * 1024)
+    monkeypatch.setattr(rating_source, "MAX_NESTING", 1)
+    with pytest.raises(ResolvedRatingSourceError, match="nesting"):
+        rating_source.canonical_sha256({"a": {"b": 1}})
+    monkeypatch.setattr(rating_source, "MAX_NESTING", 32)
+    monkeypatch.setattr(rating_source, "MAX_ITEMS", 1)
+    with pytest.raises(ResolvedRatingSourceError, match="item count"):
+        rating_source.canonical_sha256({"a": 1, "b": 2})
+    monkeypatch.setattr(rating_source, "MAX_ITEMS", 100_000)
+    monkeypatch.setattr(rating_source, "MAX_INPUT_ROWS", 1)
+    with pytest.raises(ResolvedRatingSourceError, match="row cap"):
+        enrich_rating_frame(
+            [{"game_uid": "map-1", "date": GAME_TIME}, {"game_uid": "map-2", "date": GAME_TIME}],
+            [],
+            [],
+            source_identity=SOURCE_IDENTITY,
+            source_artifact=SOURCE_ARTIFACT,
+        )
