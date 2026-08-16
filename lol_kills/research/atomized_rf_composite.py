@@ -35,8 +35,8 @@ from sklearn.metrics import brier_score_loss, log_loss, mean_squared_error, roc_
 from lol_kills.etl.aliases import normalize_team
 
 
-SCHEMA_VERSION = "scryglass:atomized-rf-composite-research:v2"
-FEATURE_SCHEMA_VERSION = "scryglass:atomized-rf-layer-a:v2"
+SCHEMA_VERSION = "scryglass:atomized-rf-composite-research:v3"
+FEATURE_SCHEMA_VERSION = "scryglass:atomized-rf-layer-a:v3"
 MECHANICS_SCHEMA_VERSION = "scryglass:exact-lcc-mechanics-atoms:v1"
 TRAIN_END = pd.Timestamp("2026-05-01", tz="UTC")
 VALIDATION_END = pd.Timestamp("2026-07-01", tz="UTC")
@@ -105,7 +105,7 @@ def _metric_columns(prefixes: Sequence[str], *, checkpoints: Sequence[int] | Non
         for checkpoint in checkpoints or (0,):
             stem = f"{prefix}_{checkpoint}" if checkpoint else prefix
             for metric in HISTORICAL_METRICS:
-                output.extend((f"{stem}_{metric}", f"{stem}_{metric}_support", f"{stem}_{metric}_missing"))
+                output.extend((f"{stem}_{metric}", f"{stem}_{metric}_missing"))
     return tuple(output)
 
 
@@ -123,7 +123,9 @@ GROUP_COLUMNS: dict[str, tuple[str, ...]] = {
         "player_rating_available",
         "player_rating_missing",
     ),
-    "player_exact_performance": _metric_columns(("history_player_champion",)),
+    "player_exact_performance": (
+        "history_unique_player_maps_min",
+    ) + _metric_columns(("history_player_champion",)),
     "exact_ally_enemy_pairs": _metric_columns(
         ("history_ally_champion_pair", "history_enemy_champion_pair")
     ),
@@ -418,10 +420,28 @@ def _unique_player_map_support(
     return len(observations)
 
 
+def _resolved_roster_sha256(rows: Sequence[Mapping[str, Any]]) -> str:
+    """Bind the exact ten-player, team, side, role, and champion assignment."""
+
+    roster = sorted(
+        (
+            _side(row.get("side")),
+            str(row.get("position") or "").strip().casefold(),
+            _team_id(row),
+            _player_id(row),
+            str(row.get("champion") or "").strip().casefold(),
+        )
+        for row in rows
+    )
+    if len(roster) != 10 or len({(side, role) for side, role, *_ in roster}) != 10:
+        raise AtomizedResearchError("rating roster binding requires ten unique side-role rows")
+    return canonical_sha256(roster)
+
+
 def _locked_rating_authority(
-    base_row: Mapping[str, Any], *, identity_recovered: bool
+    base_row: Mapping[str, Any], *, resolved_roster_sha256: str
 ) -> dict[str, float]:
-    """Gate locked ratings when their player identities differ from Layer A."""
+    """Require a hash-bound source receipt for every locked rating value."""
 
     team_values = [
         _finite(base_row.get("base_team_logit")),
@@ -431,10 +451,33 @@ def _locked_rating_authority(
         _finite(base_row.get("base_player_logit")),
         _finite(base_row.get("player_rating_diff_scaled")),
     ]
+    source_sha256 = str(base_row.get("rating_source_sha256") or "")
+    bound_roster_sha256 = str(base_row.get("rating_roster_sha256") or "")
+    receipt_payload = {
+        "schema_version": base_row.get("rating_receipt_schema"),
+        "source_available": _finite(base_row.get("rating_source_available")),
+        "source_sha256": source_sha256,
+        "roster_sha256": bound_roster_sha256,
+    }
+    receipt_matches = bool(
+        str(base_row.get("rating_receipt_sha256") or "")
+        == canonical_sha256(receipt_payload)
+    )
+    source_receipt_available = bool(
+        base_row.get("rating_receipt_schema")
+        == "scryglass:resolved-rating-source:v1"
+        and _finite(base_row.get("rating_source_available")) == 1.0
+        and re.fullmatch(r"[0-9a-f]{64}", source_sha256)
+        and receipt_matches
+    )
+    roster_matches = bool(
+        source_receipt_available
+        and bound_roster_sha256 == resolved_roster_sha256
+    )
     lineup_complete = _finite(base_row.get("player_lineup_complete")) == 1.0
-    team_available = all(value is not None for value in team_values)
+    team_available = roster_matches and all(value is not None for value in team_values)
     player_available = (
-        not identity_recovered
+        roster_matches
         and lineup_complete
         and all(value is not None for value in player_values)
     )
@@ -448,6 +491,9 @@ def _locked_rating_authority(
         "player_lineup_complete": float(player_available),
         "player_rating_available": float(player_available),
         "player_rating_missing": float(not player_available),
+        "rating_source_receipt_available": float(source_receipt_available),
+        "rating_source_receipt_hash_match": float(receipt_matches),
+        "rating_roster_receipt_match": float(roster_matches),
     }
 
 
@@ -560,7 +606,8 @@ def _annotate_feature_availability(matrix: pd.DataFrame) -> pd.DataFrame:
         "player_rating_available"
     ].astype(float)
     matrix[FEATURE_AVAILABILITY_COLUMNS["player_exact_performance"]] = (
-        matrix["history_unique_player_maps_min"] > 0
+        (matrix["history_unique_player_maps_min"] > 0)
+        & any_support(("history_player_champion_result_residual",))
     ).astype(float)
     matrix[FEATURE_AVAILABILITY_COLUMNS["exact_ally_enemy_pairs"]] = (
         any_support(("history_ally_champion_pair",))
@@ -582,20 +629,96 @@ def _annotate_feature_availability(matrix: pd.DataFrame) -> pd.DataFrame:
     return matrix
 
 
+def _coverage_scopes(
+    matrix: pd.DataFrame,
+    *,
+    prospective_start: Any | None = None,
+    prospective_end: Any | None = None,
+) -> tuple[pd.DataFrame, list[tuple[str, str, pd.DataFrame, str]], dict[str, Any]]:
+    work = matrix.copy()
+    work["date"] = pd.to_datetime(work["date"], utc=True, errors="raise")
+    start = pd.Timestamp(prospective_start) if prospective_start is not None else None
+    end = pd.Timestamp(prospective_end) if prospective_end is not None else None
+    if start is not None and start.tzinfo is None:
+        start = start.tz_localize("UTC")
+    if end is not None and end.tzinfo is None:
+        end = end.tz_localize("UTC")
+    if (start is None) != (end is None):
+        raise AtomizedResearchError("prospective start and end must be supplied together")
+    if start is not None and (start < CONSUMED_TEST_END or end <= start):
+        raise AtomizedResearchError("prospective range must start after consumed evidence")
+
+    work["split"] = np.select(
+        [work["date"] < TRAIN_END, work["date"] < VALIDATION_END],
+        ["train", "validation"],
+        default="consumed_audit",
+    )
+    development = work[work["date"] < VALIDATION_END]
+    audit = work[work["date"] >= VALIDATION_END]
+    if start is not None:
+        prospective_mask = (work["date"] >= start) & (work["date"] < end)
+        prospective = work[prospective_mask]
+        audit = audit[~audit.index.isin(prospective.index)]
+    else:
+        prospective = work.iloc[0:0]
+
+    scopes: list[tuple[str, str, pd.DataFrame, str]] = [
+        ("overall", "development", development, "development_gate")
+    ]
+    scopes.extend(
+        ("split", str(value), group, "development_gate")
+        for value, group in development.groupby("split", sort=True)
+    )
+    scopes.extend(
+        ("league", str(value), group, "development_gate")
+        for value, group in development.groupby("league", sort=True)
+    )
+    scopes.extend(
+        (
+            "split_league",
+            f"{split}|{league}",
+            group,
+            "development_gate",
+        )
+        for (split, league), group in development.groupby(
+            ["split", "league"], sort=True
+        )
+    )
+    if len(audit):
+        scopes.append(("audit", "consumed", audit, "report_only"))
+        scopes.extend(
+            ("audit_league", str(value), group, "report_only")
+            for value, group in audit.groupby("league", sort=True)
+        )
+    if start is not None:
+        scopes.append(("prospective", "all", prospective, "report_only"))
+        scopes.extend(
+            ("prospective_league", str(value), group, "report_only")
+            for value, group in prospective.groupby("league", sort=True)
+        )
+    range_receipt = {
+        "development_end_exclusive": VALIDATION_END.isoformat(),
+        "prospective_start_inclusive": start.isoformat() if start is not None else None,
+        "prospective_end_exclusive": end.isoformat() if end is not None else None,
+        "configuration_performs_source_io": False,
+    }
+    return work, scopes, range_receipt
+
+
 def feature_group_coverage_report(
     matrix: pd.DataFrame,
     *,
     thresholds: Mapping[str, float] = FEATURE_COVERAGE_THRESHOLDS,
     minimum_rows: int = 20,
+    prospective_start: Any | None = None,
+    prospective_end: Any | None = None,
 ) -> dict[str, Any]:
-    """Audit model-group authority across every split and league."""
+    """Gate development covariates and report later coverage without feedback."""
 
-    work = matrix.copy()
-    work["date"] = pd.to_datetime(work["date"], utc=True, errors="raise")
-    work["split"] = np.select(
-        [work["date"] < TRAIN_END, work["date"] < VALIDATION_END],
-        ["train", "validation"],
-        default="test",
+    work, scopes, range_receipt = _coverage_scopes(
+        matrix,
+        prospective_start=prospective_start,
+        prospective_end=prospective_end,
     )
     missing = [
         FEATURE_AVAILABILITY_COLUMNS[group]
@@ -608,21 +731,10 @@ def feature_group_coverage_report(
         )
 
     rows: list[dict[str, Any]] = []
-    scopes: list[tuple[str, str, pd.DataFrame]] = [("overall", "all", work)]
-    scopes.extend(
-        ("split", str(value), group)
-        for value, group in work.groupby("split", sort=True)
-    )
-    scopes.extend(
-        ("league", str(value), group)
-        for value, group in work.groupby("league", sort=True)
-    )
-    for dimension, value, group in scopes:
-        eligible = len(group) >= minimum_rows
+    for dimension, value, group, gate_role in scopes:
+        eligible = gate_role == "development_gate" and len(group) >= minimum_rows
         for feature_group, threshold in thresholds.items():
-            coverage = float(
-                group[FEATURE_AVAILABILITY_COLUMNS[feature_group]].mean()
-            )
+            coverage = float(group[FEATURE_AVAILABILITY_COLUMNS[feature_group]].mean()) if len(group) else 0.0
             rows.append(
                 {
                     "dimension": dimension,
@@ -632,18 +744,92 @@ def feature_group_coverage_report(
                     "coverage": coverage,
                     "missing_rate": 1.0 - coverage,
                     "threshold": float(threshold),
+                    "gate_role": gate_role,
                     "eligible_for_gate": eligible,
                     "passed": bool(coverage >= threshold) if eligible else None,
                 }
             )
     failures = [row for row in rows if row["passed"] is False]
+    development = work[work["date"] < VALIDATION_END].copy()
+    covariate_columns = [
+        FEATURE_AVAILABILITY_COLUMNS[group] for group in sorted(thresholds)
+    ]
+    frozen_covariates = [
+        {
+            "row": str(row.get("game_uid") or index),
+            "date": pd.Timestamp(row["date"]).isoformat(),
+            "league": str(row["league"]),
+            **{column: float(row[column]) for column in covariate_columns},
+        }
+        for index, row in development.sort_values(
+            ["date", "league"], kind="stable"
+        ).iterrows()
+    ]
+    eligibility_receipt = {
+        "schema_version": "scryglass:atomized-rf-development-coverage-freeze:v1",
+        "uses_outcomes_or_targets": False,
+        "development_rows": int(len(development)),
+        "covariate_sha256": canonical_sha256(frozen_covariates),
+        "policy_sha256": canonical_sha256(
+            {
+                "thresholds": dict(thresholds),
+                "minimum_rows": minimum_rows,
+                "development_end_exclusive": VALIDATION_END.isoformat(),
+            }
+        ),
+        "frozen_before_prospective_audit": True,
+    }
     return {
         "minimum_rows": minimum_rows,
         "thresholds": dict(thresholds),
+        "range": range_receipt,
+        "eligibility_receipt": eligibility_receipt,
         "rows": rows,
         "failures": failures,
         "passed": not failures,
     }
+
+
+def phase_coverage_report(
+    matrix: pd.DataFrame,
+    *,
+    prospective_start: Any | None = None,
+    prospective_end: Any | None = None,
+) -> dict[str, Any]:
+    """Report phase eligibility, targets, and forecasts by split and league."""
+
+    _work, scopes, range_receipt = _coverage_scopes(
+        matrix,
+        prospective_start=prospective_start,
+        prospective_end=prospective_end,
+    )
+    rows: list[dict[str, Any]] = []
+    for dimension, value, group, gate_role in scopes:
+        for checkpoint in CHECKPOINTS:
+            for metric in ("gold", "xp"):
+                target = group[f"target_{metric}_diff_{checkpoint}"].notna()
+                forecast = (
+                    group[f"forecast_{metric}_available_{checkpoint}"] == 1
+                )
+                rows.append(
+                    {
+                        "dimension": dimension,
+                        "value": value,
+                        "gate_role": gate_role,
+                        "checkpoint": checkpoint,
+                        "metric": metric,
+                        "eligible_rows": int(len(group)),
+                        "target_available": int(target.sum()),
+                        "target_coverage": float(target.mean()) if len(group) else 0.0,
+                        "forecast_available": int(forecast.sum()),
+                        "forecast_coverage": float(forecast.mean()) if len(group) else 0.0,
+                        "joint_available": int((target & forecast).sum()),
+                        "joint_coverage": float((target & forecast).mean())
+                        if len(group)
+                        else 0.0,
+                    }
+                )
+    return {"range": range_receipt, "rows": rows}
 
 
 def _recent_mean(history: Mapping[str, deque[float]], key: str) -> tuple[float, int]:
@@ -840,6 +1026,7 @@ def build_layer_a_matrix(
     exclusion_reasons: dict[str, str] = {}
     overlay_recovered_games: set[str] = set()
     raw_overlay_recovered_games: set[str] = set()
+    rating_authority_by_game: dict[str, dict[str, float]] = {}
 
     # The locked experiment contains these seven leagues. Histories use the
     # same competition universe, which avoids processing unrelated minor-league
@@ -939,9 +1126,11 @@ def build_layer_a_matrix(
                     map_row.get("patch") or lineup.iloc[0].get("patch"), map_row["date"]
                 )
                 base_row = base_by_id.loc[game_uid].to_dict()
-                identity_recovered = game_uid in (
-                    overlay_recovered_games | raw_overlay_recovered_games
+                rating_authority = _locked_rating_authority(
+                    base_row,
+                    resolved_roster_sha256=_resolved_roster_sha256(rows),
                 )
+                rating_authority_by_game[game_uid] = rating_authority
                 blue_team = _team_id(blue[0])
                 red_team = _team_id(red[0])
                 blue_players = [_player_id(row) for row in blue]
@@ -950,9 +1139,7 @@ def build_layer_a_matrix(
                     **base_row,
                     "series_id": series[game_uid],
                     "source_patch": patch,
-                    **_locked_rating_authority(
-                        base_row, identity_recovered=identity_recovered
-                    ),
+                    **rating_authority,
                     **_momentum_features(
                         team_momentum_history,
                         player_momentum_history,
@@ -1102,9 +1289,13 @@ def build_layer_a_matrix(
             for side in ("Blue", "Red"):
                 side_result = y_blue if side == "Blue" else 1 - y_blue
                 game_uid = str(map_row["game_uid"])
+                rating_authority = rating_authority_by_game.get(game_uid, {})
                 base_team_probability_blue = base_team_probability_by_id.get(game_uid)
                 team_residual = None
-                if base_team_probability_blue is not None:
+                if (
+                    base_team_probability_blue is not None
+                    and rating_authority.get("team_rating_available") == 1.0
+                ):
                     base_probability = (
                         base_team_probability_blue
                         if side == "Blue"
@@ -1115,8 +1306,7 @@ def build_layer_a_matrix(
                 player_residual = None
                 if (
                     base_player_probability_blue is not None
-                    and game_uid
-                    not in (overlay_recovered_games | raw_overlay_recovered_games)
+                    and rating_authority.get("player_rating_available") == 1.0
                 ):
                     base_probability = (
                         base_player_probability_blue
@@ -1225,6 +1415,7 @@ def build_layer_a_matrix(
         if row["total"] >= 20 and row["coverage"] < max(0.75, coverage - 0.15)
     ]
     feature_coverage = feature_group_coverage_report(matrix)
+    phase_coverage = phase_coverage_report(matrix)
     _validate_no_current_state_features(MODEL_COLUMNS)
     if matrix[list(MODEL_COLUMNS)].isna().any().any():
         raise AtomizedResearchError("model feature matrix contains missing values")
@@ -1273,6 +1464,7 @@ def build_layer_a_matrix(
         "coverage_bias": coverage_bias,
         "material_undercoverage": material_undercoverage,
         "feature_group_coverage": feature_coverage,
+        "phase_coverage": phase_coverage,
         "evaluation_gate": (
             "test_blocked_material_coverage_bias"
             if material_undercoverage
@@ -1288,13 +1480,20 @@ def build_layer_a_matrix(
             "team_rating": {
                 "fields": list(GROUP_COLUMNS["team_rating"]),
                 "source": "hash-bound locked momentum dataset",
+                "required_upstream_receipt": "scryglass:resolved-rating-source:v1",
+                "required_bindings": [
+                    "rating_source_sha256",
+                    "rating_roster_sha256",
+                    "rating_source_available",
+                    "rating_receipt_sha256",
+                ],
                 "missingness": "explicit available and missing flags",
                 "temporal_cutoff": "strictly before map",
             },
             "player_rating": {
                 "fields": list(GROUP_COLUMNS["player_rating"]),
                 "source": "hash-bound locked momentum dataset",
-                "identity_rule": "unavailable when the locked rating row did not use the resolved Layer A player IDs",
+                "identity_rule": "source receipt roster hash must match exact resolved team, player, side, role, and champion IDs",
                 "missingness": "neutral numeric value with an explicit missing flag",
                 "temporal_cutoff": "strictly before map",
             },
@@ -1309,7 +1508,8 @@ def build_layer_a_matrix(
                     "method": "training-history global mean",
                     "prior_rows": SMOOTHING_PRIOR_GAMES,
                 },
-                "outputs_per_metric": ["value", "support", "missing"],
+                "model_outputs_per_metric": ["value", "missing"],
+                "audit_only_support": True,
                 "source_sha256": sources["players"],
                 "temporal_cutoff": "strictly before map with equal timestamp batching",
             },
@@ -1334,14 +1534,16 @@ def build_layer_a_matrix(
                 "condition": "absolute player gold diff <= 250 and absolute player XP diff <= 250",
                 "checkpoints": list(CHECKPOINTS),
                 "metrics": list(HISTORICAL_METRICS),
-                "outputs_per_metric": ["value", "support", "missing"],
+                "model_outputs_per_metric": ["value", "missing"],
+                "audit_only_support": True,
                 "source_sha256": sources["players"],
                 "temporal_cutoff": "strictly before map",
             },
             "momentum": {
                 "fields": list(GROUP_COLUMNS["team_momentum"]),
                 "definition": "seven-map mean of outcome minus strictly prior base probability, scaled by 80",
-                "identity_rule": "rebuilt from the same resolved team and player IDs as Layer A",
+                "identity_rule": "residual history updates only after an exact roster-bound rating source receipt passes",
+                "current_locked_source_status": "blocked_missing_rating_roster_receipt",
                 "missingness": "neutral numeric value with explicit coverage and missing flags",
                 "source_sha256": sources["base_dataset"],
                 "temporal_cutoff": "strictly before map",
@@ -1349,7 +1551,8 @@ def build_layer_a_matrix(
             "patch_statistical_atoms": {
                 "families": ["patch_player_champion", "patch_champion"],
                 "metrics": list(HISTORICAL_METRICS),
-                "outputs_per_metric": ["value", "support", "missing"],
+                "model_outputs_per_metric": ["value", "missing"],
+                "audit_only_support": True,
                 "source_sha256": sources["players"],
                 "temporal_cutoff": "same source patch and strictly before map",
             },
@@ -1945,11 +2148,22 @@ def run_layer_a_experiment(
     test_eligible: bool,
     frozen_config: RFConfig | None = None,
     frozen_search_receipt: Mapping[str, Any] | None = None,
+    prospective_start: Any | None = None,
+    prospective_end: Any | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     matrix = matrix.copy()
     matrix["date"] = pd.to_datetime(matrix["date"], utc=True, errors="raise")
-    feature_coverage = feature_group_coverage_report(matrix)
+    feature_coverage = feature_group_coverage_report(
+        matrix,
+        prospective_start=prospective_start,
+        prospective_end=prospective_end,
+    )
+    phase_coverage = phase_coverage_report(
+        matrix,
+        prospective_start=prospective_start,
+        prospective_end=prospective_end,
+    )
     if not feature_coverage["passed"]:
         raise AtomizedResearchError(
             "feature-group coverage gate blocks model fitting"
@@ -1959,7 +2173,7 @@ def run_layer_a_experiment(
     test = _split(matrix, "test")
     if tuple(train.shape)[0] < 500 or len(validation) < 200 or len(test) < 100:
         raise AtomizedResearchError("chronological experiment splits are too small")
-    baseline_model = RandomForestClassifier(
+    selection_baseline_model = RandomForestClassifier(
         n_estimators=300,
         max_depth=8,
         min_samples_leaf=10,
@@ -1968,15 +2182,12 @@ def run_layer_a_experiment(
         random_state=RANDOM_SEED,
         n_jobs=-1,
     )
-    baseline_model.fit(train[list(LOCKED_BASELINE_COLUMNS)].astype(float), train["y"].astype(int))
-    baseline_validation_probability = baseline_model.predict_proba(
+    selection_baseline_model.fit(
+        train[list(LOCKED_BASELINE_COLUMNS)].astype(float), train["y"].astype(int)
+    )
+    selection_baseline_validation_probability = selection_baseline_model.predict_proba(
         validation[list(LOCKED_BASELINE_COLUMNS)].astype(float)
     )[:, 1]
-    baseline_test_probability = (
-        baseline_model.predict_proba(test[list(LOCKED_BASELINE_COLUMNS)].astype(float))[:, 1]
-        if test_eligible
-        else None
-    )
     if frozen_config is None:
         selected, search = select_rf_config(
             train,
@@ -1984,7 +2195,7 @@ def run_layer_a_experiment(
             MODEL_COLUMNS,
             cache_dir=cache_dir,
             matrix_sha256=matrix_sha256,
-            baseline_validation_probability=baseline_validation_probability,
+            baseline_validation_probability=selection_baseline_validation_probability,
         )
     else:
         selected = frozen_config
@@ -1994,6 +2205,49 @@ def run_layer_a_experiment(
     evaluation_parts = [("validation", validation)]
     if test_eligible:
         evaluation_parts.append(("test", test))
+    matched_baseline_key = canonical_sha256(
+        {
+            "matrix_sha256": matrix_sha256,
+            "config": selected.as_dict(),
+            "columns": list(LOCKED_BASELINE_COLUMNS),
+            "splits": [name for name, _ in evaluation_parts],
+            "calibration": "expanding-series-sigmoid-v2-proper-score-gated",
+        }
+    )
+    matched_baseline_path = cache_dir / f"matched-baseline-{matched_baseline_key}.npz"
+    matched_baseline_calibration_path = cache_dir / (
+        f"matched-baseline-{matched_baseline_key}.calibration.json"
+    )
+    if matched_baseline_path.exists() and matched_baseline_calibration_path.exists():
+        cached_baseline = np.load(matched_baseline_path)
+        baseline_probabilities = {
+            name: cached_baseline[name] for name, _ in evaluation_parts
+        }
+        baseline_calibration_audit = json.loads(
+            matched_baseline_calibration_path.read_text(encoding="utf-8")
+        )
+        matched_baseline_cache_hit = True
+    else:
+        matched_baseline_model = _fit_rf(
+            train, LOCKED_BASELINE_COLUMNS, config=selected
+        )
+        matched_baseline_calibrator, baseline_calibration_audit = _group_calibrator(
+            train, LOCKED_BASELINE_COLUMNS, config=selected
+        )
+        baseline_probabilities = {
+            name: _calibrated_probability(
+                matched_baseline_model,
+                matched_baseline_calibrator,
+                part,
+                LOCKED_BASELINE_COLUMNS,
+            )
+            for name, part in evaluation_parts
+        }
+        np.savez_compressed(matched_baseline_path, **baseline_probabilities)
+        _write_json(
+            matched_baseline_calibration_path, baseline_calibration_audit
+        )
+        matched_baseline_cache_hit = False
     prediction_key = canonical_sha256(
         {
             "matrix_sha256": matrix_sha256,
@@ -2028,6 +2282,7 @@ def run_layer_a_experiment(
         "features": list(MODEL_COLUMNS),
         "feature_groups": {key: list(value) for key, value in GROUP_COLUMNS.items()},
         "feature_group_coverage": feature_coverage,
+        "phase_coverage": phase_coverage,
         "hyperparameters": selected.as_dict(),
         "search": search,
         "calibration": {
@@ -2035,7 +2290,7 @@ def run_layer_a_experiment(
             **calibration_audit,
         },
         "comparison_learner": {
-            "rule": "full model, ablations, regional transfers, and shuffle control use the same frozen RF configuration",
+            "rule": "candidate, incremental baseline, ablations, regional transfers, and shuffle control use the same frozen RF configuration and calibration gate",
             "config": selected.as_dict(),
         },
         "prediction_cache": {
@@ -2048,31 +2303,52 @@ def run_layer_a_experiment(
             "validation": int(len(validation)),
             "consumed_test": int(len(test)),
             "consumed_test_evaluated": test_eligible,
-            "prospective_after": "2026-08-08T21:50:46Z",
+            "prospective": feature_coverage["range"],
         },
         "metrics": {
             name: metric_report(part["y"], probabilities[name])
             for name, part in evaluation_parts
         },
         "matched_baseline": {
-            "validation": metric_report(validation["y"], baseline_validation_probability),
+            "learner_config": selected.as_dict(),
+            "calibration": baseline_calibration_audit,
+            "cache": {
+                "path": str(matched_baseline_path),
+                "sha256": sha256_path(matched_baseline_path),
+                "hit": matched_baseline_cache_hit,
+            },
+            "validation": metric_report(
+                validation["y"], baseline_probabilities["validation"]
+            ),
             "test": (
-                metric_report(test["y"], baseline_test_probability)
-                if baseline_test_probability is not None
+                metric_report(test["y"], baseline_probabilities["test"])
+                if "test" in baseline_probabilities
                 else {"status": "blocked_material_coverage_bias"}
             ),
             "probability_vectors": {
                 "validation_sha256": hashlib.sha256(
-                    np.asarray(baseline_validation_probability, dtype="<f8").tobytes()
+                    np.asarray(
+                        baseline_probabilities["validation"], dtype="<f8"
+                    ).tobytes()
                 ).hexdigest(),
                 "test_sha256": (
                     hashlib.sha256(
-                        np.asarray(baseline_test_probability, dtype="<f8").tobytes()
+                        np.asarray(
+                            baseline_probabilities["test"], dtype="<f8"
+                        ).tobytes()
                     ).hexdigest()
-                    if baseline_test_probability is not None
+                    if "test" in baseline_probabilities
                     else None
                 ),
             },
+        },
+        "selection_reference": {
+            "learner": "locked 300-tree baseline harness",
+            "calibration": "raw",
+            "validation": metric_report(
+                validation["y"], selection_baseline_validation_probability
+            ),
+            "incremental_comparison": False,
         },
         "group_ablation": {},
         "regional_test": {},
@@ -2147,13 +2423,15 @@ def run_layer_a_experiment(
                 if available.any()
                 else None,
             }
-    if test_eligible and baseline_test_probability is not None:
+    if test_eligible and "test" in baseline_probabilities:
         report["test_auc_series_cluster_bootstrap"] = _cluster_bootstrap_auc(
             test, probabilities["test"]
         )
-        report["baseline_same_matrix"] = metric_report(test["y"], baseline_test_probability)
+        report["baseline_same_matrix"] = metric_report(
+            test["y"], baseline_probabilities["test"]
+        )
         report["test_difference_bootstrap"] = _cluster_bootstrap_differences(
-            test, probabilities["test"], baseline_test_probability
+            test, probabilities["test"], baseline_probabilities["test"]
         )
     else:
         report["test_gate"] = {
@@ -2548,6 +2826,8 @@ def main() -> None:
         "--lcc-repo", type=Path, default=Path("/Users/river/Projects/league-combat-calculator")
     )
     parser.add_argument("--cache-dir", type=Path, default=Path("/private/tmp/scryglass-atomized-rf-cache"))
+    parser.add_argument("--prospective-start")
+    parser.add_argument("--prospective-end")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
@@ -2598,6 +2878,8 @@ def main() -> None:
             cache_dir=args.cache_dir,
             matrix_sha256=manifest["matrix_sha256"],
             test_eligible=manifest["evaluation_gate"] == "eligible",
+            prospective_start=args.prospective_start,
+            prospective_end=args.prospective_end,
         )
     report["live_state"] = live_state_contract()
     report["report_sha256"] = canonical_sha256(report)

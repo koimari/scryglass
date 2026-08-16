@@ -23,9 +23,11 @@ from lol_kills.research.atomized_rf_composite import (
     _unique_player_map_support,
     _validate_no_current_state_features,
     _write_json,
+    canonical_sha256,
     exact_mechanic_keys,
     feature_group_coverage_report,
     normalize_source_patch,
+    phase_coverage_report,
 )
 
 
@@ -207,6 +209,7 @@ def test_phase_curve_is_side_swap_antisymmetric() -> None:
 
 
 def test_rating_and_momentum_missingness_is_explicit() -> None:
+    roster_sha256 = "b" * 64
     rating = _locked_rating_authority(
         {
             "base_team_logit": 0.2,
@@ -215,11 +218,36 @@ def test_rating_and_momentum_missingness_is_explicit() -> None:
             "player_rating_diff_scaled": 0.2,
             "player_lineup_complete": 1.0,
         },
-        identity_recovered=True,
+        resolved_roster_sha256=roster_sha256,
     )
+    assert rating["team_rating_available"] == 0.0
     assert rating["player_rating_available"] == 0.0
     assert rating["player_rating_missing"] == 1.0
     assert rating["base_player_logit"] == 0.0
+
+    receipt = {
+        "schema_version": "scryglass:resolved-rating-source:v1",
+        "source_available": 1.0,
+        "source_sha256": "a" * 64,
+        "roster_sha256": roster_sha256,
+    }
+    bound = _locked_rating_authority(
+        {
+            "base_team_logit": 0.2,
+            "team_rating_diff_scaled": 0.1,
+            "base_player_logit": 0.3,
+            "player_rating_diff_scaled": 0.2,
+            "player_lineup_complete": 1.0,
+            "rating_receipt_schema": "scryglass:resolved-rating-source:v1",
+            "rating_source_available": 1.0,
+            "rating_source_sha256": "a" * 64,
+            "rating_roster_sha256": roster_sha256,
+            "rating_receipt_sha256": canonical_sha256(receipt),
+        },
+        resolved_roster_sha256=roster_sha256,
+    )
+    assert bound["team_rating_available"] == 1.0
+    assert bound["player_rating_available"] == 1.0
 
     momentum = _momentum_features(
         {}, {}, "blue-team", "red-team", [f"b-{i}" for i in range(5)], [f"r-{i}" for i in range(5)]
@@ -251,6 +279,88 @@ def test_feature_group_coverage_gates_each_split_and_league() -> None:
     }
     assert ("split", "validation") in failures
     assert ("league", "LCK") in failures
+    assert ("split_league", "validation|LCK") in failures
+
+
+def test_prospective_coverage_is_report_only() -> None:
+    column = FEATURE_AVAILABILITY_COLUMNS["team_rating"]
+    frame = pd.DataFrame(
+        [
+            {"date": pd.Timestamp("2026-04-01", tz="UTC"), "league": "LEC", column: 1.0}
+            for _ in range(20)
+        ]
+        + [
+            {"date": pd.Timestamp("2026-08-10", tz="UTC"), "league": "LEC", column: 0.0}
+            for _ in range(20)
+        ]
+    )
+    development_report = feature_group_coverage_report(
+        frame.iloc[:20].copy(), thresholds={"team_rating": 0.8}
+    )
+    report = feature_group_coverage_report(
+        frame,
+        thresholds={"team_rating": 0.8},
+        prospective_start="2026-08-09T00:00:00Z",
+        prospective_end="2026-09-01T00:00:00Z",
+    )
+    assert report["passed"] is True
+    prospective = [
+        row for row in report["rows"] if row["dimension"] == "prospective"
+    ]
+    assert prospective[0]["coverage"] == 0.0
+    assert prospective[0]["gate_role"] == "report_only"
+    assert prospective[0]["passed"] is None
+    assert (
+        report["eligibility_receipt"]
+        == development_report["eligibility_receipt"]
+    )
+
+
+def test_phase_coverage_reports_target_and_forecast_by_split_league() -> None:
+    rows = []
+    for index in range(20):
+        row = {
+            "date": pd.Timestamp("2026-06-01", tz="UTC"),
+            "league": "LCK",
+        }
+        for checkpoint in (10, 15, 20, 25):
+            for metric in ("gold", "xp"):
+                row[f"target_{metric}_diff_{checkpoint}"] = (
+                    100.0 if index < 15 else np.nan
+                )
+                row[f"forecast_{metric}_available_{checkpoint}"] = (
+                    1.0 if index < 10 else 0.0
+                )
+        rows.append(row)
+    report = phase_coverage_report(pd.DataFrame(rows))
+    row = next(
+        item
+        for item in report["rows"]
+        if item["dimension"] == "split_league"
+        and item["value"] == "validation|LCK"
+        and item["checkpoint"] == 10
+        and item["metric"] == "gold"
+    )
+    assert row["eligible_rows"] == 20
+    assert row["target_available"] == 15
+    assert row["forecast_available"] == 10
+    assert row["joint_available"] == 10
+
+
+def test_repeated_metric_support_columns_are_not_model_inputs() -> None:
+    repeated_prefixes = (
+        "history_player_champion_",
+        "history_ally_champion_pair_",
+        "history_enemy_champion_pair_",
+        "parity_player_champion_",
+        "patch_player_champion_",
+        "patch_champion_",
+    )
+    assert not any(
+        column.endswith("_support") and column.startswith(repeated_prefixes)
+        for column in MODEL_COLUMNS
+    )
+    assert "history_unique_player_maps_min" in MODEL_COLUMNS
 
 
 def test_calibration_requires_brier_and_log_loss_improvement_in_every_fold() -> None:
