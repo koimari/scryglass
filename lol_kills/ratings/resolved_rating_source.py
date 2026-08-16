@@ -935,11 +935,6 @@ def build_rating_receipt_sha256(
     )
 
 
-# Short compatibility name for callers that refer to the batch receipt
-# without the rating-source prefix.
-build_batch_receipt_sha256 = build_rating_batch_receipt_sha256
-
-
 def _availability(value: Any) -> float:
     if isinstance(value, bool):
         return float(value)

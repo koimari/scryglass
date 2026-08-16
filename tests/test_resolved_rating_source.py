@@ -6,12 +6,13 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-import lol_kills.ratings.resolved_rating_source as rating_source
 from lol_kills.research.atomized_rf_composite import _resolved_roster_sha256
 from lol_kills.ratings.resolved_rating_source import (
     EQUAL_TIMESTAMP_BATCHING_POLICY,
+    MAX_SCALAR_UTF8_BYTES,
     SCHEMA_VERSION,
     ResolvedRatingSourceError,
+    _source_artifact_sha256,
     build_rating_batch_receipt_sha256,
     build_rating_receipt_sha256,
     build_resolved_rating_source,
@@ -405,37 +406,42 @@ def test_path_artifact_requires_contained_regular_non_symlink_and_streams(tmp_pa
     root.mkdir()
     artifact = root / "ratings.bin"
     artifact.write_bytes(SOURCE_ARTIFACT)
-    assert rating_source._source_artifact_sha256(artifact, allowed_root=root) == sha256_bytes(
+    assert _source_artifact_sha256(artifact, allowed_root=root) == sha256_bytes(
         SOURCE_ARTIFACT
     )
     with pytest.raises(ResolvedRatingSourceError, match="outside allowed_root"):
-        rating_source._source_artifact_sha256(tmp_path / "outside.bin", allowed_root=root)
+        _source_artifact_sha256(tmp_path / "outside.bin", allowed_root=root)
     outside = tmp_path / "outside.bin"
     outside.write_bytes(SOURCE_ARTIFACT)
     with pytest.raises(ResolvedRatingSourceError, match="outside allowed_root"):
-        rating_source._source_artifact_sha256(outside, allowed_root=root)
+        _source_artifact_sha256(outside, allowed_root=root)
     link = root / "link.bin"
     link.symlink_to(artifact)
     with pytest.raises(ResolvedRatingSourceError, match="symlink"):
-        rating_source._source_artifact_sha256(link, allowed_root=root)
+        _source_artifact_sha256(link, allowed_root=root)
     with pytest.raises(ResolvedRatingSourceError, match="regular file"):
-        rating_source._source_artifact_sha256(root, allowed_root=root)
+        _source_artifact_sha256(root, allowed_root=root)
 
 
 def test_byte_nesting_item_and_row_caps_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rating_source, "MAX_SOURCE_ARTIFACT_BYTES", 3)
+    monkeypatch.setattr(
+        "lol_kills.ratings.resolved_rating_source.MAX_SOURCE_ARTIFACT_BYTES", 3
+    )
     with pytest.raises(ResolvedRatingSourceError, match="exceeds"):
         sha256_bytes(b"1234")
-    monkeypatch.setattr(rating_source, "MAX_SOURCE_ARTIFACT_BYTES", 64 * 1024 * 1024)
-    monkeypatch.setattr(rating_source, "MAX_NESTING", 1)
+    monkeypatch.setattr(
+        "lol_kills.ratings.resolved_rating_source.MAX_SOURCE_ARTIFACT_BYTES",
+        64 * 1024 * 1024,
+    )
+    monkeypatch.setattr("lol_kills.ratings.resolved_rating_source.MAX_NESTING", 1)
     with pytest.raises(ResolvedRatingSourceError, match="nesting"):
-        rating_source.canonical_sha256({"a": {"b": 1}})
-    monkeypatch.setattr(rating_source, "MAX_NESTING", 32)
-    monkeypatch.setattr(rating_source, "MAX_ITEMS", 1)
+        canonical_sha256({"a": {"b": 1}})
+    monkeypatch.setattr("lol_kills.ratings.resolved_rating_source.MAX_NESTING", 32)
+    monkeypatch.setattr("lol_kills.ratings.resolved_rating_source.MAX_ITEMS", 1)
     with pytest.raises(ResolvedRatingSourceError, match="item count"):
-        rating_source.canonical_sha256({"a": 1, "b": 2})
-    monkeypatch.setattr(rating_source, "MAX_ITEMS", 100_000)
-    monkeypatch.setattr(rating_source, "MAX_INPUT_ROWS", 1)
+        canonical_sha256({"a": 1, "b": 2})
+    monkeypatch.setattr("lol_kills.ratings.resolved_rating_source.MAX_ITEMS", 100_000)
+    monkeypatch.setattr("lol_kills.ratings.resolved_rating_source.MAX_INPUT_ROWS", 1)
     with pytest.raises(ResolvedRatingSourceError, match="row cap"):
         enrich_rating_frame(
             [{"game_uid": "map-1", "date": GAME_TIME}, {"game_uid": "map-2", "date": GAME_TIME}],
@@ -476,14 +482,16 @@ def test_one_huge_scalar_is_rejected_before_serialization() -> None:
     with pytest.raises(ResolvedRatingSourceError, match="scalar cap"):
         _receipt(
             strict=True,
-            rating_source_reason="x" * (rating_source.MAX_SCALAR_UTF8_BYTES + 1),
+            rating_source_reason="x" * (MAX_SCALAR_UTF8_BYTES + 1),
         )
 
 
 def test_many_small_dataframe_rows_share_one_aggregate_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(rating_source, "MAX_INPUT_BATCH_BYTES", 200)
+    monkeypatch.setattr(
+        "lol_kills.ratings.resolved_rating_source.MAX_INPUT_BATCH_BYTES", 200
+    )
     maps = pd.DataFrame(
         {
             "game_uid": [f"map-{index}" for index in range(40)],
