@@ -54,6 +54,18 @@ LCC_26_15_SEED_COMMIT = "f0718a98c29dcf5559ffa98c46a487cd52d9c9e3"
 RAW_2026_IDENTITY_SHA256 = "9467bb8d3f15571a2445a4728d2d38290fa78079c4fe6b2d1037b54d0b988a65"
 RAW_2026_DRIVE_REVISION = "0B_SP330uQdQ_cHhDN1h6RVI3NUkraUNyZWprQnVDSThEeE5jPQ"
 SMOOTHING_PRIOR_GAMES = 5.0
+RATING_RECEIPT_SCHEMA = "scryglass:resolved-rating-source:v1"
+RATING_ROSTER_SCHEMA = "scryglass:resolved-rating-roster:v1"
+RATING_BATCH_SCHEMA = "scryglass:resolved-rating-batch:v1"
+RATING_BATCH_POLICY = "same-utc-timestamp-independent-map-v1"
+RATING_VALUE_FIELDS = (
+    "base_team_logit",
+    "team_rating_diff_scaled",
+    "base_player_logit",
+    "player_rating_diff_scaled",
+    "player_lineup_complete",
+)
+RATING_ROLES = ("top", "jungle", "mid", "bot", "support")
 
 FEATURE_COVERAGE_THRESHOLDS: dict[str, float] = {
     "team_rating": 0.95,
@@ -420,81 +432,309 @@ def _unique_player_map_support(
     return len(observations)
 
 
-def _resolved_roster_sha256(rows: Sequence[Mapping[str, Any]]) -> str:
-    """Bind the exact ten-player, team, side, role, and champion assignment."""
+def _strict_canonical_sha256(value: Any) -> str:
+    try:
+        raw = json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise AtomizedResearchError("rating receipt is not canonical finite JSON") from exc
+    return hashlib.sha256(raw).hexdigest()
 
-    roster = sorted(
-        (
-            _side(row.get("side")),
-            str(row.get("position") or "").strip().casefold(),
-            _team_id(row),
-            _player_id(row),
-            str(row.get("champion") or "").strip().casefold(),
+
+def _normalized_rfc3339(value: Any, field: str) -> tuple[str, pd.Timestamp]:
+    try:
+        timestamp = pd.Timestamp(value)
+    except (TypeError, ValueError) as exc:
+        raise AtomizedResearchError(f"{field} must be RFC-3339") from exc
+    if timestamp.tzinfo is None:
+        raise AtomizedResearchError(f"{field} must include a timezone")
+    utc = timestamp.tz_convert("UTC")
+    return utc.isoformat().replace("+00:00", "Z"), utc
+
+
+def _resolved_roster_sha256(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    game_id: Any,
+    timestamp: Any,
+    source_identity: Any,
+) -> str:
+    """Recompute the producer's exact context-bound roster payload."""
+
+    if len(rows) != 10 or not str(game_id or "").strip():
+        raise AtomizedResearchError("rating roster binding requires one ten-player map")
+    normalized_timestamp, _ = _normalized_rfc3339(timestamp, "map timestamp")
+    if isinstance(source_identity, str):
+        normalized_identity: Any = source_identity.strip()
+        if not normalized_identity:
+            raise AtomizedResearchError("rating source identity is missing")
+    elif isinstance(source_identity, Mapping):
+        try:
+            normalized_identity = json.loads(
+                json.dumps(
+                    source_identity,
+                    allow_nan=False,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise AtomizedResearchError("rating source identity is not canonical") from exc
+    else:
+        raise AtomizedResearchError("rating source identity is missing")
+
+    normalized: list[dict[str, str]] = []
+    teams: dict[str, str] = {}
+    seen_players: set[str] = set()
+    seen_champions: set[str] = set()
+    seen_slots: set[tuple[str, str]] = set()
+    for row in rows:
+        side = _side(row.get("side")).casefold()
+        role = str(row.get("position") or row.get("role") or "").strip().casefold()
+        team = _team_id(row)
+        player = _player_id(row)
+        champion = str(row.get("champion") or "").strip().casefold()
+        if role not in RATING_ROLES or not champion:
+            raise AtomizedResearchError("rating roster role or champion is invalid")
+        if (side, role) in seen_slots or player in seen_players or champion in seen_champions:
+            raise AtomizedResearchError("rating roster contains a duplicate assignment")
+        if side in teams and teams[side] != team:
+            raise AtomizedResearchError("rating roster side has multiple team IDs")
+        teams[side] = team
+        seen_slots.add((side, role))
+        seen_players.add(player)
+        seen_champions.add(champion)
+        normalized.append(
+            {
+                "side": side,
+                "role": role,
+                "team_id": team,
+                "player_id": player,
+                "champion": champion,
+            }
         )
-        for row in rows
+    expected_slots = {
+        (side, role) for side in ("blue", "red") for role in RATING_ROLES
+    }
+    if seen_slots != expected_slots or set(teams) != {"blue", "red"}:
+        raise AtomizedResearchError("rating roster does not cover every side-role slot")
+    if teams["blue"] == teams["red"]:
+        raise AtomizedResearchError("rating roster requires two team IDs")
+    normalized.sort(
+        key=lambda item: (
+            ("blue", "red").index(item["side"]),
+            RATING_ROLES.index(item["role"]),
+        )
     )
-    if len(roster) != 10 or len({(side, role) for side, role, *_ in roster}) != 10:
-        raise AtomizedResearchError("rating roster binding requires ten unique side-role rows")
-    return canonical_sha256(roster)
+    return _strict_canonical_sha256(
+        {
+            "schema_version": RATING_ROSTER_SCHEMA,
+            "game_id": str(game_id).strip(),
+            "timestamp": normalized_timestamp,
+            "source_identity": normalized_identity,
+            "teams": [
+                {"side": side, "team_id": teams[side]}
+                for side in ("blue", "red")
+            ],
+            "players": normalized,
+        }
+    )
+
+
+def _rating_batch_receipt_sha256(
+    *, timestamp: Any, game_ids: Sequence[Any], policy: str
+) -> str:
+    normalized_timestamp, _ = _normalized_rfc3339(timestamp, "batch timestamp")
+    normalized_ids = [str(game_id or "").strip() for game_id in game_ids]
+    if (
+        policy != RATING_BATCH_POLICY
+        or not normalized_ids
+        or any(not game_id for game_id in normalized_ids)
+        or len(set(normalized_ids)) != len(normalized_ids)
+    ):
+        raise AtomizedResearchError("rating equal-time batch contract is invalid")
+    return _strict_canonical_sha256(
+        {
+            "schema_version": RATING_BATCH_SCHEMA,
+            "policy": policy,
+            "timestamp": normalized_timestamp,
+            "game_ids": sorted(normalized_ids),
+        }
+    )
+
+
+def _canonical_rating_values(base_row: Mapping[str, Any]) -> dict[str, float | None]:
+    nested = base_row.get("rating_values")
+    if not isinstance(nested, Mapping) or set(nested) != set(RATING_VALUE_FIELDS):
+        raise AtomizedResearchError("rating values do not match the producer schema")
+    output: dict[str, float | None] = {}
+    for field in RATING_VALUE_FIELDS:
+        raw = nested.get(field)
+        try:
+            raw_missing = bool(pd.isna(raw))
+        except (TypeError, ValueError):
+            raw_missing = False
+        if raw_missing:
+            value = None
+        else:
+            value = _finite(raw)
+            if value is None:
+                raise AtomizedResearchError("rating value is not finite")
+        top_level = base_row.get(field)
+        try:
+            top_missing = bool(pd.isna(top_level))
+        except (TypeError, ValueError):
+            top_missing = False
+        normalized_top = None if top_missing else _finite(top_level)
+        if not top_missing and normalized_top is None:
+            raise AtomizedResearchError("top-level rating value is not finite")
+        if normalized_top != value:
+            raise AtomizedResearchError("top-level and canonical rating values differ")
+        output[field] = value
+    return output
 
 
 def _locked_rating_authority(
-    base_row: Mapping[str, Any], *, resolved_roster_sha256: str
-) -> dict[str, float]:
-    """Require a hash-bound source receipt for every locked rating value."""
+    base_row: Mapping[str, Any],
+    *,
+    resolved_roster_sha256: str,
+    map_timestamp: Any,
+    expected_batch_receipt_sha256: str,
+) -> dict[str, Any]:
+    """Validate the complete PR 281 source, value, time, roster, and batch receipt."""
 
-    team_values = [
-        _finite(base_row.get("base_team_logit")),
-        _finite(base_row.get("team_rating_diff_scaled")),
-    ]
-    player_values = [
-        _finite(base_row.get("base_player_logit")),
-        _finite(base_row.get("player_rating_diff_scaled")),
-    ]
-    source_sha256 = str(base_row.get("rating_source_sha256") or "")
-    bound_roster_sha256 = str(base_row.get("rating_roster_sha256") or "")
-    receipt_payload = {
-        "schema_version": base_row.get("rating_receipt_schema"),
-        "source_available": _finite(base_row.get("rating_source_available")),
-        "source_sha256": source_sha256,
-        "roster_sha256": bound_roster_sha256,
+    unavailable: dict[str, Any] = {
+        "base_team_logit": 0.0,
+        "team_rating_diff_scaled": 0.0,
+        "team_rating_available": 0.0,
+        "team_rating_missing": 1.0,
+        "base_player_logit": 0.0,
+        "player_rating_diff_scaled": 0.0,
+        "player_lineup_complete": 0.0,
+        "player_rating_available": 0.0,
+        "player_rating_missing": 1.0,
+        "rating_source_receipt_available": 0.0,
+        "rating_source_receipt_hash_match": 0.0,
+        "rating_roster_receipt_match": 0.0,
+        "rating_batch_receipt_match": 0.0,
+        "rating_value_payload_sha256": None,
     }
-    receipt_matches = bool(
-        str(base_row.get("rating_receipt_sha256") or "")
-        == canonical_sha256(receipt_payload)
-    )
-    source_receipt_available = bool(
-        base_row.get("rating_receipt_schema")
-        == "scryglass:resolved-rating-source:v1"
-        and _finite(base_row.get("rating_source_available")) == 1.0
-        and re.fullmatch(r"[0-9a-f]{64}", source_sha256)
-        and receipt_matches
-    )
-    roster_matches = bool(
-        source_receipt_available
-        and bound_roster_sha256 == resolved_roster_sha256
-    )
-    lineup_complete = _finite(base_row.get("player_lineup_complete")) == 1.0
-    team_available = roster_matches and all(value is not None for value in team_values)
-    player_available = (
-        roster_matches
-        and lineup_complete
-        and all(value is not None for value in player_values)
-    )
-    return {
-        "base_team_logit": float(team_values[0]) if team_available else 0.0,
-        "team_rating_diff_scaled": float(team_values[1]) if team_available else 0.0,
-        "team_rating_available": float(team_available),
-        "team_rating_missing": float(not team_available),
-        "base_player_logit": float(player_values[0]) if player_available else 0.0,
-        "player_rating_diff_scaled": float(player_values[1]) if player_available else 0.0,
-        "player_lineup_complete": float(player_available),
-        "player_rating_available": float(player_available),
-        "player_rating_missing": float(not player_available),
-        "rating_source_receipt_available": float(source_receipt_available),
-        "rating_source_receipt_hash_match": float(receipt_matches),
-        "rating_roster_receipt_match": float(roster_matches),
-    }
+    try:
+        if (
+            base_row.get("schema_version") != RATING_RECEIPT_SCHEMA
+            or base_row.get("rating_receipt_schema") != RATING_RECEIPT_SCHEMA
+        ):
+            return unavailable
+        source_available = _finite(base_row.get("rating_source_available"))
+        if source_available != 1.0:
+            return unavailable
+        source_sha256 = str(base_row.get("rating_source_sha256") or "")
+        bound_roster_sha256 = str(base_row.get("rating_roster_sha256") or "")
+        if not re.fullmatch(r"[0-9a-f]{64}", source_sha256):
+            return unavailable
+        if bound_roster_sha256 != resolved_roster_sha256:
+            return unavailable
+        rating_timestamp, rating_time = _normalized_rfc3339(
+            base_row.get("rating_timestamp"), "rating timestamp"
+        )
+        _, map_time = _normalized_rfc3339(map_timestamp, "map timestamp")
+        if rating_time >= map_time:
+            return unavailable
+        values = _canonical_rating_values(base_row)
+        team_derived = float(all(values[field] is not None for field in RATING_VALUE_FIELDS[:2]))
+        player_derived = float(
+            all(values[field] is not None for field in RATING_VALUE_FIELDS[2:])
+            and values["player_lineup_complete"] == 1.0
+        )
+        team_explicit = _finite(base_row.get("team_rating_available"))
+        player_explicit = _finite(base_row.get("player_rating_available"))
+        values_explicit = _finite(base_row.get("rating_values_available"))
+        team_missing = _finite(base_row.get("team_rating_missing"))
+        player_missing = _finite(base_row.get("player_rating_missing"))
+        values_missing = _finite(base_row.get("rating_values_missing"))
+        if (
+            team_explicit not in (0.0, 1.0)
+            or player_explicit not in (0.0, 1.0)
+            or values_explicit not in (0.0, 1.0)
+            or team_explicit != team_derived
+            or player_explicit != player_derived
+            or values_explicit != float(bool(team_derived or player_derived))
+            or team_missing != 1.0 - team_explicit
+            or player_missing != 1.0 - player_explicit
+            or values_missing != 1.0 - values_explicit
+        ):
+            return unavailable
+        policy = str(base_row.get("rating_batching_policy") or "")
+        batch_receipt = str(base_row.get("rating_batch_receipt_sha256") or "")
+        batch_timestamp, _ = _normalized_rfc3339(
+            base_row.get("rating_batch_timestamp"), "rating batch timestamp"
+        )
+        normalized_map_timestamp, _ = _normalized_rfc3339(
+            map_timestamp, "map timestamp"
+        )
+        if (
+            policy != RATING_BATCH_POLICY
+            or batch_timestamp != normalized_map_timestamp
+            or batch_receipt != expected_batch_receipt_sha256
+        ):
+            return unavailable
+        receipt_payload = {
+            "schema_version": RATING_RECEIPT_SCHEMA,
+            "source_available": 1.0,
+            "source_sha256": source_sha256,
+            "roster_sha256": bound_roster_sha256,
+            "rating_timestamp": rating_timestamp,
+            "rating_values": values,
+            "rating_values_available": values_explicit,
+            "team_rating_available": team_explicit,
+            "player_rating_available": player_explicit,
+            "equal_timestamp_batching": {
+                "policy": policy,
+                "receipt_sha256": batch_receipt,
+            },
+        }
+        expected_receipt = _strict_canonical_sha256(receipt_payload)
+        receipt_matches = bool(
+            str(base_row.get("rating_receipt_sha256") or "") == expected_receipt
+        )
+        if not receipt_matches:
+            return unavailable
+        team_available = bool(team_explicit)
+        player_available = bool(player_explicit)
+        return {
+            "base_team_logit": float(values["base_team_logit"])
+            if team_available
+            else 0.0,
+            "team_rating_diff_scaled": float(values["team_rating_diff_scaled"])
+            if team_available
+            else 0.0,
+            "team_rating_available": float(team_available),
+            "team_rating_missing": float(not team_available),
+            "base_player_logit": float(values["base_player_logit"])
+            if player_available
+            else 0.0,
+            "player_rating_diff_scaled": float(values["player_rating_diff_scaled"])
+            if player_available
+            else 0.0,
+            "player_lineup_complete": 1.0 if player_available else 0.0,
+            "player_rating_available": float(player_available),
+            "player_rating_missing": float(not player_available),
+            "rating_source_receipt_available": 1.0,
+            "rating_source_receipt_hash_match": 1.0,
+            "rating_roster_receipt_match": 1.0,
+            "rating_batch_receipt_match": 1.0,
+            "rating_value_payload_sha256": _strict_canonical_sha256(
+                {"rating_timestamp": rating_timestamp, "rating_values": values}
+            ),
+        }
+    except (AtomizedResearchError, TypeError, ValueError):
+        return unavailable
 
 
 def _momentum_features(
@@ -1034,7 +1274,19 @@ def build_layer_a_matrix(
     ordered = maps[
         (maps["date"] < CONSUMED_TEST_END) & maps["league"].isin(TARGET_LEAGUES)
     ].sort_values(["date", "game_uid"], kind="stable")
-    for _, same_time in ordered.groupby("date", sort=False):
+    for batch_timestamp, same_time in ordered.groupby("date", sort=False):
+        batch_game_ids = sorted(
+            set(same_time["game_uid"].astype(str)) & base_ids
+        )
+        expected_batch_receipt = (
+            _rating_batch_receipt_sha256(
+                timestamp=batch_timestamp,
+                game_ids=batch_game_ids,
+                policy=RATING_BATCH_POLICY,
+            )
+            if batch_game_ids
+            else ""
+        )
         pending: list[tuple[dict[str, Any], pd.DataFrame, pd.DataFrame]] = []
         for map_row in same_time.to_dict("records"):
             game_uid = str(map_row["game_uid"])
@@ -1126,9 +1378,20 @@ def build_layer_a_matrix(
                     map_row.get("patch") or lineup.iloc[0].get("patch"), map_row["date"]
                 )
                 base_row = base_by_id.loc[game_uid].to_dict()
+                try:
+                    resolved_roster_sha256 = _resolved_roster_sha256(
+                        rows,
+                        game_id=game_uid,
+                        timestamp=map_row["date"],
+                        source_identity=base_row.get("rating_source_identity"),
+                    )
+                except AtomizedResearchError:
+                    resolved_roster_sha256 = ""
                 rating_authority = _locked_rating_authority(
                     base_row,
-                    resolved_roster_sha256=_resolved_roster_sha256(rows),
+                    resolved_roster_sha256=resolved_roster_sha256,
+                    map_timestamp=map_row["date"],
+                    expected_batch_receipt_sha256=expected_batch_receipt,
                 )
                 rating_authority_by_game[game_uid] = rating_authority
                 blue_team = _team_id(blue[0])

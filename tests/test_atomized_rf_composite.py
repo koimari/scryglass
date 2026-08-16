@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pandas as pd
 import numpy as np
 import pytest
@@ -8,6 +10,8 @@ from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 from lol_kills.research.atomized_rf_composite import (
     FEATURE_AVAILABILITY_COLUMNS,
     MODEL_COLUMNS,
+    RATING_BATCH_POLICY,
+    RATING_RECEIPT_SCHEMA,
     AtomizedResearchError,
     RFConfig,
     RunningStat,
@@ -19,16 +23,112 @@ from lol_kills.research.atomized_rf_composite import (
     _matched_comparison_config,
     _momentum_features,
     _phase_curve_features,
+    _rating_batch_receipt_sha256,
+    _resolved_roster_sha256,
     _shrunk_metric_mean,
     _unique_player_map_support,
     _validate_no_current_state_features,
     _write_json,
-    canonical_sha256,
     exact_mechanic_keys,
     feature_group_coverage_report,
     normalize_source_patch,
     phase_coverage_report,
 )
+
+
+PRODUCER_GAME_TIME = "2026-08-01T12:00:00Z"
+PRODUCER_RATING_TIME = "2026-08-01T11:59:59Z"
+PRODUCER_SOURCE_IDENTITY = {
+    "locator": "ratings/pre-game.parquet",
+    "revision": "source-revision-1",
+}
+PRODUCER_SOURCE_SHA256 = (
+    "12b29600078993239cf8fe7508994873d4eaca1ff7559c27f177e3c79313505e"
+)
+PRODUCER_ROSTER_SHA256 = (
+    "d271e2aec25625822d850c96f453e4050c4542f4eac8784f65f8bf78e0f4a1b7"
+)
+PRODUCER_BATCH_SHA256 = (
+    "338fb35ec92e4d7fdbc1bb1cf208b02a72101e0f36b909f07edb529e78d5d220"
+)
+PRODUCER_FULL_RECEIPT_SHA256 = (
+    "a08ce2ae2211ca762e0703d7499d54313fa58fd1bd1bb509690c41b1689cd3ff"
+)
+PRODUCER_TEAM_ONLY_RECEIPT_SHA256 = (
+    "9f3e7959e6dc19dc640d3eab9f96656605a5ceb53203008743fa48cae91cc9e1"
+)
+
+
+def _producer_roster() -> list[dict[str, str]]:
+    return [
+        {
+            "game_uid": "map-1",
+            "side": side,
+            "position": role,
+            "teamid": f"oe:team:{side}",
+            "playerid": f"oe:player:{side}-{index}",
+            "champion": f"{side.title()}Champion{index}",
+        }
+        for side in ("blue", "red")
+        for index, role in enumerate(("top", "jungle", "mid", "bot", "support"))
+    ]
+
+
+def _producer_receipt(*, team_only: bool = False) -> dict[str, object]:
+    values: dict[str, float | None] = {
+        "base_team_logit": 0.2,
+        "team_rating_diff_scaled": 0.1,
+        "base_player_logit": None if team_only else 0.3,
+        "player_rating_diff_scaled": None if team_only else 0.2,
+        "player_lineup_complete": 0.0 if team_only else 1.0,
+    }
+    player_available = 0.0 if team_only else 1.0
+    return {
+        "schema_version": RATING_RECEIPT_SCHEMA,
+        "rating_receipt_schema": RATING_RECEIPT_SCHEMA,
+        "game_uid": "map-1",
+        "rating_timestamp": PRODUCER_RATING_TIME,
+        "rating_source_identity": deepcopy(PRODUCER_SOURCE_IDENTITY),
+        "rating_source_available": 1.0,
+        "rating_source_sha256": PRODUCER_SOURCE_SHA256,
+        "rating_roster_sha256": PRODUCER_ROSTER_SHA256,
+        "rating_receipt_sha256": (
+            PRODUCER_TEAM_ONLY_RECEIPT_SHA256
+            if team_only
+            else PRODUCER_FULL_RECEIPT_SHA256
+        ),
+        "rating_values": values.copy(),
+        "rating_batch_timestamp": PRODUCER_GAME_TIME,
+        "rating_batching_policy": RATING_BATCH_POLICY,
+        "rating_batch_receipt_sha256": PRODUCER_BATCH_SHA256,
+        "rating_values_available": 1.0,
+        "rating_values_missing": 0.0,
+        "team_rating_available": 1.0,
+        "team_rating_missing": 0.0,
+        "player_rating_available": player_available,
+        "player_rating_missing": 1.0 - player_available,
+        **values,
+    }
+
+
+def _consume_producer_receipt(receipt: dict[str, object]) -> dict[str, object]:
+    roster_sha256 = _resolved_roster_sha256(
+        _producer_roster(),
+        game_id="map-1",
+        timestamp=PRODUCER_GAME_TIME,
+        source_identity=receipt.get("rating_source_identity"),
+    )
+    batch_sha256 = _rating_batch_receipt_sha256(
+        timestamp=PRODUCER_GAME_TIME,
+        game_ids=["map-1"],
+        policy=RATING_BATCH_POLICY,
+    )
+    return _locked_rating_authority(
+        receipt,
+        resolved_roster_sha256=roster_sha256,
+        map_timestamp=PRODUCER_GAME_TIME,
+        expected_batch_receipt_sha256=batch_sha256,
+    )
 
 
 def test_receipt_writer_serializes_numpy_scalars(tmp_path) -> None:
@@ -208,46 +308,108 @@ def test_phase_curve_is_side_swap_antisymmetric() -> None:
         assert red[key] == pytest.approx(-blue[key])
 
 
-def test_rating_and_momentum_missingness_is_explicit() -> None:
-    roster_sha256 = "b" * 64
-    rating = _locked_rating_authority(
-        {
-            "base_team_logit": 0.2,
-            "team_rating_diff_scaled": 0.1,
-            "base_player_logit": 0.3,
-            "player_rating_diff_scaled": 0.2,
-            "player_lineup_complete": 1.0,
-        },
-        resolved_roster_sha256=roster_sha256,
-    )
-    assert rating["team_rating_available"] == 0.0
-    assert rating["player_rating_available"] == 0.0
-    assert rating["player_rating_missing"] == 1.0
-    assert rating["base_player_logit"] == 0.0
+def test_pr281_producer_receipt_is_consumed_exactly() -> None:
+    assert _resolved_roster_sha256(
+        _producer_roster(),
+        game_id="map-1",
+        timestamp=PRODUCER_GAME_TIME,
+        source_identity=PRODUCER_SOURCE_IDENTITY,
+    ) == PRODUCER_ROSTER_SHA256
+    assert _rating_batch_receipt_sha256(
+        timestamp=PRODUCER_GAME_TIME,
+        game_ids=["map-1"],
+        policy=RATING_BATCH_POLICY,
+    ) == PRODUCER_BATCH_SHA256
 
-    receipt = {
-        "schema_version": "scryglass:resolved-rating-source:v1",
-        "source_available": 1.0,
-        "source_sha256": "a" * 64,
-        "roster_sha256": roster_sha256,
-    }
-    bound = _locked_rating_authority(
-        {
-            "base_team_logit": 0.2,
-            "team_rating_diff_scaled": 0.1,
-            "base_player_logit": 0.3,
-            "player_rating_diff_scaled": 0.2,
-            "player_lineup_complete": 1.0,
-            "rating_receipt_schema": "scryglass:resolved-rating-source:v1",
-            "rating_source_available": 1.0,
-            "rating_source_sha256": "a" * 64,
-            "rating_roster_sha256": roster_sha256,
-            "rating_receipt_sha256": canonical_sha256(receipt),
-        },
-        resolved_roster_sha256=roster_sha256,
-    )
+    bound = _consume_producer_receipt(_producer_receipt())
     assert bound["team_rating_available"] == 1.0
     assert bound["player_rating_available"] == 1.0
+    assert bound["rating_source_receipt_hash_match"] == 1.0
+    assert bound["rating_roster_receipt_match"] == 1.0
+    assert bound["rating_batch_receipt_match"] == 1.0
+
+
+def test_pr281_nullable_player_group_fails_closed_without_hiding_team_group() -> None:
+    bound = _consume_producer_receipt(_producer_receipt(team_only=True))
+    assert bound["team_rating_available"] == 1.0
+    assert bound["base_team_logit"] == pytest.approx(0.2)
+    assert bound["player_rating_available"] == 0.0
+    assert bound["player_rating_missing"] == 1.0
+    assert bound["base_player_logit"] == 0.0
+    assert bound["rating_source_receipt_hash_match"] == 1.0
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "nested_value",
+        "top_level_value",
+        "rating_timestamp",
+        "source_sha256",
+        "source_identity",
+        "source_availability",
+        "batch_receipt",
+        "batch_policy",
+        "batch_timestamp",
+        "availability",
+        "missing_flag",
+        "receipt_sha256",
+    ),
+)
+def test_pr281_receipt_tampering_fails_closed(field: str) -> None:
+    receipt = _producer_receipt()
+    if field == "nested_value":
+        receipt["rating_values"]["base_team_logit"] = 0.21  # type: ignore[index]
+    elif field == "top_level_value":
+        receipt["base_team_logit"] = 0.21
+    elif field == "rating_timestamp":
+        receipt["rating_timestamp"] = "2026-08-01T11:59:58Z"
+    elif field == "source_sha256":
+        receipt["rating_source_sha256"] = "f" * 64
+    elif field == "source_identity":
+        receipt["rating_source_identity"] = {
+            **PRODUCER_SOURCE_IDENTITY,
+            "revision": "tampered-revision",
+        }
+    elif field == "source_availability":
+        receipt["rating_source_available"] = 0.0
+    elif field == "batch_receipt":
+        receipt["rating_batch_receipt_sha256"] = "f" * 64
+    elif field == "batch_policy":
+        receipt["rating_batching_policy"] = "legacy-batch-policy"
+    elif field == "batch_timestamp":
+        receipt["rating_batch_timestamp"] = "2026-08-01T12:00:01Z"
+    elif field == "availability":
+        receipt["team_rating_available"] = 0.0
+    elif field == "missing_flag":
+        receipt["player_rating_missing"] = 1.0
+    else:
+        receipt["rating_receipt_sha256"] = "0" * 64
+
+    bound = _consume_producer_receipt(receipt)
+    assert bound["team_rating_available"] == 0.0
+    assert bound["player_rating_available"] == 0.0
+    assert bound["rating_source_receipt_available"] == 0.0
+
+
+def test_legacy_four_field_rating_receipt_fails_closed() -> None:
+    legacy = _producer_receipt()
+    legacy.pop("schema_version")
+    legacy.pop("rating_values")
+    legacy.pop("rating_batch_receipt_sha256")
+    legacy["rating_receipt_sha256"] = "7" * 64
+    bound = _consume_producer_receipt(legacy)
+    assert bound["team_rating_available"] == 0.0
+    assert bound["player_rating_available"] == 0.0
+
+
+def test_rating_and_momentum_missingness_is_explicit() -> None:
+    missing_receipt = _producer_receipt()
+    missing_receipt.pop("rating_receipt_schema")
+    rating = _consume_producer_receipt(missing_receipt)
+    assert rating["team_rating_available"] == 0.0
+    assert rating["player_rating_available"] == 0.0
+    assert rating["base_player_logit"] == 0.0
 
     momentum = _momentum_features(
         {}, {}, "blue-team", "red-team", [f"b-{i}" for i in range(5)], [f"r-{i}" for i in range(5)]
