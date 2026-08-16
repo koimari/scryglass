@@ -8,10 +8,33 @@ import {
 
 export const runtime = "nodejs";
 
+const PLAYER_QUERY_WORDS = new Set([
+  "active", "best", "champion", "compare", "find", "for", "games", "league",
+  "list", "player", "players", "rank", "rating", "role", "show", "team",
+  "tier", "what", "who", "with",
+]);
+
+function isSimplePlayerName(value: string): boolean {
+  if (!value || value.length > 100 || /[?!,:;]/u.test(value)) return false;
+  const words = value.split(/\s+/u).filter(Boolean);
+  return words.length > 0 && words.length <= 4
+    && words.every((word) => !PLAYER_QUERY_WORDS.has(word.toLocaleLowerCase()));
+}
+
 async function get(request: Request, signal: AbortSignal) {
   const question = clean(searchParams(request).get("q"));
   if (!question) return chatError("A player question is required.", 422);
   try {
+    if (isSimplePlayerName(question)) {
+      return chatJson(await executePublishedQueryPlan({
+        version: 1,
+        dataset: "players",
+        operation: "rank",
+        filters: [{ field: "name", op: "eq", value: question }],
+        orderBy: [{ field: "rating", direction: "desc" }],
+        limit: 20,
+      }, signal));
+    }
     const index = await loadSupportQueryIndex(signal);
     const planned = planPlayerQuestion(question, index);
     if (!planned.ok) return chatError("The player question could not be resolved.", 422);
