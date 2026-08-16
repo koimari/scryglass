@@ -128,8 +128,8 @@ select is(
     from pg_proc
     where oid = 'public.get_scryglass_active_release(text)'::regprocedure
   ),
-  true,
-  'the public active-release wrapper is a fixed security-definer projection'
+  false,
+  'the public active-release wrapper is an invoker projection'
 );
 select is(
   (
