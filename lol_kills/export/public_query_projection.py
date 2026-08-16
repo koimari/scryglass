@@ -41,6 +41,10 @@ TIER_QUERY_DATASETS = (
 TIER_QUERY_DATASET = TIER_QUERY_DATASETS[0]
 MAX_QUERY_ROW_BYTES = 64 * 1024
 MAX_QUERY_SOURCE_ROW_BYTES = 70_000
+DESCRIPTIVE_SIGNAL_SCHEMA = "scryglass:draft-descriptive-signal:v1"
+DESCRIPTIVE_SUMMARY_SCHEMA = "scryglass:draft-descriptive-summary:v1"
+DESCRIPTIVE_AUTHORITY_SCHEMA = "scryglass:draft-authority:v1"
+_SHA256_LENGTH = 64
 _DRAFT_KEYS = frozenset(
     {
         "authority_receipt_sha256",
@@ -53,6 +57,49 @@ _DRAFT_KEYS = frozenset(
         "draft_score",
         "draft_win_share",
     }
+)
+_FORBIDDEN_DRAFT_KEYS = frozenset(
+    {
+        "average_win_share",
+        "betting",
+        "development_composite",
+        "draft_probability",
+        "draft_win_share",
+        "elo",
+        "ev",
+        "expected_value",
+        "fair_odds",
+        "gold",
+        "live_state",
+        "match_probability",
+        "match_win_expectation",
+        "momentum",
+        "mu_diff",
+        "objectives",
+        "odds",
+        "p_blue",
+        "p_red",
+        "phase_curve",
+        "player_elo",
+        "player_rating",
+        "probability",
+        "r9e",
+        "r9e_state_space",
+        "rating_uncertainty",
+        "recommendation",
+        "sigma_pair",
+        "strength",
+        "team_elo",
+        "team_rating",
+        "win_probability",
+    }
+)
+_COMPONENT_KEYS = (
+    "base",
+    "archetype_interactions",
+    "ally_synergy",
+    "enemy_counter",
+    "same_role",
 )
 _PUBLIC_IMAGE_HOSTS = frozenset({"cdn.communitydragon.org"})
 
@@ -163,6 +210,357 @@ def reject_draft_fields(value: object) -> None:
 
     if _contains_draft_field(value):
         raise PublicQueryProjectionError("query data contains Draft fields")
+
+
+def _sha256_text(value: object) -> str | None:
+    text = str(value or "").strip()
+    if len(text) != _SHA256_LENGTH or any(
+        character not in "0123456789abcdef" for character in text
+    ):
+        return None
+    return text
+
+
+def _descriptive_authority(
+    authority: Mapping[str, Any] | None,
+    *,
+    release_id: str,
+) -> dict[str, Any] | None:
+    """Return the exact release-bound descriptive authority or fail closed."""
+
+    if authority is None or authority.get("status") == "unavailable":
+        return None
+    normalized = {
+        "schema_version": authority.get("schema_version"),
+        "status": authority.get("status"),
+        "authority": authority.get("authority"),
+        "estimand": authority.get("estimand"),
+        "release_id": authority.get("release_id"),
+        "model_version": str(authority.get("model_version") or "").strip(),
+        "artifact_sha256": _sha256_text(authority.get("artifact_sha256")),
+        "receipt_sha256": _sha256_text(
+            authority.get("receipt_sha256")
+            or authority.get("authority_receipt_sha256")
+        ),
+        "probability_authority": authority.get("probability_authority"),
+        "recommendation_authority": authority.get("recommendation_authority"),
+        "betting_authority": authority.get("betting_authority"),
+    }
+    if (
+        normalized["schema_version"] != DESCRIPTIVE_AUTHORITY_SCHEMA
+        or normalized["status"] != "descriptive"
+        or normalized["authority"] != "descriptive"
+        or normalized["estimand"] != "composition_only"
+        or normalized["release_id"] != release_id
+        or not normalized["model_version"]
+        or len(normalized["model_version"]) > 100
+        or normalized["artifact_sha256"] is None
+        or normalized["receipt_sha256"] is None
+        or normalized["probability_authority"] is not False
+        or normalized["recommendation_authority"] is not False
+        or normalized["betting_authority"] is not False
+    ):
+        raise PublicQueryProjectionError(
+            "descriptive Draft Score authority is not release-bound"
+        )
+    return normalized
+
+
+def _reject_forbidden_draft_content(value: object, path: str = "draft") -> None:
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            normalized = str(key).strip().casefold()
+            if normalized in _FORBIDDEN_DRAFT_KEYS or normalized.startswith(
+                ("r9e_", "control_", "strength_", "phase_", "live_")
+            ):
+                raise PublicQueryProjectionError(
+                    f"descriptive Draft Score contains forbidden field: {path}.{key}"
+                )
+            _reject_forbidden_draft_content(child, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _reject_forbidden_draft_content(child, f"{path}[{index}]")
+
+
+def _strict_number(value: object, *, field: str, nullable: bool = False) -> float | None:
+    if value is None and nullable:
+        return None
+    number = _finite(value)
+    if number is None:
+        raise PublicQueryProjectionError(
+            f"descriptive Draft Score field is not finite: {field}"
+        )
+    return round(number, 6)
+
+
+def _strict_nonnegative_integer(value: object, *, field: str) -> int:
+    if isinstance(value, bool):
+        raise PublicQueryProjectionError(
+            f"descriptive Draft Score field is not an integer: {field}"
+        )
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as error:
+        raise PublicQueryProjectionError(
+            f"descriptive Draft Score field is not an integer: {field}"
+        ) from error
+    if number < 0 or number != value:
+        raise PublicQueryProjectionError(
+            f"descriptive Draft Score field is not a nonnegative integer: {field}"
+        )
+    return number
+
+
+def _strict_components(
+    value: object,
+    *,
+    include_total: bool,
+    field: str,
+) -> dict[str, float]:
+    expected = (*_COMPONENT_KEYS, "total") if include_total else _COMPONENT_KEYS
+    if not isinstance(value, Mapping) or set(value) != set(expected):
+        raise PublicQueryProjectionError(
+            f"descriptive Draft Score component ledger is invalid: {field}"
+        )
+    return {
+        key: _strict_number(value.get(key), field=f"{field}.{key}")  # type: ignore[dict-item]
+        for key in expected
+    }
+
+
+def _sanitize_descriptive_signal(
+    signal: object,
+    *,
+    authority: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return the bounded component-only subset of one descriptive signal."""
+
+    if not isinstance(signal, Mapping):
+        raise PublicQueryProjectionError("descriptive Draft Score signal is malformed")
+    _reject_forbidden_draft_content(signal)
+    if (
+        signal.get("schema_version") != DESCRIPTIVE_SIGNAL_SCHEMA
+        or signal.get("status") != "available"
+        or signal.get("authority") != "descriptive"
+        or signal.get("estimand") != "composition_only"
+        or signal.get("model_version") != authority["model_version"]
+        or signal.get("artifact_sha256") != authority["artifact_sha256"]
+        or signal.get("fit_through") is not None
+    ):
+        raise PublicQueryProjectionError(
+            "descriptive Draft Score signal does not match its authority"
+        )
+    sides: dict[str, dict[str, Any]] = {}
+    for side in ("blue", "red"):
+        value = signal.get(side)
+        if not isinstance(value, Mapping):
+            raise PublicQueryProjectionError(
+                f"descriptive Draft Score {side} ledger is malformed"
+            )
+        components = _strict_components(
+            value.get("components"), include_total=False, field=f"{side}.components"
+        )
+        side_signal = _strict_number(value.get("signal"), field=f"{side}.signal")
+        if not math.isclose(side_signal, sum(components.values()), abs_tol=1e-5):
+            raise PublicQueryProjectionError(
+                f"descriptive Draft Score {side} total does not reconcile"
+            )
+        sides[side] = {
+            "signal": side_signal,
+            "prior_role_games": _strict_nonnegative_integer(
+                value.get("prior_role_games"), field=f"{side}.prior_role_games"
+            ),
+            "components": components,
+        }
+    edge_components = _strict_components(
+        signal.get("edge_components"),
+        include_total=True,
+        field="edge_components",
+    )
+    for key in _COMPONENT_KEYS:
+        expected_edge = sides["blue"]["components"][key] - sides["red"]["components"][key]
+        if not math.isclose(edge_components[key], expected_edge, abs_tol=1e-5):
+            raise PublicQueryProjectionError(
+                f"descriptive Draft Score edge component does not reconcile: {key}"
+            )
+    if not math.isclose(
+        edge_components["total"],
+        sum(edge_components[key] for key in _COMPONENT_KEYS),
+        abs_tol=1e-5,
+    ):
+        raise PublicQueryProjectionError(
+            "descriptive Draft Score total edge does not reconcile"
+        )
+
+    raw_picks = signal.get("picks")
+    if not isinstance(raw_picks, list) or len(raw_picks) != 10:
+        raise PublicQueryProjectionError("descriptive Draft Score needs ten picks")
+    picks: list[dict[str, Any]] = []
+    slots: set[tuple[str, str]] = set()
+    for index, value in enumerate(raw_picks):
+        if not isinstance(value, Mapping):
+            raise PublicQueryProjectionError("descriptive Draft Score pick is malformed")
+        side = str(value.get("side") or "").strip().title()
+        role = str(value.get("role") or "").strip().casefold()
+        champion = str(value.get("champion") or "").strip()
+        slot = (side, role)
+        if side not in {"Blue", "Red"} or role not in {"top", "jng", "mid", "bot", "sup"}:
+            raise PublicQueryProjectionError("descriptive Draft Score pick slot is invalid")
+        if not champion or len(champion) > 100 or slot in slots:
+            raise PublicQueryProjectionError("descriptive Draft Score pick identity is invalid")
+        slots.add(slot)
+        evidence_status = str(value.get("evidence_status") or "")
+        if evidence_status != "available":
+            raise PublicQueryProjectionError(
+                "descriptive Draft Score pick evidence is unavailable"
+            )
+        picks.append(
+            {
+                "side": side,
+                "role": role,
+                "champion": champion,
+                "contribution": _strict_number(
+                    value.get("contribution"), field=f"picks[{index}].contribution"
+                ),
+                "prior_role_games": _strict_nonnegative_integer(
+                    value.get("prior_role_games"),
+                    field=f"picks[{index}].prior_role_games",
+                ),
+                "evidence_status": evidence_status,
+            }
+        )
+    expected_slots = {
+        (side, role)
+        for side in ("Blue", "Red")
+        for role in ("top", "jng", "mid", "bot", "sup")
+    }
+    if slots != expected_slots:
+        raise PublicQueryProjectionError("descriptive Draft Score pick set is incomplete")
+    return {
+        "schema_version": DESCRIPTIVE_SIGNAL_SCHEMA,
+        "status": "available",
+        "authority": "descriptive",
+        "estimand": "composition_only",
+        "release_id": authority["release_id"],
+        "model_version": authority["model_version"],
+        "artifact_sha256": authority["artifact_sha256"],
+        "authority_receipt_sha256": authority["receipt_sha256"],
+        "blue": sides["blue"],
+        "red": sides["red"],
+        "edge_components": edge_components,
+        "picks": picks,
+        "note": "Descriptive composition score in model units.",
+    }
+
+
+def _validate_signal_game_binding(
+    signal: Mapping[str, Any],
+    game: Mapping[str, Any],
+) -> None:
+    participants = game.get("players")
+    if not isinstance(participants, list) or len(participants) != 10:
+        raise PublicQueryProjectionError(
+            "descriptive Draft Score game does not have ten players"
+        )
+    expected: dict[tuple[str, str], str] = {}
+    champions: set[str] = set()
+    for participant in participants:
+        if not isinstance(participant, Mapping):
+            raise PublicQueryProjectionError(
+                "descriptive Draft Score game participant is malformed"
+            )
+        side = str(participant.get("side") or "").strip().title()
+        role = str(participant.get("role") or "").strip().casefold()
+        role = {"jungle": "jng", "support": "sup"}.get(role, role)
+        champion = normalize_public_key(participant.get("champion"))
+        slot = (side, role)
+        if (
+            side not in {"Blue", "Red"}
+            or role not in {"top", "jng", "mid", "bot", "sup"}
+            or not champion
+            or slot in expected
+            or champion in champions
+        ):
+            raise PublicQueryProjectionError(
+                "descriptive Draft Score game draft is incomplete"
+            )
+        expected[slot] = champion
+        champions.add(champion)
+    actual = {
+        (
+            str(pick.get("side") or "").strip().title(),
+            str(pick.get("role") or "").strip().casefold(),
+        ): normalize_public_key(pick.get("champion"))
+        for pick in signal["picks"]
+        if isinstance(pick, Mapping)
+    }
+    if expected != actual:
+        raise PublicQueryProjectionError(
+            "descriptive Draft Score picks do not match the game"
+        )
+
+
+def _validated_pool_picks(
+    pool: object,
+    signal: Mapping[str, Any],
+) -> dict[tuple[str, str], tuple[str, bool]] | None:
+    if not isinstance(pool, Mapping):
+        return None
+    pool_picks = pool.get("picked")
+    bans = pool.get("bans")
+    if (
+        pool.get("status") != "complete"
+        or pool.get("evaluated_picks") != 10
+        or not isinstance(pool_picks, list)
+        or len(pool_picks) != 10
+        or not isinstance(bans, Mapping)
+        or not all(
+            isinstance(bans.get(side), list) and len(bans.get(side)) == 5
+            for side in ("Blue", "Red")
+        )
+    ):
+        return None
+    normalized_bans = [
+        normalize_public_key(champion)
+        for side in ("Blue", "Red")
+        for champion in bans[side]
+    ]
+    if any(not champion for champion in normalized_bans) or len(set(normalized_bans)) != 10:
+        return None
+    signal_champions = {
+        (
+            str(pick.get("side") or "").strip().title(),
+            str(pick.get("role") or "").strip().casefold(),
+        ): normalize_public_key(pick.get("champion"))
+        for pick in signal.get("picks", [])
+        if isinstance(pick, Mapping)
+    }
+    output: dict[tuple[str, str], tuple[str, bool]] = {}
+    pick_orders: set[int] = set()
+    for pool_pick in pool_picks:
+        if not isinstance(pool_pick, Mapping):
+            return None
+        side = str(pool_pick.get("side") or "").strip().title()
+        role = str(pool_pick.get("role") or "").strip().casefold()
+        role = {"jungle": "jng", "support": "sup"}.get(role, role)
+        champion = normalize_public_key(pool_pick.get("champion"))
+        best = pool_pick.get("best_available")
+        order = pool_pick.get("order")
+        slot = (side, role)
+        if (
+            best not in (True, False)
+            or isinstance(order, bool)
+            or not isinstance(order, int)
+            or order not in range(1, 11)
+            or order in pick_orders
+            or slot in output
+            or champion != signal_champions.get(slot)
+            or champion in normalized_bans
+        ):
+            return None
+        output[slot] = (champion, bool(best))
+        pick_orders.add(order)
+    return output if len(output) == 10 else None
 
 
 def _finite(value: object) -> float | None:
@@ -278,8 +676,6 @@ def _search_keys(names: Iterable[str]) -> dict[str, str]:
 def _row(dataset: str, row_key: str, payload: Mapping[str, Any], **columns: Any) -> dict[str, Any]:
     if dataset not in (*QUERY_DATASETS, *TIER_QUERY_DATASETS):
         raise PublicQueryProjectionError(f"query dataset is invalid: {dataset}")
-    if _contains_draft_field(payload):
-        raise PublicQueryProjectionError(f"query row contains Draft fields: {dataset}/{row_key}")
     raw = _canonical_bytes(payload)
     if len(raw) > MAX_QUERY_ROW_BYTES:
         raise PublicQueryProjectionError(
@@ -307,6 +703,15 @@ def _refresh_row_digest(row: dict[str, Any]) -> None:
 
     source = {key: value for key, value in row.items() if key != "row_sha256"}
     row["row_sha256"] = _sha256(_canonical_bytes(source))
+
+
+def _refresh_payload_digest(row: dict[str, Any]) -> None:
+    payload_raw = _canonical_bytes(row["payload"])
+    if len(payload_raw) > MAX_QUERY_ROW_BYTES:
+        raise PublicQueryProjectionError("query payload exceeds its byte budget")
+    row["source_bytes"] = len(payload_raw)
+    row["source_sha256"] = _sha256(payload_raw)
+    _refresh_row_digest(row)
 
 
 def _wilson_lower_bound(wins: int, games: int, z: float = 1.96) -> float | None:
@@ -607,6 +1012,7 @@ def _game_rows(
     games: Mapping[str, Any],
     team_ids: Mapping[str, str],
     champion_images: Mapping[str, Any] | None = None,
+    draft_authority: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     image_by_key = {
@@ -619,6 +1025,24 @@ def _game_rows(
         if not isinstance(raw, Mapping):
             continue
         game = dict(raw)
+        raw_signal = game.pop("draft_contribution", None)
+        raw_pool = game.pop("draft_pool", None)
+        for key in game:
+            normalized = str(key).strip().casefold()
+            if normalized in _DRAFT_KEYS:
+                raise PublicQueryProjectionError(
+                    f"game contains an unapproved Draft field: {key}"
+                )
+        if draft_authority is not None and raw_signal is not None:
+            sanitized_signal = _sanitize_descriptive_signal(
+                raw_signal,
+                authority=draft_authority,
+            )
+            _validate_signal_game_binding(sanitized_signal, game)
+            if _validated_pool_picks(raw_pool, sanitized_signal) is not None:
+                game["draft_contribution"] = sanitized_signal
+        elif raw_signal is not None:
+            _reject_forbidden_draft_content(raw_signal)
         game_id = str(game.get("game_id") or raw_game_id).strip()
         if not game_id:
             continue
@@ -668,6 +1092,272 @@ def _game_rows(
     return rows
 
 
+def _draft_summary(
+    *,
+    authority: Mapping[str, Any],
+    values: Sequence[float],
+    kind: str,
+    best_available_rate: float | None = None,
+    ban_coverage: float | None = None,
+) -> dict[str, Any] | None:
+    if not values:
+        return None
+    average = round(sum(values) / len(values), 6)
+    summary: dict[str, Any] = {
+        "schema_version": DESCRIPTIVE_SUMMARY_SCHEMA,
+        "authority": "descriptive",
+        "estimand": "composition_only",
+        "release_id": authority["release_id"],
+        "model_version": authority["model_version"],
+        "artifact_sha256": authority["artifact_sha256"],
+        "authority_receipt_sha256": authority["receipt_sha256"],
+        "games": len(values),
+        "scope": "whole_archive",
+    }
+    if kind == "team":
+        summary.update(
+            {
+                "draft_edge": average,
+                "positive_edge_rate": round(
+                    sum(value > 0 for value in values) / len(values), 6
+                ),
+            }
+        )
+    elif kind == "player":
+        if best_available_rate is None or ban_coverage is None:
+            return None
+        summary.update(
+            {
+                "best_available_rate": round(best_available_rate, 6),
+                "pick_contribution": average,
+                "pool_definition": (
+                    "Best available champion in the published unbanned role pool"
+                ),
+                "ban_coverage": round(ban_coverage, 6),
+            }
+        )
+    else:
+        raise PublicQueryProjectionError("descriptive Draft summary kind is invalid")
+    return summary
+
+
+def _attach_draft_summaries(
+    *,
+    players: list[dict[str, Any]],
+    teams: list[dict[str, Any]],
+    games: Sequence[Mapping[str, Any]],
+    source_games: Mapping[str, Any],
+    authority: Mapping[str, Any] | None,
+) -> None:
+    if authority is None:
+        return
+    team_values: dict[str, list[float]] = {}
+    player_values: dict[str, list[float]] = {}
+    player_best: dict[str, int] = {}
+    player_scored_picks: dict[str, int] = {}
+    for row in games:
+        payload = row.get("payload")
+        if not isinstance(payload, Mapping):
+            continue
+        signal = payload.get("draft_contribution")
+        if not isinstance(signal, Mapping) or signal.get("status") != "available":
+            continue
+        blue = signal.get("blue")
+        red = signal.get("red")
+        if not isinstance(blue, Mapping) or not isinstance(red, Mapping):
+            continue
+        blue_signal = _finite(blue.get("signal"))
+        red_signal = _finite(red.get("signal"))
+        if blue_signal is None or red_signal is None:
+            continue
+        edge = blue_signal - red_signal
+        blue_team = _source_identity_key(payload.get("blue_team"))
+        red_team = _source_identity_key(payload.get("red_team"))
+        if blue_team:
+            team_values.setdefault(blue_team, []).append(edge)
+        if red_team:
+            team_values.setdefault(red_team, []).append(-edge)
+
+    for game_id, raw_game in source_games.items():
+        if not isinstance(raw_game, Mapping):
+            continue
+        raw_signal = raw_game.get("draft_contribution")
+        if raw_signal is None:
+            continue
+        signal = _sanitize_descriptive_signal(raw_signal, authority=authority)
+        _validate_signal_game_binding(signal, raw_game)
+        pool_values = _validated_pool_picks(raw_game.get("draft_pool"), signal)
+        pick_values = {
+            (
+                str(pick.get("side") or "").strip().title(),
+                str(pick.get("role") or "").strip().casefold(),
+            ): _strict_number(
+                pick.get("contribution"),
+                field=f"source_games.{game_id}.pick_contribution",
+            )
+            for pick in signal.get("picks", [])
+            if isinstance(pick, Mapping)
+        }
+        for participant in raw_game.get("players", []):
+            if not isinstance(participant, Mapping):
+                continue
+            player_name = _source_identity_key(participant.get("player"))
+            role = str(participant.get("role") or "").strip().casefold()
+            role = {"jungle": "jng", "support": "sup"}.get(role, role)
+            slot = (str(participant.get("side") or "").strip().title(), role)
+            contribution = pick_values.get(slot)
+            if player_name and contribution is not None:
+                player_scored_picks[player_name] = (
+                    player_scored_picks.get(player_name, 0) + 1
+                )
+                pool_value = pool_values.get(slot) if pool_values is not None else None
+                if (
+                    pool_value is not None
+                    and pool_value[0]
+                    == normalize_public_key(participant.get("champion"))
+                ):
+                    player_values.setdefault(player_name, []).append(contribution)
+                    player_best[player_name] = (
+                        player_best.get(player_name, 0) + int(pool_value[1])
+                    )
+
+    for row in players:
+        player_key = _source_identity_key(row.get("name"))
+        pool_picks = len(player_values.get(player_key, []))
+        scored_picks = player_scored_picks.get(player_key, 0)
+        summary = _draft_summary(
+            authority=authority,
+            values=player_values.get(player_key, []),
+            kind="player",
+            best_available_rate=(
+                player_best.get(player_key, 0) / pool_picks if pool_picks else None
+            ),
+            ban_coverage=(
+                pool_picks / scored_picks
+                if scored_picks
+                else None
+            ),
+        )
+        if summary is not None:
+            row["payload"]["draft_metric"] = summary
+            _refresh_payload_digest(row)
+    for row in teams:
+        summary = _draft_summary(
+            authority=authority,
+            values=team_values.get(_source_identity_key(row.get("name")), []),
+            kind="team",
+        )
+        if summary is not None:
+            row["payload"]["draft_metric"] = summary
+            _refresh_payload_digest(row)
+
+
+def _sanitize_draft_summary(
+    value: object,
+    *,
+    authority: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise PublicQueryProjectionError("descriptive Draft summary is malformed")
+    _reject_forbidden_draft_content(value, "draft_metric")
+    common = {
+        "schema_version": DESCRIPTIVE_SUMMARY_SCHEMA,
+        "authority": "descriptive",
+        "estimand": "composition_only",
+        "release_id": authority["release_id"],
+        "model_version": authority["model_version"],
+        "artifact_sha256": authority["artifact_sha256"],
+        "authority_receipt_sha256": authority["receipt_sha256"],
+        "games": _strict_nonnegative_integer(value.get("games"), field="draft_metric.games"),
+        "scope": "whole_archive",
+    }
+    if common["games"] <= 0:
+        raise PublicQueryProjectionError("descriptive Draft summary has no evidence")
+    if "draft_edge" in value:
+        expected = set(common) | {"draft_edge", "positive_edge_rate"}
+        if set(value) != expected:
+            raise PublicQueryProjectionError("team Draft summary keys are not exact")
+        positive_rate = _strict_number(
+            value.get("positive_edge_rate"), field="draft_metric.positive_edge_rate"
+        )
+        if positive_rate < 0 or positive_rate > 1:
+            raise PublicQueryProjectionError("team Draft positive-edge rate is invalid")
+        return {
+            **common,
+            "draft_edge": _strict_number(
+                value.get("draft_edge"), field="draft_metric.draft_edge"
+            ),
+            "positive_edge_rate": positive_rate,
+        }
+    expected = set(common) | {
+        "best_available_rate",
+        "pick_contribution",
+        "pool_definition",
+        "ban_coverage",
+    }
+    if set(value) != expected:
+        raise PublicQueryProjectionError("player Draft summary keys are not exact")
+    best_available_rate = _strict_number(
+        value.get("best_available_rate"),
+        field="draft_metric.best_available_rate",
+    )
+    ban_coverage = _strict_number(
+        value.get("ban_coverage"), field="draft_metric.ban_coverage"
+    )
+    if not 0 <= best_available_rate <= 1 or not 0 <= ban_coverage <= 1:
+        raise PublicQueryProjectionError("player Draft evidence rate is invalid")
+    pool_definition = str(value.get("pool_definition") or "")
+    if pool_definition != "Best available champion in the published unbanned role pool":
+        raise PublicQueryProjectionError("player Draft pool definition is invalid")
+    return {
+        **common,
+        "best_available_rate": best_available_rate,
+        "pick_contribution": _strict_number(
+            value.get("pick_contribution"),
+            field="draft_metric.pick_contribution",
+        ),
+        "pool_definition": pool_definition,
+        "ban_coverage": ban_coverage,
+    }
+
+
+def _validate_projected_draft_value(
+    value: object,
+    *,
+    authority: Mapping[str, Any] | None,
+    path: str = "query",
+) -> None:
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            normalized = str(key).strip().casefold()
+            if normalized == "draft_contribution":
+                if authority is None or _sanitize_descriptive_signal(
+                    child, authority=authority
+                ) != child:
+                    raise PublicQueryProjectionError(
+                        "query Draft signal is unavailable or not canonical"
+                    )
+                continue
+            if normalized == "draft_metric":
+                if authority is None or _sanitize_draft_summary(
+                    child, authority=authority
+                ) != child:
+                    raise PublicQueryProjectionError(
+                        "query Draft summary is unavailable or not canonical"
+                    )
+                continue
+            if normalized in _DRAFT_KEYS:
+                raise PublicQueryProjectionError(
+                    f"query data contains an unapproved Draft field: {path}.{key}"
+                )
+            _validate_projected_draft_value(
+                child, authority=authority, path=f"{path}.{key}"
+            )
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _validate_projected_draft_value(
+                child, authority=authority, path=f"{path}[{index}]"
+            )
 def _identity_game_rows(
     profile_records: Mapping[str, Any],
     player_ids: Mapping[str, str],
@@ -814,11 +1504,24 @@ def build_public_query_projection(
     team_weekly_ranks: Mapping[str, Any],
     player_metadata: Mapping[str, Any],
     leaderboards: Mapping[str, Any],
+    draft_authority: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return every row needed by the bounded public read APIs."""
 
-    if _contains_draft_field(profile_records) or _contains_draft_field(archive_games):
-        raise PublicQueryProjectionError("Draft fields must be removed before query projection")
+    authority = _descriptive_authority(draft_authority, release_id=release_id)
+    profile_games = profile_records.get("games")
+    if isinstance(profile_games, Mapping):
+        for game_id, raw_game in profile_games.items():
+            if not isinstance(raw_game, Mapping):
+                continue
+            signal = raw_game.get("draft_contribution")
+            if signal is not None:
+                if authority is None:
+                    _reject_forbidden_draft_content(
+                        signal, f"profile.games.{game_id}"
+                    )
+                else:
+                    _sanitize_descriptive_signal(signal, authority=authority)
     players, player_ids = _player_rows(
         player_ratings,
         player_records,
@@ -843,7 +1546,19 @@ def build_public_query_projection(
         player_ids,
         images,
     )
-    games = _game_rows(archive_games, team_ids, images)
+    games = _game_rows(
+        archive_games,
+        team_ids,
+        images,
+        draft_authority=authority,
+    )
+    _attach_draft_summaries(
+        players=players,
+        teams=teams,
+        games=games,
+        source_games=archive_games,
+        authority=authority,
+    )
     game_ids = {str(row["game_id"]) for row in games}
     identity_games = _identity_game_rows(
         profile_records,
@@ -868,6 +1583,11 @@ def build_public_query_projection(
     return {
         "schema_version": QUERY_API_SCHEMA,
         "release_id": release_id,
+        "draft_authority": authority or {
+            "schema_version": DESCRIPTIVE_AUTHORITY_SCHEMA,
+            "status": "unavailable",
+            "release_id": release_id,
+        },
         "datasets": datasets,
         "receipts": receipts,
     }
@@ -924,12 +1644,24 @@ def validate_public_query_projection(
 
     if projection.get("release_id") != release_id:
         raise PublicQueryProjectionError("query projection release ID is invalid")
+    authority_value = projection.get("draft_authority")
+    if not isinstance(authority_value, Mapping):
+        raise PublicQueryProjectionError("query Draft authority is missing")
+    authority = _descriptive_authority(authority_value, release_id=release_id)
+    if authority is None and authority_value != {
+        "schema_version": DESCRIPTIVE_AUTHORITY_SCHEMA,
+        "status": "unavailable",
+        "release_id": release_id,
+    }:
+        raise PublicQueryProjectionError(
+            "unavailable query Draft authority is malformed"
+        )
     receipts = projection.get("receipts")
     if not isinstance(receipts, Mapping):
         raise PublicQueryProjectionError("query projection receipts are missing")
     datasets: dict[str, list[dict[str, Any]]] = {}
     for dataset, rows in iter_query_rows(projection):
-        reject_draft_fields(rows)
+        _validate_projected_draft_value(rows, authority=authority)
         expected = query_dataset_receipt(dataset, rows)
         if receipts.get(dataset) != expected:
             raise PublicQueryProjectionError(f"query receipt is invalid: {dataset}")

@@ -15,8 +15,128 @@ from lol_kills.export.public_query_projection import (
     build_tier_query_datasets,
     canonical_query_bytes,
     normalize_public_key,
+    validate_public_query_projection,
     write_public_query_projection,
 )
+
+
+_ARTIFACT_SHA256 = "a" * 64
+_RECEIPT_SHA256 = "b" * 64
+
+
+def _draft_authority(release_id: str = "v2026.08.13.120000") -> dict:
+    return {
+        "schema_version": "scryglass:draft-authority:v1",
+        "status": "descriptive",
+        "authority": "descriptive",
+        "estimand": "composition_only",
+        "release_id": release_id,
+        "model_version": "descriptive-draft-score-v1",
+        "artifact_sha256": _ARTIFACT_SHA256,
+        "receipt_sha256": _RECEIPT_SHA256,
+        "probability_authority": False,
+        "recommendation_authority": False,
+        "betting_authority": False,
+    }
+
+
+def _descriptive_game() -> dict:
+    roles = ("top", "jng", "mid", "bot", "sup")
+    players = []
+    picks = []
+    for side in ("Blue", "Red"):
+        for role in roles:
+            champion = f"{side}-{role}"
+            player = "Faker" if side == "Blue" and role == "mid" else f"{side}-{role}-player"
+            players.append(
+                {
+                    "player": player,
+                    "side": side,
+                    "role": role,
+                    "champion": champion,
+                }
+            )
+            picks.append(
+                {
+                    "side": side,
+                    "role": role,
+                    "champion": champion,
+                    "contribution": 0.06 if side == "Blue" else 0.02,
+                    "prior_role_games": 80,
+                    "evidence_status": "available",
+                }
+            )
+    blue_components = {
+        "base": 0.3,
+        "archetype_interactions": 0.1,
+        "ally_synergy": 0.2,
+        "enemy_counter": 0.1,
+        "same_role": 0.05,
+    }
+    red_components = {
+        "base": 0.1,
+        "archetype_interactions": 0.05,
+        "ally_synergy": 0.1,
+        "enemy_counter": -0.05,
+        "same_role": 0.0,
+    }
+    return {
+        "game_id": "game-1",
+        "date": "2026-08-12T18:00:00Z",
+        "league": "LCK",
+        "competition_tier": "tier1",
+        "blue_team": "T1",
+        "red_team": "Gen.G",
+        "blue_win": 1,
+        "players": players,
+        "draft_pool": {
+            "status": "complete",
+            "evaluated_picks": 10,
+            "bans": {
+                "Blue": [f"Blue-ban-{index}" for index in range(5)],
+                "Red": [f"Red-ban-{index}" for index in range(5)],
+            },
+            "picked": [
+                {
+                    "side": pick["side"],
+                    "role": pick["role"],
+                    "champion": pick["champion"],
+                    "best_available": pick["side"] == "Blue",
+                    "order": index,
+                }
+                for index, pick in enumerate(picks, start=1)
+            ],
+        },
+        "draft_contribution": {
+            "schema_version": "scryglass:draft-descriptive-signal:v1",
+            "status": "available",
+            "authority": "descriptive",
+            "estimand": "composition_only",
+            "model_version": "descriptive-draft-score-v1",
+            "artifact_sha256": _ARTIFACT_SHA256,
+            "fit_through": None,
+            "blue": {
+                "signal": 0.75,
+                "prior_role_games": 400,
+                "components": blue_components,
+            },
+            "red": {
+                "signal": 0.2,
+                "prior_role_games": 400,
+                "components": red_components,
+            },
+            "edge_components": {
+                "base": 0.2,
+                "archetype_interactions": 0.05,
+                "ally_synergy": 0.1,
+                "enemy_counter": 0.15,
+                "same_role": 0.05,
+                "total": 0.55,
+            },
+            "picks": picks,
+            "note": "Internal source note.",
+        },
+    }
 
 
 def _game() -> dict:
@@ -194,12 +314,253 @@ def test_player_movement_uses_the_current_tier_nested_delta() -> None:
     assert row["payload"]["weekly"]["tier1"]["delta"] == -3
 
 
-def test_query_projection_rejects_any_nested_draft_field() -> None:
+def test_query_projection_strips_any_nested_draft_field_from_query_rows() -> None:
     game = _game()
     game["draft_pool"] = {"status": "complete"}
 
-    with pytest.raises(PublicQueryProjectionError, match="Draft fields"):
-        _projection(archive_games={"game-1": game})
+    projection = _projection(archive_games={"game-1": game})
+
+    def keys(value: object) -> list[str]:
+        if isinstance(value, dict):
+            return [str(key) for key in value] + [key for child in value.values() for key in keys(child)]
+        if isinstance(value, list):
+            return [key for child in value for key in keys(child)]
+        return []
+
+    assert "draft_pool" not in {key.casefold() for key in keys(projection)}
+
+
+def test_query_projection_accepts_only_receipt_bound_descriptive_subset() -> None:
+    game = _descriptive_game()
+    projection = _projection(
+        archive_games={"game-1": game},
+        profile_records={
+            "schema_version": "scryglass:profile-records:v3",
+            "champion_images": {},
+            "games": {"game-1": game},
+            "players": {"Faker": ["game-1"]},
+            "teams": {"T1": ["game-1"], "Gen.G": ["game-1"]},
+        },
+        draft_authority=_draft_authority(),
+    )
+
+    game_payload = projection["datasets"]["games"][0]["payload"]
+    signal = game_payload["draft_contribution"]
+    assert signal["schema_version"] == "scryglass:draft-descriptive-signal:v1"
+    assert signal["authority"] == "descriptive"
+    assert signal["estimand"] == "composition_only"
+    assert signal["artifact_sha256"] == _ARTIFACT_SHA256
+    assert signal["authority_receipt_sha256"] == _RECEIPT_SHA256
+    assert signal["edge_components"]["archetype_interactions"] == 0.05
+    assert "draft_pool" not in game_payload
+    assert "probability" not in json.dumps(signal)
+
+    player = next(row for row in projection["datasets"]["players"] if row["name"] == "Faker")
+    assert player["payload"]["draft_metric"]["pick_contribution"] == 0.06
+    assert player["payload"]["draft_metric"]["best_available_rate"] == 1.0
+    assert player["payload"]["draft_metric"]["ban_coverage"] == 1.0
+    assert player["payload"]["draft_metric"]["pool_definition"] == (
+        "Best available champion in the published unbanned role pool"
+    )
+    team = next(row for row in projection["datasets"]["teams"] if row["name"] == "T1")
+    assert team["payload"]["draft_metric"]["draft_edge"] == 0.55
+    assert team["payload"]["draft_metric"]["positive_edge_rate"] == 1.0
+    validate_public_query_projection(
+        projection,
+        release_id="v2026.08.13.120000",
+    )
+
+
+def test_query_projection_rejects_predictive_and_legacy_atomized_fields() -> None:
+    predictive = _descriptive_game()
+    predictive["draft_contribution"]["probability"] = 0.75
+    with pytest.raises(PublicQueryProjectionError, match="forbidden field"):
+        _projection(
+            archive_games={"game-1": predictive},
+            draft_authority=_draft_authority(),
+        )
+
+    legacy = _descriptive_game()
+    components = legacy["draft_contribution"]["edge_components"]
+    components["atomized_archetypes"] = components.pop("archetype_interactions")
+    with pytest.raises(PublicQueryProjectionError, match="component ledger"):
+        _projection(
+            archive_games={"game-1": legacy},
+            draft_authority=_draft_authority(),
+        )
+
+    unsupported_atom = _descriptive_game()
+    unsupported_atom["draft_contribution"]["picks"][0][
+        "evidence_status"
+    ] = "atom_estimate"
+    with pytest.raises(PublicQueryProjectionError, match="evidence is unavailable"):
+        _projection(
+            archive_games={"game-1": unsupported_atom},
+            draft_authority=_draft_authority(),
+        )
+
+
+def test_query_projection_binds_descriptive_rows_to_the_active_release_authority() -> None:
+    with pytest.raises(PublicQueryProjectionError, match="release-bound"):
+        _projection(
+            archive_games={"game-1": _descriptive_game()},
+            draft_authority=_draft_authority("v2026.08.13.999999"),
+        )
+
+    projection = _projection(
+        archive_games={"game-1": _descriptive_game()},
+        draft_authority=_draft_authority(),
+    )
+    projection["datasets"]["games"][0]["payload"]["draft_contribution"][
+        "authority_receipt_sha256"
+    ] = "c" * 64
+    with pytest.raises(PublicQueryProjectionError, match="not canonical"):
+        validate_public_query_projection(
+            projection,
+            release_id="v2026.08.13.120000",
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda metric: metric.pop("best_available_rate"), "keys are not exact"),
+        (lambda metric: metric.pop("games"), "not an integer"),
+        (lambda metric: metric.pop("pick_contribution"), "keys are not exact"),
+        (lambda metric: metric.pop("pool_definition"), "keys are not exact"),
+        (lambda metric: metric.pop("ban_coverage"), "keys are not exact"),
+        (lambda metric: metric.pop("scope"), "keys are not exact"),
+        (lambda metric: metric.__setitem__("best_available_rate", 1.1), "rate is invalid"),
+        (lambda metric: metric.__setitem__("ban_coverage", "complete"), "not finite"),
+        (lambda metric: metric.__setitem__("pick_contribution", "high"), "not finite"),
+        (lambda metric: metric.__setitem__("games", 0), "has no evidence"),
+        (lambda metric: metric.__setitem__("probability", 0.7), "forbidden field"),
+        (lambda metric: metric.__setitem__("draft_score", 0.2), "keys are not exact"),
+    ],
+)
+def test_query_projection_rejects_incomplete_or_unsafe_player_draft_metric(
+    mutation,
+    message: str,
+) -> None:
+    projection = _projection(
+        archive_games={"game-1": _descriptive_game()},
+        draft_authority=_draft_authority(),
+    )
+    player = next(
+        row for row in projection["datasets"]["players"] if row["name"] == "Faker"
+    )
+    mutation(player["payload"]["draft_metric"])
+
+    with pytest.raises(PublicQueryProjectionError, match=message):
+        validate_public_query_projection(
+            projection,
+            release_id="v2026.08.13.120000",
+        )
+
+
+def test_query_projection_omits_draft_fields_when_authority_is_unavailable() -> None:
+    game = _descriptive_game()
+    projection = _projection(archive_games={"game-1": game})
+
+    assert projection["draft_authority"]["status"] == "unavailable"
+    assert "draft_contribution" not in projection["datasets"]["games"][0]["payload"]
+    assert all(
+        "draft_metric" not in row["payload"]
+        for dataset in ("players", "teams")
+        for row in projection["datasets"][dataset]
+    )
+    validate_public_query_projection(
+        projection,
+        release_id="v2026.08.13.120000",
+    )
+
+
+def test_player_draft_metric_uses_one_complete_pool_denominator() -> None:
+    complete = _descriptive_game()
+    incomplete = _descriptive_game()
+    incomplete["game_id"] = "game-2"
+    incomplete["date"] = "2026-08-13T18:00:00Z"
+    incomplete["draft_pool"]["evaluated_picks"] = 9
+    faker_pick = next(
+        pick
+        for pick in incomplete["draft_contribution"]["picks"]
+        if pick["side"] == "Blue" and pick["role"] == "mid"
+    )
+    faker_pick["contribution"] = 0.9
+
+    projection = _projection(
+        archive_games={"game-1": complete, "game-2": incomplete},
+        draft_authority=_draft_authority(),
+    )
+
+    player = next(
+        row for row in projection["datasets"]["players"] if row["name"] == "Faker"
+    )
+    metric = player["payload"]["draft_metric"]
+    assert metric["games"] == 1
+    assert metric["best_available_rate"] == 1.0
+    assert metric["pick_contribution"] == 0.06
+    assert metric["ban_coverage"] == 0.5
+    games = {
+        row["game_id"]: row["payload"]
+        for row in projection["datasets"]["games"]
+    }
+    assert "draft_contribution" in games["game-1"]
+    assert "draft_contribution" not in games["game-2"]
+
+
+def test_player_draft_metrics_preserve_case_distinct_source_identities() -> None:
+    upper = _descriptive_game()
+    lower = _descriptive_game()
+    lower["game_id"] = "game-2"
+    lower["date"] = "2026-08-13T18:00:00Z"
+    next(
+        player
+        for player in upper["players"]
+        if player["side"] == "Blue" and player["role"] == "mid"
+    )["player"] = "Random"
+    next(
+        player
+        for player in lower["players"]
+        if player["side"] == "Blue" and player["role"] == "mid"
+    )["player"] = "random"
+    lower_pick = next(
+        pick
+        for pick in lower["draft_contribution"]["picks"]
+        if pick["side"] == "Blue" and pick["role"] == "mid"
+    )
+    lower_pick["contribution"] = 0.4
+    next(
+        pick
+        for pick in lower["draft_pool"]["picked"]
+        if pick["side"] == "Blue" and pick["role"] == "mid"
+    )["best_available"] = False
+
+    projection = _projection(
+        player_records={
+            "Random": {"games": 1, "primary_role": "mid"},
+            "random": {"games": 1, "primary_role": "mid"},
+        },
+        archive_games={"game-1": upper, "game-2": lower},
+        draft_authority=_draft_authority(),
+    )
+
+    players = {
+        row["name"]: row
+        for row in projection["datasets"]["players"]
+        if row["name"] in {"Random", "random"}
+    }
+    assert players["Random"]["player_id"] != players["random"]["player_id"]
+    assert players["Random"]["payload"]["draft_metric"]["pick_contribution"] == 0.06
+    assert players["Random"]["payload"]["draft_metric"]["best_available_rate"] == 1.0
+    assert players["random"]["payload"]["draft_metric"]["pick_contribution"] == 0.4
+    assert players["random"]["payload"]["draft_metric"]["best_available_rate"] == 0.0
+    ambiguous_aliases = [
+        row
+        for row in projection["datasets"]["aliases"]
+        if row["kind"] == "player" and row["alias_key"] == "random"
+    ]
+    assert ambiguous_aliases == []
 
 
 def test_query_projection_disambiguates_casefolded_identity_for_exact_resolution() -> None:
