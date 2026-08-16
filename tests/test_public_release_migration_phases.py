@@ -22,7 +22,7 @@ def test_migrations_are_split_into_ordered_cutover_phases() -> None:
         "20260814161000_oe_import_patch_receipts.sql",
         "20260814170000_strict_public_cutover.sql",
         "20260814190000_query_stage_batch_budget.sql",
-        "20260814200000_ratings_page_budget.sql",
+        "20260814202130_ratings_page_budget.sql",
     ]
 
 
@@ -43,7 +43,7 @@ def test_query_staging_batch_budget_matches_worker() -> None:
 
 def test_ratings_page_budget_updates_the_private_rpc() -> None:
     migration = (
-        MIGRATIONS / "20260814200000_ratings_page_budget.sql"
+        MIGRATIONS / "20260814202130_ratings_page_budget.sql"
     ).read_text(encoding="utf-8")
     assert "scryglass_private" in migration
     assert "p_limit, 20), 1), 100" in migration
@@ -112,7 +112,7 @@ def test_staging_cleanup_is_locked_and_service_only() -> None:
 
 def test_query_retention_cascade_allows_only_internal_table_owner() -> None:
     migration = (
-        MIGRATIONS / "20260815010000_query_retention_cascade_guard.sql"
+        MIGRATIONS / "20260815001148_query_retention_cascade_guard.sql"
     ).read_text(encoding="utf-8")
 
     assert "pg_advisory_xact_lock" in migration
@@ -125,7 +125,7 @@ def test_query_retention_cascade_allows_only_internal_table_owner() -> None:
 
 def test_retention_prunes_one_query_release_per_transaction() -> None:
     migration = (
-        MIGRATIONS / "20260815020000_bounded_retention_prune.sql"
+        MIGRATIONS / "20260815010027_bounded_retention_prune.sql"
     ).read_text(encoding="utf-8")
 
     fast_path = "if tg_op = 'DELETE' and current_user = 'postgres' then"
@@ -139,7 +139,7 @@ def test_retention_prunes_one_query_release_per_transaction() -> None:
 
 def test_trusted_retention_cascade_skips_the_per_row_lock() -> None:
     migration = (
-        MIGRATIONS / "20260815030000_fast_retention_cascade.sql"
+        MIGRATIONS / "20260815010700_fast_retention_cascade.sql"
     ).read_text(encoding="utf-8")
 
     fast_path = "and current_user in ("
@@ -153,7 +153,7 @@ def test_trusted_retention_cascade_skips_the_per_row_lock() -> None:
 
 def test_retention_rpc_has_a_bounded_api_timeout_exception() -> None:
     migration = (
-        MIGRATIONS / "20260815040000_retention_timeout_budget.sql"
+        MIGRATIONS / "20260815011223_retention_timeout_budget.sql"
     ).read_text(encoding="utf-8")
 
     assert "alter function public.prune_scryglass_public_releases_v2(integer)" in migration
