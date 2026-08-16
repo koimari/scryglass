@@ -1,0 +1,269 @@
+{
+  "schema_id": "scryglass.league-atom-ledger.delta.v1",
+  "event_id": "wiki-26.16-numeric-pilot-v1",
+  "base_patch": "26.15",
+  "target_patch": "26.16",
+  "effective_at": "2026-08-12T00:00:00Z",
+  "previous_event_hash": null,
+  "previous_snapshot_hash": "e707bfc95068490e26983388901f1d423e5e72bb547cea0f9d12fec062ceb157",
+  "authority_status": "partial_delta_pilot",
+  "coverage": {
+    "status": "partial",
+    "model_ready": false,
+    "counting_rule": "V26.16 patch-body entries with an old-to-new numeric value, a new numeric effect, or a new recipe; non-numeric bug fixes and removals are excluded",
+    "patch_page_candidate_change_count": 118,
+    "parsed_change_count": 12,
+    "unparsed_or_unsupported_change_count": 106,
+    "unparsed_or_unsupported_changes": [
+      {"entity": "Role Quests", "change_count": 4, "reason": "not_atomized_in_pilot"},
+      {"entity": "Akshan", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Aphelios", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Ashe", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Azir", "change_count": 1, "reason": "not_atomized_in_pilot"},
+      {"entity": "Bel'Veth", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Camille", "change_count": 5, "reason": "not_atomized_in_pilot"},
+      {"entity": "Corki", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Draven", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Ezreal", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Graves", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Gwen", "change_count": 3, "reason": "not_atomized_in_pilot"},
+      {"entity": "Jhin", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Jinx", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Kai'Sa", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Kalista", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Kennen", "change_count": 3, "reason": "not_atomized_in_pilot"},
+      {"entity": "Kindred", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Lucian", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Miss Fortune", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Nasus", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Poppy", "change_count": 5, "reason": "ability_changes_not_atomized_in_pilot"},
+      {"entity": "Quinn", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Samira", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Senna", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Sivir", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Smolder", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Tristana", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Varus", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Vayne", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Xayah", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Yunara", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Zeri", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Jungle pets", "change_count": 4, "reason": "missing_base_domain"},
+      {"entity": "Black Cleaver", "change_count": 1, "reason": "effect_change_not_atomized_in_pilot"},
+      {"entity": "Chainlaced Crushers", "change_count": 1, "reason": "not_atomized_in_pilot"},
+      {"entity": "Eclipse", "change_count": 2, "reason": "effect_changes_not_atomized_in_pilot"},
+      {"entity": "Gunmetal Greaves", "change_count": 1, "reason": "not_atomized_in_pilot"},
+      {"entity": "Runaan's Hurricane", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Runic Compass", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Spellslinger's Shoes", "change_count": 1, "reason": "not_atomized_in_pilot"},
+      {"entity": "Sterak's Gage", "change_count": 1, "reason": "not_atomized_in_pilot"},
+      {"entity": "Sundered Sky", "change_count": 4, "reason": "not_atomized_in_pilot"},
+      {"entity": "Sunfire Aegis", "change_count": 4, "reason": "effect_changes_not_atomized_in_pilot"},
+      {"entity": "World Atlas", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Fleet Footwork", "change_count": 2, "reason": "not_atomized_in_pilot"},
+      {"entity": "Hail of Blades", "change_count": 4, "reason": "not_atomized_in_pilot"}
+    ]
+  },
+  "source_receipt": {
+    "title": "V26.16",
+    "revision_id": 4052214,
+    "revision_timestamp": "2026-08-16T01:01:11Z",
+    "source_url": "https://wiki.leagueoflegends.com/en-us/V26.16?oldid=4052214",
+    "evidence_scope": "Only explicit numeric champion stat and item stat changes in this pilot"
+  },
+  "operations": [
+    {
+      "operation_id": "26.16:caitlyn:base-mr",
+      "op": "change",
+      "atom_id": "lolatom:v1:champion:4cac67468105dcdc7b344e2ee2602270",
+      "expected_record_hash": "03a62b364b8f8e4ba0f1bd6510c324da2d5a1c84b4c30eefad58ab587c5e1db2",
+      "fields": {
+        "value:000": {
+          "value": 33.0,
+          "source": "V26.16@oldid=4052214:Caitlyn/base magic resistance",
+          "unit": "flat",
+          "confidence": 1.0,
+          "missing": false,
+          "authority": "wiki_revision"
+        }
+      }
+    },
+    {
+      "operation_id": "26.16:caitlyn:mr-growth",
+      "op": "change",
+      "atom_id": "lolatom:v1:champion:7d883539a29a8bc37433d417d6d90284",
+      "expected_record_hash": "4f926294b933a650214a907510de15dd309e0c86e5fb065b249341548704ff0d",
+      "fields": {
+        "value:000": {
+          "value": 1.1,
+          "source": "V26.16@oldid=4052214:Caitlyn/magic resistance growth",
+          "unit": "per_level",
+          "confidence": 1.0,
+          "missing": false,
+          "authority": "wiki_revision"
+        }
+      }
+    },
+    {
+      "operation_id": "26.16:kogmaw:base-mr",
+      "op": "change",
+      "atom_id": "lolatom:v1:champion:412dce467cceb3cdc2bdf7201d4d5bb9",
+      "expected_record_hash": "8ca385747a21da2e9851b9a8c6b687d65e59388c432793c6a3921486c9407db4",
+      "fields": {
+        "value:000": {
+          "value": 33.0,
+          "source": "V26.16@oldid=4052214:Kog'Maw/base magic resistance",
+          "unit": "flat",
+          "confidence": 1.0,
+          "missing": false,
+          "authority": "wiki_revision"
+        }
+      }
+    },
+    {
+      "operation_id": "26.16:kogmaw:mr-growth",
+      "op": "change",
+      "atom_id": "lolatom:v1:champion:75185ba49e582a265904b7c19df532ec",
+      "expected_record_hash": "c7bbc85676f1c56f73a4d99ada77e26c7a38ef8869ee57dd76a66a89730e79fc",
+      "fields": {
+        "value:000": {
+          "value": 1.1,
+          "source": "V26.16@oldid=4052214:Kog'Maw/magic resistance growth",
+          "unit": "per_level",
+          "confidence": 1.0,
+          "missing": false,
+          "authority": "wiki_revision"
+        }
+      }
+    },
+    {
+      "operation_id": "26.16:poppy:base-ad",
+      "op": "change",
+      "atom_id": "lolatom:v1:champion:21a227f3f451129ce7507f6b20ca878b",
+      "expected_record_hash": "ca2e1f6a165ee43e068221f0cd0e79e4969794ff2de9add8f90e383ec389ef65",
+      "fields": {
+        "value:000": {
+          "value": 56.0,
+          "source": "V26.16@oldid=4052214:Poppy/base attack damage",
+          "unit": "flat",
+          "confidence": 1.0,
+          "missing": false,
+          "authority": "wiki_revision"
+        }
+      }
+    },
+    {
+      "operation_id": "26.16:poppy:base-mana",
+      "op": "change",
+      "atom_id": "lolatom:v1:champion:c30df44a3eee1692d95049a060f27453",
+      "expected_record_hash": "e82d5a936fe9a1697efca9e338beb8f76690fcb715a3c7e4ae2a7a50dc7ca84c",
+      "fields": {
+        "value:000": {
+          "value": 300.0,
+          "source": "V26.16@oldid=4052214:Poppy/base mana",
+          "unit": "flat",
+          "confidence": 1.0,
+          "missing": false,
+          "authority": "wiki_revision"
+        }
+      }
+    },
+    {
+      "operation_id": "26.16:poppy:mana-growth",
+      "op": "change",
+      "atom_id": "lolatom:v1:champion:1d02837a7547000735dd9e6f267f4e3d",
+      "expected_record_hash": "e4827d2f823b1434e0163ac3ceb14d7e5c02189f8ba5c62cc4625038e9da5f28",
+      "fields": {
+        "value:000": {
+          "value": 45.0,
+          "source": "V26.16@oldid=4052214:Poppy/mana growth",
+          "unit": "per_level",
+          "confidence": 1.0,
+          "missing": false,
+          "authority": "wiki_revision"
+        }
+      }
+    },
+    {
+      "operation_id": "26.16:poppy:base-health-regen",
+      "op": "change",
+      "atom_id": "lolatom:v1:champion:ba3f0e4ac4f7c6897382dab6ef13e5cf",
+      "expected_record_hash": "de39cc31739205b59dbd58b6674b5d9f53b0aa85a502b122e4e0df8d8a3decde",
+      "fields": {
+        "value:000": {
+          "value": 9.0,
+          "source": "V26.16@oldid=4052214:Poppy/base health regeneration",
+          "unit": "flat",
+          "confidence": 1.0,
+          "missing": false,
+          "authority": "wiki_revision"
+        }
+      }
+    },
+    {
+      "operation_id": "26.16:berserkers-greaves:attack-speed",
+      "op": "change",
+      "atom_id": "lolatom:v1:item:9132a7d4ddeaba399b9fc160348194b8",
+      "expected_record_hash": "17ba3dc2b4bc646d7bfaa9f709dd6c6059f5118a9836a16b776e29cf9977c3df",
+      "fields": {
+        "value:000": {
+          "value": 30.0,
+          "source": "V26.16@oldid=4052214:Berserker's Greaves/attack speed",
+          "unit": "flat",
+          "confidence": 1.0,
+          "missing": false,
+          "authority": "wiki_revision"
+        }
+      }
+    },
+    {
+      "operation_id": "26.16:black-cleaver:attack-damage",
+      "op": "change",
+      "atom_id": "lolatom:v1:item:71e01631e7825f3e2ee23e9ecec6a782",
+      "expected_record_hash": "4ea7958c0d01ed38d7ca4fc8cac77d49b0b1fcbbde2bab36812f7b53a5964806",
+      "fields": {
+        "value:000": {
+          "value": 45.0,
+          "source": "V26.16@oldid=4052214:Black Cleaver/attack damage",
+          "unit": "flat",
+          "confidence": 1.0,
+          "missing": false,
+          "authority": "wiki_revision"
+        }
+      }
+    },
+    {
+      "operation_id": "26.16:tiamat:attack-damage",
+      "op": "change",
+      "atom_id": "lolatom:v1:item:fae2b47c6d4767f9f1fb954614eb7842",
+      "expected_record_hash": "3451e9fef636cbbf33550aba3c7ea129771bb5484a73e274c30ef9a083f3c238",
+      "fields": {
+        "value:000": {
+          "value": 25.0,
+          "source": "V26.16@oldid=4052214:Tiamat/attack damage",
+          "unit": "flat",
+          "confidence": 1.0,
+          "missing": false,
+          "authority": "wiki_revision"
+        }
+      }
+    },
+    {
+      "operation_id": "26.16:sunfire-aegis:total-cost",
+      "op": "change",
+      "atom_id": "lolatom:v1:item:86f53986659096221a0a303b0c8bef4b",
+      "expected_record_hash": "ce0b5f4049506d3b0649e8ab0b1d2b7f5aa7fdda6c1a80b13c75c89c061433b9",
+      "fields": {
+        "value:000": {
+          "value": 2800.0,
+          "source": "V26.16@oldid=4052214:Sunfire Aegis/total cost",
+          "unit": "gold",
+          "confidence": 1.0,
+          "missing": false,
+          "authority": "wiki_revision"
+        }
+      }
+    }
+  ],
+  "event_hash": "7a2fd766c0519fc5cc733dcd639b9ba73cc4b0cc7dcbf3964174ddc0465608e6"
+}
