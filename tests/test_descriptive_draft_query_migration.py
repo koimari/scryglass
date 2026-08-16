@@ -230,6 +230,36 @@ def test_descriptive_query_active_release_runtime(tmp_path: Path) -> None:
             '2026-08-15T06:00:02Z','2026-08-15T05:00:00Z'
           );
 
+          insert into public.scryglass_public_releases
+            (release_id,status,manifest,created_at,source_as_of)
+          select
+            'v2026.08.15.060003','active',
+            jsonb_set(
+              jsonb_set(
+                manifest,
+                '{draft_authority,release_id}',
+                to_jsonb('v2026.08.15.060003'::text)
+              ),
+              '{draft_authority,issued_utc}',
+              to_jsonb('2026-02-30T06:00:03Z'::text)
+            ),
+            '2026-08-15T06:00:03Z','2026-08-15T05:00:00Z'
+          from public.scryglass_public_releases
+          where release_id='v2026.08.15.060001';
+
+          insert into public.scryglass_public_releases
+            (release_id,status,manifest,created_at,source_as_of)
+          select
+            'v2026.08.15.060004','active',
+            jsonb_set(
+              manifest,
+              '{draft_authority,release_id}',
+              to_jsonb('v2026.08.15.060004'::text)
+            ) #- '{draft_authority,issued_utc}',
+            '2026-08-15T06:00:04Z','2026-08-15T05:00:00Z'
+          from public.scryglass_public_releases
+          where release_id='v2026.08.15.060001';
+
           insert into public.scryglass_public_assets
             (release_id,path,storage_path,body,bytes,sha256,content_type)
           values
@@ -240,12 +270,18 @@ def test_descriptive_query_active_release_runtime(tmp_path: Path) -> None:
             ('v2026.08.15.060002','features/ratings_snapshot.json',
              'v2026.08.15.060002/features/ratings_snapshot.json',null,11,repeat('e',64),'application/json'),
             ('v2026.08.15.060002','features/draft_records.json',
-             'v2026.08.15.060002/features/draft_records.json',null,13,repeat('f',64),'application/json');
+             'v2026.08.15.060002/features/draft_records.json',null,13,repeat('f',64),'application/json'),
+            ('v2026.08.15.060003','features/draft_records.json',
+             'v2026.08.15.060003/features/draft_records.json',null,13,repeat('d',64),'application/json'),
+            ('v2026.08.15.060004','features/draft_records.json',
+             'v2026.08.15.060004/features/draft_records.json',null,13,repeat('d',64),'application/json');
 
           do $$
           declare
             descriptive jsonb;
             unavailable jsonb;
+            invalid_calendar jsonb;
+            missing_issued jsonb;
           begin
             select manifest into descriptive
             from public.get_scryglass_active_release('v2026.08.15.060001');
@@ -278,6 +314,26 @@ def test_descriptive_query_active_release_runtime(tmp_path: Path) -> None:
               raise exception 'unavailable active manifest exposed draft authority or data';
             end if;
 
+            select manifest into invalid_calendar
+            from public.get_scryglass_active_release('v2026.08.15.060003');
+            select manifest into missing_issued
+            from public.get_scryglass_active_release('v2026.08.15.060004');
+            if public.scryglass_query_descriptive_authority('v2026.08.15.060003') is not null
+               or public.scryglass_query_descriptive_authority('v2026.08.15.060004') is not null
+               or invalid_calendar ? 'draft_authority'
+               or missing_issued ? 'draft_authority'
+               or exists (
+                 select 1 from jsonb_array_elements(invalid_calendar->'files') file
+                 where file->>'path'='features/draft_records.json'
+               )
+               or exists (
+                 select 1 from jsonb_array_elements(missing_issued->'files') file
+                 where file->>'path'='features/draft_records.json'
+               )
+            then
+              raise exception 'invalid or missing issued UTC exposed descriptive authority';
+            end if;
+
             if (select count(*) from public.get_scryglass_active_asset(
                  'v2026.08.15.060001','features/draft_records.json')) <> 1
                or (select count(*) from public.get_scryglass_active_asset(
@@ -286,6 +342,14 @@ def test_descriptive_query_active_release_runtime(tmp_path: Path) -> None:
                  'v2026.08.15.060001/features/draft_records.json')
                or scryglass_private.is_active_scryglass_storage_object(
                  'v2026.08.15.060002/features/draft_records.json')
+               or (select count(*) from public.get_scryglass_active_asset(
+                 'v2026.08.15.060003','features/draft_records.json')) <> 0
+               or (select count(*) from public.get_scryglass_active_asset(
+                 'v2026.08.15.060004','features/draft_records.json')) <> 0
+               or scryglass_private.is_active_scryglass_storage_object(
+                 'v2026.08.15.060003/features/draft_records.json')
+               or scryglass_private.is_active_scryglass_storage_object(
+                 'v2026.08.15.060004/features/draft_records.json')
             then
               raise exception 'active draft asset gate did not follow descriptive authority';
             end if;

@@ -281,13 +281,17 @@ create or replace function public.scryglass_query_descriptive_authority(
   p_release_id text
 )
 returns jsonb
-language sql
+language plpgsql
 stable
 security definer
 set search_path = ''
 set statement_timeout = '5s'
 as $$
+declare
+  authority jsonb;
+begin
   select release.manifest -> 'draft_authority'
+  into authority
   from public.scryglass_public_releases release
   where release.release_id = p_release_id
     and release.status = 'active'
@@ -305,7 +309,9 @@ as $$
     and release.manifest #>> '{draft_authority,receipt_sha256}'
       ~ '^[0-9a-f]{64}$'
     and release.manifest #>> '{draft_authority,issued_utc}'
-      ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,6})?Z$'
+      ~ '^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]{1,6})?Z$'
+    and (release.manifest #>> '{draft_authority,issued_utc}')::pg_catalog.timestamptz
+      is not null
     and coalesce(
       (release.manifest #>> '{draft_authority,probability_authority}')::boolean,
       true
@@ -318,7 +324,12 @@ as $$
       (release.manifest #>> '{draft_authority,betting_authority}')::boolean,
       true
     ) is false
-  limit 1
+  limit 1;
+  return authority;
+exception
+  when invalid_datetime_format or datetime_field_overflow then
+    return null;
+end;
 $$;
 
 create or replace function public.scryglass_strip_query_draft_fields(
