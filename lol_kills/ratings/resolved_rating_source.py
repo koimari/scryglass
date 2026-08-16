@@ -24,6 +24,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import stat
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -47,6 +48,9 @@ STABLE_TEAM_PREFIX = "oe:team:"
 # turning hashing and recursive validation into an unbounded operation.
 MAX_SOURCE_ARTIFACT_BYTES = 64 * 1024 * 1024
 MAX_CANONICAL_BYTES = 16 * 1024 * 1024
+MAX_SCALAR_UTF8_BYTES = 64 * 1024
+MAX_INPUT_BATCH_BYTES = 16 * 1024 * 1024
+MAX_INPUT_BATCH_ITEMS = 200_000
 MAX_NESTING = 32
 MAX_ITEMS = 100_000
 MAX_INPUT_ROWS = 100_000
@@ -69,6 +73,33 @@ RATING_TIME_FIELDS = (
     "rating_timestamp",
     "as_of",
     "effective_at",
+)
+
+RATING_APPROVED_INPUT_FIELDS = frozenset(
+    {
+        *RATING_VALUE_FIELDS,
+        *RATING_TIME_FIELDS,
+        "game_uid",
+        "game_id",
+        "gameid",
+        "source_identity",
+        "rating_source_identity",
+        "rating_source_available",
+        "rating_values_available",
+        "rating_values_missing",
+        "team_rating_available",
+        "team_rating_missing",
+        "player_rating_available",
+        "player_rating_missing",
+        "rating_source_sha256",
+        "rating_roster_sha256",
+        "rating_receipt_sha256",
+        "rating_receipt_schema",
+        "rating_source_reason",
+        "rating_batch_timestamp",
+        "rating_batching_policy",
+        "rating_batch_receipt_sha256",
+    }
 )
 
 OUTCOME_OR_CURRENT_TOKENS = frozenset(
@@ -100,6 +131,63 @@ OUTCOME_OR_CURRENT_TOKENS = frozenset(
 
 class ResolvedRatingSourceError(ValueError):
     """A rating source or exact roster violates the frozen contract."""
+
+
+class _InputBudget:
+    """Count input scalars before any canonical JSON serialization."""
+
+    def __init__(self) -> None:
+        self.bytes = 0
+        self.items = 0
+
+    def add(self, value: Any, *, path: str = "input", depth: int = 0) -> None:
+        if depth > MAX_NESTING:
+            raise ResolvedRatingSourceError(
+                f"{path} exceeds the maximum nesting depth of {MAX_NESTING}"
+            )
+        self.items += 1
+        if self.items > MAX_INPUT_BATCH_ITEMS:
+            raise ResolvedRatingSourceError(
+                f"input batch exceeds the {MAX_INPUT_BATCH_ITEMS}-item budget"
+            )
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                self.add(key, path=f"{path}.<key>", depth=depth + 1)
+                self.add(item, path=f"{path}.{key}", depth=depth + 1)
+            return
+        if isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                self.add(item, path=f"{path}[{index}]", depth=depth + 1)
+            return
+        if isinstance(value, str):
+            try:
+                scalar_bytes = len(value.encode("utf-8"))
+            except UnicodeEncodeError as exc:
+                raise ResolvedRatingSourceError(
+                    f"{path} is not valid UTF-8"
+                ) from exc
+            if scalar_bytes > MAX_SCALAR_UTF8_BYTES:
+                raise ResolvedRatingSourceError(
+                    f"{path} exceeds the {MAX_SCALAR_UTF8_BYTES}-byte scalar cap"
+                )
+            self.bytes += scalar_bytes
+        elif isinstance(value, bytes):
+            if len(value) > MAX_SCALAR_UTF8_BYTES:
+                raise ResolvedRatingSourceError(
+                    f"{path} exceeds the {MAX_SCALAR_UTF8_BYTES}-byte scalar cap"
+                )
+            self.bytes += len(value)
+        if self.bytes > MAX_INPUT_BATCH_BYTES:
+            raise ResolvedRatingSourceError(
+                f"input batch exceeds the {MAX_INPUT_BATCH_BYTES}-byte budget"
+            )
+
+
+def _input_budget(*values: Any) -> _InputBudget:
+    budget = _InputBudget()
+    for index, value in enumerate(values):
+        budget.add(value, path=f"input[{index}]")
+    return budget
 
 
 def _guard_shape(
@@ -176,6 +264,7 @@ def _guard_shape(
 def _canonical_bytes(value: Any) -> bytes:
     """Serialize finite JSON with one stable representation and a byte cap."""
 
+    _input_budget(value)
     _guard_shape(value, require_json=True)
     try:
         raw = json.dumps(
@@ -375,11 +464,28 @@ def _game_id(row: Mapping[str, Any] | None, value: Any = None) -> str:
 
 def _timestamp(value: Any, field: str) -> tuple[str, datetime]:
     if isinstance(value, pd.Timestamp):
+        if value.nanosecond:
+            raise ResolvedRatingSourceError(
+                f"{field} must not contain nonzero nanoseconds"
+            )
         parsed = value.to_pydatetime()
     elif isinstance(value, datetime):
         parsed = value
     elif isinstance(value, str) and value.strip():
         text = value.strip()
+        fraction = re.search(r"\.(\d+)(?=(?:Z|[+-]\d{2}:?\d{2})$)", text)
+        if fraction:
+            digits = fraction.group(1)
+            if len(digits) > 6 and any(char != "0" for char in digits[6:]):
+                raise ResolvedRatingSourceError(
+                    f"{field} must not contain nonzero nanoseconds"
+                )
+            if len(digits) > 6:
+                text = (
+                    text[: fraction.start(1)]
+                    + digits[:6]
+                    + text[fraction.end(1) :]
+                )
         try:
             parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
         except ValueError as exc:
@@ -623,6 +729,7 @@ def build_roster_payload(
 ) -> dict[str, Any]:
     """Return the canonical payload used for the exact roster hash."""
 
+    _input_budget(game_id, timestamp, source_identity, roster_rows)
     normalized_game_id = _game_id(None, game_id)
     normalized_timestamp, _ = _timestamp(timestamp, "map.timestamp")
     return _roster_payload(
@@ -664,10 +771,12 @@ def _canonical_rating_values(values: Mapping[str, Any] | None) -> dict[str, floa
         return {field: None for field in RATING_VALUE_FIELDS}
     if not isinstance(values, Mapping):
         raise ResolvedRatingSourceError("rating_values must be a mapping")
+    unknown = set(values) - set(RATING_VALUE_FIELDS)
+    if unknown:
+        raise ResolvedRatingSourceError(
+            f"rating value field is not approved: {sorted(map(str, unknown))}"
+        )
     _guard_shape(values, path="rating_values")
-    leaked = _contains_outcome_or_current(values)
-    if leaked:
-        raise ResolvedRatingSourceError(f"current or outcome field is forbidden: {leaked}")
     normalized: dict[str, float | None] = {}
     for field in RATING_VALUE_FIELDS:
         raw = values.get(field)
@@ -692,6 +801,7 @@ def build_rating_batch_receipt_sha256(
 ) -> str:
     """Hash the immutable equal-timestamp batch membership and policy."""
 
+    _input_budget(timestamp, game_ids, policy)
     if not isinstance(game_ids, Sequence) or isinstance(game_ids, (str, bytes)):
         raise ResolvedRatingSourceError("batch game IDs must be a sequence")
     if len(game_ids) == 0:
@@ -732,6 +842,18 @@ def build_rating_receipt_payload(
 ) -> dict[str, Any]:
     """Return the canonical payload bound by ``rating_receipt_sha256``."""
 
+    _input_budget(
+        rating_source_available,
+        rating_source_sha256,
+        rating_roster_sha256,
+        rating_values,
+        rating_timestamp,
+        team_rating_available,
+        player_rating_available,
+        rating_values_available,
+        batching_policy,
+        batch_receipt_sha256,
+    )
     available = _availability(rating_source_available)
     source = _require_sha256(rating_source_sha256, "rating_source_sha256")
     roster = _require_sha256(rating_roster_sha256, "rating_roster_sha256")
@@ -867,10 +989,19 @@ def _rating_values(
 ) -> tuple[dict[str, float | None], str, datetime]:
     if not isinstance(values, Mapping):
         raise ResolvedRatingSourceError("rating values must be a mapping")
+    unknown = set(values) - RATING_APPROVED_INPUT_FIELDS
+    if unknown:
+        raise ResolvedRatingSourceError(
+            f"rating row field is not approved: {sorted(map(str, unknown))}"
+        )
+    for key, value in values.items():
+        if key in {"source_identity", "rating_source_identity"}:
+            continue
+        if isinstance(value, (Mapping, list, tuple)):
+            raise ResolvedRatingSourceError(
+                f"rating row field must be scalar: {key}"
+            )
     _guard_shape(values, path="rating values")
-    leaked = _contains_outcome_or_current(values)
-    if leaked:
-        raise ResolvedRatingSourceError(f"current or outcome field is forbidden: {leaked}")
     embedded_game_id = _optional_game_id(values)
     if (
         expected_game_id is not None
@@ -1053,6 +1184,17 @@ def build_resolved_rating_source(
     """Build one map receipt, returning explicit unavailable fields on failure."""
 
     try:
+        _input_budget(
+            game_id,
+            game_timestamp,
+            source_identity,
+            roster_rows,
+            rating_values,
+            batching_policy,
+            batch_timestamp,
+            batch_game_ids,
+            batch_receipt_sha256,
+        )
         return _build_strict(
             game_id=game_id,
             game_timestamp=game_timestamp,
@@ -1104,7 +1246,14 @@ def require_resolved_rating_source(**kwargs: Any) -> dict[str, Any]:
     return build_resolved_rating_source(**kwargs)
 
 
-def _records(value: Any, label: str) -> list[dict[str, Any]]:
+def _records(
+    value: Any,
+    label: str,
+    *,
+    budget: _InputBudget | None = None,
+) -> list[dict[str, Any]]:
+    if budget is None:
+        budget = _InputBudget()
     if isinstance(value, pd.DataFrame):
         if len(value) > MAX_INPUT_ROWS:
             raise ResolvedRatingSourceError(
@@ -1112,6 +1261,7 @@ def _records(value: Any, label: str) -> list[dict[str, Any]]:
             )
         records = [dict(row) for row in value.to_dict(orient="records")]
         for row in records:
+            budget.add(row, path=f"{label} row")
             _guard_shape(row, path=f"{label} row")
         return records
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
@@ -1125,6 +1275,7 @@ def _records(value: Any, label: str) -> list[dict[str, Any]]:
         if not isinstance(row, Mapping):
             raise ResolvedRatingSourceError(f"{label} row must be a mapping")
         copied = dict(row)
+        budget.add(copied, path=f"{label} row")
         _guard_shape(copied, path=f"{label} row")
         rows.append(copied)
     return rows
@@ -1160,9 +1311,12 @@ def enrich_rating_frame(
     maps are independent and cannot update each other.
     """
 
-    map_records = _records(maps, "maps")
-    roster_records = _records(roster_rows, "roster_rows")
-    rating_records = _records(rating_rows, "rating_rows")
+    budget = _InputBudget()
+    budget.add(source_identity, path="source_identity")
+    budget.add(batching_policy, path="batching_policy")
+    map_records = _records(maps, "maps", budget=budget)
+    roster_records = _records(roster_rows, "roster_rows", budget=budget)
+    rating_records = _records(rating_rows, "rating_rows", budget=budget)
     roster_by_game = _group_by_game(roster_records, "roster")
     rating_by_game = _group_by_game(rating_records, "rating")
     map_context: list[tuple[dict[str, Any], str, str | None, str | None]] = []

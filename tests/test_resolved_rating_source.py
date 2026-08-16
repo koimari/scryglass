@@ -229,7 +229,7 @@ def test_same_timestamp_maps_are_independent_and_ordered() -> None:
 def test_outcome_and_current_state_fields_cannot_supply_rating_values() -> None:
     receipt = _receipt(result=1)
     assert receipt["rating_source_available"] == 0.0
-    assert "forbidden" in receipt["rating_source_reason"]
+    assert "approved" in receipt["rating_source_reason"]
     receipt = _receipt(current_gold=1000)
     assert receipt["rating_source_available"] == 0.0
 
@@ -358,7 +358,7 @@ def test_duplicate_map_ids_are_rejected_at_batch_boundary() -> None:
 
 @pytest.mark.parametrize("field", ("y_blue_win", "map_result_flag", "winner_team_id"))
 def test_recursive_outcome_fields_are_rejected(field: str) -> None:
-    with pytest.raises(ResolvedRatingSourceError, match="forbidden"):
+    with pytest.raises(ResolvedRatingSourceError, match="approved"):
         _receipt(strict=True, nested={"level": [{field: 1}]})
 
 
@@ -441,6 +441,60 @@ def test_byte_nesting_item_and_row_caps_fail_closed(monkeypatch: pytest.MonkeyPa
             [{"game_uid": "map-1", "date": GAME_TIME}, {"game_uid": "map-2", "date": GAME_TIME}],
             [],
             [],
+            source_identity=SOURCE_IDENTITY,
+            source_artifact=SOURCE_ARTIFACT,
+        )
+
+
+@pytest.mark.parametrize("field", ("label", "y", "won", "victory", "unknown_field"))
+def test_rating_row_allows_only_approved_input_keys(field: str) -> None:
+    with pytest.raises(ResolvedRatingSourceError, match="approved"):
+        _receipt(strict=True, **{field: 1})
+
+
+def test_timestamps_with_nonzero_nanoseconds_are_rejected() -> None:
+    with pytest.raises(ResolvedRatingSourceError, match="nanoseconds"):
+        _receipt(strict=True, rating_as_of="2026-08-01T11:59:59.000000001Z")
+    with pytest.raises(ResolvedRatingSourceError, match="nanoseconds"):
+        build_resolved_rating_source(
+            game_id="map-1",
+            game_timestamp="2026-08-01T12:00:00.000000001Z",
+            source_identity=SOURCE_IDENTITY,
+            source_artifact=SOURCE_ARTIFACT,
+            roster_rows=_roster(),
+            rating_values=_ratings(),
+            strict=True,
+        )
+    accepted = _receipt(
+        strict=True,
+        rating_as_of="2026-08-01T11:59:59.123456000Z",
+    )
+    assert accepted["rating_timestamp"] == "2026-08-01T11:59:59.123456Z"
+
+
+def test_one_huge_scalar_is_rejected_before_serialization() -> None:
+    with pytest.raises(ResolvedRatingSourceError, match="scalar cap"):
+        _receipt(
+            strict=True,
+            rating_source_reason="x" * (rating_source.MAX_SCALAR_UTF8_BYTES + 1),
+        )
+
+
+def test_many_small_dataframe_rows_share_one_aggregate_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(rating_source, "MAX_INPUT_BATCH_BYTES", 200)
+    maps = pd.DataFrame(
+        {
+            "game_uid": [f"map-{index}" for index in range(40)],
+            "date": [GAME_TIME] * 40,
+        }
+    )
+    with pytest.raises(ResolvedRatingSourceError, match="byte budget"):
+        enrich_rating_frame(
+            maps,
+            pd.DataFrame(),
+            pd.DataFrame(),
             source_identity=SOURCE_IDENTITY,
             source_artifact=SOURCE_ARTIFACT,
         )
