@@ -451,9 +451,13 @@ def _normalized_rfc3339(value: Any, field: str) -> tuple[str, pd.Timestamp]:
         timestamp = pd.Timestamp(value)
     except (TypeError, ValueError) as exc:
         raise AtomizedResearchError(f"{field} must be RFC-3339") from exc
-    if timestamp.tzinfo is None:
+    if pd.isna(timestamp) or timestamp.tzinfo is None:
         raise AtomizedResearchError(f"{field} must include a timezone")
     utc = timestamp.tz_convert("UTC")
+    if utc.nanosecond != 0:
+        raise AtomizedResearchError(
+            f"{field} must use microsecond-or-coarser precision"
+        )
     return utc.isoformat().replace("+00:00", "Z"), utc
 
 

@@ -26,6 +26,7 @@ from lol_kills.research.atomized_rf_composite import (
     _rating_batch_receipt_sha256,
     _resolved_roster_sha256,
     _shrunk_metric_mean,
+    _strict_canonical_sha256,
     _unique_player_map_support,
     _validate_no_current_state_features,
     _write_json,
@@ -111,22 +112,63 @@ def _producer_receipt(*, team_only: bool = False) -> dict[str, object]:
     }
 
 
-def _consume_producer_receipt(receipt: dict[str, object]) -> dict[str, object]:
+def _producer_like_receipt(
+    *, game_time: str, rating_time: str
+) -> dict[str, object]:
+    receipt = _producer_receipt()
+    receipt["rating_timestamp"] = rating_time
+    receipt["rating_batch_timestamp"] = game_time
     roster_sha256 = _resolved_roster_sha256(
         _producer_roster(),
         game_id="map-1",
-        timestamp=PRODUCER_GAME_TIME,
+        timestamp=game_time,
+        source_identity=receipt["rating_source_identity"],
+    )
+    batch_sha256 = _rating_batch_receipt_sha256(
+        timestamp=game_time,
+        game_ids=["map-1"],
+        policy=RATING_BATCH_POLICY,
+    )
+    receipt["rating_roster_sha256"] = roster_sha256
+    receipt["rating_batch_receipt_sha256"] = batch_sha256
+    receipt["rating_receipt_sha256"] = _strict_canonical_sha256(
+        {
+            "schema_version": RATING_RECEIPT_SCHEMA,
+            "source_available": receipt["rating_source_available"],
+            "source_sha256": receipt["rating_source_sha256"],
+            "roster_sha256": roster_sha256,
+            "rating_timestamp": rating_time,
+            "rating_values": receipt["rating_values"],
+            "rating_values_available": receipt["rating_values_available"],
+            "team_rating_available": receipt["team_rating_available"],
+            "player_rating_available": receipt["player_rating_available"],
+            "equal_timestamp_batching": {
+                "policy": RATING_BATCH_POLICY,
+                "receipt_sha256": batch_sha256,
+            },
+        }
+    )
+    return receipt
+
+
+def _consume_producer_receipt(
+    receipt: dict[str, object], *, game_time: str = PRODUCER_GAME_TIME
+) -> dict[str, object]:
+    roster_sha256 = _resolved_roster_sha256(
+        _producer_roster(),
+        game_id="map-1",
+        timestamp=game_time,
         source_identity=receipt.get("rating_source_identity"),
     )
     batch_sha256 = _rating_batch_receipt_sha256(
-        timestamp=PRODUCER_GAME_TIME,
+        timestamp=game_time,
         game_ids=["map-1"],
         policy=RATING_BATCH_POLICY,
     )
     return _locked_rating_authority(
         receipt,
         resolved_roster_sha256=roster_sha256,
-        map_timestamp=PRODUCER_GAME_TIME,
+        map_timestamp=game_time,
         expected_batch_receipt_sha256=batch_sha256,
     )
 
@@ -327,6 +369,50 @@ def test_pr281_producer_receipt_is_consumed_exactly() -> None:
     assert bound["rating_source_receipt_hash_match"] == 1.0
     assert bound["rating_roster_receipt_match"] == 1.0
     assert bound["rating_batch_receipt_match"] == 1.0
+
+
+def test_pr281_microsecond_timestamps_remain_canonical() -> None:
+    game_time = "2026-08-01T12:00:00.123456Z"
+    rating_time = "2026-08-01T11:59:59.123456Z"
+    receipt = _producer_like_receipt(
+        game_time=game_time,
+        rating_time=rating_time,
+    )
+    bound = _consume_producer_receipt(receipt, game_time=game_time)
+    assert bound["team_rating_available"] == 1.0
+    assert bound["player_rating_available"] == 1.0
+    assert bound["rating_source_receipt_hash_match"] == 1.0
+
+
+@pytest.mark.parametrize("timestamp_field", ("rating", "game", "batch"))
+def test_pr281_nanosecond_timestamps_fail_closed(timestamp_field: str) -> None:
+    game_time = "2026-08-01T12:00:00.123456Z"
+    receipt = _producer_like_receipt(
+        game_time=game_time,
+        rating_time="2026-08-01T11:59:59.123456Z",
+    )
+    presented_game_time = game_time
+    if timestamp_field == "rating":
+        receipt["rating_timestamp"] = "2026-08-01T11:59:59.123456789Z"
+    elif timestamp_field == "batch":
+        receipt["rating_batch_timestamp"] = "2026-08-01T12:00:00.123456789Z"
+    else:
+        presented_game_time = "2026-08-01T12:00:00.123456789Z"
+        bound = _locked_rating_authority(
+            receipt,
+            resolved_roster_sha256=str(receipt["rating_roster_sha256"]),
+            map_timestamp=presented_game_time,
+            expected_batch_receipt_sha256=str(
+                receipt["rating_batch_receipt_sha256"]
+            ),
+        )
+        assert bound["rating_source_receipt_available"] == 0.0
+        return
+
+    bound = _consume_producer_receipt(receipt, game_time=presented_game_time)
+    assert bound["team_rating_available"] == 0.0
+    assert bound["player_rating_available"] == 0.0
+    assert bound["rating_source_receipt_available"] == 0.0
 
 
 def test_pr281_nullable_player_group_fails_closed_without_hiding_team_group() -> None:
