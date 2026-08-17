@@ -1,0 +1,24 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v27",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T21:50:01Z",
+  "inherits": "public-draft-score-promotion-protocol-v25.json",
+  "iteration": {
+    "id": "v27",
+    "single_change": "Enforce red-blue side symmetry in each balanced hidden-world forest. Add a mirrored red-side training row with the complementary outcome for every game. Score each game as the mean of its direct blue probability and the complement of its mirrored red probability. Support, coverage, missingness, patch, league, and series-index fields remain invariant. Signed differences reverse and paired blue/red support fields swap.",
+    "previous_receipt": "dbfe728ad18cad99fe847ac8932018cde85a2fb15ed9d611b75d55a77f8c7b35",
+    "matrix_sha256": "0f9de19c3849c4d4454a833391626257552ee498e35e243e0309a5ac2a0ebf1c"
+  },
+  "selection_extension": {
+    "quantum_forest_config": {
+      "id": "quantum-rf-side-symmetric",
+      "n_estimators": 400,
+      "max_depth": 8,
+      "min_samples_leaf": 10,
+      "max_features": 0.15,
+      "max_samples": 0.8,
+      "class_weight": null,
+      "side_symmetry_augmentation": true
+    }
+  }
+}

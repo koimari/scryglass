@@ -129,7 +129,7 @@ select is(
     where oid = 'public.get_scryglass_active_release(text)'::regprocedure
   ),
   false,
-  'the public active-release wrapper is security invoker'
+  'the public active-release wrapper is an invoker projection'
 );
 select is(
   (

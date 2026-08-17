@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run Scryglass Public Release"
+  short_description: "Build and verify one census-bound release"
+  default_prompt: "Use $run-scryglass-public-release to run or verify one Scryglass public data release."

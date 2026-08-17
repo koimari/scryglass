@@ -9,6 +9,9 @@ import {
   getRatings,
   getTierFacets,
   getTierScope,
+  validatePromotedDraftScoreResult,
+  validatePromotedDraftResultsPayload,
+  validatePublicDraftResponse,
 } from "./publicData";
 import type { PackManifest } from "./pack";
 
@@ -31,6 +34,56 @@ function queryManifest(): PackManifest {
   };
 }
 
+function descriptiveManifest(): PackManifest {
+  return {
+    ...queryManifest(),
+    draft_authority: {
+      schema_version: "scryglass:draft-authority:v1",
+      status: "descriptive",
+      authority: "descriptive",
+      release_id: RELEASE_ID,
+      model_version: "draft-descriptive-v1",
+      artifact_sha256: "c".repeat(64),
+      receipt_sha256: "a".repeat(64),
+      issued_utc: "2026-08-13T18:31:17Z",
+    },
+  };
+}
+
+function promotedManifest(): PackManifest {
+  return {
+    ...queryManifest(),
+    draft_authority: {
+      schema_version: "scryglass:draft-authority:v1",
+      status: "promoted",
+      authority: "promoted",
+      release_id: RELEASE_ID,
+      model_version: "public-draft-score-v1",
+      artifact_sha256: "d".repeat(64),
+      receipt_sha256: "b".repeat(64),
+      issued_utc: "2026-08-16T22:00:00Z",
+      estimand: "prematch_map_win_probability_with_controlled_draft_intervention",
+      probability_authority: true,
+      recommendation_authority: true,
+      betting_authority: false,
+      descriptive_authority: {
+        schema_version: "scryglass:draft-authority:v1",
+        status: "descriptive",
+        authority: "descriptive",
+        release_id: RELEASE_ID,
+        model_version: "draft-recommendation-static-v2",
+        artifact_sha256: "c".repeat(64),
+        receipt_sha256: "a".repeat(64),
+        issued_utc: "2026-08-13T18:31:17Z",
+        estimand: "composition_only",
+        probability_authority: false,
+        recommendation_authority: false,
+        betting_authority: false,
+      },
+    },
+  };
+}
+
 test("public query row limits stay inside the chat response budget", () => {
   assert.equal(boundedRowLimit(undefined, 20), 20);
   assert.equal(boundedRowLimit(1, 20), 1);
@@ -39,6 +92,142 @@ test("public query row limits stay inside the chat response budget", () => {
   assert.equal(boundedRowLimit(50, 20, 100), 50);
   assert.equal(boundedRowLimit(500, 20, 100), 100);
   assert.equal(boundedRowLimit(0, 20), 1);
+});
+
+test("descriptive Draft responses accept model-unit fields and reject probability fields", () => {
+  const manifest = descriptiveManifest();
+  assert.doesNotThrow(() => validatePublicDraftResponse({
+    authority: "descriptive",
+    draft_metric: { draft_edge: 0.25, games: 12 },
+  }, manifest));
+  assert.throws(() => validatePublicDraftResponse({
+    authority: "descriptive",
+    draft_metric: { draft_win_share: 0.61 },
+  }, manifest), /probability fields/);
+  assert.throws(() => validatePublicDraftResponse({
+    authority: "unavailable",
+    draft_metric: { draft_edge: 0.25 },
+  }, manifest), /unbound authority/);
+});
+
+test("promoted Draft responses allow probability and recommendation but never betting fields", () => {
+  const manifest = promotedManifest();
+  assert.doesNotThrow(() => validatePublicDraftResponse({
+    authority: "promoted",
+    match_win_probability: { Blue: 0.61, Red: 0.39 },
+    controlled_draft_score: { edge_percentage_points: 2.4 },
+    side_recommendation: "Blue",
+  }, manifest));
+  for (const field of ["odds", "fair_odds", "expected_value", "ev", "stake", "wager", "betting"]) {
+    assert.throws(() => validatePublicDraftResponse({
+      authority: "promoted",
+      [field]: 1,
+    }, manifest), /permanently forbidden betting field/);
+  }
+  assert.throws(() => validatePublicDraftResponse({
+    authority: "descriptive",
+    side_recommendation: "Blue",
+  }, descriptiveManifest()), /recommendation without promoted authority/);
+});
+
+test("promoted releases keep their bound descriptive Draft fields", () => {
+  assert.doesNotThrow(() => validatePublicDraftResponse({
+    authority: "descriptive",
+    draft_metric: { draft_edge: 0.25, games: 12 },
+  }, promotedManifest()));
+});
+
+test("promoted Draft result keeps match probability and controlled draft evidence separate", () => {
+  const manifest = promotedManifest();
+  const result = {
+    schema_version: "scryglass:public-draft-score-result:v1",
+    authority: "promoted",
+    release_id: RELEASE_ID,
+    model_version: "public-draft-score-v1",
+    receipt_sha256: "b".repeat(64),
+    evidence_window: {
+      start: "2025-01-01T00:00:00Z",
+      end: "2026-08-16T00:00:00Z",
+    },
+    match_win_probability: { Blue: 0.61, Red: 0.39 },
+    controlled_draft_score: {
+      model_units: -0.18,
+      edge_percentage_points: -1.9,
+      stronger_draft: "Red",
+      explanation: "Composition contribution with strength controls held fixed.",
+      method: "role_matched_champion_swap",
+      intervention_receipt_sha256: "c".repeat(64),
+      isolated_blue_draft_probability: 0.455,
+      fixed_strength_blue_win_probability: 0.56,
+    },
+    side_recommendation: "Blue",
+  };
+  assert.doesNotThrow(() => validatePromotedDraftScoreResult(result, manifest));
+  assert.throws(() => validatePromotedDraftScoreResult({
+    ...result,
+    match_win_probability: { Blue: 0.61, Red: 0.41 },
+  }, manifest), /probabilities are invalid/);
+  assert.throws(() => validatePromotedDraftScoreResult({
+    ...result,
+    side_recommendation: "Red",
+  }, manifest), /recommendation conflicts/);
+  assert.throws(() => validatePromotedDraftScoreResult({
+    ...result,
+    release_id: "v2026.08.16.999999",
+  }, manifest), /not release-bound/);
+  assert.throws(() => validatePromotedDraftScoreResult({
+    ...result,
+    internal_vector: [1, 2],
+  }, manifest), /not release-bound/);
+  assert.throws(() => validatePromotedDraftScoreResult({
+    ...result,
+    controlled_draft_score: {
+      ...result.controlled_draft_score,
+      stronger_draft: "Blue",
+    },
+  }, manifest), /direction is inconsistent/);
+  assert.throws(() => validatePromotedDraftScoreResult({
+    ...result,
+    receipt_sha256: "f".repeat(64),
+  }, manifest), /not release-bound/);
+});
+
+test("promoted Draft result assets validate every release-bound row", () => {
+  const manifest = promotedManifest();
+  const result = {
+    schema_version: "scryglass:public-draft-score-result:v1",
+    authority: "promoted",
+    release_id: RELEASE_ID,
+    model_version: "public-draft-score-v1",
+    receipt_sha256: "b".repeat(64),
+    evidence_window: { start: "2025-01-01T00:00:00Z", end: "2026-08-16T00:00:00Z" },
+    match_win_probability: { Blue: 0.61, Red: 0.39 },
+    controlled_draft_score: {
+      model_units: -0.18,
+      edge_percentage_points: -1.9,
+      stronger_draft: "Red",
+      explanation: "Role-matched champion swap with strength held fixed.",
+      method: "role_matched_champion_swap",
+      intervention_receipt_sha256: "c".repeat(64),
+      isolated_blue_draft_probability: 0.455,
+      fixed_strength_blue_win_probability: 0.56,
+    },
+    side_recommendation: "Blue",
+  } as const;
+  const payload = {
+    schema_version: "scryglass:promoted-draft-results:v1",
+    authority: "promoted",
+    release_id: RELEASE_ID,
+    model_version: "public-draft-score-v1",
+    receipt_sha256: "b".repeat(64),
+    results: { "game-1": result },
+  } as const;
+
+  assert.doesNotThrow(() => validatePromotedDraftResultsPayload(payload, manifest));
+  assert.throws(() => validatePromotedDraftResultsPayload({
+    ...payload,
+    release_id: "v2026.08.16.999999",
+  }, manifest), /not release-bound/);
 });
 
 test("ratings RPC uses publishable auth and caps exact-name comparisons at 20 rows", async () => {

@@ -19,3 +19,11 @@
 - Dragon stat-equivalent reviews must follow the Wiki template/revision lookup and then use `python3 -m lol_kills.research.dragon_gold_equivalent` with explicit champion snapshots, stacks, missing-health, duration, and patch inputs; do not hand-rebuild item anchors or Ocean/Rejuvenation-Bead arithmetic, and preserve intentionally unpriced effects
 - `/grubs` permanently redirects to `/articles/void-grubs-contest-or-leave`
 - Browse/H2H Draft WR and ad-hoc draft boards use league-calibrated Draft Score via `/api/draft-wr` / the draft recommendation stack (not raw pick win rate); live same-role lane contribs may be gated out of the score even when raw matchup WR is shown for context
+
+## Public Release Rule
+
+- Run production data releases through `python3 -m lol_kills.public_refresh --once --force`. Do not publish ratings, Draft Score, Tier Lists, or matches through separate production commands.
+- Freeze one accepted source census before derived work. Bind its `source_as_of`, `source_game_count`, and `source_identity_sha256` into every public artifact and receipt.
+- Build Tier Lists after source acceptance and before the public pack. Pass the tier payload explicitly into pack export.
+- Treat team Draft coverage and player best-available coverage as separate denominators. Team Draft uses all scoreable complete drafts. Player best-available uses complete ban, order, and pool evidence.
+- Before completion, run `.codex/skills/run-scryglass-public-release/scripts/verify_live_release.py`, check both Supabase advisor groups, and inspect production browser and Vercel errors.

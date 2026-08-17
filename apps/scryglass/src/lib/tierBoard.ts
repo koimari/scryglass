@@ -28,6 +28,21 @@ export type TierRow = {
   expected_counter_breadth: number | null;
 };
 
+export function tierGameCount(rows: TierRow[]): number {
+  const appearancesByRole = new Map<string, number>();
+  for (const row of rows) {
+    if (!Number.isFinite(row.played_maps) || row.played_maps < 0) continue;
+    appearancesByRole.set(
+      row.role,
+      (appearancesByRole.get(row.role) ?? 0) + row.played_maps,
+    );
+  }
+  return Math.max(
+    0,
+    ...[...appearancesByRole.values()].map((appearances) => Math.floor(appearances / 2)),
+  );
+}
+
 export type RegionalRow = {
   champion: string;
   champion_id: string;

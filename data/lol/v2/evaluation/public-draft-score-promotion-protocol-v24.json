@@ -1,0 +1,12 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v24",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T21:09:31Z",
+  "inherits": "public-draft-score-promotion-protocol-v23.json",
+  "iteration": {
+    "id": "v24",
+    "single_change": "Fix the hidden-world combiner intercept at zero. Keep its anchor and hidden-world coefficients learned from each inner validation window. This prevents a fold-specific prevalence offset from changing ranks across chronological outer folds. The hash-bound forest-prediction cache is an operational optimization and does not change the model or estimand.",
+    "previous_receipt": "71905d364be986188adf903ed51565fe78b3a9bf5566c5ce24cb3d8fb8491aa9",
+    "matrix_sha256": "0f9de19c3849c4d4454a833391626257552ee498e35e243e0309a5ac2a0ebf1c"
+  }
+}

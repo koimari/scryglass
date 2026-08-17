@@ -1,0 +1,11 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v19",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T17:45:55Z",
+  "inherits": "public-draft-score-promotion-protocol-v18.json",
+  "iteration": {
+    "id": "v19",
+    "single_change": "Use deterministic bounded logistic solvers for calibration and the hidden-world combiner. Reject every non-finite input, coefficient, intercept, and output instead of replacing invalid values.",
+    "previous_protocol_result": "v18 stopped during its first outer fold after numerical overflow warnings; it produced no evaluation receipt"
+  }
+}

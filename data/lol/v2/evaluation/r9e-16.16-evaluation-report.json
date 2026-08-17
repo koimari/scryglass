@@ -1,0 +1,47 @@
+{
+  "artifact_sha256": "1d3bf92acb632065e991510d723dc001e2a4bafed581d88896c02299453a985a",
+  "authority": {
+    "private_r9e_promotion": false,
+    "public_draft": false,
+    "public_probability": false
+  },
+  "candidate": {
+    "family": "depth4_plus_state_space",
+    "model_id": "scryglass-pi-r9-depth4-state-space",
+    "seed": 461,
+    "bootstrap_repetitions": 60
+  },
+  "gates": {
+    "auc_floor": 0.705,
+    "auc_floor_passes": false,
+    "reference_auc": 0.70681,
+    "auc_delta_vs_reference": -0.01742,
+    "promotion_status": "blocked_auc_floor"
+  },
+  "metrics": {
+    "auc": 0.68939,
+    "brier": 0.22301,
+    "log_loss": 0.63701,
+    "evaluated_outcomes": 13682,
+    "brier_improved_windows": 3,
+    "log_loss_improved_windows": 4,
+    "rating_integration_eligible": true
+  },
+  "population": {
+    "composition_games": 17545,
+    "controlled_games": 17377,
+    "accepted_16_16_games": 7,
+    "accepted_16_16_rows": 84,
+    "source_token": "16.16",
+    "public_patch": "26.16"
+  },
+  "provenance": {
+    "oe_revision_sha256": "9467bb8d3f15571a2445a4728d2d38290fa78079c4fe6b2d1037b54d0b988a65",
+    "ingest_receipt_artifact_sha256": "fcb265a3ff7ec46420d80fd6ae06dad6b16468d3a5adfdc266052475033ab5aa",
+    "series_crosswalk_sha256": "906873d20b952d479eb840bfd4ba48aceed5f596cac55a888c72e27357612e8e",
+    "evaluation_source": "private_autoresearch9_r9e",
+    "evaluation_command": "r9._run_eval(D4, SS, bootstrap_reps=60, seed=461)"
+  },
+  "schema_version": "scryglass:r9e-promotion-evaluation:v1",
+  "claim_ceiling": "The candidate fails the locked AUC floor on this refreshed population. It remains a private development result. No public Draft Score or probability authority is issued."
+}

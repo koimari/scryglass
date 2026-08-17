@@ -36,11 +36,11 @@ jobs:
           version: v0.11.0
 
       - name: Parse zsh operator scripts
+        timeout-minutes: 2
         run: |
           set -euo pipefail
           if ! command -v zsh >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install --no-install-recommends -y zsh
+            sudo timeout --foreground 60s apt-get install --no-install-recommends -y zsh
           fi
           while IFS= read -r -d '' script; do
             zsh -n "$script"

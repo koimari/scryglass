@@ -292,6 +292,34 @@ def _oe_rating_source_complete(root: Path) -> bool:
     return payload.get("player_statistics_complete") is True
 
 
+def _verify_prebuilt_oe_live(root: Path, expected_live_as_of: str) -> dict[str, Any]:
+    """Keep the accepted release source intact during the tier refresh."""
+
+    observed = _oe_source_latest(root)
+    try:
+        matches = (
+            observed is not None
+            and pd.Timestamp(observed).tz_convert("UTC")
+            == pd.Timestamp(expected_live_as_of).tz_convert("UTC")
+        )
+    except (TypeError, ValueError):
+        matches = False
+    complete = _oe_rating_source_complete(root)
+    return {
+        "source": "oe_live_source",
+        "command": [],
+        "returncode": 0 if matches and complete else 2,
+        "completed": bool(matches and complete),
+        "skipped": True,
+        "reason": (
+            "accepted_oe_live_verified"
+            if matches and complete
+            else "accepted_oe_live_mismatch"
+        ),
+        "source_observed_through": observed,
+    }
+
+
 def _previous_week_start(value: str) -> pd.Timestamp:
     stamp = pd.Timestamp(value)
     if stamp.tzinfo is None:
@@ -312,6 +340,7 @@ def refresh_candidate(
     source_mode: str = DEFAULT_SOURCE_MODE,
     promote: bool = False,
     skip_annual_oe: bool = False,
+    skip_live_source: bool = False,
     skip_atom_bridge: bool = False,
     prepared_source: dict[str, Any] | None = None,
     step_timeout_seconds: float = DEFAULT_STEP_TIMEOUT_SECONDS,
@@ -397,9 +426,13 @@ def refresh_candidate(
                 source="champion_atomization",
             )
         )
-        live_source_step = run_step(
-            ["lol_kills.etl.oe_live_source", "--root", str(root)],
-            source="oe_live_source",
+        live_source_step = (
+            _verify_prebuilt_oe_live(root, expected_live_as_of)
+            if skip_live_source
+            else run_step(
+                ["lol_kills.etl.oe_live_source", "--root", str(root)],
+                source="oe_live_source",
+            )
         )
         observed_as_of = _oe_source_latest(root) if live_source_step["completed"] else None
         candidate_expected_live_as_of = observed_as_of or expected_live_as_of

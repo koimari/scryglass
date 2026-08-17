@@ -16,6 +16,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -35,12 +36,17 @@ from lol_kills.export.public_query_projection import (
     query_dataset_receipt,
     validate_public_query_projection,
 )
+from lol_kills.export.promoted_draft_authority import (
+    PromotedDraftAuthorityError,
+    validate_promoted_results_payload,
+)
 from lol_kills.v2.patch_identity import PatchIdentityError, public_patch
 
 
 TIER_ASSET_PATH = "rankings/tierlists.json"
 TIER_LATEST_ASSET_PATH = "rankings/tierlists-latest.json"
 DRAFT_ASSET_PATH = "features/draft_records.json"
+PROMOTED_DRAFT_RESULTS_PATH = "features/promoted_draft_results.json"
 DRAFT_AUTHORITY_SCHEMA = "scryglass:draft-authority:v1"
 DRAFT_RECORDS_SCHEMA = "scryglass:draft-records:v1"
 PUBLIC_ASSET_PATH_SET = frozenset(PUBLIC_ASSET_PATHS)
@@ -61,6 +67,9 @@ QUERY_STAGE_BATCH_ROWS = 500
 QUERY_STAGE_BATCH_BYTES = 3_200_000
 PUBLIC_ASSET_CONTENT_TYPE = "application/json"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+DRAFT_ISSUED_UTC_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
+)
 QUERY_TABLE = "scryglass_public_query_rows"
 QUERY_RECEIPT_TABLE = "scryglass_public_query_receipts"
 QUERY_ROW_FIELDS = frozenset(
@@ -167,23 +176,250 @@ def _retention_storage_path(value: object) -> str:
 
 
 def _draft_authority(manifest: dict[str, Any], release_id: str) -> dict[str, Any]:
-    """Keep Draft Score unavailable until an independent verifier exists."""
+    """Validate the descriptive Draft receipt at the publication boundary."""
 
     candidate = manifest.get("draft_authority")
-    if isinstance(candidate, dict) and candidate.get("status") == "promoted":
-        raise SupabasePublicationError(
-            "Draft Score promotion requires an independent receipt verifier"
+    if not isinstance(candidate, dict):
+        return {
+            "schema_version": DRAFT_AUTHORITY_SCHEMA,
+            "status": "unavailable",
+            "release_id": release_id,
+            "model_version": None,
+            "artifact_sha256": None,
+            "receipt_sha256": None,
+            "issued_utc": None,
+            "reason": "model_not_promoted",
+        }
+    status = candidate.get("status")
+    if status == "promoted":
+        artifact_sha256 = candidate.get("artifact_sha256")
+        receipt_sha256 = candidate.get("receipt_sha256")
+        issued_utc = candidate.get("issued_utc")
+        model_version = candidate.get("model_version")
+        descriptive_authority = _draft_authority(
+            {"draft_authority": candidate.get("descriptive_authority")},
+            release_id,
         )
-    reason = candidate.get("reason") if isinstance(candidate, dict) else None
+        if (
+            candidate.get("schema_version") != DRAFT_AUTHORITY_SCHEMA
+            or candidate.get("release_id") != release_id
+            or candidate.get("authority") != "promoted"
+            or candidate.get("estimand")
+            != "prematch_map_win_probability_with_controlled_draft_intervention"
+            or not isinstance(model_version, str)
+            or not model_version.strip()
+            or not isinstance(artifact_sha256, str)
+            or not SHA256_RE.fullmatch(artifact_sha256)
+            or not isinstance(receipt_sha256, str)
+            or not SHA256_RE.fullmatch(receipt_sha256)
+            or not _valid_issued_utc(issued_utc)
+            or candidate.get("probability_authority") is not True
+            or candidate.get("recommendation_authority") is not True
+            or candidate.get("betting_authority") is not False
+            or candidate.get("reason") is not None
+            or descriptive_authority.get("status") != "descriptive"
+        ):
+            raise SupabasePublicationError("promoted Draft Score authority is invalid")
+        return {
+            "schema_version": DRAFT_AUTHORITY_SCHEMA,
+            "status": "promoted",
+            "authority": "promoted",
+            "release_id": release_id,
+            "model_version": model_version.strip(),
+            "artifact_sha256": artifact_sha256,
+            "receipt_sha256": receipt_sha256,
+            "issued_utc": issued_utc,
+            "estimand": candidate["estimand"],
+            "probability_authority": True,
+            "recommendation_authority": True,
+            "betting_authority": False,
+            "reason": None,
+            "descriptive_authority": descriptive_authority,
+        }
+    if status == "descriptive":
+        artifact_sha256 = candidate.get("artifact_sha256")
+        receipt_sha256 = candidate.get("receipt_sha256")
+        issued_utc = candidate.get("issued_utc")
+        if (
+            candidate.get("schema_version") != DRAFT_AUTHORITY_SCHEMA
+            or candidate.get("release_id") != release_id
+            or candidate.get("authority") != "descriptive"
+            or candidate.get("estimand") != "composition_only"
+            or candidate.get("model_version")
+            != "draft-recommendation-static-v2"
+            or not isinstance(artifact_sha256, str)
+            or not SHA256_RE.fullmatch(artifact_sha256)
+            or not isinstance(receipt_sha256, str)
+            or not SHA256_RE.fullmatch(receipt_sha256)
+            or not _valid_issued_utc(issued_utc)
+            or candidate.get("probability_authority") is not False
+            or candidate.get("recommendation_authority") is not False
+            or candidate.get("betting_authority") is not False
+            or candidate.get("reason") is not None
+        ):
+            raise SupabasePublicationError("descriptive Draft Score authority is invalid")
+        return {
+            "schema_version": DRAFT_AUTHORITY_SCHEMA,
+            "status": "descriptive",
+            "authority": "descriptive",
+            "release_id": release_id,
+            "model_version": str(candidate["model_version"]),
+            "artifact_sha256": artifact_sha256,
+            "receipt_sha256": receipt_sha256,
+            "issued_utc": issued_utc,
+            "estimand": "composition_only",
+            "probability_authority": False,
+            "recommendation_authority": False,
+            "betting_authority": False,
+            "reason": None,
+        }
+    if status not in {None, "unavailable"}:
+        raise SupabasePublicationError("Draft Score authority status is invalid")
+    reason = candidate.get("reason")
     return {
         "schema_version": DRAFT_AUTHORITY_SCHEMA,
         "status": "unavailable",
         "release_id": release_id,
         "model_version": None,
+        "artifact_sha256": None,
         "receipt_sha256": None,
         "issued_utc": None,
         "reason": str(reason or "model_not_promoted"),
     }
+
+
+def _valid_issued_utc(value: object) -> bool:
+    if not isinstance(value, str) or not DRAFT_ISSUED_UTC_RE.fullmatch(value):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() == timezone.utc.utcoffset(parsed)
+
+
+def _validate_descriptive_draft_records(payload: object) -> None:
+    """Reject predictive fields from the descriptive Draft asset."""
+
+    if not isinstance(payload, dict):
+        raise SupabasePublicationError("descriptive Draft asset is malformed")
+    if (
+        payload.get("schema_version") != DRAFT_RECORDS_SCHEMA
+        or payload.get("authority") != "descriptive"
+        or payload.get("estimand") != "composition_only"
+        or payload.get("model_version") != "draft-recommendation-static-v2"
+        or not isinstance(payload.get("games"), dict)
+    ):
+        raise SupabasePublicationError("descriptive Draft asset binding is invalid")
+    if not payload["games"]:
+        raise SupabasePublicationError("descriptive Draft asset has no usable games")
+    forbidden = {
+        "probability",
+        "win_probability",
+        "draft_probability",
+        "draft_win_share",
+        "average_win_share",
+        "p_blue",
+        "p_red",
+        "odds",
+        "ev",
+        "r9e",
+        "r9e_state_space",
+        "development_composite",
+        "match_probability",
+        "match_win_expectation",
+        "team_rating",
+        "player_rating",
+        "elo",
+        "mu_diff",
+        "sigma_pair",
+        "momentum",
+        "gold",
+        "objectives",
+        "recommendation",
+        "betting",
+    }
+
+    def scan(value: object) -> None:
+        if isinstance(value, dict):
+            normalized_keys = {str(key).strip().casefold() for key in value}
+            if forbidden.intersection(normalized_keys) or any(
+                key.startswith("r9e_") or key.startswith("r9e|")
+                for key in normalized_keys
+            ):
+                raise SupabasePublicationError(
+                    "descriptive Draft asset contains predictive fields"
+                )
+            for nested in value.values():
+                scan(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                scan(nested)
+
+    scan(payload)
+    for game in payload["games"].values():
+        if not isinstance(game, dict):
+            raise SupabasePublicationError("descriptive Draft game is malformed")
+        edge = game.get("draft_edge")
+        if not isinstance(edge, (int, float)) or isinstance(edge, bool):
+            raise SupabasePublicationError("descriptive Draft edge is invalid")
+        pool = game.get("draft_pool")
+        if not isinstance(pool, dict) or pool.get("status") != "complete":
+            raise SupabasePublicationError("descriptive Draft pool is incomplete")
+        if not isinstance(pool.get("patch"), str) or not pool["patch"].strip():
+            raise SupabasePublicationError("descriptive Draft pool patch is missing")
+        bans = pool.get("bans")
+        if not isinstance(bans, dict):
+            raise SupabasePublicationError("descriptive Draft bans are incomplete")
+        blue_bans = bans.get("Blue")
+        red_bans = bans.get("Red")
+        if (
+            not isinstance(blue_bans, list)
+            or not isinstance(red_bans, list)
+            or len(blue_bans) != 5
+            or len(red_bans) != 5
+            or len({str(item).strip().casefold() for item in (*blue_bans, *red_bans)}) != 10
+            or any(not isinstance(item, str) or not item.strip() for item in (*blue_bans, *red_bans))
+        ):
+            raise SupabasePublicationError("descriptive Draft bans are incomplete")
+        picked = pool.get("picked")
+        if not isinstance(picked, list) or len(picked) != 10:
+            raise SupabasePublicationError("descriptive Draft picks are incomplete")
+        identities: set[tuple[str, str]] = set()
+        champions: set[str] = set()
+        orders: set[int] = set()
+        for pick in picked:
+            if not isinstance(pick, dict):
+                raise SupabasePublicationError("descriptive Draft pick is malformed")
+            side = str(pick.get("side") or "").strip().title()
+            role = str(pick.get("role") or "").strip().casefold()
+            champion = str(pick.get("champion") or "").strip().casefold()
+            order = pick.get("order")
+            if (
+                side not in {"Blue", "Red"}
+                or not role
+                or not champion
+                or not isinstance(order, int)
+                or isinstance(order, bool)
+                or order not in range(1, 11)
+                or (side, role) in identities
+                or champion in champions
+                or order in orders
+                or not isinstance(pick.get("best_available"), bool)
+                or not isinstance(pick.get("tier_rank"), int)
+                or isinstance(pick.get("tier_rank"), bool)
+                or not isinstance(pick.get("available_count"), int)
+                or isinstance(pick.get("available_count"), bool)
+                or pick.get("available_count") < 1
+            ):
+                raise SupabasePublicationError("descriptive Draft pick evidence is incomplete")
+            identities.add((side, role))
+            champions.add(champion)
+            orders.add(order)
+        if len(identities) != 10 or orders != set(range(1, 11)):
+            raise SupabasePublicationError("descriptive Draft pick evidence is incomplete")
+        if pool.get("evaluated_picks") != 10:
+            raise SupabasePublicationError("descriptive Draft pool evaluation is incomplete")
 
 
 def _pack_asset_path(pack_dir: Path, path: str) -> Path:
@@ -1150,7 +1386,7 @@ class SupabasePublicData:
             or release_metadata.get("release_id") != release_id
             or not isinstance(draft_authority, dict)
             or draft_authority.get("schema_version") != DRAFT_AUTHORITY_SCHEMA
-            or draft_authority.get("status") != "unavailable"
+            or draft_authority.get("status") not in {"unavailable", "descriptive"}
             or draft_authority.get("release_id") != release_id
             or not isinstance(raw_files, list)
             or not isinstance(artifact_hashes, dict)
@@ -1163,7 +1399,10 @@ class SupabasePublicData:
             if not isinstance(item, dict):
                 raise SupabasePublicationError("Supabase rollback manifest inventory is invalid")
             path = _public_asset_path(item.get("path"))
-            if path in seen or path == DRAFT_ASSET_PATH:
+            if path in seen or (
+                path == DRAFT_ASSET_PATH
+                and draft_authority.get("status") != "descriptive"
+            ):
                 raise SupabasePublicationError("Supabase rollback manifest inventory is invalid")
             seen.add(path)
             raw_bytes = item.get("bytes")
@@ -1461,8 +1700,34 @@ def prepare_release(
         if not isinstance(metadata, dict):
             continue
         if path == DRAFT_ASSET_PATH:
-            continue
-        raw = _pack_asset_path(pack_dir, path).read_bytes()
+            if draft_authority["status"] not in {"descriptive", "promoted"}:
+                continue
+            raw = _pack_asset_path(pack_dir, path).read_bytes()
+            try:
+                draft_payload = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise SupabasePublicationError("descriptive Draft asset is invalid JSON") from error
+            _validate_descriptive_draft_records(draft_payload)
+        elif path == PROMOTED_DRAFT_RESULTS_PATH:
+            if draft_authority["status"] != "promoted":
+                continue
+            raw = _pack_asset_path(pack_dir, path).read_bytes()
+            try:
+                promoted_payload = json.loads(raw.decode("utf-8"))
+                validate_promoted_results_payload(
+                    promoted_payload,
+                    authority=draft_authority,
+                )
+            except (
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                PromotedDraftAuthorityError,
+            ) as error:
+                raise SupabasePublicationError(
+                    "promoted Draft result asset is invalid"
+                ) from error
+        else:
+            raw = _pack_asset_path(pack_dir, path).read_bytes()
         if len(raw) != metadata.get("bytes") or _sha256(raw) != metadata.get("sha256"):
             raise SupabasePublicationError(f"optional public asset checksum failed: {path}")
         if isinstance(bound_hashes, dict) and bound_hashes.get(path) != _sha256(raw):
@@ -1473,6 +1738,17 @@ def prepare_release(
         asset["storage_path"] = storage_path
         storage_objects[storage_path] = raw
         assets.append(asset)
+
+    if draft_authority["status"] in {"descriptive", "promoted"} and not any(
+        str(asset.get("path")) == DRAFT_ASSET_PATH for asset in assets
+    ):
+        raise SupabasePublicationError("published Draft authority has no Draft asset")
+    if draft_authority["status"] == "promoted" and not any(
+        str(asset.get("path")) == PROMOTED_DRAFT_RESULTS_PATH for asset in assets
+    ):
+        raise SupabasePublicationError(
+            "promoted Draft authority has no promoted result asset"
+        )
 
     tier_source_raw = tier_path.read_bytes()
     try:

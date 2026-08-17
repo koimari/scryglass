@@ -349,6 +349,7 @@ def _live_source_binding(
         frame["source_game_key"].notna() & frame["source_game_key"].ne("")
     ]
     frame = frame[frame["date"].notna()]
+    full_source_game_count = int(frame["source_game_key"].nunique())
     frame = frame[frame["date"] >= pd.Timestamp(source_start)]
     if frame.empty:
         raise PatchMappingError("OE live player parquet has no rows in the audited source window")
@@ -418,7 +419,7 @@ def _live_source_binding(
     if observed_latest_utc != source_latest:
         raise PatchMappingError("OE live metadata watermark does not match the player parquet")
     expected_maps = meta.get("maps")
-    if isinstance(expected_maps, int) and expected_maps != int(games["source_game_key"].nunique()):
+    if isinstance(expected_maps, int) and expected_maps != full_source_game_count:
         raise PatchMappingError("OE live metadata map count does not match the player parquet")
     return intervals, {
         "status": "bound",

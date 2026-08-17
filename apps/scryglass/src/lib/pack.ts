@@ -75,12 +75,37 @@ export type PackManifest = {
   };
   draft_authority?: {
     schema_version: "scryglass:draft-authority:v1";
-    status: "unavailable" | "promoted";
+    /**
+     * `status` is retained for release compatibility. New releases should
+     * also write `authority`. The web gate accepts the explicit authority
+     * value when both fields are present and requires them to agree.
+     */
+    status: "unavailable" | "descriptive" | "promoted";
+    authority?: "unavailable" | "descriptive" | "promoted";
     release_id: string;
     model_version: string | null;
+    artifact_sha256?: string | null;
     receipt_sha256: string | null;
     issued_utc?: string | null;
+    estimand?: string | null;
+    probability_authority?: boolean;
+    recommendation_authority?: boolean;
+    betting_authority?: boolean;
     reason?: string | null;
+    descriptive_authority?: {
+      schema_version: "scryglass:draft-authority:v1";
+      status: "descriptive";
+      authority: "descriptive";
+      release_id: string;
+      model_version: string;
+      artifact_sha256: string;
+      receipt_sha256: string;
+      issued_utc: string;
+      estimand: "composition_only";
+      probability_authority: false;
+      recommendation_authority: false;
+      betting_authority: false;
+    };
   };
   query_api?: {
     schema_version?: "scryglass:query-api:v1";
@@ -101,6 +126,8 @@ export type PackManifest = {
   ratings?: {
     source_mode?: string;
     source_as_of?: string;
+    source_game_count?: number;
+    source_identity_sha256?: string;
     window_years?: number[];
     map_rows?: number;
     team_rating_rows?: number;
@@ -294,17 +321,51 @@ export type ProfileGrade =
   | { status: "unavailable"; reason: string };
 
 export type DraftContribution = {
-  schema_version: "scryglass:composition-signal:v1";
+  schema_version: "scryglass:draft-descriptive-signal:v1";
   status: "available" | "limited" | "unavailable";
   model_version: string;
   fit_through: string | null;
+  archetype_interaction_source?: {
+    id: string;
+    status: string;
+    lcc_atoms: "excluded";
+    reason: string;
+  };
   blue: {
     signal: number | null;
     prior_role_games: number;
+    components?: {
+      base: number | null;
+      archetype_interactions: number | null;
+      ally_synergy: number | null;
+      enemy_counter: number | null;
+      same_role: number | null;
+    };
   };
   red: {
     signal: number | null;
     prior_role_games: number;
+    components?: {
+      base: number | null;
+      archetype_interactions: number | null;
+      ally_synergy: number | null;
+      enemy_counter: number | null;
+      same_role: number | null;
+    };
+  };
+  edge_components?: {
+    base: number | null;
+    archetype_interactions: number | null;
+    ally_synergy: number | null;
+    enemy_counter: number | null;
+    same_role: number | null;
+    total: number | null;
+  };
+  player_comfort?: {
+    status: "available" | "limited" | "unavailable" | string;
+    contribution: number | null;
+    source?: string | null;
+    reason?: string | null;
   };
   picks: Array<{
     side: "Blue" | "Red";
@@ -312,10 +373,18 @@ export type DraftContribution = {
     champion: string;
     contribution: number | null;
     prior_role_games: number;
-    evidence_status: "available" | "atom_estimate" | "limited" | "unavailable";
+    evidence_status: "available" | "atom_estimate" | "role_estimate" | "limited" | "unavailable";
     best_available?: boolean | null;
     tier_rank?: number | null;
     available_count?: number | null;
+    components?: {
+      base?: number | null;
+      archetype_interactions?: number | null;
+      ally_synergy?: number | null;
+      enemy_counter?: number | null;
+      same_role?: number | null;
+      total?: number | null;
+    };
   }>;
   note: string;
   reason?: string;
@@ -602,12 +671,93 @@ export function findRecordByName<T>(
   return entry?.[1];
 }
 
-/** Draft results stay private until an independent, release-bound receipt is published. */
+export type DraftAuthorityStatus = "unavailable" | "descriptive" | "promoted";
+
+const DRAFT_RECEIPT_SHA256 = /^[a-f0-9]{64}$/;
+const DRAFT_ISSUED_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
+
+function declaredDraftAuthority(
+  manifest: PackManifest,
+): DraftAuthorityStatus | null {
+  const authority = manifest.draft_authority;
+  if (!authority || authority.schema_version !== "scryglass:draft-authority:v1") return null;
+  const status = authority.authority ?? authority.status;
+  if (authority.authority && authority.status !== authority.authority) return null;
+  if (status !== "unavailable" && status !== "descriptive" && status !== "promoted") return null;
+  return status;
+}
+
+/**
+ * Validate the release binding that is safe for the browser to verify.
+ *
+ * The browser can verify the manifest release ID and the receipt digest shape.
+ * It cannot verify the receipt contents. Probability authority therefore
+ * remains behind the independent verifier used by the private release gate.
+ */
+function hasBoundDraftReceipt(manifest: PackManifest): boolean {
+  const authority = manifest.draft_authority;
+  return Boolean(
+    authority
+    && authority.release_id === manifest.pack_id
+    && typeof authority.model_version === "string"
+    && authority.model_version.trim().length > 0
+    && typeof authority.artifact_sha256 === "string"
+    && DRAFT_RECEIPT_SHA256.test(authority.artifact_sha256)
+    && typeof authority.receipt_sha256 === "string"
+    && DRAFT_RECEIPT_SHA256.test(authority.receipt_sha256)
+    && typeof authority.issued_utc === "string"
+    && DRAFT_ISSUED_UTC.test(authority.issued_utc)
+    && Number.isFinite(Date.parse(authority.issued_utc))
+  );
+}
+
+/** Return the manifest's verified public Draft state. */
+export function draftAuthorityStatus(manifest: PackManifest): DraftAuthorityStatus {
+  const status = declaredDraftAuthority(manifest);
+  if (!status || status === "unavailable") return "unavailable";
+  if (status === "promoted") {
+    const authority = manifest.draft_authority;
+    if (
+      authority?.authority !== "promoted"
+      || authority.estimand !== "prematch_map_win_probability_with_controlled_draft_intervention"
+      || authority.probability_authority !== true
+      || authority.recommendation_authority !== true
+      || authority.betting_authority !== false
+    ) return "unavailable";
+  }
+  return hasBoundDraftReceipt(manifest) ? status : "unavailable";
+}
+
+/** Descriptive Draft fields may render after their release-bound receipt passes. */
+export function hasDescriptiveDraftAuthority(manifest: PackManifest): boolean {
+  const status = draftAuthorityStatus(manifest);
+  if (status === "descriptive") return true;
+  const nested = manifest.draft_authority?.descriptive_authority;
+  return Boolean(
+    status === "promoted"
+    && nested?.schema_version === "scryglass:draft-authority:v1"
+    && nested.status === "descriptive"
+    && nested.authority === "descriptive"
+    && nested.release_id === manifest.pack_id
+    && nested.estimand === "composition_only"
+    && nested.model_version.trim()
+    && DRAFT_RECEIPT_SHA256.test(nested.artifact_sha256)
+    && DRAFT_RECEIPT_SHA256.test(nested.receipt_sha256)
+    && DRAFT_ISSUED_UTC.test(nested.issued_utc)
+    && Number.isFinite(Date.parse(nested.issued_utc))
+    && nested.probability_authority === false
+    && nested.recommendation_authority === false
+    && nested.betting_authority === false
+  );
+}
+
+/** Accept only the active manifest's complete release-bound promoted receipt. */
 export function hasPromotedDraftAuthority(manifest: PackManifest): boolean {
-  // The current release contract has no independent receipt verifier. Keep
-  // every draft surface closed until that verifier and its issuer exist.
-  void manifest;
-  return false;
+  return draftAuthorityStatus(manifest) === "promoted";
+}
+
+export function hasPublishedDraftAuthority(manifest: PackManifest): boolean {
+  return hasDescriptiveDraftAuthority(manifest) || hasPromotedDraftAuthority(manifest);
 }
 
 export function packUpdatedLabel(manifest: PackManifest): string {

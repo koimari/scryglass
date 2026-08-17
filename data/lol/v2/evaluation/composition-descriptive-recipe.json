@@ -1,0 +1,109 @@
+{
+  "schema_version": "scryglass:draft-descriptive-recipe:v1",
+  "status": "descriptive",
+  "estimand": "composition_only",
+  "model_version": "draft-recommendation-static-v2",
+  "source_artifact": "data/lol/models/draft_recommendation.json",
+  "source_artifact_version": 2,
+  "source_artifact_as_of": "2026-07-18T16:33:48Z",
+  "source_artifact_maps": 16334,
+  "source_artifact_commit": "87bcff462f6005269b94fd9e604c9e8b2b5ec9c0",
+  "scorer_code": {
+    "path": "lol_kills/research/descriptive_draft_score.py",
+    "sha256": "b9428e042af2aab8412b1a709f6d5ef2091b7c9317da3fbf83eb5da6eaaa956b"
+  },
+  "feature_schema": {
+    "id": "scryglass:draft-descriptive-features:v1",
+    "sha256": null,
+    "status": "unavailable",
+    "reason": "The legacy artifact has no separate serialized feature-schema file. The frozen recipe terms are the binding schema."
+  },
+  "source_snapshot": {
+    "id": "oracle-elixir-professional-maps-2025-2026",
+    "sha256": null,
+    "status": "unavailable",
+    "reason": "The source parquet snapshot used to fit the artifact is not distributed with this release."
+  },
+  "release_source_binding": {
+    "id": "canonical-accepted-public-pack-game-identities",
+    "sha256": null,
+    "status": "per_release_manifest",
+    "binding_field": "manifest.draft.source_identity_sha256",
+    "reason": "The current release digest is computed from accepted canonical rows during export. It is separate from the unavailable fit snapshot."
+  },
+  "included_terms": [
+    "champion_effects",
+    "role_conditioned_champion_effects",
+    "ally_synergy",
+    "archetype_interactions",
+    "enemy_counter",
+    "same_role",
+    "archetype_synergy",
+    "archetype_counters"
+  ],
+  "archetype_interaction_source": {
+    "id": "legacy-manual-archetype-tags-v1",
+    "status": "bound_in_artifact",
+    "lcc_atoms": "excluded",
+    "reason": "LCC-derived atoms remain research-only and are not part of this descriptive release."
+  },
+  "excluded_terms": [
+    "team_controls",
+    "player_controls",
+    "team_rating",
+    "player_rating",
+    "elo",
+    "pace",
+    "kill_beta",
+    "phase_curve",
+    "live_state",
+    "outcome_probability",
+    "r9e",
+    "development_composite",
+    "match_probability",
+    "match_win_expectation",
+    "odds",
+    "ev"
+  ],
+  "public_contract": {
+    "unit": "descriptive model units",
+    "probability_fields": false,
+    "component_fields": [
+      "base",
+      "archetype_interactions",
+      "ally_synergy",
+      "player_comfort",
+      "enemy_counter",
+      "same_role",
+      "total"
+    ]
+  },
+  "source_patch_binding": {
+    "oracle_elixir_tokens": ["16.15", "16.16"],
+    "public_patches": ["26.15", "26.16"],
+    "note": "The artifact is dated 2026-07-18. Newer accepted 16.16 rows are scored descriptively with this fixed artifact and are not treated as an artifact refit."
+  },
+  "evaluation": {
+    "artifact_auc": 0.687456,
+    "artifact_auc_status": "historical evidence for the frozen static artifact",
+    "benchmark_auc": 0.70606,
+    "benchmark_status": "mixed controlled R9E benchmark only; not composition-only authority",
+    "benchmark_source_commit": "fdf8dd15",
+    "benchmark_holdout_rows": 13682,
+    "benchmark_source_as_of": "2026-08-13T17:26:34Z",
+    "benchmark_patch_ceiling": "source 16.15",
+    "composition_only_auc_status": "unverified",
+    "split": "Three rolling-origin development folds through the first 85%; final 15% chronological evaluation",
+    "regional_holdout": "unavailable: artifact report has no regional holdout",
+    "patch_holdout": "unavailable: artifact report has no patch holdout",
+    "roster_change_holdout": "unavailable: artifact report has no roster-change holdout",
+    "calibration": "artifact probability metrics are evidence only and are not public authority"
+  },
+  "player_comfort": {
+    "status": "unavailable",
+    "contribution": null,
+    "source": null,
+    "sha256": null,
+    "reason": "No player familiarity input is included in the frozen static artifact."
+  }
+}

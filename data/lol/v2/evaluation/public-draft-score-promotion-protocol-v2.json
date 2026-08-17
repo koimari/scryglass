@@ -1,0 +1,11 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v2",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T13:59:01Z",
+  "inherits": "public-draft-score-promotion-protocol-v1.json",
+  "iteration": {
+    "id": "v2",
+    "single_change": "Warm team and player rating state with source-bound 2023 and 2024 Oracle's Elixir history. Keep the 2025 and 2026 evaluation maps, folds, feature groups, forest grid, calibration rule, and promotion gates unchanged.",
+    "previous_receipt": "3d187f6c52ec3c2fc566a7b5dea413458ebeee5a408e62cc9eb70e65f075cd1b"
+  }
+}

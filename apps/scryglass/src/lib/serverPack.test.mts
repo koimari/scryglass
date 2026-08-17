@@ -40,7 +40,7 @@ test("local E2E data needs its exact flag and can never activate on Vercel", () 
 
 function manifest(
   releaseId = RELEASE_ID,
-  options: { queryApi?: boolean; draftStatus?: "unavailable" | "promoted" } = {},
+  options: { queryApi?: boolean; draftStatus?: "unavailable" | "descriptive" | "promoted" } = {},
 ): PackManifest & {
   release: { release_id: string; artifact_hashes: Record<string, string> };
 } {
@@ -70,10 +70,19 @@ function manifest(
     result.draft_authority = {
       schema_version: "scryglass:draft-authority:v1",
       status: options.draftStatus,
+      authority: options.draftStatus,
       release_id: releaseId,
-      model_version: options.draftStatus === "promoted" ? "test-model" : null,
-      receipt_sha256: options.draftStatus === "promoted" ? "a".repeat(64) : null,
+      model_version: options.draftStatus === "unavailable" ? null : "test-model",
+      artifact_sha256: options.draftStatus === "unavailable" ? null : "b".repeat(64),
+      receipt_sha256: options.draftStatus === "unavailable" ? null : "a".repeat(64),
+      issued_utc: options.draftStatus === "unavailable" ? null : "2026-08-13T18:31:17Z",
       reason: options.draftStatus === "promoted" ? null : "model_not_promoted",
+      ...(options.draftStatus === "promoted" ? {
+        estimand: "prematch_map_win_probability_with_controlled_draft_intervention",
+        probability_authority: true,
+        recommendation_authority: true,
+        betting_authority: false,
+      } : {}),
     };
   }
   return result;
@@ -282,8 +291,16 @@ test("public asset paths use the canonical allowlist", () => {
 });
 
 test("public manifest removes internal fields and binds same-origin asset URLs", () => {
-  const result = publicPackManifest(manifest());
+  const candidate = manifest();
+  candidate.ratings = {
+    source_as_of: "2026-08-13T18:00:00Z",
+    source_game_count: 2,
+    source_identity_sha256: "c".repeat(64),
+  };
+  const result = publicPackManifest(candidate);
   assert.equal(result.release_id, RELEASE_ID);
+  assert.equal(result.source_game_count, 2);
+  assert.equal(result.source_identity_sha256, "c".repeat(64));
   assert.equal(result.files[0]?.url, `/api/assets/${RELEASE_ID}/features%2Fteam_records.json`);
   assert.deepEqual(Object.keys(result.files[0] ?? {}).sort(), ["bytes", "path", "sha256", "url"]);
 });
@@ -297,6 +314,53 @@ test("unpromoted draft records stay outside the public manifest", () => {
   candidate.total_bytes += 10;
   candidate.release.artifact_hashes[draftPath] = draftSha;
   assert.equal(publicPackManifest(candidate).files.some((file) => file.path === draftPath), false);
+
+  const descriptive = manifest(RELEASE_ID, { draftStatus: "descriptive" });
+  descriptive.files.push({ path: draftPath, bytes: 10, rows: 0, cols: 0, sha256: draftSha });
+  descriptive.total_files += 1;
+  descriptive.total_bytes += 10;
+  descriptive.release.artifact_hashes[draftPath] = draftSha;
+  assert.equal(publicPackManifest(descriptive).files.some((file) => file.path === draftPath), true);
+});
+
+test("promoted results require promoted probability authority", () => {
+  const promotedPath = "features/promoted_draft_results.json";
+  const promotedSha = "e".repeat(64);
+  const withPromotedAsset = (
+    draftStatus: "unavailable" | "descriptive" | "promoted",
+  ) => {
+    const candidate = manifest(RELEASE_ID, { draftStatus });
+    candidate.files.push({
+      path: promotedPath,
+      bytes: 10,
+      rows: 1,
+      cols: 0,
+      sha256: promotedSha,
+    });
+    candidate.total_files += 1;
+    candidate.total_bytes += 10;
+    candidate.release.artifact_hashes[promotedPath] = promotedSha;
+    return candidate;
+  };
+
+  assert.equal(
+    publicPackManifest(withPromotedAsset("unavailable")).files.some(
+      (file) => file.path === promotedPath,
+    ),
+    false,
+  );
+  assert.equal(
+    publicPackManifest(withPromotedAsset("descriptive")).files.some(
+      (file) => file.path === promotedPath,
+    ),
+    false,
+  );
+  assert.equal(
+    publicPackManifest(withPromotedAsset("promoted")).files.some(
+      (file) => file.path === promotedPath,
+    ),
+    true,
+  );
 });
 
 test("public manifest rejects release and digest conflicts", () => {

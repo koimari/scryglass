@@ -3,8 +3,9 @@ import type { ProfileGame, ProfileRecords } from "./pack";
 export type DraftTeamRow = {
   team: string;
   games: number;
-  draft_win_share: number;
   draft_edge: number;
+  /** Share of complete games where this team had a positive draft edge. */
+  positive_edge_rate?: number | null;
   league?: string | null;
   tier?: string | null;
 };
@@ -12,7 +13,7 @@ export type DraftTeamRow = {
 export type DraftPlayerRow = {
   player: string;
   games: number;
-  draft_score: number | null;
+  pick_contribution: number | null;
   /** Share of evaluated picks that were the highest-ranked available pick. */
   best_available_rate?: number | null;
   role?: string | null;
@@ -41,7 +42,7 @@ type TeamAggregate = {
   tier: string | null;
   league: string | null;
   scores: number[];
-  winShares: number[];
+  positiveEdges: number;
 };
 
 type PlayerAggregate = {
@@ -84,12 +85,11 @@ function addTeamEvidence(
   tier: string | null,
   league: string | null,
   score: number,
-  winShare: number,
 ): void {
   const key = scopeKey(team, tier, league);
-  const aggregate = aggregates.get(key) ?? { team, tier, league, scores: [], winShares: [] };
+  const aggregate = aggregates.get(key) ?? { team, tier, league, scores: [], positiveEdges: 0 };
   aggregate.scores.push(score);
-  aggregate.winShares.push(winShare);
+  if (score > 0) aggregate.positiveEdges += 1;
   aggregates.set(key, aggregate);
 }
 
@@ -142,10 +142,6 @@ function round(value: number): number {
   return Number(value.toFixed(4));
 }
 
-function winShare(edge: number): number {
-  return 1 / (1 + Math.exp(-edge));
-}
-
 function inferScope(records: ProfileRecords): DraftRankingsScope {
   if (records.window_days <= 0) return "whole_archive";
   const timestamps = Object.values(records.games)
@@ -169,22 +165,22 @@ function rowMatchesScope(row: { league?: string | null; tier?: string | null }, 
 }
 
 function aggregateTeamRows(rows: DraftTeamRow[]): DraftTeamRow[] {
-  const aggregates = new Map<string, { games: number; edge: number; winShare: number }>();
+  const aggregates = new Map<string, { games: number; edge: number; positiveEdges: number }>();
   for (const row of rows) {
-    const aggregate = aggregates.get(row.team) ?? { games: 0, edge: 0, winShare: 0 };
+    const aggregate = aggregates.get(row.team) ?? { games: 0, edge: 0, positiveEdges: 0 };
     aggregate.games += row.games;
     aggregate.edge += row.draft_edge * row.games;
-    aggregate.winShare += row.draft_win_share * row.games;
+    if (row.positive_edge_rate != null) aggregate.positiveEdges += row.positive_edge_rate * row.games;
     aggregates.set(row.team, aggregate);
   }
   return [...aggregates.entries()]
     .map(([team, aggregate]) => ({
       team,
       games: aggregate.games,
-      draft_win_share: round(aggregate.winShare / aggregate.games),
       draft_edge: round(aggregate.edge / aggregate.games),
+      positive_edge_rate: aggregate.games > 0 ? round(aggregate.positiveEdges / aggregate.games) : null,
     }))
-    .sort((left, right) => right.draft_win_share - left.draft_win_share || right.draft_edge - left.draft_edge || right.games - left.games || left.team.localeCompare(right.team));
+    .sort((left, right) => right.draft_edge - left.draft_edge || right.games - left.games || left.team.localeCompare(right.team));
 }
 
 function aggregatePlayerRows(rows: DraftPlayerRow[]): DraftPlayerRow[] {
@@ -208,8 +204,8 @@ function aggregatePlayerRows(rows: DraftPlayerRow[]): DraftPlayerRow[] {
       teams: new Map(),
     };
     aggregate.games += row.games;
-    if (finite(row.draft_score)) {
-      aggregate.score += row.draft_score * row.games;
+    if (finite(row.pick_contribution)) {
+      aggregate.score += row.pick_contribution * row.games;
       aggregate.scoreGames += row.games;
     }
     if (finite(row.best_available_rate)) {
@@ -224,7 +220,7 @@ function aggregatePlayerRows(rows: DraftPlayerRow[]): DraftPlayerRow[] {
     .map(([player, aggregate]) => ({
       player,
       games: aggregate.games,
-      draft_score: aggregate.scoreGames ? round(aggregate.score / aggregate.scoreGames) : null,
+      pick_contribution: aggregate.scoreGames ? round(aggregate.score / aggregate.scoreGames) : null,
       best_available_rate: aggregate.evaluatedPicks ? round(aggregate.bestAvailablePicks / aggregate.evaluatedPicks) : null,
       role: mostCommon(aggregate.roles),
       team: mostCommon(aggregate.teams),
@@ -232,7 +228,7 @@ function aggregatePlayerRows(rows: DraftPlayerRow[]): DraftPlayerRow[] {
     .sort((left, right) => (
       (right.best_available_rate ?? -Infinity) - (left.best_available_rate ?? -Infinity)
       || right.games - left.games
-      || (right.draft_score ?? -Infinity) - (left.draft_score ?? -Infinity)
+      || (right.pick_contribution ?? -Infinity) - (left.pick_contribution ?? -Infinity)
       || left.player.localeCompare(right.player)
     ));
 }
@@ -251,8 +247,46 @@ export function filterDraftRankings(rankings: DraftRankings, filters: DraftRanki
 }
 
 /**
+ * Return true only when all pre-game draft facts needed for a descriptive
+ * score are present. Missing facts stay unavailable at the UI boundary.
+ */
+export function hasCompleteCompositionEvidence(game: ProfileGame): boolean {
+  const contribution = game.draft_contribution;
+  return contribution?.status === "available"
+    && finite(contribution.blue.signal)
+    && finite(contribution.red.signal);
+}
+
+export function hasCompleteDraftEvidence(game: ProfileGame): boolean {
+  const pool = game.draft_pool;
+  if (!pool || pool.status !== "complete" || !pool.patch || !game.competition_tier?.trim()) return false;
+  const bans = [...(pool.bans?.Blue ?? []), ...(pool.bans?.Red ?? [])];
+  const picked = pool.picked ?? [];
+  const orders = picked.map((pick) => pick.order);
+  const numericOrders = orders.filter((order): order is number => typeof order === "number" && Number.isInteger(order));
+  const normalizeRole = (role: string | null): string => ({ jungle: "jungle", jng: "jungle", adc: "bot", bot: "bot", sup: "support", support: "support" }[role?.trim().toLowerCase() ?? ""] ?? role?.trim().toLowerCase() ?? "");
+  const completeSides = (["Blue", "Red"] as const).every((side) => {
+    const sidePicks = picked.filter((pick) => pick.side === side);
+    const roles = sidePicks.map((pick) => normalizeRole(pick.role));
+    return sidePicks.length === 5
+      && roles.every((role) => ["top", "jungle", "mid", "bot", "support"].includes(role))
+      && new Set(roles).size === 5;
+  });
+  return (
+    bans.length === 10
+    && new Set(bans).size === 10
+    && picked.length === 10
+    && new Set(picked.map((pick) => pick.champion)).size === 10
+    && numericOrders.length === 10
+    && numericOrders.every((order) => order >= 1 && order <= 10)
+    && new Set(numericOrders).size === 10
+    && completeSides
+  );
+}
+
+/**
  * Build compact, scope-aware rankings from published profile evidence.
- * A team row stores the per-game average of the descriptive draft win share.
+ * A team row stores the per-game mean descriptive edge in model units.
  * Player rows publish a best-available rate alongside the underlying
  * contribution. The rate is attached to each pick only after the public
  * record has complete bans, pick order, patch identity, and tier evidence.
@@ -265,7 +299,7 @@ export function draftRankingsFromProfile(records: ProfileRecords): DraftRankings
   for (const game of Object.values(records.games)) {
     const contribution = game.draft_contribution;
     const poolPicks = game.draft_pool?.picked ?? [];
-    if (!contribution && !poolPicks.length) continue;
+    if (!hasCompleteCompositionEvidence(game) || contribution?.status !== "available") continue;
 
     const blueSignal = contribution?.blue.signal;
     const redSignal = contribution?.red.signal;
@@ -273,11 +307,12 @@ export function draftRankingsFromProfile(records: ProfileRecords): DraftRankings
     const league = game.league?.trim() || null;
     if (finite(blueSignal) && finite(redSignal)) {
       const edge = blueSignal - redSignal;
-      const blueShare = winShare(edge);
-      addTeamEvidence(teamAggregates, game.blue_team, tier, league, edge, blueShare);
-      addTeamEvidence(teamAggregates, game.red_team, tier, league, -edge, 1 - blueShare);
+      addTeamEvidence(teamAggregates, game.blue_team, tier, league, edge);
+      addTeamEvidence(teamAggregates, game.red_team, tier, league, -edge);
       evidenceGames += 1;
     }
+
+    if (!hasCompleteDraftEvidence(game)) continue;
 
     const contributionPicks = contribution?.picks ?? [];
     const contributionFor = (side: "Blue" | "Red", role: string, champion: string) => contributionPicks.find(
@@ -314,19 +349,19 @@ export function draftRankingsFromProfile(records: ProfileRecords): DraftRankings
     .map((aggregate) => ({
       team: aggregate.team,
       games: aggregate.scores.length,
-      draft_win_share: round(average(aggregate.winShares)),
       draft_edge: round(average(aggregate.scores)),
+      positive_edge_rate: round(aggregate.positiveEdges / aggregate.scores.length),
       league: aggregate.league,
       tier: aggregate.tier,
     }))
-    .sort((left, right) => right.draft_win_share - left.draft_win_share || right.draft_edge - left.draft_edge || right.games - left.games || left.team.localeCompare(right.team));
+    .sort((left, right) => right.draft_edge - left.draft_edge || right.games - left.games || left.team.localeCompare(right.team));
 
   const players = [...playerAggregates.values()]
     .filter((aggregate) => aggregate.evaluatedPicks >= 5)
     .map((aggregate) => ({
       player: aggregate.player,
       games: aggregate.evaluatedPicks,
-      draft_score: aggregate.scores.length ? round(average(aggregate.scores)) : null,
+      pick_contribution: aggregate.scores.length ? round(average(aggregate.scores)) : null,
       best_available_rate: round(aggregate.bestAvailablePicks / aggregate.evaluatedPicks),
       role: mostCommon(aggregate.roles),
       team: mostCommon(aggregate.teams),
@@ -336,7 +371,7 @@ export function draftRankingsFromProfile(records: ProfileRecords): DraftRankings
     .sort((left, right) => (
       (right.best_available_rate ?? -Infinity) - (left.best_available_rate ?? -Infinity)
       || right.games - left.games
-      || (right.draft_score ?? -Infinity) - (left.draft_score ?? -Infinity)
+      || (right.pick_contribution ?? -Infinity) - (left.pick_contribution ?? -Infinity)
       || left.player.localeCompare(right.player)
     ));
 

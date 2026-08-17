@@ -348,6 +348,49 @@ def test_complete_new_game_publishes_manifest_last(tmp_path: Path) -> None:
     assert pointer["release"]["canonical_game_identity_digest"]
 
 
+def test_tier_preparation_is_bound_before_pack_export(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    _write_receipt(tmp_path, ["game-1"])
+    config.state_path.parent.mkdir(parents=True)
+    config.state_path.write_text(json.dumps({"published_game_ids": ["game-1"]}), encoding="utf-8")
+
+    def build(root: Path):
+        _write_live(root, ["game-1", "game-2"])
+        return {}
+
+    seen: dict[str, object] = {}
+
+    def prepare(source_latest: str | None, source: dict[str, object]):
+        seen["source_latest"] = source_latest
+        seen["source_identity"] = source["identity_sha256"]
+        return {
+            "status": "available",
+            "production_status": "production_built",
+            "tier_schema_version": "rankings-tierlists-v2",
+            "payload_sha256": "a" * 64,
+            "receipt_sha256": "b" * 64,
+            "source_observed_through": source_latest,
+        }
+
+    def export(*, out_root: Path, pack_id: str, tier_publication=None, **_kwargs):
+        seen["tier_publication"] = tier_publication
+        return _manifest(out_root / pack_id, ["game-1", "game-2"])
+
+    result = sync_once(
+        config,
+        now=NOW,
+        ingest_fn=_ingest(tmp_path, ["game-1", "game-2"]),
+        build_live_fn=build,
+        export_pack_fn=export,
+        prepare_tier_fn=prepare,
+    )
+
+    assert seen["source_latest"] == "2026-08-09T17:00:00Z"
+    assert seen["source_identity"] == source_identity_sha256(["game-1", "game-2"])
+    assert seen["tier_publication"]["production_status"] == "production_built"
+    assert result["tier_publication"]["receipt_sha256"] == "b" * 64
+
+
 def test_corrected_game_rebuilds_when_no_identity_is_new(tmp_path: Path) -> None:
     config = _config(tmp_path)
     _write_receipt(tmp_path, ["game-1"])

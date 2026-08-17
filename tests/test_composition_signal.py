@@ -6,6 +6,8 @@ import pandas as pd
 
 from lol_kills.research.composition_signal import (
     ATOM_CORPUS_PATH,
+    DESCRIPTIVE_EXCLUDED_TERMS,
+    DESCRIPTIVE_MODEL_VERSION,
     FittedCompositionModel,
     REGULARIZATION_C,
     _apply_oof_recalibration,
@@ -22,6 +24,7 @@ from lol_kills.research.composition_signal import (
     public_signal_for_game,
     score_games_temporally,
     _composition_code_digest,
+    _descriptive_feature_names,
 )
 
 import numpy as np
@@ -54,6 +57,7 @@ def _rows(game_id: str, date: str, result: int, *, suffix: str = "") -> list[dic
                     "game_uid": game_id,
                     "date": date,
                     "league": "LCS",
+                    "competition_tier": "tier1",
                     "patch": "16.15",
                     "side": side,
                     "teamname": team,
@@ -75,6 +79,13 @@ def _games(*rows: list[dict[str, object]]) -> list[dict[str, object]]:
         ]
     )
     return build_composition_games(frame, strength_features=strength)
+
+
+def test_composition_game_keeps_its_release_scope() -> None:
+    game = build_composition_games(pd.DataFrame(_rows("scope", "2026-01-01", 1)))[0]
+
+    assert game["league"] == "LCS"
+    assert game["competition_tier"] == "tier1"
 
 
 def _rows_with_extras(game_id: str, date: str, result: int) -> list[dict[str, object]]:
@@ -108,6 +119,73 @@ def test_target_result_does_not_change_its_composition_signal() -> None:
         target_game_ids={"target"},
         min_training_games=2,
         min_support_games=1,
+    )
+    assert first.signals["target"] == second.signals["target"]
+
+
+def test_public_descriptive_scorer_has_no_context_controls() -> None:
+    training = [
+        *_rows("old-1", "2026-01-01", 1),
+        *_rows("old-2", "2026-01-02", 0),
+    ]
+    games = build_composition_games(pd.DataFrame(training))
+    names = _descriptive_feature_names(games)
+    assert names
+    assert all(name.startswith(("draft|", "atom|")) for name in names)
+    assert not any(name.startswith(("control|", "league|", "patch|")) for name in names)
+    assert {
+        "pre_game_team_strength_gap",
+        "rating_uncertainty",
+        "momentum",
+        "live_state",
+        "outcome",
+        "r9e_state_space",
+    }.issubset(DESCRIPTIVE_EXCLUDED_TERMS)
+
+    result = score_games_temporally(
+        games,
+        target_game_ids={"old-2"},
+        min_training_games=1,
+        min_support_games=1,
+        composition_only=True,
+    )
+    signal = result.signals["old-2"]
+    assert result.audit["estimand"] == "composition_only"
+    assert result.audit["model_version"] == DESCRIPTIVE_MODEL_VERSION
+    assert signal["estimand"] == "composition_only"
+    assert "probability" not in signal
+
+
+def test_public_descriptive_score_is_invariant_to_strength_and_patch_controls() -> None:
+    games = build_composition_games(
+        pd.DataFrame(
+            [
+                *_rows("old-1", "2026-01-01", 1),
+                *_rows("old-2", "2026-01-02", 0),
+                *_rows("target", "2026-01-03", 1),
+            ]
+        )
+    )
+    first = score_games_temporally(
+        games,
+        target_game_ids={"target"},
+        min_training_games=2,
+        min_support_games=1,
+        composition_only=True,
+    )
+    changed = deepcopy(games)
+    changed_target = next(game for game in changed if game["game_uid"] == "target")
+    changed_target["mu_diff"] = 9999.0
+    changed_target["sigma_pair"] = 0.0
+    changed_target["league"] = "OTHER"
+    changed_target["patch"] = "99.99"
+    changed_target["y"] = 0
+    second = score_games_temporally(
+        changed,
+        target_game_ids={"target"},
+        min_training_games=2,
+        min_support_games=1,
+        composition_only=True,
     )
     assert first.signals["target"] == second.signals["target"]
 

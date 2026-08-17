@@ -1,0 +1,34 @@
+name: Public release smoke
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: "Expected release ID. Leave empty to verify the active release."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-release-smoke
+  cancel-in-progress: true
+
+jobs:
+  production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+      - name: Verify one public release
+        env:
+          EXPECTED_RELEASE_ID: ${{ inputs.release_id }}
+        run: |
+          args=(--site https://scryglass.xyz)
+          if [[ -n "${EXPECTED_RELEASE_ID}" ]]; then
+            args+=(--release-id "${EXPECTED_RELEASE_ID}")
+          fi
+          python3 .codex/skills/run-scryglass-public-release/scripts/verify_live_release.py "${args[@]}"

@@ -77,8 +77,28 @@ function game(
     red_team: redTeam,
     blue_win: 1,
     players: [],
+    draft_pool: {
+      schema_version: "scryglass:draft-pool:v1",
+      status: "complete",
+      source: "published-tier-list",
+      patch: "26.16",
+      bans: {
+        Blue: ["BanA", "BanB", "BanC", "BanD", "BanE"],
+        Red: ["BanF", "BanG", "BanH", "BanI", "BanJ"],
+      },
+      picked: [
+        "Ahri", "Azir", "Jinx", "Nautilus", "Gnar",
+        "Orianna", "Sejuani", "Varus", "Rakan", "Renekton",
+      ].map((champion, index) => ({
+        side: index < 5 ? "Blue" as const : "Red" as const,
+        role: ["mid", "jungle", "bot", "support", "top"][index % 5],
+        champion,
+        order: index + 1,
+      })),
+      unpicked: [],
+    },
     draft_contribution: {
-      schema_version: "scryglass:composition-signal:v1",
+      schema_version: "scryglass:draft-descriptive-signal:v1",
       status,
       model_version: "test",
       fit_through: null,
@@ -96,8 +116,8 @@ test("team draft scores support best, worst, and the ordered rows between", () =
   const worst = queryTeamDraftScores(records, "which team has the worst draft score");
   assert.deepEqual(best.rows.map((row) => row.team), ["T1", "Gen.G", "HLE", "KT"]);
   assert.deepEqual(worst.rows.map((row) => row.team), ["KT", "HLE", "Gen.G", "T1"]);
-  assert.match(best.answer.headline, /T1 has the highest average published draft win share/);
-  assert.match(worst.answer.headline, /KT has the lowest average published draft win share/);
+  assert.match(best.answer.headline, /T1 has the highest average descriptive draft edge/);
+  assert.match(worst.answer.headline, /KT has the lowest average descriptive draft edge/);
   assert.match(best.answer.basis, /Tier 1/);
 
   const fullOrder = queryTeamDraftScores(records, "show team draft scores from best to worst");
@@ -110,7 +130,7 @@ test("team draft rankings support limits, sample floors, and named teams", () =>
 
   const named = queryTeamDraftScores(records, "what is T1's draft score?");
   assert.deepEqual(named.rows.map((row) => row.team), ["T1"]);
-  assert.match(named.answer.headline, /67%/);
+  assert.match(named.answer.headline, /\+0\.70 model units/);
   assert.match(named.answer.headline, /across 3 games/);
 
   const allTiers = queryTeamDraftScores(records, "best team draft score across all tiers with at least 1 draft");
@@ -122,12 +142,12 @@ test("team draft scores compare two teams over their published history", () => {
   assert.equal(comparison.kind, "team_draft_comparison");
   assert.deepEqual(comparison.rows.map((row) => row.team), ["T1", "Gen.G"]);
   assert.equal(comparison.comparison?.winner, "T1");
-  assert.match(comparison.answer.headline, /T1 has the higher average published draft win share in the active 90-day profile window/);
-  assert.match(comparison.answer.headline, /67%/);
-  assert.match(comparison.answer.headline, /49%/);
-  assert.match(comparison.answer.headline, /18 percentage-point edge/);
-  assert.ok((comparison.comparison?.win_share_gap ?? 0) > 0.16);
-  assert.doesNotMatch(comparison.answer.headline, /[+-]\d+\.\d{2}/);
+  assert.match(comparison.answer.headline, /T1 has the higher average descriptive draft edge in the active 90-day profile window/);
+  assert.match(comparison.answer.headline, /\+0\.70 model units/);
+  assert.match(comparison.answer.headline, /-0\.03 model units/);
+  assert.match(comparison.answer.headline, /gap is 0\.73 model-unit for T1/);
+  assert.ok((comparison.comparison?.difference ?? 0) > 0.7);
+  assert.match(comparison.answer.headline, /[+-]\d+\.\d{2}/);
   assert.match(comparison.answer.basis, /active 90-day profile window/);
   assert.match(comparison.answer.basis, /not all seasons/);
 
@@ -143,16 +163,16 @@ test("team draft comparisons resolve common team aliases", () => {
   assert.deepEqual(comparison.rows.map((row) => row.team), ["Karmine Corp", "G2 Esports"]);
 });
 
-test("draft rankings use the visible win-share percentage metric", () => {
+test("draft rankings use the descriptive edge metric", () => {
   const result = queryTeamDraftScores(shareRankingRecords, "which team has the best draft with at least 2 drafts");
   assert.equal(result.rows[0]?.team, "ShareHigh");
-  assert.match(result.answer.headline, /ShareHigh has the highest average published draft win share at 60%/);
+  assert.match(result.answer.headline, /ShareHigh has the highest average descriptive draft edge at \+0\.40 model units/);
 });
 
 test("team draft rankings stay inside the requested league", () => {
   const result = queryTeamDraftScores(leagueRecords, "which team has the best draft in LEC?");
   assert.deepEqual(result.rows.map((row) => row.team), ["LEC High"]);
-  assert.match(result.answer.headline, /LEC High has the highest average published draft win share in LEC at 88%/);
+  assert.match(result.answer.headline, /LEC High has the highest average descriptive draft edge in LEC at \+2\.00 model units/);
   assert.match(result.answer.basis, /Ranked 1 team .* in LEC, Tier 1/);
 
   const emea = queryTeamDraftScores(leagueRecords, "which team has the best draft in EMEA?");

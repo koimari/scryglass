@@ -1,0 +1,21 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v25",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T21:27:47Z",
+  "inherits": "public-draft-score-promotion-protocol-v24.json",
+  "iteration": {
+    "id": "v25",
+    "single_change": "Add 2.302585092994046 as an inner-window momentum weight. The matrix stores the accepted seven-game scale-80 residual in Elo-point units. Multiplying its points-over-400 term by ln(10) places it on the same base-10 Elo logit scale as the team and player ratings. Preserve all prior momentum choices.",
+    "previous_receipt": "e6137836b80fab4ec253e2b664ef840ece9f45806bbc5b44cc3b69ee32a6ac62",
+    "matrix_sha256": "0f9de19c3849c4d4454a833391626257552ee498e35e243e0309a5ac2a0ebf1c"
+  },
+  "selection_extension": {
+    "anchor_momentum_weights": [
+      0.0,
+      0.5,
+      1.0,
+      1.5,
+      2.302585092994046
+    ]
+  }
+}

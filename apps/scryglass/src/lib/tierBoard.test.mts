@@ -8,6 +8,7 @@ import {
   regionalOptions,
   regionalViewForRole,
   rowsForMode,
+  tierGameCount,
   viableCandidates,
   type StructuralSimilarity,
   type TierRow,
@@ -38,6 +39,17 @@ function row(overrides: Partial<TierRow> = {}): TierRow {
 test("first-pick values fall back to the published tier bucket", () => {
   assert.equal(firstPickMetric(row()), "A");
   assert.equal(firstPickMetric(row({ tier_value_pp: 4.25 })), "+4.3 percentage points");
+});
+
+test("patch game count uses all champion appearances", () => {
+  const rows = [
+    row({ role: "top", champion: "Riven", played_maps: 8 }),
+    row({ role: "top", champion: "Gnar", played_maps: 6 }),
+    row({ role: "jungle", champion: "Vi", played_maps: 7 }),
+    row({ role: "jungle", champion: "Sejuani", played_maps: 7 }),
+  ];
+
+  assert.equal(tierGameCount(rows), 7);
 });
 
 test("matchup-only modes omit rows without their required evidence", () => {

@@ -28,6 +28,9 @@ type LeaderboardRow = {
   grade_a_games: number;
   grade_games: number;
   recent_form: number | null;
+  draft_edge?: number | null;
+  positive_edge_rate?: number | null;
+  best_available_rate?: number | null;
 };
 
 type PlayerQueryRow = LeaderboardRow & {
@@ -50,11 +53,11 @@ type PlayerQueryResult = {
 
 type TeamDraftRow = {
   team: string;
-  average_score: number;
-  average_win_share: number;
+  average_edge: number;
   games: number;
-  best_score: number;
-  worst_score: number;
+  best_edge: number;
+  worst_edge: number;
+  positive_edge_rate: number | null;
 };
 
 type TeamDraftQueryResult = {
@@ -127,6 +130,10 @@ function percentage(value: number | null | undefined): string {
   return value == null || !Number.isFinite(value) ? "—" : `${Math.round(value * 100)}%`;
 }
 
+function draftEdge(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(value) ? "—" : `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
+}
+
 function roleName(value: string | null | undefined): string {
   const roles: Record<string, string> = {
     bot: "Bot",
@@ -169,38 +176,41 @@ function table(children: React.ReactNode): React.ReactNode {
 function leaderboardTable(rows: LeaderboardRow[], category: string): React.ReactNode {
   if (category === "teams_draft" || category === "players_draft") {
     const teamsDraft = category === "teams_draft";
-    const chartRows: DataBarRow[] = rows.flatMap((row) => row.recent_form == null ? [] : [{
+    const chartRows: DataBarRow[] = rows.flatMap((row) => {
+      const value = teamsDraft ? row.draft_edge : row.best_available_rate;
+      return value == null ? [] : [{
       id: row.name,
       label: row.name,
       href: teamsDraft ? `/elo/team/${teamSlug(row.name)}` : `/elo/player/${playerSlug(row.name)}`,
-      value: row.recent_form,
-      valueLabel: `${Math.round(row.recent_form * 100)}%`,
+      value,
+      valueLabel: teamsDraft ? draftEdge(value) : percentage(value),
       detail: `${row.games} ${teamsDraft ? "games" : "picks"}${row.role ? ` · ${roleName(row.role)}` : ""}`,
-      tone: teamsDraft ? (row.recent_form >= 0.5 ? "positive" : "negative") : "positive",
-    }]);
+      tone: teamsDraft ? (value >= 0 ? "positive" : "negative") : "positive",
+    }];
+    });
     return (
       <>
         <DataBars
           className={styles.chatChart}
-          title={teamsDraft ? "Team draft win share" : "Player best-available rate"}
-          description={teamsDraft ? "Published per-game draft estimate" : "Published pick evidence"}
+          title={teamsDraft ? "Team draft edge" : "Player best-available rate"}
+          description={teamsDraft ? "Descriptive edge in model units" : "Published pick evidence"}
           rows={chartRows}
-          domain={{ min: 0, max: 1 }}
-          baseline={teamsDraft ? 0.5 : undefined}
-          baselineLabel={teamsDraft ? "50% even" : undefined}
-          axisLeft="0%"
-          axisRight="100%"
+          domain={teamsDraft ? { min: Math.min(0, ...chartRows.map((row) => row.value)), max: Math.max(0, ...chartRows.map((row) => row.value)) } : { min: 0, max: 1 }}
+          baseline={teamsDraft ? 0 : undefined}
+          baselineLabel={teamsDraft ? "0 even" : undefined}
+          axisLeft={teamsDraft ? "lower" : "0%"}
+          axisRight={teamsDraft ? "higher" : "100%"}
         />
         {table(
           <table className={styles.resultTable}>
-            <thead><tr>{teamsDraft ? <th>Team</th> : <th>Player</th>}{teamsDraft ? null : <th>Role</th>}<th className={styles.numeric}>Games</th><th className={styles.numeric}>{teamsDraft ? "Draft win share" : "Best-available rate"}</th></tr></thead>
+            <thead><tr>{teamsDraft ? <th>Team</th> : <th>Player</th>}{teamsDraft ? null : <th>Role</th>}<th className={styles.numeric}>{teamsDraft ? "Games" : "Picks"}</th><th className={styles.numeric}>{teamsDraft ? "Draft edge" : "Best-available rate"}</th></tr></thead>
             <tbody>
               {rows.map((row) => (
                 <tr key={row.name}>
                   <td><a className="row-link" href={teamsDraft ? `/elo/team/${teamSlug(row.name)}` : `/elo/player/${playerSlug(row.name)}`}>{present(row.name)}</a></td>
                   {teamsDraft ? null : <td>{roleName(row.role)}</td>}
                   <td className={styles.numeric}>{present(row.games)}</td>
-                  <td className={styles.numeric}>{row.recent_form != null ? `${Math.round(row.recent_form * 100)}%` : "—"}</td>
+                  <td className={styles.numeric}>{teamsDraft ? draftEdge(row.draft_edge) : percentage(row.best_available_rate)}</td>
                 </tr>
               ))}
             </tbody>
@@ -350,25 +360,25 @@ function resultTable(result: unknown, call: ToolCall): React.ReactNode {
       id: row.team,
       label: row.team,
       href: `/elo/team/${teamSlug(row.team)}`,
-      value: row.average_win_share,
-      valueLabel: percentage(row.average_win_share),
-      detail: `${row.games} games`,
-      tone: row.average_win_share >= 0.5 ? "positive" : "negative",
+      value: row.average_edge,
+      valueLabel: draftEdge(row.average_edge),
+      detail: `${row.games} complete drafts`,
+      tone: row.average_edge >= 0 ? "positive" : "negative",
     }));
     return (
       <div className={styles.queryResult} data-testid={query.kind === "team_draft_comparison" ? "team-draft-comparison-result" : "team-draft-query-result"}>
         <p className={styles.queryHeadline} data-testid="team-draft-query-headline">{query.answer.headline}</p>
         <p className={styles.queryBasis}>{query.answer.basis}</p>
         <p className={styles.queryCaveat}>{query.answer.caveat}</p>
-        {query.rows.length ? <DataBars className={styles.chatChart} title="Draft win share" description="Published per-game estimate" rows={chartRows} domain={{ min: 0, max: 1 }} baseline={0.5} baselineLabel="50% even" axisLeft="0%" axisRight="100%" /> : null}
+        {query.rows.length ? <DataBars className={styles.chatChart} title="Draft Score" description="Ten-pick composition score in model units" rows={chartRows} domain={{ min: Math.min(0, ...chartRows.map((row) => row.value)), max: Math.max(0, ...chartRows.map((row) => row.value)) }} baseline={0} baselineLabel="0 even" axisLeft="lower" axisRight="higher" /> : null}
         {query.rows.length ? table(
           <table className={styles.resultTable}>
-            <thead><tr><th>Team</th><th className={styles.numeric}>Draft win share</th><th className={styles.numeric}>Games</th></tr></thead>
+            <thead><tr><th>Team</th><th className={styles.numeric}>Draft edge</th><th className={styles.numeric}>Complete drafts</th></tr></thead>
             <tbody>
               {query.rows.map((row) => (
                 <tr key={row.team}>
                   <td><a className="row-link" href={`/elo/team/${teamSlug(row.team)}`}>{row.team}</a></td>
-                  <td className={styles.numeric}>{percentage(row.average_win_share)}</td>
+                  <td className={styles.numeric}>{draftEdge(row.average_edge)}</td>
                   <td className={styles.numeric}>{row.games}</td>
                 </tr>
               ))}

@@ -29,6 +29,7 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 
 from lol_kills.etl.aliases import normalize_champ, normalize_team
+from lol_kills.etl.competition import competition_tier
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.v2.champions.atoms.depth2_aggregate import (
     DEFAULT_ARTIFACT_PATH as DEPTH2_ARTIFACT_PATH,
@@ -39,6 +40,8 @@ from lol_kills.v2.champions.atoms.depth2_aggregate import (
 
 SCHEMA_VERSION = "scryglass:composition-signal:v1"
 MODEL_VERSION = "composition-signal-v3"
+DESCRIPTIVE_SCHEMA_VERSION = "scryglass:composition-signal-descriptive:v1"
+DESCRIPTIVE_MODEL_VERSION = "composition-signal-descriptive-v1"
 REGULARIZATION_C = 0.03
 MIN_SUPPORT_GAMES = 40
 MIN_TRAINING_GAMES = 100
@@ -52,6 +55,24 @@ MODEL_TERMS = (
     "patch",
     "role_conditioned_champion_effects",
     "atomized_champion_effects",
+)
+DESCRIPTIVE_INCLUDED_TERMS = (
+    "role_conditioned_champion_effects",
+    "atomized_champion_effects",
+)
+DESCRIPTIVE_EXCLUDED_TERMS = (
+    "pre_game_team_strength_gap",
+    "rating_uncertainty",
+    "league",
+    "region",
+    "patch",
+    "roster_context",
+    "team_draft_history",
+    "momentum",
+    "live_state",
+    "outcome",
+    "player_execution",
+    "r9e_state_space",
 )
 EXCLUDED_TERMS = (
     "role_pair_interactions",
@@ -72,7 +93,14 @@ ROLE_ALIASES = {
     "utility": "sup",
 }
 PUBLIC_STATUS = ("available", "limited", "unavailable")
-PUBLIC_EVIDENCE = ("available", "atom_estimate", "limited", "unavailable")
+PUBLIC_EVIDENCE = (
+    "available",
+    "atom_estimate",
+    "role_estimate",
+    "limited",
+    "unavailable",
+)
+DESCRIPTIVE_SIGNAL_SCHEMA = "scryglass:draft-descriptive-signal:v1"
 PUBLIC_PRIVATE_FIELDS = frozenset(
     {
         "coefficients",
@@ -84,6 +112,27 @@ PUBLIC_PRIVATE_FIELDS = frozenset(
         "probability",
         "win_probability",
         "odds",
+        "win_share",
+        "draft_win_share",
+        "average_win_share",
+        "draft_probability",
+        "p_blue",
+        "p_red",
+        "r9e",
+        "r9e_state_space",
+        "development_composite",
+        "match_probability",
+        "match_win_expectation",
+        "team_rating",
+        "player_rating",
+        "elo",
+        "mu_diff",
+        "sigma_pair",
+        "momentum",
+        "gold",
+        "objectives",
+        "recommendation",
+        "betting",
     }
 )
 NOTE = (
@@ -605,12 +654,17 @@ def _complete_game_from_group(game_id: str, group: pd.DataFrame, strength: Mappi
     strength_row = dict(strength or {})
     mu_diff = _number(strength_row.get("mu_diff"))
     sigma_pair = _number(strength_row.get("sigma_pair"))
+    league = _text(
+        group.get("league", pd.Series(["UNKNOWN"])).iloc[0], "UNKNOWN"
+    ).upper()
+    tier = _text(
+        group.get("competition_tier", pd.Series([""])).iloc[0]
+    ).casefold() or competition_tier(league)
     return {
         "game_uid": game_id,
         "date": pd.Timestamp(date),
-        "league": _text(
-            group.get("league", pd.Series(["UNKNOWN"])).iloc[0], "UNKNOWN"
-        ).upper(),
+        "league": league,
+        "competition_tier": tier,
         "patch": _patch(
             group.get("patch", pd.Series(["UNKNOWN"])).iloc[0]
             if "patch" in group
@@ -673,6 +727,7 @@ def build_composition_games(
             "result",
             "champion",
             "league",
+            "competition_tier",
             "patch",
             "grid_series_id",
             "tournament",
@@ -731,6 +786,11 @@ def build_composition_games(
     stat_cols = [c for c in ("kills", "deaths", "damageshare", "cspm", "visionscore") if c in frame.columns]
     stats_arr = {c: frame[c].to_numpy(dtype=object) for c in stat_cols}
     league_arr = frame["league"].to_numpy(dtype=object) if "league" in frame.columns else None
+    tier_arr = (
+        frame["competition_tier"].to_numpy(dtype=object)
+        if "competition_tier" in frame.columns
+        else None
+    )
     patch_arr = frame["patch"].to_numpy(dtype=object) if "patch" in frame.columns else None
     series_arr = frame["grid_series_id"].to_numpy(dtype=object) if "grid_series_id" in frame.columns else None
     tourn_arr = frame["tournament"].to_numpy(dtype=object) if "tournament" in frame.columns else None
@@ -831,10 +891,21 @@ def build_composition_games(
                         "visionscore": float(stats.get("visionscore", 0.0)),
                     }
         first = s
+        league = (
+            _text(league_arr[first], "UNKNOWN").upper()
+            if league_arr is not None
+            else "UNKNOWN"
+        )
+        tier = (
+            _text(tier_arr[first]).casefold()
+            if tier_arr is not None
+            else ""
+        ) or competition_tier(league)
         game = {
             "game_uid": str(game_id),
             "date": date,
-            "league": _text(league_arr[first], "UNKNOWN").upper() if league_arr is not None else "UNKNOWN",
+            "league": league,
+            "competition_tier": tier,
             "patch": _patch(patch_arr[first] if patch_arr is not None else None),
             "blue_team": teams["Blue"],
             "red_team": teams["Red"],
@@ -917,6 +988,28 @@ def _feature_names(games: Sequence[Mapping[str, Any]]) -> list[str]:
     draft = sorted(name for name in names if name.startswith("draft|"))
     atom = sorted(name for name in names if name.startswith("atom|"))
     return controls + context + draft + atom
+
+
+def _descriptive_feature_names(games: Sequence[Mapping[str, Any]]) -> list[str]:
+    """Return only composition terms for the descriptive public scorer.
+
+    The controlled evaluation model remains available for research. The
+    public descriptive recipe has no strength, uncertainty, league, patch,
+    roster, history, live-state, or outcome feature columns.
+    """
+
+    return [
+        name
+        for name in _feature_names(games)
+        if (
+            name.startswith("atom|")
+            or (
+                name.startswith("draft|")
+                and len(name.split("|")) == 3
+                and name.split("|", 2)[1] in ROLES
+            )
+        )
+    ]
 
 
 _MATRIX_ROW_CACHE: dict[tuple[Any, tuple[str, ...], bool], tuple[list[int], list[float]]] = {}
@@ -1011,6 +1104,7 @@ class FittedCompositionModel:
     worker_commit: str | None = None
     atom_prior: dict[str, Any] | None = None
     code_digest: str | None = None
+    estimand: str = "controlled"
 
     def coefficient(self, role: str, champion: str) -> float:
         key = f"draft|{role}|{_champion(champion)}"
@@ -1056,6 +1150,7 @@ class FittedCompositionModel:
             "worker_commit": self.worker_commit,
             "code_digest": self.code_digest,
             "atom_prior": self.atom_prior,
+            "estimand": self.estimand,
         }
 
     @classmethod
@@ -1078,6 +1173,7 @@ class FittedCompositionModel:
                 if isinstance(payload.get("atom_prior"), dict)
                 else None
             ),
+            estimand=str(payload.get("estimand") or "controlled"),
         )
 
 
@@ -1089,8 +1185,13 @@ def _fit_model(
     min_training_games: int = MIN_TRAINING_GAMES,
     regularization_c: float = REGULARIZATION_C,
     worker_commit: str | None = None,
+    composition_only: bool = False,
 ) -> FittedCompositionModel | None:
-    usable = [game for game in games if game.get("controls_available", False)]
+    usable = [
+        game
+        for game in games
+        if composition_only or game.get("controls_available", False)
+    ]
     if len(usable) < min_training_games or len({int(game["y"]) for game in usable}) < 2:
         return None
     model = LogisticRegression(
@@ -1118,7 +1219,11 @@ def _fit_model(
         min_support_games=ATOM_PRIOR_MIN_SUPPORT,
     ) if include_draft else None
     return FittedCompositionModel(
-        model_version=MODEL_VERSION if include_draft else f"{MODEL_VERSION}:baseline",
+        model_version=(
+            DESCRIPTIVE_MODEL_VERSION
+            if composition_only and include_draft
+            else MODEL_VERSION if include_draft else f"{MODEL_VERSION}:baseline"
+        ),
         fit_through=fit_through,
         feature_names=tuple(names),
         coefficients=tuple(float(value) for value in model.coef_[0]),
@@ -1129,6 +1234,7 @@ def _fit_model(
         worker_commit=worker_commit,
         code_digest=_composition_code_digest(),
         atom_prior=atom_prior,
+        estimand="composition_only" if composition_only else "controlled",
     )
 
 
@@ -1333,9 +1439,10 @@ def _cache_key(
     *,
     names: Sequence[str],
     worker_commit: str | None,
+    estimand: str = "controlled",
 ) -> str:
     material = "|".join(
-        (MODEL_VERSION, source_digest, _rfc(cutoff), _digest(names), worker_commit or "")
+        (MODEL_VERSION, estimand, source_digest, _rfc(cutoff), _digest(names), worker_commit or "")
     )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
 
@@ -1402,14 +1509,32 @@ def _load_or_fit(
     cache_dir: Path | None,
     min_training_games: int,
     worker_commit: str | None,
+    composition_only: bool = False,
 ) -> tuple[FittedCompositionModel | None, bool]:
     training_games = [game for game in games if _day(game["date"]) < _day(cutoff)]
-    training_names = _feature_names(training_games)
+    training_names = (
+        _descriptive_feature_names(training_games)
+        if composition_only
+        else _feature_names(training_games)
+    )
     training_digest = _games_digest(training_games)
+    estimand = "composition_only" if composition_only else "controlled"
     path = None
     if cache_dir is not None:
-        cache_key = _cache_key(training_digest, cutoff, names=training_names, worker_commit=worker_commit)
-        stable_key = _cache_key(training_digest, cutoff, names=training_names, worker_commit=None)
+        cache_key = _cache_key(
+            training_digest,
+            cutoff,
+            names=training_names,
+            worker_commit=worker_commit,
+            estimand=estimand,
+        )
+        stable_key = _cache_key(
+            training_digest,
+            cutoff,
+            names=training_names,
+            worker_commit=None,
+            estimand=estimand,
+        )
         for candidate_key in (cache_key, stable_key):
             candidate_path = cache_dir / "checkpoints" / f"{candidate_key}.json"
             if not candidate_path.exists():
@@ -1418,8 +1543,10 @@ def _load_or_fit(
                 cached = FittedCompositionModel.from_json(
                     json.loads(candidate_path.read_text(encoding="utf-8"))
                 )
-                if cached.worker_commit == worker_commit or (
+                if cached.estimand == estimand and (
+                    cached.worker_commit == worker_commit or (
                     cached.code_digest and cached.code_digest == _composition_code_digest()
+                    )
                 ):
                     return cached, True
             except (OSError, ValueError, KeyError, TypeError, CompositionSignalError):
@@ -1431,6 +1558,7 @@ def _load_or_fit(
         include_draft=True,
         min_training_games=min_training_games,
         worker_commit=worker_commit,
+        composition_only=composition_only,
     )
     if model is not None and path is not None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1438,7 +1566,58 @@ def _load_or_fit(
     return model, False
 
 
-def _unavailable(game: Mapping[str, Any], reason: str) -> dict[str, Any]:
+def _empty_component_ledger() -> dict[str, None]:
+    """Return the public component keys when no composition fit exists."""
+
+    return {
+        "base": None,
+        "atomized": None,
+        "ally_synergy": None,
+        "enemy_counter": None,
+        "same_role": None,
+    }
+
+
+def _pick_component_ledger(
+    model: FittedCompositionModel,
+    role: str,
+    champion: str,
+) -> dict[str, float]:
+    """Split one descriptive pick contribution into public model units.
+
+    The current static recipe has additive champion and atom terms. It has no
+    fitted ally-synergy, enemy-counter, or same-role interaction terms. Those
+    fields stay explicit zeroes so downstream clients can keep one stable
+    component contract without inventing evidence.
+    """
+
+    base = model.coefficient(role, champion)
+    total = model.pick_contribution(role, champion)
+    return {
+        "base": float(base),
+        "atomized": float(total - base),
+        "ally_synergy": 0.0,
+        "enemy_counter": 0.0,
+        "same_role": 0.0,
+    }
+
+
+def _component_totals(
+    values: Mapping[str, Mapping[str, float]],
+) -> dict[str, float]:
+    return {
+        key: float(sum(float(item.get(key, 0.0)) for item in values.values()))
+        for key in ("base", "atomized", "ally_synergy", "enemy_counter", "same_role")
+    }
+
+
+def _unavailable(
+    game: Mapping[str, Any],
+    reason: str,
+    *,
+    estimand: str = "composition_only",
+    model_version: str = MODEL_VERSION,
+) -> dict[str, Any]:
     picks = []
     for side in ("Blue", "Red"):
         side_data = game.get(side.lower()) if isinstance(game.get(side.lower()), Mapping) else {}
@@ -1450,6 +1629,7 @@ def _unavailable(game: Mapping[str, Any], reason: str) -> dict[str, Any]:
                     "role": role,
                     "champion": _champion(pick.get("champion")) if isinstance(pick, Mapping) else "",
                     "contribution": None,
+                    "components": _empty_component_ledger(),
                     "prior_role_games": 0,
                     "evidence_status": "unavailable",
                 }
@@ -1457,10 +1637,19 @@ def _unavailable(game: Mapping[str, Any], reason: str) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "status": "unavailable",
-        "model_version": MODEL_VERSION,
+        "model_version": model_version,
+        "estimand": estimand,
         "fit_through": None,
-        "blue": {"signal": None, "prior_role_games": 0},
-        "red": {"signal": None, "prior_role_games": 0},
+        "blue": {
+            "signal": None,
+            "prior_role_games": 0,
+            "components": _empty_component_ledger(),
+        },
+        "red": {
+            "signal": None,
+            "prior_role_games": 0,
+            "components": _empty_component_ledger(),
+        },
         "picks": picks,
         "note": NOTE,
         "reason": reason,
@@ -1483,6 +1672,10 @@ def public_signal_for_game(
     picks: list[dict[str, Any]] = []
     side_signals: dict[str, float] = {"Blue": 0.0, "Red": 0.0}
     side_support: dict[str, int] = {"Blue": 0, "Red": 0}
+    side_components: dict[str, dict[str, dict[str, float]]] = {
+        "Blue": {},
+        "Red": {},
+    }
     limited = False
     for side in ("Blue", "Red"):
         for role in ROLES:
@@ -1500,29 +1693,55 @@ def public_signal_for_game(
             else:
                 evidence_status = "limited"
                 limited = True
+            components = (
+                _pick_component_ledger(model, role, champion)
+                if evidence_status in {"available", "atom_estimate"}
+                else None
+            )
+            if components is not None:
+                side_components[side][role] = components
             picks.append(
                 {
                     "side": side,
                     "role": role,
                     "champion": champion,
                     "contribution": _json_number(coefficient) if evidence_status != "limited" else None,
+                    "components": (
+                        {
+                            key: _json_number(value)
+                            for key, value in components.items()
+                        }
+                        if components is not None
+                        else _empty_component_ledger()
+                    ),
                     "prior_role_games": support,
                     "evidence_status": evidence_status,
                 }
             )
     status = "limited" if limited else "available"
+    public_side_components = {
+        side.lower(): (
+            _component_totals(side_components[side])
+            if status == "available"
+            else _empty_component_ledger()
+        )
+        for side in ("Blue", "Red")
+    }
     return {
         "schema_version": SCHEMA_VERSION,
         "status": status,
         "model_version": model.model_version,
+        "estimand": model.estimand,
         "fit_through": model.fit_through,
         "blue": {
             "signal": _json_number(side_signals["Blue"]) if status == "available" else None,
             "prior_role_games": side_support["Blue"],
+            "components": public_side_components["blue"],
         },
         "red": {
             "signal": _json_number(side_signals["Red"]) if status == "available" else None,
             "prior_role_games": side_support["Red"],
+            "components": public_side_components["red"],
         },
         "picks": picks,
         "note": NOTE,
@@ -1539,11 +1758,24 @@ def validate_public_signal(
 
     if not isinstance(signal, Mapping):
         raise CompositionSignalError("composition signal is not an object")
-    leaked = sorted(
-        key
-        for key in signal
-        if str(key) in PUBLIC_PRIVATE_FIELDS
-    )
+    leaked: list[str] = []
+
+    def scan_private_keys(value: Any, path: str = "") -> None:
+        if isinstance(value, Mapping):
+            for key, nested in value.items():
+                key_text = str(key)
+                key_path = f"{path}.{key_text}" if path else key_text
+                normalized_key = key_text.strip().casefold()
+                if normalized_key in PUBLIC_PRIVATE_FIELDS or normalized_key.startswith(
+                    ("r9e_", "r9e|", "control|", "strength|", "phase|", "live|")
+                ):
+                    leaked.append(key_path)
+                scan_private_keys(nested, key_path)
+        elif isinstance(value, list):
+            for index, nested in enumerate(value):
+                scan_private_keys(nested, f"{path}[{index}]")
+
+    scan_private_keys(signal)
     if leaked:
         raise CompositionSignalError(
             "private composition fields are present: " + ", ".join(leaked)
@@ -1563,11 +1795,23 @@ def validate_public_signal(
         raise CompositionSignalError(
             "composition signal is missing: " + ", ".join(missing)
         )
-    if signal.get("schema_version") != SCHEMA_VERSION:
+    schema_version = str(signal.get("schema_version") or "")
+    if schema_version not in {SCHEMA_VERSION, DESCRIPTIVE_SIGNAL_SCHEMA}:
         raise CompositionSignalError("composition signal schema is not supported")
     status = str(signal.get("status") or "")
     if status not in PUBLIC_STATUS:
         raise CompositionSignalError("composition signal status is invalid")
+    estimand = str(signal.get("estimand") or "")
+    if estimand and estimand not in {"controlled", "composition_only"}:
+        raise CompositionSignalError("composition signal estimand is invalid")
+    static_descriptive = schema_version == DESCRIPTIVE_SIGNAL_SCHEMA
+    if static_descriptive and (
+        signal.get("authority") != "descriptive"
+        or estimand != "composition_only"
+        or not str(signal.get("artifact_sha256") or "")
+        or not isinstance(signal.get("edge_components"), Mapping)
+    ):
+        raise CompositionSignalError("descriptive Draft Score binding is incomplete")
     if not str(signal.get("model_version") or "").strip():
         raise CompositionSignalError("composition signal model version is missing")
     if not str(signal.get("note") or "").strip():
@@ -1606,6 +1850,9 @@ def validate_public_signal(
     if status == "unavailable":
         if fit_through is not None:
             raise CompositionSignalError("unavailable composition signal has a fit watermark")
+    elif static_descriptive:
+        if fit_through is not None:
+            raise CompositionSignalError("static descriptive signal has a fit watermark")
     else:
         if fit_through is None:
             raise CompositionSignalError("supported composition signal has no fit watermark")
@@ -1621,6 +1868,26 @@ def validate_public_signal(
             raise CompositionSignalError("composition signal dates are invalid") from error
 
     side_payloads: dict[str, Mapping[str, Any]] = {}
+    component_keys = {
+        "base",
+        "archetype_interactions",
+        "ally_synergy",
+        "enemy_counter",
+        "same_role",
+    }
+    edge_components = signal.get("edge_components")
+    if static_descriptive:
+        if set(edge_components or {}) != component_keys | {"total"}:
+            raise CompositionSignalError("descriptive Draft Score components are incomplete")
+        for key, component in edge_components.items():
+            if component is not None and (
+                not isinstance(component, (int, float))
+                or isinstance(component, bool)
+                or not np.isfinite(float(component))
+            ):
+                raise CompositionSignalError(f"descriptive Draft Score component {key} is invalid")
+        if status == "available" and any(edge_components[key] is None for key in component_keys | {"total"}):
+            raise CompositionSignalError("available descriptive Draft Score has missing components")
     for side in ("blue", "red"):
         value = signal.get(side)
         if not isinstance(value, Mapping):
@@ -1642,6 +1909,45 @@ def validate_public_signal(
             )
         if status == "available" and summary is None:
             raise CompositionSignalError("available composition signal has no team summary")
+        components = value.get("components")
+        if components is not None:
+            if not isinstance(components, Mapping):
+                raise CompositionSignalError(f"{side} composition components are malformed")
+            expected_component_keys = {
+                "base",
+                "atomized",
+                "ally_synergy",
+                "enemy_counter",
+                "same_role",
+            }
+            if static_descriptive:
+                expected_component_keys = component_keys
+            if set(components) != expected_component_keys:
+                raise CompositionSignalError(f"{side} composition components are incomplete")
+            for key, component in components.items():
+                if component is not None and (
+                    not isinstance(component, (int, float))
+                    or isinstance(component, bool)
+                    or not np.isfinite(float(component))
+                ):
+                    raise CompositionSignalError(
+                        f"{side} composition component {key} is invalid"
+                    )
+            if estimand == "composition_only" and status == "available":
+                if any(components[key] is None for key in expected_component_keys):
+                    raise CompositionSignalError(
+                        f"{side} composition components have unavailable values"
+                    )
+                if not np.isclose(
+                    float(summary),
+                    sum(float(components[key]) for key in expected_component_keys),
+                    atol=1e-5,
+                ):
+                    raise CompositionSignalError(
+                        f"{side} composition summary does not match its components"
+                    )
+        elif estimand == "composition_only" and not static_descriptive:
+            raise CompositionSignalError(f"{side} composition components are missing")
 
     picks = signal.get("picks")
     if not isinstance(picks, list) or len(picks) != 10:
@@ -1672,6 +1978,44 @@ def validate_public_signal(
             or not np.isfinite(float(contribution))
         ):
             raise CompositionSignalError("composition pick contribution is invalid")
+        components = pick.get("components")
+        if components is not None:
+            if not isinstance(components, Mapping):
+                raise CompositionSignalError("composition pick components are malformed")
+            expected_component_keys = {
+                "base",
+                "atomized",
+                "ally_synergy",
+                "enemy_counter",
+                "same_role",
+            }
+            if set(components) != expected_component_keys:
+                raise CompositionSignalError("composition pick components are incomplete")
+            for key, component in components.items():
+                if component is not None and (
+                    not isinstance(component, (int, float))
+                    or isinstance(component, bool)
+                    or not np.isfinite(float(component))
+                ):
+                    raise CompositionSignalError(
+                        f"composition pick component {key} is invalid"
+                    )
+            if contribution is not None and any(
+                components[key] is None for key in expected_component_keys
+            ):
+                raise CompositionSignalError(
+                    "composition pick contribution has unavailable components"
+                )
+            if contribution is not None and not np.isclose(
+                float(contribution),
+                sum(float(components[key]) for key in expected_component_keys),
+                atol=1e-5,
+            ):
+                raise CompositionSignalError(
+                    "composition pick contribution does not match its components"
+                )
+        elif estimand == "composition_only" and not static_descriptive and evidence != "unavailable":
+            raise CompositionSignalError("composition pick components are missing")
         if evidence == "available":
             if support < min_support_games or contribution is None:
                 raise CompositionSignalError("available composition pick lacks support")
@@ -1679,6 +2023,10 @@ def validate_public_signal(
         elif evidence == "atom_estimate":
             if support >= min_support_games or contribution is None:
                 raise CompositionSignalError("atom_estimate composition pick is malformed")
+            contribution_totals[side] += float(contribution)
+        elif evidence == "role_estimate":
+            if support >= min_support_games or contribution is None:
+                raise CompositionSignalError("role_estimate composition pick is malformed")
             contribution_totals[side] += float(contribution)
         elif evidence == "limited":
             if support >= min_support_games or contribution is not None:
@@ -1690,13 +2038,37 @@ def validate_public_signal(
     if seen != set(expected):
         raise CompositionSignalError("composition signal has incomplete pick identities")
     if status == "available":
-        if any(evidence not in {"available", "atom_estimate"} for evidence in evidence_statuses):
+        if any(
+            evidence not in {"available", "atom_estimate", "role_estimate"}
+            for evidence in evidence_statuses
+        ):
             raise CompositionSignalError("available composition signal has limited picks")
         for side in ("Blue", "Red"):
             summary = float(side_payloads[side.lower()]["signal"])
-            if not np.isclose(summary, contribution_totals[side], atol=1e-5):
+            if static_descriptive:
+                components = side_payloads[side.lower()].get("components")
+                if not isinstance(components, Mapping) or not np.isclose(
+                    summary,
+                    sum(float(components[key]) for key in component_keys),
+                    atol=1e-5,
+                ):
+                    raise CompositionSignalError(
+                        f"{side} descriptive Draft Score summary does not match components"
+                    )
+            elif not np.isclose(summary, contribution_totals[side], atol=1e-5):
                 raise CompositionSignalError(
                     f"{side} composition summary does not match its picks"
+                )
+        if static_descriptive:
+            blue_summary = float(side_payloads["blue"]["signal"])
+            red_summary = float(side_payloads["red"]["signal"])
+            if not np.isclose(
+                float(edge_components["total"]),
+                blue_summary - red_summary,
+                atol=1e-5,
+            ):
+                raise CompositionSignalError(
+                    "descriptive Draft Score total does not match side summaries"
                 )
     elif status == "limited":
         if "limited" not in evidence_statuses:
@@ -1721,8 +2093,15 @@ def score_games_temporally(
     worker_commit: str | None = None,
     min_support_games: int = MIN_SUPPORT_GAMES,
     min_training_games: int = MIN_TRAINING_GAMES,
+    composition_only: bool = False,
 ) -> CompositionScoreResult:
-    """Score target games from checkpoints fit before each target date."""
+    """Score target games from checkpoints fit before each target date.
+
+    ``composition_only`` is the public descriptive path. It fits only the
+    role/champion and atom columns. It does not require or read strength,
+    uncertainty, league, patch, roster, momentum, live-state, or outcome
+    features.
+    """
 
     ordered = sorted(games, key=lambda game: (_timestamp(game["date"]), str(game["game_uid"])))
     target_ids = (
@@ -1744,6 +2123,7 @@ def score_games_temporally(
             cache_dir=cache_dir,
             min_training_games=min_training_games,
             worker_commit=worker_commit,
+            composition_only=composition_only,
         )
         cache_hits += int(hit)
         for game in target_games:
@@ -1761,10 +2141,11 @@ def score_games_temporally(
     return CompositionScoreResult(
         signals=signals,
         audit={
-            "schema_version": SCHEMA_VERSION,
-            "model_version": MODEL_VERSION,
-            "included_terms": list(MODEL_TERMS),
-            "excluded_terms": list(EXCLUDED_TERMS),
+            "schema_version": DESCRIPTIVE_SCHEMA_VERSION if composition_only else SCHEMA_VERSION,
+            "model_version": DESCRIPTIVE_MODEL_VERSION if composition_only else MODEL_VERSION,
+            "estimand": "composition_only" if composition_only else "controlled",
+            "included_terms": list(DESCRIPTIVE_INCLUDED_TERMS if composition_only else MODEL_TERMS),
+            "excluded_terms": list(DESCRIPTIVE_EXCLUDED_TERMS if composition_only else EXCLUDED_TERMS),
             "training_order": "earlier accepted calendar-date clusters only",
             "status": "available" if statuses["available"] else "limited" if statuses["limited"] else "unavailable",
             "target_games": len(signals),

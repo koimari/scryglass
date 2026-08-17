@@ -1,0 +1,26 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v9",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T16:00:00Z",
+  "inherits": "public-draft-score-promotion-protocol-v8.json",
+  "iteration": {
+    "id": "v9",
+    "single_change": "Add the classical quantum masked forest. Each atom group is active in some committed forest worlds and inactive in others. A regularized meta-model sees anonymous world predictions. The receipt reveals the world assignments after prediction commitment.",
+    "previous_receipt": "5bafbdda3ed72d8592f4ff46c8325e82658f7e4daba80befb16112ae74fd5777"
+  },
+  "selection_extension": {
+    "architecture": "quantum_masked_forest_v1",
+    "candidate": "Classical randomized masked-world forest stack",
+    "quantum_claim": "classical paired counterfactual masking; no quantum-computing hardware claim",
+    "quantum_forest_config": {"id": "quantum-rf", "n_estimators": 400, "max_depth": 8, "min_samples_leaf": 10, "max_features": 0.15, "max_samples": 0.8, "class_weight": null},
+    "quantum_worlds": [
+      {"id": "world-player", "groups": ["player_exact_performance"]},
+      {"id": "world-pairs", "groups": ["exact_ally_enemy_pairs"]},
+      {"id": "world-phase", "groups": ["checkpoint_forecasts"]},
+      {"id": "world-parity", "groups": ["parity_conditioned_performance"]},
+      {"id": "world-patch", "groups": ["patch_exact_performance"]},
+      {"id": "world-region", "groups": ["regional_draft_atoms"]},
+      {"id": "world-all", "groups": ["player_exact_performance", "exact_ally_enemy_pairs", "checkpoint_forecasts", "parity_conditioned_performance", "patch_exact_performance", "regional_draft_atoms"]}
+    ]
+  }
+}

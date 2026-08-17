@@ -1,0 +1,321 @@
+{
+  "authority": "promoted",
+  "model_version": "public-draft-score-v34",
+  "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
+  "release_id": "v2026.08.17.073440",
+  "results": {
+    "13417-13417_game_1": {
+      "authority": "promoted",
+      "controlled_draft_score": {
+        "edge_percentage_points": 0.8129916873595544,
+        "explanation": "Role-matched champion swap with team strength, player strength, momentum, league, match context, and side held fixed.",
+        "fixed_strength_blue_win_probability": 0.7661515657436908,
+        "intervention_receipt_sha256": "1f97c01690b3d7cc4de58f1545330041afb0a0fc9bd63b45fe8e1386c8db3848",
+        "isolated_blue_draft_probability": 0.5081299168735955,
+        "method": "role_matched_champion_swap",
+        "model_units": 0.03252253382275405,
+        "stronger_draft": "Blue"
+      },
+      "evidence_window": {
+        "end": "2026-08-16T00:00:00Z",
+        "start": "2024-01-01T00:00:00Z"
+      },
+      "match_win_probability": {
+        "Blue": 0.7719279029939023,
+        "Red": 0.22807209700609765
+      },
+      "model_version": "public-draft-score-v34",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
+      "release_id": "v2026.08.17.073440",
+      "schema_version": "scryglass:public-draft-score-result:v1",
+      "side_recommendation": "Blue"
+    },
+    "13417-13417_game_2": {
+      "authority": "promoted",
+      "controlled_draft_score": {
+        "edge_percentage_points": 5.678519459318043,
+        "explanation": "Role-matched champion swap with team strength, player strength, momentum, league, match context, and side held fixed.",
+        "fixed_strength_blue_win_probability": 0.7532815474770223,
+        "intervention_receipt_sha256": "92e2b51f8d9fc14308e00216bfb46a6dfa2d7f854925c3ab01511e91acb40f6b",
+        "isolated_blue_draft_probability": 0.5567851945931804,
+        "method": "role_matched_champion_swap",
+        "model_units": 0.22812497791996783,
+        "stronger_draft": "Blue"
+      },
+      "evidence_window": {
+        "end": "2026-08-16T00:00:00Z",
+        "start": "2024-01-01T00:00:00Z"
+      },
+      "match_win_probability": {
+        "Blue": 0.7931988459710514,
+        "Red": 0.2068011540289486
+      },
+      "model_version": "public-draft-score-v34",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
+      "release_id": "v2026.08.17.073440",
+      "schema_version": "scryglass:public-draft-score-result:v1",
+      "side_recommendation": "Blue"
+    },
+    "13417-13417_game_3": {
+      "authority": "promoted",
+      "controlled_draft_score": {
+        "edge_percentage_points": -1.2952570389272222,
+        "explanation": "Role-matched champion swap with team strength, player strength, momentum, league, match context, and side held fixed.",
+        "fixed_strength_blue_win_probability": 0.37765927522502785,
+        "intervention_receipt_sha256": "117b68532cc585391348d86cc48561b3a7bf385a0f2b8e14e122aef979b26e2c",
+        "isolated_blue_draft_probability": 0.4870474296107278,
+        "method": "role_matched_champion_swap",
+        "model_units": -0.051821875776818016,
+        "stronger_draft": "Red"
+      },
+      "evidence_window": {
+        "end": "2026-08-16T00:00:00Z",
+        "start": "2024-01-01T00:00:00Z"
+      },
+      "match_win_probability": {
+        "Blue": 0.3655588609897644,
+        "Red": 0.6344411390102356
+      },
+      "model_version": "public-draft-score-v34",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
+      "release_id": "v2026.08.17.073440",
+      "schema_version": "scryglass:public-draft-score-result:v1",
+      "side_recommendation": "Red"
+    },
+    "13418-13418_game_1": {
+      "authority": "promoted",
+      "controlled_draft_score": {
+        "edge_percentage_points": 2.531399462048256,
+        "explanation": "Role-matched champion swap with team strength, player strength, momentum, league, match context, and side held fixed.",
+        "fixed_strength_blue_win_probability": 0.6274949040655599,
+        "intervention_receipt_sha256": "86f9e72653c3dad4c67fed1d8bcbaed0de574b7212dddf66aaeb0a12e6b48223",
+        "isolated_blue_draft_probability": 0.5253139946204826,
+        "method": "role_matched_champion_swap",
+        "model_units": 0.10134262465724769,
+        "stronger_draft": "Blue"
+      },
+      "evidence_window": {
+        "end": "2026-08-16T00:00:00Z",
+        "start": "2024-01-01T00:00:00Z"
+      },
+      "match_win_probability": {
+        "Blue": 0.6508613359754271,
+        "Red": 0.34913866402457294
+      },
+      "model_version": "public-draft-score-v34",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
+      "release_id": "v2026.08.17.073440",
+      "schema_version": "scryglass:public-draft-score-result:v1",
+      "side_recommendation": "Blue"
+    },
+    "13418-13418_game_2": {
+      "authority": "promoted",
+      "controlled_draft_score": {
+        "edge_percentage_points": 5.464713640044061,
+        "explanation": "Role-matched champion swap with team strength, player strength, momentum, league, match context, and side held fixed.",
+        "fixed_strength_blue_win_probability": 0.6245128779202002,
+        "intervention_receipt_sha256": "548a2bb7de52ebf9015ff1359dc8f7ef91e0319dc44847ec589a34b8be5245b4",
+        "isolated_blue_draft_probability": 0.5546471364004406,
+        "method": "role_matched_champion_swap",
+        "model_units": 0.21946520142152123,
+        "stronger_draft": "Blue"
+      },
+      "evidence_window": {
+        "end": "2026-08-16T00:00:00Z",
+        "start": "2024-01-01T00:00:00Z"
+      },
+      "match_win_probability": {
+        "Blue": 0.6744130001903195,
+        "Red": 0.32558699980968053
+      },
+      "model_version": "public-draft-score-v34",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
+      "release_id": "v2026.08.17.073440",
+      "schema_version": "scryglass:public-draft-score-result:v1",
+      "side_recommendation": "Blue"
+    },
+    "13419-13419_game_1": {
+      "authority": "promoted",
+      "controlled_draft_score": {
+        "edge_percentage_points": -1.1182338473784526,
+        "explanation": "Role-matched champion swap with team strength, player strength, momentum, league, match context, and side held fixed.",
+        "fixed_strength_blue_win_probability": 0.1871747993875135,
+        "intervention_receipt_sha256": "df31c9c79bb8d671e48027fbad7019aee5fb5d26fde5c40811dc919f1ab5b35e",
+        "isolated_blue_draft_probability": 0.4888176615262155,
+        "method": "role_matched_champion_swap",
+        "model_units": -0.04473681369181737,
+        "stronger_draft": "Red"
+      },
+      "evidence_window": {
+        "end": "2026-08-16T00:00:00Z",
+        "start": "2024-01-01T00:00:00Z"
+      },
+      "match_win_probability": {
+        "Blue": 0.18046356461395416,
+        "Red": 0.8195364353860458
+      },
+      "model_version": "public-draft-score-v34",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
+      "release_id": "v2026.08.17.073440",
+      "schema_version": "scryglass:public-draft-score-result:v1",
+      "side_recommendation": "Red"
+    },
+    "13419-13419_game_2": {
+      "authority": "promoted",
+      "controlled_draft_score": {
+        "edge_percentage_points": 2.7511969462643227,
+        "explanation": "Role-matched champion swap with team strength, player strength, momentum, league, match context, and side held fixed.",
+        "fixed_strength_blue_win_probability": 0.840041991353926,
+        "intervention_receipt_sha256": "d42956d6c8edbec4c03b508d72bedf5cb7294653c0d345e228db401e33cd8d87",
+        "isolated_blue_draft_probability": 0.5275119694626432,
+        "method": "role_matched_champion_swap",
+        "model_units": 0.11015914160036677,
+        "stronger_draft": "Blue"
+      },
+      "evidence_window": {
+        "end": "2026-08-16T00:00:00Z",
+        "start": "2024-01-01T00:00:00Z"
+      },
+      "match_win_probability": {
+        "Blue": 0.85429588991661,
+        "Red": 0.14570411008339001
+      },
+      "model_version": "public-draft-score-v34",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
+      "release_id": "v2026.08.17.073440",
+      "schema_version": "scryglass:public-draft-score-result:v1",
+      "side_recommendation": "Blue"
+    },
+    "LOLTMNT02_449792": {
+      "authority": "promoted",
+      "controlled_draft_score": {
+        "edge_percentage_points": -0.2954396182228036,
+        "explanation": "Role-matched champion swap with team strength, player strength, momentum, league, match context, and side held fixed.",
+        "fixed_strength_blue_win_probability": 0.6019932054962245,
+        "intervention_receipt_sha256": "c88acd9ebc29c6e0789433d500207770f89c97b2fbbcd0f86cec1e951bb25c3e",
+        "isolated_blue_draft_probability": 0.49704560381777196,
+        "method": "role_matched_champion_swap",
+        "model_units": -0.011817722264163721,
+        "stronger_draft": "Red"
+      },
+      "evidence_window": {
+        "end": "2026-08-16T00:00:00Z",
+        "start": "2024-01-01T00:00:00Z"
+      },
+      "match_win_probability": {
+        "Blue": 0.599158326168065,
+        "Red": 0.40084167383193503
+      },
+      "model_version": "public-draft-score-v34",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
+      "release_id": "v2026.08.17.073440",
+      "schema_version": "scryglass:public-draft-score-result:v1",
+      "side_recommendation": "Blue"
+    },
+    "LOLTMNT02_450852": {
+      "authority": "promoted",
+      "controlled_draft_score": {
+        "edge_percentage_points": -1.5234081708021707,
+        "explanation": "Role-matched champion swap with team strength, player strength, momentum, league, match context, and side held fixed.",
+        "fixed_strength_blue_win_probability": 0.5794726053106145,
+        "intervention_receipt_sha256": "0fcb9a0b16d51fb17fa5ebcb8dd95fbf8a34adfa9fd7546e9f8dbb6a93180425",
+        "isolated_blue_draft_probability": 0.4847659182919783,
+        "method": "role_matched_champion_swap",
+        "model_units": -0.06095519325469881,
+        "stronger_draft": "Red"
+      },
+      "evidence_window": {
+        "end": "2026-08-16T00:00:00Z",
+        "start": "2024-01-01T00:00:00Z"
+      },
+      "match_win_probability": {
+        "Blue": 0.5645511297903544,
+        "Red": 0.4354488702096456
+      },
+      "model_version": "public-draft-score-v34",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
+      "release_id": "v2026.08.17.073440",
+      "schema_version": "scryglass:public-draft-score-result:v1",
+      "side_recommendation": "Blue"
+    },
+    "LOLTMNT05_217237": {
+      "authority": "promoted",
+      "controlled_draft_score": {
+        "edge_percentage_points": -2.6141921641621213,
+        "explanation": "Role-matched champion swap with team strength, player strength, momentum, league, match context, and side held fixed.",
+        "fixed_strength_blue_win_probability": 0.6268511224332787,
+        "intervention_receipt_sha256": "63bfa823e1f042d2bb0e979c2c2a867f2ed03d307f0ed088dce47ea7db8d5f93",
+        "isolated_blue_draft_probability": 0.4738580783583788,
+        "method": "role_matched_champion_swap",
+        "model_units": -0.10466312523551635,
+        "stronger_draft": "Red"
+      },
+      "evidence_window": {
+        "end": "2026-08-16T00:00:00Z",
+        "start": "2024-01-01T00:00:00Z"
+      },
+      "match_win_probability": {
+        "Blue": 0.6020630186016327,
+        "Red": 0.3979369813983673
+      },
+      "model_version": "public-draft-score-v34",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
+      "release_id": "v2026.08.17.073440",
+      "schema_version": "scryglass:public-draft-score-result:v1",
+      "side_recommendation": "Blue"
+    },
+    "LOLTMNT05_217247": {
+      "authority": "promoted",
+      "controlled_draft_score": {
+        "edge_percentage_points": 2.2627738986097046,
+        "explanation": "Role-matched champion swap with team strength, player strength, momentum, league, match context, and side held fixed.",
+        "fixed_strength_blue_win_probability": 0.2566975694017646,
+        "intervention_receipt_sha256": "673592fe7f8eb1b678ff2f439e242badcfe40792738e75691c13a9d53e072e91",
+        "isolated_blue_draft_probability": 0.522627738986097,
+        "method": "role_matched_champion_swap",
+        "model_units": 0.09057282255717225,
+        "stronger_draft": "Blue"
+      },
+      "evidence_window": {
+        "end": "2026-08-16T00:00:00Z",
+        "start": "2024-01-01T00:00:00Z"
+      },
+      "match_win_probability": {
+        "Blue": 0.2743562873418244,
+        "Red": 0.7256437126581756
+      },
+      "model_version": "public-draft-score-v34",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
+      "release_id": "v2026.08.17.073440",
+      "schema_version": "scryglass:public-draft-score-result:v1",
+      "side_recommendation": "Red"
+    },
+    "LOLTMNT05_217248": {
+      "authority": "promoted",
+      "controlled_draft_score": {
+        "edge_percentage_points": -5.635312420942052,
+        "explanation": "Role-matched champion swap with team strength, player strength, momentum, league, match context, and side held fixed.",
+        "fixed_strength_blue_win_probability": 0.27489033221239617,
+        "intervention_receipt_sha256": "e5073d2ab76cb6a859331ff53709ab948e9729ddd4208879070df6d90ee74ef6",
+        "isolated_blue_draft_probability": 0.4436468757905795,
+        "method": "role_matched_champion_swap",
+        "model_units": -0.22637428693699257,
+        "stronger_draft": "Red"
+      },
+      "evidence_window": {
+        "end": "2026-08-16T00:00:00Z",
+        "start": "2024-01-01T00:00:00Z"
+      },
+      "match_win_probability": {
+        "Blue": 0.23212962895226674,
+        "Red": 0.7678703710477333
+      },
+      "model_version": "public-draft-score-v34",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
+      "release_id": "v2026.08.17.073440",
+      "schema_version": "scryglass:public-draft-score-result:v1",
+      "side_recommendation": "Red"
+    }
+  },
+  "schema_version": "scryglass:promoted-draft-results:v1"
+}

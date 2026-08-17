@@ -1,0 +1,66 @@
+{
+  "feature_contract": {
+    "categorical_context": "exact pre-match team, player, champion, role, patch, competition, first-pick, and ban identities",
+    "current_map_state_allowed": false,
+    "final_outcome_features_allowed": false,
+    "rating_context_required": "scryglass:public-draft-score-rating-context:v1",
+    "rating_receipt_required": "scryglass:resolved-rating-source:v1",
+    "schema_version": "scryglass:atomized-rf-layer-a:v10"
+  },
+  "frozen_utc": "2026-08-17T01:39:37Z",
+  "inherits": "public-draft-score-promotion-protocol-v28.json",
+  "authority_policy": {
+    "scope": "candidate_development_only",
+    "final_public_holdout_required": true,
+    "public_probability_allowed": false
+  },
+  "source_window": {
+    "start_inclusive": "2024-01-01T00:00:00Z",
+    "end_exclusive": "2026-08-09T00:00:00Z",
+    "leagues": ["LCS", "LEC", "LCK", "LPL", "MSI", "EWC", "Worlds"]
+  },
+  "outer_folds": [
+    {"id": "outer-2025-summer", "start": "2025-07-01T00:00:00Z", "end": "2026-01-01T00:00:00Z", "inner_start": "2025-04-01T00:00:00Z"},
+    {"id": "outer-2026-q1", "start": "2026-01-01T00:00:00Z", "end": "2026-04-01T00:00:00Z", "inner_start": "2025-07-01T00:00:00Z"},
+    {"id": "outer-2026-spring", "start": "2026-04-01T00:00:00Z", "end": "2026-06-01T00:00:00Z", "inner_start": "2026-01-01T00:00:00Z"},
+    {"id": "outer-2026-midseason", "start": "2026-06-01T00:00:00Z", "end": "2026-08-09T00:00:00Z", "inner_start": "2026-04-01T00:00:00Z"}
+  ],
+  "iteration": {
+    "id": "v29",
+    "matrix_manifest_sha256": "3faec8f2c46e4c0c139a007f80481f256f40866a3d693a2b38dc84ec2be69765",
+    "matrix_sha256": "36d48e7bd68066d782d8ad8164a87084871203feb72ae7259241909fb62fdd96",
+    "previous_receipt": "8deb2b4e2e4982703238e445b51dcabbc22023487d10fef06acf55016ab38a57",
+    "single_change": "Add one fold-local LightGBM world that reads the exact pre-match team, player, champion, role, patch, competition, first-pick, and ban identities from feature schema v10. Use compact fold-local integer codes, explicit unseen-category receipts, and red-blue mirror averaging. The hidden-world forests, phase curve, rating anchor, folds through 2026-08-09, and promotion thresholds remain fixed."
+  },
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v29",
+  "selection_extension": {
+    "categorical_world_config": {
+      "id": "exact-prematch-categorical-world-v1",
+      "groups": [
+        "player_exact_performance",
+        "player_overall_performance",
+        "player_role_performance",
+        "global_champion_performance",
+        "global_champion_interactions",
+        "exact_ally_enemy_pairs",
+        "checkpoint_forecasts",
+        "parity_conditioned_performance",
+        "patch_exact_performance",
+        "regional_draft_atoms"
+      ],
+      "n_estimators": 600,
+      "learning_rate": 0.02,
+      "num_leaves": 31,
+      "max_depth": 8,
+      "min_child_samples": 25,
+      "subsample": 0.85,
+      "colsample_bytree": 0.35,
+      "reg_alpha": 1.0,
+      "reg_lambda": 5.0,
+      "cat_smooth": 15.0,
+      "cat_l2": 10.0,
+      "side_symmetry_augmentation": true
+    }
+  },
+  "status": "frozen_before_first_v1_model_evaluation"
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v17",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T18:35:00Z",
+  "inherits": "public-draft-score-promotion-protocol-v16.json",
+  "iteration": {
+    "id": "v17",
+    "single_change": "Replace singleton atom worlds with a balanced four-world hidden-mask design. Every atom group is active in exactly two committed worlds and inactive in exactly two committed worlds before the assignment reveal.",
+    "previous_receipt": "6519e81756205f8dcf8de43c9516d3f331fd6789b5550e4a7914d174e1c335fd"
+  },
+  "selection_extension": {
+    "quantum_worlds": [
+      {"id": "masked-world-a", "groups": ["player_exact_performance", "player_role_performance", "global_champion_performance", "exact_ally_enemy_pairs", "checkpoint_forecasts"]},
+      {"id": "masked-world-b", "groups": ["player_overall_performance", "global_champion_interactions", "parity_conditioned_performance", "patch_exact_performance", "regional_draft_atoms"]},
+      {"id": "masked-world-c", "groups": ["player_exact_performance", "player_overall_performance", "global_champion_interactions", "parity_conditioned_performance", "regional_draft_atoms"]},
+      {"id": "masked-world-d", "groups": ["player_role_performance", "global_champion_performance", "exact_ally_enemy_pairs", "checkpoint_forecasts", "patch_exact_performance"]}
+    ],
+    "regional_worlds": []
+  }
+}
