@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
 
 import pandas as pd
@@ -8,16 +9,21 @@ import pytest
 from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 
 from lol_kills.research.atomized_rf_composite import (
+    CATEGORICAL_CONTEXT_COLUMNS,
     FEATURE_AVAILABILITY_COLUMNS,
     MODEL_COLUMNS,
     RATING_BATCH_POLICY,
+    RATING_CONTEXT_FIELDS,
+    RATING_CONTEXT_SCHEMA,
     RATING_RECEIPT_SCHEMA,
     AtomizedResearchError,
     RFConfig,
     RunningStat,
     _calibration_outer_audit,
+    _categorical_context,
     _expanding_series_folds,
     _cluster_bootstrap_differences,
+    _emit_role_metric_families,
     _equal_weight_team_forecast,
     _locked_rating_authority,
     _matched_comparison_config,
@@ -32,9 +38,48 @@ from lol_kills.research.atomized_rf_composite import (
     _write_json,
     exact_mechanic_keys,
     feature_group_coverage_report,
+    layer_a_build_preflight,
     normalize_source_patch,
     phase_coverage_report,
 )
+
+
+def test_layer_a_preflight_binds_all_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = {
+        name: tmp_path / name
+        for name in ("base.parquet", "maps.parquet", "players.parquet", "teams.parquet", "raw.csv")
+    }
+    for name, path in paths.items():
+        path.write_bytes(f"source:{name}".encode("utf-8"))
+    base_sha256 = hashlib.sha256(paths["base.parquet"].read_bytes()).hexdigest()
+    raw_sha256 = hashlib.sha256(paths["raw.csv"].read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        "lol_kills.research.atomized_rf_composite.RAW_2026_IDENTITY_SHA256",
+        raw_sha256,
+    )
+
+    receipt = layer_a_build_preflight(
+        base_dataset=paths["base.parquet"],
+        maps_path=paths["maps.parquet"],
+        players_path=paths["players.parquet"],
+        team_path=paths["teams.parquet"],
+        identity_overlay_players_path=paths["players.parquet"],
+        raw_identity_overlay_csv=paths["raw.csv"],
+        cache_dir=tmp_path / "cache",
+        expected_base_sha256=base_sha256,
+    )
+
+    assert receipt["status"] == "frozen_inputs_ready_for_matrix_build"
+    assert receipt["sources"]["base_dataset"] == base_sha256
+    assert receipt["sources"]["raw_identity_overlay_csv"] == raw_sha256
+    assert receipt["matrix_path"].endswith(".parquet")
+    assert receipt["authority"] == {
+        "model_fit": False,
+        "public_probability": False,
+        "promotion": False,
+    }
 
 
 PRODUCER_GAME_TIME = "2026-08-01T12:00:00Z"
@@ -72,6 +117,19 @@ def _producer_roster() -> list[dict[str, str]]:
         }
         for side in ("blue", "red")
         for index, role in enumerate(("top", "jungle", "mid", "bot", "support"))
+    ]
+
+
+def _categorical_lineup(side: str) -> list[dict[str, str]]:
+    return [
+        {
+            "side": side,
+            "position": role,
+            "teamid": f"oe:team:{side.casefold()}",
+            "playerid": f"oe:player:{side.casefold()}-{role}",
+            "champion": f"{side}-{role}-champion",
+        }
+        for role in ("top", "jng", "mid", "bot", "sup")
     ]
 
 
@@ -151,6 +209,25 @@ def _producer_like_receipt(
     return receipt
 
 
+def _with_rating_context(receipt: dict[str, object]) -> dict[str, object]:
+    context_values = {
+        field: float(index + 1) / 100.0
+        for index, field in enumerate(RATING_CONTEXT_FIELDS)
+    }
+    receipt.update(context_values)
+    receipt["rating_context_schema"] = RATING_CONTEXT_SCHEMA
+    receipt["rating_context_available"] = 1.0
+    receipt["rating_context_missing"] = 0.0
+    receipt["rating_context_sha256"] = _strict_canonical_sha256(
+        {
+            "schema_version": RATING_CONTEXT_SCHEMA,
+            "rating_receipt_sha256": receipt["rating_receipt_sha256"],
+            "values": context_values,
+        }
+    )
+    return receipt
+
+
 def _consume_producer_receipt(
     receipt: dict[str, object], *, game_time: str = PRODUCER_GAME_TIME
 ) -> dict[str, object]:
@@ -190,6 +267,60 @@ def test_model_columns_exclude_current_state_and_targets() -> None:
     assert not any(column.startswith("target_") for column in MODEL_COLUMNS)
 
 
+def test_categorical_context_preserves_exact_prematch_identities() -> None:
+    map_row = {
+        "league": "LEC",
+        "tournament": "LEC 2026 Summer",
+        "competition_scope": "regional",
+        "event_kind": "playoffs",
+        "blue_firstPick": 1,
+        "red_firstPick": 0,
+        **{
+            f"{side}_ban{slot}": f"{side}-ban-{slot}"
+            for side in ("blue", "red")
+            for slot in range(1, 6)
+        },
+    }
+    output = _categorical_context(
+        map_row,
+        _categorical_lineup("Blue"),
+        _categorical_lineup("Red"),
+        source_patch="16.16",
+    )
+
+    assert set(output) == set(CATEGORICAL_CONTEXT_COLUMNS)
+    assert output["category_source_patch"] == "16.16"
+    assert output["category_first_pick_side"] == "blue"
+    assert output["category_blue_player_id_mid"] == "oe:player:blue-mid"
+    assert output["category_red_champion_sup"] == "Red-sup-champion"
+    assert output["category_red_ban_5"] == "red-ban-5"
+
+
+def test_categorical_context_rejects_incomplete_roles() -> None:
+    with pytest.raises(AtomizedResearchError, match="roles are incomplete"):
+        _categorical_context(
+            {"league": "LEC"},
+            _categorical_lineup("Blue")[:-1],
+            _categorical_lineup("Red"),
+            source_patch="16.16",
+        )
+
+
+def test_categorical_context_uses_lineup_tournament_when_map_omits_it() -> None:
+    blue = _categorical_lineup("Blue")
+    for row in blue:
+        row["tournament"] = "LEC 2026 Summer"
+
+    output = _categorical_context(
+        {"league": "LEC"},
+        blue,
+        _categorical_lineup("Red"),
+        source_patch="16.16",
+    )
+
+    assert output["category_tournament"] == "LEC 2026 Summer"
+
+
 def test_expanding_series_folds_are_forward_only() -> None:
     rows = []
     for series in range(40):
@@ -225,6 +356,37 @@ def test_shrinkage_uses_only_supplied_prior_state() -> None:
     assert value == pytest.approx((400.0 + 5.0 * 50.0) / 7.0)
     assert support == 2
     assert missing == 0
+
+
+def test_role_metric_families_keep_lineup_roles_separate() -> None:
+    roles = ("top", "jng", "mid", "bot", "sup")
+    blue = [{"position": role, "playerid": f"blue-{role}"} for role in roles]
+    red = [{"position": role, "playerid": f"red-{role}"} for role in roles]
+    state: dict[tuple[str, str], RunningStat] = {}
+    for index, role in enumerate(roles, start=1):
+        state[(f"blue-{role}", "gold_diff_10")] = RunningStat(
+            total=float(index * 10), count=1
+        )
+        state[(f"red-{role}", "gold_diff_10")] = RunningStat(
+            total=float(index), count=1
+        )
+    output: dict[str, float] = {}
+
+    _emit_role_metric_families(
+        output,
+        prefix="history_player_overall",
+        state=state,
+        global_state={"gold_diff_10": RunningStat(total=0.0, count=1)},
+        blue_rows=blue,
+        red_rows=red,
+        key_from_row=lambda row: (str(row["playerid"]),),
+    )
+
+    assert output["history_player_overall_top_gold_diff_10"] != output[
+        "history_player_overall_sup_gold_diff_10"
+    ]
+    assert output["history_player_overall_top_gold_diff_10_support"] == 1
+    assert output["history_player_overall_sup_gold_diff_10_support"] == 1
 
 
 def test_exact_mechanic_keys_keep_raw_fields() -> None:
@@ -423,6 +585,32 @@ def test_pr281_nullable_player_group_fails_closed_without_hiding_team_group() ->
     assert bound["player_rating_missing"] == 1.0
     assert bound["base_player_logit"] == 0.0
     assert bound["rating_source_receipt_hash_match"] == 1.0
+
+
+def test_rating_context_receipt_exposes_role_specific_features() -> None:
+    receipt = _with_rating_context(_producer_receipt())
+    bound = _consume_producer_receipt(receipt)
+
+    assert bound["team_rating_available"] == 1.0
+    assert bound["player_rating_available"] == 1.0
+    assert bound["rating_context_available"] == 1.0
+    assert bound["rating_context_missing"] == 0.0
+    for field in RATING_CONTEXT_FIELDS:
+        assert bound[field] == pytest.approx(receipt[field])
+
+
+def test_rating_context_tampering_closes_only_context_group() -> None:
+    receipt = _with_rating_context(_producer_receipt())
+    receipt["player_role_rating_diff_scaled_mid"] = 9.0
+    bound = _consume_producer_receipt(receipt)
+
+    assert bound["team_rating_available"] == 1.0
+    assert bound["player_rating_available"] == 1.0
+    assert bound["rating_source_receipt_hash_match"] == 1.0
+    assert bound["rating_context_available"] == 0.0
+    assert bound["rating_context_missing"] == 1.0
+    for field in RATING_CONTEXT_FIELDS:
+        assert bound[field] == 0.0
 
 
 @pytest.mark.parametrize(

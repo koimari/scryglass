@@ -1,0 +1,18 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v8",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T15:45:00Z",
+  "inherits": "public-draft-score-promotion-protocol-v5.json",
+  "iteration": {
+    "id": "v8",
+    "single_change": "Use the previously selected 7-game, scale-80 residual momentum inside both sequential team and player rating states. Keep the random forest, atom features, selection, outer folds, calibration, and promotion gates unchanged.",
+    "previous_receipt": "345818bf291304709b5c3e524e68e98ca22543a9d0dc26460c57fb822f7decd1"
+  },
+  "rating_state": {
+    "team_momentum_window_games": 7,
+    "team_momentum_scale": 80.0,
+    "player_momentum_window_games": 7,
+    "player_momentum_scale": 80.0,
+    "residual_timing": "strictly prior with equal source timestamps batched"
+  }
+}

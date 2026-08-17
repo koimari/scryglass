@@ -9,6 +9,7 @@ import {
   getRatings,
   getTierFacets,
   getTierScope,
+  validatePromotedDraftScoreResult,
   validatePublicDraftResponse,
 } from "./publicData";
 import type { PackManifest } from "./pack";
@@ -48,6 +49,22 @@ function descriptiveManifest(): PackManifest {
   };
 }
 
+function promotedManifest(): PackManifest {
+  return {
+    ...queryManifest(),
+    draft_authority: {
+      schema_version: "scryglass:draft-authority:v1",
+      status: "promoted",
+      authority: "promoted",
+      release_id: RELEASE_ID,
+      model_version: "public-draft-score-v1",
+      artifact_sha256: "d".repeat(64),
+      receipt_sha256: "b".repeat(64),
+      issued_utc: "2026-08-16T22:00:00Z",
+    },
+  };
+}
+
 test("public query row limits stay inside the chat response budget", () => {
   assert.equal(boundedRowLimit(undefined, 20), 20);
   assert.equal(boundedRowLimit(1, 20), 1);
@@ -72,6 +89,73 @@ test("descriptive Draft responses accept model-unit fields and reject probabilit
     authority: "unavailable",
     draft_metric: { draft_edge: 0.25 },
   }, manifest), /unbound authority/);
+});
+
+test("promoted Draft responses allow probability and recommendation but never betting fields", () => {
+  const manifest = promotedManifest();
+  assert.doesNotThrow(() => validatePublicDraftResponse({
+    authority: "promoted",
+    match_win_probability: { Blue: 0.61, Red: 0.39 },
+    controlled_draft_score: { edge_percentage_points: 2.4 },
+    side_recommendation: "Blue",
+  }, manifest));
+  for (const field of ["odds", "fair_odds", "expected_value", "ev", "stake", "wager", "betting"]) {
+    assert.throws(() => validatePublicDraftResponse({
+      authority: "promoted",
+      [field]: 1,
+    }, manifest), /permanently forbidden betting field/);
+  }
+  assert.throws(() => validatePublicDraftResponse({
+    authority: "descriptive",
+    side_recommendation: "Blue",
+  }, descriptiveManifest()), /recommendation without promoted authority/);
+});
+
+test("promoted Draft result keeps match probability and controlled draft evidence separate", () => {
+  const manifest = promotedManifest();
+  const result = {
+    schema_version: "scryglass:public-draft-score-result:v1",
+    authority: "promoted",
+    release_id: RELEASE_ID,
+    model_version: "public-draft-score-v1",
+    receipt_sha256: "b".repeat(64),
+    evidence_window: {
+      start: "2025-01-01T00:00:00Z",
+      end: "2026-08-16T00:00:00Z",
+    },
+    match_win_probability: { Blue: 0.61, Red: 0.39 },
+    controlled_draft_score: {
+      model_units: -0.18,
+      edge_percentage_points: -1.9,
+      stronger_draft: "Red",
+      explanation: "Composition contribution with strength controls held fixed.",
+    },
+    side_recommendation: "Blue",
+  };
+  assert.doesNotThrow(() => validatePromotedDraftScoreResult(result, manifest));
+  assert.throws(() => validatePromotedDraftScoreResult({
+    ...result,
+    match_win_probability: { Blue: 0.61, Red: 0.41 },
+  }, manifest), /probabilities are invalid/);
+  assert.throws(() => validatePromotedDraftScoreResult({
+    ...result,
+    side_recommendation: "Red",
+  }, manifest), /recommendation conflicts/);
+  assert.throws(() => validatePromotedDraftScoreResult({
+    ...result,
+    release_id: "v2026.08.16.999999",
+  }, manifest), /not release-bound/);
+  assert.throws(() => validatePromotedDraftScoreResult({
+    ...result,
+    controlled_draft_score: {
+      ...result.controlled_draft_score,
+      stronger_draft: "Blue",
+    },
+  }, manifest), /direction is inconsistent/);
+  assert.throws(() => validatePromotedDraftScoreResult({
+    ...result,
+    receipt_sha256: "f".repeat(64),
+  }, manifest), /not release-bound/);
 });
 
 test("ratings RPC uses publishable auth and caps exact-name comparisons at 20 rows", async () => {

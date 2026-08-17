@@ -1,0 +1,11 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v18",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T17:38:58Z",
+  "inherits": "public-draft-score-promotion-protocol-v17.json",
+  "iteration": {
+    "id": "v18",
+    "single_change": "Replace the stochastic sparse draft expert with a deterministic L2 logistic solver. Its regularization preserves the prior alpha scale, and every coefficient, intercept, and training score must be finite.",
+    "previous_receipt": "d7aea6b13c3f51aafde0f32db6275ebc2d08cf91fd659f5dfcace6c3724800aa"
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v32",
+  "status": "frozen_after_exploratory_development_before_new_holdout",
+  "frozen_utc": "2026-08-17T04:02:00Z",
+  "inherits": "public-draft-score-promotion-protocol-v29.json",
+  "iteration": {
+    "id": "v32-selective-ensemble",
+    "single_change": "Use four equal-weight out-of-fold probability models. Fit a side-symmetric ridge confidence gate on squared error in the 2025 summer selection window. Publish probability only above the frozen 80 percent training-coverage threshold.",
+    "matrix_sha256": "36d48e7bd68066d782d8ad8164a87084871203feb72ae7259241909fb62fdd96",
+    "matrix_manifest_sha256": "3faec8f2c46e4c0c139a007f80481f256f40866a3d693a2b38dc84ec2be69765",
+    "exploratory_evaluation_receipt_sha256": "cda4c02b0275dffbdf63ec9ff5721ddd8500390a8ae024dfd380e755d4ce40b8"
+  },
+  "selective_probability": {
+    "predictors": [
+      {
+        "id": "quantum",
+        "weight": 0.25,
+        "prediction_artifact_sha256": "c3dba387fc375a9c1cec6d27e8751e856934a6f2e6390af94277ba6062b1e1d8"
+      },
+      {
+        "id": "roster",
+        "weight": 0.25,
+        "prediction_artifact_sha256": "dbdb2a76a59872b81bfe92576d593d02503b2ec3815f1743e8de7393f10fa0da"
+      },
+      {
+        "id": "identity",
+        "weight": 0.25,
+        "prediction_artifact_sha256": "647177540768d0e769997425f79626567a16c9d7d387ecb52d70de8fc3e7e87e"
+      },
+      {
+        "id": "development_composite",
+        "weight": 0.25,
+        "prediction_artifact_sha256": "53c452d6cf136c793b12fdc14d0fbb21c4d06fe89886c7413752ad86b235a2fe"
+      }
+    ],
+    "confidence_target": "squared_error_of_equal_weight_probability",
+    "confidence_model": "standardized_ridge",
+    "ridge_alpha": 10.0,
+    "selection_window": {
+      "start": "2025-07-01T00:00:00Z",
+      "end": "2026-01-01T00:00:00Z"
+    },
+    "target_training_coverage": 0.8,
+    "minimum_evaluation_coverage": 0.75,
+    "minimum_pooled_auc": 0.71,
+    "high_disagreement_fallback": "descriptive_composition_score_only",
+    "side_symmetric": true
+  },
+  "authority": {
+    "development_result": "research_only",
+    "public_probability": "unavailable_until_new_sealed_holdout_passes",
+    "public_recommendation": "unavailable_until_new_sealed_holdout_passes",
+    "betting_odds_ev_stake": false
+  }
+}

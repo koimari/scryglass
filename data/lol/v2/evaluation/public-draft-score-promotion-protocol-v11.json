@@ -1,0 +1,19 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v11",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T16:30:00Z",
+  "inherits": "public-draft-score-promotion-protocol-v10.json",
+  "iteration": {
+    "id": "v11",
+    "single_change": "Add four fold-local batch rating and composition experts to the committed masked-world stack. Each expert fits only earlier team, player, champion, allied, counter, same-role, and archetype rows. It emits a full pre-match logit and a separate composition-only logit.",
+    "previous_receipt": "3128b14639057f1a22c0e9349730578937f83afcf71c53d9312d4818074d3151"
+  },
+  "selection_extension": {
+    "draft_expert_configs": [
+      {"id": "draft-fast", "alpha": 0.01, "half_life_days": 90},
+      {"id": "draft-year", "alpha": 0.01, "half_life_days": 365},
+      {"id": "draft-long", "alpha": 0.01, "half_life_days": 730},
+      {"id": "draft-flex", "alpha": 0.003, "half_life_days": 730}
+    ]
+  }
+}

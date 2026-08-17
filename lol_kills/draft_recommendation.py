@@ -116,40 +116,50 @@ def build_games(players: pd.DataFrame) -> list[dict[str, Any]]:
     frame = frame.dropna(subset=["date", "result", "champion"])
     frame = frame[frame["side"].isin(("Blue", "Red")) & frame["role"].isin(ROLES)]
 
-    games: list[dict[str, Any]] = []
-    for gid, group in frame.groupby("_gid", sort=False):
-        sides: dict[str, dict[str, dict[str, str]]] = {}
-        complete = True
-        for side in ("Blue", "Red"):
-            side_rows = group[group["side"] == side]
-            picks: dict[str, dict[str, str]] = {}
-            for role in ROLES:
-                hit = side_rows[side_rows["role"] == role]
-                if hit.empty:
-                    complete = False
-                    break
-                row = hit.iloc[0]
-                picks[role] = {
-                    "champion": str(row["champion"]),
-                    "player": str(row.get("playername") or ""),
-                }
-            sides[side] = picks
-        if not complete:
-            continue
-        blue = group[group["side"] == "Blue"]
-        if blue.empty:
-            continue
-        first = blue.iloc[0]
-        games.append(
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in frame.to_dict(orient="records"):
+        gid = str(row["_gid"])
+        side = str(row["side"])
+        role = str(row["role"])
+        game = grouped.setdefault(
+            gid,
             {
                 "game_uid": gid,
-                "date": pd.Timestamp(first["date"]),
-                "league": str(first.get("league") or "UNKNOWN").upper(),
-                "blue_team": str(first.get("teamname") or ""),
-                "red_team": str(group[group["side"] == "Red"].iloc[0].get("teamname") or ""),
-                "y": float(first["result"]),
-                "blue": sides["Blue"],
-                "red": sides["Red"],
+                "blue": {},
+                "red": {},
+                "blue_metadata": None,
+                "red_team": None,
+            },
+        )
+        side_key = side.casefold()
+        if role not in game[side_key]:
+            game[side_key][role] = {
+                "champion": str(row["champion"]),
+                "player": str(row.get("playername") or ""),
+            }
+        if side == "Blue" and game["blue_metadata"] is None:
+            game["blue_metadata"] = {
+                "date": pd.Timestamp(row["date"]),
+                "league": str(row.get("league") or "UNKNOWN").upper(),
+                "blue_team": str(row.get("teamname") or ""),
+                "y": float(row["result"]),
+            }
+        if side == "Red" and game["red_team"] is None:
+            game["red_team"] = str(row.get("teamname") or "")
+
+    games: list[dict[str, Any]] = []
+    for game in grouped.values():
+        if game["blue_metadata"] is None or game["red_team"] is None:
+            continue
+        if any(role not in game["blue"] or role not in game["red"] for role in ROLES):
+            continue
+        games.append(
+            {
+                "game_uid": game["game_uid"],
+                **game["blue_metadata"],
+                "red_team": game["red_team"],
+                "blue": game["blue"],
+                "red": game["red"],
             }
         )
     return sorted(games, key=lambda game: (game["date"], game["game_uid"]))

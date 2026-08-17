@@ -1,0 +1,27 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v4",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T14:21:06Z",
+  "inherits": "public-draft-score-promotion-protocol-v3.json",
+  "iteration": {
+    "id": "v4",
+    "single_change": "Add strictly prior 40-map team macro atoms for checkpoint gold, XP, CS, kills, objectives, structures, and first-objective control. The forest, folds, selection rule, calibration rule, and promotion gates remain fixed.",
+    "previous_receipt": "6678a87388aaae033a84329faece7450199d88e7edd3791d60c6e011faa98206"
+  },
+  "feature_contract": {
+    "schema_version": "scryglass:atomized-rf-layer-a:v4",
+    "current_map_state_allowed": false,
+    "final_outcome_features_allowed": false,
+    "rating_receipt_required": "scryglass:resolved-rating-source:v1",
+    "missing_values": "zero value plus an explicit missing flag",
+    "draft_groups": [
+      "player_exact_performance",
+      "exact_ally_enemy_pairs",
+      "checkpoint_forecasts",
+      "parity_conditioned_performance",
+      "patch_exact_performance"
+    ],
+    "strength_groups": ["team_rating", "player_rating", "team_momentum", "team_macro_form"],
+    "context_group": "competition_context"
+  }
+}

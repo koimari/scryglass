@@ -24,7 +24,7 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping, MutableMapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, MutableMapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -36,7 +36,7 @@ from lol_kills.etl.aliases import normalize_team
 
 
 SCHEMA_VERSION = "scryglass:atomized-rf-composite-research:v3"
-FEATURE_SCHEMA_VERSION = "scryglass:atomized-rf-layer-a:v3"
+FEATURE_SCHEMA_VERSION = "scryglass:atomized-rf-layer-a:v10"
 MECHANICS_SCHEMA_VERSION = "scryglass:exact-lcc-mechanics-atoms:v1"
 TRAIN_END = pd.Timestamp("2026-05-01", tz="UTC")
 VALIDATION_END = pd.Timestamp("2026-07-01", tz="UTC")
@@ -65,18 +65,81 @@ RATING_VALUE_FIELDS = (
     "player_rating_diff_scaled",
     "player_lineup_complete",
 )
+RATING_CONTEXT_SCHEMA = "scryglass:public-draft-score-rating-context:v1"
 RATING_ROLES = ("top", "jungle", "mid", "bot", "support")
+LINEUP_ROLES = ("top", "jng", "mid", "bot", "sup")
+RATING_CONTEXT_FIELDS = (
+    "team_sigma_pair_scaled",
+    "team_sigma_diff_scaled",
+    "player_sigma_pair_scaled",
+    "player_sigma_diff_scaled",
+    "player_known_fraction_min",
+    *tuple(
+        f"player_role_{field}_{role}"
+        for role in LINEUP_ROLES
+        for field in (
+            "rating_diff_scaled",
+            "sigma_pair_scaled",
+            "momentum_diff_scaled",
+            "rating_available",
+        )
+    ),
+)
+CATEGORICAL_CONTEXT_COLUMNS = (
+    "category_league",
+    "category_tournament",
+    "category_competition_scope",
+    "category_event_kind",
+    "category_source_patch",
+    "category_first_pick_side",
+    "category_blue_team_id",
+    "category_red_team_id",
+    *tuple(
+        f"category_{side}_{kind}_{role}"
+        for side in ("blue", "red")
+        for role in LINEUP_ROLES
+        for kind in ("player_id", "champion")
+    ),
+    *tuple(
+        f"category_{side}_ban_{slot}"
+        for side in ("blue", "red")
+        for slot in range(1, 6)
+    ),
+)
 
 FEATURE_COVERAGE_THRESHOLDS: dict[str, float] = {
     "team_rating": 0.95,
     "player_rating": 0.95,
+    "rating_uncertainty": 0.95,
     "player_exact_performance": 0.50,
+    "player_role_performance": 0.50,
+    "global_champion_performance": 0.50,
+    "global_champion_interactions": 0.35,
     "exact_ally_enemy_pairs": 0.35,
     "checkpoint_forecasts": 0.50,
     "parity_conditioned_performance": 0.20,
     "team_momentum": 0.50,
     "patch_exact_performance": 0.35,
+    "competition_context": 1.0,
+    "team_macro_form": 0.50,
+    "regional_draft_atoms": 0.35,
 }
+
+TEAM_MACRO_METRICS = (
+    *(f"gold_diff_{checkpoint}" for checkpoint in CHECKPOINTS),
+    *(f"xp_diff_{checkpoint}" for checkpoint in CHECKPOINTS),
+    *(f"cs_diff_{checkpoint}" for checkpoint in CHECKPOINTS),
+    "kill_diff",
+    "dragon_diff",
+    "baron_diff",
+    "tower_diff",
+    "inhibitor_diff",
+    "void_grub_diff",
+    "first_blood",
+    "first_dragon",
+    "first_baron",
+    "first_tower",
+)
 
 HISTORICAL_METRICS: dict[str, str] = {
     **{
@@ -121,6 +184,12 @@ def _metric_columns(prefixes: Sequence[str], *, checkpoints: Sequence[int] | Non
     return tuple(output)
 
 
+def _role_metric_columns(prefixes: Sequence[str]) -> tuple[str, ...]:
+    return _metric_columns(
+        tuple(f"{prefix}_{role}" for prefix in prefixes for role in LINEUP_ROLES)
+    )
+
+
 GROUP_COLUMNS: dict[str, tuple[str, ...]] = {
     "team_rating": (
         "base_team_logit",
@@ -135,9 +204,27 @@ GROUP_COLUMNS: dict[str, tuple[str, ...]] = {
         "player_rating_available",
         "player_rating_missing",
     ),
+    "rating_uncertainty": (
+        *RATING_CONTEXT_FIELDS,
+        "rating_context_available",
+        "rating_context_missing",
+    ),
     "player_exact_performance": (
         "history_unique_player_maps_min",
-    ) + _metric_columns(("history_player_champion",)),
+    )
+    + _metric_columns(("history_player_champion",))
+    + _role_metric_columns(("history_player_champion",)),
+    "player_overall_performance": _metric_columns(("history_player_overall",))
+    + _role_metric_columns(("history_player_overall",)),
+    "player_role_performance": _metric_columns(("history_player_role",))
+    + _role_metric_columns(("history_player_role",)),
+    "global_champion_performance": _metric_columns(
+        ("history_champion", "history_role_champion")
+    )
+    + _role_metric_columns(("history_champion", "history_role_champion")),
+    "global_champion_interactions": _metric_columns(
+        ("history_ally_champion_pair_global", "history_enemy_champion_pair_global")
+    ),
     "exact_ally_enemy_pairs": _metric_columns(
         ("history_ally_champion_pair", "history_enemy_champion_pair")
     ),
@@ -182,9 +269,54 @@ GROUP_COLUMNS: dict[str, tuple[str, ...]] = {
         "player_momentum_coverage",
         "player_momentum_available",
         "player_momentum_missing",
+        "team_wr_diff_g40",
+        "team_residual_diff_g40",
+        "team_last_diff_g40",
+        "team_streak_diff_g40",
+        "team_count_diff_g40",
+        "player_wr_diff_g40",
+        "player_residual_diff_g40",
+        "player_last_diff_g40",
+        "player_streak_diff_g40",
+        "player_count_diff_g40",
+        "player_coverage_g40",
     ),
     "patch_exact_performance": _metric_columns(
         ("patch_player_champion", "patch_champion")
+    ),
+    "competition_context": (
+        *(f"context_league_{league}" for league in TARGET_LEAGUES),
+        "context_international",
+        "context_year_2026",
+        "context_patch_minor",
+    ),
+    "match_context": (
+        "series_map_index",
+        "series_score_diff",
+        "series_previous_winner_blue",
+        "series_state_available",
+        "h2h_win_rate_diff_g10",
+        "h2h_count_g10",
+        "h2h_available",
+    ),
+    "team_macro_form": (
+        "team_macro_form_available",
+        "team_macro_form_missing",
+        *(
+            field
+            for metric in TEAM_MACRO_METRICS
+            for field in (
+                f"team_macro_{metric}",
+                f"team_macro_{metric}_missing",
+            )
+        ),
+    ),
+    "regional_draft_atoms": _metric_columns(
+        (
+            "regional_champion",
+            "regional_ally_champion_pair",
+            "regional_enemy_champion_pair",
+        )
     ),
 }
 MODEL_COLUMNS = ("blue_side",) + tuple(
@@ -326,6 +458,72 @@ def _game_id(row: Mapping[str, Any]) -> str:
     return str(row.get("game_uid") or row.get("gameid") or "").strip()
 
 
+def _category_token(value: Any) -> str:
+    token = str(value or "").strip()
+    return token if token else "__missing__"
+
+
+def _categorical_context(
+    map_row: Mapping[str, Any],
+    blue_rows: Sequence[Mapping[str, Any]],
+    red_rows: Sequence[Mapping[str, Any]],
+    *,
+    source_patch: str,
+) -> dict[str, str]:
+    """Preserve exact pre-match identities for an ordered categorical world."""
+
+    blue_by_role = {
+        str(row.get("position") or "").strip().casefold(): row
+        for row in blue_rows
+    }
+    red_by_role = {
+        str(row.get("position") or "").strip().casefold(): row
+        for row in red_rows
+    }
+    if set(blue_by_role) != set(LINEUP_ROLES) or set(red_by_role) != set(
+        LINEUP_ROLES
+    ):
+        raise AtomizedResearchError("categorical lineup roles are incomplete")
+    blue_first = _finite(map_row.get("blue_firstPick")) == 1.0
+    red_first = _finite(map_row.get("red_firstPick")) == 1.0
+    if blue_first and not red_first:
+        first_pick_side = "blue"
+    elif red_first and not blue_first:
+        first_pick_side = "red"
+    else:
+        first_pick_side = "__missing__"
+    output = {
+        "category_league": _category_token(map_row.get("league")),
+        "category_tournament": _category_token(
+            map_row.get("tournament")
+            or blue_rows[0].get("tournament")
+            or red_rows[0].get("tournament")
+        ),
+        "category_competition_scope": _category_token(
+            map_row.get("competition_scope")
+        ),
+        "category_event_kind": _category_token(map_row.get("event_kind")),
+        "category_source_patch": _category_token(source_patch),
+        "category_first_pick_side": first_pick_side,
+        "category_blue_team_id": _team_id(blue_rows[0]),
+        "category_red_team_id": _team_id(red_rows[0]),
+    }
+    for side, rows_by_role in (("blue", blue_by_role), ("red", red_by_role)):
+        for role in LINEUP_ROLES:
+            row = rows_by_role[role]
+            output[f"category_{side}_player_id_{role}"] = _player_id(row)
+            output[f"category_{side}_champion_{role}"] = _category_token(
+                row.get("champion")
+            )
+        for slot in range(1, 6):
+            output[f"category_{side}_ban_{slot}"] = _category_token(
+                map_row.get(f"{side}_ban{slot}")
+            )
+    if set(output) != set(CATEGORICAL_CONTEXT_COLUMNS):
+        raise AtomizedResearchError("categorical context schema changed")
+    return output
+
+
 def normalize_source_patch(value: Any, date: Any) -> str:
     """Preserve OE patch identity when CSV float parsing drops a zero."""
 
@@ -355,14 +553,34 @@ def _side_difference(
 
 
 def _equal_weight_team_forecast(
-    state: Mapping[Any, RunningStat], keys: Iterable[Any]
+    state: Mapping[Any, RunningStat],
+    keys: Iterable[Any],
+    *,
+    fallback_state: Mapping[Any, RunningStat] | None = None,
+    fallback_keys: Iterable[Any] | None = None,
 ) -> tuple[float, int, float, int]:
-    """Return a five-player team total with one equal term per current player."""
+    """Return one equal forecast term per player slot.
+
+    Exact player-champion history has priority.  A strictly prior champion
+    history can fill a cold player-champion slot.  The coverage value remains
+    the fraction of slots backed by the exact player-champion history.
+    """
 
     keys = list(keys)
-    values = [state.get(key) for key in keys]
+    fallback_keys = list(fallback_keys or ())
+    if fallback_state is not None and len(fallback_keys) != len(keys):
+        raise AtomizedResearchError("phase fallback keys do not match player slots")
+    values: list[RunningStat | None] = []
+    exact_count = 0
+    for index, key in enumerate(keys):
+        value = state.get(key)
+        if value is not None and value.count:
+            exact_count += 1
+        elif fallback_state is not None:
+            value = fallback_state.get(fallback_keys[index])
+        values.append(value)
     observed = [value for value in values if value is not None and value.count]
-    coverage = len(observed) / len(keys) if keys else 0.0
+    coverage = exact_count / len(keys) if keys else 0.0
     support = min((value.count for value in observed), default=0)
     if not keys or len(observed) != len(keys):
         return 0.0, support, coverage, 1
@@ -504,12 +722,21 @@ def _resolved_roster_sha256(
     seen_slots: set[tuple[str, str]] = set()
     for row in rows:
         side = _side(row.get("side")).casefold()
-        role = str(
+        role_token = str(
             row.get("position")
             or row.get("position_name")
             or row.get("role")
             or ""
         ).strip().casefold()
+        role = {
+            "jng": "jungle",
+            "jung": "jungle",
+            "jungler": "jungle",
+            "adc": "bot",
+            "bottom": "bot",
+            "sup": "support",
+            "utility": "support",
+        }.get(role_token, role_token)
         team = _team_id(row)
         player = _player_id(row)
         champion = str(
@@ -639,6 +866,9 @@ def _locked_rating_authority(
         "rating_roster_receipt_match": 0.0,
         "rating_batch_receipt_match": 0.0,
         "rating_value_payload_sha256": None,
+        **{field: 0.0 for field in RATING_CONTEXT_FIELDS},
+        "rating_context_available": 0.0,
+        "rating_context_missing": 1.0,
     }
     try:
         if (
@@ -720,6 +950,36 @@ def _locked_rating_authority(
         )
         if not receipt_matches:
             return unavailable
+        context_features = {
+            field: 0.0 for field in RATING_CONTEXT_FIELDS
+        }
+        context_available = 0.0
+        if (
+            base_row.get("rating_context_schema") == RATING_CONTEXT_SCHEMA
+            and _finite(base_row.get("rating_context_available")) == 1.0
+            and _finite(base_row.get("rating_context_missing")) == 0.0
+        ):
+            parsed_context = {
+                field: _finite(base_row.get(field))
+                for field in RATING_CONTEXT_FIELDS
+            }
+            if all(value is not None for value in parsed_context.values()):
+                context_payload = {
+                    "schema_version": RATING_CONTEXT_SCHEMA,
+                    "rating_receipt_sha256": str(
+                        base_row.get("rating_receipt_sha256") or ""
+                    ),
+                    "values": parsed_context,
+                }
+                if str(base_row.get("rating_context_sha256") or "") == (
+                    _strict_canonical_sha256(context_payload)
+                ):
+                    context_features = {
+                        field: float(value)
+                        for field, value in parsed_context.items()
+                        if value is not None
+                    }
+                    context_available = 1.0
         team_available = bool(team_explicit)
         player_available = bool(player_explicit)
         return {
@@ -747,6 +1007,9 @@ def _locked_rating_authority(
             "rating_value_payload_sha256": _strict_canonical_sha256(
                 {"rating_timestamp": rating_timestamp, "rating_values": values}
             ),
+            **context_features,
+            "rating_context_available": context_available,
+            "rating_context_missing": 1.0 - context_available,
         }
     except (AtomizedResearchError, TypeError, ValueError):
         return unavailable
@@ -797,6 +1060,65 @@ def _momentum_features(
     }
 
 
+def _team_macro_features(
+    state: Mapping[str, deque[Mapping[str, float]]],
+    blue_team: str,
+    red_team: str,
+) -> dict[str, float]:
+    blue_rows = list(state.get(blue_team, ()))
+    red_rows = list(state.get(red_team, ()))
+    output: dict[str, float] = {}
+    available_count = 0
+    for metric in TEAM_MACRO_METRICS:
+        blue = [float(row[metric]) for row in blue_rows if metric in row]
+        red = [float(row[metric]) for row in red_rows if metric in row]
+        available = bool(blue and red)
+        available_count += int(available)
+        output[f"team_macro_{metric}"] = (
+            float(np.mean(blue) - np.mean(red)) if available else 0.0
+        )
+        output[f"team_macro_{metric}_missing"] = float(not available)
+    available = available_count >= int(math.ceil(len(TEAM_MACRO_METRICS) * 0.75))
+    output["team_macro_form_available"] = float(available)
+    output["team_macro_form_missing"] = float(not available)
+    return output
+
+
+def _team_macro_update(row: Mapping[str, Any]) -> dict[str, float]:
+    output: dict[str, float] = {}
+    for checkpoint in CHECKPOINTS:
+        for prefix, source, scale in (
+            ("gold", "golddiff", 1000.0),
+            ("xp", "xpdiff", 1000.0),
+            ("cs", "csdiff", 100.0),
+        ):
+            value = _finite(row.get(f"{source}at{checkpoint}"))
+            if value is not None:
+                output[f"{prefix}_diff_{checkpoint}"] = value / scale
+    for metric, own, opponent in (
+        ("kill_diff", "kills", "deaths"),
+        ("dragon_diff", "dragons", "opp_dragons"),
+        ("baron_diff", "barons", "opp_barons"),
+        ("tower_diff", "towers", "opp_towers"),
+        ("inhibitor_diff", "inhibitors", "opp_inhibitors"),
+        ("void_grub_diff", "void_grubs", "opp_void_grubs"),
+    ):
+        own_value = _finite(row.get(own))
+        opponent_value = _finite(row.get(opponent))
+        if own_value is not None and opponent_value is not None:
+            output[metric] = own_value - opponent_value
+    for metric, source in (
+        ("first_blood", "firstblood"),
+        ("first_dragon", "firstdragon"),
+        ("first_baron", "firstbaron"),
+        ("first_tower", "firsttower"),
+    ):
+        value = _finite(row.get(source))
+        if value is not None:
+            output[metric] = value
+    return output
+
+
 def _shrunk_metric_mean(
     state: Mapping[Any, RunningStat],
     global_state: Mapping[str, RunningStat],
@@ -838,6 +1160,37 @@ def _emit_metric_family(
         output[f"{prefix}_{metric}_missing"] = max(blue_missing, red_missing)
 
 
+def _emit_role_metric_families(
+    output: MutableMapping[str, Any],
+    *,
+    prefix: str,
+    state: Mapping[Any, RunningStat],
+    global_state: Mapping[str, RunningStat],
+    blue_rows: Sequence[Mapping[str, Any]],
+    red_rows: Sequence[Mapping[str, Any]],
+    key_from_row: Callable[[Mapping[str, Any]], tuple[Any, ...]],
+) -> None:
+    blue_by_role = {
+        str(row["position"]).strip().casefold(): row for row in blue_rows
+    }
+    red_by_role = {
+        str(row["position"]).strip().casefold(): row for row in red_rows
+    }
+    if set(blue_by_role) != set(LINEUP_ROLES) or set(red_by_role) != set(
+        LINEUP_ROLES
+    ):
+        raise AtomizedResearchError("role-preserving feature input is incomplete")
+    for role in LINEUP_ROLES:
+        _emit_metric_family(
+            output,
+            prefix=f"{prefix}_{role}",
+            state=state,
+            global_state=global_state,
+            blue_keys=[key_from_row(blue_by_role[role])],
+            red_keys=[key_from_row(red_by_role[role])],
+        )
+
+
 def _annotate_feature_availability(matrix: pd.DataFrame) -> pd.DataFrame:
     """Add one explicit authority flag for each model feature group."""
 
@@ -860,9 +1213,26 @@ def _annotate_feature_availability(matrix: pd.DataFrame) -> pd.DataFrame:
     matrix[FEATURE_AVAILABILITY_COLUMNS["player_rating"]] = matrix[
         "player_rating_available"
     ].astype(float)
+    matrix[FEATURE_AVAILABILITY_COLUMNS["rating_uncertainty"]] = matrix[
+        "rating_context_available"
+    ].astype(float)
     matrix[FEATURE_AVAILABILITY_COLUMNS["player_exact_performance"]] = (
         (matrix["history_unique_player_maps_min"] > 0)
         & any_support(("history_player_champion_result_residual",))
+    ).astype(float)
+    matrix[FEATURE_AVAILABILITY_COLUMNS["player_overall_performance"]] = (
+        any_support(("history_player_overall",))
+    ).astype(float)
+    matrix[FEATURE_AVAILABILITY_COLUMNS["player_role_performance"]] = (
+        any_support(("history_player_role",))
+    ).astype(float)
+    matrix[FEATURE_AVAILABILITY_COLUMNS["global_champion_performance"]] = (
+        any_support(("history_champion",))
+        & any_support(("history_role_champion",))
+    ).astype(float)
+    matrix[FEATURE_AVAILABILITY_COLUMNS["global_champion_interactions"]] = (
+        any_support(("history_ally_champion_pair_global",))
+        & any_support(("history_enemy_champion_pair_global",))
     ).astype(float)
     matrix[FEATURE_AVAILABILITY_COLUMNS["exact_ally_enemy_pairs"]] = (
         any_support(("history_ally_champion_pair",))
@@ -880,6 +1250,16 @@ def _annotate_feature_availability(matrix: pd.DataFrame) -> pd.DataFrame:
     ).astype(float)
     matrix[FEATURE_AVAILABILITY_COLUMNS["patch_exact_performance"]] = (
         any_support(("patch_player_champion", "patch_champion"))
+    ).astype(float)
+    matrix[FEATURE_AVAILABILITY_COLUMNS["competition_context"]] = 1.0
+    matrix[FEATURE_AVAILABILITY_COLUMNS["match_context"]] = 1.0
+    matrix[FEATURE_AVAILABILITY_COLUMNS["team_macro_form"]] = matrix[
+        "team_macro_form_available"
+    ].astype(float)
+    matrix[FEATURE_AVAILABILITY_COLUMNS["regional_draft_atoms"]] = (
+        any_support(("regional_champion",))
+        & any_support(("regional_ally_champion_pair",))
+        & any_support(("regional_enemy_champion_pair",))
     ).astype(float)
     return matrix
 
@@ -1145,24 +1525,27 @@ def _load_frames(maps_path: Path, players_path: Path, team_path: Path) -> tuple[
     return maps, players, teams
 
 
-def build_layer_a_matrix(
+def layer_a_build_preflight(
     *,
     base_dataset: Path,
     maps_path: Path,
     players_path: Path,
     team_path: Path,
-    identity_overlay_players_path: Path | None = None,
-    raw_identity_overlay_csv: Path | None = None,
+    identity_overlay_players_path: Path | None,
+    raw_identity_overlay_csv: Path | None,
     cache_dir: Path,
-    force: bool = False,
-) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Build the strictly lagged statistical-atom matrix.
+    expected_base_sha256: str,
+    history_end: Any = CONSUMED_TEST_END,
+) -> dict[str, Any]:
+    """Bind every matrix source without constructing the feature matrix."""
 
-    Gold and XP checkpoint values update histories after the map.  The same
-    fields remain targets for the current map.  They never enter the current
-    pre-match feature vector.
-    """
-
+    normalized_history_end = pd.Timestamp(history_end)
+    if normalized_history_end.tzinfo is None:
+        normalized_history_end = normalized_history_end.tz_localize("UTC")
+    else:
+        normalized_history_end = normalized_history_end.tz_convert("UTC")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(expected_base_sha256)):
+        raise AtomizedResearchError("expected base dataset SHA-256 is invalid")
     sources = {
         "base_dataset": sha256_path(base_dataset),
         "maps": sha256_path(maps_path),
@@ -1182,11 +1565,72 @@ def build_layer_a_matrix(
         "feature_schema": FEATURE_SCHEMA_VERSION,
         "momentum_window": MOMENTUM_WINDOW_GAMES,
         "momentum_scale": MOMENTUM_SCALE,
+        "history_end_exclusive": normalized_history_end.isoformat(),
     }
+    if sources["base_dataset"] != expected_base_sha256:
+        raise AtomizedResearchError("locked baseline dataset SHA-256 changed")
+    if (
+        raw_identity_overlay_csv is not None
+        and sources["raw_identity_overlay_csv"] != RAW_2026_IDENTITY_SHA256
+    ):
+        raise AtomizedResearchError("accepted raw 2026 identity source changed")
     digest = canonical_sha256(sources)
+    return {
+        "schema_version": "scryglass:atomized-rf-layer-a-build-preflight:v1",
+        "status": "frozen_inputs_ready_for_matrix_build",
+        "sources": sources,
+        "cache_digest": digest,
+        "matrix_path": str(cache_dir / f"layer-a-{digest}.parquet"),
+        "manifest_path": str(
+            cache_dir / f"layer-a-{digest}.manifest.json"
+        ),
+        "authority": {
+            "model_fit": False,
+            "public_probability": False,
+            "promotion": False,
+        },
+    }
+
+
+def build_layer_a_matrix(
+    *,
+    base_dataset: Path,
+    maps_path: Path,
+    players_path: Path,
+    team_path: Path,
+    identity_overlay_players_path: Path | None = None,
+    raw_identity_overlay_csv: Path | None = None,
+    cache_dir: Path,
+    force: bool = False,
+    expected_base_sha256: str = LOCKED_DATASET_SHA256,
+    history_end: Any = CONSUMED_TEST_END,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Build the strictly lagged statistical-atom matrix.
+
+    Gold and XP checkpoint values update histories after the map.  The same
+    fields remain targets for the current map.  They never enter the current
+    pre-match feature vector.
+    """
+
+    source_receipt = layer_a_build_preflight(
+        base_dataset=base_dataset,
+        maps_path=maps_path,
+        players_path=players_path,
+        team_path=team_path,
+        identity_overlay_players_path=identity_overlay_players_path,
+        raw_identity_overlay_csv=raw_identity_overlay_csv,
+        cache_dir=cache_dir,
+        expected_base_sha256=expected_base_sha256,
+        history_end=history_end,
+    )
+    normalized_history_end = pd.Timestamp(
+        source_receipt["sources"]["history_end_exclusive"]
+    )
+    sources = source_receipt["sources"]
+    digest = str(source_receipt["cache_digest"])
     cache_dir.mkdir(parents=True, exist_ok=True)
-    matrix_path = cache_dir / f"layer-a-{digest}.parquet"
-    manifest_path = cache_dir / f"layer-a-{digest}.manifest.json"
+    matrix_path = Path(source_receipt["matrix_path"])
+    manifest_path = Path(source_receipt["manifest_path"])
     if matrix_path.exists() and manifest_path.exists() and not force:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest.get("matrix_sha256") != sha256_path(matrix_path):
@@ -1196,8 +1640,6 @@ def build_layer_a_matrix(
     started = time.perf_counter()
     base = pd.read_parquet(base_dataset)
     base["date"] = pd.to_datetime(base["date"], utc=True, errors="raise")
-    if sha256_path(base_dataset) != LOCKED_DATASET_SHA256:
-        raise AtomizedResearchError("locked baseline dataset SHA-256 changed")
     maps, players, teams = _load_frames(maps_path, players_path, team_path)
     identity_overlay: dict[tuple[str, str, str, str], tuple[str, str]] = {}
     raw_identity_overlay: dict[tuple[str, str, str, str, str, str], tuple[str, str]] = {}
@@ -1219,8 +1661,6 @@ def build_layer_a_matrix(
                     )
                 ] = (player, team)
     if raw_identity_overlay_csv is not None:
-        if sha256_path(raw_identity_overlay_csv) != RAW_2026_IDENTITY_SHA256:
-            raise AtomizedResearchError("accepted raw 2026 identity source changed")
         raw_overlay = pd.read_csv(raw_identity_overlay_csv, low_memory=False)
         raw_overlay = raw_overlay[raw_overlay["position"].astype(str).str.casefold() != "team"]
         raw_overlay["date"] = pd.to_datetime(raw_overlay["date"], utc=True, errors="raise")
@@ -1264,12 +1704,22 @@ def build_layer_a_matrix(
     series = _series_ids(maps[maps["game_uid"].isin(base_ids)].copy())
 
     player_champion: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
+    player_overall: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
+    player_role: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
+    champion_history: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
+    role_champion_history: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
+    global_ally_pair: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
+    global_enemy_pair: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
     ally_pair: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
     enemy_pair: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
     forecast: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
+    forecast_champion: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
     parity: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
     patch_player_champion: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
     patch_champion: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
+    regional_champion: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
+    regional_ally_pair: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
+    regional_enemy_pair: MutableMapping[Any, RunningStat] = defaultdict(RunningStat)
     global_metric: MutableMapping[str, RunningStat] = defaultdict(RunningStat)
     player_champion_maps: MutableMapping[tuple[str, str], set[str]] = defaultdict(set)
     team_momentum_history: MutableMapping[str, deque[float]] = defaultdict(
@@ -1278,6 +1728,9 @@ def build_layer_a_matrix(
     player_momentum_history: MutableMapping[str, deque[float]] = defaultdict(
         lambda: deque(maxlen=MOMENTUM_WINDOW_GAMES)
     )
+    team_macro_history: MutableMapping[
+        str, deque[Mapping[str, float]]
+    ] = defaultdict(lambda: deque(maxlen=40))
     output: list[dict[str, Any]] = []
     rejected_lineups = 0
     exclusion_reasons: dict[str, str] = {}
@@ -1289,7 +1742,8 @@ def build_layer_a_matrix(
     # same competition universe, which avoids processing unrelated minor-league
     # rows and keeps the feature authority aligned with the evaluation set.
     ordered = maps[
-        (maps["date"] < CONSUMED_TEST_END) & maps["league"].isin(TARGET_LEAGUES)
+        (maps["date"] < normalized_history_end)
+        & maps["league"].isin(TARGET_LEAGUES)
     ].sort_values(["date", "game_uid"], kind="stable")
     for batch_timestamp, same_time in ordered.groupby("date", sort=False):
         batch_game_ids = sorted(
@@ -1419,6 +1873,29 @@ def build_layer_a_matrix(
                     **base_row,
                     "series_id": series[game_uid],
                     "source_patch": patch,
+                    **_categorical_context(
+                        map_row,
+                        blue,
+                        red,
+                        source_patch=patch,
+                    ),
+                    **{
+                        f"context_league_{league}": float(
+                            str(map_row.get("league")) == league
+                        )
+                        for league in TARGET_LEAGUES
+                    },
+                    "context_international": float(
+                        bool(map_row.get("is_international"))
+                    ),
+                    "context_year_2026": float(
+                        pd.Timestamp(map_row["date"]).year == 2026
+                    ),
+                    "context_patch_minor": float(
+                        patch.split(".", 1)[1]
+                    )
+                    if re.fullmatch(r"\d+\.\d+", patch)
+                    else 0.0,
                     **rating_authority,
                     **_momentum_features(
                         team_momentum_history,
@@ -1427,6 +1904,11 @@ def build_layer_a_matrix(
                         red_team,
                         blue_players,
                         red_players,
+                    ),
+                    **_team_macro_features(
+                        team_macro_history,
+                        blue_team,
+                        red_team,
                     ),
                 }
                 blue_unique_player_maps = _unique_player_map_support(
@@ -1453,6 +1935,144 @@ def build_layer_a_matrix(
                     global_state=global_metric,
                     blue_keys=blue_pc,
                     red_keys=red_pc,
+                )
+                _emit_metric_family(
+                    feature_row,
+                    prefix="history_player_overall",
+                    state=player_overall,
+                    global_state=global_metric,
+                    blue_keys=[(_player_id(row),) for row in blue],
+                    red_keys=[(_player_id(row),) for row in red],
+                )
+                _emit_metric_family(
+                    feature_row,
+                    prefix="history_player_role",
+                    state=player_role,
+                    global_state=global_metric,
+                    blue_keys=[
+                        (_player_id(row), str(row["position"]).strip().casefold())
+                        for row in blue
+                    ],
+                    red_keys=[
+                        (_player_id(row), str(row["position"]).strip().casefold())
+                        for row in red
+                    ],
+                )
+                _emit_metric_family(
+                    feature_row,
+                    prefix="history_champion",
+                    state=champion_history,
+                    global_state=global_metric,
+                    blue_keys=[(str(row["champion"]),) for row in blue],
+                    red_keys=[(str(row["champion"]),) for row in red],
+                )
+                _emit_metric_family(
+                    feature_row,
+                    prefix="history_role_champion",
+                    state=role_champion_history,
+                    global_state=global_metric,
+                    blue_keys=[
+                        (
+                            str(row["position"]).strip().casefold(),
+                            str(row["champion"]),
+                        )
+                        for row in blue
+                    ],
+                    red_keys=[
+                        (
+                            str(row["position"]).strip().casefold(),
+                            str(row["champion"]),
+                        )
+                        for row in red
+                    ],
+                )
+                _emit_role_metric_families(
+                    feature_row,
+                    prefix="history_player_champion",
+                    state=player_champion,
+                    global_state=global_metric,
+                    blue_rows=blue,
+                    red_rows=red,
+                    key_from_row=lambda row: (
+                        _player_id(row),
+                        str(row["champion"]),
+                    ),
+                )
+                _emit_role_metric_families(
+                    feature_row,
+                    prefix="history_player_overall",
+                    state=player_overall,
+                    global_state=global_metric,
+                    blue_rows=blue,
+                    red_rows=red,
+                    key_from_row=lambda row: (_player_id(row),),
+                )
+                _emit_role_metric_families(
+                    feature_row,
+                    prefix="history_player_role",
+                    state=player_role,
+                    global_state=global_metric,
+                    blue_rows=blue,
+                    red_rows=red,
+                    key_from_row=lambda row: (
+                        _player_id(row),
+                        str(row["position"]).strip().casefold(),
+                    ),
+                )
+                _emit_role_metric_families(
+                    feature_row,
+                    prefix="history_champion",
+                    state=champion_history,
+                    global_state=global_metric,
+                    blue_rows=blue,
+                    red_rows=red,
+                    key_from_row=lambda row: (str(row["champion"]),),
+                )
+                _emit_role_metric_families(
+                    feature_row,
+                    prefix="history_role_champion",
+                    state=role_champion_history,
+                    global_state=global_metric,
+                    blue_rows=blue,
+                    red_rows=red,
+                    key_from_row=lambda row: (
+                        str(row["position"]).strip().casefold(),
+                        str(row["champion"]),
+                    ),
+                )
+                _emit_metric_family(
+                    feature_row,
+                    prefix="history_ally_champion_pair_global",
+                    state=global_ally_pair,
+                    global_state=global_metric,
+                    blue_keys=[
+                        (str(row["champion"]), str(ally["champion"]))
+                        for row in blue
+                        for ally in blue
+                        if str(ally["champion"]) != str(row["champion"])
+                    ],
+                    red_keys=[
+                        (str(row["champion"]), str(ally["champion"]))
+                        for row in red
+                        for ally in red
+                        if str(ally["champion"]) != str(row["champion"])
+                    ],
+                )
+                _emit_metric_family(
+                    feature_row,
+                    prefix="history_enemy_champion_pair_global",
+                    state=global_enemy_pair,
+                    global_state=global_metric,
+                    blue_keys=[
+                        (str(row["champion"]), str(enemy["champion"]))
+                        for row in blue
+                        for enemy in red
+                    ],
+                    red_keys=[
+                        (str(row["champion"]), str(enemy["champion"]))
+                        for row in red
+                        for enemy in blue
+                    ],
                 )
                 _emit_metric_family(
                     feature_row,
@@ -1486,6 +2106,49 @@ def build_layer_a_matrix(
                     blue_keys=[(patch, str(row["champion"])) for row in blue],
                     red_keys=[(patch, str(row["champion"])) for row in red],
                 )
+                league = str(map_row.get("league") or "")
+                _emit_metric_family(
+                    feature_row,
+                    prefix="regional_champion",
+                    state=regional_champion,
+                    global_state=global_metric,
+                    blue_keys=[(league, str(row["champion"])) for row in blue],
+                    red_keys=[(league, str(row["champion"])) for row in red],
+                )
+                _emit_metric_family(
+                    feature_row,
+                    prefix="regional_ally_champion_pair",
+                    state=regional_ally_pair,
+                    global_state=global_metric,
+                    blue_keys=[
+                        (league, str(row["champion"]), str(ally["champion"]))
+                        for row in blue
+                        for ally in blue
+                        if str(ally["champion"]) != str(row["champion"])
+                    ],
+                    red_keys=[
+                        (league, str(row["champion"]), str(ally["champion"]))
+                        for row in red
+                        for ally in red
+                        if str(ally["champion"]) != str(row["champion"])
+                    ],
+                )
+                _emit_metric_family(
+                    feature_row,
+                    prefix="regional_enemy_champion_pair",
+                    state=regional_enemy_pair,
+                    global_state=global_metric,
+                    blue_keys=[
+                        (league, str(row["champion"]), str(enemy["champion"]))
+                        for row in blue
+                        for enemy in red
+                    ],
+                    red_keys=[
+                        (league, str(row["champion"]), str(enemy["champion"]))
+                        for row in red
+                        for enemy in blue
+                    ],
+                )
                 phase_available = True
                 for checkpoint in CHECKPOINTS:
                     for metric in ("gold", "xp"):
@@ -1495,11 +2158,27 @@ def build_layer_a_matrix(
                         state_keys_red = [
                             (_player_id(row), str(row["champion"]), checkpoint, metric) for row in red
                         ]
+                        fallback_keys_blue = [
+                            (str(row["champion"]), checkpoint, metric) for row in blue
+                        ]
+                        fallback_keys_red = [
+                            (str(row["champion"]), checkpoint, metric) for row in red
+                        ]
                         blue_total, blue_support, blue_coverage, blue_missing = (
-                            _equal_weight_team_forecast(forecast, state_keys_blue)
+                            _equal_weight_team_forecast(
+                                forecast,
+                                state_keys_blue,
+                                fallback_state=forecast_champion,
+                                fallback_keys=fallback_keys_blue,
+                            )
                         )
                         red_total, red_support, red_coverage, red_missing = (
-                            _equal_weight_team_forecast(forecast, state_keys_red)
+                            _equal_weight_team_forecast(
+                                forecast,
+                                state_keys_red,
+                                fallback_state=forecast_champion,
+                                fallback_keys=fallback_keys_red,
+                            )
                         )
                         available = not (blue_missing or red_missing)
                         phase_available = phase_available and available
@@ -1565,6 +2244,14 @@ def build_layer_a_matrix(
             patch = normalize_source_patch(
                 map_row.get("patch") or lineup.iloc[0].get("patch"), map_row["date"]
             )
+            league = str(map_row.get("league") or "")
+            for team_row in _team_rows.to_dict("records"):
+                side = _side(team_row.get("side"))
+                side_rows = by_side.get(side, [])
+                if side_rows:
+                    team_macro_history[_team_id(side_rows[0])].append(
+                        _team_macro_update(team_row)
+                    )
             y_blue = int(map_row["y_blue_win"])
             for side in ("Blue", "Red"):
                 side_result = y_blue if side == "Blue" else 1 - y_blue
@@ -1617,22 +2304,43 @@ def build_layer_a_matrix(
                             values[metric] = value
                     for metric, value in values.items():
                         global_metric[metric].add(value)
+                        player_overall[(player, metric)].add(value)
+                        role = str(row["position"]).strip().casefold()
+                        player_role[(player, role, metric)].add(value)
+                        champion_history[(champion, metric)].add(value)
+                        role_champion_history[(role, champion, metric)].add(value)
                         player_champion[(player, champion, metric)].add(value)
                         patch_player_champion[(patch, player, champion, metric)].add(value)
                         patch_champion[(patch, champion, metric)].add(value)
+                        regional_champion[(league, champion, metric)].add(value)
                         for ally in own_rows:
                             ally_champion = str(ally["champion"])
                             if ally_champion != champion:
                                 ally_pair[(player, champion, ally_champion, metric)].add(value)
+                                global_ally_pair[
+                                    (champion, ally_champion, metric)
+                                ].add(value)
+                                regional_ally_pair[
+                                    (league, champion, ally_champion, metric)
+                                ].add(value)
                         for enemy in enemy_rows:
-                            enemy_pair[(player, champion, str(enemy["champion"]), metric)].add(value)
+                            enemy_champion = str(enemy["champion"])
+                            enemy_pair[(player, champion, enemy_champion, metric)].add(value)
+                            global_enemy_pair[
+                                (champion, enemy_champion, metric)
+                            ].add(value)
+                            regional_enemy_pair[
+                                (league, champion, enemy_champion, metric)
+                            ].add(value)
                     for checkpoint in CHECKPOINTS:
                         gold = _finite(row.get(f"golddiffat{checkpoint}"))
                         xp = _finite(row.get(f"xpdiffat{checkpoint}"))
                         if gold is not None:
                             forecast[(player, champion, checkpoint, "gold")].add(gold)
+                            forecast_champion[(champion, checkpoint, "gold")].add(gold)
                         if xp is not None:
                             forecast[(player, champion, checkpoint, "xp")].add(xp)
+                            forecast_champion[(champion, checkpoint, "xp")].add(xp)
                         if gold is not None and xp is not None and abs(gold) <= 250 and abs(xp) <= 250:
                             for metric, value in values.items():
                                 parity[
@@ -1699,6 +2407,18 @@ def build_layer_a_matrix(
     _validate_no_current_state_features(MODEL_COLUMNS)
     if matrix[list(MODEL_COLUMNS)].isna().any().any():
         raise AtomizedResearchError("model feature matrix contains missing values")
+    missing_categories = sorted(
+        set(CATEGORICAL_CONTEXT_COLUMNS) - set(matrix.columns)
+    )
+    if missing_categories:
+        raise AtomizedResearchError(
+            f"categorical context misses fields: {missing_categories}"
+        )
+    if any(
+        not matrix[column].map(lambda value: bool(str(value).strip())).all()
+        for column in CATEGORICAL_CONTEXT_COLUMNS
+    ):
+        raise AtomizedResearchError("categorical context contains blank values")
     matrix.to_parquet(matrix_path, index=False)
     manifest = {
         "schema_version": FEATURE_SCHEMA_VERSION,
@@ -1754,7 +2474,9 @@ def build_layer_a_matrix(
                 else "eligible"
             )
         ),
-        "columns": list(MODEL_COLUMNS),
+        "columns": [*MODEL_COLUMNS, *CATEGORICAL_CONTEXT_COLUMNS],
+        "model_columns": list(MODEL_COLUMNS),
+        "categorical_columns": list(CATEGORICAL_CONTEXT_COLUMNS),
         "feature_groups": {key: list(value) for key, value in GROUP_COLUMNS.items()},
         "feature_authority": {
             "team_rating": {
@@ -1793,6 +2515,17 @@ def build_layer_a_matrix(
                 "source_sha256": sources["players"],
                 "temporal_cutoff": "strictly before map with equal timestamp batching",
             },
+            "categorical_context": {
+                "fields": list(CATEGORICAL_CONTEXT_COLUMNS),
+                "source": "accepted map and exact stable lineup rows",
+                "target_values_used": False,
+                "current_map_state_used": False,
+                "intended_consumer": "fold-local ordered categorical world",
+                "source_sha256": {
+                    "maps": sources["maps"],
+                    "players": sources["players"],
+                },
+            },
             "phase_forecast": {
                 "raw_outputs": [
                     f"expected_{metric}_diff_{checkpoint}"
@@ -1823,7 +2556,10 @@ def build_layer_a_matrix(
                 "fields": list(GROUP_COLUMNS["team_momentum"]),
                 "definition": "seven-map mean of outcome minus strictly prior base probability, scaled by 80",
                 "identity_rule": "residual history updates only after an exact roster-bound rating source receipt passes",
-                "current_locked_source_status": "blocked_missing_rating_roster_receipt",
+                "current_locked_source_status": "accepted_where_row_receipts_validate",
+                "validated_row_coverage": float(
+                    matrix["rating_source_receipt_available"].mean()
+                ),
                 "missingness": "neutral numeric value with explicit coverage and missing flags",
                 "source_sha256": sources["base_dataset"],
                 "temporal_cutoff": "strictly before map",
@@ -3090,6 +3826,11 @@ def main() -> None:
         default=Path("/private/tmp/scryglass-momentum-autoresearch/momentum-dataset.parquet"),
     )
     parser.add_argument(
+        "--expected-base-sha256",
+        default=LOCKED_DATASET_SHA256,
+        help="Required SHA-256 for --base-dataset.",
+    )
+    parser.add_argument(
         "--baseline-report",
         type=Path,
         default=Path("/private/tmp/scryglass-momentum-autoresearch/rating-comparison.json"),
@@ -3103,14 +3844,55 @@ def main() -> None:
         default=Path("/Users/river/Projects/scryglass/data/lol/warehouse/parquet/oe_live"),
     )
     parser.add_argument(
+        "--raw-identity-overlay-csv",
+        type=Path,
+        default=Path(
+            "/Users/river/Library/Application Support/Scryglass Worker/runtime/"
+            "data/lol/warehouse/raw/archive/"
+            "2026_LoL_esports_match_data_from_OraclesElixir."
+            f"{RAW_2026_IDENTITY_SHA256}.csv"
+        ),
+        help="Content-addressed 2026 OE identity source.",
+    )
+    parser.add_argument(
         "--lcc-repo", type=Path, default=Path("/Users/river/Projects/league-combat-calculator")
     )
     parser.add_argument("--cache-dir", type=Path, default=Path("/private/tmp/scryglass-atomized-rf-cache"))
     parser.add_argument("--prospective-start")
     parser.add_argument("--prospective-end")
+    parser.add_argument(
+        "--history-end",
+        default=CONSUMED_TEST_END.isoformat(),
+        help="Exclusive feature-history boundary for an explicitly opened holdout.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="Hash and validate layer-a sources without constructing features.",
+    )
     args = parser.parse_args()
+    if args.preflight_only:
+        if args.mode != "layer-a":
+            raise AtomizedResearchError(
+                "--preflight-only requires --mode layer-a"
+            )
+        preflight = layer_a_build_preflight(
+            base_dataset=args.base_dataset,
+            maps_path=args.historical_oe_root / "maps.parquet",
+            players_path=args.historical_oe_root / "oe_player_games.parquet",
+            team_path=args.historical_oe_root / "oe_team_games.parquet",
+            identity_overlay_players_path=args.oe_root
+            / "oe_player_games.parquet",
+            raw_identity_overlay_csv=args.raw_identity_overlay_csv,
+            cache_dir=args.cache_dir,
+            expected_base_sha256=args.expected_base_sha256,
+            history_end=args.history_end,
+        )
+        _write_json(args.output, preflight)
+        print(json.dumps(preflight, indent=2, sort_keys=True))
+        return
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "estimands": {
@@ -3146,10 +3928,10 @@ def main() -> None:
             players_path=args.historical_oe_root / "oe_player_games.parquet",
             team_path=args.historical_oe_root / "oe_team_games.parquet",
             identity_overlay_players_path=args.oe_root / "oe_player_games.parquet",
-            raw_identity_overlay_csv=Path(
-                "/Users/river/Library/Application Support/Scryglass Worker/runtime/data/lol/warehouse/raw/2026_LoL_esports_match_data_from_OraclesElixir.csv"
-            ),
+            raw_identity_overlay_csv=args.raw_identity_overlay_csv,
             cache_dir=args.cache_dir,
+            expected_base_sha256=args.expected_base_sha256,
+            history_end=args.history_end,
             force=args.force,
         )
         report["layer_a_matrix"] = manifest

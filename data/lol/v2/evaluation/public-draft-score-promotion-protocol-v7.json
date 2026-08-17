@@ -1,0 +1,19 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v7",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T15:30:00Z",
+  "inherits": "public-draft-score-promotion-protocol-v5.json",
+  "iteration": {
+    "id": "v7",
+    "single_change": "Replace the sparse random forest with a bounded gradient-boosted tree ensemble. Keep the rating anchor, atom groups, inner selection, outer folds, calibration rule, and promotion gates unchanged.",
+    "previous_receipt": "d8854195d14b8cb0b3bc7db399408f1ecdbbc5a9c3e41063207269466975ce19"
+  },
+  "selection_extension": {
+    "configs": [
+      {"id": "gbm-a", "learner": "lightgbm", "n_estimators": 250, "learning_rate": 0.03, "num_leaves": 15, "max_depth": 5, "min_child_samples": 30, "subsample": 0.8, "colsample_bytree": 0.35, "reg_alpha": 0.5, "reg_lambda": 2.0},
+      {"id": "gbm-b", "learner": "lightgbm", "n_estimators": 400, "learning_rate": 0.02, "num_leaves": 15, "max_depth": 5, "min_child_samples": 40, "subsample": 0.8, "colsample_bytree": 0.5, "reg_alpha": 1.0, "reg_lambda": 4.0},
+      {"id": "gbm-c", "learner": "lightgbm", "n_estimators": 300, "learning_rate": 0.025, "num_leaves": 31, "max_depth": 6, "min_child_samples": 40, "subsample": 0.8, "colsample_bytree": 0.35, "reg_alpha": 1.0, "reg_lambda": 4.0},
+      {"id": "gbm-d", "learner": "lightgbm", "n_estimators": 500, "learning_rate": 0.015, "num_leaves": 15, "max_depth": 4, "min_child_samples": 50, "subsample": 0.9, "colsample_bytree": 0.5, "reg_alpha": 1.5, "reg_lambda": 6.0}
+    ]
+  }
+}

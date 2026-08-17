@@ -1,0 +1,150 @@
+{
+  "authority": "research_only",
+  "betting_odds_ev_stake": false,
+  "calibration": {
+    "kind": "zero_intercept_logit_scale",
+    "side_symmetric": true,
+    "slope": 1.1236952732887175
+  },
+  "confidence": {
+    "model": {
+      "alpha": 10.0,
+      "coefficient": [
+        0.012481842107030438,
+        0.002886043739355763,
+        0.002288961203596231,
+        -0.006737189098787906,
+        -0.005621867170593411,
+        -0.011596146800895374,
+        -0.011457305461873063,
+        -0.002397702669251511,
+        -0.0016414934980960598,
+        -0.007241477897342636,
+        -0.004197831298344675,
+        -0.0031953334878869815,
+        -0.0015638133628091905,
+        -0.00038128005079649137,
+        0.0006156288729988588,
+        0.0,
+        0.003270769451395357,
+        -0.0034830483463853304,
+        0.0,
+        0.0016755066375036696,
+        0.0013502486065589297,
+        0.0013816319570800538
+      ],
+      "feature_columns": [
+        "disagreement",
+        "prediction_range",
+        "ensemble_margin",
+        "margin_quantum",
+        "margin_roster",
+        "margin_identity",
+        "margin_development_composite",
+        "distance_quantum_roster",
+        "distance_quantum_identity",
+        "distance_quantum_development_composite",
+        "distance_roster_identity",
+        "distance_roster_development_composite",
+        "distance_identity_development_composite",
+        "team_sigma_pair_scaled",
+        "player_sigma_pair_scaled",
+        "player_known_fraction_min",
+        "history_unique_player_maps_min",
+        "availability_player_exact_performance",
+        "availability_exact_ally_enemy_pairs",
+        "availability_checkpoint_forecasts",
+        "availability_parity_conditioned_performance",
+        "availability_regional_draft_atoms"
+      ],
+      "mean": [
+        0.03707568407910299,
+        0.09567860588598663,
+        0.13671376896020698,
+        0.13862829686226125,
+        0.14884727115813992,
+        0.14713393951800033,
+        0.13445314734831265,
+        0.046253366018922035,
+        0.047930521554967846,
+        0.059428378269109475,
+        0.04202430043342016,
+        0.05657435503971351,
+        0.06102183507716242,
+        0.15952744219332546,
+        0.1387594901216995,
+        1.0,
+        38.103121295930464,
+        0.9873567759778744,
+        1.0,
+        0.9932832872382458,
+        0.8214144606874753,
+        0.9956538917423943
+      ],
+      "scale": [
+        0.016548195811781782,
+        0.04341525950844663,
+        0.08774906098645073,
+        0.09273374855709403,
+        0.08505801061137207,
+        0.09634977105066846,
+        0.09118633939250904,
+        0.03445841258756544,
+        0.03807635503040922,
+        0.04620157815513276,
+        0.032222277022498684,
+        0.04179334352675276,
+        0.04647199026537121,
+        0.07014003533086063,
+        0.048198016289550796,
+        1.0,
+        22.410999491299734,
+        0.11172901551724149,
+        1.0,
+        0.08167985388962407,
+        0.38300488829906515,
+        0.06578160533628576
+      ],
+      "schema_version": "scryglass:selective-confidence-ridge:v1",
+      "target_mean": 0.21823981552594493
+    },
+    "target_coverage": 0.9,
+    "threshold": -0.2542499880616309
+  },
+  "ensemble": {
+    "predictors": [
+      "quantum",
+      "roster",
+      "identity",
+      "development_composite"
+    ],
+    "semantics": {
+      "development_composite": "in_repo_all_atom_fields_identity_logit",
+      "identity": "in_repo_strength_and_identity_logit",
+      "quantum": "in_repo_quantum_masked_forest_v24",
+      "roster": "in_repo_roster_random_forest"
+    },
+    "weights": {
+      "development_composite": 0.3,
+      "identity": 0.1,
+      "quantum": 0.4,
+      "roster": 0.2
+    }
+  },
+  "evidence": {
+    "end_exclusive": "2026-08-16T00:00:00+00:00",
+    "input_sha256": {
+      "development_composite": "57fae7f96a430696458d7c4ed5d73eaa9e2296e427488aa380e64dcd0297e39f",
+      "identity": "3446860fc793b8911de98610a39b798c11d164f839cf6ddabd7e26f0dd9fa55c",
+      "matrix": "8528ba6c2dd6323158e9999506a93eddb8887ad49c4233223aec99f8a92ce9f0",
+      "quantum": "c3dba387fc375a9c1cec6d27e8751e856934a6f2e6390af94277ba6062b1e1d8",
+      "roster": "82909450992f3a19220501f4ace9ea6e629a47e601eb3d409d0bb75b7331b230"
+    },
+    "rows": 2531
+  },
+  "public_probability": false,
+  "public_recommendation": false,
+  "receipt_sha256": "f5e895bb60946c9e6c2fcb528245597236e15960c1cf83ca835fadb56e750757",
+  "schema_version": "scryglass:selective-draft-probability-candidate:v1",
+  "status": "frozen_candidate_waiting_for_new_holdout"
+}

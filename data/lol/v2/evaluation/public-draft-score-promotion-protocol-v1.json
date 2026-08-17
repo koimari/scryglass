@@ -1,0 +1,81 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v1",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T13:50:19Z",
+  "target": "blue_map_win",
+  "products": {
+    "match_win_probability": "Full pre-match model probability from ratings, form, and draft inputs.",
+    "draft_score": "Model-specific composition contribution with rating and form controls held fixed.",
+    "recommendation": "The side with the higher model probability. Betting, odds, EV, and stake fields are absent."
+  },
+  "claim_boundary": {
+    "draft_score_is_causal": false,
+    "draft_score_label": "Controlled Draft Score contribution",
+    "draft_score_explanation": "This value measures the model probability change from the entered composition while team and player strength inputs stay fixed.",
+    "separate_strength_display": true
+  },
+  "source_window": {
+    "start_inclusive": "2025-01-01T00:00:00Z",
+    "end_exclusive": "2026-08-16T00:00:00Z",
+    "leagues": ["LCS", "LEC", "LCK", "LPL", "MSI", "EWC", "Worlds"]
+  },
+  "outer_folds": [
+    {"id": "outer-2025-summer", "start": "2025-07-01T00:00:00Z", "end": "2026-01-01T00:00:00Z", "inner_start": "2025-04-01T00:00:00Z"},
+    {"id": "outer-2026-q1", "start": "2026-01-01T00:00:00Z", "end": "2026-04-01T00:00:00Z", "inner_start": "2025-07-01T00:00:00Z"},
+    {"id": "outer-2026-spring", "start": "2026-04-01T00:00:00Z", "end": "2026-06-01T00:00:00Z", "inner_start": "2026-01-01T00:00:00Z"},
+    {"id": "outer-2026-midseason", "start": "2026-06-01T00:00:00Z", "end": "2026-08-09T00:00:00Z", "inner_start": "2026-04-01T00:00:00Z"},
+    {"id": "outer-2026-16-16", "start": "2026-08-09T00:00:00Z", "end": "2026-08-16T00:00:00Z", "inner_start": "2026-06-01T00:00:00Z"}
+  ],
+  "series_rule": "Training requires series maximum time before the evaluation start. Evaluation requires series minimum time at or after the start and series maximum time before the end. Boundary-crossing series are excluded.",
+  "feature_contract": {
+    "schema_version": "scryglass:atomized-rf-layer-a:v3",
+    "current_map_state_allowed": false,
+    "final_outcome_features_allowed": false,
+    "rating_receipt_required": "scryglass:resolved-rating-source:v1",
+    "missing_values": "zero value plus an explicit missing flag",
+    "draft_groups": [
+      "player_exact_performance",
+      "exact_ally_enemy_pairs",
+      "checkpoint_forecasts",
+      "parity_conditioned_performance",
+      "patch_exact_performance"
+    ],
+    "strength_groups": ["team_rating", "player_rating", "team_momentum"]
+  },
+  "selection": {
+    "metric": "lowest calibrated inner log loss",
+    "tie_breaker": "higher inner AUC",
+    "candidate": "RandomForestClassifier",
+    "baseline": "RandomForestClassifier on strength and momentum controls",
+    "blend_weights": [0.25, 0.5, 0.75, 1.0],
+    "calibration": "sigmoid on inner predictions, accepted only when inner Brier score and log loss both improve",
+    "random_seed": 461,
+    "n_jobs": -1,
+    "configs": [
+      {"id": "rf-a", "n_estimators": 400, "max_depth": 8, "min_samples_leaf": 10, "max_features": 0.15, "max_samples": 0.8, "class_weight": null},
+      {"id": "rf-b", "n_estimators": 400, "max_depth": 12, "min_samples_leaf": 10, "max_features": 0.15, "max_samples": 0.8, "class_weight": null},
+      {"id": "rf-c", "n_estimators": 400, "max_depth": null, "min_samples_leaf": 20, "max_features": 0.15, "max_samples": 0.8, "class_weight": null},
+      {"id": "rf-d", "n_estimators": 400, "max_depth": null, "min_samples_leaf": 40, "max_features": 0.15, "max_samples": 0.8, "class_weight": null},
+      {"id": "rf-e", "n_estimators": 400, "max_depth": 12, "min_samples_leaf": 20, "max_features": 0.25, "max_samples": 0.8, "class_weight": null},
+      {"id": "rf-f", "n_estimators": 400, "max_depth": null, "min_samples_leaf": 20, "max_features": 0.25, "max_samples": 0.8, "class_weight": null}
+    ]
+  },
+  "promotion_gates": {
+    "pooled_outer_auc_min": 0.710,
+    "pooled_outer_brier_max_delta_vs_baseline": 0.0,
+    "pooled_outer_log_loss_max_delta_vs_baseline": 0.0,
+    "pooled_outer_ece_max": 0.08,
+    "shuffle_auc_max": 0.55,
+    "series_bootstrap_auc_difference_median_min": 0.0,
+    "minimum_outer_rows": 1500,
+    "minimum_regions_with_100_rows": 4,
+    "probability_fields_allowed_only_after_all_gates": true
+  },
+  "research_basis": [
+    {"title": "Calibrating random forests for probability estimation", "year": 2016, "use": "Probability calibration audit."},
+    {"title": "Temporal Probability Calibration", "year": 2020, "use": "Calibration under time shift."},
+    {"title": "Shift Happens: Adjusting Classifiers", "year": 2021, "use": "Proper-score-aware adjustment under distribution shift."},
+    {"title": "Pairwise Comparisons with Flexible Time-Dynamics", "year": 2019, "use": "Time-varying sports strength context."},
+    {"title": "Linking a predictive model to causal effect estimation", "year": 2023, "use": "Controlled prediction contrasts remain non-causal without added assumptions."}
+  ]
+}

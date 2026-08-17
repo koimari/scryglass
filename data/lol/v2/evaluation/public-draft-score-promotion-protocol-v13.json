@@ -1,0 +1,33 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v13",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T17:00:00Z",
+  "inherits": "public-draft-score-promotion-protocol-v12.json",
+  "iteration": {
+    "id": "v13",
+    "single_change": "Add strictly prior player-wide performance atoms across champions. These fields preserve player evidence through champion changes and roster transfers.",
+    "previous_receipt": "7eace97d2107d5d4eed687565c6f142015ebb8ac1444534b1f330f127e65853d"
+  },
+  "feature_contract": {
+    "schema_version": "scryglass:atomized-rf-layer-a:v7",
+    "current_map_state_allowed": false,
+    "final_outcome_features_allowed": false,
+    "rating_receipt_required": "scryglass:resolved-rating-source:v1",
+    "player_overall_performance": "strictly prior player-wide statistical atoms across champions"
+  },
+  "selection_extension": {
+    "quantum_worlds": [
+      {"id": "world-player", "groups": ["player_exact_performance"]},
+      {"id": "world-player-overall", "groups": ["player_overall_performance"]},
+      {"id": "world-pairs", "groups": ["exact_ally_enemy_pairs"]},
+      {"id": "world-phase", "groups": ["checkpoint_forecasts"]},
+      {"id": "world-parity", "groups": ["parity_conditioned_performance"]},
+      {"id": "world-patch", "groups": ["patch_exact_performance"]},
+      {"id": "world-region", "groups": ["regional_draft_atoms"]},
+      {"id": "world-all", "groups": ["player_exact_performance", "player_overall_performance", "exact_ally_enemy_pairs", "checkpoint_forecasts", "parity_conditioned_performance", "patch_exact_performance", "regional_draft_atoms"]}
+    ],
+    "regional_worlds": [
+      {"id": "regional-world-all", "groups": ["player_exact_performance", "player_overall_performance", "exact_ally_enemy_pairs", "checkpoint_forecasts", "parity_conditioned_performance", "patch_exact_performance", "regional_draft_atoms"]}
+    ]
+  }
+}

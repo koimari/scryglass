@@ -1,0 +1,20 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v16",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T18:00:00Z",
+  "inherits": "public-draft-score-promotion-protocol-v15.json",
+  "iteration": {
+    "id": "v16",
+    "single_change": "Extend strictly prior training and atom histories through the complete 2024 Tier 1 source. Keep the 2025 to 2026 outer folds, atom schema, hidden worlds, learner, calibration, and promotion gates unchanged.",
+    "previous_receipt": "e1fbf24672fed566f1f09a8d4c34d140cc69345a3336690f1882b62372acfb5e"
+  },
+  "data_extension": {
+    "base_sha256": "8ab98b36ab3bd8e1a4d2dc5656cc0ac18b8e58143ba2a490f8d53c5f07068dc1",
+    "maps_sha256": "781325903aebb278a5bbcc3275a7171db46271e419177bde5b6b67c7f42d8798",
+    "players_sha256": "8d0285c6991b53cc3535653b99faa7f46bc55e2b204751f274835df6dfbcfb95",
+    "teams_sha256": "b4a56d1af555b6ad1418ac6d7fff22dad2a569f6665d166fc2173b6f75b3cd66",
+    "rating_history_2023_sha256": "8cf6c1bbe4a4c75a73d0a38fca826ecea48dd1fb386f515e2a7986797f7c1f3a",
+    "training_start": "2024-01-01T00:00:00Z",
+    "evaluation_start": "2025-07-01T00:00:00Z"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "feature_contract": {
+    "categorical_context": "exact pre-match team, player, champion, role, patch, competition, first-pick, and ban identities",
+    "current_map_state_allowed": false,
+    "final_outcome_features_allowed": false,
+    "rating_context_required": "scryglass:public-draft-score-rating-context:v1",
+    "rating_receipt_required": "scryglass:resolved-rating-source:v1",
+    "schema_version": "scryglass:atomized-rf-layer-a:v10"
+  },
+  "frozen_utc": "2026-08-17T03:14:06Z",
+  "inherits": "public-draft-score-promotion-protocol-v29.json",
+  "iteration": {
+    "id": "v31",
+    "matrix_manifest_sha256": "3faec8f2c46e4c0c139a007f80481f256f40866a3d693a2b38dc84ec2be69765",
+    "matrix_sha256": "36d48e7bd68066d782d8ad8164a87084871203feb72ae7259241909fb62fdd96",
+    "previous_receipt": "f0ab93deafa82dc42d8c710ec766b6c7f9eccfa7de2a5022a044327c98c6f679",
+    "single_change": "Add fold-local composition experts with alpha 0.0003 and 0.001 at 90, 180, and 365 day half-lives. Keep the existing composition experts, hidden worlds, exact-identity world, rating anchor, chronological folds, matrix, promotion gates, and candidate-only authority fixed."
+  },
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v31",
+  "selection_extension": {
+    "draft_expert_configs": [
+      {"id": "draft-weak-90", "alpha": 0.0003, "half_life_days": 90},
+      {"id": "draft-weak-180", "alpha": 0.0003, "half_life_days": 180},
+      {"id": "draft-weak-365", "alpha": 0.0003, "half_life_days": 365},
+      {"id": "draft-mid-90", "alpha": 0.001, "half_life_days": 90},
+      {"id": "draft-mid-180", "alpha": 0.001, "half_life_days": 180},
+      {"id": "draft-mid-365", "alpha": 0.001, "half_life_days": 365},
+      {"id": "draft-fast", "alpha": 0.01, "half_life_days": 90},
+      {"id": "draft-year", "alpha": 0.01, "half_life_days": 365},
+      {"id": "draft-long", "alpha": 0.01, "half_life_days": 730},
+      {"id": "draft-flex", "alpha": 0.003, "half_life_days": 730}
+    ]
+  },
+  "status": "frozen_before_first_v1_model_evaluation"
+}
