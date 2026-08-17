@@ -11,12 +11,17 @@ from lol_kills import draft_recommendation as draft_recommendation_module
 from lol_kills.export import paired_public_draft_score as paired_result_module
 from lol_kills.export import public_draft_score_result as public_result_module
 from lol_kills.research import controlled_draft_contribution as contribution_module
+from lol_kills.research import atomized_rf_composite as atomized_feature_module
 from lol_kills.research import evaluate_selective_draft_holdout as evaluator_module
+from lol_kills.research import prepare_controlled_draft_swaps as swap_preparer_module
 from lol_kills.research import selective_draft_probability as selective_module
 from lol_kills.research import selective_draft_constituents as constituent_module
 from lol_kills.research import public_draft_score_promotion as promotion_module
 from lol_kills.research import prepare_selective_draft_holdout_sources as source_module
 from lol_kills.research import seal_selective_draft_holdout as sealer_module
+from lol_kills.research import (
+    seal_controlled_draft_interventions as intervention_sealer_module,
+)
 from lol_kills.research import selective_draft_holdout_inventory as inventory_module
 from lol_kills.research import verify_selective_draft_promotion as verifier_module
 from lol_kills.research.selective_draft_probability import (
@@ -272,7 +277,7 @@ def test_frozen_holdout_gates_cannot_be_weakened() -> None:
 
 def test_latest_protocol_binds_the_frozen_candidate_and_implementation() -> None:
     root = Path(__file__).resolve().parents[1]
-    protocol_path = root / "data/lol/v2/evaluation/public-draft-score-promotion-protocol-v35.json"
+    protocol_path = root / "data/lol/v2/evaluation/public-draft-score-promotion-protocol-v36.json"
     candidate_path = root / "data/lol/v2/evaluation/public-draft-score-selective-candidate-v34.json"
     protocol, _ = promotion_module._load_protocol(protocol_path)
     candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
@@ -313,6 +318,15 @@ def test_latest_protocol_binds_the_frozen_candidate_and_implementation() -> None
     assert protocol["iteration"][
         "paired_public_result_builder_sha256"
     ] == file_sha256(Path(paired_result_module.__file__))
+    assert protocol["iteration"]["atomized_feature_builder_sha256"] == file_sha256(
+        Path(atomized_feature_module.__file__)
+    )
+    assert protocol["iteration"]["controlled_swap_preparer_sha256"] == file_sha256(
+        Path(swap_preparer_module.__file__)
+    )
+    assert protocol["iteration"][
+        "controlled_intervention_sealer_sha256"
+    ] == file_sha256(Path(intervention_sealer_module.__file__))
     assert protocol["iteration"]["holdout_sealer_sha256"] == file_sha256(
         Path(sealer_module.__file__)
     )
