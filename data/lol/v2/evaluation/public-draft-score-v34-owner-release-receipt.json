@@ -29,7 +29,7 @@
   },
   "release_basis": "owner_authorized_development_validation",
   "owner_identity": "koimari/scryglass",
-  "issued_utc": "2026-08-17T14:15:45Z",
+  "issued_utc": "2026-08-17T07:28:59Z",
   "approved_public_fields": [
     "match_win_probability",
     "controlled_draft_score",
@@ -38,5 +38,5 @@
   "public_probability": true,
   "public_recommendation": true,
   "betting_odds_ev_stake": false,
-  "receipt_sha256": "d0c12bfcc5e1efb4eeaa14ede722f1675eee472dbbaea65e74b238b89efe01eb"
+  "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a"
 }
