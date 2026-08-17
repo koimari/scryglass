@@ -181,7 +181,7 @@ if (await exists(bundledManifestPath)) {
 }
 
 const draftRoute = await readFile(path.join(appRoot, "src/app/api/chat/query_drafts/route.ts"), "utf8").catch(() => "");
-if (!draftRoute.includes("draftAuthorityStatus") || draftRoute.includes("draft_records")) {
+if (!draftRoute.includes("hasDescriptiveDraftAuthority") || draftRoute.includes("draft_records")) {
   failures.push("draft chat route does not use the release-bound descriptive gate");
 }
 for (const key of ["draft_probability", "draft_win_share", "average_win_share", "p_blue", "p_red", "fair_odds", "expected_value"]) {
