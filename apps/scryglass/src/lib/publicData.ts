@@ -24,6 +24,7 @@ import type {
 export const QUERY_API_SCHEMA = "scryglass:query-api:v1" as const;
 export const PUBLIC_RESPONSE_MAX_BYTES = 500 * 1024;
 export const PUBLIC_DRAFT_SCORE_RESULT_SCHEMA = "scryglass:public-draft-score-result:v1" as const;
+export const PROMOTED_DRAFT_RESULTS_SCHEMA = "scryglass:promoted-draft-results:v1" as const;
 
 export type PublicDraftScoreResult = {
   schema_version: typeof PUBLIC_DRAFT_SCORE_RESULT_SCHEMA;
@@ -38,8 +39,21 @@ export type PublicDraftScoreResult = {
     edge_percentage_points: number;
     stronger_draft: "Blue" | "Red" | "Even";
     explanation: string;
+    method: "role_matched_champion_swap";
+    intervention_receipt_sha256: string;
+    isolated_blue_draft_probability: number;
+    fixed_strength_blue_win_probability: number;
   };
   side_recommendation: "Blue" | "Red";
+};
+
+export type PromotedDraftResultsPayload = {
+  schema_version: typeof PROMOTED_DRAFT_RESULTS_SCHEMA;
+  authority: "promoted";
+  release_id: string;
+  model_version: string;
+  receipt_sha256: string;
+  results: Record<string, PublicDraftScoreResult>;
 };
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -91,6 +105,17 @@ export function validatePromotedDraftScoreResult(
     || !["Blue", "Red", "Even"].includes(String(score.stronger_draft))
     || typeof score.explanation !== "string"
     || !score.explanation.trim()
+    || score.method !== "role_matched_champion_swap"
+    || typeof score.intervention_receipt_sha256 !== "string"
+    || !SHA256_PATTERN.test(score.intervention_receipt_sha256)
+    || typeof score.isolated_blue_draft_probability !== "number"
+    || !Number.isFinite(score.isolated_blue_draft_probability)
+    || score.isolated_blue_draft_probability < 0
+    || score.isolated_blue_draft_probability > 1
+    || typeof score.fixed_strength_blue_win_probability !== "number"
+    || !Number.isFinite(score.fixed_strength_blue_win_probability)
+    || score.fixed_strength_blue_win_probability < 0
+    || score.fixed_strength_blue_win_probability > 1
   ) {
     throw new Error("Controlled Draft Score is invalid");
   }
@@ -119,6 +144,33 @@ export function validatePromotedDraftScoreResult(
     || Date.parse(window.start) >= Date.parse(window.end)
   ) {
     throw new Error("Promoted Draft evidence window is invalid");
+  }
+}
+
+/** Validate the complete promoted result asset before exposing any row. */
+export function validatePromotedDraftResultsPayload(
+  value: unknown,
+  manifest: PackManifest,
+): asserts value is PromotedDraftResultsPayload {
+  if (!value || typeof value !== "object") throw new Error("Promoted Draft result asset is malformed");
+  const payload = value as Partial<PromotedDraftResultsPayload>;
+  if (
+    payload.schema_version !== PROMOTED_DRAFT_RESULTS_SCHEMA
+    || payload.authority !== "promoted"
+    || payload.release_id !== manifest.pack_id
+    || payload.model_version !== manifest.draft_authority?.model_version
+    || payload.receipt_sha256 !== manifest.draft_authority?.receipt_sha256
+    || !payload.results
+    || typeof payload.results !== "object"
+    || Array.isArray(payload.results)
+    || Object.keys(payload.results).length === 0
+    || Object.keys(payload.results).length > 10_000
+  ) {
+    throw new Error("Promoted Draft result asset is not release-bound");
+  }
+  for (const [gameUid, result] of Object.entries(payload.results)) {
+    if (!gameUid) throw new Error("Promoted Draft result game ID is empty");
+    validatePromotedDraftScoreResult(result, manifest);
   }
 }
 const RPC_TIMEOUT_MS = 5_000;

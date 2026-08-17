@@ -10,6 +10,7 @@ import {
   getTierFacets,
   getTierScope,
   validatePromotedDraftScoreResult,
+  validatePromotedDraftResultsPayload,
   validatePublicDraftResponse,
 } from "./publicData";
 import type { PackManifest } from "./pack";
@@ -133,6 +134,10 @@ test("promoted Draft result keeps match probability and controlled draft evidenc
       edge_percentage_points: -1.9,
       stronger_draft: "Red",
       explanation: "Composition contribution with strength controls held fixed.",
+      method: "role_matched_champion_swap",
+      intervention_receipt_sha256: "c".repeat(64),
+      isolated_blue_draft_probability: 0.455,
+      fixed_strength_blue_win_probability: 0.56,
     },
     side_recommendation: "Blue",
   };
@@ -159,6 +164,44 @@ test("promoted Draft result keeps match probability and controlled draft evidenc
   assert.throws(() => validatePromotedDraftScoreResult({
     ...result,
     receipt_sha256: "f".repeat(64),
+  }, manifest), /not release-bound/);
+});
+
+test("promoted Draft result assets validate every release-bound row", () => {
+  const manifest = promotedManifest();
+  const result = {
+    schema_version: "scryglass:public-draft-score-result:v1",
+    authority: "promoted",
+    release_id: RELEASE_ID,
+    model_version: "public-draft-score-v1",
+    receipt_sha256: "b".repeat(64),
+    evidence_window: { start: "2025-01-01T00:00:00Z", end: "2026-08-16T00:00:00Z" },
+    match_win_probability: { Blue: 0.61, Red: 0.39 },
+    controlled_draft_score: {
+      model_units: -0.18,
+      edge_percentage_points: -1.9,
+      stronger_draft: "Red",
+      explanation: "Role-matched champion swap with strength held fixed.",
+      method: "role_matched_champion_swap",
+      intervention_receipt_sha256: "c".repeat(64),
+      isolated_blue_draft_probability: 0.455,
+      fixed_strength_blue_win_probability: 0.56,
+    },
+    side_recommendation: "Blue",
+  } as const;
+  const payload = {
+    schema_version: "scryglass:promoted-draft-results:v1",
+    authority: "promoted",
+    release_id: RELEASE_ID,
+    model_version: "public-draft-score-v1",
+    receipt_sha256: "b".repeat(64),
+    results: { "game-1": result },
+  } as const;
+
+  assert.doesNotThrow(() => validatePromotedDraftResultsPayload(payload, manifest));
+  assert.throws(() => validatePromotedDraftResultsPayload({
+    ...payload,
+    release_id: "v2026.08.16.999999",
   }, manifest), /not release-bound/);
 });
 
