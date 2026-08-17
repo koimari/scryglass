@@ -243,6 +243,42 @@ def test_live_binding_accepts_zero_padded_alias_for_float_like_oe_token(tmp_path
     assert binding["source_token_count"] == 1
 
 
+def test_live_binding_compares_metadata_before_the_public_history_window(tmp_path: Path) -> None:
+    player_path = tmp_path / "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet"
+    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_live/meta.json"
+    player_path.parent.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {"gameid": "old-map", "date": "2024-12-20T12:00:00Z", "patch": "14.24"},
+            {"gameid": "public-map", "date": "2026-01-25T12:00:00Z", "patch": "16.02"},
+        ]
+    ).to_parquet(player_path, index=False)
+    meta_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "scryglass:oe-live-source:v1",
+                "source_mode": "oe_only",
+                "source_latest": "2026-01-25T12:00:00Z",
+                "maps": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload = {
+        "source_window": {"start": "2026-01-01T00:00:00Z"},
+        "sources": [
+            {"kind": "oe_live_player_games", "locator": "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet", "mutable_live_source": True},
+            {"kind": "oe_live_meta", "locator": "data/lol/warehouse/parquet/oe_live/meta.json", "mutable_live_source": True},
+        ],
+        "mappings": [{"oe_token": "16.02"}],
+    }
+
+    intervals, binding = _live_source_binding(payload, repo_root=tmp_path)
+
+    assert list(intervals) == ["16.02"]
+    assert binding["source_game_count"] == 1
+
+
 def test_float_like_token_uses_event_time_when_both_audited_aliases_exist() -> None:
     path = Path("data/lol/v2/champions/oe-atom-patch-map-v1.json")
     payload = json.loads(path.read_text(encoding="utf-8"))

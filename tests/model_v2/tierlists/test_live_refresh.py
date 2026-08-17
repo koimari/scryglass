@@ -353,6 +353,44 @@ def test_skip_annual_oe_uses_the_cached_oe_source(tmp_path: Path) -> None:
     assert run_step.call_args_list[0].kwargs["source"] == "champion_atomization"
 
 
+def test_release_tier_refresh_does_not_rebuild_the_accepted_oe_source(tmp_path: Path) -> None:
+    steps = [
+        {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0}
+        for _ in range(2)
+    ]
+    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_live/meta.json"
+    meta_path.parent.mkdir(parents=True)
+    meta_path.write_text(
+        json.dumps(
+            {
+                "source_latest": "2026-08-16T21:07:39+00:00",
+                "source_game_count": 22,
+                "identity_complete_game_count": 22,
+            }
+        ),
+        encoding="utf-8",
+    )
+    with patch.object(live_refresh, "_run_step", side_effect=steps) as run_step, patch.object(
+        live_refresh,
+        "build_candidate",
+        return_value=_candidate(source_mode="oe_only"),
+    ), patch.object(live_refresh, "write_candidate", return_value="b" * 64):
+        receipt = live_refresh.refresh_candidate(
+            tmp_path,
+            expected_live_as_of="2026-08-16T21:07:39Z",
+            output_path=tmp_path / "candidate.json",
+            receipt_path=tmp_path / "receipt.json",
+            source_mode="oe_only",
+            skip_annual_oe=True,
+            skip_live_source=True,
+        )
+
+    assert run_step.call_count == 2
+    assert all(call.kwargs["source"] != "oe_live_source" for call in run_step.call_args_list)
+    assert receipt["source_steps"][2]["completed"] is True
+    assert receipt["source_steps"][2]["reason"] == "accepted_oe_live_verified"
+
+
 def test_ratings_step_receives_previous_refresh_as_of(tmp_path: Path) -> None:
     """Movement baseline: the ratings step gets --previous-as-of from the
     previous approved bundle so rank movement reflects the last cycle."""

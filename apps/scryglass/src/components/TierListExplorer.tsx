@@ -138,8 +138,8 @@ function roleLabel(role: string): string {
   return ROLE_LABELS[role] ?? role;
 }
 
-function gameCount(value: number): string {
-  return `${value} ${value === 1 ? "game" : "games"}`;
+function appearanceCount(value: number): string {
+  return `${value} ${value === 1 ? "appearance" : "appearances"}`;
 }
 
 function signedScore(value: number | null | undefined): string {
@@ -389,7 +389,7 @@ function listMetric(row: TierRow, mode: RankedBoardMode): { value: string; detai
   }
   return {
     value: firstPickMetric(row),
-    detail: `${gameCount(row.played_maps)} observed · patch-wide tier`,
+    detail: `${appearanceCount(row.played_maps)} · patch-wide tier`,
   };
 }
 
@@ -415,7 +415,7 @@ function DraftRow({
       <span className={styles.rowName}>
         <strong>{row.champion}</strong>
         <span>
-          {roleLabel(row.role)} · {gameCount(row.played_maps)} · <span className={movementClass(row)}>{movementText(row)}</span>
+          {roleLabel(row.role)} · {appearanceCount(row.played_maps)} · <span className={movementClass(row)}>{movementText(row)}</span>
         </span>
       </span>
       <span className={styles.rowMetric}>
@@ -961,6 +961,12 @@ export function TierListExplorer({
   const regionalRows = serverFiltered ? rows : filterRowsByRegion(rows, scopes, activePatch, activeRegion);
   const visibleRows = filterRowsByMinimumGames(regionalRows, minimumGames);
   const patchRowCount = regionalRows.length;
+  const patchGameCount = Math.max(
+    0,
+    ...scopes
+      .filter((scope) => scope.patch === activePatch)
+      .map((scope) => (scope.regional_views ?? []).reduce((sum, view) => sum + view.maps, 0)),
+  );
   const noEvidenceAtFloor = patchRowCount > 0 && visibleRows.length === 0;
   const selectedRows = role ? visibleRows.filter((row) => row.role === role) : [];
   const selectedScope = role
@@ -1050,7 +1056,7 @@ export function TierListExplorer({
           />
         ) : null}
         <label className={styles.field}>
-          <span>Minimum games</span>
+          <span>Minimum appearances</span>
           <select value={minimumGames} onChange={(event) => setMinimumGames(Number(event.target.value))}>
             {MINIMUM_GAME_OPTIONS.map((value) => (
               <option key={value} value={value}>{value}+</option>
@@ -1071,14 +1077,15 @@ export function TierListExplorer({
 
       <div className={styles.meta}>
         {role ? `${selectedRows.length} champions · ${roleLabel(role)}` : `${visibleRows.length} champions across all roles`}
-        {activeRegionLabel ? ` · ${activeRegionLabel}` : " · all regions"} · {minimumGames}+ games · {freshnessLabel(data)} · updated {data.as_of ?? data.generated_at}
+        {activeRegionLabel ? ` · ${activeRegionLabel}` : " · all regions"}
+        {patchGameCount ? ` · ${patchGameCount} patch games` : ""} · {minimumGames}+ champion appearances · {freshnessLabel(data)} · updated {data.as_of ?? data.generated_at}
       </div>
 
       {noEvidenceAtFloor ? (
         <div className={styles.unavailable} role="status">
-          <p>No champions have {minimumGames}+ accepted games in {activePatch} for this scope.</p>
-          <span>{patchRowCount} patch rows have at least one accepted game. These early rows are provisional evidence.</span>
-          {minimumGames !== 1 ? <button type="button" className={styles.button} onClick={() => setMinimumGames(1)}>Show 1+ games</button> : null}
+          <p>No champions have {minimumGames}+ appearances in {activePatch} for this scope.</p>
+          <span>{patchGameCount ? `${patchGameCount} games are in the patch census. ` : ""}{patchRowCount} champion rows have at least one appearance.</span>
+          {minimumGames !== 1 ? <button type="button" className={styles.button} onClick={() => setMinimumGames(1)}>Show 1+ appearances</button> : null}
         </div>
       ) : null}
 
@@ -1106,7 +1113,7 @@ export function TierListExplorer({
             row={firstPick}
             value={firstPickMetric(firstPick)}
             mode="first_pick"
-            description={`Strongest general result among champions with at least ${minimumGames} accepted games.`}
+            description={`Strongest general result among champions with at least ${minimumGames} appearances.`}
           />
         </div>
       ) : null}

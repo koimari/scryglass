@@ -8,6 +8,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import re
@@ -1759,6 +1760,7 @@ def export_public_pack(
     composition_games: list[dict[str, Any]] = []
     composition_result: dict[str, Any] | None = None
     draft_records_payload: dict[str, Any] | None = None
+    team_draft_records_payload: dict[str, Any] | None = None
     promoted_results_payload: dict[str, Any] | None = None
     descriptive_publication: dict[str, Any] | None = None
     draft_players: list[dict[str, Any]] = []
@@ -1835,6 +1837,9 @@ def export_public_pack(
             composition_games,
             composition_audit,
         )
+        # Team Draft Score needs only a complete composition. Best-available
+        # player metrics need the narrower pick-pool gate applied below.
+        team_draft_records_payload = copy.deepcopy(draft_records_payload)
         draft_publication = _draft_publication_decision(
             None,
             descriptive_authority=descriptive_authority,
@@ -1905,6 +1910,11 @@ def export_public_pack(
             raise RuntimeError("promoted Draft results are outside descriptive evidence")
 
     draft_published = draft_publication["status"] in {"descriptive", "promoted"}
+
+    if draft_published and tier_publication is None:
+        raise RuntimeError(
+            "published Draft releases require a release-bound tier publication"
+        )
 
     tier_receipt_sha256: str | None = None
     if tier_publication is not None:
@@ -2298,9 +2308,8 @@ def export_public_pack(
             team_records=team_records_payload_raw,
             player_champion_records=player_champion_records_raw,
             match_index=match_index_raw,
-            draft_records=draft_records_payload,
+            draft_records=team_draft_records_payload,
             draft_players=draft_players,
-            draft_profile_records=profile_records_payload if draft_published else None,
         )
         leaderboards_dest = feat_dir / "leaderboards.json"
         leaderboards_dest.write_text(
