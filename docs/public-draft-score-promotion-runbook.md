@@ -7,8 +7,8 @@
 - Selected development games: `1,482`
 - Development coverage: `87.02%`
 - Candidate receipt: `f5e895bb60946c9e6c2fcb528245597236e15960c1cf83ca835fadb56e750757`
-- Protocol: `public-draft-score-promotion-protocol-v38.json`
-- Protocol file SHA-256: `f6496ff946aa22734cd956cd531bf3f2c17a87dba9e810bbaf988f1f32028126`
+- Protocol: `public-draft-score-promotion-protocol-v39.json`
+- Protocol file SHA-256: `6a95f63d5a00b229967379a13be2eb4e213aa2184d87d5b3ce9ae3f2bdda52bf`
 - Public probability: unavailable
 - Public recommendation: unavailable
 
@@ -73,7 +73,7 @@ The training matrices can contain historical outcomes. The evaluation feature an
 
 ```zsh
 python3 -m lol_kills.research.seal_selective_draft_holdout \
-  --protocol data/lol/v2/evaluation/public-draft-score-promotion-protocol-v38.json \
+  --protocol data/lol/v2/evaluation/public-draft-score-promotion-protocol-v39.json \
   --protocol-sha256 "$PROTOCOL_SHA256" \
   --candidate data/lol/v2/evaluation/public-draft-score-selective-candidate-v34.json \
   --candidate-sha256 "$CANDIDATE_SHA256" \
@@ -109,7 +109,7 @@ Create a minimal outcome file with exactly `game_uid` and binary `y`. Do this on
 
 ```zsh
 python3 -m lol_kills.research.evaluate_selective_draft_holdout \
-  --protocol data/lol/v2/evaluation/public-draft-score-promotion-protocol-v38.json \
+  --protocol data/lol/v2/evaluation/public-draft-score-promotion-protocol-v39.json \
   --protocol-sha256 "$PROTOCOL_SHA256" \
   --candidate data/lol/v2/evaluation/public-draft-score-selective-candidate-v34.json \
   --candidate-sha256 "$CANDIDATE_SHA256" \
@@ -156,9 +156,9 @@ The August 16 batch is the first valid batch.
 - Selected recommendations: `13`
 - Coverage: `92.86%`
 - Selected by league: LPL `7`, LEC `4`, LCS `2`
-- Sealed receipt: `836030ec47ed0aba22548cf911690db55975bf069a6ce7b7cc9cbb1c9a0f80ad`
-- Inventory receipt: `40bf966bf8fb77155a34c2dfeb8ee755226a9fce75e95f4b8878735daef35ec7`
-- Paired intervention receipt: `3416cf29bc6ee6490e2d9abd593724f2de1799b742b8c7b2a9bb23419eb8bbac`
+- Sealed receipt: `468b220f2650c7876b2a6d80ee1e6dfbdedad1a3901de538e071bf2c7ea832fe`
+- Inventory receipt: `e407bfdce6a8daa53c3f090dc643c6e1949a9fe135b774b2cab27ac3b4f89716`
+- Paired intervention receipt: `10f5531f9ff06ae6396ccb7dfc8315fe862f39354ac7ecc25fabad61af202758`
 - Outcomes opened: no
 
 ## Public contract
@@ -209,13 +209,13 @@ The implementation is in:
 - `lol_kills/research/controlled_draft_contribution.py`
 - `lol_kills/export/paired_public_draft_score.py`
 
-Protocol v38 binds both files, the atomized counterfactual feature builder,
+Protocol v39 binds both files, the atomized counterfactual feature builder,
 the swap preparer, and the paired intervention sealer. The first August 16
-batch was resealed under v38 before any outcome was opened. Its predictions,
-selection, and game IDs stayed unchanged. Use only the v38 receipt for the
+batch was resealed under v39 before any outcome was opened. Its predictions,
+selection, and game IDs stayed unchanged. Use only the v39 receipt for the
 promotion inventory.
 
-The paired v38 seal contains 14 observed and swapped predictions. Thirteen
+The paired v39 seal contains 14 observed and swapped predictions. Thirteen
 rows pass the frozen selection rule in each direction. The controlled Draft
 edge ranges from `-5.64` to `+6.00` percentage points. This is outcome-blind
 evidence. It does not grant public authority.

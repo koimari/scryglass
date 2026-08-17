@@ -73,13 +73,13 @@ These are development results. They do not grant public authority.
 
 Protocol:
 
-`data/lol/v2/evaluation/public-draft-score-promotion-protocol-v38.json`
+`data/lol/v2/evaluation/public-draft-score-promotion-protocol-v39.json`
 
 Protocol file SHA-256:
 
-`f6496ff946aa22734cd956cd531bf3f2c17a87dba9e810bbaf988f1f32028126`
+`6a95f63d5a00b229967379a13be2eb4e213aa2184d87d5b3ce9ae3f2bdda52bf`
 
-Version 38 binds:
+Version 39 binds:
 
 - the candidate and every model implementation;
 - source preparation, sealing, inventory, and final evaluation;
@@ -132,7 +132,7 @@ Source patch `16.16` maps to public patch `26.16`.
 
 Observed output:
 
-`/private/tmp/scryglass-v38-holdout-batch-20260816-sealed-v1.parquet`
+`/private/tmp/scryglass-v39-holdout-batch-20260816-sealed-v1.parquet`
 
 Observed output SHA-256:
 
@@ -140,21 +140,21 @@ Observed output SHA-256:
 
 Observed receipt:
 
-`/private/tmp/scryglass-v38-holdout-batch-20260816-sealed-v1.receipt.json`
+`/private/tmp/scryglass-v39-holdout-batch-20260816-sealed-v1.receipt.json`
 
 Observed receipt file SHA-256:
 
-`8938643066904647a05d15b4c73e1fdd80f0f19d258128ef596e934abe54bf51`
+`b6fb662d272210aa37f45e0a3934e8071a9df818317d4c5877802cdfa278d6ef`
 
 Observed internal receipt:
 
-`836030ec47ed0aba22548cf911690db55975bf069a6ce7b7cc9cbb1c9a0f80ad`
+`468b220f2650c7876b2a6d80ee1e6dfbdedad1a3901de538e071bf2c7ea832fe`
 
 ### Paired Draft seal
 
 Paired output:
 
-`/private/tmp/scryglass-v38-holdout-batch-20260816-paired-sealed-v1.parquet`
+`/private/tmp/scryglass-v39-holdout-batch-20260816-paired-sealed-v1.parquet`
 
 Paired output SHA-256:
 
@@ -162,15 +162,15 @@ Paired output SHA-256:
 
 Paired receipt:
 
-`/private/tmp/scryglass-v38-holdout-batch-20260816-paired-sealed-v1.receipt.json`
+`/private/tmp/scryglass-v39-holdout-batch-20260816-paired-sealed-v1.receipt.json`
 
 Paired receipt file SHA-256:
 
-`4f283f3c13f917f2cbd208bf2302bc97c6ca093fe80b92633ed336c21fc388a9`
+`68cbbe130a7458a77c9ae0e177c4d741fbcc8e7393e3d4758ab4eb4423a3b409`
 
 Paired internal receipt:
 
-`3416cf29bc6ee6490e2d9abd593724f2de1799b742b8c7b2a9bb23419eb8bbac`
+`10f5531f9ff06ae6396ccb7dfc8315fe862f39354ac7ecc25fabad61af202758`
 
 ### Inventory
 
@@ -180,7 +180,7 @@ Paired internal receipt:
 - Selected LPL games: `7`
 - Selected LEC games: `4`
 - Selected LCS games: `2`
-- Inventory receipt: `40bf966bf8fb77155a34c2dfeb8ee755226a9fce75e95f4b8878735daef35ec7`
+- Inventory receipt: `e407bfdce6a8daa53c3f090dc643c6e1949a9fe135b774b2cab27ac3b4f89716`
 - Outcomes opened: no
 - Outcomes may be joined: no
 
@@ -267,8 +267,8 @@ Hyperlegible Mono and Atkinson Hyperlegible Next.
 6. Create the role-matched swap batch before any outcome read.
 7. Build counterfactual features with observed historical updates and swapped
    current-map champion features.
-8. Seal observed predictions under protocol v38.
-9. Seal paired interventions under protocol v38.
+8. Seal observed predictions under protocol v39.
+9. Seal paired interventions under protocol v39.
 10. Add the new observed receipt to the inventory in chronological order.
 11. Keep outcomes closed until every inventory gate passes.
 
@@ -277,8 +277,8 @@ binary `y`. Run the evaluation once. Pass both observed and paired path pairs:
 
 ```zsh
 python3 -m lol_kills.research.evaluate_selective_draft_holdout \
-  --protocol data/lol/v2/evaluation/public-draft-score-promotion-protocol-v38.json \
-  --protocol-sha256 f6496ff946aa22734cd956cd531bf3f2c17a87dba9e810bbaf988f1f32028126 \
+  --protocol data/lol/v2/evaluation/public-draft-score-promotion-protocol-v39.json \
+  --protocol-sha256 6a95f63d5a00b229967379a13be2eb4e213aa2184d87d5b3ce9ae3f2bdda52bf \
   --candidate data/lol/v2/evaluation/public-draft-score-selective-candidate-v34.json \
   --candidate-sha256 b0de3d4d0e683a3cdbaa71fe7282817e95538f5f1dbd0f992a646f64cedb2b10 \
   --receipt "$OBSERVED_RECEIPT_1" \
