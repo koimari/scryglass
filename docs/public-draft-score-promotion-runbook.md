@@ -168,3 +168,45 @@ The promoted result keeps two outputs separate.
 `side_recommendation` names the side with the higher match win probability.
 
 Betting, odds, expected value, and stake fields stay unavailable.
+
+## Controlled Draft contribution
+
+The controlled Draft value uses two pre-match predictions for the same map.
+
+1. Score the observed ten-player draft.
+2. Exchange the Blue and Red champions within each role.
+3. Keep the teams, players, roles, date, league, side, ratings, uncertainty,
+   momentum, and match context fixed.
+4. Score the exchanged draft before reading the result.
+
+`validate_role_matched_champion_swap` proves that the paired rows changed only
+the role-matched champions. It binds the two inputs and the fixed controls in a
+SHA-256 receipt.
+
+Let `L_observed` and `L_swapped` be the two Blue win logits.
+
+```text
+fixed_strength_logit = (L_observed + L_swapped) / 2
+controlled_draft_logit = (L_observed - L_swapped) / 2
+```
+
+The public percentage-point Draft edge is:
+
+```text
+100 * (sigmoid(controlled_draft_logit) - 0.5)
+```
+
+This operation removes every effect that is shared by the two predictions.
+It preserves champion atoms, player-champion atoms, ally and enemy atom
+interactions, patch atom history, and the pre-match phase curve.
+
+The implementation is in:
+
+- `lol_kills/research/controlled_draft_contribution.py`
+- `lol_kills/export/paired_public_draft_score.py`
+
+These files were added after protocol v34 and its first blind batch were
+sealed. Protocol v34 can still evaluate the frozen match probability. It
+cannot authorize the final paired public envelope. Before public promotion,
+freeze a successor protocol that binds both files. Seal future paired inputs
+and predictions under that protocol before any outcome is opened.
