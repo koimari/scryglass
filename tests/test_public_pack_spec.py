@@ -143,7 +143,7 @@ def test_descriptive_draft_publication_binds_schema_and_artifact() -> None:
     assert decision["receipt_sha256"] == "b" * 64
 
 
-def test_incomplete_published_pool_removes_draft_score_from_raw_projections() -> None:
+def test_incomplete_published_pool_keeps_score_and_removes_pool_only() -> None:
     profile = {
         "games": {
             "complete": {
@@ -173,10 +173,12 @@ def test_incomplete_published_pool_removes_draft_score_from_raw_projections() ->
 
     result = _gate_published_draft_contributions(profile, draft_records)
 
-    assert result == {"eligible_games": 1, "removed_games": 1}
+    assert result == {"score_games": 2, "pool_games": 1, "removed_games": 0}
     assert "draft_contribution" in profile["games"]["complete"]
-    assert "draft_contribution" not in profile["games"]["incomplete"]
-    assert set(draft_records["games"]) == {"complete"}
+    assert "draft_contribution" in profile["games"]["incomplete"]
+    assert "draft_pool" not in profile["games"]["incomplete"]
+    assert set(draft_records["games"]) == {"complete", "incomplete"}
+    assert "draft_pool" not in draft_records["games"]["incomplete"]
 
 
 def test_passing_candidate_stays_closed_without_independent_receipt() -> None:

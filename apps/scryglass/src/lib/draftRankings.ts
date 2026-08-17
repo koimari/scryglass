@@ -250,6 +250,13 @@ export function filterDraftRankings(rankings: DraftRankings, filters: DraftRanki
  * Return true only when all pre-game draft facts needed for a descriptive
  * score are present. Missing facts stay unavailable at the UI boundary.
  */
+export function hasCompleteCompositionEvidence(game: ProfileGame): boolean {
+  const contribution = game.draft_contribution;
+  return contribution?.status === "available"
+    && finite(contribution.blue.signal)
+    && finite(contribution.red.signal);
+}
+
 export function hasCompleteDraftEvidence(game: ProfileGame): boolean {
   const pool = game.draft_pool;
   if (!pool || pool.status !== "complete" || !pool.patch || !game.competition_tier?.trim()) return false;
@@ -292,7 +299,7 @@ export function draftRankingsFromProfile(records: ProfileRecords): DraftRankings
   for (const game of Object.values(records.games)) {
     const contribution = game.draft_contribution;
     const poolPicks = game.draft_pool?.picked ?? [];
-    if (!hasCompleteDraftEvidence(game) || contribution?.status !== "available") continue;
+    if (!hasCompleteCompositionEvidence(game) || contribution?.status !== "available") continue;
 
     const blueSignal = contribution?.blue.signal;
     const redSignal = contribution?.red.signal;
@@ -304,6 +311,8 @@ export function draftRankingsFromProfile(records: ProfileRecords): DraftRankings
       addTeamEvidence(teamAggregates, game.red_team, tier, league, -edge);
       evidenceGames += 1;
     }
+
+    if (!hasCompleteDraftEvidence(game)) continue;
 
     const contributionPicks = contribution?.picks ?? [];
     const contributionFor = (side: "Blue" | "Red", role: string, champion: string) => contributionPicks.find(

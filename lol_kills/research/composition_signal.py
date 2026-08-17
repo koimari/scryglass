@@ -93,7 +93,13 @@ ROLE_ALIASES = {
     "utility": "sup",
 }
 PUBLIC_STATUS = ("available", "limited", "unavailable")
-PUBLIC_EVIDENCE = ("available", "atom_estimate", "limited", "unavailable")
+PUBLIC_EVIDENCE = (
+    "available",
+    "atom_estimate",
+    "role_estimate",
+    "limited",
+    "unavailable",
+)
 DESCRIPTIVE_SIGNAL_SCHEMA = "scryglass:draft-descriptive-signal:v1"
 PUBLIC_PRIVATE_FIELDS = frozenset(
     {
@@ -2018,6 +2024,10 @@ def validate_public_signal(
             if support >= min_support_games or contribution is None:
                 raise CompositionSignalError("atom_estimate composition pick is malformed")
             contribution_totals[side] += float(contribution)
+        elif evidence == "role_estimate":
+            if support >= min_support_games or contribution is None:
+                raise CompositionSignalError("role_estimate composition pick is malformed")
+            contribution_totals[side] += float(contribution)
         elif evidence == "limited":
             if support >= min_support_games or contribution is not None:
                 raise CompositionSignalError("limited composition pick has full support")
@@ -2028,7 +2038,10 @@ def validate_public_signal(
     if seen != set(expected):
         raise CompositionSignalError("composition signal has incomplete pick identities")
     if status == "available":
-        if any(evidence not in {"available", "atom_estimate"} for evidence in evidence_statuses):
+        if any(
+            evidence not in {"available", "atom_estimate", "role_estimate"}
+            for evidence in evidence_statuses
+        ):
             raise CompositionSignalError("available composition signal has limited picks")
         for side in ("Blue", "Red"):
             summary = float(side_payloads[side.lower()]["signal"])

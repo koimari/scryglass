@@ -595,29 +595,45 @@
   white-space: nowrap;
 }
 
-.ratingCard > strong {
+.cardScore {
+  display: grid;
+  justify-items: end;
+  gap: 0.15rem;
+}
+
+.cardScore span,
+.cardFacts small {
+  color: var(--ink-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cardScore strong {
   font-family: var(--font-mono), monospace;
   font-size: 1.15rem;
 }
 
-.ratingCard > span:nth-last-child(2) {
-  font-family: var(--font-mono), monospace;
-  font-size: var(--text-micro);
-}
-
-.cardVisuals {
+.cardFacts {
   grid-column: 2 / -1;
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   min-width: 0;
-  gap: 0.75rem;
-  align-items: center;
-  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--line);
 }
 
-.cardVisuals > span {
-  color: var(--ink-muted);
+.cardFacts > span {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.cardFacts b {
   font-family: var(--font-mono), monospace;
-  font-size: var(--text-micro);
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 
 .ratingCard .championStrip img {
@@ -838,11 +854,6 @@
 
   .ratingCard {
     grid-template-columns: 2rem minmax(0, 1fr) auto;
-  }
-
-  .cardVisuals {
-    flex-direction: column;
-    align-items: flex-start;
   }
 
 }

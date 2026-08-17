@@ -371,7 +371,7 @@ export type DraftContribution = {
     champion: string;
     contribution: number | null;
     prior_role_games: number;
-    evidence_status: "available" | "atom_estimate" | "limited" | "unavailable";
+    evidence_status: "available" | "atom_estimate" | "role_estimate" | "limited" | "unavailable";
     best_available?: boolean | null;
     tier_rank?: number | null;
     available_count?: number | null;

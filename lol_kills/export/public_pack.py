@@ -795,17 +795,17 @@ def _gate_published_draft_contributions(
     profile_records: Mapping[str, Any],
     draft_records_payload: Mapping[str, Any] | None = None,
 ) -> dict[str, int]:
-    """Keep Draft Score only when public pool evidence is complete.
+    """Keep valid composition scores and retain only complete pool evidence.
 
-    The score and the best-available pool share one evidence boundary. A
-    signal without five bans per side, ten ordered picks, and ten evaluated
-    tier rows is removed from both public projections.
+    A ten-pick composition score does not need ban and pick-order evidence.
+    Best-available player metrics keep the narrower complete-pool boundary.
     """
 
     games = profile_records.get("games") if isinstance(profile_records, Mapping) else None
     if not isinstance(games, Mapping):
-        return {"eligible_games": 0, "removed_games": 0}
-    eligible: set[str] = set()
+        return {"score_games": 0, "pool_games": 0, "removed_games": 0}
+    score_games: set[str] = set()
+    pool_games: set[str] = set()
     removed = 0
     for game_id, game in games.items():
         if not isinstance(game, dict):
@@ -819,9 +819,13 @@ def _gate_published_draft_contributions(
             evaluated_picks = int(pool.get("evaluated_picks")) if isinstance(pool, Mapping) else 0
         except (TypeError, ValueError):
             evaluated_picks = 0
+        if signal.get("status") != "available":
+            game.pop("draft_contribution", None)
+            game.pop("draft_pool", None)
+            removed += 1
+            continue
+        score_games.add(str(game_id))
         complete = (
-            signal.get("status") == "available"
-            and
             isinstance(pool, Mapping)
             and pool.get("status") == "complete"
             and isinstance(pool_picks, list)
@@ -829,18 +833,24 @@ def _gate_published_draft_contributions(
             and evaluated_picks == 10
         )
         if complete:
-            eligible.add(str(game_id))
+            pool_games.add(str(game_id))
         else:
-            game.pop("draft_contribution", None)
-            removed += 1
+            game.pop("draft_pool", None)
 
     if isinstance(draft_records_payload, dict):
         records = draft_records_payload.get("games")
         if isinstance(records, dict):
             for game_id in list(records):
-                if str(game_id) not in eligible:
+                if str(game_id) not in score_games:
                     records.pop(game_id, None)
-    return {"eligible_games": len(eligible), "removed_games": removed}
+                    continue
+                if str(game_id) not in pool_games and isinstance(records[game_id], dict):
+                    records[game_id].pop("draft_pool", None)
+    return {
+        "score_games": len(score_games),
+        "pool_games": len(pool_games),
+        "removed_games": removed,
+    }
 
 
 def _normalized_game_uid(frame: pd.DataFrame) -> pd.Series:
@@ -2029,7 +2039,6 @@ def export_public_pack(
                     entry["draft_pool"] = profile_game["draft_pool"]
         _gate_published_draft_contributions(
             profile_records_payload,
-            draft_records_payload,
         )
         if not tier_payload_source:
             raise RuntimeError(
