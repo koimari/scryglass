@@ -20,6 +20,7 @@ const allowedAssetPaths = new Set([
   "features/schedule.json",
   "features/leaderboards.json",
   "features/draft_records.json",
+  "features/promoted_draft_results.json",
   "features/match_records_2025_q1.json",
   "features/match_records_2025_q2.json",
   "features/match_records_2025_q3.json",

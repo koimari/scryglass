@@ -8,7 +8,7 @@ from lol_kills.export import supabase_publication
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FINAL_MIGRATION = ROOT / "supabase/migrations/20260814010000_bounded_public_query_api.sql"
+FINAL_MIGRATION = ROOT / "supabase/migrations/20260817070509_promoted_draft_results.sql"
 
 
 def _quoted_paths(source: str, start: str, end: str) -> set[str]:

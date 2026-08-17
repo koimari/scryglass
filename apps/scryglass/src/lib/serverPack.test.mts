@@ -77,6 +77,12 @@ function manifest(
       receipt_sha256: options.draftStatus === "unavailable" ? null : "a".repeat(64),
       issued_utc: options.draftStatus === "unavailable" ? null : "2026-08-13T18:31:17Z",
       reason: options.draftStatus === "promoted" ? null : "model_not_promoted",
+      ...(options.draftStatus === "promoted" ? {
+        estimand: "prematch_map_win_probability_with_controlled_draft_intervention",
+        probability_authority: true,
+        recommendation_authority: true,
+        betting_authority: false,
+      } : {}),
     };
   }
   return result;
@@ -307,6 +313,46 @@ test("unpromoted draft records stay outside the public manifest", () => {
   descriptive.total_bytes += 10;
   descriptive.release.artifact_hashes[draftPath] = draftSha;
   assert.equal(publicPackManifest(descriptive).files.some((file) => file.path === draftPath), true);
+});
+
+test("promoted results require promoted probability authority", () => {
+  const promotedPath = "features/promoted_draft_results.json";
+  const promotedSha = "e".repeat(64);
+  const withPromotedAsset = (
+    draftStatus: "unavailable" | "descriptive" | "promoted",
+  ) => {
+    const candidate = manifest(RELEASE_ID, { draftStatus });
+    candidate.files.push({
+      path: promotedPath,
+      bytes: 10,
+      rows: 1,
+      cols: 0,
+      sha256: promotedSha,
+    });
+    candidate.total_files += 1;
+    candidate.total_bytes += 10;
+    candidate.release.artifact_hashes[promotedPath] = promotedSha;
+    return candidate;
+  };
+
+  assert.equal(
+    publicPackManifest(withPromotedAsset("unavailable")).files.some(
+      (file) => file.path === promotedPath,
+    ),
+    false,
+  );
+  assert.equal(
+    publicPackManifest(withPromotedAsset("descriptive")).files.some(
+      (file) => file.path === promotedPath,
+    ),
+    false,
+  );
+  assert.equal(
+    publicPackManifest(withPromotedAsset("promoted")).files.some(
+      (file) => file.path === promotedPath,
+    ),
+    true,
+  );
 });
 
 test("public manifest rejects release and digest conflicts", () => {
