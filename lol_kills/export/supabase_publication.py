@@ -65,6 +65,7 @@ RETRYABLE_STORAGE_HTTP_CODES = frozenset(
 )
 QUERY_STAGE_BATCH_ROWS = 500
 QUERY_STAGE_BATCH_BYTES = 3_200_000
+QUERY_STAGE_MAX_WORKERS = 6
 PUBLIC_ASSET_CONTENT_TYPE = "application/json"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DRAFT_ISSUED_UTC_RE = re.compile(
@@ -1269,6 +1270,7 @@ class SupabasePublicData:
                     )
                 reused += len(rows)
                 continue
+            batches: list[list[dict[str, Any]]] = []
             pending: list[dict[str, Any]] = []
             pending_bytes = 0
             for source in rows:
@@ -1292,13 +1294,23 @@ class SupabasePublicData:
                     len(pending) >= QUERY_STAGE_BATCH_ROWS
                     or pending_bytes + row_bytes > QUERY_STAGE_BATCH_BYTES
                 ):
-                    self._stage_query_rows(release_id, dataset, pending)
+                    batches.append(pending)
                     pending = []
                     pending_bytes = 0
                 pending.append(row)
                 pending_bytes += row_bytes
             if pending:
-                self._stage_query_rows(release_id, dataset, pending)
+                batches.append(pending)
+            # Every row batch is validated above (unsupported fields raise
+            # before any batch is built), so all batches for this dataset are
+            # known before any network call is made. Batches are independent,
+            # idempotent RPC calls: rows carry release_id/dataset/row_sha256,
+            # and the sealed receipt digest (query_dataset_receipt) sorts rows
+            # by row_key before hashing, so staging order does not affect the
+            # dataset's on-disk content or its receipt. Stage them through a
+            # bounded worker pool, mirroring the asset-upload concurrency in
+            # stage_assets above.
+            self._stage_query_row_batches(release_id, dataset, batches)
             sealed = self._request(
                 "POST",
                 "rpc/seal_scryglass_query_dataset",
@@ -1316,6 +1328,40 @@ class SupabasePublicData:
                     f"Supabase query receipt seal failed: {dataset}"
                 )
         return reused
+
+    def _stage_query_row_batches(
+        self,
+        release_id: str,
+        dataset: str,
+        batches: list[list[dict[str, Any]]],
+    ) -> None:
+        """Stage every prebuilt batch for one dataset via bounded workers.
+
+        Each batch already carries the release ID, dataset, and per-row
+        digests, so batches may be staged out of order without changing the
+        result. All batches are enqueued up front (bounded to at most
+        ``QUERY_STAGE_MAX_WORKERS`` running concurrently); if any batch's RPC
+        call raises (after its own internal retries in
+        ``_stage_query_rows``), the first such exception in submission order
+        propagates out of this call once every enqueued batch has finished
+        (``ThreadPoolExecutor`` waits on shutdown), and the caller never
+        proceeds to seal the dataset.
+        """
+
+        if not batches:
+            return
+        if len(batches) == 1:
+            self._stage_query_rows(release_id, dataset, batches[0])
+            return
+        with ThreadPoolExecutor(
+            max_workers=min(QUERY_STAGE_MAX_WORKERS, len(batches))
+        ) as executor:
+            list(
+                executor.map(
+                    lambda batch: self._stage_query_rows(release_id, dataset, batch),
+                    batches,
+                )
+            )
 
     def _stage_query_rows(
         self,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import threading
 import urllib.error
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -986,6 +987,164 @@ def test_query_staging_retries_gateway_520(monkeypatch) -> None:
 
     assert client._stage_query_rows("v2026.08.15.120000", "players", []) == 0
     assert attempts == 2
+
+
+def test_stage_query_row_batches_submits_every_batch_concurrently() -> None:
+    client = supabase_publication.SupabasePublicData(
+        "https://example.supabase.co",
+        "sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    staged: list[list[dict[str, object]]] = []
+    lock = threading.Lock()
+
+    def fake_stage_query_rows(release_id, dataset, rows):
+        assert release_id == "v2026.08.15.120000"
+        assert dataset == "players"
+        with lock:
+            staged.append(rows)
+        return len(rows)
+
+    client._stage_query_rows = fake_stage_query_rows  # type: ignore[method-assign]
+
+    batches = [[{"row_key": f"k{i}"}] for i in range(14)]
+    client._stage_query_row_batches("v2026.08.15.120000", "players", batches)
+
+    # Every batch was staged exactly once; none were dropped by the pool.
+    assert len(staged) == len(batches)
+    staged_keys = sorted(row["row_key"] for batch in staged for row in batch)
+    expected_keys = sorted(row["row_key"] for batch in batches for row in batch)
+    assert staged_keys == expected_keys
+
+
+def test_stage_query_row_batches_propagates_a_failing_batch() -> None:
+    client = supabase_publication.SupabasePublicData(
+        "https://example.supabase.co",
+        "sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    attempted: list[str] = []
+    lock = threading.Lock()
+
+    def fake_stage_query_rows(release_id, dataset, rows):
+        key = rows[0]["row_key"]
+        with lock:
+            attempted.append(key)
+        if key == "bad":
+            raise supabase_publication.SupabasePublicationError("batch boom")
+        return len(rows)
+
+    client._stage_query_rows = fake_stage_query_rows  # type: ignore[method-assign]
+
+    batches = [[{"row_key": "ok1"}], [{"row_key": "bad"}], [{"row_key": "ok2"}]]
+    with pytest.raises(supabase_publication.SupabasePublicationError, match="batch boom"):
+        client._stage_query_row_batches("v2026.08.15.120000", "players", batches)
+
+    # The failure was not swallowed, and every batch was still attempted
+    # (ThreadPoolExecutor.map enqueues all batches up front).
+    assert sorted(attempted) == ["bad", "ok1", "ok2"]
+
+
+def test_stage_query_datasets_validates_every_row_before_staging_any_batch() -> None:
+    client = supabase_publication.SupabasePublicData(
+        "https://example.supabase.co",
+        "sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    staging_calls: list[dict[str, object]] = []
+
+    def fake_request(method, path, payload=None, **kwargs):
+        del kwargs
+        if path.startswith(supabase_publication.QUERY_RECEIPT_TABLE):
+            return []
+        if path == "rpc/stage_scryglass_query_rows":
+            staging_calls.append(payload)
+            return len(payload["p_rows"])
+        raise AssertionError(f"unexpected request: {method} {path}")
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    # The first QUERY_STAGE_BATCH_ROWS rows are valid and exactly fill the
+    # first batch; the very next row (which starts the second batch) carries
+    # an unsupported field. Under the old inline-flush implementation the
+    # first (full) batch would already have been staged over the network by
+    # the time this row is reached; the new implementation must build every
+    # batch before staging any of them.
+    rows = [
+        {"row_key": f"k{i}", "payload": {}, "row_sha256": "0" * 64}
+        for i in range(supabase_publication.QUERY_STAGE_BATCH_ROWS)
+    ]
+    rows.append(
+        {
+            "row_key": "bad",
+            "payload": {},
+            "row_sha256": "0" * 64,
+            "not_a_real_field": True,
+        }
+    )
+
+    with pytest.raises(supabase_publication.SupabasePublicationError, match="unsupported fields"):
+        client.stage_query_datasets(
+            "v2026.08.15.120000",
+            {"players": rows},
+            {
+                "players": {
+                    "rows": len(rows),
+                    "bytes": 1,
+                    "sha256": "x",
+                    "row_digest_sha256": "y",
+                }
+            },
+        )
+
+    assert staging_calls == []
+
+
+def test_stage_query_datasets_reuse_accounting_is_unchanged() -> None:
+    client = supabase_publication.SupabasePublicData(
+        "https://example.supabase.co",
+        "sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    all_datasets = (
+        *supabase_publication.QUERY_DATASETS,
+        *supabase_publication.TIER_QUERY_DATASETS,
+    )
+
+    def fake_request(method, path, payload=None, **kwargs):
+        del payload, kwargs
+        if path.startswith(supabase_publication.QUERY_RECEIPT_TABLE):
+            return [
+                {
+                    "dataset": dataset,
+                    "row_count": 3,
+                    "source_bytes": 10,
+                    "source_sha256": "s",
+                    "row_digest_sha256": "d",
+                }
+                for dataset in all_datasets
+            ]
+        raise AssertionError(
+            f"unexpected request when every dataset already matches: {method} {path}"
+        )
+
+    client._request = fake_request  # type: ignore[method-assign]
+
+    datasets_payload = {}
+    receipts = {}
+    for dataset in all_datasets:
+        datasets_payload[dataset] = [
+            {"row_key": f"{dataset}-{i}", "payload": {}, "row_sha256": "0" * 64}
+            for i in range(3)
+        ]
+        receipts[dataset] = {
+            "rows": 3,
+            "bytes": 10,
+            "sha256": "s",
+            "row_digest_sha256": "d",
+        }
+
+    reused = client.stage_query_datasets(
+        "v2026.08.15.120000", datasets_payload, receipts
+    )
+
+    assert reused == 3 * len(all_datasets)
 
 
 def test_retention_prunes_one_release_per_database_call() -> None:
