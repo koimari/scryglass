@@ -312,8 +312,11 @@ rejects `status: promoted` by design:
 The private promotion receipt verifier now exists in
 `lol_kills/export/promoted_draft_authority.py`. The web gate now accepts a
 complete promoted authority from the sanitized active manifest. The pack
-builder, Supabase publisher, final activation migration, promoted result asset,
-and active-only query projection still need implementation.
+builder, Supabase publisher, final activation migration, and active-only query
+projection still need implementation. The same Python module now validates the
+proposed `features/promoted_draft_results.json` payload, including release and
+receipt binding, probabilities, controlled direction, paired receipt, evidence
+window, recommendation, and the permanent betting-field ban.
 
 Do not open the browser gate alone. Implement the promoted lane after a valid
 promotion receipt exists, or in a separate fail-closed slice that requires that
