@@ -75,6 +75,30 @@ def _fixture(tmp_path: Path) -> tuple[Path, dict]:
     return binding_path, binding
 
 
+def _registration_and_draft() -> tuple[dict, dict]:
+    registration = {
+        "teams": [
+            {
+                "side": side,
+                "organization_name": side.title(),
+                "players": [
+                    {"role": role, "display_name": f"{side[0].upper()}-{role}"}
+                    for role in ("top", "jungle", "mid", "bot", "support")
+                ],
+            }
+            for side in ("blue", "red")
+        ]
+    }
+    draft = {
+        side: {
+            role: f"{side[0].upper()}-Champ-{role}"
+            for role in ("top", "jungle", "mid", "bot", "support")
+        }
+        for side in ("blue", "red")
+    }
+    return registration, draft
+
+
 def test_private_binding_requires_descriptive_claim_ceiling(tmp_path: Path) -> None:
     binding_path, binding = _fixture(tmp_path)
     binding["claim_ceiling"]["descriptive_draft_score"] = True
@@ -119,29 +143,15 @@ def test_private_r9e_score_stays_a_composite_diagnostic(tmp_path: Path) -> None:
     assert "draft_contribution" not in result
 
 
+def test_private_r9e_rejects_a_query_inside_the_fit_window(tmp_path: Path) -> None:
+    binding_path, _ = _fixture(tmp_path)
+
+    with pytest.raises(PrivateDraftRecipeError, match="after the fit boundary"):
+        score_private_descriptive_r9e(binding_path, {"date": "2026-08-12T06:56:48Z"})
+
+
 def test_build_r9e_query_preserves_exact_roster_and_role_order() -> None:
-    registration = {
-        "teams": [
-            {
-                "side": "blue",
-                "organization_name": "Blue",
-                "players": [
-                    {"role": role, "display_name": f"B-{role}"} for role in ("top", "jungle", "mid", "bot", "support")
-                ],
-            },
-            {
-                "side": "red",
-                "organization_name": "Red",
-                "players": [
-                    {"role": role, "display_name": f"R-{role}"} for role in ("top", "jungle", "mid", "bot", "support")
-                ],
-            },
-        ]
-    }
-    draft = {
-        "blue": {role: f"B-Champ-{role}" for role in ("top", "jungle", "mid", "bot", "support")},
-        "red": {role: f"R-Champ-{role}" for role in ("top", "jungle", "mid", "bot", "support")},
-    }
+    registration, draft = _registration_and_draft()
     query = build_r9e_query(
         registration,
         draft,
@@ -150,9 +160,33 @@ def test_build_r9e_query_preserves_exact_roster_and_role_order() -> None:
         mu_diff=25.0,
         sigma_pair=80.0,
         player_elo={"p": 0.54, "sigma": 40.0},
+        bans={
+            "blue": ["A", "B", "C", "D", "E"],
+            "red": ["F", "G", "H", "I", "J"],
+        },
     )
 
     assert query["blue"]["jng"] == {"player": "B-jungle", "champion": "B-Champ-jungle"}
     assert query["red"]["sup"] == {"player": "R-support", "champion": "R-Champ-support"}
     assert query["mu_diff"] == 25.0
     assert query["player_elo"]["p"] == 0.54
+    assert query["bans"]["blue"] == ["A", "B", "C", "D", "E"]
+
+
+def test_build_r9e_query_rejects_negative_uncertainty() -> None:
+    registration, draft = _registration_and_draft()
+
+    with pytest.raises(PrivateDraftRecipeError, match="nonnegative"):
+        build_r9e_query(
+            registration,
+            draft,
+            date="2026-08-14T12:00:00Z",
+            patch="16.15",
+            mu_diff=25.0,
+            sigma_pair=-1.0,
+            player_elo={"p": 0.54, "sigma": 40.0},
+            bans={
+                "blue": ["A", "B", "C", "D", "E"],
+                "red": ["F", "G", "H", "I", "J"],
+            },
+        )

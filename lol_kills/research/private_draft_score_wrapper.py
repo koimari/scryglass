@@ -52,7 +52,11 @@ class PrivateDraftScoreWrapperError(ValueError):
 
 
 def _authority_is_closed(value: Any) -> bool:
-    return isinstance(value, Mapping) and all(value.get(key) is False for key in AUTHORITY_KEYS)
+    return (
+        isinstance(value, Mapping)
+        and set(value) == set(AUTHORITY_KEYS)
+        and all(value.get(key) is False for key in AUTHORITY_KEYS)
+    )
 
 
 def _unavailable_recipe(reason: str, missing_inputs: Sequence[str] = ()) -> dict[str, Any]:
@@ -129,6 +133,8 @@ def _build_recipe(
             ("patch", args.patch),
             ("r9e_player_elo_p", args.r9e_player_elo_p),
             ("r9e_player_elo_sigma", args.r9e_player_elo_sigma),
+            ("blue_bans", args.blue_bans),
+            ("red_bans", args.red_bans),
         )
         if value is None or value == ""
     ]
@@ -154,6 +160,10 @@ def _build_recipe(
             "blue": dict(zip(ROLE_ORDER, blue_picks)),
             "red": dict(zip(ROLE_ORDER, red_picks)),
         }
+        bans = {
+            "blue": private_scorer.exact_five(args.blue_bans, "blue bans"),
+            "red": private_scorer.exact_five(args.red_bans, "red bans"),
+        }
         blue, red = registration["teams"]
         sigma_pair = math.hypot(float(blue["team_rating_sigma"]), float(red["team_rating_sigma"]))
         player_ratings = {
@@ -173,9 +183,10 @@ def _build_recipe(
                 "p": float(args.r9e_player_elo_p),
                 "sigma": float(args.r9e_player_elo_sigma),
             },
+            bans=bans,
             player_ratings=player_ratings,
         )
-    except (OSError, PrivateDraftRecipeError, ValueError, TypeError, KeyError) as error:
+    except (AttributeError, OSError, PrivateDraftRecipeError, ValueError, TypeError, KeyError) as error:
         return _unavailable_recipe(f"r9e_unavailable:{type(error).__name__}")
 
 
@@ -209,6 +220,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--patch", help="Exact source patch token, such as 16.15")
     parser.add_argument("--r9e-player-elo-p", type=float)
     parser.add_argument("--r9e-player-elo-sigma", type=float)
+    parser.add_argument("--blue-bans", help="Five comma-separated blue-side bans")
+    parser.add_argument("--red-bans", help="Five comma-separated red-side bans")
     parser.add_argument("--league", required=True)
     parser.add_argument("--blue-name", required=True)
     parser.add_argument("--red-name", required=True)

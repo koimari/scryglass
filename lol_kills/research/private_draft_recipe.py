@@ -17,6 +17,7 @@ import json
 import math
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -113,6 +114,18 @@ def _number(value: Any, field: str) -> float:
     if not math.isfinite(parsed):
         raise PrivateDraftRecipeError(f"{field} must be finite")
     return parsed
+
+
+def _utc_datetime(value: Any, field: str) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise PrivateDraftRecipeError(f"{field} must be a UTC timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError as error:
+        raise PrivateDraftRecipeError(f"{field} must be a UTC timestamp") from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise PrivateDraftRecipeError(f"{field} must include a UTC offset")
+    return parsed.astimezone(timezone.utc)
 
 
 def load_private_descriptive_r9e_binding(path: Path) -> PrivateDraftRecipeBinding:
@@ -217,6 +230,7 @@ def build_r9e_query(
     mu_diff: float,
     sigma_pair: float,
     player_elo: Mapping[str, float],
+    bans: Mapping[str, Sequence[str]],
     player_ratings: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Convert the private exact-roster input into the R9E query contract."""
@@ -235,11 +249,23 @@ def build_r9e_query(
             "p": _number(player_elo.get("p"), "R9E player_elo.p"),
             "sigma": _number(player_elo.get("sigma"), "R9E player_elo.sigma"),
         },
-        "bans": {"blue": [], "red": []},
+        "bans": {},
         "player_ratings": dict(player_ratings or {}),
     }
     if not 0.0 <= output["player_elo"]["p"] <= 1.0:
         raise PrivateDraftRecipeError("R9E player_elo.p must be between zero and one")
+    if output["sigma_pair"] < 0.0 or output["player_elo"]["sigma"] < 0.0:
+        raise PrivateDraftRecipeError("R9E uncertainty values must be nonnegative")
+    for side in ("blue", "red"):
+        side_bans = bans.get(side)
+        if (
+            not isinstance(side_bans, Sequence)
+            or isinstance(side_bans, (str, bytes))
+            or len(side_bans) != 5
+            or any(not isinstance(champion, str) or not champion for champion in side_bans)
+        ):
+            raise PrivateDraftRecipeError(f"R9E {side} bans must contain five champions")
+        output["bans"][side] = list(side_bans)
     for team in teams:
         if not isinstance(team, Mapping) or team.get("side") not in ("blue", "red"):
             raise PrivateDraftRecipeError("R9E team side is invalid")
@@ -301,6 +327,10 @@ def score_private_descriptive_r9e(
     """Run the bound R9E checkpoint as a descriptive private diagnostic."""
 
     binding = load_private_descriptive_r9e_binding(binding_path)
+    if _utc_datetime(query.get("date"), "R9E query date") <= _utc_datetime(
+        binding.fit_through, "R9E fit boundary"
+    ):
+        raise PrivateDraftRecipeError("R9E query date must be after the fit boundary")
     module = _load_module(binding.module_path)
     loader = getattr(module, "load_checkpoint", None)
     scorer = getattr(module, "score_query", None)
@@ -377,6 +407,7 @@ def score_registered_draft_with_private_r9e(
     mu_diff: float,
     sigma_pair: float,
     player_elo: Mapping[str, float],
+    bans: Mapping[str, Sequence[str]],
     player_ratings: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Build and score one exact private roster with the bound recipe."""
@@ -389,6 +420,7 @@ def score_registered_draft_with_private_r9e(
         mu_diff=mu_diff,
         sigma_pair=sigma_pair,
         player_elo=player_elo,
+        bans=bans,
         player_ratings=player_ratings,
     )
     return score_private_descriptive_r9e(binding_path, query)

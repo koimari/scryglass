@@ -21,6 +21,8 @@ def _args(scorer: Path, binding: Path) -> Namespace:
         patch=None,
         r9e_player_elo_p=None,
         r9e_player_elo_sigma=None,
+        blue_bans=None,
+        red_bans=None,
     )
 
 
@@ -81,6 +83,8 @@ def test_wrapper_reports_the_exact_r9e_query_contract(tmp_path: Path) -> None:
         "patch",
         "r9e_player_elo_p",
         "r9e_player_elo_sigma",
+        "blue_bans",
+        "red_bans",
     ]
 
 
@@ -97,3 +101,40 @@ def test_wrapper_keeps_r9e_composite_out_of_draft_score(tmp_path: Path, monkeypa
     assert result["development_composite"] is composite
     assert result["draft_score_recipe"]["reason"] == "r9e_checkpoint_is_composite_not_draft_score"
     assert result["draft_score_recipe"]["claim_ceiling"]["descriptive_draft_score"] is False
+
+
+def test_wrapper_rejects_new_authority_fields(tmp_path: Path) -> None:
+    scorer = _fake_scorer(tmp_path)
+    source = scorer.read_text(encoding="utf-8")
+    scorer.write_text(
+        source.replace(
+            "'betting_authority': False,",
+            "'betting_authority': False, 'public_probability_authority': True,",
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        wrapper.run(_args(scorer, tmp_path / "missing-binding.json"))
+    except wrapper.PrivateDraftScoreWrapperError as error:
+        assert "widened its authority" in str(error)
+    else:
+        raise AssertionError("widened authority was accepted")
+
+
+def test_wrapper_helper_api_drift_keeps_the_owner_score(tmp_path: Path, monkeypatch) -> None:
+    binding = tmp_path / "binding.json"
+    binding.write_text("{}", encoding="utf-8")
+    args = _args(_fake_scorer(tmp_path), binding)
+    args.as_of = "2026-08-14T12:00:00Z"
+    args.patch = "16.15"
+    args.r9e_player_elo_p = 0.54
+    args.r9e_player_elo_sigma = 40.0
+    args.blue_bans = "A,B,C,D,E"
+    args.red_bans = "F,G,H,I,J"
+    monkeypatch.setattr(wrapper, "_load_private_modules", lambda: (object(), object()))
+
+    result = wrapper.run(args)
+
+    assert result["draft_score"] == {"blue": 0.12, "red": -0.12}
+    assert result["draft_score_recipe"]["reason"] == "r9e_unavailable:AttributeError"
