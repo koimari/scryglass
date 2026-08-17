@@ -577,6 +577,7 @@ def _run_tier_refresh(config: RefreshConfig, expected_live_as_of: str) -> dict[s
         source_mode="oe_only",
         promote=True,
         skip_annual_oe=True,
+        skip_live_source=True,
         skip_atom_bridge=True,
         step_timeout_seconds=config.step_timeout_seconds,
         publish=config.publication_backend == "blob",
@@ -665,6 +666,15 @@ def _tier_publication_for_source(
     candidate_artifact = str(candidate.get("artifact_sha256") or "")
     if not supabase_publication.SHA256_RE.fullmatch(candidate_artifact):
         raise PublicRefreshError("tier-list candidate has no artifact digest")
+    live_census = validate_live_source(config.runtime_root, [])
+    expected_count = int(source.get("game_count", -1))
+    candidate_count = int(candidate.get("maps_replayed", -1))
+    if (
+        live_census.get("game_count") != expected_count
+        or live_census.get("identity_sha256") != source_identity
+        or candidate_count != expected_count
+    ):
+        raise PublicRefreshError("tier-list game census does not match the accepted release")
 
     def timestamp(value: object) -> datetime | None:
         if not isinstance(value, str) or not value.strip():

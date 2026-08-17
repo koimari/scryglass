@@ -7,6 +7,7 @@ import pytest
 
 from lol_kills.export.leaderboards import (
     LEADERBOARDS_SCHEMA,
+    _teams_draft,
     build_leaderboards,
 )
 
@@ -99,6 +100,8 @@ def _draft_records() -> dict:
                 "blue_team": "Team A",
                 "red_team": "Team B",
                 "draft_edge": 0.4,
+                "league": "LCS",
+                "competition_tier": "tier1",
             }
             for index in range(5)
         }
@@ -153,6 +156,9 @@ def test_build_leaderboards_aggregates_all_domains() -> None:
     assert "LCS" in payload["indexes"]["leagues"] and "LEC" in payload["indexes"]["leagues"]
     assert payload["teams_draft"][0]["team"] == "Team A"
     assert payload["teams_draft"][0]["draft_edge"] == 0.4
+    assert payload["teams_draft"][0]["games"] == 5
+    assert payload["teams_draft"][0]["league"] == "LCS"
+    assert payload["teams_draft"][0]["tier"] == "tier1"
     assert "draft_win_share" not in payload["teams_draft"][0]
     assert payload["players_draft"][0]["player"] == "Alice"
     assert payload["players_draft"][0]["best_available_rate"] == 0.625
@@ -163,3 +169,52 @@ def test_build_leaderboards_handles_missing_optional_payloads() -> None:
     assert payload["champions"] == {}
     assert payload["teams"][0]["recent"] == []
     assert "players" in payload["indexes"]
+
+
+def test_team_draft_uses_whole_archive_when_player_pool_is_narrower() -> None:
+    narrow_profile = {
+        "games": {
+            "profile-only": {
+                "blue_team": "Team B",
+                "red_team": "Team A",
+                "draft_contribution": {
+                    "blue": {"signal": 1.0},
+                    "red": {"signal": 0.0},
+                },
+            }
+        }
+    }
+    payload = build_leaderboards(
+        _player_records(),
+        _profile_records(),
+        _ratings(),
+        _team_ratings(),
+        draft_records=_draft_records(),
+        draft_profile_records=narrow_profile,
+    )
+
+    assert payload["teams_draft"][0] == {
+        "team": "Team A",
+        "games": 5,
+        "draft_edge": 0.4,
+        "positive_edge_rate": 1.0,
+        "league": "LCS",
+        "tier": "tier1",
+    }
+
+
+def test_team_draft_keeps_every_supported_team_scope() -> None:
+    games = {}
+    for team_index in range(60):
+        for game_index in range(5):
+            games[f"{team_index}-{game_index}"] = {
+                "blue_team": f"Team {team_index}",
+                "red_team": "Shared Opponent",
+                "draft_edge": team_index / 100,
+                "league": "LCS",
+                "competition_tier": "tier1",
+            }
+
+    rows = _teams_draft({"games": games})
+
+    assert len([row for row in rows if row["team"].startswith("Team ")]) == 60

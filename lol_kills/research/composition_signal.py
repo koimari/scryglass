@@ -29,6 +29,7 @@ from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 
 from lol_kills.etl.aliases import normalize_champ, normalize_team
+from lol_kills.etl.competition import competition_tier
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.v2.champions.atoms.depth2_aggregate import (
     DEFAULT_ARTIFACT_PATH as DEPTH2_ARTIFACT_PATH,
@@ -647,12 +648,17 @@ def _complete_game_from_group(game_id: str, group: pd.DataFrame, strength: Mappi
     strength_row = dict(strength or {})
     mu_diff = _number(strength_row.get("mu_diff"))
     sigma_pair = _number(strength_row.get("sigma_pair"))
+    league = _text(
+        group.get("league", pd.Series(["UNKNOWN"])).iloc[0], "UNKNOWN"
+    ).upper()
+    tier = _text(
+        group.get("competition_tier", pd.Series([""])).iloc[0]
+    ).casefold() or competition_tier(league)
     return {
         "game_uid": game_id,
         "date": pd.Timestamp(date),
-        "league": _text(
-            group.get("league", pd.Series(["UNKNOWN"])).iloc[0], "UNKNOWN"
-        ).upper(),
+        "league": league,
+        "competition_tier": tier,
         "patch": _patch(
             group.get("patch", pd.Series(["UNKNOWN"])).iloc[0]
             if "patch" in group
@@ -715,6 +721,7 @@ def build_composition_games(
             "result",
             "champion",
             "league",
+            "competition_tier",
             "patch",
             "grid_series_id",
             "tournament",
@@ -773,6 +780,11 @@ def build_composition_games(
     stat_cols = [c for c in ("kills", "deaths", "damageshare", "cspm", "visionscore") if c in frame.columns]
     stats_arr = {c: frame[c].to_numpy(dtype=object) for c in stat_cols}
     league_arr = frame["league"].to_numpy(dtype=object) if "league" in frame.columns else None
+    tier_arr = (
+        frame["competition_tier"].to_numpy(dtype=object)
+        if "competition_tier" in frame.columns
+        else None
+    )
     patch_arr = frame["patch"].to_numpy(dtype=object) if "patch" in frame.columns else None
     series_arr = frame["grid_series_id"].to_numpy(dtype=object) if "grid_series_id" in frame.columns else None
     tourn_arr = frame["tournament"].to_numpy(dtype=object) if "tournament" in frame.columns else None
@@ -873,10 +885,21 @@ def build_composition_games(
                         "visionscore": float(stats.get("visionscore", 0.0)),
                     }
         first = s
+        league = (
+            _text(league_arr[first], "UNKNOWN").upper()
+            if league_arr is not None
+            else "UNKNOWN"
+        )
+        tier = (
+            _text(tier_arr[first]).casefold()
+            if tier_arr is not None
+            else ""
+        ) or competition_tier(league)
         game = {
             "game_uid": str(game_id),
             "date": date,
-            "league": _text(league_arr[first], "UNKNOWN").upper() if league_arr is not None else "UNKNOWN",
+            "league": league,
+            "competition_tier": tier,
             "patch": _patch(patch_arr[first] if patch_arr is not None else None),
             "blue_team": teams["Blue"],
             "red_team": teams["Red"],
