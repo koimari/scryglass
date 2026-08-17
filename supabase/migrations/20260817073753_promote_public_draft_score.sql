@@ -238,10 +238,10 @@ begin
 end;
 $$;
 
-alter function scryglass_private.is_active_scryglass_storage_object(text,text)
+alter function scryglass_private.is_active_scryglass_storage_object(text)
   rename to is_active_scryglass_storage_object_before_promotion;
 
-create function scryglass_private.is_active_scryglass_storage_object(p_bucket_id text,p_name text)
+create function scryglass_private.is_active_scryglass_storage_object(p_storage_path text)
 returns boolean
 language plpgsql
 stable
@@ -249,8 +249,8 @@ security definer
 set search_path = ''
 set statement_timeout = '5s'
 as $$
-declare release_id text:=pg_catalog.split_part(p_name,'/',1);
-declare asset_path text:=pg_catalog.substr(p_name,pg_catalog.length(release_id)+2);
+declare release_id text:=pg_catalog.split_part(p_storage_path,'/',1);
+declare asset_path text:=pg_catalog.substr(p_storage_path,pg_catalog.length(release_id)+2);
 declare authority_status text;
 begin
   select release.manifest#>>'{draft_authority,status}' into authority_status
@@ -259,16 +259,16 @@ begin
   if asset_path='features/promoted_draft_results.json' and authority_status<>'promoted' then return false; end if;
   if asset_path='features/draft_records.json'
     and public.scryglass_query_descriptive_authority(release_id) is null then return false; end if;
-  return scryglass_private.is_active_scryglass_storage_object_before_promotion(p_bucket_id,p_name);
+  return scryglass_private.is_active_scryglass_storage_object_before_promotion(p_storage_path);
 end;
 $$;
 
 revoke all on function scryglass_private.get_scryglass_active_release_before_promotion(text) from public,anon,authenticated,service_role;
 revoke all on function scryglass_private.get_scryglass_active_asset_before_promotion(text,text) from public,anon,authenticated,service_role;
-revoke all on function scryglass_private.is_active_scryglass_storage_object_before_promotion(text,text) from public,anon,authenticated,service_role;
+revoke all on function scryglass_private.is_active_scryglass_storage_object_before_promotion(text) from public,anon,authenticated,service_role;
 revoke all on function scryglass_private.get_scryglass_active_release(text) from public,service_role;
 revoke all on function scryglass_private.get_scryglass_active_asset(text,text) from public,service_role;
-revoke all on function scryglass_private.is_active_scryglass_storage_object(text,text) from public,anon,authenticated,service_role;
+revoke all on function scryglass_private.is_active_scryglass_storage_object(text) from public,anon,authenticated,service_role;
 grant execute on function scryglass_private.get_scryglass_active_release(text) to anon,authenticated;
 grant execute on function scryglass_private.get_scryglass_active_asset(text,text) to anon,authenticated;
-grant execute on function scryglass_private.is_active_scryglass_storage_object(text,text) to supabase_storage_admin;
+grant execute on function scryglass_private.is_active_scryglass_storage_object(text) to supabase_storage_admin;
