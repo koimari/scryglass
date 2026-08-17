@@ -277,7 +277,7 @@ def test_frozen_holdout_gates_cannot_be_weakened() -> None:
 
 def test_latest_protocol_binds_the_frozen_candidate_and_implementation() -> None:
     root = Path(__file__).resolve().parents[1]
-    protocol_path = root / "data/lol/v2/evaluation/public-draft-score-promotion-protocol-v36.json"
+    protocol_path = root / "data/lol/v2/evaluation/public-draft-score-promotion-protocol-v37.json"
     candidate_path = root / "data/lol/v2/evaluation/public-draft-score-selective-candidate-v34.json"
     protocol, _ = promotion_module._load_protocol(protocol_path)
     candidate = json.loads(candidate_path.read_text(encoding="utf-8"))

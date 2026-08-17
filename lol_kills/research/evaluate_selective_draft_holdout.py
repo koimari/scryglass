@@ -52,6 +52,8 @@ def evaluate_sealed_holdout(
     expected_candidate_sha256: str,
     receipt_paths: Sequence[Path],
     sealed_paths: Sequence[Path],
+    paired_receipt_paths: Sequence[Path] = (),
+    paired_sealed_paths: Sequence[Path] = (),
     outcomes_path: Path,
     expected_outcomes_sha256: str,
     output_path: Path,
@@ -108,6 +110,43 @@ def evaluate_sealed_holdout(
         or holdout.get("candidate_receipt_sha256") != candidate.get("receipt_sha256")
     ):
         raise SelectiveDraftHoldoutEvaluationError("protocol gates changed")
+
+    paired_receipts: list[dict[str, Any]] = []
+    if protocol.get("controlled_draft_contribution") is not None:
+        if (
+            len(paired_receipt_paths) != len(receipt_paths)
+            or len(paired_sealed_paths) != len(receipt_paths)
+        ):
+            raise SelectiveDraftHoldoutEvaluationError(
+                "paired Draft intervention batches do not align"
+            )
+        for observed_receipt, paired_receipt_path, paired_path in zip(
+            receipts, paired_receipt_paths, paired_sealed_paths
+        ):
+            paired_receipt = _json(paired_receipt_path)
+            if not _receipt_matches(paired_receipt):
+                raise SelectiveDraftHoldoutEvaluationError(
+                    "paired Draft intervention receipt changed"
+                )
+            if (
+                paired_receipt.get("schema_version")
+                != "scryglass:sealed-controlled-draft-interventions:v1"
+                or paired_receipt.get("protocol_file_sha256")
+                != expected_protocol_sha256
+                or paired_receipt.get("candidate_receipt_sha256")
+                != candidate.get("receipt_sha256")
+                or paired_receipt.get("game_ids") != observed_receipt.get("game_ids")
+                or paired_receipt.get("outcome_blind") is not True
+                or paired_receipt.get("outcomes_opened") is not False
+                or paired_receipt.get("public_probability") is not False
+                or paired_receipt.get("public_recommendation") is not False
+                or not paired_path.is_file()
+                or sha256_path(paired_path) != paired_receipt.get("output_sha256")
+            ):
+                raise SelectiveDraftHoldoutEvaluationError(
+                    "paired Draft intervention binding changed"
+                )
+            paired_receipts.append(paired_receipt)
 
     batches: list[pd.DataFrame] = []
     for receipt, sealed_path in zip(receipts, sealed_paths):
@@ -175,6 +214,9 @@ def evaluate_sealed_holdout(
         "protocol_file_sha256": expected_protocol_sha256,
         "inventory_receipt_sha256": inventory["receipt_sha256"],
         "batch_receipt_sha256": inventory["batch_receipt_sha256"],
+        "controlled_intervention_receipt_sha256": [
+            receipt["receipt_sha256"] for receipt in paired_receipts
+        ],
         "outcomes_sha256": expected_outcomes_sha256,
         "eligible_rows": len(evaluated),
         "selected_rows": len(selected),
@@ -206,6 +248,8 @@ def main() -> None:
     parser.add_argument("--candidate-sha256", required=True)
     parser.add_argument("--receipt", type=Path, action="append", required=True)
     parser.add_argument("--sealed", type=Path, action="append", required=True)
+    parser.add_argument("--paired-receipt", type=Path, action="append", default=[])
+    parser.add_argument("--paired-sealed", type=Path, action="append", default=[])
     parser.add_argument("--outcomes", type=Path, required=True)
     parser.add_argument("--outcomes-sha256", required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -217,6 +261,8 @@ def main() -> None:
         expected_candidate_sha256=args.candidate_sha256,
         receipt_paths=args.receipt,
         sealed_paths=args.sealed,
+        paired_receipt_paths=args.paired_receipt,
+        paired_sealed_paths=args.paired_sealed,
         outcomes_path=args.outcomes,
         expected_outcomes_sha256=args.outcomes_sha256,
         output_path=args.output,

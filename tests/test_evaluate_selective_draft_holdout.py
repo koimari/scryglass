@@ -32,7 +32,11 @@ def _candidate(path: Path) -> tuple[Path, str, str]:
 
 
 def _protocol(
-    path: Path, candidate_sha: str, candidate_receipt: str
+    path: Path,
+    candidate_sha: str,
+    candidate_receipt: str,
+    *,
+    controlled: bool = False,
 ) -> tuple[Path, str]:
     value = {
         "next_holdout": {
@@ -48,6 +52,10 @@ def _protocol(
             "series_cluster_bootstrap_median_auc_minimum": 0.710,
         }
     }
+    if controlled:
+        value["controlled_draft_contribution"] = {
+            "schema_version": "scryglass:controlled-draft-contribution:v1"
+        }
     path.write_text(json.dumps(value), encoding="utf-8")
     return path, sha256_path(path)
 
@@ -123,7 +131,10 @@ def test_ready_inventory_produces_independent_review_request(
         tmp_path / "candidate.json"
     )
     protocol_path, protocol_sha = _protocol(
-        tmp_path / "protocol.json", candidate_sha, candidate_receipt
+        tmp_path / "protocol.json",
+        candidate_sha,
+        candidate_receipt,
+        controlled=True,
     )
     game_ids = [f"game-{index:03d}" for index in range(120)]
     leagues = ["LCK", "LEC", "LPL"]
@@ -155,6 +166,23 @@ def test_ready_inventory_produces_independent_review_request(
     receipt = _signed(receipt)
     receipt_path = tmp_path / "receipt.json"
     receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    paired_path = tmp_path / "paired.parquet"
+    paired_path.write_bytes(b"paired outcome-blind predictions")
+    paired_receipt = _signed(
+        {
+            "schema_version": "scryglass:sealed-controlled-draft-interventions:v1",
+            "protocol_file_sha256": protocol_sha,
+            "candidate_receipt_sha256": candidate_receipt,
+            "game_ids": game_ids,
+            "outcome_blind": True,
+            "outcomes_opened": False,
+            "public_probability": False,
+            "public_recommendation": False,
+            "output_sha256": sha256_path(paired_path),
+        }
+    )
+    paired_receipt_path = tmp_path / "paired.receipt.json"
+    paired_receipt_path.write_text(json.dumps(paired_receipt), encoding="utf-8")
     outcome_path = tmp_path / "outcomes.parquet"
     outcomes.to_parquet(outcome_path, index=False)
     monkeypatch.setattr(
@@ -169,6 +197,8 @@ def test_ready_inventory_produces_independent_review_request(
         expected_candidate_sha256=candidate_sha,
         receipt_paths=[receipt_path],
         sealed_paths=[sealed_path],
+        paired_receipt_paths=[paired_receipt_path],
+        paired_sealed_paths=[paired_path],
         outcomes_path=outcome_path,
         expected_outcomes_sha256=sha256_path(outcome_path),
         output_path=tmp_path / "evaluation.json",
@@ -179,3 +209,6 @@ def test_ready_inventory_produces_independent_review_request(
     assert report["authority"] == "unavailable"
     assert report["public_probability"] is False
     assert report["metrics"]["auc"] == 1.0
+    assert report["controlled_intervention_receipt_sha256"] == [
+        paired_receipt["receipt_sha256"]
+    ]
