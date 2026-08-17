@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from lol_kills import draft_recommendation as draft_recommendation_module
 from lol_kills.research import selective_draft_probability as selective_module
 from lol_kills.research import selective_draft_constituents as constituent_module
 from lol_kills.research import public_draft_score_promotion as promotion_module
@@ -285,6 +286,9 @@ def test_latest_protocol_binds_the_frozen_candidate_and_implementation() -> None
     assert protocol["iteration"][
         "quantum_implementation_sha256"
     ] == file_sha256(Path(promotion_module.__file__))
+    assert protocol["iteration"][
+        "draft_builder_implementation_sha256"
+    ] == file_sha256(Path(draft_recommendation_module.__file__))
     assert protocol["iteration"]["holdout_sealer_sha256"] == file_sha256(
         Path(sealer_module.__file__)
     )

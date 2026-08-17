@@ -105,15 +105,26 @@ def _sigmoid(value: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-np.clip(value, -30, 30)))
 
 
-def build_games(players: pd.DataFrame) -> list[dict[str, Any]]:
-    """Return complete professional drafts in chronological order."""
+def build_games(
+    players: pd.DataFrame, *, require_result: bool = True
+) -> list[dict[str, Any]]:
+    """Return complete professional drafts in chronological order.
+
+    Research fitting keeps the historical-result requirement. Pre-match
+    inference can construct the same draft features without a result column.
+    """
     frame = players.copy()
+    if require_result and "result" not in frame:
+        raise ValueError("historical draft rows require results")
     frame["_gid"] = frame["game_uid"].astype(str)
     frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
     frame["side"] = frame["side"].astype(str).str.title()
     frame["role"] = frame["position"].map(_role)
     frame["champion"] = frame["champion"].map(lambda value: normalize_champ(str(value)))
-    frame = frame.dropna(subset=["date", "result", "champion"])
+    required = ["date", "champion"]
+    if require_result:
+        required.append("result")
+    frame = frame.dropna(subset=required)
     frame = frame[frame["side"].isin(("Blue", "Red")) & frame["role"].isin(ROLES)]
 
     grouped: dict[str, dict[str, Any]] = {}
@@ -138,12 +149,15 @@ def build_games(players: pd.DataFrame) -> list[dict[str, Any]]:
                 "player": str(row.get("playername") or ""),
             }
         if side == "Blue" and game["blue_metadata"] is None:
-            game["blue_metadata"] = {
+            metadata = {
                 "date": pd.Timestamp(row["date"]),
                 "league": str(row.get("league") or "UNKNOWN").upper(),
                 "blue_team": str(row.get("teamname") or ""),
-                "y": float(row["result"]),
             }
+            result = row.get("result")
+            if result is not None and not pd.isna(result):
+                metadata["y"] = float(result)
+            game["blue_metadata"] = metadata
         if side == "Red" and game["red_team"] is None:
             game["red_team"] = str(row.get("teamname") or "")
 

@@ -44,6 +44,16 @@ STRENGTH_IDENTITY_SCHEMA = "scryglass:strength-identity-logit:v1"
 ROSTER_FOREST_SCHEMA = "scryglass:roster-random-forest:v1"
 QUANTUM_VOTER_SCHEMA = "scryglass:quantum-masked-forest-voter:v1"
 FROZEN_SELECTIVE_VOTERS_SCHEMA = "scryglass:frozen-selective-voters:v1"
+DRAFT_INFERENCE_COLUMNS = (
+    "game_uid",
+    "date",
+    "side",
+    "position",
+    "champion",
+    "playername",
+    "teamname",
+    "league",
+)
 V24_QUANTUM_PROTOCOL_FILE_SHA256 = (
     "da548e126829ab57a1a90f11387128cb66f839f6fde01ba0062b2feb53881004"
 )
@@ -99,6 +109,18 @@ def _normalize_player_game_uids(players: pd.DataFrame) -> pd.DataFrame:
         )
     output["game_uid"] = output["game_uid"].astype(str)
     return output
+
+
+def _outcome_blind_draft_source(players: pd.DataFrame) -> pd.DataFrame:
+    """Keep only fields used to construct a pre-match draft."""
+
+    normalized = _normalize_player_game_uids(players)
+    missing = [column for column in DRAFT_INFERENCE_COLUMNS if column not in normalized]
+    if missing:
+        raise SelectiveDraftConstituentError(
+            f"player source misses pre-match fields: {missing}"
+        )
+    return normalized[list(DRAFT_INFERENCE_COLUMNS)].copy()
 
 
 def load_v24_quantum_contract(
@@ -289,9 +311,10 @@ def run_frozen_selective_voters(
     quantum_training = pd.read_parquet(quantum_training_matrix_path)
     evaluation_features = pd.read_parquet(evaluation_features_path)
     players = pd.read_parquet(players_path)
-    players = _normalize_player_game_uids(players)
+    players = _outcome_blind_draft_source(players)
     game_by_id = {
-        str(game["game_uid"]): game for game in build_draft_games(players)
+        str(game["game_uid"]): game
+        for game in build_draft_games(players, require_result=False)
     }
     source_matrix_sha256 = canonical_sha256(
         {

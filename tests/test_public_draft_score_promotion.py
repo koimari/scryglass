@@ -15,6 +15,7 @@ from lol_kills.research.public_draft_score_promotion import (
     _encoded_categorical_frame,
     _fit_bounded_draft_model,
     _fit_quantum_meta,
+    _draft_expert_logits,
     _mirror_categorical_frame,
     _mirror_features,
     _phase_curve_predictions,
@@ -559,3 +560,40 @@ def test_draft_loader_keeps_first_complete_role_rows_and_time_order() -> None:
     assert games[0]["blue_team"] == "Blue-team"
     assert games[0]["red_team"] == "Red-team"
     assert games[0]["red"]["sup"]["player"] == "first-Red-sup"
+
+
+def test_draft_expert_reads_labels_from_training_matrix() -> None:
+    rows: list[dict[str, object]] = []
+    training_rows: list[dict[str, object]] = []
+    for index in range(20):
+        game_id = f"game-{index}"
+        training_rows.append({"game_uid": game_id, "y": index % 2})
+        for side in ("Blue", "Red"):
+            for role in ROLES:
+                rows.append(
+                    {
+                        "game_uid": game_id,
+                        "date": f"2026-01-{index + 1:02d}T12:00:00Z",
+                        "side": side,
+                        "position": role,
+                        "champion": f"{side}-{role}-{index % 3}",
+                        "playername": f"{side}-{role}-{index % 4}",
+                        "teamname": f"{side}-team-{index % 5}",
+                        "league": "LEC",
+                    }
+                )
+    games = build_games(pd.DataFrame(rows), require_result=False)
+    game_by_id = {game["game_uid"]: game for game in games}
+    training = pd.DataFrame(training_rows[:18])
+    evaluation = pd.DataFrame(training_rows[18:]).drop(columns="y")
+
+    prediction, receipts = _draft_expert_logits(
+        training,
+        evaluation,
+        game_by_id,
+        [{"id": "test", "alpha": 0.01, "half_life_days": 365}],
+    )
+
+    assert prediction.shape == (2, 2)
+    assert np.isfinite(prediction).all()
+    assert receipts[0]["outputs"] == ["full_logit", "composition_only_logit"]

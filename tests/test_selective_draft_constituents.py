@@ -242,6 +242,38 @@ def test_player_game_identity_uses_gameid_for_appended_rows() -> None:
     ]
 
 
+def test_pre_match_draft_source_excludes_every_result_field() -> None:
+    roles = ["top", "jng", "mid", "bot", "sup"]
+    players = pd.DataFrame(
+        [
+            {
+                "game_uid": "future-game",
+                "gameid": "future-game",
+                "date": "2026-08-17T12:00:00Z",
+                "side": side,
+                "position": role,
+                "champion": f"Champion-{side}-{role}",
+                "playername": f"Player-{side}-{role}",
+                "teamname": f"Team-{side}",
+                "league": "LEC",
+                "result": 1 if side == "Blue" else 0,
+                "kills": 99,
+                "goldat15": 99999,
+            }
+            for side in ("Blue", "Red")
+            for role in roles
+        ]
+    )
+
+    source = constituents._outcome_blind_draft_source(players)
+    games = constituents.build_draft_games(source, require_result=False)
+
+    assert source.columns.tolist() == list(constituents.DRAFT_INFERENCE_COLUMNS)
+    assert len(games) == 1
+    assert "y" not in games[0]
+    assert games[0]["blue"]["top"]["champion"] == "Champion-Blue-top"
+
+
 def test_quantum_voter_uses_only_training_outcomes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

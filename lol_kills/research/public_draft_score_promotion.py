@@ -182,6 +182,17 @@ def _games_for_rows(
     return games
 
 
+def _training_target(rows: pd.DataFrame) -> np.ndarray:
+    """Read outcomes only from the hash-bound training matrix."""
+
+    if "y" not in rows:
+        raise PublicDraftScorePromotionError("training outcomes are missing")
+    target = pd.to_numeric(rows["y"], errors="raise").to_numpy(dtype=int)
+    if set(np.unique(target)) != {0, 1}:
+        raise PublicDraftScorePromotionError("training needs both outcomes")
+    return target
+
+
 def _add_crossfit_composition(
     train: pd.DataFrame,
     evaluation: pd.DataFrame,
@@ -203,7 +214,7 @@ def _add_crossfit_composition(
     vocabulary, _ = _draft_vocabulary(train_games)
     train_matrix = _draft_feature_rows(train_games, vocabulary)
     evaluation_matrix = _draft_feature_rows(evaluation_games, vocabulary)
-    target = np.asarray([game["y"] for game in train_games], dtype=int)
+    target = _training_target(train)
     reference = train_games[-1]["date"]
     weights = _draft_recency_weights(train_games, reference, int(half_life_days))
     model = _fit_bounded_draft_model(train_matrix, target, weights, float(alpha))
@@ -248,7 +259,7 @@ def _draft_expert_logits(
     vocabulary, _ = _draft_vocabulary(train_games)
     train_matrix = _draft_feature_rows(train_games, vocabulary)
     evaluation_matrix = _draft_feature_rows(evaluation_games, vocabulary)
-    target = np.asarray([game["y"] for game in train_games], dtype=int)
+    target = _training_target(train)
     if shuffled:
         target = np.random.default_rng(RANDOM_SEED).permutation(target)
     component_columns = _draft_component_columns(vocabulary)
