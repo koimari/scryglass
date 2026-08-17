@@ -196,6 +196,10 @@ def _draft_authority(manifest: dict[str, Any], release_id: str) -> dict[str, Any
         receipt_sha256 = candidate.get("receipt_sha256")
         issued_utc = candidate.get("issued_utc")
         model_version = candidate.get("model_version")
+        descriptive_authority = _draft_authority(
+            {"draft_authority": candidate.get("descriptive_authority")},
+            release_id,
+        )
         if (
             candidate.get("schema_version") != DRAFT_AUTHORITY_SCHEMA
             or candidate.get("release_id") != release_id
@@ -213,6 +217,7 @@ def _draft_authority(manifest: dict[str, Any], release_id: str) -> dict[str, Any
             or candidate.get("recommendation_authority") is not True
             or candidate.get("betting_authority") is not False
             or candidate.get("reason") is not None
+            or descriptive_authority.get("status") != "descriptive"
         ):
             raise SupabasePublicationError("promoted Draft Score authority is invalid")
         return {
@@ -229,6 +234,7 @@ def _draft_authority(manifest: dict[str, Any], release_id: str) -> dict[str, Any
             "recommendation_authority": True,
             "betting_authority": False,
             "reason": None,
+            "descriptive_authority": descriptive_authority,
         }
     if status == "descriptive":
         artifact_sha256 = candidate.get("artifact_sha256")

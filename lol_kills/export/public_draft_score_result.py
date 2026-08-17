@@ -74,8 +74,8 @@ def build_public_draft_score_result(
     if abs(controlled_edge_percentage_points) > 100.0:
         raise PublicDraftScoreResultError("Draft edge is outside percentage points")
     if (
-        controlled_model_units != 0.0
-        and controlled_edge_percentage_points == 0.0
+        (controlled_model_units == 0.0)
+        != (controlled_edge_percentage_points == 0.0)
     ) or controlled_model_units * controlled_edge_percentage_points < 0.0:
         raise PublicDraftScoreResultError("Draft Score direction is inconsistent")
     if not controlled_explanation.strip():

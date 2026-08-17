@@ -66,6 +66,20 @@ function promotedManifest(): PackManifest {
       probability_authority: true,
       recommendation_authority: true,
       betting_authority: false,
+      descriptive_authority: {
+        schema_version: "scryglass:draft-authority:v1",
+        status: "descriptive",
+        authority: "descriptive",
+        release_id: RELEASE_ID,
+        model_version: "draft-recommendation-static-v2",
+        artifact_sha256: "c".repeat(64),
+        receipt_sha256: "a".repeat(64),
+        issued_utc: "2026-08-13T18:31:17Z",
+        estimand: "composition_only",
+        probability_authority: false,
+        recommendation_authority: false,
+        betting_authority: false,
+      },
     },
   };
 }
@@ -116,6 +130,13 @@ test("promoted Draft responses allow probability and recommendation but never be
   }, descriptiveManifest()), /recommendation without promoted authority/);
 });
 
+test("promoted releases keep their bound descriptive Draft fields", () => {
+  assert.doesNotThrow(() => validatePublicDraftResponse({
+    authority: "descriptive",
+    draft_metric: { draft_edge: 0.25, games: 12 },
+  }, promotedManifest()));
+});
+
 test("promoted Draft result keeps match probability and controlled draft evidence separate", () => {
   const manifest = promotedManifest();
   const result = {
@@ -153,6 +174,10 @@ test("promoted Draft result keeps match probability and controlled draft evidenc
   assert.throws(() => validatePromotedDraftScoreResult({
     ...result,
     release_id: "v2026.08.16.999999",
+  }, manifest), /not release-bound/);
+  assert.throws(() => validatePromotedDraftScoreResult({
+    ...result,
+    internal_vector: [1, 2],
   }, manifest), /not release-bound/);
   assert.throws(() => validatePromotedDraftScoreResult({
     ...result,

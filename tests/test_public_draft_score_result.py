@@ -73,6 +73,21 @@ def test_public_draft_score_result_rejects_direction_conflict() -> None:
         )
 
 
+def test_public_draft_score_result_rejects_nonzero_edge_for_even_score() -> None:
+    with pytest.raises(PublicDraftScoreResultError, match="direction"):
+        build_public_draft_score_result(
+            release_id="v2026.08.16.220000",
+            model_version="public-draft-score-v1",
+            promotion_receipt=_promotion_receipt(),
+            evidence_start="2025-01-01T00:00:00Z",
+            evidence_end="2026-08-16T00:00:00Z",
+            blue_win_probability=0.61,
+            controlled_model_units=0.0,
+            controlled_edge_percentage_points=1.9,
+            controlled_explanation="Controlled composition contribution.",
+        )
+
+
 def test_public_draft_score_result_rejects_hash_shaped_placeholder() -> None:
     receipt = _promotion_receipt()
     receipt["receipt_sha256"] = "a" * 64

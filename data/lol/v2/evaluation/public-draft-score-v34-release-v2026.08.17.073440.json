@@ -1,7 +1,7 @@
 {
   "authority": "promoted",
   "model_version": "public-draft-score-v34",
-  "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
+  "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
   "release_id": "v2026.08.17.073440",
   "results": {
     "13417-13417_game_1": {
@@ -25,7 +25,7 @@
         "Red": 0.22807209700609765
       },
       "model_version": "public-draft-score-v34",
-      "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
       "release_id": "v2026.08.17.073440",
       "schema_version": "scryglass:public-draft-score-result:v1",
       "side_recommendation": "Blue"
@@ -51,7 +51,7 @@
         "Red": 0.2068011540289486
       },
       "model_version": "public-draft-score-v34",
-      "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
       "release_id": "v2026.08.17.073440",
       "schema_version": "scryglass:public-draft-score-result:v1",
       "side_recommendation": "Blue"
@@ -77,7 +77,7 @@
         "Red": 0.6344411390102356
       },
       "model_version": "public-draft-score-v34",
-      "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
       "release_id": "v2026.08.17.073440",
       "schema_version": "scryglass:public-draft-score-result:v1",
       "side_recommendation": "Red"
@@ -103,7 +103,7 @@
         "Red": 0.34913866402457294
       },
       "model_version": "public-draft-score-v34",
-      "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
       "release_id": "v2026.08.17.073440",
       "schema_version": "scryglass:public-draft-score-result:v1",
       "side_recommendation": "Blue"
@@ -129,33 +129,7 @@
         "Red": 0.32558699980968053
       },
       "model_version": "public-draft-score-v34",
-      "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
-      "release_id": "v2026.08.17.073440",
-      "schema_version": "scryglass:public-draft-score-result:v1",
-      "side_recommendation": "Blue"
-    },
-    "13418-13418_game_3": {
-      "authority": "promoted",
-      "controlled_draft_score": {
-        "edge_percentage_points": 6.003136451035241,
-        "explanation": "Role-matched champion swap with team strength, player strength, momentum, league, match context, and side held fixed.",
-        "fixed_strength_blue_win_probability": 0.4571341550926688,
-        "intervention_receipt_sha256": "75e5135b9ac6ba1714a98b820f9c17b7a60d474eeecda6cf5f6f056700bd6e43",
-        "isolated_blue_draft_probability": 0.5600313645103524,
-        "method": "role_matched_champion_swap",
-        "model_units": 0.24128934882152203,
-        "stronger_draft": "Blue"
-      },
-      "evidence_window": {
-        "end": "2026-08-16T00:00:00Z",
-        "start": "2024-01-01T00:00:00Z"
-      },
-      "match_win_probability": {
-        "Blue": 0.5173440449911907,
-        "Red": 0.4826559550088093
-      },
-      "model_version": "public-draft-score-v34",
-      "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
       "release_id": "v2026.08.17.073440",
       "schema_version": "scryglass:public-draft-score-result:v1",
       "side_recommendation": "Blue"
@@ -181,7 +155,7 @@
         "Red": 0.8195364353860458
       },
       "model_version": "public-draft-score-v34",
-      "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
       "release_id": "v2026.08.17.073440",
       "schema_version": "scryglass:public-draft-score-result:v1",
       "side_recommendation": "Red"
@@ -207,7 +181,7 @@
         "Red": 0.14570411008339001
       },
       "model_version": "public-draft-score-v34",
-      "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
       "release_id": "v2026.08.17.073440",
       "schema_version": "scryglass:public-draft-score-result:v1",
       "side_recommendation": "Blue"
@@ -233,7 +207,7 @@
         "Red": 0.40084167383193503
       },
       "model_version": "public-draft-score-v34",
-      "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
       "release_id": "v2026.08.17.073440",
       "schema_version": "scryglass:public-draft-score-result:v1",
       "side_recommendation": "Blue"
@@ -259,7 +233,7 @@
         "Red": 0.4354488702096456
       },
       "model_version": "public-draft-score-v34",
-      "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
       "release_id": "v2026.08.17.073440",
       "schema_version": "scryglass:public-draft-score-result:v1",
       "side_recommendation": "Blue"
@@ -285,7 +259,7 @@
         "Red": 0.3979369813983673
       },
       "model_version": "public-draft-score-v34",
-      "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
       "release_id": "v2026.08.17.073440",
       "schema_version": "scryglass:public-draft-score-result:v1",
       "side_recommendation": "Blue"
@@ -311,7 +285,7 @@
         "Red": 0.7256437126581756
       },
       "model_version": "public-draft-score-v34",
-      "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
       "release_id": "v2026.08.17.073440",
       "schema_version": "scryglass:public-draft-score-result:v1",
       "side_recommendation": "Red"
@@ -337,33 +311,7 @@
         "Red": 0.7678703710477333
       },
       "model_version": "public-draft-score-v34",
-      "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
-      "release_id": "v2026.08.17.073440",
-      "schema_version": "scryglass:public-draft-score-result:v1",
-      "side_recommendation": "Red"
-    },
-    "LOLTMNT05_218255": {
-      "authority": "promoted",
-      "controlled_draft_score": {
-        "edge_percentage_points": -1.55327037249276,
-        "explanation": "Role-matched champion swap with team strength, player strength, momentum, league, match context, and side held fixed.",
-        "fixed_strength_blue_win_probability": 0.4632319161864344,
-        "intervention_receipt_sha256": "1d49752c730c43aaa466782108a0c7678e8dd11025fcc79cb68542d77430cbb6",
-        "isolated_blue_draft_probability": 0.4844672962750724,
-        "method": "role_matched_champion_swap",
-        "model_units": -0.062150813125891755,
-        "stronger_draft": "Red"
-      },
-      "evidence_window": {
-        "end": "2026-08-16T00:00:00Z",
-        "start": "2024-01-01T00:00:00Z"
-      },
-      "match_win_probability": {
-        "Blue": 0.4478184176862762,
-        "Red": 0.5521815823137237
-      },
-      "model_version": "public-draft-score-v34",
-      "receipt_sha256": "edfc0a660b31d563614778d0c529d4ca533bf5ca536fad72005354301c29e3c0",
+      "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a",
       "release_id": "v2026.08.17.073440",
       "schema_version": "scryglass:public-draft-score-result:v1",
       "side_recommendation": "Red"

@@ -728,7 +728,25 @@ export function draftAuthorityStatus(manifest: PackManifest): DraftAuthorityStat
 
 /** Descriptive Draft fields may render after their release-bound receipt passes. */
 export function hasDescriptiveDraftAuthority(manifest: PackManifest): boolean {
-  return draftAuthorityStatus(manifest) === "descriptive";
+  const status = draftAuthorityStatus(manifest);
+  if (status === "descriptive") return true;
+  const nested = manifest.draft_authority?.descriptive_authority;
+  return Boolean(
+    status === "promoted"
+    && nested?.schema_version === "scryglass:draft-authority:v1"
+    && nested.status === "descriptive"
+    && nested.authority === "descriptive"
+    && nested.release_id === manifest.pack_id
+    && nested.estimand === "composition_only"
+    && nested.model_version.trim()
+    && DRAFT_RECEIPT_SHA256.test(nested.artifact_sha256)
+    && DRAFT_RECEIPT_SHA256.test(nested.receipt_sha256)
+    && DRAFT_ISSUED_UTC.test(nested.issued_utc)
+    && Number.isFinite(Date.parse(nested.issued_utc))
+    && nested.probability_authority === false
+    && nested.recommendation_authority === false
+    && nested.betting_authority === false
+  );
 }
 
 /** Accept only the active manifest's complete release-bound promoted receipt. */

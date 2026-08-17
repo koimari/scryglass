@@ -22,7 +22,7 @@ from sklearn.ensemble import (
     RandomForestRegressor,
 )
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
+from sklearn.metrics import brier_score_loss, log_loss
 from sklearn.preprocessing import OneHotEncoder
 
 from lol_kills import draft_recommendation as draft_recommendation_module

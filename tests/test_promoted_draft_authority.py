@@ -184,6 +184,8 @@ def test_promoted_result_asset_is_release_and_receipt_bound(tmp_path: Path) -> N
     [
         (lambda payload: payload["results"]["game-1"].update({"side_recommendation": "Red"}), "direction"),
         (lambda payload: payload["results"]["game-1"].update({"odds": 1.7}), "asset"),
+        (lambda payload: payload["results"]["game-1"].update({"internal_vector": [1, 2]}), "row"),
+        (lambda payload: payload["results"]["game-1"]["controlled_draft_score"].update({"internal": 1}), "row"),
         (lambda payload: payload["results"]["game-1"]["match_win_probability"].update({"Red": 0.4}), "numbers"),
         (lambda payload: payload.update({"receipt_sha256": "9" * 64}), "asset"),
     ],
@@ -203,4 +205,19 @@ def test_promoted_result_asset_tampering_fails_closed(
     mutation(payload)
 
     with pytest.raises(PromotedDraftAuthorityError, match=message):
+        validate_promoted_results_payload(payload, authority=authority)
+
+
+def test_promoted_result_rejects_nonzero_edge_for_even_score(tmp_path: Path) -> None:
+    path, file_sha256 = _receipt(tmp_path / "promotion.json")
+    authority, _receipt_value = load_promoted_draft_authority(
+        receipt_path=path,
+        expected_file_sha256=file_sha256,
+        release_id="v2026.09.01.120000",
+    )
+    payload = _promoted_payload(authority)
+    score = payload["results"]["game-1"]["controlled_draft_score"]
+    score["model_units"] = 0.0
+
+    with pytest.raises(PromotedDraftAuthorityError, match="direction"):
         validate_promoted_results_payload(payload, authority=authority)

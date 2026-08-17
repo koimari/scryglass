@@ -1,5 +1,6 @@
 import {
   draftAuthorityStatus,
+  hasDescriptiveDraftAuthority,
   type DraftAuthorityStatus,
 } from "./pack";
 import type {
@@ -57,6 +58,11 @@ export type PromotedDraftResultsPayload = {
 };
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const exactKeys = (value: object, keys: readonly string[]) => {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+};
 
 /** Validate one promoted public result before any product surface renders it. */
 export function validatePromotedDraftScoreResult(
@@ -67,7 +73,11 @@ export function validatePromotedDraftScoreResult(
   if (!value || typeof value !== "object") throw new Error("Promoted Draft result is malformed");
   const result = value as Partial<PublicDraftScoreResult>;
   if (
-    result.schema_version !== PUBLIC_DRAFT_SCORE_RESULT_SCHEMA
+    !exactKeys(value, [
+      "schema_version", "authority", "release_id", "model_version", "receipt_sha256",
+      "evidence_window", "match_win_probability", "controlled_draft_score", "side_recommendation",
+    ])
+    || result.schema_version !== PUBLIC_DRAFT_SCORE_RESULT_SCHEMA
     || result.authority !== "promoted"
     || result.release_id !== manifest.pack_id
     || typeof result.model_version !== "string"
@@ -82,7 +92,9 @@ export function validatePromotedDraftScoreResult(
   const blue = result.match_win_probability?.Blue;
   const red = result.match_win_probability?.Red;
   if (
-    typeof blue !== "number"
+    !result.match_win_probability
+    || !exactKeys(result.match_win_probability, ["Blue", "Red"])
+    || typeof blue !== "number"
     || typeof red !== "number"
     || !Number.isFinite(blue)
     || !Number.isFinite(red)
@@ -97,6 +109,11 @@ export function validatePromotedDraftScoreResult(
   const score = result.controlled_draft_score;
   if (
     !score
+    || !exactKeys(score, [
+      "model_units", "edge_percentage_points", "stronger_draft", "explanation", "method",
+      "intervention_receipt_sha256", "isolated_blue_draft_probability",
+      "fixed_strength_blue_win_probability",
+    ])
     || typeof score.model_units !== "number"
     || !Number.isFinite(score.model_units)
     || typeof score.edge_percentage_points !== "number"
@@ -126,7 +143,7 @@ export function validatePromotedDraftScoreResult(
       : "Even";
   if (
     score.stronger_draft !== expectedDraftSide
-    || (score.model_units !== 0 && score.edge_percentage_points === 0)
+    || ((score.model_units === 0) !== (score.edge_percentage_points === 0))
     || score.model_units * score.edge_percentage_points < 0
   ) {
     throw new Error("Controlled Draft Score direction is inconsistent");
@@ -137,6 +154,7 @@ export function validatePromotedDraftScoreResult(
   const window = result.evidence_window;
   if (
     !window
+    || !exactKeys(window, ["start", "end"])
     || typeof window.start !== "string"
     || typeof window.end !== "string"
     || !Number.isFinite(Date.parse(window.start))
@@ -155,7 +173,8 @@ export function validatePromotedDraftResultsPayload(
   if (!value || typeof value !== "object") throw new Error("Promoted Draft result asset is malformed");
   const payload = value as Partial<PromotedDraftResultsPayload>;
   if (
-    payload.schema_version !== PROMOTED_DRAFT_RESULTS_SCHEMA
+    !exactKeys(value, ["schema_version", "authority", "release_id", "model_version", "receipt_sha256", "results"])
+    || payload.schema_version !== PROMOTED_DRAFT_RESULTS_SCHEMA
     || payload.authority !== "promoted"
     || payload.release_id !== manifest.pack_id
     || payload.model_version !== manifest.draft_authority?.model_version
@@ -571,11 +590,15 @@ function validateDraftResponse(value: unknown, manifest: PackManifest): void {
     throw new Error("Public Draft response contains a recommendation without promoted authority");
   }
   const declared = draftAuthorityStatus(manifest);
-  if (authority && authority !== declared) {
+  if (
+    authority
+    && authority !== declared
+    && !(authority === "descriptive" && hasDescriptiveDraftAuthority(manifest))
+  ) {
     throw new Error("Public Draft response has an unbound authority");
   }
   if (containsKey(value, "draft_metric") || containsKey(value, "draft_pool") || containsKey(value, "draft_contribution")) {
-    if (authority !== "descriptive" || declared !== "descriptive") {
+    if (authority !== "descriptive" || !hasDescriptiveDraftAuthority(manifest)) {
       throw new Error("Public Draft response is missing descriptive release authority");
     }
   }

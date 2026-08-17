@@ -25,6 +25,7 @@ def build_promoted_results(
     receipt_path: Path,
     observed_rows_path: Path,
     paired_predictions_path: Path,
+    paired_predictions_receipt_path: Path,
     swapped_rows_path: Path,
 ) -> dict[str, Any]:
     """Return the fixed result asset from outcome-blind paired inputs."""
@@ -35,8 +36,44 @@ def build_promoted_results(
         release_id=release_id,
     )
     evidence = receipt["evidence_window"]
+    try:
+        paired_receipt = json.loads(
+            paired_predictions_receipt_path.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("paired Draft prediction receipt is unreadable") from error
+    if (
+        not isinstance(paired_receipt, dict)
+        or sha256_path(paired_predictions_path)
+        != receipt["paired_prediction_file_sha256"]
+        or sha256_path(paired_predictions_receipt_path)
+        != receipt["paired_prediction_receipt_file_sha256"]
+        or paired_receipt.get("receipt_sha256")
+        != receipt["paired_prediction_receipt_sha256"]
+        or paired_receipt.get("output_sha256")
+        != receipt["paired_prediction_file_sha256"]
+        or paired_receipt.get("candidate_receipt_sha256")
+        != receipt["candidate_receipt_sha256"]
+        or sha256_path(observed_rows_path) != receipt["observed_rows_file_sha256"]
+        or sha256_path(swapped_rows_path) != receipt["swapped_rows_file_sha256"]
+        or paired_receipt.get("input_sha256", {}).get("swap_batch")
+        != receipt["swapped_rows_file_sha256"]
+    ):
+        raise ValueError("paired Draft prediction inputs changed")
     observed = pd.read_parquet(observed_rows_path)
     paired = pd.read_parquet(paired_predictions_path)
+    required_selection = {
+        "probability_authorized_observed",
+        "probability_authorized_swapped",
+    }
+    if not required_selection.issubset(paired.columns):
+        raise ValueError("paired Draft selection fields are missing")
+    paired = paired.loc[
+        paired["probability_authorized_observed"].eq(True)
+        & paired["probability_authorized_swapped"].eq(True)
+    ].copy()
+    if paired.empty:
+        raise ValueError("paired Draft predictions contain no authorized rows")
     swapped_payload = json.loads(swapped_rows_path.read_text(encoding="utf-8"))
     swapped_by_game = swapped_payload.get("games")
     if not isinstance(swapped_by_game, dict):
@@ -84,6 +121,7 @@ def main() -> int:
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--observed-rows", type=Path, required=True)
     parser.add_argument("--paired-predictions", type=Path, required=True)
+    parser.add_argument("--paired-predictions-receipt", type=Path, required=True)
     parser.add_argument("--swapped-rows", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -92,6 +130,7 @@ def main() -> int:
         receipt_path=args.receipt,
         observed_rows_path=args.observed_rows,
         paired_predictions_path=args.paired_predictions,
+        paired_predictions_receipt_path=args.paired_predictions_receipt,
         swapped_rows_path=args.swapped_rows,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)

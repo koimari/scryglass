@@ -35,6 +35,25 @@ BOUND_HASH_FIELDS = (
 )
 PROMOTED_RESULTS_SCHEMA = "scryglass:promoted-draft-results:v1"
 PUBLIC_RESULT_SCHEMA = "scryglass:public-draft-score-result:v1"
+PROMOTED_RESULTS_KEYS = frozenset(
+    {"schema_version", "authority", "release_id", "model_version", "receipt_sha256", "results"}
+)
+PUBLIC_RESULT_KEYS = frozenset(
+    {
+        "schema_version", "authority", "release_id", "model_version",
+        "receipt_sha256", "evidence_window", "match_win_probability",
+        "controlled_draft_score", "side_recommendation",
+    }
+)
+PROBABILITY_KEYS = frozenset({"Blue", "Red"})
+EVIDENCE_WINDOW_KEYS = frozenset({"start", "end"})
+CONTROLLED_SCORE_KEYS = frozenset(
+    {
+        "model_units", "edge_percentage_points", "stronger_draft", "explanation",
+        "method", "intervention_receipt_sha256", "isolated_blue_draft_probability",
+        "fixed_strength_blue_win_probability",
+    }
+)
 OWNER_RELEASE_RECEIPT_SCHEMA = "scryglass:public-draft-score-owner-release-receipt:v1"
 OWNER_MODEL_VERSION = "public-draft-score-v34"
 OWNER_CANDIDATE_PATH = Path(
@@ -124,6 +143,11 @@ def _valid_owner_release_contract(receipt: Mapping[str, Any]) -> bool:
                 "development_evaluation_file_sha256",
                 "development_evaluation_receipt_sha256",
                 "supporting_evaluation_file_sha256",
+                "paired_prediction_file_sha256",
+                "paired_prediction_receipt_file_sha256",
+                "paired_prediction_receipt_sha256",
+                "observed_rows_file_sha256",
+                "swapped_rows_file_sha256",
             )
         )
         and isinstance(evaluation.get("eligible_rows"), int)
@@ -310,7 +334,11 @@ def validate_promoted_results_payload(
 ) -> dict[str, Any]:
     """Validate one release-bound promoted result asset before publication."""
 
-    if not isinstance(payload, dict) or _contains_forbidden_key(payload):
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != PROMOTED_RESULTS_KEYS
+        or _contains_forbidden_key(payload)
+    ):
         raise PromotedDraftAuthorityError("promoted Draft result asset is invalid")
     results = payload.get("results")
     if (
@@ -326,7 +354,12 @@ def validate_promoted_results_payload(
         raise PromotedDraftAuthorityError("promoted Draft result asset is invalid")
 
     for game_uid, result in results.items():
-        if not isinstance(game_uid, str) or not game_uid or not isinstance(result, dict):
+        if (
+            not isinstance(game_uid, str)
+            or not game_uid
+            or not isinstance(result, dict)
+            or set(result) != PUBLIC_RESULT_KEYS
+        ):
             raise PromotedDraftAuthorityError("promoted Draft result row is invalid")
         probabilities = result.get("match_win_probability")
         controlled = result.get("controlled_draft_score")
@@ -338,8 +371,11 @@ def validate_promoted_results_payload(
             or result.get("model_version") != authority.get("model_version")
             or result.get("receipt_sha256") != authority.get("receipt_sha256")
             or not isinstance(probabilities, dict)
+            or set(probabilities) != PROBABILITY_KEYS
             or not isinstance(controlled, dict)
+            or set(controlled) != CONTROLLED_SCORE_KEYS
             or not isinstance(evidence, dict)
+            or set(evidence) != EVIDENCE_WINDOW_KEYS
         ):
             raise PromotedDraftAuthorityError("promoted Draft result row is invalid")
         evidence_start = evidence.get("start")
@@ -382,7 +418,7 @@ def validate_promoted_results_payload(
         )
         if (
             controlled.get("stronger_draft") != expected_draft_side
-            or (model_units != 0 and edge == 0)
+            or ((model_units == 0) != (edge == 0))
             or model_units * edge < 0
             or controlled.get("method") != "role_matched_champion_swap"
             or not isinstance(intervention_receipt, str)

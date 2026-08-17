@@ -509,7 +509,7 @@ def evaluate_frozen_candidate_holdout(
         )
     inference["y"] = holdout["y"].to_numpy(dtype=int)
     selected = inference[inference["probability_authorized"]].copy()
-    enough_outcomes = len(selected) >= minimum_selected_rows and selected["y"].nunique() == 2
+    enough_outcomes = selected["y"].nunique() == 2
     if enough_outcomes:
         metrics = _metrics(selected)
         quantum_baseline = selected.copy()

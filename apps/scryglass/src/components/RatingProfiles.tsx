@@ -478,7 +478,7 @@ function CompositionEvidence({
               </small>
             </div>
           </div>
-          <span className={styles.compositionVs}>Model pick</span>
+          <span className={styles.compositionVs}>Research model · no betting advice</span>
           <div className={`${styles.compositionTeam} ${styles.compositionTeamRight}`}>
             <div>
               <strong>{draftScore.side_recommendation}</strong>

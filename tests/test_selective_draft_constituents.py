@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-import lol_kills.research.selective_draft_constituents as constituents
 from lol_kills.research.public_draft_score_promotion import (
     CATEGORICAL_CONTEXT_COLUMNS,
     STRENGTH_COLUMNS,
@@ -22,6 +22,10 @@ from lol_kills.research.selective_draft_constituents import (
     STRENGTH_IDENTITY_SCHEMA,
     V24_QUANTUM_FEATURE_GROUPS_SHA256,
     V24_QUANTUM_PROTOCOL_RESOLVED_SHA256,
+    DRAFT_INFERENCE_COLUMNS,
+    _normalize_player_game_uids,
+    _outcome_blind_draft_source,
+    build_draft_games,
     SelectiveDraftConstituentError,
     fit_all_atom_identity_predictions,
     fit_frozen_selective_voters,
@@ -32,6 +36,10 @@ from lol_kills.research.selective_draft_constituents import (
 )
 from lol_kills.research.selective_draft_probability import canonical_sha256
 from lol_kills.research.atomized_rf_composite import GROUP_COLUMNS
+
+
+def _constituents_module() -> object:
+    return sys.modules[fit_frozen_selective_voters.__module__]
 
 
 def _training_frame(rows: int = 80) -> pd.DataFrame:
@@ -116,7 +124,7 @@ def test_strength_identity_voter_uses_frozen_public_feature_contract(
             "receipt_sha256": "0" * 64,
         }
 
-    monkeypatch.setattr(constituents, "fit_all_atom_identity_predictions", fake_fit)
+    monkeypatch.setattr(_constituents_module(), "fit_all_atom_identity_predictions", fake_fit)
     output, receipt = fit_strength_identity_predictions(training, evaluation)
 
     expected_numeric = tuple(
@@ -163,7 +171,7 @@ def test_roster_forest_voter_is_bound_and_does_not_use_evaluation_outcome(
         )
         return np.asarray([[-1.0], [1.0]]), [{"world_id": "roster"}]
 
-    monkeypatch.setattr(constituents, "_quantum_world_predictions", fake_worlds)
+    monkeypatch.setattr(_constituents_module(), "_quantum_world_predictions", fake_worlds)
     output, receipt = fit_roster_random_forest_predictions(
         training,
         evaluation,
@@ -234,7 +242,7 @@ def test_player_game_identity_uses_gameid_for_appended_rows() -> None:
         }
     )
 
-    normalized = constituents._normalize_player_game_uids(players)
+    normalized = _normalize_player_game_uids(players)
 
     assert normalized["game_uid"].tolist() == [
         "frozen-game",
@@ -265,10 +273,10 @@ def test_pre_match_draft_source_excludes_every_result_field() -> None:
         ]
     )
 
-    source = constituents._outcome_blind_draft_source(players)
-    games = constituents.build_draft_games(source, require_result=False)
+    source = _outcome_blind_draft_source(players)
+    games = build_draft_games(source, require_result=False)
 
-    assert source.columns.tolist() == list(constituents.DRAFT_INFERENCE_COLUMNS)
+    assert source.columns.tolist() == list(DRAFT_INFERENCE_COLUMNS)
     assert len(games) == 1
     assert "y" not in games[0]
     assert games[0]["blue"]["top"]["champion"] == "Champion-Blue-top"
@@ -310,9 +318,9 @@ def test_quantum_voter_uses_only_training_outcomes(
         coef_ = np.asarray([[0.25, 0.75]])
         intercept_ = np.asarray([0.0])
 
-    monkeypatch.setattr(constituents, "_quantum_stack", fake_stack)
+    monkeypatch.setattr(_constituents_module(), "_quantum_stack", fake_stack)
     monkeypatch.setattr(
-        constituents,
+        _constituents_module(),
         "_select_anchor",
         lambda *_: {
             "team_weight": 0.5,
@@ -321,13 +329,13 @@ def test_quantum_voter_uses_only_training_outcomes(
         },
     )
     monkeypatch.setattr(
-        constituents,
+        _constituents_module(),
         "_anchor_probability",
         lambda frame, **_: 1.0 / (1.0 + np.exp(-frame["signal"].to_numpy())),
     )
-    monkeypatch.setattr(constituents, "_fit_quantum_meta", lambda *_: FakeMeta())
+    monkeypatch.setattr(_constituents_module(), "_fit_quantum_meta", lambda *_: FakeMeta())
     monkeypatch.setattr(
-        constituents,
+        _constituents_module(),
         "_quantum_meta_probability",
         lambda _model, worlds, _anchor: 1.0 / (1.0 + np.exp(-worlds[:, 0])),
     )
@@ -397,7 +405,7 @@ def test_frozen_voter_builder_removes_future_outcomes(
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
-        constituents,
+        _constituents_module(),
         "load_v24_quantum_contract",
         lambda _path: ({"selection": {}}, {"team_rating": ["signal"]}),
     )
@@ -428,13 +436,13 @@ def test_frozen_voter_builder_removes_future_outcomes(
         )
 
     monkeypatch.setattr(
-        constituents, "fit_quantum_masked_forest_predictions", fake_quantum
+        _constituents_module(), "fit_quantum_masked_forest_predictions", fake_quantum
     )
     monkeypatch.setattr(
-        constituents, "fit_roster_random_forest_predictions", fake_voter
+        _constituents_module(), "fit_roster_random_forest_predictions", fake_voter
     )
-    monkeypatch.setattr(constituents, "fit_strength_identity_predictions", fake_voter)
-    monkeypatch.setattr(constituents, "fit_all_atom_identity_predictions", fake_voter)
+    monkeypatch.setattr(_constituents_module(), "fit_strength_identity_predictions", fake_voter)
+    monkeypatch.setattr(_constituents_module(), "fit_all_atom_identity_predictions", fake_voter)
 
     predictions, receipt = fit_frozen_selective_voters(
         training,

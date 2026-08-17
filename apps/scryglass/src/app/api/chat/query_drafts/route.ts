@@ -1,6 +1,6 @@
 import { chatError, chatJson, clean, searchParams, secureChatRoute } from "@/lib/chatApi";
 import { queryTeamDraftScores } from "@/lib/draftQuery";
-import { draftAuthorityStatus, type ProfileRecords } from "@/lib/pack";
+import { hasDescriptiveDraftAuthority, type ProfileRecords } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 export const runtime = "nodejs";
@@ -9,8 +9,7 @@ async function get(request: Request, signal: AbortSignal) {
   const question = clean(searchParams(request).get("q"));
   if (!question) return chatError("A team draft-score question is required.", 422);
   const manifest = await readPackManifest(signal);
-  const authority = draftAuthorityStatus(manifest);
-  if (authority !== "descriptive") {
+  if (!hasDescriptiveDraftAuthority(manifest)) {
     return chatJson({
       schema_version: "scryglass:draft-api:v1",
       release_id: manifest.pack_id,
@@ -23,7 +22,7 @@ async function get(request: Request, signal: AbortSignal) {
   return chatJson({
     schema_version: "scryglass:draft-api:v1",
     release_id: manifest.pack_id,
-    authority,
+    authority: "descriptive",
     ...result,
   });
 }
