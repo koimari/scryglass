@@ -15,6 +15,7 @@ from lol_kills.research import public_draft_score_promotion as promotion_module
 from lol_kills.research import prepare_selective_draft_holdout_sources as source_module
 from lol_kills.research import seal_selective_draft_holdout as sealer_module
 from lol_kills.research import selective_draft_holdout_inventory as inventory_module
+from lol_kills.research import verify_selective_draft_promotion as verifier_module
 from lol_kills.research.selective_draft_probability import (
     CONFIDENCE_COLUMNS,
     PREDICTORS,
@@ -297,6 +298,9 @@ def test_latest_protocol_binds_the_frozen_candidate_and_implementation() -> None
     assert protocol["iteration"][
         "holdout_evaluator_sha256"
     ] == file_sha256(Path(evaluator_module.__file__))
+    assert protocol["iteration"][
+        "promotion_verifier_sha256"
+    ] == file_sha256(Path(verifier_module.__file__))
     assert protocol["iteration"]["holdout_sealer_sha256"] == file_sha256(
         Path(sealer_module.__file__)
     )
