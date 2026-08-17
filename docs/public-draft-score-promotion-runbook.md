@@ -7,7 +7,8 @@
 - Selected development games: `1,482`
 - Development coverage: `87.02%`
 - Candidate receipt: `f5e895bb60946c9e6c2fcb528245597236e15960c1cf83ca835fadb56e750757`
-- Protocol file SHA-256: `740e46a6a8c0e0030543ef7de3c72247ae1d6d57e88292c889a1c8b4286637e8`
+- Protocol: `public-draft-score-promotion-protocol-v35.json`
+- Protocol file SHA-256: `de7e0613367d8fc3a9d7a7f988ea92c63ff74af50ad9b81ffce6e9373e8b591d`
 - Public probability: unavailable
 - Public recommendation: unavailable
 
@@ -72,7 +73,7 @@ The training matrices can contain historical outcomes. The evaluation feature an
 
 ```zsh
 python3 -m lol_kills.research.seal_selective_draft_holdout \
-  --protocol data/lol/v2/evaluation/public-draft-score-promotion-protocol-v34.json \
+  --protocol data/lol/v2/evaluation/public-draft-score-promotion-protocol-v35.json \
   --protocol-sha256 "$PROTOCOL_SHA256" \
   --candidate data/lol/v2/evaluation/public-draft-score-selective-candidate-v34.json \
   --candidate-sha256 "$CANDIDATE_SHA256" \
@@ -108,7 +109,7 @@ Create a minimal outcome file with exactly `game_uid` and binary `y`. Do this on
 
 ```zsh
 python3 -m lol_kills.research.evaluate_selective_draft_holdout \
-  --protocol data/lol/v2/evaluation/public-draft-score-promotion-protocol-v34.json \
+  --protocol data/lol/v2/evaluation/public-draft-score-promotion-protocol-v35.json \
   --protocol-sha256 "$PROTOCOL_SHA256" \
   --candidate data/lol/v2/evaluation/public-draft-score-selective-candidate-v34.json \
   --candidate-sha256 "$CANDIDATE_SHA256" \
@@ -153,8 +154,8 @@ The August 16 batch is the first valid batch.
 - Selected recommendations: `13`
 - Coverage: `92.86%`
 - Selected by league: LPL `7`, LEC `4`, LCS `2`
-- Sealed receipt: `ea9cce89d8cf54ad3dc6acd5e62ace1616398c832a09e8afabea894615076634`
-- Inventory receipt: `1ac00d3d1b3a1e0c029729c933a895bf938d1bbc22ce58bbfa3c870ebf540aa5`
+- Sealed receipt: `af277ecfb007769b12357f9a22a6487a6bcbad8054365ecca307c98aab7926f6`
+- Inventory receipt: `b412b678a3be6e753f6fd23eed2254c27e76e72044db5fef93db36142a425bd5`
 - Outcomes opened: no
 
 ## Public contract
@@ -205,8 +206,6 @@ The implementation is in:
 - `lol_kills/research/controlled_draft_contribution.py`
 - `lol_kills/export/paired_public_draft_score.py`
 
-These files were added after protocol v34 and its first blind batch were
-sealed. Protocol v34 can still evaluate the frozen match probability. It
-cannot authorize the final paired public envelope. Before public promotion,
-freeze a successor protocol that binds both files. Seal future paired inputs
-and predictions under that protocol before any outcome is opened.
+Protocol v35 binds both files. The first August 16 batch was resealed under
+v35 before any outcome was opened. The model predictions and selection stayed
+unchanged. Use only the v35 receipt for the promotion inventory.
