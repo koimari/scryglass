@@ -411,6 +411,20 @@ def _canonical_pack_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return canonicalize_competition_frame(frame)
 
 
+def _profile_archive_frame(
+    table: pa.Table,
+    years: tuple[int, ...],
+) -> pd.DataFrame:
+    """Build the one canonical player archive used by public match surfaces."""
+
+    frame = _filter_year_frame(
+        _canonicalize_game_ids(table.to_pandas()),
+        years,
+        ("year", "oe_year"),
+    )
+    return canonicalize_competition_frame(frame)
+
+
 def _validate_public_record_tiers(records: dict[str, dict[str, Any]], *, label: str) -> None:
     invalid = {"ORACLE_ELIXIR_API", "OE_API", "PUBLIC_DATALISK_API"}
     for identity, record in records.items():
@@ -1724,12 +1738,9 @@ def export_public_pack(
         ),
         player_available,
     )
-    player_profile_frame = _filter_year_frame(
-        _canonicalize_game_ids(
-            pq.read_table(player_path, columns=profile_source_columns).to_pandas()
-        ),
+    player_profile_frame = _profile_archive_frame(
+        pq.read_table(player_path, columns=profile_source_columns),
         years,
-        ("year", "oe_year"),
     )
     if live_source:
         player_profile_frame["game_uid"] = _normalized_game_uid(player_profile_frame)

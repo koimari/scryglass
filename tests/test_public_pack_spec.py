@@ -25,6 +25,7 @@ from lol_kills.export.public_pack import (
     _draft_publication_decision,
     _gate_published_draft_contributions,
     _load_tier_payload,
+    _profile_archive_frame,
     _ensure_year_column,
     _filter_years,
     _public_player_rating_rows,
@@ -380,6 +381,25 @@ def test_profile_records_normalize_recent_games_without_raw_tables() -> None:
     assert inspired["vision_score"] == 31
     assert inspired["grade"]["status"] == "unavailable"
     assert payload["champion_images"]["Ivern"] == "https://example.test/ivern.png"
+
+
+def test_profile_archive_rebuilds_match_league_and_tier() -> None:
+    table = pa.Table.from_pylist(
+        [
+            {
+                "gameid": "game-1",
+                "year": 2026,
+                "league": "LEC",
+                "league_source": None,
+                "competition_tier": None,
+            }
+        ]
+    )
+
+    frame = _profile_archive_frame(table, (2025, 2026))
+
+    assert frame.iloc[0]["league"] == "LEC"
+    assert frame.iloc[0]["competition_tier"] == "tier1"
 
 
 def test_profile_records_use_authoritative_team_objectives_for_each_side() -> None:
