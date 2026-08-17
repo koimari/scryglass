@@ -1,0 +1,384 @@
+{
+  "acceptance_gates": {
+    "brier_no_worse_than_baseline": {
+      "rule": "candidate forward Brier score on the frozen holdout must be <= baseline forward Brier score on the identical rows"
+    },
+    "ece_10_max": 0.08,
+    "forward_auc_exceeds_baseline": {
+      "baseline_comparator": "baseline_model.id = team_outcome_only_v0, i.e. the beta=0 candidate re-run over the same holdout rows",
+      "paired_test_required": true,
+      "paired_test_rule": "Compare the two models as a PAIRED difference on identical rows, never as two independent AUCs. Report the paired bootstrap distribution of the AUC difference over series-clustered resamples, with its median and a two-sided 95% interval.",
+      "rule": "the PAIRED forward AUC difference (candidate minus team_outcome_only_v0) on the identical holdout rows must be strictly greater than zero",
+      "statistical_power_disclosure": "At n=35 the absolute AUC 95% interval is approximately +/-0.216 (SE ~0.110), so an unpaired comparison at this size cannot distinguish a real improvement from noise. The paired difference cancels between-game variance and is the only defensible comparison at this sample size. This limitation must be stated verbatim in any published promotion receipt issued at n<100."
+    },
+    "identifiability_shrinkage_gate": {
+      "baseline_reference_counts": {
+        "duplicated_players_any_n_maps": 1066,
+        "duplicated_players_n_maps_ge_20": 212
+      },
+      "rule": "the published duplicate-group player count (see identifiability_diagnostic) computed under the candidate must be strictly lower than the team-outcome-only baseline's duplicate-group player count over the identical player/game population at the same n_maps thresholds (>=1 and >=20)"
+    },
+    "log_loss_no_worse_than_baseline": {
+      "rule": "candidate forward log loss on the frozen holdout must be <= baseline forward log loss on the identical rows"
+    },
+    "minimum_games_and_coverage_inventory_gate": {
+      "coherence_note": "The league sub-gate is restored to 3 leagues x 20 holdout games. It had been rescaled to 3 x 10 only because 3 x 20 = 60 could not fit inside a 35-game holdout; that constraint no longer binds at 100 (60 <= 100).",
+      "minimum_grade_available_coverage_fraction": 0.75,
+      "minimum_holdout_games": 100,
+      "minimum_leagues_with_20_holdout_games": 3,
+      "note": "mirrors public-draft-score-promotion-protocol-v39.json's inventory gates; open the sealed outcomes exactly once, only after every inventory gate passes",
+      "owner_amendment": "Owner restored minimum_holdout_games from 35 to 100 on 2026-08-17. Rationale: at n=35 the disclosed absolute AUC 95% interval is approximately +/-0.216, which could only ever yield evidence_strength \"provisional_small_sample\". Slower evidence is preferred over a provisional-only result. The 2026-08-17 lowering from 150 to 35 is superseded."
+    },
+    "provisional_promotion_prohibited": {
+      "reason": "minimum_holdout_games (100) equals the former provisional threshold (100), so the provisional path is unreachable by construction. The dead rule was removed rather than left in the gate set.",
+      "rule": "No promotion under this protocol version may carry evidence_strength \"provisional_small_sample\".",
+      "superseded_rule": "provisional_promotion_rule (protocol v1)"
+    },
+    "series_cluster_bootstrap_median_auc_exceeds_baseline": {
+      "rule": "series-clustered bootstrap median AUC for the candidate must exceed the equivalent bootstrap median AUC for the baseline on the same resampled series"
+    }
+  },
+  "authority": {
+    "betting_odds_ev_stake": false,
+    "candidate_ratings": "unavailable_until_sealed_holdout_passes",
+    "development_result": "research_only",
+    "public_player_ladder": "unchanged_team_outcome_only_v0_until_promotion_receipt"
+  },
+  "baseline_model": {
+    "claim": "descriptive; measures historical team results; does not identify individual causal contribution",
+    "definition": "the current published build_player_ratings() pipeline, unmodified: every player on a side receives the identical (y - exp_b) or ((1-y)-(1-exp_b)) residual, scaled only by k_regional/k_meta, k_scale, and mov",
+    "id": "team_outcome_only_v0",
+    "locator": "lol_kills/ratings/player_elo.py"
+  },
+  "candidate_attribution_parameterization": {
+    "attribution_definition": "a_i(t) = 1.0 + beta * soft_clip(grade_team_i(t), z_clip)",
+    "attribution_floor": "a_i(t) = max(a_i(t), floor)",
+    "attribution_input_source": {
+      "contract": "scryglass:player-map-grade:v2",
+      "field_consumed": "grade_team",
+      "function": "compute_player_map_grades",
+      "module": "lol_kills.ratings.player_map_grades",
+      "note": "grade_team is already: (1) role-and-league-or-tier normalized per metric via _historical_z before combining into _base, then (2) demeaned and standardized within the same game_id+side 5-player group. It is mean-zero across the 5 teammates in a map by construction, which is what makes it usable as a zero-sum split of a shared team residual. No raw CORE_INPUTS value is consumed directly by the attribution term."
+    },
+    "equation_blue": "st.mu_regional += cfg.k_regional * k_scale * mov * (y - exp_b) * a_i(t)",
+    "equation_red": "st.mu_regional += cfg.k_regional * k_scale * mov * ((1 - y) - (1 - exp_b)) * a_i(t)",
+    "excluded_this_version": [
+      "absolute_grading_channel (no team-outcome anchor; rejected, see zero_sum_vs_absolute_analysis)",
+      "additive_attribution_in_elo_points (rejected: decouples rating direction from win/loss sign)",
+      "per_role_asymmetric_k_regional_or_k_meta",
+      "any use of raw, non-role-normalized CORE_INPUTS values directly in the update"
+    ],
+    "fallback_on_unavailable_grade": {
+      "a_i": 1.0,
+      "effect": "reduces exactly to today's baseline update for that player-map; never fabricated",
+      "trigger": "grade_status != 'available' for that player-map (per GRADE_CONTRACT: incomplete lineup, missing core inputs, or fewer than 10 prior self-comparable games)"
+    },
+    "free_parameters": {
+      "attribution_floor": {
+        "candidate_grid": [
+          0.0,
+          0.1,
+          0.2
+        ],
+        "permitted_range": [
+          0.0,
+          0.3
+        ],
+        "symbol": "floor"
+      },
+      "attribution_scale_beta": {
+        "beta_0_recovers_baseline": true,
+        "candidate_grid": [
+          0.0,
+          0.05,
+          0.1,
+          0.15,
+          0.2,
+          0.25
+        ],
+        "permitted_range": [
+          0.0,
+          0.25
+        ],
+        "symbol": "beta"
+      },
+      "role_specific_beta": {
+        "count": 5,
+        "permitted_range": [
+          0.0,
+          0.25
+        ],
+        "selection_rule": "fit only after the global-beta family is scored on the development folds; select the role-specific family only if its development-fold forward AUC exceeds the best global-beta family by a materially significant margin (owner-reviewed) under the same gates; otherwise the simplest identified parameterization (global beta) is frozen, per the closed-decision convention in docs/model-v2/research-register.md",
+        "status": "registered_secondary_candidate",
+        "symbol": "beta_role"
+      },
+      "z_clip": {
+        "candidate_grid": [
+          2.5,
+          3.0
+        ],
+        "permitted_range": [
+          2.0,
+          3.0
+        ],
+        "symbol": "z_clip"
+      }
+    },
+    "insertion_points": [
+      "lol_kills/ratings/player_elo.py:582",
+      "lol_kills/ratings/player_elo.py:599"
+    ],
+    "invariants": {
+      "attribution_nonnegative": "floor >= 0.0 guarantees a_i >= 0 for all i",
+      "never_flips_residual_sign": "because a_i >= 0, sign(update_i) == sign(y - exp_b); a poor individual statline in a win can shrink credit toward zero but never becomes a rating loss, and vice versa for a loss",
+      "team_mean_attribution_equals_one_before_clip": "mean_i(1 + beta * grade_team_i) = 1 across the 5 teammates, because grade_team is mean-zero within team+game by construction",
+      "team_mean_attribution_near_one_after_soft_clip": "soft_clip is odd and smooth, so the post-clip team mean deviates from 1 only by higher-order curvature; must be monitored (see identifiability_diagnostic.zero_sum_drift_check), not assumed exact"
+    },
+    "operator": "multiplicative_zero_sum_within_team",
+    "schema_version": "scryglass:player-rating-attribution-candidate:v1",
+    "soft_clip_definition": "soft_clip(z, c) = c * tanh(z / c)",
+    "tie_handling": {
+      "cases": [
+        {
+          "case": "grade unavailable for one or both players on every shared map",
+          "disclosure": "the pair remains in the existing duplicate-group diagnostic, unresolved_reason='grade_unavailable'"
+        },
+        {
+          "case": "grade available but a_i is numerically identical for two teammates on every shared map (e.g., beta=0, or truly indistinguishable performance)",
+          "disclosure": "if resulting mu_total/mu_regional/mu_meta/sigma/n_maps remain equal within 1e-9 across the pair's full shared history, the pair is marked identifiability_status='tie_group' with a shared tie_group_id in the published snapshot; no synthetic epsilon, hash-based jitter, or arbitrary tie-break ordering may be introduced to force a visible difference"
+        }
+      ],
+      "forbidden": [
+        "deterministic-but-arbitrary jitter",
+        "name-hash tie-breaking",
+        "silent omission of a known tie from the public snapshot"
+      ],
+      "rule": "never fabricate a difference the data does not support"
+    },
+    "zero_sum_vs_absolute_analysis": {
+      "future_research_flag": "an absolute (non-zero-sum) channel could in principle be explored later as a fully separate additive term structurally isolated from mu_regional/mu_meta (analogous to the existing momentum_scale/momentum_residual channel), but that is out of scope for this protocol and requires a new owner-approved research item before any design work begins.",
+      "reasoning": [
+        "Zero-sum preserves the existing team-outcome calibration in aggregate: mean(a_i)~=1 means the total rating mass moved for a team-map is unchanged from today's baseline, only its allocation across the 5 teammates changes. This bounds regression risk to every downstream consumer of the aggregate team mu (draft-score ensemble strength inputs, p_player_elo, momentum).",
+        "Zero-sum cannot let a whole roster of stat-padders collectively out-earn what the team actually won on the scoreboard, and cannot let a whole roster collectively lose less than the team actually lost. It only re-ranks teammates against each other.",
+        "Absolute grading breaks the tie to wins: a high-stat performance in a loss could gain rating, or a low-stat performance in a win could lose rating, independent of the team result. This is the same failure mode that makes traditional raw KDA/damage 'grade' systems gameable by stat-padding in a loss, and it removes the natural budget constraint that keeps the update magnitude anchored to k_regional/k_meta*mov*(y-exp_b); an absolute channel needs its own separately-calibrated scale, which risks degrading forward AUC/Brier/log-loss below baseline and failing the acceptance gates outright.",
+        "Zero-sum's known cost: if two teammates truly have indistinguishable individual performance in every shared map, zero-sum split still cannot separate them (a_i equal for both). This is accepted and must be disclosed via the tie-group marker (see tie_handling), never papered over."
+      ],
+      "recommendation": "zero_sum_within_team"
+    }
+  },
+  "established_diagnosis": {
+    "conclusion": "collinear teammates are non-identifiable under a team-outcome-only model; this is expected, not a bug",
+    "only_per_player_terms": [
+      "k_scale = st.sigma / cfg.sigma0 (deterministic decay, not skill-derived)",
+      "ROLE_WEIGHT (fixed constant, not fit)"
+    ],
+    "root_cause_expression_blue": "st.mu_regional += cfg.k_regional * k_scale * mov * (y - exp_b)",
+    "root_cause_expression_red": "st.mu_regional += cfg.k_regional * k_scale * mov * ((1 - y) - (1 - exp_b))",
+    "root_cause_locators": [
+      "lol_kills/ratings/player_elo.py:582",
+      "lol_kills/ratings/player_elo.py:599"
+    ],
+    "shared_terms": [
+      "y",
+      "exp_b",
+      "mov",
+      "k_regional",
+      "k_meta"
+    ],
+    "verified_scale": {
+      "duplicate_groups": 375,
+      "duplicated_players": 1066,
+      "duplicated_players_n_maps_ge_20": 212,
+      "example_clean_player_symdiff": "Canyon 257 games, symdiff >= 2 vs nearest duplicate candidate",
+      "example_zero_symdiff_pairs": [
+        "Chovy/Ruler (255 games each)",
+        "Caps/BrokenBlade/Labrov/Hans Sama/SkewMond (220 games each)"
+      ],
+      "present_since": "every locally available pack back to 2026-07-25; the update expression is unchanged since the repository's initial commit",
+      "total_players": 3847,
+      "total_players_n_maps_ge_20": 1931
+    }
+  },
+  "fail_closed_rule": {
+    "no_fabrication_rule": "a failed or inconclusive gate may never be papered over with a hand-tuned constant, a synthetic tie-break, or a partial rollout that bypasses the gate set above",
+    "statement": "if any gate in acceptance_gates fails, the currently published team-outcome-only player rating model (lol_kills/ratings/player_elo.py as of this protocol's freeze) remains the production model. No partial promotion, no silent parameter change, and no re-fit-and-retry against the same sealed holdout is permitted. A failed attempt requires a new protocol version and a new frozen prospective holdout before any further candidate may be evaluated."
+  },
+  "frozen_prospective_holdout": {
+    "definition": "every accepted, complete-lineup map with date >= start_inclusive, accumulated going forward from the freeze date of this protocol; sealed in the same append-only, receipt-based manner as the Draft Score holdout batches (never replace a sealed batch; use a new path per batch)",
+    "end_exclusive": null,
+    "never_refit_after_seal": true,
+    "reseal_on_candidate_change": "any change to beta, z_clip, floor, the role-specific decision, or the attribution equation itself invalidates every previously sealed batch for promotion purposes and starts a new holdout, exactly as changing a bound file starts a new holdout under protocol v39",
+    "sealing_procedure": "prepare_selective_..._holdout-style: strip outcome/result fields from the feature and player rows before any candidate inference, run the frozen selected candidate (from training_windows.selection_rule) to produce forward player-Elo/win-probability forecasts, seal the sealed batch and its receipt with a SHA-256, and only then may a minimal outcomes file be joined",
+    "start_inclusive": "2026-08-17T00:00:00Z"
+  },
+  "frozen_utc": "2026-08-17T16:00:00Z",
+  "identifiability_diagnostic": {
+    "cadence": "computed and published every refresh/release, both for the currently published model and, during development, for each evaluated candidate",
+    "computation": "group all published players by the byte-identical tuple (mu_total, mu_regional, mu_meta, sigma, n_maps) rounded to the same precision the public snapshot already uses; a group of size >= 2 is a duplicate/tie group",
+    "publication_requirement": "this diagnostic must be written to a content-addressed JSON artifact under data/lol/v2/evaluation/ every release and referenced from a public-facing disclosure surface; it may not be computed and discarded, and it may not be an internal-only log line",
+    "published_fields": {
+      "as_of": "release timestamp",
+      "delta_vs_previous_release": {
+        "duplicated_players": "int, negative is improvement",
+        "duplicated_players_pct": "float"
+      },
+      "duplicate_group_size_histogram": "object, group size -> count of groups",
+      "duplicated_players": "int, any n_maps",
+      "duplicated_players_n_maps_ge_20": "int",
+      "duplicated_players_pct": "float",
+      "model_id": "team_outcome_only_v0 or the promoted candidate id",
+      "tie_group_disclosures": "list of {tie_group_id, players, reason} per tie_handling.cases above",
+      "total_players": "int",
+      "total_players_n_maps_ge_20": "int"
+    },
+    "schema_version": "scryglass:player-rating-identifiability-diagnostic:v1",
+    "zero_sum_drift_check": {
+      "rule": "for a sample of team-maps per release, report the mean and max absolute deviation of mean_i(a_i) from 1.0 across each 5-player team-map; this is a monitoring diagnostic, not a gate, but a persistent large drift blocks promotion pending owner review"
+    }
+  },
+  "independent_reviewer": {
+    "assigned_utc": "2026-08-17",
+    "independence_condition": "The candidate fit must be executed by an agent/automation, NOT by the reviewer. The reviewer must not author or tune the fitting run.",
+    "reviewer": "River (owner)",
+    "scope": "promotion_receipt_shape",
+    "void_condition": "If the reviewer becomes involved in fitting or parameter selection, this assignment is void and a different reviewer must be named before a receipt is issued."
+  },
+  "leakage_constraint": {
+    "enforcement": "identical in spirit to the sealed-holdout mechanism in data/lol/v2/evaluation/public-draft-score-promotion-protocol-v39.json: development-fold selection happens first and is fully separate from the single frozen prospective holdout, which is sealed by game_uid/date range before any outcome in it is read for evaluation purposes",
+    "forbidden": [
+      "scoring a candidate by whether grade_team_i correlates with game t's own outcome (trivially true by construction and uninformative)",
+      "any metric that is computed from, or averaged over, the outcome-labeled window used to evaluate forward prediction",
+      "refitting beta/z_clip/floor after opening the frozen prospective holdout defined below"
+    ],
+    "statement": "in-game metrics (CORE_INPUTS, and any grade derived from them) are contemporaneous with the outcome of game t. They may inform the per-player attribution applied to the rating UPDATE that follows game t (redistributing an outcome-anchored residual that was already computed from pre-game mu's), but the ATTRIBUTION PARAMETERIZATION (beta, z_clip, floor, and any role-specific variant) may only be selected and evaluated by whether the RESULTING RATINGS predict games strictly after the games used to fit them."
+  },
+  "metric_set": {
+    "brier_score": "same holdout, same prediction stream",
+    "ece_10": "ten-bin expected calibration error, same holdout, same prediction stream",
+    "forward_auc": "AUC of the sequential win-probability output (p_player_elo or its candidate-updated equivalent) against y_blue_win, computed strictly out-of-sample on the frozen holdout using only ratings state as of just before each holdout game",
+    "log_loss": "same holdout, same prediction stream",
+    "series_cluster_bootstrap": "series-clustered bootstrap median AUC, mirroring public-draft-score-promotion-protocol-v39.json's series_cluster_bootstrap_median_auc_minimum, to avoid multi-map-series pseudo-replication inflating apparent significance"
+  },
+  "out_of_scope_this_protocol": [
+    "fitting, training, or evaluating any candidate (design and protocol only)",
+    "any change to lol_kills/ratings/player_elo.py or any other production rating code",
+    "any refresh, publish, or promotion action",
+    "the absolute (non-zero-sum) attribution channel described in zero_sum_vs_absolute_analysis.future_research_flag",
+    "the separate v2 dynamic Player Rating track under lol_kills/v2/ratings/player/"
+  ],
+  "owner_approval_record": {
+    "amended": [
+      "minimum_holdout_games 35 -> 100",
+      "league sub-gate 3x10 -> 3x20",
+      "provisional_promotion_rule removed"
+    ],
+    "approved_as_written": [
+      "operator_and_insertion_point",
+      "free_parameter_ranges_and_grids",
+      "acceptance_gates",
+      "tie_handling_disclosure_fields"
+    ],
+    "assigned": [
+      "independent_reviewer = River (owner)"
+    ],
+    "reaffirmed": [
+      "fail_closed_rule",
+      "out_of_scope_this_protocol",
+      "open sealed outcomes exactly once after inventory gates pass"
+    ],
+    "reviewed_utc": "2026-08-17",
+    "supersedes_protocol_sha256": "e1998c94c266650cea928c00078fe86a0a4ce2daad14ce8d0788098f3c998612",
+    "supersedes_schema_version": "scryglass:player-rating-identifiability-protocol:v1"
+  },
+  "owner_approvals_required_before_fitting_begins": [
+    "confirm the multiplicative zero-sum-within-team operator and its exact insertion at player_elo.py:582/599",
+    "confirm the free-parameter ranges and candidate grids in candidate_attribution_parameterization.free_parameters",
+    "confirm the five-fold forward-chaining development window and the 2026-08-17 frozen prospective holdout start date",
+    "confirm the acceptance_gates thresholds, in particular the strict-AUC-exceeds-baseline requirement and the identifiability_shrinkage_gate baseline_reference_counts",
+    "confirm the tie_handling disclosure fields are acceptable for public display before any candidate is fit",
+    "assign an independent reviewer for the promotion_receipt_shape, distinct from whoever fits the candidate, per this repository's existing promotion pattern"
+  ],
+  "owner_decision": {
+    "authorized_direction": "individual in-game metrics should affect ratings (game grade, CS/min, damage/min, role-weighted KDA, gold share %, damage share %)",
+    "precedent": "data/lol/v2/evaluation/public-draft-score-promotion-protocol-v39.json and docs/public-draft-score-promotion-runbook.md",
+    "weighting_method": "mathematically determined by fitting to what best predicts winning, the same way the Draft Score composite was selected; no hand-picked constants"
+  },
+  "problem_statement": "The public player Dual-Elo baseline (lol_kills/ratings/player_elo.py) applies one team-outcome residual to every player on a side with only a fixed role weight and a per-player sigma-decay scale as differentiators. Teammates who share an identical game set therefore receive byte-identical mu_total/mu_regional/mu_meta/sigma/n_maps. This is a proven non-identifiability of the current update, not a code defect. This protocol binds a candidate fix, its forward-chaining evaluation, and its promotion gates. It does not fit, train, or evaluate anything.",
+  "promotion_receipt_shape": {
+    "binds": [
+      "this protocol file's own SHA-256",
+      "the candidate attribution implementation file SHA-256",
+      "the sealed holdout batch receipt SHA-256(es), in chronological order",
+      "the minimal outcomes file SHA-256 used to open the seal",
+      "the baseline (beta=0) re-run receipt SHA-256 on the identical holdout rows",
+      "every acceptance_gates value actually observed, pass/fail per gate",
+      "the identifiability_diagnostic artifact SHA-256, before and after",
+      "reviewer identity and issue time",
+      "a false betting/odds/EV/stake flag, matching every other promotion receipt in this repository"
+    ],
+    "schema_version": "scryglass:player-rating-identifiability-promotion-receipt:v1",
+    "unlock_condition": "only a receipt of exactly this schema_version, with every acceptance_gates entry recorded as pass, may flip the production player-rating pipeline from team_outcome_only_v0 to the promoted candidate; a hash-shaped placeholder fails closed"
+  },
+  "related_but_distinct_track": {
+    "locators": [
+      "lol_kills/v2/ratings/player/model.py",
+      "lol_kills/v2/ratings/player/multileague_v2_protocol.py",
+      "docs/model-v2/research-register.md#R-03",
+      "docs/model-v2/research-register.md#R-21"
+    ],
+    "note": "lol_kills/v2/ratings/player/ implements a separate, development-only dynamic Player Rating (issue #45 acceptance record) that also targets this non-identifiability via a joint rank-one Gaussian attribution over player-specific pre-event information. That track is materially larger in scope, remains gated behind its own multi-stage acceptance protocol (protocol-lock-v1/v2, R-01 through R-21 in docs/model-v2/research-register.md), and is not reused or superseded by this protocol. This protocol is a narrower, surgical amendment to the existing published descriptive baseline only."
+  },
+  "role_normalization_contract": {
+    "normalization_chain": [
+      "each of the 8 METRICS in player_map_grades.py is z-scored per (league, role), falling back to (competition_tier, role), then (role) alone, against a strictly prior-calendar-day historical baseline (_historical_z), so a support's wards/min is compared only to other supports' history, never to a mid laner's",
+      "the 8 role-normalized z-scores are averaged into _base per player-map",
+      "_team demeans _base within the same game_id+side 5-player group (which mixes roles) and divides by the in-map team standard deviation, which is legitimate only because _base was already role-normalized upstream"
+    ],
+    "requirement": "the attribution term must consume only the already role-normalized grade_team component; it must never consume raw CORE_INPUTS (kills, dpm, damageshare, cspm, wpm, wcpm, ...) directly",
+    "role_neutrality_gate": "per release, the mean attribution multiplier a_i must be reported by role (top/jng/mid/bot/sup) over the full development window; the protocol requires this to be published as a diagnostic, and a persistent, materially large mean deviation by role (owner-reviewed, no automatic numeric threshold prescribed here) blocks promotion pending root-cause review of the underlying metric normalization"
+  },
+  "schema_version": "scryglass:player-rating-identifiability-protocol:v2",
+  "status": "fitting_authorized",
+  "target": "blue_map_win",
+  "training_windows": {
+    "development_folds": [
+      {
+        "eval_end_exclusive": "2026-01-01T00:00:00Z",
+        "eval_start": "2025-10-01T00:00:00Z",
+        "id": "dev-2025-summer",
+        "train_end_exclusive": "2025-10-01T00:00:00Z"
+      },
+      {
+        "eval_end_exclusive": "2026-04-01T00:00:00Z",
+        "eval_start": "2026-01-01T00:00:00Z",
+        "id": "dev-2026-q1",
+        "train_end_exclusive": "2026-01-01T00:00:00Z"
+      },
+      {
+        "eval_end_exclusive": "2026-06-01T00:00:00Z",
+        "eval_start": "2026-04-01T00:00:00Z",
+        "id": "dev-2026-spring",
+        "train_end_exclusive": "2026-04-01T00:00:00Z"
+      },
+      {
+        "eval_end_exclusive": "2026-08-09T00:00:00Z",
+        "eval_start": "2026-06-01T00:00:00Z",
+        "id": "dev-2026-midseason",
+        "train_end_exclusive": "2026-06-01T00:00:00Z"
+      },
+      {
+        "eval_end_exclusive": "2026-08-17T00:00:00Z",
+        "eval_start": "2026-08-09T00:00:00Z",
+        "id": "dev-2026-16-16",
+        "train_end_exclusive": "2026-08-09T00:00:00Z"
+      }
+    ],
+    "fold_rule": "for fold k, run the sequential player-Elo replay exactly as today through train_end_exclusive with candidate (beta, z_clip, floor) applied from the start of the sequence, then score forward, unseen games in [eval_start, eval_end_exclusive) only; a game's own grade_team values may feed the update applied after that game finishes, but its label may never be used to pick beta/z_clip/floor",
+    "selection_rule": {
+      "beta_0_baseline_check": "the beta=0 candidate must reproduce the current published baseline's forward metrics on every development fold within floating-point tolerance; a mismatch invalidates the whole candidate grid and blocks selection",
+      "candidate_family_precedence": "global beta first; role-specific beta only per the role_specific_beta.selection_rule above",
+      "metric": "mean forward AUC across the 5 development folds (equal weight)",
+      "tie_breaker": "lower mean forward Brier score across the 5 development folds"
+    }
+  }
+}
