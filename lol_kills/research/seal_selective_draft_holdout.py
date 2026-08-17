@@ -105,6 +105,8 @@ def seal_holdout_batch(
         "holdout_evaluator_sha256": "lol_kills/research/evaluate_selective_draft_holdout.py",
         "promotion_verifier_sha256": "lol_kills/research/verify_selective_draft_promotion.py",
         "public_result_builder_sha256": "lol_kills/export/public_draft_score_result.py",
+        "controlled_contribution_sha256": "lol_kills/research/controlled_draft_contribution.py",
+        "paired_public_result_builder_sha256": "lol_kills/export/paired_public_draft_score.py",
     }
     iteration = protocol.get("iteration")
     if not isinstance(iteration, dict) or any(

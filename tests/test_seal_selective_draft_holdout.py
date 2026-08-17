@@ -33,6 +33,8 @@ def _write_inputs(tmp_path: Path) -> dict[str, Path]:
         "holdout_evaluator_sha256": "lol_kills/research/evaluate_selective_draft_holdout.py",
         "promotion_verifier_sha256": "lol_kills/research/verify_selective_draft_promotion.py",
         "public_result_builder_sha256": "lol_kills/export/public_draft_score_result.py",
+        "controlled_contribution_sha256": "lol_kills/research/controlled_draft_contribution.py",
+        "paired_public_result_builder_sha256": "lol_kills/export/paired_public_draft_score.py",
     }
     protocol = {
         "iteration": {
