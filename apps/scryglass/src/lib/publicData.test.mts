@@ -61,6 +61,10 @@ function promotedManifest(): PackManifest {
       artifact_sha256: "d".repeat(64),
       receipt_sha256: "b".repeat(64),
       issued_utc: "2026-08-16T22:00:00Z",
+      estimand: "prematch_map_win_probability_with_controlled_draft_intervention",
+      probability_authority: true,
+      recommendation_authority: true,
+      betting_authority: false,
     },
   };
 }

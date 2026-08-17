@@ -87,6 +87,10 @@ export type PackManifest = {
     artifact_sha256?: string | null;
     receipt_sha256: string | null;
     issued_utc?: string | null;
+    estimand?: string | null;
+    probability_authority?: boolean;
+    recommendation_authority?: boolean;
+    betting_authority?: boolean;
     reason?: string | null;
   };
   query_api?: {
@@ -695,6 +699,16 @@ function hasBoundDraftReceipt(manifest: PackManifest): boolean {
 export function draftAuthorityStatus(manifest: PackManifest): DraftAuthorityStatus {
   const status = declaredDraftAuthority(manifest);
   if (!status || status === "unavailable") return "unavailable";
+  if (status === "promoted") {
+    const authority = manifest.draft_authority;
+    if (
+      authority?.authority !== "promoted"
+      || authority.estimand !== "prematch_map_win_probability_with_controlled_draft_intervention"
+      || authority.probability_authority !== true
+      || authority.recommendation_authority !== true
+      || authority.betting_authority !== false
+    ) return "unavailable";
+  }
   return hasBoundDraftReceipt(manifest) ? status : "unavailable";
 }
 
@@ -703,13 +717,9 @@ export function hasDescriptiveDraftAuthority(manifest: PackManifest): boolean {
   return draftAuthorityStatus(manifest) === "descriptive";
 }
 
-/**
- * Probability authority stays closed in the web client until the independent
- * receipt verifier is available. A descriptive receipt never opens it.
- */
+/** Accept only the active manifest's complete release-bound promoted receipt. */
 export function hasPromotedDraftAuthority(manifest: PackManifest): boolean {
-  void manifest;
-  return false;
+  return draftAuthorityStatus(manifest) === "promoted";
 }
 
 export function hasPublishedDraftAuthority(manifest: PackManifest): boolean {
