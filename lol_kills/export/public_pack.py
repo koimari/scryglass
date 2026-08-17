@@ -791,28 +791,6 @@ def _validate_public_composition_records(
     return counts
 
 
-def _POOLDBG(label, archive, records):
-    """TEMPORARY instrumentation: report draft_pool population at each stage."""
-    import os, sys
-    def pools(d):
-        g = (d or {}).get("games") or {}
-        return sum(1 for v in g.values() if isinstance(v, dict) and v.get("draft_pool") is not None), len(g)
-    ap, an = pools(archive)
-    rp, rn = pools(records)
-    same = "n/a"
-    if records:
-        ag = {k for k, v in ((archive or {}).get("games") or {}).items() if isinstance(v, dict) and v.get("draft_pool") is not None}
-        rg = {k for k, v in ((records or {}).get("games") or {}).items() if isinstance(v, dict) and v.get("draft_pool") is not None}
-        same = f"parity={ag == rg} mismatch={len(ag ^ rg)}"
-    line = f"[POOLDBG] {label:22} archive_pools={ap}/{an}  record_pools={rp}/{rn}  {same}"
-    print(line, file=sys.stderr, flush=True)
-    try:
-        with open(os.environ.get("SCRYGLASS_POOLDBG_PATH", "/tmp/pooldbg-probe.log"), "a", encoding="utf-8") as fh:
-            fh.write(line + "\n")
-            fh.flush()
-    except OSError:
-        pass
-
 def _gate_published_draft_contributions(
     profile_records: Mapping[str, Any],
     draft_records_payload: Mapping[str, Any] | None = None,
@@ -2034,9 +2012,7 @@ def export_public_pack(
             tier_payload_sha256=tier_payload_sha256,
             tier_receipt_sha256=tier_receipt_sha256,
         )
-        _POOLDBG("A pre-gate2015", archive_view, draft_records_payload)
         _gate_published_draft_contributions(archive_view, draft_records_payload)
-        _POOLDBG("B post-gate2015", archive_view, draft_records_payload)
         archive_games = archive_view["games"]
     profile_game_ids = set(profile_records_payload.get("games", {})).intersection(archive_games)
     profile_records_payload["games"] = {
@@ -2056,17 +2032,19 @@ def export_public_pack(
             tier_payload_sha256=tier_payload_sha256,
             tier_receipt_sha256=tier_receipt_sha256,
         )
-        _POOLDBG("C post-attach2029", profile_records_payload, draft_records_payload)
         if draft_records_payload is not None:
             for game_id, entry in draft_records_payload.get("games", {}).items():
                 profile_game = profile_records_payload.get("games", {}).get(game_id)
                 if isinstance(profile_game, Mapping) and isinstance(profile_game.get("draft_pool"), Mapping):
                     entry["draft_pool"] = profile_game["draft_pool"]
-        _POOLDBG("D post-inject2039", profile_records_payload, draft_records_payload)
+        # Trim the archive and the Draft records together. The injection above
+        # leaves both sides holding exactly the same pool set; gating only the
+        # archive here would drop its incomplete pools while the records kept
+        # theirs, and the bounded query projection rejects that asymmetry.
         _gate_published_draft_contributions(
             profile_records_payload,
+            draft_records_payload,
         )
-        _POOLDBG("E post-gate2040", profile_records_payload, draft_records_payload)
         if not tier_payload_source:
             raise RuntimeError(
                 "descriptive Draft release requires an available generated tier payload"
