@@ -57,6 +57,7 @@ def _rows(game_id: str, date: str, result: int, *, suffix: str = "") -> list[dic
                     "game_uid": game_id,
                     "date": date,
                     "league": "LCS",
+                    "competition_tier": "tier1",
                     "patch": "16.15",
                     "side": side,
                     "teamname": team,
@@ -78,6 +79,13 @@ def _games(*rows: list[dict[str, object]]) -> list[dict[str, object]]:
         ]
     )
     return build_composition_games(frame, strength_features=strength)
+
+
+def test_composition_game_keeps_its_release_scope() -> None:
+    game = build_composition_games(pd.DataFrame(_rows("scope", "2026-01-01", 1)))[0]
+
+    assert game["league"] == "LCS"
+    assert game["competition_tier"] == "tier1"
 
 
 def _rows_with_extras(game_id: str, date: str, result: int) -> list[dict[str, object]]:
