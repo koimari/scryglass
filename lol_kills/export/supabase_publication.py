@@ -10,7 +10,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import os
 import time
 import re
 import urllib.error
@@ -131,148 +130,6 @@ class SupabasePublicationError(RuntimeError):
 
 def _sha256(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
-
-
-# ---------------------------------------------------------------------------
-# QRDBG: TEMPORARY query-row staging instrumentation. Diagnosis only.
-#
-# Every helper below is strictly additive and inert unless SCRYGLASS_QRDBG_PATH
-# names a writable file. Nothing here changes a validation, a digest, a gate or
-# a threshold; the probes only observe what the publisher already built.
-# ---------------------------------------------------------------------------
-
-# Mirrors public.scryglass_json_has_draft_fields as redefined by
-# supabase/migrations/20260815060001_descriptive_draft_query_api.sql:219.
-# Reported for comparison only; never used to accept or reject a row.
-_QRDBG_BANNED_KEYS = frozenset(
-    {
-        "average_win_share", "best_available", "betting", "development_composite",
-        "draft_authority", "draft_edge", "draft_pool", "draft_probability",
-        "draft_score", "draft_win_share", "elo", "ev", "expected_value",
-        "fair_odds", "gold", "live_state", "match_probability",
-        "match_win_expectation", "momentum", "mu_diff", "objectives", "odds",
-        "p_blue", "p_red", "phase_curve", "player_elo", "player_rating",
-        "probability", "r9e", "r9e_state_space", "rating_uncertainty",
-        "recommendation", "sigma_pair", "strength", "team_elo", "team_rating",
-        "win_probability",
-    }
-)
-_QRDBG_BANNED_PREFIXES = ("r9e_", "control_", "strength_", "phase_", "live_")
-_QRDBG_CONDITIONAL_KEYS = ("draft_contribution", "draft_metric")
-_QRDBG_MAX_BISECT_REJECTS = 25
-
-
-def _qrdbg_path() -> str | None:
-    """Return the probe log path, or None when the probe is disabled."""
-
-    raw = os.environ.get("SCRYGLASS_QRDBG_PATH")
-    if not isinstance(raw, str):
-        return None
-    path = raw.strip()
-    return path or None
-
-
-def _qrdbg(event: str, **fields: Any) -> None:
-    """Append one JSON line to the probe log. Never raises."""
-
-    path = _qrdbg_path()
-    if not path:
-        return
-    try:
-        record: dict[str, Any] = {
-            "tag": "QRDBG",
-            "utc": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
-            "event": event,
-        }
-        record.update(fields)
-        line = json.dumps(record, ensure_ascii=False, sort_keys=True, default=str)
-        with open(path, "a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
-            handle.flush()
-    except Exception:  # noqa: BLE001 - a probe must never break a refresh
-        pass
-
-
-def _qrdbg_draft_key_hits(value: object, prefix: str = "$") -> dict[str, list[str]]:
-    """Report the key paths the server-side draft-field guard would look at."""
-
-    banned: list[str] = []
-    conditional: list[str] = []
-
-    def walk(node: object, path: str) -> None:
-        if isinstance(node, dict):
-            for key, child in node.items():
-                normalized = str(key).lower()
-                child_path = f"{path}.{key}"
-                if normalized in _QRDBG_CONDITIONAL_KEYS:
-                    conditional.append(child_path)
-                    continue
-                if normalized in _QRDBG_BANNED_KEYS or any(
-                    normalized.startswith(item) for item in _QRDBG_BANNED_PREFIXES
-                ):
-                    banned.append(child_path)
-                    continue
-                walk(child, child_path)
-        elif isinstance(node, list):
-            for index, child in enumerate(node):
-                walk(child, f"{path}[{index}]")
-
-    walk(value, prefix)
-    return {"banned": banned[:40], "conditional": conditional[:40]}
-
-
-def _qrdbg_row_diagnosis(row: dict[str, Any]) -> dict[str, Any]:
-    """Recompute, read-only, every clause the server digest gate evaluates."""
-
-    diagnosis: dict[str, Any] = {}
-    source_text = row.get("source_json")
-    payload_text = row.get("payload_json")
-    expected = row.get("row_sha256")
-    try:
-        diagnosis["source_json_bytes"] = len(str(source_text).encode("utf-8"))
-        diagnosis["payload_json_bytes"] = len(str(payload_text).encode("utf-8"))
-        diagnosis["computed_source_json_sha256"] = _sha256(
-            str(source_text).encode("utf-8")
-        )
-        diagnosis["client_row_sha256"] = expected
-        diagnosis["clause1_row_digest_matches"] = (
-            diagnosis["computed_source_json_sha256"] == expected
-        )
-    except Exception as error:  # noqa: BLE001
-        diagnosis["digest_error"] = repr(error)
-        return diagnosis
-    try:
-        source = json.loads(str(source_text))
-    except Exception as error:  # noqa: BLE001
-        diagnosis["source_json_parse_error"] = repr(error)
-        return diagnosis
-    payload = source.get("payload") if isinstance(source, dict) else None
-    diagnosis["row_key"] = source.get("row_key") if isinstance(source, dict) else None
-    diagnosis["clause2_payload_is_object"] = isinstance(payload, dict)
-    try:
-        diagnosis["clause3_payload_json_matches_source_payload"] = (
-            json.loads(str(payload_text)) == payload
-        )
-    except Exception as error:  # noqa: BLE001
-        diagnosis["clause3_payload_json_matches_source_payload"] = f"error: {error!r}"
-    computed_payload_sha = _sha256(str(payload_text).encode("utf-8"))
-    diagnosis["computed_payload_json_sha256"] = computed_payload_sha
-    diagnosis["client_source_sha256"] = (
-        source.get("source_sha256") if isinstance(source, dict) else None
-    )
-    diagnosis["clause4_payload_digest_matches"] = (
-        computed_payload_sha == diagnosis["client_source_sha256"]
-    )
-    row_key = diagnosis.get("row_key")
-    diagnosis["clause5_row_key_length"] = len(str(row_key)) if row_key is not None else 0
-    diagnosis["clause5_row_key_in_range"] = 1 <= diagnosis["clause5_row_key_length"] <= 200
-    diagnosis["clause6_draft_key_hits"] = _qrdbg_draft_key_hits(source)
-    if isinstance(payload, dict):
-        for key in _QRDBG_CONDITIONAL_KEYS:
-            candidate = payload.get(key)
-            if isinstance(candidate, dict):
-                diagnosis[f"{key}_keys"] = sorted(str(item) for item in candidate)
-    return diagnosis
 
 
 def _release_id(value: object) -> str:
@@ -1411,31 +1268,10 @@ class SupabasePublicData:
                         f"existing query receipt has different content: {dataset}"
                     )
                 reused += len(rows)
-                _qrdbg(
-                    "dataset",
-                    dataset=dataset,
-                    release_id=release_id,
-                    rows=len(rows),
-                    disposition="reused",
-                    receipt_rows=receipt.get("rows"),
-                    receipt_bytes=receipt.get("bytes"),
-                )
                 continue
-            _qrdbg(
-                "dataset",
-                dataset=dataset,
-                release_id=release_id,
-                rows=len(rows),
-                disposition="pending",
-                receipt_rows=receipt.get("rows"),
-                receipt_bytes=receipt.get("bytes"),
-            )
             pending: list[dict[str, Any]] = []
             pending_bytes = 0
-            pending_keys: list[str] = []
-            batch_index = 0
-            batch_start = 0
-            for row_ordinal, source in enumerate(rows):
+            for source in rows:
                 unknown = set(source) - QUERY_ROW_FIELDS
                 if unknown:
                     raise SupabasePublicationError(
@@ -1456,50 +1292,13 @@ class SupabasePublicData:
                     len(pending) >= QUERY_STAGE_BATCH_ROWS
                     or pending_bytes + row_bytes > QUERY_STAGE_BATCH_BYTES
                 ):
-                    _qrdbg(
-                        "batch_boundary",
-                        dataset=dataset,
-                        batch_index=batch_index,
-                        first_row_ordinal=batch_start,
-                        last_row_ordinal=row_ordinal - 1,
-                        rows=len(pending),
-                        bytes=pending_bytes,
-                    )
-                    self._stage_query_rows(
-                        release_id,
-                        dataset,
-                        pending,
-                        batch_index=batch_index,
-                        row_keys=pending_keys,
-                        first_row_ordinal=batch_start,
-                    )
-                    batch_index += 1
-                    batch_start = row_ordinal
+                    self._stage_query_rows(release_id, dataset, pending)
                     pending = []
                     pending_bytes = 0
-                    pending_keys = []
                 pending.append(row)
                 pending_bytes += row_bytes
-                pending_keys.append(str(source.get("row_key")))
             if pending:
-                _qrdbg(
-                    "batch_boundary",
-                    dataset=dataset,
-                    batch_index=batch_index,
-                    first_row_ordinal=batch_start,
-                    last_row_ordinal=len(rows) - 1,
-                    rows=len(pending),
-                    bytes=pending_bytes,
-                    final=True,
-                )
-                self._stage_query_rows(
-                    release_id,
-                    dataset,
-                    pending,
-                    batch_index=batch_index,
-                    row_keys=pending_keys,
-                    first_row_ordinal=batch_start,
-                )
+                self._stage_query_rows(release_id, dataset, pending)
             sealed = self._request(
                 "POST",
                 "rpc/seal_scryglass_query_dataset",
@@ -1523,10 +1322,6 @@ class SupabasePublicData:
         release_id: str,
         dataset: str,
         rows: list[dict[str, Any]],
-        *,
-        batch_index: int = 0,
-        row_keys: list[str] | None = None,
-        first_row_ordinal: int = 0,
     ) -> int:
         """Retry one idempotent query-row batch after transient transport faults."""
 
@@ -1535,21 +1330,6 @@ class SupabasePublicData:
             "p_dataset": dataset,
             "p_rows": rows,
         }
-        if _qrdbg_path():
-            _qrdbg(
-                "batch",
-                dataset=dataset,
-                release_id=release_id,
-                batch_index=batch_index,
-                first_row_ordinal=first_row_ordinal,
-                rows=len(rows),
-                payload_bytes=len(
-                    json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode(
-                        "utf-8"
-                    )
-                ),
-                row_keys=list(row_keys or []),
-            )
         for attempt in range(MAX_QUERY_STAGE_ATTEMPTS):
             try:
                 staged = self._request(
@@ -1563,16 +1343,6 @@ class SupabasePublicData:
                 if isinstance(cause, urllib.error.HTTPError):
                     retryable = cause.code in RETRYABLE_QUERY_STAGE_HTTP_CODES
                 if not retryable or attempt + 1 >= MAX_QUERY_STAGE_ATTEMPTS:
-                    if isinstance(cause, urllib.error.HTTPError) and cause.code == 400:
-                        self._qrdbg_failing_batch(
-                            release_id,
-                            dataset,
-                            rows,
-                            batch_index=batch_index,
-                            first_row_ordinal=first_row_ordinal,
-                            row_keys=row_keys,
-                            error=error,
-                        )
                     raise
                 time.sleep(0.5 * (2**attempt))
                 continue
@@ -1582,119 +1352,6 @@ class SupabasePublicData:
                 )
             return staged
         raise AssertionError("query staging retry loop did not return")
-
-    def _qrdbg_failing_batch(
-        self,
-        release_id: str,
-        dataset: str,
-        rows: list[dict[str, Any]],
-        *,
-        batch_index: int,
-        first_row_ordinal: int,
-        row_keys: list[str] | None,
-        error: Exception,
-    ) -> None:
-        """TEMPORARY probe: dump one rejected batch, then bisect it row by row.
-
-        Inert unless SCRYGLASS_QRDBG_PATH is set. Reads only; the single-row
-        replays use exactly the payload the batch already submitted, and the
-        original error is always re-raised by the caller.
-        """
-
-        path = _qrdbg_path()
-        if not path:
-            return
-        try:
-            _qrdbg(
-                "batch_rejected",
-                dataset=dataset,
-                release_id=release_id,
-                batch_index=batch_index,
-                first_row_ordinal=first_row_ordinal,
-                rows=len(rows),
-                error=str(error),
-                row_keys=list(row_keys or []),
-            )
-            dump = {
-                "release_id": release_id,
-                "dataset": dataset,
-                "batch_index": batch_index,
-                "first_row_ordinal": first_row_ordinal,
-                "rows": len(rows),
-                "error": str(error),
-                "row_dumps": [
-                    {
-                        "index_in_batch": index,
-                        "row_ordinal": first_row_ordinal + index,
-                        "row": row,
-                        "diagnosis": _qrdbg_row_diagnosis(row),
-                    }
-                    for index, row in enumerate(rows)
-                ],
-            }
-            with open(f"{path}.failing-batch.json", "w", encoding="utf-8") as handle:
-                json.dump(dump, handle, ensure_ascii=False, default=str)
-                handle.flush()
-        except Exception as dump_error:  # noqa: BLE001 - probe must not mask the fault
-            _qrdbg("batch_dump_failed", dataset=dataset, error=repr(dump_error))
-
-        rejected = 0
-        for index, row in enumerate(rows):
-            if rejected >= _QRDBG_MAX_BISECT_REJECTS:
-                _qrdbg(
-                    "bisect_stopped",
-                    dataset=dataset,
-                    batch_index=batch_index,
-                    reason="reject cap reached",
-                    cap=_QRDBG_MAX_BISECT_REJECTS,
-                    inspected=index,
-                )
-                break
-            try:
-                staged = self._request(
-                    "POST",
-                    "rpc/stage_scryglass_query_rows",
-                    {
-                        "p_release_id": release_id,
-                        "p_dataset": dataset,
-                        "p_rows": [row],
-                    },
-                )
-            except Exception as row_error:  # noqa: BLE001
-                rejected += 1
-                _qrdbg(
-                    "bisect_row",
-                    dataset=dataset,
-                    batch_index=batch_index,
-                    index_in_batch=index,
-                    row_ordinal=first_row_ordinal + index,
-                    row_key=(row_keys or [None] * len(rows))[index]
-                    if index < len(row_keys or [])
-                    else None,
-                    row_sha256=row.get("row_sha256"),
-                    accepted=False,
-                    error=str(row_error),
-                    diagnosis=_qrdbg_row_diagnosis(row),
-                )
-                continue
-            _qrdbg(
-                "bisect_row",
-                dataset=dataset,
-                batch_index=batch_index,
-                index_in_batch=index,
-                row_ordinal=first_row_ordinal + index,
-                row_key=(row_keys or [])[index] if index < len(row_keys or []) else None,
-                row_sha256=row.get("row_sha256"),
-                accepted=True,
-                staged=staged,
-            )
-        _qrdbg(
-            "bisect_done",
-            dataset=dataset,
-            batch_index=batch_index,
-            rejected=rejected,
-            rows=len(rows),
-        )
 
     def activate(self, release_id: str) -> dict[str, Any]:
         release_id = _release_id(release_id)
