@@ -294,6 +294,11 @@ Repeat all four batch arguments for each chronological batch.
 
 ## Public release work still required
 
+The exact three-state release design is in
+`docs/public-draft-score-promoted-release-contract.md`, added by commit
+`3df747f1`. Use that contract for the publisher, migration, RPC, Storage, and
+web implementation.
+
 The research and receipt chain is ready. The current publication boundary still
 rejects `status: promoted` by design:
 
