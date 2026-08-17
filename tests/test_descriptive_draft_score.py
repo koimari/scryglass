@@ -130,7 +130,7 @@ def test_static_descriptive_score_rejects_duplicate_champions() -> None:
         score_game(game, model=model, artifact_sha256=artifact_sha256)
 
 
-def test_static_descriptive_score_marks_sparse_off_role_evidence_limited() -> None:
+def test_static_descriptive_score_marks_sparse_off_role_as_shrunk_estimate() -> None:
     model, artifact_sha256 = load_model()
     model["champion_role_counts"]["Akshan"] = {"bot": 1}
     game = _game()
@@ -138,9 +138,11 @@ def test_static_descriptive_score_marks_sparse_off_role_evidence_limited() -> No
 
     signal = score_game(game, model=model, artifact_sha256=artifact_sha256)
 
-    assert signal["status"] == "limited"
+    assert signal["status"] == "available"
     assert any(
-        pick["champion"] == "Akshan" and pick["evidence_status"] == "limited"
+        pick["champion"] == "Akshan"
+        and pick["evidence_status"] == "role_estimate"
+        and pick["contribution"] is not None
         for pick in signal["picks"]
     )
     for player in game["players"]:

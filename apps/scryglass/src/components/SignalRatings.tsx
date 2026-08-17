@@ -342,30 +342,6 @@ export function SignalRatings({
   const formatBestAvailableRate = (value: number | null | undefined) => value == null ? "—" : `${Math.round(value * 100)}%`;
   const bestAvailableRateBarWidth = (value: number | null | undefined) => value == null ? 0 : Math.min(100, value * 100);
 
-  const ratingChartRows: DataBarRow[] = entities.slice(0, 8).map((entity) => {
-    const name = entityName(entity);
-    const record = tab === "teams" ? teamRecords[name] : playerRecords[name];
-    const team = tab === "teams" ? name : (record as PlayerRecordView | undefined)?.current_team ?? (entity as PlayerRatingView).last_team;
-    const value = ratingOf(entity);
-    const detail = tab === "teams"
-      ? `${(record as TeamRecordView | undefined)?.games ?? entity.n_maps ?? 0} games · ${formatAffiliation((record as TeamRecordView | undefined)?.current_tier, (record as TeamRecordView | undefined)?.current_league ?? (record as TeamRecordView | undefined)?.primary)}`
-      : `${(entity as PlayerRatingView).n_maps} games · ${roleLabel((record as PlayerRecordView | undefined)?.primary_role)}`;
-    return {
-      id: name,
-      label: name,
-      href: tab === "teams" ? `/elo/team/${teamSlug(name)}` : `/elo/player/${playerSlug(name)}`,
-      value,
-      valueLabel: value.toFixed(0),
-      detail,
-      mark: <TeamMark team={team} />,
-      tone: "neutral",
-    };
-  });
-  const ratingValues = ratingChartRows.map((row) => row.value);
-  const ratingDomain = ratingValues.length ? {
-    min: Math.floor((Math.min(...ratingValues) - 25) / 50) * 50,
-    max: Math.ceil((Math.max(...ratingValues) + 25) / 50) * 50,
-  } : undefined;
   const draftTeamChartRows: DataBarRow[] = draftRows.teams.slice(0, 8).map((row) => ({
     id: `team-${row.team}-${row.league ?? "all"}-${row.tier ?? "all"}`,
     label: row.team,
@@ -549,15 +525,6 @@ export function SignalRatings({
             </aside>
           </section>
 
-          <DataBars
-            title={`${tab === "teams" ? "Team" : "Player"} adjusted rating`}
-            description={`Top ${ratingChartRows.length} ${tab} in ${scope.toLowerCase()} by uncertainty-adjusted rating`}
-            rows={ratingChartRows}
-            domain={ratingDomain}
-            axisLeft={ratingDomain ? `${ratingDomain.min}` : "—"}
-            axisRight={ratingDomain ? `${ratingDomain.max}` : "—"}
-          />
-
           <section className={styles.gallerySection}>
             <header><h2>{tab === "teams" ? "Team ratings" : "Player ratings"}</h2><p>{visible.length} of {serverFiltered ? total : entities.length} shown · {scope}</p></header>
             <div className={styles.gallery}>
@@ -565,13 +532,19 @@ export function SignalRatings({
                 const name = entityName(entity);
                 const record = tab === "teams" ? teamRecords[name] : playerRecords[name];
                 const entityTeam = tab === "teams" ? name : (record as PlayerRecordView | undefined)?.current_team ?? (entity as PlayerRatingView).last_team;
+                const games = tab === "teams" ? (record as TeamRecordView | undefined)?.games ?? entity.n_maps ?? 0 : (entity as PlayerRatingView).n_maps;
+                const winRate = (record as TeamRecordView | PlayerRecordView | undefined)?.wr;
+                const movement = deltaOf(name);
                 return (
                   <Link className={styles.ratingCard} href={tab === "teams" ? `/elo/team/${teamSlug(name)}` : `/elo/player/${playerSlug(name)}`} key={name}>
                     <span className={styles.cardRank}>{String(index + 1).padStart(2, "0")}</span>
                     <div className={styles.cardIdentity}><TeamMark team={entityTeam} size="medium" /><div><h3>{name}</h3><p>{tab === "teams" ? formatAffiliation((record as TeamRecordView | undefined)?.current_tier, (record as TeamRecordView | undefined)?.current_league ?? (record as TeamRecordView | undefined)?.primary) : `${(record as PlayerRecordView | undefined)?.current_team ?? (entity as PlayerRatingView).last_team ?? "Independent"} · ${roleLabel((record as PlayerRecordView | undefined)?.primary_role)}`}</p></div></div>
-                    <strong>{ratingOf(entity).toFixed(0)}</strong>
-                    <span className={(deltaOf(name) ?? 0) > 0 ? styles.positive : (deltaOf(name) ?? 0) < 0 ? styles.negative : ""}>{rankDeltaLabel(deltaOf(name))}</span>
-                    <div className={styles.cardVisuals}><span>Evidence window</span><span>{tab === "teams" ? (record as TeamRecordView | undefined)?.games ?? entity.n_maps ?? 0 : (entity as PlayerRatingView).n_maps} games</span></div>
+                    <div className={styles.cardScore}><span>Rating</span><strong>{ratingOf(entity).toFixed(0)}</strong></div>
+                    <div className={styles.cardFacts}>
+                      <span><small>Movement</small><b className={(movement ?? 0) > 0 ? styles.positive : (movement ?? 0) < 0 ? styles.negative : ""}>{rankDeltaLabel(movement)}</b></span>
+                      <span><small>Games</small><b>{games}</b></span>
+                      <span><small>Win rate</small><b>{formatWr(winRate)}</b></span>
+                    </div>
                   </Link>
                 );
               })}

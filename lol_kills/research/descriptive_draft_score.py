@@ -107,11 +107,11 @@ def _weighted_effect(
     champion: str,
     role: str,
     model: Mapping[str, Any],
-) -> tuple[float, bool]:
+) -> tuple[float, str]:
     counts = model.get("champ_game_counts")
     role_counts = model.get("champion_role_counts")
     if not isinstance(counts, Mapping) or champion not in counts:
-        return 0.0, False
+        return 0.0, "unavailable"
     champion_weight = _number(counts.get(champion)) / (
         _number(counts.get(champion)) + CHAMPION_PRIOR_N
     )
@@ -121,7 +121,8 @@ def _weighted_effect(
         role_count = _number(role_counts[champion].get(role))
     role_weight = role_count / (role_count + ROLE_PRIOR_N) if role_count else 0.0
     role_effect = _logit_value(model.get("role_effects") or {}, f"{role}|{champion}")
-    return champion_weight * champion_effect + role_weight * role_effect, role_count >= MIN_SUPPORT_GAMES
+    evidence_status = "available" if role_count >= MIN_SUPPORT_GAMES else "role_estimate"
+    return champion_weight * champion_effect + role_weight * role_effect, evidence_status
 
 
 def load_model(path: Path = ARTIFACT_PATH) -> tuple[dict[str, Any], str]:
@@ -184,14 +185,14 @@ def score_game(
         raise DescriptiveDraftScoreError("composition has duplicate champions")
 
     base_by_side: dict[str, dict[str, float]] = {"Blue": {}, "Red": {}}
-    support_by_side: dict[str, dict[str, bool]] = {"Blue": {}, "Red": {}}
+    evidence_by_side: dict[str, dict[str, str]] = {"Blue": {}, "Red": {}}
     supported = True
     for side, picks in (("Blue", blue), ("Red", red)):
         for role, champion in picks.items():
-            value, has_support = _weighted_effect(champion, role, model)
+            value, evidence_status = _weighted_effect(champion, role, model)
             base_by_side[side][role] = value
-            support_by_side[side][role] = has_support
-            supported = supported and has_support
+            evidence_by_side[side][role] = evidence_status
+            supported = supported and evidence_status != "unavailable"
     ally_by_side = {"Blue": 0.0, "Red": 0.0}
     archetype_ally_by_side = {"Blue": 0.0, "Red": 0.0}
     ally = model.get("ally_synergy") or {}
@@ -286,16 +287,14 @@ def score_game(
                     "role": role,
                     "champion": champion,
                     "contribution": round(contribution, 6)
-                    if support_by_side[side][role]
+                    if evidence_by_side[side][role] != "unavailable"
                     else None,
                     "prior_role_games": int(
                         _number((model.get("champion_role_counts") or {}).get(champion, {}).get(role))
                         if isinstance((model.get("champion_role_counts") or {}).get(champion), Mapping)
                         else 0
                     ),
-                    "evidence_status": (
-                        "available" if support_by_side[side][role] else "limited"
-                    ),
+                    "evidence_status": evidence_by_side[side][role],
                 }
             )
     status = "available" if supported else "limited"

@@ -177,7 +177,10 @@ def _champion_performers(
 
 
 
-def _teams_draft(draft_records: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+def _teams_draft(
+    draft_records: Mapping[str, Any] | None,
+    active_teams: set[str] | None = None,
+) -> list[dict[str, Any]]:
     """Teams ranked by mean descriptive draft edge across the archive."""
     if not isinstance(draft_records, Mapping):
         return []
@@ -196,9 +199,9 @@ def _teams_draft(draft_records: Mapping[str, Any] | None) -> list[dict[str, Any]
         edge_value = float(edge)
         tier = str(game.get("competition_tier") or "").strip() or None
         league = str(game.get("league") or "").strip() or None
-        if blue:
+        if blue and (active_teams is None or blue in active_teams):
             by_team.setdefault((blue, tier, league), []).append(edge_value)
-        if red:
+        if red and (active_teams is None or red in active_teams):
             by_team.setdefault((red, tier, league), []).append(-edge_value)
     rows = []
     for (team, tier, league), evidence in by_team.items():
@@ -409,6 +412,21 @@ def build_leaderboards(
             leagues.add(str(entry["league"]))
     indexes["leagues"] = sorted(leagues)
 
+    rating_rows_with_activity = [
+        entry
+        for entry in team_ratings
+        if isinstance(entry, Mapping) and entry.get("evidence_active") is not None
+    ]
+    active_draft_teams = (
+        {
+            str(entry.get("team") or "").strip()
+            for entry in rating_rows_with_activity
+            if entry.get("evidence_active") == 1
+        }
+        if rating_rows_with_activity
+        else None
+    )
+
     return {
         "schema_version": LEADERBOARDS_SCHEMA,
         "players": players,
@@ -421,7 +439,7 @@ def build_leaderboards(
         "teams": teams,
         "champions": champions,
         "indexes": indexes,
-        "teams_draft": _teams_draft(draft_records)
+        "teams_draft": _teams_draft(draft_records, active_draft_teams)
         if draft_records is not None
         else _teams_draft_from_profile(draft_profile_records),
         "players_draft": _players_draft(draft_players or []),

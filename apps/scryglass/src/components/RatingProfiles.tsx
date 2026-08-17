@@ -30,7 +30,7 @@ import { championImageUrl } from "@/lib/championImages";
 import { objectiveFieldsForPatch } from "@/lib/objectiveSupport";
 import { matchTeamHref } from "@/lib/matchFilters";
 import type { DraftRankingsScope } from "@/lib/draftRankings";
-import { hasCompleteDraftEvidence } from "@/lib/draftRankings";
+import { hasCompleteCompositionEvidence } from "@/lib/draftRankings";
 import type { PublicDraftScoreResult } from "@/lib/publicData";
 import { PlayerPortrait } from "./PlayerPortrait";
 import { RecentGames } from "./RecentGames";
@@ -430,7 +430,7 @@ function CompositionEvidence({
   contribution,
   draftPool,
   draftScore,
-  completeDraft,
+  completeComposition,
   blueTeam,
   redTeam,
   championImages,
@@ -438,7 +438,7 @@ function CompositionEvidence({
   contribution?: DraftContribution;
   draftPool?: DraftPool;
   draftScore?: PublicDraftScoreResult | null;
-  completeDraft: boolean;
+  completeComposition: boolean;
   blueTeam: string;
   redTeam: string;
   championImages: Record<string, string>;
@@ -448,7 +448,7 @@ function CompositionEvidence({
     || contribution?.status === "unavailable"
     ? contribution.status
     : "unavailable";
-  const scoreAvailable = completeDraft && sourceStatus === "available";
+  const scoreAvailable = completeComposition && sourceStatus === "available";
   const status: DraftContribution["status"] = scoreAvailable ? "available" : sourceStatus;
   const picks = contribution?.picks ?? [];
   const pickFor = (side: "Blue" | "Red", role: string) => {
@@ -456,11 +456,11 @@ function CompositionEvidence({
     return picks.find((pick) => pick.side === side && pick.role === modelRole);
   };
   return (
-    <section className={styles.compositionSignal} aria-label="Composition signal">
+    <section className={styles.compositionSignal} aria-label="Draft Score">
       <div className={styles.compositionHeader}>
         <div>
           <p>Before the game</p>
-          <h2>Composition signal</h2>
+          <h2>Draft Score</h2>
         </div>
         <span className={`${styles.compositionStatus} ${styles[`composition${status[0].toUpperCase()}${status.slice(1)}`]}`}>
           {status === "available" ? "Available" : status === "limited" ? "Limited evidence" : "Unavailable"}
@@ -502,9 +502,9 @@ function CompositionEvidence({
       ) : null}
       {!scoreAvailable ? (
         <p className={styles.compositionEmpty}>
-          {completeDraft
+          {completeComposition
             ? (contribution?.reason ?? "The descriptive draft signal is not available for this game.")
-            : "Complete pick, ban, order, patch, and tier evidence is required for the descriptive draft signal."}
+            : "A complete ten-pick composition is required for the descriptive draft signal."}
         </p>
       ) : (
         <>
@@ -530,7 +530,7 @@ function CompositionEvidence({
             </div>
           </div>
           <p className={styles.compositionLegend}>
-            Draft edge is a descriptive composition signal in model units. It is separate from match results, team rating, and calibrated probability.
+            Draft Score measures the ten-pick composition in model units. It is separate from match results, team rating, and calibrated probability.
           </p>
           <p className={styles.compositionLegend}>
             Match strength covers team rating, lineup strength, uncertainty, form, and momentum in its own section. Phase and pace evidence remain separate.
@@ -573,11 +573,11 @@ function CompositionEvidence({
                         imageUrl={pick?.champion ? championImages[pick.champion] : null}
                       />
                       <span>{pick?.champion ?? "—"}</span>
-                      <strong className={pick?.evidence_status === "available" ? styles.compositionAvailable : pick?.evidence_status === "atom_estimate" ? styles.compositionEstimated : styles.compositionLimited}>
+                      <strong className={pick?.evidence_status === "available" ? styles.compositionAvailable : pick?.evidence_status === "atom_estimate" || pick?.evidence_status === "role_estimate" ? styles.compositionEstimated : styles.compositionLimited}>
                         {pick?.evidence_status === "unavailable" || pick?.evidence_status === "limited"
                           ? "Limited"
                           : pick
-                            ? `${componentLabel(pick.components?.total ?? pick.contribution)}${pick.evidence_status === "atom_estimate" ? " ≈" : ""}`
+                            ? `${componentLabel(pick.components?.total ?? pick.contribution)}${pick.evidence_status === "atom_estimate" || pick.evidence_status === "role_estimate" ? " ≈" : ""}`
                             : "—"}
                       </strong>
                       <small>
@@ -588,6 +588,8 @@ function CompositionEvidence({
                             : ""
                         }{pick?.evidence_status === "atom_estimate"
                           ? "atom estimate"
+                          : pick?.evidence_status === "role_estimate"
+                            ? `${pick.prior_role_games} prior role games · shrunk role estimate`
                           : pick?.evidence_status === "available"
                             ? `${pick.prior_role_games} prior role games`
                             : `${pick?.prior_role_games ?? 0} prior role games`}
@@ -621,7 +623,7 @@ export function MatchRatingProfile({
   const winner = blueWon ? game.blue_team : game.red_team;
   const loser = blueWon ? game.red_team : game.blue_team;
   const duration = durationLabel(game.duration_seconds);
-  const completeDraft = hasCompleteDraftEvidence(game);
+  const completeComposition = hasCompleteCompositionEvidence(game);
   const sides = (["Blue", "Red"] as const).map((side) => ({
     side,
     team: side === "Blue" ? game.blue_team : game.red_team,
@@ -651,7 +653,7 @@ export function MatchRatingProfile({
         contribution={game.draft_contribution}
         draftPool={game.draft_pool}
         draftScore={draftScore}
-        completeDraft={completeDraft}
+        completeComposition={completeComposition}
         blueTeam={game.blue_team}
         redTeam={game.red_team}
         championImages={championImages}

@@ -563,7 +563,7 @@ def test_query_projection_rejects_archive_signal_outside_draft_records() -> None
         )
 
 
-def test_query_projection_rejects_incomplete_or_absent_authorized_pool() -> None:
+def test_query_projection_rejects_incomplete_authorized_pool() -> None:
     incomplete = _descriptive_game()
     incomplete["draft_pool"]["evaluated_picks"] = 9
 
@@ -574,14 +574,39 @@ def test_query_projection_rejects_incomplete_or_absent_authorized_pool() -> None
             draft_records=_draft_records({"game-1": incomplete}),
         )
 
-    absent = _descriptive_game()
-    absent.pop("draft_pool")
-    with pytest.raises(PublicQueryProjectionError, match="matching complete pool"):
-        _projection(
-            archive_games={"game-1": absent},
-            draft_authority=_draft_authority(),
-            draft_records=_draft_records({"game-1": absent}),
-        )
+
+
+def test_query_projection_keeps_composition_score_without_pool_metrics() -> None:
+    no_pool = _descriptive_game()
+    no_pool.pop("draft_pool")
+    projection = _projection(
+        archive_games={"game-1": no_pool},
+        draft_authority=_draft_authority(),
+        draft_records=_draft_records({"game-1": no_pool}),
+    )
+
+    game = projection["datasets"]["games"][0]
+    assert game["payload"]["draft_contribution"]["status"] == "available"
+    player = next(
+        row for row in projection["datasets"]["players"] if row["name"] == "Faker"
+    )
+    assert "draft_metric" not in player["payload"]
+
+
+def test_query_projection_keeps_shrunk_role_estimate() -> None:
+    game = _descriptive_game()
+    estimated = game["draft_contribution"]["picks"][0]
+    estimated["evidence_status"] = "role_estimate"
+    estimated["prior_role_games"] = 14
+
+    projection = _projection(
+        archive_games={"game-1": game},
+        draft_authority=_draft_authority(),
+        draft_records=_draft_records({"game-1": game}),
+    )
+
+    picks = projection["datasets"]["games"][0]["payload"]["draft_contribution"]["picks"]
+    assert picks[0]["evidence_status"] == "role_estimate"
 
 
 def test_query_projection_uses_exact_complete_pool_record_set() -> None:

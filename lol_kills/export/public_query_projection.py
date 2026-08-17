@@ -424,7 +424,7 @@ def _sanitize_descriptive_signal(
             raise PublicQueryProjectionError("descriptive Draft Score pick identity is invalid")
         slots.add(slot)
         evidence_status = str(value.get("evidence_status") or "")
-        if evidence_status != "available":
+        if evidence_status not in {"available", "role_estimate"}:
             raise PublicQueryProjectionError(
                 "descriptive Draft Score pick evidence is unavailable"
             )
@@ -582,7 +582,7 @@ def _validated_draft_record_games(
     *,
     authority: Mapping[str, Any] | None,
 ) -> dict[str, Mapping[str, Any]]:
-    """Return the receipt-bound complete-pool game authority set."""
+    """Return the receipt-bound descriptive game authority set."""
 
     if authority is None:
         if draft_records is not None:
@@ -610,9 +610,7 @@ def _validated_draft_record_games(
         )
     raw_games = draft_records.get("games")
     if not isinstance(raw_games, Mapping) or not raw_games:
-        raise PublicQueryProjectionError(
-            "descriptive Draft records have no complete-pool games"
-        )
+        raise PublicQueryProjectionError("descriptive Draft records have no games")
     games: dict[str, Mapping[str, Any]] = {}
     for raw_game_id, record in raw_games.items():
         game_id = str(raw_game_id).strip()
@@ -1113,15 +1111,18 @@ def _game_rows(
                 authority=draft_authority,
             )
             _validate_signal_game_binding(sanitized_signal, game)
-            archive_pool = _validated_pool_picks(raw_pool, sanitized_signal)
-            record_pool = _validated_pool_picks(
-                authorized_draft_games[game_id].get("draft_pool"),
-                sanitized_signal,
-            )
-            if archive_pool is None or record_pool is None or archive_pool != record_pool:
+            record_raw_pool = authorized_draft_games[game_id].get("draft_pool")
+            if (raw_pool is None) != (record_raw_pool is None):
                 raise PublicQueryProjectionError(
-                    "authorized Draft signal does not have one matching complete pool"
+                    "authorized Draft signal has inconsistent pool evidence"
                 )
+            if raw_pool is not None:
+                archive_pool = _validated_pool_picks(raw_pool, sanitized_signal)
+                record_pool = _validated_pool_picks(record_raw_pool, sanitized_signal)
+                if archive_pool is None or record_pool is None or archive_pool != record_pool:
+                    raise PublicQueryProjectionError(
+                        "authorized Draft signal does not have one matching complete pool"
+                    )
             game["draft_contribution"] = sanitized_signal
             projected_draft_game_ids.add(game_id)
         elif raw_signal is not None:
@@ -1285,10 +1286,6 @@ def _attach_draft_summaries(
         signal = _sanitize_descriptive_signal(raw_signal, authority=authority)
         _validate_signal_game_binding(signal, raw_game)
         pool_values = _validated_pool_picks(record.get("draft_pool"), signal)
-        if pool_values is None:
-            raise PublicQueryProjectionError(
-                "validated Draft record has no complete pool"
-            )
         pick_values = {
             (
                 str(pick.get("side") or "").strip().title(),

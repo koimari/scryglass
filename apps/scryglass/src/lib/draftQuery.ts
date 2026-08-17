@@ -237,7 +237,7 @@ function comparisonAnswer(
 ): TeamDraftQueryResult {
   const scope = scopeLabel(tier, league);
   const basis = `Compared ${firstTeam} and ${secondTeam} in ${scope} by average descriptive draft edge, using at least ${minimumGames} complete ${minimumGames === 1 ? "draft" : "drafts"} in the active ${windowDays}-day profile window. Historical here means this profile window, not all seasons.`;
-  const caveat = "Draft edge is a descriptive composition signal in model units. It is separate from match results, team rating, and calibrated probability.";
+  const caveat = "Draft Score measures the ten-pick composition in model units. It is separate from match results, team rating, and calibrated probability.";
 
   if (!first || !second) {
     return {
@@ -346,7 +346,7 @@ export function queryTeamDraftScores(records: ProfileRecords, question: string):
     answer: {
       headline,
       basis: `Ranked ${rows.length} ${rows.length === 1 ? "team" : "teams"} by average descriptive draft edge in ${scope} with at least ${minimumGames} complete ${minimumGames === 1 ? "draft" : "drafts"} in the active ${records.window_days}-day profile window.`,
-      caveat: "Draft edge is a descriptive composition signal in model units. It is separate from match results, team rating, and calibrated probability.",
+      caveat: "Draft Score measures the ten-pick composition in model units. It is separate from match results, team rating, and calibrated probability.",
     },
     rows: visibleRows,
     proof: { sources: [SOURCE], resultCount: rows.length },

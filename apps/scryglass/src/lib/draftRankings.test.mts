@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { draftRankingsFromProfile, filterDraftRankings } from "./draftRankings";
-import type { DraftPool, ProfileRecords } from "./pack";
+import { draftRankingsFromProfile, filterDraftRankings, hasCompleteCompositionEvidence, hasCompleteDraftEvidence } from "./draftRankings";
+import type { DraftPool, ProfileGame, ProfileRecords } from "./pack";
 
 function game(
   id: string,
@@ -89,6 +89,32 @@ test("derives team and player rankings when the leaderboard asset is missing", (
     { player: "BlueMid", games: 5, pick_contribution: 0.2, best_available_rate: 1, role: "mid", team: "Team A", league: "LCK", tier: "tier1" },
     { player: "RedMid", games: 5, pick_contribution: -0.1, best_available_rate: 1, role: "mid", team: "Team B", league: "LCK", tier: "tier1" },
   ]);
+});
+
+test("composition evidence does not require a complete ban and pick-order pool", () => {
+  const value = game("composition-only", "Team A", "Team B", 0.5, 0.1) as ProfileGame;
+  delete value.draft_pool;
+
+  assert.equal(hasCompleteCompositionEvidence(value), true);
+  assert.equal(hasCompleteDraftEvidence(value), false);
+
+  const games = Object.fromEntries(Array.from({ length: 5 }, (_, index) => {
+    const copy = structuredClone(value);
+    copy.game_id = `composition-only-${index}`;
+    return [copy.game_id, copy];
+  }));
+  const records = {
+    schema_version: "scryglass:profile-records:v2",
+    window_days: 120,
+    champion_images: {},
+    players: {},
+    teams: {},
+    games,
+  } satisfies ProfileRecords;
+  const result = draftRankingsFromProfile(records);
+  assert.equal(result.evidenceGames, 5);
+  assert.equal(result.teams.length, 2);
+  assert.equal(result.players.length, 0);
 });
 
 test("ranks players by the share of best-available picks", () => {

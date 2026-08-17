@@ -25,6 +25,7 @@ from lol_kills.export.public_pack import (
     _draft_publication_decision,
     _gate_published_draft_contributions,
     _load_tier_payload,
+    _profile_archive_frame,
     _ensure_year_column,
     _filter_years,
     _public_player_rating_rows,
@@ -142,7 +143,7 @@ def test_descriptive_draft_publication_binds_schema_and_artifact() -> None:
     assert decision["receipt_sha256"] == "b" * 64
 
 
-def test_incomplete_published_pool_removes_draft_score_from_raw_projections() -> None:
+def test_incomplete_published_pool_keeps_score_and_removes_pool_only() -> None:
     profile = {
         "games": {
             "complete": {
@@ -172,10 +173,12 @@ def test_incomplete_published_pool_removes_draft_score_from_raw_projections() ->
 
     result = _gate_published_draft_contributions(profile, draft_records)
 
-    assert result == {"eligible_games": 1, "removed_games": 1}
+    assert result == {"score_games": 2, "pool_games": 1, "removed_games": 0}
     assert "draft_contribution" in profile["games"]["complete"]
-    assert "draft_contribution" not in profile["games"]["incomplete"]
-    assert set(draft_records["games"]) == {"complete"}
+    assert "draft_contribution" in profile["games"]["incomplete"]
+    assert "draft_pool" not in profile["games"]["incomplete"]
+    assert set(draft_records["games"]) == {"complete", "incomplete"}
+    assert "draft_pool" not in draft_records["games"]["incomplete"]
 
 
 def test_passing_candidate_stays_closed_without_independent_receipt() -> None:
@@ -380,6 +383,25 @@ def test_profile_records_normalize_recent_games_without_raw_tables() -> None:
     assert inspired["vision_score"] == 31
     assert inspired["grade"]["status"] == "unavailable"
     assert payload["champion_images"]["Ivern"] == "https://example.test/ivern.png"
+
+
+def test_profile_archive_rebuilds_match_league_and_tier() -> None:
+    table = pa.Table.from_pylist(
+        [
+            {
+                "gameid": "game-1",
+                "year": 2026,
+                "league": "LEC",
+                "league_source": None,
+                "competition_tier": None,
+            }
+        ]
+    )
+
+    frame = _profile_archive_frame(table, (2025, 2026))
+
+    assert frame.iloc[0]["league"] == "LEC"
+    assert frame.iloc[0]["competition_tier"] == "tier1"
 
 
 def test_profile_records_use_authoritative_team_objectives_for_each_side() -> None:

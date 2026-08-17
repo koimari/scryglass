@@ -203,6 +203,23 @@ def test_team_draft_uses_whole_archive_when_player_pool_is_narrower() -> None:
     }
 
 
+def test_team_draft_uses_the_rating_activity_registry() -> None:
+    ratings = [
+        {"team": "Team A", "mu_total": 1700.0, "n_maps": 60, "evidence_active": 1},
+        {"team": "Team B", "mu_total": 1620.0, "n_maps": 55, "evidence_active": 0},
+    ]
+
+    payload = build_leaderboards(
+        _player_records(),
+        _profile_records(),
+        _ratings(),
+        ratings,
+        draft_records=_draft_records(),
+    )
+
+    assert [row["team"] for row in payload["teams_draft"]] == ["Team A"]
+
+
 def test_team_draft_keeps_every_supported_team_scope() -> None:
     games = {}
     for team_index in range(60):
