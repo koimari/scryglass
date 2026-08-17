@@ -8,6 +8,7 @@ import pytest
 from lol_kills.export.promoted_draft_authority import (
     PromotedDraftAuthorityError,
     load_promoted_draft_authority,
+    validate_promoted_results_payload,
 )
 from lol_kills.research.public_draft_score_promotion import sha256_path
 from lol_kills.research.selective_draft_probability import canonical_sha256
@@ -109,3 +110,78 @@ def test_changed_receipt_file_fails_before_parsing(tmp_path: Path) -> None:
             expected_file_sha256=file_sha256,
             release_id="v2026.09.01.120000",
         )
+
+
+def _promoted_payload(authority: dict[str, object]) -> dict[str, object]:
+    return {
+        "schema_version": "scryglass:promoted-draft-results:v1",
+        "authority": "promoted",
+        "release_id": authority["release_id"],
+        "model_version": authority["model_version"],
+        "receipt_sha256": authority["receipt_sha256"],
+        "results": {
+            "game-1": {
+                "schema_version": "scryglass:public-draft-score-result:v1",
+                "authority": "promoted",
+                "release_id": authority["release_id"],
+                "model_version": authority["model_version"],
+                "receipt_sha256": authority["receipt_sha256"],
+                "evidence_window": {
+                    "start": "2025-01-01T00:00:00Z",
+                    "end": "2026-08-16T00:00:00Z",
+                },
+                "match_win_probability": {"Blue": 0.61, "Red": 0.39},
+                "controlled_draft_score": {
+                    "model_units": -0.18,
+                    "edge_percentage_points": -1.9,
+                    "stronger_draft": "Red",
+                    "explanation": "Role-matched champion swap with strength held fixed.",
+                    "method": "role_matched_champion_swap",
+                    "intervention_receipt_sha256": "4" * 64,
+                    "isolated_blue_draft_probability": 0.455,
+                    "fixed_strength_blue_win_probability": 0.56,
+                },
+                "side_recommendation": "Blue",
+            }
+        },
+    }
+
+
+def test_promoted_result_asset_is_release_and_receipt_bound(tmp_path: Path) -> None:
+    path, file_sha256 = _receipt(tmp_path / "promotion.json")
+    authority, _receipt_value = load_promoted_draft_authority(
+        receipt_path=path,
+        expected_file_sha256=file_sha256,
+        release_id="v2026.09.01.120000",
+    )
+
+    payload = _promoted_payload(authority)
+
+    assert validate_promoted_results_payload(payload, authority=authority) is payload
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda payload: payload["results"]["game-1"].update({"side_recommendation": "Red"}), "direction"),
+        (lambda payload: payload["results"]["game-1"].update({"odds": 1.7}), "asset"),
+        (lambda payload: payload["results"]["game-1"]["match_win_probability"].update({"Red": 0.4}), "numbers"),
+        (lambda payload: payload.update({"receipt_sha256": "9" * 64}), "asset"),
+    ],
+)
+def test_promoted_result_asset_tampering_fails_closed(
+    tmp_path: Path,
+    mutation: object,
+    message: str,
+) -> None:
+    path, file_sha256 = _receipt(tmp_path / "promotion.json")
+    authority, _receipt_value = load_promoted_draft_authority(
+        receipt_path=path,
+        expected_file_sha256=file_sha256,
+        release_id="v2026.09.01.120000",
+    )
+    payload = _promoted_payload(authority)
+    mutation(payload)
+
+    with pytest.raises(PromotedDraftAuthorityError, match=message):
+        validate_promoted_results_payload(payload, authority=authority)
