@@ -1,5 +1,118 @@
 # Public Draft Score 0.710 handover
 
+## Pause update at 97% Codex usage
+
+Work paused at `2026-08-17T10:55:02Z` because primary Codex plan usage reached
+`97%`. This follows the user's explicit stop rule. There were no active
+Scryglass refresh, Draft Score, or model-training Python processes to stop.
+MCP servers and unrelated Python services were left running.
+
+The active checkout is now:
+
+- Worktree: `/private/tmp/scryglass-atomized-public.UN76kO`
+- Branch: `codex/unify-public-release-census`
+- Clean head: `523ec5332759f2e03b5d297c59cb2ebac2c24db0`
+
+PR #288 was merged manually after all required checks passed:
+
+- PR: `https://github.com/koimari/scryglass/pull/288`
+- Main merge commit: `6aecb7131206087cbfd0e2519df0d3ee27011ea0`
+- Production Vercel deployment: `dpl_GAfAPkvYuXiaWeVTVj8STbXGaZzQ`
+- Deployment state: `READY`, target `production`
+
+The merged product changes include a shared match census, active-team filtering,
+Draft Score display for complete compositions, low-support role estimates,
+useful rating-card fields, and removal of the top-eight rating graphs.
+
+## Current release blocker
+
+The clean worker checkout was updated to the merge commit. A forced refresh
+downloaded the current Oracle's Elixir file and accepted its identity:
+
+- Source SHA-256:
+  `cbd6bb95d6e4c3408017f09d61362b08fb8f7a7e731954a76b3414ae84e55d83`
+- Source through: `2026-08-16T21:07:39Z`
+- New games: `44`
+- Corrected games: `3`
+- Source patch `16.16`: `27` games, displayed as public patch `26.16`
+
+The refresh stopped before pack build or publication:
+
+```text
+RefreshValidationError: source continuity failed; 1782 published completed maps disappeared; first=10665-10665_game_1
+```
+
+Production still serves release `v2026.08.17.093703`. Do not bypass this
+continuity check. Diagnose the exact 1,782 missing IDs first. Compare the saved
+publication baseline with the candidate source IDs. Group missing IDs by year,
+league, and ID family. Confirm whether the saved baseline contains a stale or
+mixed source population.
+
+Relevant worker paths:
+
+- Repo: `/Users/river/Library/Application Support/Scryglass Worker/repo`
+- Runtime: `/Users/river/Library/Application Support/Scryglass Worker/runtime`
+- Public packs: `/Users/river/Library/Application Support/Scryglass Worker/public-packs`
+- Accepted source receipt:
+  `/Users/river/Library/Application Support/Scryglass Worker/runtime/data/lol/runtime/cycles/20260817T060000/accepted-source.json`
+- Accepted import receipt:
+  `/Users/river/Library/Application Support/Scryglass Worker/runtime/data/lol/runtime/cycles/20260817T060000/accepted-import.json`
+
+Inspect `lol_kills/postgame_sync.py`, especially `_continuity_baseline()`,
+`validate_source_continuity()`, and `sync_once()`. Do all diagnosis read-only.
+Run a second refresh only after the cause is proven and repaired.
+
+## Public verifier follow-up
+
+The merged verifier compares ratings, Draft, match, and tier source bindings.
+The current sanitized Supabase active-release RPC omits two ratings fields:
+
+- `source_game_count`
+- `source_identity_sha256`
+
+The raw active manifest contains both fields. The public RPC returns only
+`source_as_of` and `claim_ceiling`. The verifier will fail until a tested final
+migration exposes a fixed safe projection, or the verifier uses an equally
+strong public artifact binding.
+
+The raw active release also has a census mismatch:
+
+- ratings accepted maps: `17,598`
+- Draft target maps: `17,588`
+
+Explain the ten-map difference before the next release. Keep one explicit
+accepted-match census for ratings, Draft, matches, tiers, players, and teams.
+
+## Next product slice: Player status and Team status
+
+After the release census is healthy, add a separate profile-tab PR.
+
+Player profiles need a `Player status` tab. Team profiles need a `Team status`
+tab. Each tab has a selectable scatter plot with these graph choices:
+
+- gold share percentage against damage share percentage;
+- CS per minute against damage per minute;
+- KDA against win rate percentage;
+- Draft Score against win rate percentage.
+
+Player comparison scopes:
+
+- same role and same league;
+- same role across all leagues;
+- all roles in the same league;
+- all roles across all leagues.
+
+Team comparison scopes:
+
+- same league;
+- all leagues.
+
+Use the active release census and canonical player, team, league, and role
+identities. Compute one consistent evidence window. Show the selected subject,
+comparison population, game count, date range, and current filter. Use bounded
+query RPCs and keep each response below 500 KB. Do not build another profile-only
+data source.
+
 ## Goal state
 
 The active goal is:

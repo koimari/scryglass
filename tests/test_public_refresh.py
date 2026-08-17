@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 
 from lol_kills import public_refresh
@@ -568,6 +569,9 @@ def test_fresh_supabase_worker_seeds_exact_active_game_ids(tmp_path: Path) -> No
         "pack_id": release_id,
         "game_count": 2,
         "source": "profile_index",
+        # A clean bootstrap excludes nothing.
+        "out_of_window_game_count": 0,
+        "out_of_window_identity_sha256": source_identity_sha256([]),
     }
     assert json.loads(config.sync.state_path.read_text())["published_game_ids"] == game_ids
     assert json.loads((config.public_root / "manifest.json").read_text()) == manifest
@@ -622,14 +626,22 @@ def test_supabase_bootstrap_uses_a_checksum_verified_full_local_cache(tmp_path: 
 
 
 def test_supabase_bootstrap_recovers_a_worker_ahead_of_the_active_release(tmp_path: Path) -> None:
+    # The recovery-seeded local cache is a *contaminated* superset: it covers
+    # the release index plus one out-of-window (2024) game that never left
+    # worker state. The bootstrap must never seed that unfiltered superset —
+    # only the restriction of it to the release's declared publication
+    # window years, and only when that restriction reproduces the published
+    # binding exactly.
     release_ids = ["oe:game:a", "oe:game:b"]
-    local_ids = ["oe:game:a", "oe:game:b", "oe:game:c"]
+    contaminated_id = "oe:game:c-2024"
+    local_ids = [*release_ids, contaminated_id]
     release_id = "v2026.08.10.001500"
     manifest = {
         "pack_id": release_id,
         "ratings": {
             "source_game_count": len(release_ids),
             "source_identity_sha256": source_identity_sha256(release_ids),
+            "window_years": [2025, 2026],
         },
     }
     config = replace(
@@ -638,6 +650,21 @@ def test_supabase_bootstrap_recovers_a_worker_ahead_of_the_active_release(tmp_pa
         supabase_url="https://example.supabase.co",
         supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
     )
+    live = config.runtime_root / "data/lol/warehouse/parquet/oe_live"
+    live.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {
+                "game_uid": game_id,
+                "date": (
+                    "2024-11-03T00:00:00Z"
+                    if game_id == contaminated_id
+                    else "2026-06-01T00:00:00Z"
+                ),
+            }
+            for game_id in local_ids
+        ]
+    ).to_parquet(live / "maps.parquet", index=False)
 
     class Client:
         def __init__(self, *_args, **_kwargs):
@@ -670,14 +697,176 @@ def test_supabase_bootstrap_recovers_a_worker_ahead_of_the_active_release(tmp_pa
     assert result == {
         "status": "seeded",
         "pack_id": release_id,
-        "game_count": len(local_ids),
+        "game_count": len(release_ids),
         "source": "validated_local_cache_superset",
+        # This cache is a superset but wholly in-window, so nothing is excluded.
+        "out_of_window_game_count": 0,
+        "out_of_window_identity_sha256": source_identity_sha256([]),
     }
-    assert json.loads(config.sync.state_path.read_text())["published_game_ids"] == local_ids
-    assert json.loads(config.sync.state_path.read_text())["release_index_game_ids"] == sorted(
-        release_ids
-    )
+    written = json.loads(config.sync.state_path.read_text())
+    assert written["published_game_ids"] == release_ids
+    assert contaminated_id not in written["published_game_ids"]
+    assert written["release_index_game_ids"] == sorted(release_ids)
     assert json.loads((config.public_root / "manifest.json").read_text()) == manifest
+
+
+def test_supabase_bootstrap_rejects_a_superset_whose_window_filter_still_mismatches(
+    tmp_path: Path,
+) -> None:
+    # The window restriction removes nothing here (every id is in-window),
+    # so it still fails to reproduce the two-game published binding. The
+    # bootstrap must raise rather than silently seed the unfiltered, or any
+    # partially filtered, superset.
+    release_ids = ["oe:game:a", "oe:game:b"]
+    local_ids = [*release_ids, "oe:game:extra-inwindow"]
+    release_id = "v2026.08.10.001500"
+    manifest = {
+        "pack_id": release_id,
+        "ratings": {
+            "source_game_count": len(release_ids),
+            "source_identity_sha256": source_identity_sha256(release_ids),
+            "window_years": [2025, 2026],
+        },
+    }
+    config = replace(
+        _config(tmp_path),
+        publication_backend="supabase",
+        supabase_url="https://example.supabase.co",
+        supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+    live = config.runtime_root / "data/lol/warehouse/parquet/oe_live"
+    live.mkdir(parents=True)
+    pd.DataFrame(
+        [{"game_uid": game_id, "date": "2026-06-01T00:00:00Z"} for game_id in local_ids]
+    ).to_parquet(live / "maps.parquet", index=False)
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def active_release(self):
+            return {"release_id": release_id, "manifest": manifest}
+
+        def asset(self, _release_id: str, path: str):
+            return {"body": None, "storage_path": f"{release_id}/{path}"}
+
+        def storage_object(self, storage_path: str):
+            if storage_path.endswith("features/match_index.json"):
+                return json.dumps(
+                    {"games": [{"game_id": game_id} for game_id in release_ids]}
+                ).encode()
+            return json.dumps({"games": {"oe:game:a": {"game_id": "oe:game:a"}}}).encode()
+
+    with patch.object(
+        public_refresh.supabase_publication,
+        "SupabasePublicData",
+        Client,
+    ), patch.object(
+        public_refresh,
+        "validate_live_source",
+        return_value={"game_ids": local_ids},
+    ), pytest.raises(public_refresh.PublicRefreshError, match="does not match"):
+        public_refresh.seed_supabase_continuity(config)
+
+    assert not config.sync.state_path.exists()
+
+
+def test_supabase_bootstrap_reads_a_contaminated_cache_before_window_validation(
+    tmp_path: Path,
+) -> None:
+    """The bootstrap must extract candidates before whole-cache window validation.
+
+    Regression test for an ordering defect: the bootstrap validated the whole
+    cache strictly first, which aborted on the very out-of-window rows the
+    recovery was written to discard, leaving the recovery path unreachable in the
+    exact contaminated-cache scenario it exists for.
+
+    The stub below mirrors the real validator: it raises when asked to validate
+    the whole contaminated cache strictly, and only yields the in-window
+    population when the caller opts into exclusion. A caller that omits the flag
+    fails this test.
+    """
+
+    release_ids = ["oe:game:a", "oe:game:b"]
+    stale_id = "oe:game:from-2024"
+    release_id = "v2026.08.10.001500"
+    manifest = {
+        "pack_id": release_id,
+        "ratings": {
+            "source_game_count": len(release_ids),
+            "source_identity_sha256": source_identity_sha256(release_ids),
+            "window_years": [2025, 2026],
+        },
+    }
+    config = replace(
+        _config(tmp_path),
+        publication_backend="supabase",
+        supabase_url="https://example.supabase.co",
+        supabase_secret_key="sb_secret_abcdefghijklmnopqrstuvwxyz",
+    )
+
+    calls: list[bool] = []
+
+    def fake_validate_live_source(
+        _root: Path,
+        _new_game_ids,
+        *,
+        years,
+        exclude_out_of_window: bool = False,
+    ):
+        calls.append(exclude_out_of_window)
+        if not exclude_out_of_window:
+            raise RefreshValidationError(
+                "live source contains 1 games outside the publication window "
+                f"{tuple(years)}; offending years=[2024]"
+            )
+        return {
+            "game_ids": sorted(release_ids),
+            "game_count": len(release_ids),
+            "identity_sha256": source_identity_sha256(release_ids),
+            "out_of_window_game_ids": [stale_id],
+            "out_of_window_identity_sha256": source_identity_sha256([stale_id]),
+        }
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def active_release(self):
+            return {"release_id": release_id, "manifest": manifest}
+
+        def asset(self, _release_id: str, path: str):
+            return {"body": None, "storage_path": f"{release_id}/{path}"}
+
+        def storage_object(self, storage_path: str):
+            if storage_path.endswith("features/match_index.json"):
+                return json.dumps(
+                    {"games": [{"game_id": game_id} for game_id in release_ids]}
+                ).encode()
+            # A stale profile index forces the local-cache path.
+            return json.dumps({"games": {"oe:game:a": {"game_id": "oe:game:a"}}}).encode()
+
+    with patch.object(
+        public_refresh.supabase_publication,
+        "SupabasePublicData",
+        Client,
+    ), patch.object(
+        public_refresh,
+        "validate_live_source",
+        fake_validate_live_source,
+    ):
+        result = public_refresh.seed_supabase_continuity(config)
+
+    assert calls == [True], "bootstrap must opt into out-of-window exclusion"
+    assert result["status"] == "seeded"
+    assert result["game_count"] == len(release_ids)
+    # The contamination is surfaced, not swallowed.
+    assert result["out_of_window_game_count"] == 1
+    assert result["out_of_window_identity_sha256"] == source_identity_sha256([stale_id])
+
+    state = json.loads(config.sync.state_path.read_text(encoding="utf-8"))
+    assert state["published_game_ids"] == sorted(release_ids)
+    assert stale_id not in state["published_game_ids"]
 
 
 def test_supabase_bootstrap_rejects_a_worker_missing_release_games(tmp_path: Path) -> None:

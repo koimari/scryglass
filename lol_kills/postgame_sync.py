@@ -31,6 +31,7 @@ from lol_kills.export import pack_spec
 from lol_kills.export.pack_records import profile_game_has_complete_stats
 from lol_kills.export.public_pack import (
     _complete_player_game_ids as _complete_identity_game_ids,
+    _ensure_year_column,
     export_public_pack,
     source_identity_sha256,
 )
@@ -289,8 +290,110 @@ def _identity_frame(
     return frame
 
 
-def validate_live_source(root: Path, new_game_ids: Sequence[str]) -> dict[str, Any]:
-    """Return the complete canonical source set and verify every new game."""
+def _map_year_frame(root: Path) -> pd.DataFrame:
+    """Canonical live-map identities paired with a resolved publication year.
+
+    Reuses ``_ensure_year_column`` — the same year-resolution mechanism the
+    public pack export uses (a declared ``year``/``oe_year`` column, else a
+    UTC year parsed from ``date``) — so a game's year is never re-derived by
+    a second, possibly inconsistent, method.
+    """
+
+    path = root / LIVE_MAPS
+    if not path.is_file():
+        raise RefreshValidationError(f"missing live source file: {path}")
+    columns = pq.ParquetFile(path).schema_arrow.names
+    identity_columns = [name for name in ("game_uid", "gameid", "oe_gameid") if name in columns]
+    if not identity_columns:
+        raise RefreshValidationError(f"live source schema is incomplete: {path}")
+    year_columns = [name for name in ("year", "oe_year", "date") if name in columns]
+    table = _ensure_year_column(pq.read_table(path, columns=[*identity_columns, *year_columns]))
+    frame = table.to_pandas()
+    frame["_game_id"] = [
+        next(
+            (
+                key
+                for column in identity_columns
+                if (key := canonical_source_game_key(row[column]))
+            ),
+            "",
+        )
+        for _, row in frame.iterrows()
+    ]
+    available = set(table.column_names)
+    year_column = "oe_year" if "oe_year" in available else "year" if "year" in available else None
+    frame["_year"] = pd.to_numeric(frame[year_column], errors="coerce") if year_column else pd.NA
+    return frame.loc[frame["_game_id"].ne(""), ["_game_id", "_year"]]
+
+
+def _year_filtered_ids(root: Path, candidate_ids: Sequence[str], years: Sequence[int]) -> list[str]:
+    """Restrict a candidate game-identity set to the declared publication window.
+
+    The candidate set (e.g. worker state or a recovery-seeded local cache)
+    is never trusted directly: it can be contaminated with games outside the
+    active publication window. Only the ids whose resolved year (via
+    ``_map_year_frame``) falls inside ``years`` are kept.
+    """
+
+    candidates = set(_canonical_ids(list(candidate_ids)))
+    if not candidates:
+        return []
+    year_frame = _map_year_frame(root)
+    allowed = {int(year) for year in years}
+    in_window = set(year_frame.loc[year_frame["_year"].isin(allowed), "_game_id"])
+    return sorted(candidates.intersection(in_window))
+
+
+def _manifest_window_years(manifest: Mapping[str, Any]) -> tuple[int, ...]:
+    """The active publication window years declared by a pack manifest.
+
+    Prefers ``ratings.window_years`` and falls back to ``filters.years``.
+    Never guesses: an undeclared or malformed window fails closed.
+    """
+
+    ratings = manifest.get("ratings") if isinstance(manifest, Mapping) else None
+    raw_years = ratings.get("window_years") if isinstance(ratings, Mapping) else None
+    if not isinstance(raw_years, list) or not raw_years:
+        filters_block = manifest.get("filters") if isinstance(manifest, Mapping) else None
+        raw_years = filters_block.get("years") if isinstance(filters_block, Mapping) else None
+    if not isinstance(raw_years, list) or not raw_years:
+        raise RefreshValidationError("published pack has no declared publication window years")
+    try:
+        years = tuple(sorted({int(year) for year in raw_years}))
+    except (TypeError, ValueError) as error:
+        raise RefreshValidationError(
+            "published pack publication window years are invalid"
+        ) from error
+    if not years:
+        raise RefreshValidationError("published pack has no declared publication window years")
+    return years
+
+
+def _published_window_years(public_root: Path) -> tuple[int, ...]:
+    """The active publication window years, read from the published manifest."""
+
+    return _manifest_window_years(_load_json(public_root / "manifest.json"))
+
+
+def validate_live_source(
+    root: Path,
+    new_game_ids: Sequence[str],
+    *,
+    years: Sequence[int],
+    exclude_out_of_window: bool = False,
+) -> dict[str, Any]:
+    """Return the complete canonical source set and verify every new game.
+
+    By default a cache holding any game outside ``years`` fails closed: the
+    refresh path must never derive a release from an out-of-window population.
+
+    ``exclude_out_of_window`` exists for the continuity bootstrap alone. That
+    caller has to read the in-window population out of a cache it already knows
+    is contaminated, because the sanctioned release entrypoint is the only
+    command permitted to run a production release. Excluded identities are always
+    reported back, so an exclusion is visible rather than silent, and the caller
+    must still reproduce the published binding digest before it seeds anything.
+    """
 
     requested = set(_canonical_ids(list(new_game_ids)))
     if len(requested) != len(new_game_ids):
@@ -305,6 +408,34 @@ def validate_live_source(root: Path, new_game_ids: Sequence[str]) -> dict[str, A
     map_ids = _canonical_ids(maps["_game_id"].tolist())
     if len(map_ids) != len(maps):
         raise RefreshValidationError("live maps are not one row per canonical game identity")
+    allowed_years = {int(year) for year in years}
+    if not allowed_years:
+        raise RefreshValidationError(
+            "live source validation requires a non-empty publication year window"
+        )
+    year_frame = _map_year_frame(root)
+    year_by_id = dict(zip(year_frame["_game_id"], year_frame["_year"]))
+    offending_ids = [
+        game_id
+        for game_id in map_ids
+        if pd.isna(year_by_id.get(game_id)) or int(year_by_id[game_id]) not in allowed_years
+    ]
+    if offending_ids:
+        offending_years = sorted(
+            {
+                int(year_by_id[game_id])
+                for game_id in offending_ids
+                if pd.notna(year_by_id.get(game_id))
+            }
+        )
+        if not exclude_out_of_window:
+            raise RefreshValidationError(
+                f"live source contains {len(offending_ids)} games outside the publication window "
+                f"{tuple(sorted(allowed_years))}; offending years="
+                f"{offending_years or ['unresolved']}"
+            )
+        excluded = set(offending_ids)
+        map_ids = [game_id for game_id in map_ids if game_id not in excluded]
     valid_team_ids: set[str] = set()
     for game_id, team_rows in teams.groupby("_game_id", sort=False):
         sides = set(team_rows["side"].astype(str).str.title())
@@ -377,6 +508,11 @@ def validate_live_source(root: Path, new_game_ids: Sequence[str]) -> dict[str, A
         "identity_sha256": source_identity_sha256(accepted_ids),
         "candidate_game_count": len(map_ids),
         "rejected_incomplete_game_count": len(set(map_ids).difference(accepted_ids)),
+        # Always reported, so an out-of-window exclusion is auditable rather
+        # than silent. Empty unless the caller opted into exclusion and the
+        # cache actually held games outside the publication window.
+        "out_of_window_game_ids": sorted(offending_ids),
+        "out_of_window_identity_sha256": source_identity_sha256(offending_ids),
     }
 
 
@@ -414,7 +550,7 @@ def _continuity_baseline(
         and source_identity_sha256(state_ids) == binding["identity_sha256"]
     ):
         return state_ids, binding
-    current_source = validate_live_source(config.data_root, [])
+    current_source = validate_live_source(config.data_root, [], years=config.years)
     if (
         current_source["game_count"] != binding["game_count"]
         or current_source["identity_sha256"] != binding["identity_sha256"]
@@ -430,11 +566,25 @@ def _continuity_baseline(
                 and len(state_ids) >= binding["game_count"]
                 and set(index_ids) <= set(state_ids)
             ):
-                # A bootstrap recovery seeded the worker with a validated
-                # source that covers the active release's own published game
-                # index. The worker is current or ahead; the next publication
-                # supersedes the active release.
-                return state_ids, binding
+                # A bootstrap recovery seeded the worker with a source that
+                # covers the active release's own published game index, but
+                # the raw superset can be contaminated with games outside the
+                # declared publication window (e.g. a prior year's maps that
+                # never left worker state). The unfiltered superset is never
+                # trusted directly: only restricting it to the published
+                # pack's declared window years and reproducing the exact
+                # published binding proves continuity.
+                window_years = _published_window_years(config.public_root)
+                filtered_ids = _year_filtered_ids(config.data_root, state_ids, window_years)
+                if (
+                    len(filtered_ids) == binding["game_count"]
+                    and source_identity_sha256(filtered_ids) == binding["identity_sha256"]
+                ):
+                    return filtered_ids, binding
+                raise RefreshValidationError(
+                    "recovery-seeded source does not reproduce the published pack inside its "
+                    f"declared publication window {list(window_years)}; exact continuity cannot be proved"
+                )
             raise RefreshValidationError(
                 "current source cache does not match the published pack; exact continuity cannot be proved"
             )
@@ -831,7 +981,7 @@ def sync_once(
             _write_health(config, "ok", checked_at, pack_id=result["pack_id"])
             return result
         build_live_fn(config.data_root)
-        candidate_source = validate_live_fn(config.data_root, [])
+        candidate_source = validate_live_fn(config.data_root, [], years=config.years)
         candidate_continuity = validate_source_continuity(
             baseline_ids, candidate_source, published_source
         )
@@ -857,7 +1007,7 @@ def sync_once(
             _atomic_json(config.state_path, {**state, **result, "published_game_ids": sorted(known)})
             _write_health(config, status if status != "no_change" else "ok", checked_at, pending_game_ids=pending_ids)
             return result
-        source = validate_live_fn(config.data_root, new_ids)
+        source = validate_live_fn(config.data_root, new_ids, years=config.years)
         publish_ids = sorted(
             set(baseline_ids)
             .difference(candidate_continuity["quarantined_game_ids"])

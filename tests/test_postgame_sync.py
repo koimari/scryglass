@@ -113,19 +113,29 @@ def _ingest(root: Path, game_ids: list[str], complete: bool = True):
     return run
 
 
+DEFAULT_LIVE_DATE = "2026-06-01T00:00:00Z"
+
+
 def _write_live(
     root: Path,
     game_id: str | list[str],
     missing_player: bool = False,
     missing_statistics: bool = False,
     partial_source: bool = False,
+    dates: str | dict[str, str] | None = None,
 ) -> None:
     game_ids = [game_id] if isinstance(game_id, str) else game_id
     live = root / "data/lol/warehouse/parquet/oe_live"
     live.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([{"game_uid": value} for value in game_ids]).to_parquet(
-        live / "maps.parquet", index=False
-    )
+
+    def date_for(value: str) -> str:
+        if isinstance(dates, dict):
+            return dates.get(value, DEFAULT_LIVE_DATE)
+        return dates or DEFAULT_LIVE_DATE
+
+    pd.DataFrame(
+        [{"game_uid": value, "date": date_for(value)} for value in game_ids]
+    ).to_parquet(live / "maps.parquet", index=False)
     pd.DataFrame(
         [
             {
@@ -208,10 +218,80 @@ def test_no_new_game_skips_all_rebuild_work(tmp_path: Path) -> None:
     assert result["status"] == "no_change"
 
 
-def test_continuity_baseline_accepts_a_recovery_seeded_superset(tmp_path: Path) -> None:
+def test_continuity_baseline_restricts_a_recovery_seeded_superset_to_the_window(
+    tmp_path: Path,
+) -> None:
+    """A contaminated recovery seed is trusted only after window restriction.
+
+    Reproduces the 2026-08-17 release blocker: worker state held the published
+    maps plus out-of-window prior-year maps that never left the local cache.
+    The unfiltered superset must never become the continuity baseline; only the
+    window-restricted set that reproduces the published binding may.
+    """
+
     release_ids = ["oe:game:a", "oe:game:b"]
-    seeded_ids = ["oe:game:a", "oe:game:b", "oe:game:c"]
+    out_of_window_id = "oe:game:c"
+    seeded_ids = [*release_ids, out_of_window_id]
     config = _config(tmp_path)
+    _write_live(
+        tmp_path,
+        seeded_ids,
+        dates={
+            "oe:game:a": "2026-03-01T00:00:00Z",
+            "oe:game:b": "2026-03-02T00:00:00Z",
+            out_of_window_id: "2024-03-03T00:00:00Z",
+        },
+    )
+    config.public_root.mkdir(parents=True)
+    (config.public_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "v2026.08.10.001500",
+                "ratings": {
+                    "source_game_count": len(release_ids),
+                    "source_identity_sha256": source_identity_sha256(release_ids),
+                    "window_years": [2026],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = {
+        "pack_id": "v2026.08.10.001500",
+        "published_game_ids": seeded_ids,
+        "release_index_game_ids": release_ids,
+    }
+    with patch.object(
+        postgame_sync,
+        "validate_live_source",
+        return_value={
+            "game_ids": seeded_ids,
+            "game_count": len(seeded_ids),
+            "identity_sha256": source_identity_sha256(seeded_ids),
+            "legacy_identity_game_ids": [],
+        },
+    ):
+        baseline, binding = postgame_sync._continuity_baseline(config, state)
+
+    assert baseline == release_ids
+    assert out_of_window_id not in baseline
+    assert source_identity_sha256(baseline) == source_identity_sha256(release_ids)
+    assert binding == {
+        "pack_id": "v2026.08.10.001500",
+        "game_count": len(release_ids),
+        "identity_sha256": source_identity_sha256(release_ids),
+    }
+
+
+def test_continuity_baseline_rejects_a_superset_without_a_declared_window(
+    tmp_path: Path,
+) -> None:
+    """An undeclared publication window fails closed instead of guessing."""
+
+    release_ids = ["oe:game:a", "oe:game:b"]
+    seeded_ids = [*release_ids, "oe:game:c"]
+    config = _config(tmp_path)
+    _write_live(tmp_path, seeded_ids)
     config.public_root.mkdir(parents=True)
     (config.public_root / "manifest.json").write_text(
         json.dumps(
@@ -240,14 +320,8 @@ def test_continuity_baseline_accepts_a_recovery_seeded_superset(tmp_path: Path) 
             "legacy_identity_game_ids": [],
         },
     ):
-        baseline, binding = postgame_sync._continuity_baseline(config, state)
-
-    assert baseline == seeded_ids
-    assert binding == {
-        "pack_id": "v2026.08.10.001500",
-        "game_count": len(release_ids),
-        "identity_sha256": source_identity_sha256(release_ids),
-    }
+        with pytest.raises(RefreshValidationError, match="publication window years"):
+            postgame_sync._continuity_baseline(config, state)
 
 
 def test_continuity_baseline_rejects_a_state_without_a_release_index(tmp_path: Path) -> None:
@@ -516,13 +590,13 @@ def test_pack_candidate_cannot_stage_inside_web_public_directory(
 def test_live_validation_rejects_incomplete_players(tmp_path: Path) -> None:
     _write_live(tmp_path, "game-2", missing_player=True)
     with pytest.raises(RefreshValidationError, match="complete OE source set"):
-        validate_live_source(tmp_path, ["game-2"])
+        validate_live_source(tmp_path, ["game-2"], years=(2025, 2026))
 
 
 def test_live_validation_rejects_incomplete_player_statistics(tmp_path: Path) -> None:
     _write_live(tmp_path, "game-2", missing_statistics=True)
     with pytest.raises(RefreshValidationError, match="complete OE source set"):
-        validate_live_source(tmp_path, ["game-2"])
+        validate_live_source(tmp_path, ["game-2"], years=(2025, 2026))
 
 
 def test_live_validation_keeps_source_labelled_partial_map_pending(
@@ -530,10 +604,81 @@ def test_live_validation_keeps_source_labelled_partial_map_pending(
 ) -> None:
     _write_live(tmp_path, "game-2", partial_source=True)
 
-    source = validate_live_source(tmp_path, [])
+    source = validate_live_source(tmp_path, [], years=(2025, 2026))
 
     assert source["game_ids"] == ["game-2"]
     assert source["statistics_complete_game_ids"] == []
+
+
+def test_live_validation_rejects_a_map_outside_the_publication_window(
+    tmp_path: Path,
+) -> None:
+    _write_live(
+        tmp_path,
+        ["game-1", "game-2"],
+        dates={"game-1": "2026-06-01T00:00:00Z", "game-2": "2024-11-03T00:00:00Z"},
+    )
+
+    with pytest.raises(RefreshValidationError) as excinfo:
+        validate_live_source(tmp_path, [], years=(2025, 2026))
+
+    message = str(excinfo.value)
+    assert "outside the publication window" in message
+    assert "1 games" in message
+    assert "2024" in message
+
+
+def test_live_validation_can_exclude_out_of_window_maps_for_the_bootstrap(
+    tmp_path: Path,
+) -> None:
+    """The bootstrap must be able to read a contaminated cache, unmocked.
+
+    This exercises the real validator against a real contaminated cache. The
+    continuity bootstrap has to obtain the in-window population from a cache it
+    already knows holds out-of-window rows; if this mode were absent or ordered
+    after the strict whole-cache check, the bootstrap could never recover from
+    the exact scenario it exists for.
+    """
+
+    _write_live(
+        tmp_path,
+        ["game-1", "game-2", "game-3"],
+        dates={
+            "game-1": "2026-06-01T00:00:00Z",
+            "game-2": "2025-04-02T00:00:00Z",
+            "game-3": "2024-11-03T00:00:00Z",
+        },
+    )
+
+    source = validate_live_source(
+        tmp_path,
+        [],
+        years=(2025, 2026),
+        exclude_out_of_window=True,
+    )
+
+    assert source["game_ids"] == ["game-1", "game-2"]
+    assert "game-3" not in source["game_ids"]
+    assert source["game_count"] == 2
+    assert source["identity_sha256"] == source_identity_sha256(["game-1", "game-2"])
+    # The exclusion is auditable, never silent.
+    assert source["out_of_window_game_ids"] == ["game-3"]
+    assert source["out_of_window_identity_sha256"] == source_identity_sha256(["game-3"])
+
+    # The same cache still fails closed by default.
+    with pytest.raises(RefreshValidationError, match="outside the publication window"):
+        validate_live_source(tmp_path, [], years=(2025, 2026))
+
+
+def test_live_validation_reports_no_exclusions_for_a_clean_cache(tmp_path: Path) -> None:
+    """A clean cache reports an empty exclusion set in both modes."""
+
+    _write_live(tmp_path, ["game-1", "game-2"])
+
+    for kwargs in ({}, {"exclude_out_of_window": True}):
+        source = validate_live_source(tmp_path, [], years=(2025, 2026), **kwargs)
+        assert source["out_of_window_game_ids"] == []
+        assert source["game_count"] == 2
 
 
 def test_source_continuity_rejects_a_disappearing_published_game(tmp_path: Path) -> None:
@@ -582,7 +727,7 @@ def test_live_validation_uses_fallback_game_identity_columns(tmp_path: Path) -> 
         frame["game_uid"] = ""
         frame.to_parquet(path, index=False)
 
-    result = validate_live_source(tmp_path, ["game-2"])
+    result = validate_live_source(tmp_path, ["game-2"], years=(2025, 2026))
 
     assert result["game_ids"] == ["game-2"]
 
