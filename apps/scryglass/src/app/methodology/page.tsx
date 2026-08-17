@@ -95,7 +95,7 @@ export default function MethodologyPage() {
         </section>
 
         <section id="composition-signal">
-          <h2>Composition signal</h2>
+          <h2>Draft Score</h2>
           <p>
             Draft Score is a private research track. Public pages withhold its
             probabilities, team summaries, and pick contributions until an

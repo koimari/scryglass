@@ -456,11 +456,11 @@ function CompositionEvidence({
     return picks.find((pick) => pick.side === side && pick.role === modelRole);
   };
   return (
-    <section className={styles.compositionSignal} aria-label="Composition signal">
+    <section className={styles.compositionSignal} aria-label="Draft Score">
       <div className={styles.compositionHeader}>
         <div>
           <p>Before the game</p>
-          <h2>Composition signal</h2>
+          <h2>Draft Score</h2>
         </div>
         <span className={`${styles.compositionStatus} ${styles[`composition${status[0].toUpperCase()}${status.slice(1)}`]}`}>
           {status === "available" ? "Available" : status === "limited" ? "Limited evidence" : "Unavailable"}
@@ -530,7 +530,7 @@ function CompositionEvidence({
             </div>
           </div>
           <p className={styles.compositionLegend}>
-            Draft edge is a descriptive composition signal in model units. It is separate from match results, team rating, and calibrated probability.
+            Draft Score measures the ten-pick composition in model units. It is separate from match results, team rating, and calibrated probability.
           </p>
           <p className={styles.compositionLegend}>
             Match strength covers team rating, lineup strength, uncertainty, form, and momentum in its own section. Phase and pace evidence remain separate.

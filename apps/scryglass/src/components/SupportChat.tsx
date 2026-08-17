@@ -370,7 +370,7 @@ function resultTable(result: unknown, call: ToolCall): React.ReactNode {
         <p className={styles.queryHeadline} data-testid="team-draft-query-headline">{query.answer.headline}</p>
         <p className={styles.queryBasis}>{query.answer.basis}</p>
         <p className={styles.queryCaveat}>{query.answer.caveat}</p>
-        {query.rows.length ? <DataBars className={styles.chatChart} title="Draft edge" description="Descriptive composition signal in model units" rows={chartRows} domain={{ min: Math.min(0, ...chartRows.map((row) => row.value)), max: Math.max(0, ...chartRows.map((row) => row.value)) }} baseline={0} baselineLabel="0 even" axisLeft="lower" axisRight="higher" /> : null}
+        {query.rows.length ? <DataBars className={styles.chatChart} title="Draft Score" description="Ten-pick composition score in model units" rows={chartRows} domain={{ min: Math.min(0, ...chartRows.map((row) => row.value)), max: Math.max(0, ...chartRows.map((row) => row.value)) }} baseline={0} baselineLabel="0 even" axisLeft="lower" axisRight="higher" /> : null}
         {query.rows.length ? table(
           <table className={styles.resultTable}>
             <thead><tr><th>Team</th><th className={styles.numeric}>Draft edge</th><th className={styles.numeric}>Complete drafts</th></tr></thead>
