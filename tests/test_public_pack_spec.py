@@ -18,12 +18,14 @@ from lol_kills.export.pack_records import (
     public_team_affiliation,
 )
 from lol_kills.export.public_pack import (
+    ROOT,
     _attach_public_team_evidence,
     _attach_published_draft_pools,
     _champion_image_urls,
     _complete_player_game_ids,
     _draft_publication_decision,
     _gate_published_draft_contributions,
+    _load_descriptive_authority,
     _load_tier_payload,
     _profile_archive_frame,
     _ensure_year_column,
@@ -96,6 +98,27 @@ def test_build_draft_records_payload() -> None:
         signals, games + [{"game_uid": "g2", "date": "2026-08-02"}], None
     )
     assert "g2" not in payload2["games"]
+
+
+def test_checked_in_descriptive_authority_receipt_binds_current_scorer_code() -> None:
+    """Regression guard for the outage where the descriptive receipt went
+    stale: the checked-in `composition-descriptive-authority.json` must
+    keep binding the live scorer/recipe/artifact hashes. If someone edits
+    `descriptive_draft_score.py` (or the recipe/artifact it depends on)
+    without re-issuing the receipt, this must fail instead of silently
+    shipping a release with Draft Score UNAVAILABLE.
+    """
+
+    authority, receipt_sha256 = _load_descriptive_authority(ROOT)
+
+    scorer_path = ROOT / "lol_kills" / "research" / "descriptive_draft_score.py"
+    assert authority["scorer_code_sha256"] == hashlib.sha256(
+        scorer_path.read_bytes()
+    ).hexdigest()
+    assert len(receipt_sha256) == 64
+    assert authority["probability_authority"] is False
+    assert authority["recommendation_authority"] is False
+    assert authority["betting_authority"] is False
 
 
 def test_failed_draft_promotion_keeps_factual_profile_rows_publishable() -> None:

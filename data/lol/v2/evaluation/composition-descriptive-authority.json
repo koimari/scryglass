@@ -11,7 +11,7 @@
   "artifact_sha256": "3a42542710e8a61f11f740ff85965d7f4541724575c3dc7fd063872b7a0c71fe",
   "artifact_commit": "87bcff462f6005269b94fd9e604c9e8b2b5ec9c0",
   "scorer_code_path": "lol_kills/research/descriptive_draft_score.py",
-  "scorer_code_sha256": "aeaf052aa7e7cd26c00f5b1096f6a94d5b0b8fa5be8609d8e093caa83d90d45f",
+  "scorer_code_sha256": "81cc384c87926e2540dfa9829c3fcfa109b3483595ca154b4ec6046ff1a39c3f",
   "feature_schema": {
     "id": "scryglass:draft-descriptive-features:v1",
     "sha256": null,
