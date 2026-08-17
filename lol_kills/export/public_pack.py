@@ -2040,6 +2040,69 @@ def export_public_pack(
         _gate_published_draft_contributions(
             profile_records_payload,
         )
+        # Player best-available evidence needs complete ban, order and pool
+        # evidence, a narrower denominator than team Draft coverage, which
+        # keeps every scoreable complete draft in team_draft_records_payload.
+        # Restrict the published Draft records to games whose pool survived the
+        # archive gate above. This keeps pool presence identical on both sides,
+        # which the bounded query projection requires, and leaves every
+        # published record pool-complete, which the Supabase publisher
+        # requires. Records are dropped only when their pool evidence is
+        # incomplete; the whole-archive team payload is untouched.
+        if draft_records_payload is not None:
+            gated_games = profile_records_payload.get("games", {})
+            records = draft_records_payload.get("games")
+            if isinstance(records, dict):
+                for record_game_id in list(records):
+                    archive_game = gated_games.get(record_game_id)
+                    archive_pool = (
+                        archive_game.get("draft_pool")
+                        if isinstance(archive_game, Mapping)
+                        else None
+                    )
+                    if (
+                        not isinstance(archive_pool, Mapping)
+                        or archive_pool.get("status") != "complete"
+                    ):
+                        records.pop(record_game_id, None)
+        # The bounded query API accepts a descriptive Draft pick only when its
+        # evidence_status is exactly 'available'
+        # (supabase/migrations/20260815060001_descriptive_draft_query_api.sql:135).
+        # The projection sanitizer also admits 'role_estimate'
+        # (lol_kills/export/public_query_projection.py:427), so a game whose
+        # role was estimated rather than observed passes every client check and
+        # is then refused by the server, which reports the refusal as an
+        # invalid canonical row digest. Drop the Draft evidence for those games
+        # here, on both sides together, so the archive and the records stay
+        # symmetric for the projection and no unpublishable signal is staged.
+        # The signal is withheld rather than downgraded: an estimated role is
+        # weaker evidence than the descriptive lane asserts.
+        archive_games = profile_records_payload.get("games")
+        if isinstance(archive_games, dict):
+            record_games = (
+                draft_records_payload.get("games")
+                if isinstance(draft_records_payload, Mapping)
+                else None
+            )
+            for archive_game_id in list(archive_games):
+                archive_game = archive_games.get(archive_game_id)
+                if not isinstance(archive_game, Mapping):
+                    continue
+                signal = archive_game.get("draft_contribution")
+                if not isinstance(signal, Mapping):
+                    continue
+                picks = signal.get("picks")
+                if not isinstance(picks, list):
+                    continue
+                if any(
+                    not isinstance(pick, Mapping)
+                    or pick.get("evidence_status") != "available"
+                    for pick in picks
+                ):
+                    archive_game.pop("draft_contribution", None)
+                    archive_game.pop("draft_pool", None)
+                    if isinstance(record_games, dict):
+                        record_games.pop(archive_game_id, None)
         if not tier_payload_source:
             raise RuntimeError(
                 "descriptive Draft release requires an available generated tier payload"
