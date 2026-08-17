@@ -60,6 +60,8 @@ def _verify_receipt(value: Mapping[str, Any], label: str) -> None:
 
 def seal_holdout_batch(
     *,
+    protocol_path: Path,
+    expected_protocol_sha256: str,
     candidate_path: Path,
     expected_candidate_sha256: str,
     features_path: Path,
@@ -77,9 +79,39 @@ def seal_holdout_batch(
 
     if output_path.exists() or receipt_output_path.exists():
         raise SelectiveDraftHoldoutSealError("holdout output already exists")
+    protocol = _verified_json(
+        protocol_path, expected_protocol_sha256, "protocol"
+    )
     candidate = _verified_json(
         candidate_path, expected_candidate_sha256, "candidate"
     )
+    holdout = protocol.get("next_holdout")
+    if (
+        not isinstance(holdout, dict)
+        or holdout.get("candidate_artifact_sha256") != expected_candidate_sha256
+        or holdout.get("candidate_receipt_sha256")
+        != candidate.get("receipt_sha256")
+    ):
+        raise SelectiveDraftHoldoutSealError("protocol candidate binding changed")
+    project_root = Path(__file__).resolve().parents[2]
+    implementations = {
+        "implementation_sha256": "lol_kills/research/selective_draft_probability.py",
+        "constituent_implementation_sha256": "lol_kills/research/selective_draft_constituents.py",
+        "quantum_implementation_sha256": "lol_kills/research/public_draft_score_promotion.py",
+        "draft_builder_implementation_sha256": "lol_kills/draft_recommendation.py",
+        "holdout_source_preparer_sha256": "lol_kills/research/prepare_selective_draft_holdout_sources.py",
+        "holdout_sealer_sha256": "lol_kills/research/seal_selective_draft_holdout.py",
+        "holdout_inventory_sha256": "lol_kills/research/selective_draft_holdout_inventory.py",
+        "holdout_evaluator_sha256": "lol_kills/research/evaluate_selective_draft_holdout.py",
+        "promotion_verifier_sha256": "lol_kills/research/verify_selective_draft_promotion.py",
+        "public_result_builder_sha256": "lol_kills/export/public_draft_score_result.py",
+    }
+    iteration = protocol.get("iteration")
+    if not isinstance(iteration, dict) or any(
+        iteration.get(key) != sha256_path(project_root / relative)
+        for key, relative in implementations.items()
+    ):
+        raise SelectiveDraftHoldoutSealError("protocol implementation binding changed")
     voter_receipt = _verified_json(
         voter_receipt_path,
         expected_voter_receipt_sha256,
@@ -159,6 +191,7 @@ def seal_holdout_batch(
             "end_exclusive": end.isoformat(),
         },
         "candidate_receipt_sha256": candidate.get("receipt_sha256"),
+        "protocol_file_sha256": expected_protocol_sha256,
         "voter_receipt_sha256": voter_receipt["receipt_sha256"],
         "input_sha256": {
             "candidate": expected_candidate_sha256,
@@ -197,6 +230,8 @@ def seal_holdout_batch(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--protocol", type=Path, required=True)
+    parser.add_argument("--protocol-sha256", required=True)
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--candidate-sha256", required=True)
     parser.add_argument("--features", type=Path, required=True)
@@ -211,6 +246,8 @@ def main() -> None:
     parser.add_argument("--receipt-output", type=Path, required=True)
     args = parser.parse_args()
     receipt = seal_holdout_batch(
+        protocol_path=args.protocol,
+        expected_protocol_sha256=args.protocol_sha256,
         candidate_path=args.candidate,
         expected_candidate_sha256=args.candidate_sha256,
         features_path=args.features,

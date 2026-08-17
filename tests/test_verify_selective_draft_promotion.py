@@ -29,6 +29,7 @@ def _inputs(tmp_path: Path) -> tuple[Path, str, Path, str]:
             "status": "independent_promotion_receipt_required",
             "gates": {"passed": True},
             "candidate_receipt_sha256": "a" * 64,
+            "protocol_file_sha256": "c" * 64,
             "outcomes_sha256": "b" * 64,
             "public_probability": False,
             "public_recommendation": False,

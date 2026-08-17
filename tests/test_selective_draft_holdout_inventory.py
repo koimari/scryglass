@@ -28,6 +28,7 @@ def _batch(
             "end_exclusive": f"2026-08-{day + 1:02d}T00:00:00+00:00",
         },
         "candidate_receipt_sha256": candidate,
+        "protocol_file_sha256": "c" * 64,
         "game_ids": game_ids,
         "game_ids_sha256": canonical_sha256(game_ids),
         "rows": rows,

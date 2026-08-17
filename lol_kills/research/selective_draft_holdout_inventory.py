@@ -68,6 +68,13 @@ def summarize_holdout_inventory(
     candidate_receipts = {item.get("candidate_receipt_sha256") for item in batches}
     if len(candidate_receipts) != 1 or None in candidate_receipts:
         raise SelectiveDraftHoldoutInventoryError("candidate receipt changed")
+    protocol_files = {item.get("protocol_file_sha256") for item in batches}
+    if (
+        len(protocol_files) != 1
+        or None in protocol_files
+        or not isinstance(next(iter(protocol_files)), str)
+    ):
+        raise SelectiveDraftHoldoutInventoryError("protocol file changed")
 
     ordered = sorted(batches, key=lambda item: item["window"]["start"])
     prior_end: str | None = None
@@ -115,6 +122,7 @@ def summarize_holdout_inventory(
         "status": "ready_for_one_outcome_join" if all(gates.values()) else "waiting",
         "outcome_blind": True,
         "candidate_receipt_sha256": next(iter(candidate_receipts)),
+        "protocol_file_sha256": next(iter(protocol_files)),
         "batch_receipt_sha256": [item["receipt_sha256"] for item in ordered],
         "rows": rows,
         "selected_rows": selected_rows,

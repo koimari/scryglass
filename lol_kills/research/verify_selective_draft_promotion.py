@@ -117,6 +117,7 @@ def verify_promotion_decision(
         "authority": "promoted",
         "model_version": model_version,
         "candidate_receipt_sha256": evaluation["candidate_receipt_sha256"],
+        "protocol_file_sha256": evaluation["protocol_file_sha256"],
         "evaluation_file_sha256": expected_evaluation_sha256,
         "evaluation_receipt_sha256": evaluation["receipt_sha256"],
         "decision_file_sha256": expected_decision_sha256,

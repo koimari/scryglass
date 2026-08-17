@@ -21,6 +21,30 @@ def _write_inputs(tmp_path: Path) -> dict[str, Path]:
     }
     candidate_path = tmp_path / "candidate.json"
     candidate_path.write_text(json.dumps(candidate))
+    root = Path(__file__).resolve().parents[1]
+    implementations = {
+        "implementation_sha256": "lol_kills/research/selective_draft_probability.py",
+        "constituent_implementation_sha256": "lol_kills/research/selective_draft_constituents.py",
+        "quantum_implementation_sha256": "lol_kills/research/public_draft_score_promotion.py",
+        "draft_builder_implementation_sha256": "lol_kills/draft_recommendation.py",
+        "holdout_source_preparer_sha256": "lol_kills/research/prepare_selective_draft_holdout_sources.py",
+        "holdout_sealer_sha256": "lol_kills/research/seal_selective_draft_holdout.py",
+        "holdout_inventory_sha256": "lol_kills/research/selective_draft_holdout_inventory.py",
+        "holdout_evaluator_sha256": "lol_kills/research/evaluate_selective_draft_holdout.py",
+        "promotion_verifier_sha256": "lol_kills/research/verify_selective_draft_promotion.py",
+        "public_result_builder_sha256": "lol_kills/export/public_draft_score_result.py",
+    }
+    protocol = {
+        "iteration": {
+            key: _sha(root / relative) for key, relative in implementations.items()
+        },
+        "next_holdout": {
+            "candidate_artifact_sha256": _sha(candidate_path),
+            "candidate_receipt_sha256": candidate["receipt_sha256"],
+        },
+    }
+    protocol_path = tmp_path / "protocol.json"
+    protocol_path.write_text(json.dumps(protocol))
     features = pd.DataFrame(
         {
             "game_uid": ["game-a", "game-b"],
@@ -53,6 +77,7 @@ def _write_inputs(tmp_path: Path) -> dict[str, Path]:
     voter_receipt_path = tmp_path / "voter-receipt.json"
     voter_receipt_path.write_text(json.dumps(voter_receipt))
     return {
+        "protocol": protocol_path,
         "candidate": candidate_path,
         "features": features_path,
         "voters": voters_path,
@@ -78,6 +103,8 @@ def test_seal_holdout_batch_is_outcome_blind_and_receipt_bound(
     receipt_output = tmp_path / "sealed.receipt.json"
 
     receipt = seal.seal_holdout_batch(
+        protocol_path=paths["protocol"],
+        expected_protocol_sha256=_sha(paths["protocol"]),
         candidate_path=paths["candidate"],
         expected_candidate_sha256=_sha(paths["candidate"]),
         features_path=paths["features"],
@@ -121,6 +148,8 @@ def test_seal_holdout_batch_rejects_result_fields(
         seal.SelectiveDraftHoldoutSealError, match="forbidden fields"
     ):
         seal.seal_holdout_batch(
+            protocol_path=paths["protocol"],
+            expected_protocol_sha256=_sha(paths["protocol"]),
             candidate_path=paths["candidate"],
             expected_candidate_sha256=_sha(paths["candidate"]),
             features_path=paths["features"],

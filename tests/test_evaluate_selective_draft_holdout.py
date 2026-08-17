@@ -31,7 +31,33 @@ def _candidate(path: Path) -> tuple[Path, str, str]:
     return path, sha256_path(path), str(value["receipt_sha256"])
 
 
-def _receipt(candidate_receipt: str, game_ids: list[str], selected: int) -> dict[str, object]:
+def _protocol(
+    path: Path, candidate_sha: str, candidate_receipt: str
+) -> tuple[Path, str]:
+    value = {
+        "next_holdout": {
+            "candidate_artifact_sha256": candidate_sha,
+            "candidate_receipt_sha256": candidate_receipt,
+            "minimum_selected_rows": 100,
+            "minimum_eligible_coverage": 0.75,
+            "minimum_auc": 0.710,
+            "maximum_brier_delta_vs_quantum": 0.0,
+            "maximum_log_loss_delta_vs_quantum": 0.0,
+            "maximum_ece_10": 0.08,
+            "minimum_leagues_with_20_selected_rows": 3,
+            "series_cluster_bootstrap_median_auc_minimum": 0.710,
+        }
+    }
+    path.write_text(json.dumps(value), encoding="utf-8")
+    return path, sha256_path(path)
+
+
+def _receipt(
+    candidate_receipt: str,
+    protocol_sha: str,
+    game_ids: list[str],
+    selected: int,
+) -> dict[str, object]:
     leagues = {"LCK": 40, "LEC": 40, "LPL": 40}
     return _signed(
         {
@@ -42,6 +68,7 @@ def _receipt(candidate_receipt: str, game_ids: list[str], selected: int) -> dict
                 "end_exclusive": "2026-09-01T00:00:00+00:00",
             },
             "candidate_receipt_sha256": candidate_receipt,
+            "protocol_file_sha256": protocol_sha,
             "rows": len(game_ids),
             "selected_rows": selected,
             "coverage": selected / len(game_ids),
@@ -60,7 +87,15 @@ def test_outcomes_remain_unread_before_inventory_gate(
     candidate_path, candidate_sha, candidate_receipt = _candidate(
         tmp_path / "candidate.json"
     )
-    receipt = _receipt(candidate_receipt, [f"game-{index}" for index in range(14)], 13)
+    protocol_path, protocol_sha = _protocol(
+        tmp_path / "protocol.json", candidate_sha, candidate_receipt
+    )
+    receipt = _receipt(
+        candidate_receipt,
+        protocol_sha,
+        [f"game-{index}" for index in range(14)],
+        13,
+    )
     receipt_path = tmp_path / "receipt.json"
     receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
     monkeypatch.setattr(pd, "read_parquet", lambda *_args, **_kwargs: pytest.fail("read"))
@@ -69,6 +104,8 @@ def test_outcomes_remain_unread_before_inventory_gate(
         SelectiveDraftHoldoutEvaluationError, match="outcomes remain sealed"
     ):
         evaluate_sealed_holdout(
+            protocol_path=protocol_path,
+            expected_protocol_sha256=protocol_sha,
             candidate_path=candidate_path,
             expected_candidate_sha256=candidate_sha,
             receipt_paths=[receipt_path],
@@ -84,6 +121,9 @@ def test_ready_inventory_produces_independent_review_request(
 ) -> None:
     candidate_path, candidate_sha, candidate_receipt = _candidate(
         tmp_path / "candidate.json"
+    )
+    protocol_path, protocol_sha = _protocol(
+        tmp_path / "protocol.json", candidate_sha, candidate_receipt
     )
     game_ids = [f"game-{index:03d}" for index in range(120)]
     leagues = ["LCK", "LEC", "LPL"]
@@ -109,7 +149,7 @@ def test_ready_inventory_produces_independent_review_request(
     )
     sealed_path = tmp_path / "sealed.parquet"
     sealed.to_parquet(sealed_path, index=False)
-    receipt = _receipt(candidate_receipt, game_ids, 120)
+    receipt = _receipt(candidate_receipt, protocol_sha, game_ids, 120)
     receipt["output_sha256"] = sha256_path(sealed_path)
     receipt.pop("receipt_sha256")
     receipt = _signed(receipt)
@@ -123,6 +163,8 @@ def test_ready_inventory_produces_independent_review_request(
     )
 
     report = evaluate_sealed_holdout(
+        protocol_path=protocol_path,
+        expected_protocol_sha256=protocol_sha,
         candidate_path=candidate_path,
         expected_candidate_sha256=candidate_sha,
         receipt_paths=[receipt_path],

@@ -46,6 +46,8 @@ def _receipt_matches(value: Mapping[str, Any]) -> bool:
 
 def evaluate_sealed_holdout(
     *,
+    protocol_path: Path,
+    expected_protocol_sha256: str,
     candidate_path: Path,
     expected_candidate_sha256: str,
     receipt_paths: Sequence[Path],
@@ -60,14 +62,21 @@ def evaluate_sealed_holdout(
         raise SelectiveDraftHoldoutEvaluationError("evaluation output already exists")
     if len(receipt_paths) != len(sealed_paths) or not receipt_paths:
         raise SelectiveDraftHoldoutEvaluationError("batch inputs do not align")
-    if not re.fullmatch(r"[0-9a-f]{64}", expected_candidate_sha256):
-        raise SelectiveDraftHoldoutEvaluationError("candidate SHA-256 is invalid")
+    for expected, label in (
+        (expected_protocol_sha256, "protocol"),
+        (expected_candidate_sha256, "candidate"),
+    ):
+        if not re.fullmatch(r"[0-9a-f]{64}", expected):
+            raise SelectiveDraftHoldoutEvaluationError(f"{label} SHA-256 is invalid")
+    if not protocol_path.is_file() or sha256_path(protocol_path) != expected_protocol_sha256:
+        raise SelectiveDraftHoldoutEvaluationError("protocol changed")
     if (
         not candidate_path.is_file()
         or sha256_path(candidate_path) != expected_candidate_sha256
     ):
         raise SelectiveDraftHoldoutEvaluationError("candidate changed")
     candidate = _json(candidate_path)
+    protocol = _json(protocol_path)
     if not _receipt_matches(candidate):
         raise SelectiveDraftHoldoutEvaluationError("candidate receipt changed")
 
@@ -79,6 +88,26 @@ def evaluate_sealed_holdout(
         )
     if inventory.get("candidate_receipt_sha256") != candidate.get("receipt_sha256"):
         raise SelectiveDraftHoldoutEvaluationError("candidate binding changed")
+    if inventory.get("protocol_file_sha256") != expected_protocol_sha256:
+        raise SelectiveDraftHoldoutEvaluationError("protocol binding changed")
+    holdout = protocol.get("next_holdout")
+    required_gates = {
+        "minimum_selected_rows": 100,
+        "minimum_eligible_coverage": 0.75,
+        "minimum_auc": 0.710,
+        "maximum_brier_delta_vs_quantum": 0.0,
+        "maximum_log_loss_delta_vs_quantum": 0.0,
+        "maximum_ece_10": 0.08,
+        "minimum_leagues_with_20_selected_rows": 3,
+        "series_cluster_bootstrap_median_auc_minimum": 0.710,
+    }
+    if (
+        not isinstance(holdout, dict)
+        or any(holdout.get(key) != value for key, value in required_gates.items())
+        or holdout.get("candidate_artifact_sha256") != expected_candidate_sha256
+        or holdout.get("candidate_receipt_sha256") != candidate.get("receipt_sha256")
+    ):
+        raise SelectiveDraftHoldoutEvaluationError("protocol gates changed")
 
     batches: list[pd.DataFrame] = []
     for receipt, sealed_path in zip(receipts, sealed_paths):
@@ -143,6 +172,7 @@ def evaluate_sealed_holdout(
         ),
         "authority": "unavailable",
         "candidate_receipt_sha256": candidate["receipt_sha256"],
+        "protocol_file_sha256": expected_protocol_sha256,
         "inventory_receipt_sha256": inventory["receipt_sha256"],
         "batch_receipt_sha256": inventory["batch_receipt_sha256"],
         "outcomes_sha256": expected_outcomes_sha256,
@@ -170,6 +200,8 @@ def evaluate_sealed_holdout(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--protocol", type=Path, required=True)
+    parser.add_argument("--protocol-sha256", required=True)
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--candidate-sha256", required=True)
     parser.add_argument("--receipt", type=Path, action="append", required=True)
@@ -179,6 +211,8 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     report = evaluate_sealed_holdout(
+        protocol_path=args.protocol,
+        expected_protocol_sha256=args.protocol_sha256,
         candidate_path=args.candidate,
         expected_candidate_sha256=args.candidate_sha256,
         receipt_paths=args.receipt,
