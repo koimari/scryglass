@@ -93,6 +93,14 @@ def verify_promotion_decision(
         raise SelectiveDraftPromotionVerificationError(
             "paired Draft intervention evidence is invalid"
         )
+    candidate_artifact_sha256 = evaluation.get("candidate_artifact_sha256")
+    if (
+        not isinstance(candidate_artifact_sha256, str)
+        or not SHA256_PATTERN.fullmatch(candidate_artifact_sha256)
+    ):
+        raise SelectiveDraftPromotionVerificationError(
+            "candidate artifact binding is invalid"
+        )
     if (
         decision.get("schema_version") != DECISION_SCHEMA_VERSION
         or decision.get("decision") != "promoted"
@@ -128,6 +136,7 @@ def verify_promotion_decision(
         "status": "promoted",
         "authority": "promoted",
         "model_version": model_version,
+        "candidate_artifact_sha256": candidate_artifact_sha256,
         "candidate_receipt_sha256": evaluation["candidate_receipt_sha256"],
         "protocol_file_sha256": evaluation["protocol_file_sha256"],
         "evaluation_file_sha256": expected_evaluation_sha256,

@@ -210,6 +210,7 @@ def evaluate_sealed_holdout(
             else "promotion_gate_failed"
         ),
         "authority": "unavailable",
+        "candidate_artifact_sha256": expected_candidate_sha256,
         "candidate_receipt_sha256": candidate["receipt_sha256"],
         "protocol_file_sha256": expected_protocol_sha256,
         "inventory_receipt_sha256": inventory["receipt_sha256"],

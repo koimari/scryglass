@@ -28,6 +28,7 @@ def _inputs(tmp_path: Path) -> tuple[Path, str, Path, str]:
             "schema_version": "scryglass:selective-draft-holdout-evaluation:v1",
             "status": "independent_promotion_receipt_required",
             "gates": {"passed": True},
+            "candidate_artifact_sha256": "e" * 64,
             "candidate_receipt_sha256": "a" * 64,
             "protocol_file_sha256": "c" * 64,
             "outcomes_sha256": "b" * 64,
@@ -72,6 +73,7 @@ def test_independent_decision_creates_promoted_receipt(tmp_path: Path) -> None:
     assert receipt["public_probability"] is True
     assert receipt["public_recommendation"] is True
     assert receipt["betting_odds_ev_stake"] is False
+    assert receipt["candidate_artifact_sha256"] == "e" * 64
     assert receipt["controlled_intervention_receipt_sha256"] == ["d" * 64]
 
 

@@ -207,6 +207,7 @@ def test_ready_inventory_produces_independent_review_request(
     assert report["gates"]["passed"] is True
     assert report["status"] == "independent_promotion_receipt_required"
     assert report["authority"] == "unavailable"
+    assert report["candidate_artifact_sha256"] == candidate_sha
     assert report["public_probability"] is False
     assert report["metrics"]["auc"] == 1.0
     assert report["controlled_intervention_receipt_sha256"] == [
