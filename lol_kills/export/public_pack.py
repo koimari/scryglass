@@ -1912,8 +1912,24 @@ def export_public_pack(
     draft_published = draft_publication["status"] in {"descriptive", "promoted"}
 
     if draft_published and tier_publication is None:
-        raise RuntimeError(
-            "published Draft releases require a release-bound tier publication"
+        if any(value is not None for value in promoted_inputs):
+            raise RuntimeError(
+                "promoted Draft releases require a release-bound tier publication"
+            )
+        draft_publication = _draft_publication_decision(None)
+        draft_published = False
+        draft_records_payload = None
+        team_draft_records_payload = None
+        descriptive_publication = None
+        composition_audit.update(
+            {
+                "status": "unavailable",
+                "authority": "unavailable",
+                "reason": "release-bound tier publication is unavailable",
+                "probability_authority": False,
+                "recommendation_authority": False,
+                "betting_authority": False,
+            }
         )
 
     tier_receipt_sha256: str | None = None

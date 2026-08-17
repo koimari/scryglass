@@ -18,6 +18,7 @@ import {
   regionalOptions,
   rowsForMode,
   TIER_ROLE_ORDER,
+  tierGameCount,
   viableCandidates,
   type TierBoardMode,
   type TierBucket,
@@ -961,12 +962,7 @@ export function TierListExplorer({
   const regionalRows = serverFiltered ? rows : filterRowsByRegion(rows, scopes, activePatch, activeRegion);
   const visibleRows = filterRowsByMinimumGames(regionalRows, minimumGames);
   const patchRowCount = regionalRows.length;
-  const patchGameCount = Math.max(
-    0,
-    ...scopes
-      .filter((scope) => scope.patch === activePatch)
-      .map((scope) => (scope.regional_views ?? []).reduce((sum, view) => sum + view.maps, 0)),
-  );
+  const patchGameCount = tierGameCount(regionalRows);
   const noEvidenceAtFloor = patchRowCount > 0 && visibleRows.length === 0;
   const selectedRows = role ? visibleRows.filter((row) => row.role === role) : [];
   const selectedScope = role
