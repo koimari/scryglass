@@ -308,8 +308,12 @@ rejects `status: promoted` by design:
   only unavailable or descriptive authority.
 - `supabase/migrations/20260815060001_descriptive_draft_query_api.sql` exposes
   descriptive authority only.
-- `apps/scryglass/src/lib/pack.ts` makes
-  `hasPromotedDraftAuthority()` return `false` for every manifest.
+
+The private promotion receipt verifier now exists in
+`lol_kills/export/promoted_draft_authority.py`. The web gate now accepts a
+complete promoted authority from the sanitized active manifest. The pack
+builder, Supabase publisher, final activation migration, promoted result asset,
+and active-only query projection still need implementation.
 
 Do not open the browser gate alone. Implement the promoted lane after a valid
 promotion receipt exists, or in a separate fail-closed slice that requires that
