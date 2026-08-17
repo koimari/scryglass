@@ -36,12 +36,17 @@ from lol_kills.export.public_query_projection import (
     query_dataset_receipt,
     validate_public_query_projection,
 )
+from lol_kills.export.promoted_draft_authority import (
+    PromotedDraftAuthorityError,
+    validate_promoted_results_payload,
+)
 from lol_kills.v2.patch_identity import PatchIdentityError, public_patch
 
 
 TIER_ASSET_PATH = "rankings/tierlists.json"
 TIER_LATEST_ASSET_PATH = "rankings/tierlists-latest.json"
 DRAFT_ASSET_PATH = "features/draft_records.json"
+PROMOTED_DRAFT_RESULTS_PATH = "features/promoted_draft_results.json"
 DRAFT_AUTHORITY_SCHEMA = "scryglass:draft-authority:v1"
 DRAFT_RECORDS_SCHEMA = "scryglass:draft-records:v1"
 PUBLIC_ASSET_PATH_SET = frozenset(PUBLIC_ASSET_PATHS)
@@ -187,9 +192,50 @@ def _draft_authority(manifest: dict[str, Any], release_id: str) -> dict[str, Any
         }
     status = candidate.get("status")
     if status == "promoted":
-        raise SupabasePublicationError(
-            "Draft Score promotion requires an independent receipt verifier"
+        artifact_sha256 = candidate.get("artifact_sha256")
+        receipt_sha256 = candidate.get("receipt_sha256")
+        issued_utc = candidate.get("issued_utc")
+        model_version = candidate.get("model_version")
+        descriptive_authority = _draft_authority(
+            {"draft_authority": candidate.get("descriptive_authority")},
+            release_id,
         )
+        if (
+            candidate.get("schema_version") != DRAFT_AUTHORITY_SCHEMA
+            or candidate.get("release_id") != release_id
+            or candidate.get("authority") != "promoted"
+            or candidate.get("estimand")
+            != "prematch_map_win_probability_with_controlled_draft_intervention"
+            or not isinstance(model_version, str)
+            or not model_version.strip()
+            or not isinstance(artifact_sha256, str)
+            or not SHA256_RE.fullmatch(artifact_sha256)
+            or not isinstance(receipt_sha256, str)
+            or not SHA256_RE.fullmatch(receipt_sha256)
+            or not _valid_issued_utc(issued_utc)
+            or candidate.get("probability_authority") is not True
+            or candidate.get("recommendation_authority") is not True
+            or candidate.get("betting_authority") is not False
+            or candidate.get("reason") is not None
+            or descriptive_authority.get("status") != "descriptive"
+        ):
+            raise SupabasePublicationError("promoted Draft Score authority is invalid")
+        return {
+            "schema_version": DRAFT_AUTHORITY_SCHEMA,
+            "status": "promoted",
+            "authority": "promoted",
+            "release_id": release_id,
+            "model_version": model_version.strip(),
+            "artifact_sha256": artifact_sha256,
+            "receipt_sha256": receipt_sha256,
+            "issued_utc": issued_utc,
+            "estimand": candidate["estimand"],
+            "probability_authority": True,
+            "recommendation_authority": True,
+            "betting_authority": False,
+            "reason": None,
+            "descriptive_authority": descriptive_authority,
+        }
     if status == "descriptive":
         artifact_sha256 = candidate.get("artifact_sha256")
         receipt_sha256 = candidate.get("receipt_sha256")
@@ -1654,7 +1700,7 @@ def prepare_release(
         if not isinstance(metadata, dict):
             continue
         if path == DRAFT_ASSET_PATH:
-            if draft_authority["status"] != "descriptive":
+            if draft_authority["status"] not in {"descriptive", "promoted"}:
                 continue
             raw = _pack_asset_path(pack_dir, path).read_bytes()
             try:
@@ -1662,6 +1708,24 @@ def prepare_release(
             except (UnicodeDecodeError, json.JSONDecodeError) as error:
                 raise SupabasePublicationError("descriptive Draft asset is invalid JSON") from error
             _validate_descriptive_draft_records(draft_payload)
+        elif path == PROMOTED_DRAFT_RESULTS_PATH:
+            if draft_authority["status"] != "promoted":
+                continue
+            raw = _pack_asset_path(pack_dir, path).read_bytes()
+            try:
+                promoted_payload = json.loads(raw.decode("utf-8"))
+                validate_promoted_results_payload(
+                    promoted_payload,
+                    authority=draft_authority,
+                )
+            except (
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                PromotedDraftAuthorityError,
+            ) as error:
+                raise SupabasePublicationError(
+                    "promoted Draft result asset is invalid"
+                ) from error
         else:
             raw = _pack_asset_path(pack_dir, path).read_bytes()
         if len(raw) != metadata.get("bytes") or _sha256(raw) != metadata.get("sha256"):
@@ -1675,10 +1739,16 @@ def prepare_release(
         storage_objects[storage_path] = raw
         assets.append(asset)
 
-    if draft_authority["status"] == "descriptive" and not any(
+    if draft_authority["status"] in {"descriptive", "promoted"} and not any(
         str(asset.get("path")) == DRAFT_ASSET_PATH for asset in assets
     ):
-        raise SupabasePublicationError("descriptive Draft authority has no Draft asset")
+        raise SupabasePublicationError("published Draft authority has no Draft asset")
+    if draft_authority["status"] == "promoted" and not any(
+        str(asset.get("path")) == PROMOTED_DRAFT_RESULTS_PATH for asset in assets
+    ):
+        raise SupabasePublicationError(
+            "promoted Draft authority has no promoted result asset"
+        )
 
     tier_source_raw = tier_path.read_bytes()
     try:

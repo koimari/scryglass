@@ -34,7 +34,7 @@ test("record joins ignore source casing and harmless spacing differences", () =>
   assert.deepEqual(findRecordByName(records, "  GEN.G  "), { current_tier: "tier1" });
 });
 
-test("draft authority stays closed until an independent receipt verifier exists", () => {
+test("promoted draft authority requires a complete release-bound receipt", () => {
   const manifest = {
     pack_id: "v2026.08.13.1830",
     schema_version: "test",
@@ -54,19 +54,65 @@ test("draft authority stays closed until an independent receipt verifier exists"
     draft_authority: {
       schema_version: "scryglass:draft-authority:v1",
       status: "promoted",
+      authority: "promoted",
       release_id: manifest.pack_id,
       model_version: "draft-v1",
+      artifact_sha256: "b".repeat(64),
       receipt_sha256: "a".repeat(64),
+      issued_utc: "2026-08-13T18:31:17Z",
+      estimand: "prematch_map_win_probability_with_controlled_draft_intervention",
+      probability_authority: true,
+      recommendation_authority: true,
+      betting_authority: false,
     },
-  }), false);
+  }), true);
+  const promotedWithDescription = {
+    ...manifest,
+    draft_authority: {
+      schema_version: "scryglass:draft-authority:v1" as const,
+      status: "promoted" as const,
+      authority: "promoted" as const,
+      release_id: manifest.pack_id,
+      model_version: "draft-v1",
+      artifact_sha256: "b".repeat(64),
+      receipt_sha256: "a".repeat(64),
+      issued_utc: "2026-08-13T18:31:17Z",
+      estimand: "prematch_map_win_probability_with_controlled_draft_intervention" as const,
+      probability_authority: true,
+      recommendation_authority: true,
+      betting_authority: false,
+      descriptive_authority: {
+        schema_version: "scryglass:draft-authority:v1" as const,
+        status: "descriptive" as const,
+        authority: "descriptive" as const,
+        release_id: manifest.pack_id,
+        model_version: "draft-recommendation-static-v2",
+        artifact_sha256: "c".repeat(64),
+        receipt_sha256: "d".repeat(64),
+        issued_utc: "2026-08-13T18:31:17Z",
+        estimand: "composition_only" as const,
+        probability_authority: false as const,
+        recommendation_authority: false as const,
+        betting_authority: false as const,
+      },
+    },
+  } satisfies PackManifest;
+  assert.equal(hasDescriptiveDraftAuthority(promotedWithDescription), true);
   assert.equal(hasPromotedDraftAuthority({
     ...manifest,
     draft_authority: {
       schema_version: "scryglass:draft-authority:v1",
       status: "promoted",
+      authority: "promoted",
       release_id: "different-release",
       model_version: "draft-v1",
+      artifact_sha256: "b".repeat(64),
       receipt_sha256: "a".repeat(64),
+      issued_utc: "2026-08-13T18:31:17Z",
+      estimand: "prematch_map_win_probability_with_controlled_draft_intervention",
+      probability_authority: true,
+      recommendation_authority: true,
+      betting_authority: false,
     },
   }), false);
   const descriptive = {

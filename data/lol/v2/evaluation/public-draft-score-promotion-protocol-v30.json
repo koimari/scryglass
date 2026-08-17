@@ -1,0 +1,46 @@
+{
+  "feature_contract": {
+    "categorical_context": "exact pre-match team, player, champion, role, patch, competition, first-pick, and ban identities",
+    "current_map_state_allowed": false,
+    "final_outcome_features_allowed": false,
+    "rating_context_required": "scryglass:public-draft-score-rating-context:v1",
+    "rating_receipt_required": "scryglass:resolved-rating-source:v1",
+    "schema_version": "scryglass:atomized-rf-layer-a:v10"
+  },
+  "frozen_utc": "2026-08-17T01:58:38Z",
+  "inherits": "public-draft-score-promotion-protocol-v29.json",
+  "iteration": {
+    "id": "v30",
+    "matrix_manifest_sha256": "3faec8f2c46e4c0c139a007f80481f256f40866a3d693a2b38dc84ec2be69765",
+    "matrix_sha256": "36d48e7bd68066d782d8ad8164a87084871203feb72ae7259241909fb62fdd96",
+    "previous_receipt": "f0ab93deafa82dc42d8c710ec766b6c7f9eccfa7de2a5022a044327c98c6f679",
+    "single_change": "Replace the exact-identity LightGBM world with an Extra Trees random forest over one-hot pre-match identities and the same numeric atom groups. Unknown evaluation identities map to an all-zero category block. The matrix, chronological folds, rating anchor, hidden worlds, phase curve, combiner, and candidate-only authority remain fixed."
+  },
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v30",
+  "selection_extension": {
+    "categorical_world_config": {
+      "id": "exact-prematch-onehot-extra-trees-v1",
+      "learner": "extra_trees_onehot",
+      "groups": [
+        "player_exact_performance",
+        "player_overall_performance",
+        "player_role_performance",
+        "global_champion_performance",
+        "global_champion_interactions",
+        "exact_ally_enemy_pairs",
+        "checkpoint_forecasts",
+        "parity_conditioned_performance",
+        "patch_exact_performance",
+        "regional_draft_atoms"
+      ],
+      "n_estimators": 1200,
+      "max_depth": 16,
+      "min_samples_leaf": 5,
+      "max_features": 0.1,
+      "max_samples": 0.9,
+      "class_weight": null,
+      "side_symmetry_augmentation": true
+    }
+  },
+  "status": "frozen_before_first_v1_model_evaluation"
+}

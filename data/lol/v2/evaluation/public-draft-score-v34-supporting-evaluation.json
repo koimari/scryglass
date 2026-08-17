@@ -1,0 +1,130 @@
+{
+  "authority": "research_only",
+  "confirmation_gate": {
+    "minimum_selected_rows": 50,
+    "passed": true,
+    "selected_rows": 62
+  },
+  "evaluation": {
+    "auc": 0.7692307692307692,
+    "brier": 0.18958077902121578,
+    "coverage": 0.8985507246376812,
+    "delta_vs_quantum": {
+      "auc": 0.03455964325529537,
+      "brier": -0.00709941388754276,
+      "log_loss": -0.015036968940717488
+    },
+    "ece_10": 0.16335303171129545,
+    "eligible_rows": 69,
+    "end": "2026-08-16T00:00:00+00:00",
+    "folds": [
+      {
+        "auc": 0.7692307692307692,
+        "brier": 0.18958077902121578,
+        "ece_10": 0.16335303171129545,
+        "id": "2026-midseason",
+        "log_loss": 0.5650662294087985,
+        "rows": 62
+      }
+    ],
+    "leagues": [],
+    "log_loss": 0.5650662294087985,
+    "patches": [
+      {
+        "auc": 0.7628458498023716,
+        "brier": 0.19578008545413825,
+        "ece_10": 0.14570714714892244,
+        "log_loss": 0.5801732206927074,
+        "rows": 56,
+        "source_patch": "16.15"
+      }
+    ],
+    "rows": 62,
+    "same_rows_quantum_baseline": {
+      "auc": 0.7346711259754738,
+      "brier": 0.19668019290875854,
+      "ece_10": 0.14116232532114648,
+      "log_loss": 0.580103198349516,
+      "rows": 62
+    },
+    "selected_rows": 62,
+    "series_bootstrap_auc": {
+      "lower_95": 0.6399821428571427,
+      "median": 0.7772868418037877,
+      "repetitions": 2000,
+      "upper_95": 0.8817282851557044
+    },
+    "start": "2026-08-09T00:00:00+00:00"
+  },
+  "gates": {
+    "auc": true,
+    "brier": true,
+    "confirmation_sample": true,
+    "coverage": true,
+    "ece": false,
+    "log_loss": true,
+    "passed": false
+  },
+  "inputs": {
+    "matrix_sha256": "8528ba6c2dd6323158e9999506a93eddb8887ad49c4233223aec99f8a92ce9f0",
+    "prediction_sha256": {
+      "development_composite": "57fae7f96a430696458d7c4ed5d73eaa9e2296e427488aa380e64dcd0297e39f",
+      "identity": "3446860fc793b8911de98610a39b798c11d164f839cf6ddabd7e26f0dd9fa55c",
+      "quantum": "c3dba387fc375a9c1cec6d27e8751e856934a6f2e6390af94277ba6062b1e1d8",
+      "roster": "82909450992f3a19220501f4ace9ea6e629a47e601eb3d409d0bb75b7331b230"
+    }
+  },
+  "public_contract": {
+    "abstained_rows": "descriptive composition score only",
+    "authorized_rows": "calibrated win probability and side recommendation",
+    "betting_fields": false
+  },
+  "receipt_sha256": "62d0c56db6ccc109e9215ffbf7942fff831cee2b2d0d1cb738334fab06400bae",
+  "schema_version": "scryglass:selective-draft-probability-evaluation:v1",
+  "selection": {
+    "calibration": {
+      "kind": "zero_intercept_logit_scale",
+      "side_symmetric": true,
+      "slope": 1.117737243448219
+    },
+    "confidence_model": "standardized_ridge_squared_error",
+    "confidence_threshold": -0.2551693155170364,
+    "end": "2026-08-09T00:00:00+00:00",
+    "predictor_weights": {
+      "development_composite": 0.3,
+      "identity": 0.1,
+      "quantum": 0.4,
+      "roster": 0.2
+    },
+    "ridge_alpha": 10.0,
+    "rows": 2462,
+    "side_symmetric_features": [
+      "disagreement",
+      "prediction_range",
+      "ensemble_margin",
+      "margin_quantum",
+      "margin_roster",
+      "margin_identity",
+      "margin_development_composite",
+      "distance_quantum_roster",
+      "distance_quantum_identity",
+      "distance_quantum_development_composite",
+      "distance_roster_identity",
+      "distance_roster_development_composite",
+      "distance_identity_development_composite",
+      "team_sigma_pair_scaled",
+      "player_sigma_pair_scaled",
+      "player_known_fraction_min",
+      "history_unique_player_maps_min",
+      "availability_player_exact_performance",
+      "availability_exact_ally_enemy_pairs",
+      "availability_checkpoint_forecasts",
+      "availability_parity_conditioned_performance",
+      "availability_regional_draft_atoms"
+    ],
+    "start": "2025-07-01T00:00:00+00:00",
+    "target_coverage": 0.9
+  },
+  "selection_history": "These August games informed earlier component work. This result supports the candidate but cannot promote it.",
+  "status": "supporting_confirmation_after_model_selection"
+}

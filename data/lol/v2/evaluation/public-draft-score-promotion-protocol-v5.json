@@ -1,0 +1,39 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v5",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T14:30:19Z",
+  "inherits": "public-draft-score-promotion-protocol-v4.json",
+  "iteration": {
+    "id": "v5",
+    "single_change": "Add strictly prior regional champion, directed allied champion-pair, and directed enemy champion-pair statistical atoms. These atoms use the exact league and remain separate from player-specific pair atoms.",
+    "previous_receipt": "aa8bdbf706625dfbc25ce4bd2c0b5382d166c860164031a2859845f3e932800a"
+  },
+  "feature_contract": {
+    "schema_version": "scryglass:atomized-rf-layer-a:v5",
+    "current_map_state_allowed": false,
+    "final_outcome_features_allowed": false,
+    "rating_receipt_required": "scryglass:resolved-rating-source:v1",
+    "missing_values": "zero value plus an explicit missing flag",
+    "draft_groups": [
+      "player_exact_performance",
+      "exact_ally_enemy_pairs",
+      "checkpoint_forecasts",
+      "parity_conditioned_performance",
+      "patch_exact_performance",
+      "regional_draft_atoms"
+    ],
+    "strength_groups": ["team_rating", "player_rating", "team_momentum", "team_macro_form"],
+    "context_group": "competition_context"
+  },
+  "selection_extension": {
+    "draft_group_sets": [
+      {"id": "context-only", "groups": []},
+      {"id": "regional", "groups": ["regional_draft_atoms"]},
+      {"id": "regional-patch", "groups": ["regional_draft_atoms", "patch_exact_performance"]},
+      {"id": "regional-phase", "groups": ["regional_draft_atoms", "checkpoint_forecasts", "parity_conditioned_performance"]},
+      {"id": "player-regional", "groups": ["player_exact_performance", "exact_ally_enemy_pairs", "regional_draft_atoms"]},
+      {"id": "composition", "groups": ["player_exact_performance", "exact_ally_enemy_pairs", "patch_exact_performance", "regional_draft_atoms"]},
+      {"id": "composition-phase", "groups": ["player_exact_performance", "exact_ally_enemy_pairs", "checkpoint_forecasts", "parity_conditioned_performance", "patch_exact_performance", "regional_draft_atoms"]}
+    ]
+  }
+}

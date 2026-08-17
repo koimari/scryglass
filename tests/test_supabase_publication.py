@@ -449,7 +449,7 @@ def test_descriptive_draft_asset_requires_complete_pool_and_ten_valid_picks() ->
         supabase_publication._validate_descriptive_draft_records(payload)
 
 
-def test_publish_release_rejects_promoted_draft_until_independent_verification() -> None:
+def test_publish_release_rejects_incomplete_promoted_draft_authority() -> None:
     with TemporaryDirectory() as temporary:
         pack, manifest, tier = _fixture(Path(temporary))
         model_version = "draft-promoted-v1"
@@ -473,7 +473,7 @@ def test_publish_release_rejects_promoted_draft_until_independent_verification()
         }
         with pytest.raises(
             supabase_publication.SupabasePublicationError,
-            match="independent receipt verifier",
+            match="promoted Draft Score authority is invalid",
         ):
             supabase_publication.prepare_release(
                 pack,
@@ -496,7 +496,7 @@ def test_publish_release_rejects_unbound_promoted_draft_authority() -> None:
 
         with pytest.raises(
             supabase_publication.SupabasePublicationError,
-            match="independent receipt verifier",
+            match="promoted Draft Score authority is invalid",
         ):
             supabase_publication.prepare_release(
                 pack,
@@ -504,6 +504,48 @@ def test_publish_release_rejects_unbound_promoted_draft_authority() -> None:
                 tier,
                 project_url="https://example.supabase.co",
             )
+
+
+def test_promoted_publication_preserves_bound_descriptive_authority() -> None:
+    release_id = "v2026.08.10.153000"
+    descriptive = {
+        "schema_version": "scryglass:draft-authority:v1",
+        "status": "descriptive",
+        "authority": "descriptive",
+        "release_id": release_id,
+        "model_version": "draft-recommendation-static-v2",
+        "artifact_sha256": "b" * 64,
+        "receipt_sha256": "c" * 64,
+        "issued_utc": "2026-08-10T15:29:00Z",
+        "estimand": "composition_only",
+        "probability_authority": False,
+        "recommendation_authority": False,
+        "betting_authority": False,
+        "reason": None,
+    }
+    manifest = {
+        "draft_authority": {
+            "schema_version": "scryglass:draft-authority:v1",
+            "status": "promoted",
+            "authority": "promoted",
+            "release_id": release_id,
+            "model_version": "public-draft-score-v34",
+            "artifact_sha256": "a" * 64,
+            "receipt_sha256": "d" * 64,
+            "issued_utc": "2026-08-10T15:30:00Z",
+            "estimand": "prematch_map_win_probability_with_controlled_draft_intervention",
+            "probability_authority": True,
+            "recommendation_authority": True,
+            "betting_authority": False,
+            "reason": None,
+            "descriptive_authority": descriptive,
+        }
+    }
+
+    authority = supabase_publication._draft_authority(manifest, release_id)
+
+    assert authority["status"] == "promoted"
+    assert authority["descriptive_authority"] == descriptive
 
 
 def test_publish_release_includes_optional_schedule_when_present() -> None:

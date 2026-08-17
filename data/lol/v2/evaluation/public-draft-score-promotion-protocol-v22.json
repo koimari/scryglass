@@ -1,0 +1,11 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v22",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T17:56:00Z",
+  "inherits": "public-draft-score-promotion-protocol-v21.json",
+  "iteration": {
+    "id": "v22",
+    "single_change": "Evaluate the bounded six-parameter hidden-world combiner with explicit element-wise sums. This avoids the failing matrix-multiplication runtime while preserving the same logistic objective, gradient, bounds, and inputs.",
+    "previous_protocol_result": "v21 stopped before its first outer prediction when the platform matrix-multiplication routine emitted a runtime overflow warning at zero initialization; it produced no receipt"
+  }
+}

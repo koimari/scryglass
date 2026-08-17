@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { PackManifest } from "./pack";
-import { draftAuthorityStatus, hasDescriptiveDraftAuthority } from "./pack";
+import {
+  draftAuthorityStatus,
+  hasPromotedDraftAuthority,
+  hasPublishedDraftAuthority,
+} from "./pack";
 
 const packJsonCache = new Map<string, Promise<unknown>>();
 const PACK_CACHE_SECONDS = 21_600;
@@ -44,6 +48,7 @@ export const PUBLIC_ASSET_PATHS = new Set([
   "features/schedule.json",
   "features/leaderboards.json",
   "features/draft_records.json",
+  "features/promoted_draft_results.json",
   "rankings/tierlists.json",
   "rankings/tierlists-latest.json",
 ]);
@@ -108,7 +113,13 @@ export function safeRelativePath(relativePath: string): string {
 }
 
 function assetAuthorized(manifest: PackManifest, relativePath: string): boolean {
-  return relativePath !== "features/draft_records.json" || hasDescriptiveDraftAuthority(manifest);
+  if (relativePath === "features/draft_records.json") {
+    return hasPublishedDraftAuthority(manifest);
+  }
+  if (relativePath === "features/promoted_draft_results.json") {
+    return hasPromotedDraftAuthority(manifest);
+  }
+  return true;
 }
 
 export async function readLocalManifest(): Promise<PackManifest> {

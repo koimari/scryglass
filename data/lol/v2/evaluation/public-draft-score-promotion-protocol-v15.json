@@ -1,0 +1,36 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v15",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T17:35:00Z",
+  "inherits": "public-draft-score-promotion-protocol-v14.json",
+  "iteration": {
+    "id": "v15",
+    "single_change": "Add strictly prior support-stable statistical atoms for player by role, champion by role, global champion performance, global allied champion pairs, and directed enemy champion pairs. These identities survive roster transfers and patch boundaries without broad gameplay labels.",
+    "previous_receipt": "552a852d7d2025c59757a29e859b47dac3c5eea27aa7459f49f9aca407c57948"
+  },
+  "feature_contract": {
+    "schema_version": "scryglass:atomized-rf-layer-a:v8",
+    "current_map_state_allowed": false,
+    "final_outcome_features_allowed": false,
+    "rating_receipt_required": "scryglass:resolved-rating-source:v1",
+    "support_stable_atoms": "strictly prior player-role, champion-role, champion, allied-pair, and directed enemy-pair statistical fields"
+  },
+  "selection_extension": {
+    "quantum_worlds": [
+      {"id": "world-player", "groups": ["player_exact_performance"]},
+      {"id": "world-player-overall", "groups": ["player_overall_performance"]},
+      {"id": "world-player-role", "groups": ["player_role_performance"]},
+      {"id": "world-champion", "groups": ["global_champion_performance"]},
+      {"id": "world-global-pairs", "groups": ["global_champion_interactions"]},
+      {"id": "world-pairs", "groups": ["exact_ally_enemy_pairs"]},
+      {"id": "world-phase", "groups": ["checkpoint_forecasts"]},
+      {"id": "world-parity", "groups": ["parity_conditioned_performance"]},
+      {"id": "world-patch", "groups": ["patch_exact_performance"]},
+      {"id": "world-region", "groups": ["regional_draft_atoms"]},
+      {"id": "world-all", "groups": ["player_exact_performance", "player_overall_performance", "player_role_performance", "global_champion_performance", "global_champion_interactions", "exact_ally_enemy_pairs", "checkpoint_forecasts", "parity_conditioned_performance", "patch_exact_performance", "regional_draft_atoms"]}
+    ],
+    "regional_worlds": [
+      {"id": "regional-world-all", "groups": ["player_exact_performance", "player_overall_performance", "player_role_performance", "global_champion_performance", "global_champion_interactions", "exact_ally_enemy_pairs", "checkpoint_forecasts", "parity_conditioned_performance", "patch_exact_performance", "regional_draft_atoms"]}
+    ]
+  }
+}

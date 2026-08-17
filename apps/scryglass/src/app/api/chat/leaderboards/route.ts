@@ -1,7 +1,7 @@
 import { chatJson, clean, searchParams, secureChatRoute } from "@/lib/chatApi";
 import { leaderboardRows } from "@/lib/chatData";
 import { draftRankingsFromProfile, filterDraftRankings } from "@/lib/draftRankings";
-import { draftAuthorityStatus, type ProfileRecords } from "@/lib/pack";
+import { hasDescriptiveDraftAuthority, type ProfileRecords } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 export const runtime = "nodejs";
@@ -14,8 +14,7 @@ async function get(request: Request, signal: AbortSignal) {
   const limit = Math.min(Math.max(parseInt(params.get("limit") ?? "10", 10) || 10, 1), 20);
   if (category === "teams_draft" || category === "players_draft") {
     const manifest = await readPackManifest(signal);
-    const authority = draftAuthorityStatus(manifest);
-    if (authority !== "descriptive") {
+    if (!hasDescriptiveDraftAuthority(manifest)) {
       return chatJson({
         schema_version: "scryglass:draft-api:v1",
         release_id: manifest.pack_id,
@@ -74,7 +73,7 @@ async function get(request: Request, signal: AbortSignal) {
     return chatJson({
       schema_version: "scryglass:draft-api:v1",
       release_id: manifest.pack_id,
-      authority,
+      authority: "descriptive",
       category,
       role,
       tier,

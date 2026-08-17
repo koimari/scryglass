@@ -87,7 +87,25 @@ export type PackManifest = {
     artifact_sha256?: string | null;
     receipt_sha256: string | null;
     issued_utc?: string | null;
+    estimand?: string | null;
+    probability_authority?: boolean;
+    recommendation_authority?: boolean;
+    betting_authority?: boolean;
     reason?: string | null;
+    descriptive_authority?: {
+      schema_version: "scryglass:draft-authority:v1";
+      status: "descriptive";
+      authority: "descriptive";
+      release_id: string;
+      model_version: string;
+      artifact_sha256: string;
+      receipt_sha256: string;
+      issued_utc: string;
+      estimand: "composition_only";
+      probability_authority: false;
+      recommendation_authority: false;
+      betting_authority: false;
+    };
   };
   query_api?: {
     schema_version?: "scryglass:query-api:v1";
@@ -695,21 +713,45 @@ function hasBoundDraftReceipt(manifest: PackManifest): boolean {
 export function draftAuthorityStatus(manifest: PackManifest): DraftAuthorityStatus {
   const status = declaredDraftAuthority(manifest);
   if (!status || status === "unavailable") return "unavailable";
+  if (status === "promoted") {
+    const authority = manifest.draft_authority;
+    if (
+      authority?.authority !== "promoted"
+      || authority.estimand !== "prematch_map_win_probability_with_controlled_draft_intervention"
+      || authority.probability_authority !== true
+      || authority.recommendation_authority !== true
+      || authority.betting_authority !== false
+    ) return "unavailable";
+  }
   return hasBoundDraftReceipt(manifest) ? status : "unavailable";
 }
 
 /** Descriptive Draft fields may render after their release-bound receipt passes. */
 export function hasDescriptiveDraftAuthority(manifest: PackManifest): boolean {
-  return draftAuthorityStatus(manifest) === "descriptive";
+  const status = draftAuthorityStatus(manifest);
+  if (status === "descriptive") return true;
+  const nested = manifest.draft_authority?.descriptive_authority;
+  return Boolean(
+    status === "promoted"
+    && nested?.schema_version === "scryglass:draft-authority:v1"
+    && nested.status === "descriptive"
+    && nested.authority === "descriptive"
+    && nested.release_id === manifest.pack_id
+    && nested.estimand === "composition_only"
+    && nested.model_version.trim()
+    && DRAFT_RECEIPT_SHA256.test(nested.artifact_sha256)
+    && DRAFT_RECEIPT_SHA256.test(nested.receipt_sha256)
+    && DRAFT_ISSUED_UTC.test(nested.issued_utc)
+    && Number.isFinite(Date.parse(nested.issued_utc))
+    && nested.probability_authority === false
+    && nested.recommendation_authority === false
+    && nested.betting_authority === false
+  );
 }
 
-/**
- * Probability authority stays closed in the web client until the independent
- * receipt verifier is available. A descriptive receipt never opens it.
- */
+/** Accept only the active manifest's complete release-bound promoted receipt. */
 export function hasPromotedDraftAuthority(manifest: PackManifest): boolean {
-  void manifest;
-  return false;
+  return draftAuthorityStatus(manifest) === "promoted";
 }
 
 export function hasPublishedDraftAuthority(manifest: PackManifest): boolean {

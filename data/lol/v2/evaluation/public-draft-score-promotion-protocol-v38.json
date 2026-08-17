@@ -1,0 +1,62 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v38",
+  "status": "frozen_with_paired_draft_promotion_binding",
+  "frozen_utc": "2026-08-17T07:25:00Z",
+  "inherits": "public-draft-score-promotion-protocol-v37.json",
+  "iteration": {
+    "id": "v38-public-selective-ensemble-with-paired-promotion-binding",
+    "single_change": "Require the independent promotion verifier and final promotion receipt to bind every paired Draft intervention receipt. The model, weights, threshold, intervention, evaluation, and gates are unchanged.",
+    "implementation_sha256": "bac43f72a001d24cb6e09e61a96aa530c6209398104e31e8a6dff26c6322af5a",
+    "constituent_implementation_sha256": "452bfb54b7cff4cac2cbc4f0156af11acf3a39adb0d8af033e23c81824d1c794",
+    "quantum_implementation_sha256": "565398d9ae2c8e032d9e48c592405521ec7511f37798814f1231bc5198b0b1ed",
+    "draft_builder_implementation_sha256": "d59e49ff6dd2f48a08406c3e6b4000883537298719cc05f028418e472a792c62",
+    "holdout_source_preparer_sha256": "31dca4bc0f3d2b5324b24806fb706736863919ad13b920472f62a992d9d3370a",
+    "holdout_evaluator_sha256": "58a6fcb3ef34b7e86e0d28c7fd7c9f91acde32c286e1ec3b660039ceac9e3467",
+    "promotion_verifier_sha256": "8a340f8791711b68d668d5fe343d3858f29609688bbe902b1de17bdb6804783f",
+    "public_result_builder_sha256": "418b581b4a691cca669989014bf6397cd18d45e6142a9a58a6a037a1d90b454d",
+    "controlled_contribution_sha256": "ac819bde0eacc2d817d724bd7714f5d2119e8d87af56f015eb4b0bea22b0757b",
+    "paired_public_result_builder_sha256": "6ada91defb1a09b9a34ce3af4b973c6f6a6c5b7c0f1d593dc9b1b93e5aebe44a",
+    "atomized_feature_builder_sha256": "dddc44fb5f7e00716d2d84db306f7064915811bab71f040a31e13cfc05e160e5",
+    "controlled_swap_preparer_sha256": "59ba4b8f54cb760dd6d9eeae1bb1c942b0ba20e3f1f0ab922dce13896e48ceb8",
+    "controlled_intervention_sealer_sha256": "1d7ca56d2ade471eb3ab4baa84be0dd6f7f09303c5ad1c5a84307d0324cd37b0",
+    "holdout_sealer_sha256": "c1c338a84ce39ac0a07aa89f3fab11ddfceebc12099c61e9a6c3eb0722707dac",
+    "holdout_inventory_sha256": "d28feb02c9eeb9c2ece3c3ae901943f2eb395947b74d1b9106dc70163d5c314f",
+    "matrix_sha256": "36d48e7bd68066d782d8ad8164a87084871203feb72ae7259241909fb62fdd96",
+    "matrix_manifest_sha256": "3faec8f2c46e4c0c139a007f80481f256f40866a3d693a2b38dc84ec2be69765"
+  },
+  "controlled_draft_contribution": {
+    "schema_version": "scryglass:controlled-draft-contribution:v1",
+    "intervention_schema_version": "scryglass:role-matched-draft-swap:v1",
+    "batch_schema_version": "scryglass:controlled-draft-swap-batch:v1",
+    "sealed_schema_version": "scryglass:sealed-controlled-draft-interventions:v1",
+    "method": "role_matched_champion_swap",
+    "fixed_fields": ["game_uid", "date", "side", "position", "playername", "teamname", "league"],
+    "changed_field": "champion",
+    "history_update_lineup": "observed",
+    "current_feature_lineup": "swapped",
+    "model_units": "half_observed_minus_swapped_blue_logit",
+    "edge_percentage_points": "100_times_sigmoid_model_units_minus_50",
+    "outcome_blind": true
+  },
+  "next_holdout": {
+    "start_inclusive": "2026-08-16T00:00:00Z",
+    "candidate_artifact_sha256": "b0de3d4d0e683a3cdbaa71fe7282817e95538f5f1dbd0f992a646f64cedb2b10",
+    "candidate_receipt_sha256": "f5e895bb60946c9e6c2fcb528245597236e15960c1cf83ca835fadb56e750757",
+    "minimum_selected_rows": 100,
+    "minimum_eligible_coverage": 0.75,
+    "minimum_auc": 0.710,
+    "maximum_brier_delta_vs_quantum": 0.0,
+    "maximum_log_loss_delta_vs_quantum": 0.0,
+    "maximum_ece_10": 0.08,
+    "minimum_leagues_with_20_selected_rows": 3,
+    "series_cluster_bootstrap_median_auc_minimum": 0.710
+  },
+  "authority": {
+    "development_result": "research_only",
+    "public_probability": "unavailable_until_new_sealed_holdout_passes",
+    "public_recommendation": "unavailable_until_new_sealed_holdout_passes",
+    "controlled_static_draft_score": "sealed_paired_intervention_waiting_for_holdout",
+    "r9e_is_public_predictor": false,
+    "betting_odds_ev_stake": false
+  }
+}

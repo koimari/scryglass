@@ -1,0 +1,86 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v33",
+  "status": "frozen_after_exploratory_development_before_new_holdout",
+  "frozen_utc": "2026-08-17T04:03:46Z",
+  "inherits": "public-draft-score-promotion-protocol-v32.json",
+  "iteration": {
+    "id": "v33-selective-calibrated-ensemble",
+    "single_change": "Raise the confidence model target coverage to 0.90, replay it with earlier-window-only fitting, and apply one side-symmetric zero-intercept logit calibration fitted only on prior outcomes.",
+    "implementation_sha256": "5d808df1ed9ee629e0a752333e1659337c000d497a5995ee52a0573015790a3f",
+    "matrix_sha256": "36d48e7bd68066d782d8ad8164a87084871203feb72ae7259241909fb62fdd96",
+    "matrix_manifest_sha256": "3faec8f2c46e4c0c139a007f80481f256f40866a3d693a2b38dc84ec2be69765"
+  },
+  "selective_probability": {
+    "predictor_weights": {
+      "quantum": 0.25,
+      "roster": 0.25,
+      "identity": 0.25,
+      "development_composite": 0.25
+    },
+    "confidence_target": "squared_error_of_equal_weight_probability",
+    "confidence_model": "standardized_ridge",
+    "ridge_alpha": 10.0,
+    "target_training_coverage": 0.90,
+    "calibration": {
+      "kind": "zero_intercept_logit_scale",
+      "side_symmetric": true,
+      "fit_scope": "strictly_prior_outcomes"
+    },
+    "public_behavior": {
+      "authorized_rows": "calibrated match win probability and side recommendation",
+      "abstained_rows": "descriptive composition score only",
+      "controlled_static_draft_score": "reported separately from match win probability",
+      "betting_odds_ev_stake": false
+    }
+  },
+  "development_evidence": {
+    "evaluation_file_sha256": "4e9770037a75b1fe08a1e0f89b5856c5f5ecafc95fb491e1001532ad38c78336",
+    "prediction_file_sha256": "ffa4da92fbeee1378922c73c6546b4d4405556b978db334b4fcc8e2600471027",
+    "receipt_sha256": "8e860472293eba321f932bc38ea957b98fa9109acb9a1002c00a590b3c95d34c",
+    "eligible_rows": 1698,
+    "selected_rows": 1506,
+    "coverage": 0.8869257950530035,
+    "auc": 0.7111631815218338,
+    "brier": 0.21467851092800644,
+    "log_loss": 0.6188013257167758,
+    "ece_10": 0.018181102351795656,
+    "same_rows_quantum_auc": 0.7028013209856585,
+    "all_development_gates_passed": true
+  },
+  "forward_confirmation": {
+    "source_end_exclusive": "2026-08-16T00:00:00Z",
+    "matrix_sha256": "8528ba6c2dd6323158e9999506a93eddb8887ad49c4233223aec99f8a92ce9f0",
+    "evaluation_file_sha256": "78bf157de606b086c2bab18db6f132cec0a73c917e813bc6b9ece645aae4d776",
+    "prediction_file_sha256": "93dfe3c602208a3791ceb0adf925daf222b59d34edfcc37c4004fbd948ebb62f",
+    "receipt_sha256": "4aa6b83f8d832b11bbf39e62fb95e12adbf6ef9d1882e34fde1bb18b9544d749",
+    "eligible_rows": 69,
+    "selected_rows": 53,
+    "coverage": 0.7681159420289855,
+    "auc": 0.7365079365079364,
+    "brier": 0.1917469692347177,
+    "log_loss": 0.5699775143069258,
+    "same_rows_quantum_auc": 0.7222222222222221,
+    "selection_history": "The coverage threshold was inspected against this window after older component experiments had already evaluated these games. This is supporting evidence and cannot promote the model."
+  },
+  "next_holdout": {
+    "start_inclusive": "2026-08-16T00:00:00Z",
+    "rule_frozen_before_outcomes": true,
+    "candidate_artifact_sha256": "06203cc3c01d8d867dc7d53813af0b9d7cf81687c973c6883b03ed9fdfc48551",
+    "candidate_receipt_sha256": "86dacfa6859897ec2f0bc67b0b24fe706f17c961f6a29728c2859381867e02db",
+    "minimum_selected_rows": 100,
+    "minimum_eligible_coverage": 0.75,
+    "minimum_auc": 0.710,
+    "maximum_brier_delta_vs_quantum": 0.0,
+    "maximum_log_loss_delta_vs_quantum": 0.0,
+    "maximum_ece_10": 0.08,
+    "minimum_leagues_with_20_selected_rows": 3,
+    "series_cluster_bootstrap_median_auc_minimum": 0.710
+  },
+  "authority": {
+    "development_result": "research_only",
+    "public_probability": "unavailable_until_new_sealed_holdout_passes",
+    "public_recommendation": "unavailable_until_new_sealed_holdout_passes",
+    "descriptive_composition_score": "available_under_its_separate_receipt",
+    "development_composite_is_draft_score": false
+  }
+}

@@ -1,12 +1,25 @@
 import { notFound } from "next/navigation";
 import { MatchRatingProfile } from "@/components/RatingProfiles";
-import { hasPublishedDraftAuthority, type MatchIndex, type MatchRecords, type ProfileGame, type ProfileRecords } from "@/lib/pack";
-import { getMatch, queryApiAvailable } from "@/lib/publicData";
+import { hasPromotedDraftAuthority, hasPublishedDraftAuthority, type MatchIndex, type MatchRecords, type ProfileGame, type ProfileRecords } from "@/lib/pack";
+import { getMatch, queryApiAvailable, validatePromotedDraftResultsPayload, type PromotedDraftResultsPayload, type PublicDraftScoreResult } from "@/lib/publicData";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
 export const revalidate = 21_600;
 
 type Props = { params: Promise<{ game: string }> };
+
+async function promotedDraftResult(
+  manifest: Awaited<ReturnType<typeof readPackManifest>>,
+  gameId: string,
+): Promise<PublicDraftScoreResult | null> {
+  if (!hasPromotedDraftAuthority(manifest)) return null;
+  const payload = await readPackJson<PromotedDraftResultsPayload>(
+    manifest,
+    "features/promoted_draft_results.json",
+  );
+  validatePromotedDraftResultsPayload(payload, manifest);
+  return payload.results[gameId] ?? null;
+}
 
 export default async function MatchPage({ params }: Props) {
   const { game: raw } = await params;
@@ -15,6 +28,7 @@ export default async function MatchPage({ params }: Props) {
   if (queryApiAvailable(manifest)) {
     const result = await getMatch(manifest, gameId);
     if (!result.row) notFound();
+    const draftScore = await promotedDraftResult(manifest, gameId);
     return (
       <MatchRatingProfile
         game={hasPublishedDraftAuthority(manifest)
@@ -22,6 +36,7 @@ export default async function MatchPage({ params }: Props) {
           : { ...result.row.payload, draft_pool: undefined, draft_contribution: undefined }}
         championImages={result.champion_images}
         releaseId={manifest.pack_id}
+        draftScore={draftScore}
       />
     );
   }
@@ -45,6 +60,7 @@ export default async function MatchPage({ params }: Props) {
       game={publishedGame}
       championImages={profiles.champion_images}
       releaseId={manifest.pack_id}
+      draftScore={await promotedDraftResult(manifest, gameId)}
     />
   );
 }

@@ -1,0 +1,105 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v34",
+  "status": "frozen_after_exploratory_development_before_new_holdout",
+  "frozen_utc": "2026-08-17T04:16:00Z",
+  "inherits": "public-draft-score-promotion-protocol-v33.json",
+  "iteration": {
+    "id": "v34-public-reproducible-selective-ensemble",
+    "single_change": "Replace the private R9E voter with an in-repository side-symmetric identity logit over the complete atomized pre-match feature matrix. Freeze public-reproducible weights of 0.40 quantum, 0.20 roster, 0.10 identity, and 0.30 all-atom identity.",
+    "implementation_sha256": "bac43f72a001d24cb6e09e61a96aa530c6209398104e31e8a6dff26c6322af5a",
+    "constituent_implementation_sha256": "452bfb54b7cff4cac2cbc4f0156af11acf3a39adb0d8af033e23c81824d1c794",
+    "quantum_implementation_sha256": "565398d9ae2c8e032d9e48c592405521ec7511f37798814f1231bc5198b0b1ed",
+    "draft_builder_implementation_sha256": "d59e49ff6dd2f48a08406c3e6b4000883537298719cc05f028418e472a792c62",
+    "holdout_source_preparer_sha256": "31dca4bc0f3d2b5324b24806fb706736863919ad13b920472f62a992d9d3370a",
+    "holdout_evaluator_sha256": "0e6a4d0c70e497eef0895daaa20ff5f94a42dcd52454a3ec037560a95a294a62",
+    "promotion_verifier_sha256": "43ae99f43796d2d2fd8686ae358bc0a1d26e0f2dc4042d5163f30bc979291dee",
+    "public_result_builder_sha256": "418b581b4a691cca669989014bf6397cd18d45e6142a9a58a6a037a1d90b454d",
+    "holdout_sealer_sha256": "8bc20f5d31d95aeffcf4a503cc12530bfadff2c4a4bf83cb714dbff4c3e56742",
+    "holdout_inventory_sha256": "d28feb02c9eeb9c2ece3c3ae901943f2eb395947b74d1b9106dc70163d5c314f",
+    "matrix_sha256": "36d48e7bd68066d782d8ad8164a87084871203feb72ae7259241909fb62fdd96",
+    "matrix_manifest_sha256": "3faec8f2c46e4c0c139a007f80481f256f40866a3d693a2b38dc84ec2be69765"
+  },
+  "predictors": [
+    {
+      "slot": "quantum",
+      "semantics": "in_repo_quantum_masked_forest_v24",
+      "weight": 0.40
+    },
+    {
+      "slot": "roster",
+      "semantics": "in_repo_roster_random_forest",
+      "weight": 0.20
+    },
+    {
+      "slot": "identity",
+      "semantics": "in_repo_strength_and_identity_logit",
+      "weight": 0.10
+    },
+    {
+      "slot": "development_composite",
+      "semantics": "in_repo_all_atom_fields_identity_logit",
+      "weight": 0.30,
+      "r9e": false,
+      "legacy_slot_name_only": true
+    }
+  ],
+  "quantum_reproducibility": {
+    "protocol_file_sha256": "da548e126829ab57a1a90f11387128cb66f839f6fde01ba0062b2feb53881004",
+    "protocol_resolved_sha256": "5ecba3d602394816ef3d3c5a9c9ebac6bf13671092c5872e3e683e1c424faa2b",
+    "feature_groups_sha256": "731f88119bc698d428005c3ecf8f455bbba25d5ef9e231880c55ab998de132c8",
+    "reference_matrix_sha256": "0f9de19c3849c4d4454a833391626257552ee498e35e243e0309a5ac2a0ebf1c",
+    "reference_player_source_sha256": "8d0285c6991b53cc3535653b99faa7f46bc55e2b204751f274835df6dfbcfb95",
+    "reference_prediction_file_sha256": "c3dba387fc375a9c1cec6d27e8751e856934a6f2e6390af94277ba6062b1e1d8",
+    "parity_rows": 69,
+    "parity_max_absolute_probability_delta": 0.0,
+    "parity_receipt_sha256": "60c001c53461368f3cf794146909d23dd6994784e98627a98eb15c0c0fda13dc"
+  },
+  "development_evidence": {
+    "file_sha256": "9856f4d3fedee5dae1664d4279f60f3bc90ab351c7dd0695e73ad19e10e5eba8",
+    "receipt_sha256": "a017626500cc14bed8f34874563c9fdda9602e77d6733c675547d1ba35d96d59",
+    "eligible_rows": 1703,
+    "selected_rows": 1482,
+    "coverage": 0.8702290076335878,
+    "auc": 0.7108585858585859,
+    "brier": 0.2148938742405089,
+    "log_loss": 0.6197182809203964,
+    "ece_10": 0.017395532247523722,
+    "same_rows_quantum_auc": 0.7088566827697263,
+    "series_bootstrap_auc_median": 0.7117327486738189,
+    "all_development_gates_passed": true
+  },
+  "supporting_evidence": {
+    "file_sha256": "1a323078a97ac8494802034eacbebc973a1205533a1ca3d996250139c963c77f",
+    "receipt_sha256": "62d0c56db6ccc109e9215ffbf7942fff831cee2b2d0d1cb738334fab06400bae",
+    "selected_rows": 62,
+    "coverage": 0.8985507246376812,
+    "auc": 0.7692307692307692,
+    "brier": 0.18958077902121578,
+    "log_loss": 0.5650662294087985,
+    "ece_10": 0.16335303171129545,
+    "passed": false,
+    "failed_gate": "ece_10",
+    "selection_history": "These games informed earlier component work. They cannot promote the candidate."
+  },
+  "next_holdout": {
+    "start_inclusive": "2026-08-16T00:00:00Z",
+    "candidate_artifact_sha256": "b0de3d4d0e683a3cdbaa71fe7282817e95538f5f1dbd0f992a646f64cedb2b10",
+    "candidate_receipt_sha256": "f5e895bb60946c9e6c2fcb528245597236e15960c1cf83ca835fadb56e750757",
+    "minimum_selected_rows": 100,
+    "minimum_eligible_coverage": 0.75,
+    "minimum_auc": 0.710,
+    "maximum_brier_delta_vs_quantum": 0.0,
+    "maximum_log_loss_delta_vs_quantum": 0.0,
+    "maximum_ece_10": 0.08,
+    "minimum_leagues_with_20_selected_rows": 3,
+    "series_cluster_bootstrap_median_auc_minimum": 0.710
+  },
+  "authority": {
+    "development_result": "research_only",
+    "public_probability": "unavailable_until_new_sealed_holdout_passes",
+    "public_recommendation": "unavailable_until_new_sealed_holdout_passes",
+    "controlled_static_draft_score": "separate_descriptive_receipt",
+    "r9e_is_public_predictor": false,
+    "betting_odds_ev_stake": false
+  }
+}

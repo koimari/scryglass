@@ -1,0 +1,235 @@
+{
+  "auc": 0.7108585858585859,
+  "authority": "research_only",
+  "brier": 0.2148938742405089,
+  "candidate": "v34-public-reproducible-selective-ensemble",
+  "coverage": 0.8702290076335878,
+  "delta_vs_quantum": {
+    "auc": 0.0020019030888596134,
+    "brier": -0.001163073564405731,
+    "log_loss": -0.0025376871200591955
+  },
+  "ece_10": 0.017395532247523722,
+  "eligible_rows": 1703,
+  "folds": [
+    {
+      "auc": 0.6829144881092933,
+      "brier": 0.22906843313353178,
+      "calibration_slope": 1.1412886205074204,
+      "confidence_threshold": -0.25701110449874554,
+      "coverage": 0.9329501915708812,
+      "ece_10": 0.07178595068171949,
+      "eligible_rows": 522,
+      "fold": 1,
+      "log_loss": 0.6504879687245286,
+      "rows": 487,
+      "selected_rows": 487,
+      "training_rows": 759
+    },
+    {
+      "auc": 0.7525873970835727,
+      "brier": 0.20305650807043432,
+      "calibration_slope": 0.9984620685221949,
+      "confidence_threshold": -0.2573138161993351,
+      "coverage": 0.8337730870712401,
+      "ece_10": 0.062143879383526564,
+      "eligible_rows": 758,
+      "fold": 2,
+      "log_loss": 0.5944555684521898,
+      "rows": 632,
+      "selected_rows": 632,
+      "training_rows": 1281
+    },
+    {
+      "auc": 0.6968647578999444,
+      "brier": 0.21648672613743727,
+      "calibration_slope": 1.141017257324774,
+      "confidence_threshold": -0.254644438538025,
+      "coverage": 0.8581560283687943,
+      "ece_10": 0.06669164631591738,
+      "eligible_rows": 423,
+      "fold": 3,
+      "log_loss": 0.6224213010837412,
+      "rows": 363,
+      "selected_rows": 363,
+      "training_rows": 2039
+    }
+  ],
+  "gates": {
+    "minimum_rows": true,
+    "passed": true,
+    "pooled_auc": true,
+    "pooled_brier": true,
+    "pooled_ece": true,
+    "pooled_log_loss": true,
+    "regional_coverage": true
+  },
+  "inputs": {
+    "matrix_sha256": "36d48e7bd68066d782d8ad8164a87084871203feb72ae7259241909fb62fdd96",
+    "prediction_sha256": {
+      "development_composite": "df0943715c8beed45bba7b33020d8fa8d0c80dc0255363542f67bffbbf9495a3",
+      "identity": "647177540768d0e769997425f79626567a16c9d7d387ecb52d70de8fc3e7e87e",
+      "quantum": "c3dba387fc375a9c1cec6d27e8751e856934a6f2e6390af94277ba6062b1e1d8",
+      "roster": "dbdb2a76a59872b81bfe92576d593d02503b2ec3815f1743e8de7393f10fa0da"
+    }
+  },
+  "leagues": [
+    {
+      "auc": 0.6958628841607565,
+      "brier": 0.22063618009823593,
+      "ece_10": 0.08132338679710831,
+      "league": "EWC",
+      "log_loss": 0.6321452561651211,
+      "rows": 184
+    },
+    {
+      "auc": 0.7146977141636404,
+      "brier": 0.21471137978734944,
+      "ece_10": 0.044279888483937935,
+      "league": "LCK",
+      "log_loss": 0.618329279648853,
+      "rows": 337
+    },
+    {
+      "auc": 0.7425170068027211,
+      "brier": 0.20707356720959919,
+      "ece_10": 0.05901024418869005,
+      "league": "LCS",
+      "log_loss": 0.6037332020106085,
+      "rows": 154
+    },
+    {
+      "auc": 0.6978309232480534,
+      "brier": 0.2163757938536875,
+      "ece_10": 0.08006018727517168,
+      "league": "LEC",
+      "log_loss": 0.6233172215895434,
+      "rows": 269
+    },
+    {
+      "auc": 0.7034007673526333,
+      "brier": 0.21912201898460235,
+      "ece_10": 0.05064761512372457,
+      "league": "LPL",
+      "log_loss": 0.629611722955292,
+      "rows": 479
+    }
+  ],
+  "log_loss": 0.6197182809203964,
+  "patches": [
+    {
+      "auc": 0.6828125,
+      "brier": 0.2360468927111146,
+      "ece_10": 0.11949100747736992,
+      "log_loss": 0.6666668354388511,
+      "rows": 134,
+      "source_patch": "16.1"
+    },
+    {
+      "auc": 0.7797468354430379,
+      "brier": 0.19822472056124302,
+      "ece_10": 0.09941342110267168,
+      "log_loss": 0.5863794438985493,
+      "rows": 154,
+      "source_patch": "16.10"
+    },
+    {
+      "auc": 0.6757215619694398,
+      "brier": 0.22348645820856294,
+      "ece_10": 0.14857399115719003,
+      "log_loss": 0.6346834458111761,
+      "rows": 50,
+      "source_patch": "16.11"
+    },
+    {
+      "auc": 0.7257290513104466,
+      "brier": 0.20475578973389946,
+      "ece_10": 0.07786028366515776,
+      "log_loss": 0.5955268560435076,
+      "rows": 106,
+      "source_patch": "16.13"
+    },
+    {
+      "auc": 0.6702214930270713,
+      "brier": 0.23651811204995626,
+      "ece_10": 0.10822516906453526,
+      "log_loss": 0.668928829216303,
+      "rows": 99,
+      "source_patch": "16.14"
+    },
+    {
+      "auc": 0.6975308641975309,
+      "brier": 0.21104194000641835,
+      "ece_10": 0.1360176022164004,
+      "log_loss": 0.6058468045772131,
+      "rows": 75,
+      "source_patch": "16.15"
+    },
+    {
+      "auc": 0.714859437751004,
+      "brier": 0.2211041884732436,
+      "ece_10": 0.07953702764834424,
+      "log_loss": 0.6314317376418249,
+      "rows": 161,
+      "source_patch": "16.2"
+    },
+    {
+      "auc": 0.6644061902277865,
+      "brier": 0.2289755436844512,
+      "ece_10": 0.06790575075010978,
+      "log_loss": 0.6515417466514211,
+      "rows": 152,
+      "source_patch": "16.3"
+    },
+    {
+      "auc": 0.7374324885749896,
+      "brier": 0.20405063886537766,
+      "ece_10": 0.1043948052357821,
+      "log_loss": 0.5967828543630594,
+      "rows": 141,
+      "source_patch": "16.7"
+    },
+    {
+      "auc": 0.7929916640938561,
+      "brier": 0.19190943826170537,
+      "ece_10": 0.10806411135116938,
+      "log_loss": 0.5707062534580349,
+      "rows": 161,
+      "source_patch": "16.8"
+    },
+    {
+      "auc": 0.7286475900337287,
+      "brier": 0.20859486582159212,
+      "ece_10": 0.06783160377125119,
+      "log_loss": 0.6061161716808633,
+      "rows": 192,
+      "source_patch": "16.9"
+    }
+  ],
+  "predictor_weights": {
+    "development_composite": 0.3,
+    "identity": 0.1,
+    "quantum": 0.4,
+    "roster": 0.2
+  },
+  "receipt_sha256": "a017626500cc14bed8f34874563c9fdda9602e77d6733c675547d1ba35d96d59",
+  "ridge_alpha": 10.0,
+  "rows": 1482,
+  "same_rows_quantum_baseline": {
+    "auc": 0.7088566827697262,
+    "brier": 0.21605694780491463,
+    "ece_10": 0.03601981206507728,
+    "log_loss": 0.6222559680404556,
+    "rows": 1482
+  },
+  "schema_version": "scryglass:selective-draft-probability-evaluation:v1",
+  "selected_rows": 1482,
+  "series_bootstrap_auc": {
+    "lower_95": 0.6824789343215005,
+    "median": 0.7117327486738189,
+    "repetitions": 2000,
+    "upper_95": 0.7381713274329966
+  },
+  "status": "rolling_development_evaluation",
+  "target_coverage": 0.9
+}

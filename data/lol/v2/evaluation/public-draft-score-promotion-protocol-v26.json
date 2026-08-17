@@ -1,0 +1,71 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v26",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T21:36:37Z",
+  "inherits": "public-draft-score-promotion-protocol-v25.json",
+  "iteration": {
+    "id": "v26",
+    "single_change": "Add one full role-aware forest world containing every committed Draft atom group. Retain the four balanced hidden-mask worlds so every atom group remains tested in both active and inactive states. The full world can learn interactions that cross the previous complementary masks.",
+    "previous_receipt": "4730cfc8a71143ce24479389fdf438c7fc46b52f51f000be2b54a2db7e0a0386",
+    "matrix_sha256": "0f9de19c3849c4d4454a833391626257552ee498e35e243e0309a5ac2a0ebf1c"
+  },
+  "selection_extension": {
+    "quantum_worlds": [
+      {
+        "id": "masked-world-a",
+        "groups": [
+          "player_exact_performance",
+          "player_role_performance",
+          "global_champion_performance",
+          "exact_ally_enemy_pairs",
+          "checkpoint_forecasts"
+        ]
+      },
+      {
+        "id": "masked-world-b",
+        "groups": [
+          "player_overall_performance",
+          "global_champion_interactions",
+          "parity_conditioned_performance",
+          "patch_exact_performance",
+          "regional_draft_atoms"
+        ]
+      },
+      {
+        "id": "masked-world-c",
+        "groups": [
+          "player_exact_performance",
+          "player_overall_performance",
+          "global_champion_interactions",
+          "parity_conditioned_performance",
+          "regional_draft_atoms"
+        ]
+      },
+      {
+        "id": "masked-world-d",
+        "groups": [
+          "player_role_performance",
+          "global_champion_performance",
+          "exact_ally_enemy_pairs",
+          "checkpoint_forecasts",
+          "patch_exact_performance"
+        ]
+      },
+      {
+        "id": "full-role-aware-world",
+        "groups": [
+          "player_exact_performance",
+          "player_overall_performance",
+          "player_role_performance",
+          "global_champion_performance",
+          "global_champion_interactions",
+          "exact_ally_enemy_pairs",
+          "checkpoint_forecasts",
+          "parity_conditioned_performance",
+          "patch_exact_performance",
+          "regional_draft_atoms"
+        ]
+      }
+    ]
+  }
+}

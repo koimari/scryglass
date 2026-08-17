@@ -1,0 +1,14 @@
+{
+  "schema_version": "scryglass:public-draft-score-promotion-protocol:v14",
+  "status": "frozen_before_first_v1_model_evaluation",
+  "frozen_utc": "2026-08-16T17:20:00Z",
+  "inherits": "public-draft-score-promotion-protocol-v13.json",
+  "iteration": {
+    "id": "v14",
+    "single_change": "Use the canonical unshrunk Elo rating differences for the strength anchor. The conversion is ln(10) times rating difference divided by 400. Keep atom features, hidden worlds, folds, learner, calibration, and promotion gates unchanged.",
+    "previous_receipt": "186e9f75de2e17951a7c1a8dfe14da9288ed45e63686c2b5ae73cafb7c84f6ac"
+  },
+  "selection_extension": {
+    "anchor_source": "raw_rating_difference"
+  }
+}

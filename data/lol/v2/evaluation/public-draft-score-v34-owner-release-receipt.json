@@ -1,0 +1,42 @@
+{
+  "schema_version": "scryglass:public-draft-score-owner-release-receipt:v1",
+  "status": "promoted",
+  "authority": "promoted",
+  "model_version": "public-draft-score-v34",
+  "candidate_artifact_sha256": "b0de3d4d0e683a3cdbaa71fe7282817e95538f5f1dbd0f992a646f64cedb2b10",
+  "candidate_receipt_sha256": "f5e895bb60946c9e6c2fcb528245597236e15960c1cf83ca835fadb56e750757",
+  "development_evaluation_file_sha256": "9856f4d3fedee5dae1664d4279f60f3bc90ab351c7dd0695e73ad19e10e5eba8",
+  "development_evaluation_receipt_sha256": "a017626500cc14bed8f34874563c9fdda9602e77d6733c675547d1ba35d96d59",
+  "supporting_evaluation_file_sha256": "1a323078a97ac8494802034eacbebc973a1205533a1ca3d996250139c963c77f",
+  "paired_prediction_file_sha256": "9de0d1f437ad87e3478946d9bd2270af6cacdff33a928d5dbe7663119ff2a3f5",
+  "paired_prediction_receipt_file_sha256": "68cbbe130a7458a77c9ae0e177c4d741fbcc8e7393e3d4758ab4eb4423a3b409",
+  "paired_prediction_receipt_sha256": "10f5531f9ff06ae6396ccb7dfc8315fe862f39354ac7ecc25fabad61af202758",
+  "observed_rows_file_sha256": "b8034e98eda78c17416678769df100c8a894312bf2f69d94523c82e33ad2ea49",
+  "swapped_rows_file_sha256": "0af66b2625b3f1f788d1bf2671004fd4b27a5b86ba836ae2a74a2eb2b9bc1382",
+  "evidence_window": {
+    "start": "2024-01-01T00:00:00Z",
+    "end_exclusive": "2026-08-16T00:00:00Z"
+  },
+  "evaluation": {
+    "eligible_rows": 1703,
+    "selected_rows": 1482,
+    "coverage": 0.8702290076335878,
+    "auc": 0.7108585858585859,
+    "brier": 0.2148938742405089,
+    "log_loss": 0.6197182809203964,
+    "ece_10": 0.017395532247523722,
+    "series_bootstrap_auc_median": 0.7117327486738189
+  },
+  "release_basis": "owner_authorized_development_validation",
+  "owner_identity": "koimari/scryglass",
+  "issued_utc": "2026-08-17T07:28:59Z",
+  "approved_public_fields": [
+    "match_win_probability",
+    "controlled_draft_score",
+    "side_recommendation"
+  ],
+  "public_probability": true,
+  "public_recommendation": true,
+  "betting_odds_ev_stake": false,
+  "receipt_sha256": "6d1f5c3a9ed7ae0f9adfb2637361f6d0c5a0977bcd363c963fba12a79435ee2a"
+}

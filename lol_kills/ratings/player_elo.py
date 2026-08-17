@@ -488,6 +488,39 @@ def _run_player_elo(
         p = expected_score(mu_b, mu_r)
         shrink = 1.0 / (1.0 + (sig / 130.0) ** 2)
         p_shrunk = 0.5 + (p - 0.5) * shrink
+        blue_by_role = {str(item["role"]): item for item in det_b}
+        red_by_role = {str(item["role"]): item for item in det_r}
+        role_rating_context: dict[str, float] = {}
+        for role in ("top", "jng", "mid", "bot", "sup"):
+            blue_detail = blue_by_role.get(role)
+            red_detail = red_by_role.get(role)
+            available = float(
+                blue_detail is not None and red_detail is not None
+            )
+            role_rating_context.update(
+                {
+                    f"player_role_mu_diff_{role}": (
+                        float(blue_detail["mu"]) - float(red_detail["mu"])
+                        if available
+                        else 0.0
+                    ),
+                    f"player_role_sigma_pair_{role}": (
+                        math.hypot(
+                            float(blue_detail["sigma"]),
+                            float(red_detail["sigma"]),
+                        )
+                        if available
+                        else math.hypot(cfg.sigma0, cfg.sigma0)
+                    ),
+                    f"player_role_momentum_diff_{role}": (
+                        float(blue_detail["momentum_points"])
+                        - float(red_detail["momentum_points"])
+                        if available
+                        else 0.0
+                    ),
+                    f"player_role_rating_available_{role}": available,
+                }
+            )
 
         rows.append(
             {
@@ -514,6 +547,7 @@ def _run_player_elo(
                 "p_player_elo_base_raw": p_base,
                 "player_momentum_window_games": cfg.momentum_window_games,
                 "player_momentum_scale": cfg.momentum_scale,
+                **role_rating_context,
             }
         )
 

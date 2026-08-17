@@ -48,6 +48,11 @@ from lol_kills.export.public_query_projection import (
     build_public_query_projection,
     write_public_query_projection,
 )
+from lol_kills.export.promoted_draft_authority import (
+    PromotedDraftAuthorityError,
+    load_promoted_draft_authority,
+    validate_promoted_results_payload,
+)
 from lol_kills.etl.competition import TAXONOMY_VERSION, canonicalize_competition_frame, competition_tier
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.refresh_ledger import worker_commit as resolve_worker_commit
@@ -1212,6 +1217,10 @@ def export_public_pack(
     tier_payload_path: Path | None = None,
     tier_publication: Mapping[str, Any] | None = None,
     allowed_game_ids: Sequence[str] | None = None,
+    promoted_draft_receipt_path: Path | None = None,
+    promoted_draft_receipt_sha256: str | None = None,
+    promoted_draft_results_path: Path | None = None,
+    promoted_draft_results_sha256: str | None = None,
     momentum_window_games: int = DEFAULT_MOMENTUM_WINDOW_GAMES,
     momentum_scale: float = DEFAULT_MOMENTUM_SCALE,
 ) -> dict[str, Any]:
@@ -1750,6 +1759,8 @@ def export_public_pack(
     composition_games: list[dict[str, Any]] = []
     composition_result: dict[str, Any] | None = None
     draft_records_payload: dict[str, Any] | None = None
+    promoted_results_payload: dict[str, Any] | None = None
+    descriptive_publication: dict[str, Any] | None = None
     draft_players: list[dict[str, Any]] = []
     composition_audit: dict[str, Any] = {
         "schema_version": "scryglass:composition-signal-descriptive:v1",
@@ -1830,6 +1841,7 @@ def export_public_pack(
             receipt_sha256=descriptive_receipt_sha256,
             release_id=pack_id,
         )
+        descriptive_publication = dict(draft_publication)
         draft_records_payload.update(
             {
                 "release_id": pack_id,
@@ -1845,6 +1857,54 @@ def export_public_pack(
                 archive_candidate["draft_contribution"] = signal
     else:
         draft_publication = _draft_publication_decision(None)
+
+    promoted_inputs = (
+        promoted_draft_receipt_path,
+        promoted_draft_receipt_sha256,
+        promoted_draft_results_path,
+        promoted_draft_results_sha256,
+    )
+    if any(value is not None for value in promoted_inputs):
+        if any(value is None for value in promoted_inputs):
+            raise RuntimeError("promoted Draft inputs are incomplete")
+        if descriptive_publication is None or draft_records_payload is None:
+            raise RuntimeError("promoted Draft release requires descriptive Draft evidence")
+        assert promoted_draft_receipt_path is not None
+        assert promoted_draft_receipt_sha256 is not None
+        assert promoted_draft_results_path is not None
+        assert promoted_draft_results_sha256 is not None
+        try:
+            draft_publication, _promotion_receipt = load_promoted_draft_authority(
+                receipt_path=Path(promoted_draft_receipt_path),
+                expected_file_sha256=promoted_draft_receipt_sha256,
+                release_id=pack_id,
+            )
+            if (
+                not SHA256_RE.fullmatch(promoted_draft_results_sha256)
+                or _sha256(Path(promoted_draft_results_path))
+                != promoted_draft_results_sha256
+            ):
+                raise PromotedDraftAuthorityError("promoted Draft result file changed")
+            promoted_results_payload = json.loads(
+                Path(promoted_draft_results_path).read_text(encoding="utf-8")
+            )
+            validate_promoted_results_payload(
+                promoted_results_payload,
+                authority=draft_publication,
+            )
+        except (
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            PromotedDraftAuthorityError,
+        ) as error:
+            raise RuntimeError("promoted Draft release inputs are invalid") from error
+        result_ids = set(map(str, promoted_results_payload["results"]))
+        descriptive_ids = set(map(str, draft_records_payload.get("games", {})))
+        if not result_ids.issubset(descriptive_ids):
+            raise RuntimeError("promoted Draft results are outside descriptive evidence")
+
+    draft_published = draft_publication["status"] in {"descriptive", "promoted"}
 
     tier_receipt_sha256: str | None = None
     if tier_publication is not None:
@@ -1877,7 +1937,7 @@ def export_public_pack(
         expected_source_identity = str(tier_publication.get("source_identity_sha256") or "")
         if expected_source_identity and expected_source_identity != composition_source_digest:
             raise RuntimeError("tier publication source identity does not match the pack source")
-    if draft_publication["status"] == "descriptive":
+    if draft_published:
         _attach_published_draft_pools(
             profile_records_payload,
             tier_payload,
@@ -1897,7 +1957,7 @@ def export_public_pack(
         profile_records_payload.pop("_archive_games", {}),
         _accepted_profile_games(project),
     )
-    if draft_publication["status"] == "descriptive":
+    if draft_published:
         archive_view = {"games": archive_games}
         _attach_published_draft_pools(
             archive_view,
@@ -1918,7 +1978,7 @@ def export_public_pack(
             for identity, game_ids in profile_records_payload.get(index_name, {}).items()
             if any(game_id in profile_game_ids for game_id in game_ids)
         }
-    if draft_publication["status"] == "descriptive":
+    if draft_published:
         draft_pool_audit = _attach_published_draft_pools(
             {"games": profile_records_payload["games"]},
             tier_payload,
@@ -2031,7 +2091,7 @@ def export_public_pack(
         "features/profile_records.json",
     )
 
-    if draft_records_payload is not None and draft_publication["status"] == "descriptive":
+    if draft_records_payload is not None and draft_published:
         draft_records_dest = feat_dir / "draft_records.json"
         draft_records_dest.write_text(
             json.dumps(draft_records_payload, separators=(",", ":"), ensure_ascii=False),
@@ -2046,6 +2106,27 @@ def export_public_pack(
                 "columns": None,
             },
             "features/draft_records.json",
+        )
+
+    if promoted_results_payload is not None:
+        promoted_results_dest = feat_dir / "promoted_draft_results.json"
+        promoted_results_dest.write_text(
+            json.dumps(
+                promoted_results_payload,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        register(
+            {
+                "rows": len(promoted_results_payload.get("results", {})),
+                "cols": None,
+                "bytes": promoted_results_dest.stat().st_size,
+                "sha256": _sha256(promoted_results_dest),
+                "columns": None,
+            },
+            "features/promoted_draft_results.json",
         )
 
     match_index_payload = {
@@ -2219,7 +2300,7 @@ def export_public_pack(
             match_index=match_index_raw,
             draft_records=draft_records_payload,
             draft_players=draft_players,
-            draft_profile_records=profile_records_payload if draft_publication["status"] == "descriptive" else None,
+            draft_profile_records=profile_records_payload if draft_published else None,
         )
         leaderboards_dest = feat_dir / "leaderboards.json"
         leaderboards_dest.write_text(
@@ -2241,7 +2322,7 @@ def export_public_pack(
 
     progress("building bounded public query projection")
     query_archive_games = archive_games
-    if draft_publication["status"] == "descriptive" and draft_records_payload is not None:
+    if draft_published and draft_records_payload is not None:
         published_draft_ids = {
             str(game_id) for game_id in draft_records_payload.get("games", {})
         }
@@ -2267,10 +2348,10 @@ def export_public_pack(
         team_weekly_ranks=team_weekly_ranks,
         player_metadata=player_metadata,
         leaderboards=leaderboards,
-        draft_authority=draft_publication,
+        draft_authority=descriptive_publication if draft_published else None,
         draft_records=draft_records_payload,
     )
-    if draft_publication["status"] == "descriptive" and draft_records_payload is not None:
+    if draft_published and draft_records_payload is not None:
         expected_draft_ids = {
             str(game_id) for game_id in draft_records_payload.get("games", {})
         }
@@ -2335,16 +2416,18 @@ def export_public_pack(
         "issued_utc": draft_publication.get("issued_utc"),
         "reason": draft_publication["reason"],
     }
-    if draft_publication["status"] == "descriptive":
+    if draft_publication["status"] in {"descriptive", "promoted"}:
         draft_manifest.update(
             {
-                "authority": "descriptive",
-                "estimand": "composition_only",
-                "probability_authority": False,
-                "recommendation_authority": False,
+                "authority": draft_publication["authority"],
+                "estimand": draft_publication["estimand"],
+                "probability_authority": draft_publication["probability_authority"],
+                "recommendation_authority": draft_publication["recommendation_authority"],
                 "betting_authority": False,
             }
         )
+    if draft_publication["status"] == "promoted" and descriptive_publication:
+        draft_manifest["descriptive_authority"] = descriptive_publication
     manifest: dict[str, Any] = {
         "pack_id": pack_id,
         "schema_version": spec.SCHEMA_VERSION,
@@ -2443,6 +2526,10 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_MOMENTUM_SCALE,
         help="Explicit research momentum scale in rating points; default is zero",
     )
+    ap.add_argument("--promoted-draft-receipt", type=Path, default=None)
+    ap.add_argument("--promoted-draft-receipt-sha256", default=None)
+    ap.add_argument("--promoted-draft-results", type=Path, default=None)
+    ap.add_argument("--promoted-draft-results-sha256", default=None)
     args = ap.parse_args(argv)
     years = tuple(int(x.strip()) for x in args.years.split(",") if x.strip())
     man = export_public_pack(
@@ -2453,6 +2540,10 @@ def main(argv: list[str] | None = None) -> int:
         tier_payload_path=args.tier_payload,
         momentum_window_games=args.momentum_window_games,
         momentum_scale=args.momentum_scale,
+        promoted_draft_receipt_path=args.promoted_draft_receipt,
+        promoted_draft_receipt_sha256=args.promoted_draft_receipt_sha256,
+        promoted_draft_results_path=args.promoted_draft_results,
+        promoted_draft_results_sha256=args.promoted_draft_results_sha256,
     )
     mb = man["total_bytes"] / (1024 * 1024)
     print(f"Wrote pack {man['pack_id']} → {args.out / man['pack_id']}")

@@ -1,5 +1,6 @@
 import {
   draftAuthorityStatus,
+  hasDescriptiveDraftAuthority,
   type DraftAuthorityStatus,
 } from "./pack";
 import type {
@@ -23,6 +24,174 @@ import type {
 
 export const QUERY_API_SCHEMA = "scryglass:query-api:v1" as const;
 export const PUBLIC_RESPONSE_MAX_BYTES = 500 * 1024;
+export const PUBLIC_DRAFT_SCORE_RESULT_SCHEMA = "scryglass:public-draft-score-result:v1" as const;
+export const PROMOTED_DRAFT_RESULTS_SCHEMA = "scryglass:promoted-draft-results:v1" as const;
+
+export type PublicDraftScoreResult = {
+  schema_version: typeof PUBLIC_DRAFT_SCORE_RESULT_SCHEMA;
+  authority: "promoted";
+  release_id: string;
+  model_version: string;
+  receipt_sha256: string;
+  evidence_window: { start: string; end: string };
+  match_win_probability: { Blue: number; Red: number };
+  controlled_draft_score: {
+    model_units: number;
+    edge_percentage_points: number;
+    stronger_draft: "Blue" | "Red" | "Even";
+    explanation: string;
+    method: "role_matched_champion_swap";
+    intervention_receipt_sha256: string;
+    isolated_blue_draft_probability: number;
+    fixed_strength_blue_win_probability: number;
+  };
+  side_recommendation: "Blue" | "Red";
+};
+
+export type PromotedDraftResultsPayload = {
+  schema_version: typeof PROMOTED_DRAFT_RESULTS_SCHEMA;
+  authority: "promoted";
+  release_id: string;
+  model_version: string;
+  receipt_sha256: string;
+  results: Record<string, PublicDraftScoreResult>;
+};
+
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const exactKeys = (value: object, keys: readonly string[]) => {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+};
+
+/** Validate one promoted public result before any product surface renders it. */
+export function validatePromotedDraftScoreResult(
+  value: unknown,
+  manifest: PackManifest,
+): asserts value is PublicDraftScoreResult {
+  validateDraftResponse(value, manifest);
+  if (!value || typeof value !== "object") throw new Error("Promoted Draft result is malformed");
+  const result = value as Partial<PublicDraftScoreResult>;
+  if (
+    !exactKeys(value, [
+      "schema_version", "authority", "release_id", "model_version", "receipt_sha256",
+      "evidence_window", "match_win_probability", "controlled_draft_score", "side_recommendation",
+    ])
+    || result.schema_version !== PUBLIC_DRAFT_SCORE_RESULT_SCHEMA
+    || result.authority !== "promoted"
+    || result.release_id !== manifest.pack_id
+    || typeof result.model_version !== "string"
+    || !result.model_version.trim()
+    || typeof result.receipt_sha256 !== "string"
+    || !SHA256_PATTERN.test(result.receipt_sha256)
+    || result.receipt_sha256 !== manifest.draft_authority?.receipt_sha256
+    || result.model_version !== manifest.draft_authority?.model_version
+  ) {
+    throw new Error("Promoted Draft result is not release-bound");
+  }
+  const blue = result.match_win_probability?.Blue;
+  const red = result.match_win_probability?.Red;
+  if (
+    !result.match_win_probability
+    || !exactKeys(result.match_win_probability, ["Blue", "Red"])
+    || typeof blue !== "number"
+    || typeof red !== "number"
+    || !Number.isFinite(blue)
+    || !Number.isFinite(red)
+    || blue < 0
+    || blue > 1
+    || red < 0
+    || red > 1
+    || Math.abs(blue + red - 1) > 1e-9
+  ) {
+    throw new Error("Promoted Draft probabilities are invalid");
+  }
+  const score = result.controlled_draft_score;
+  if (
+    !score
+    || !exactKeys(score, [
+      "model_units", "edge_percentage_points", "stronger_draft", "explanation", "method",
+      "intervention_receipt_sha256", "isolated_blue_draft_probability",
+      "fixed_strength_blue_win_probability",
+    ])
+    || typeof score.model_units !== "number"
+    || !Number.isFinite(score.model_units)
+    || typeof score.edge_percentage_points !== "number"
+    || !Number.isFinite(score.edge_percentage_points)
+    || Math.abs(score.edge_percentage_points) > 100
+    || !["Blue", "Red", "Even"].includes(String(score.stronger_draft))
+    || typeof score.explanation !== "string"
+    || !score.explanation.trim()
+    || score.method !== "role_matched_champion_swap"
+    || typeof score.intervention_receipt_sha256 !== "string"
+    || !SHA256_PATTERN.test(score.intervention_receipt_sha256)
+    || typeof score.isolated_blue_draft_probability !== "number"
+    || !Number.isFinite(score.isolated_blue_draft_probability)
+    || score.isolated_blue_draft_probability < 0
+    || score.isolated_blue_draft_probability > 1
+    || typeof score.fixed_strength_blue_win_probability !== "number"
+    || !Number.isFinite(score.fixed_strength_blue_win_probability)
+    || score.fixed_strength_blue_win_probability < 0
+    || score.fixed_strength_blue_win_probability > 1
+  ) {
+    throw new Error("Controlled Draft Score is invalid");
+  }
+  const expectedDraftSide = score.model_units > 0
+    ? "Blue"
+    : score.model_units < 0
+      ? "Red"
+      : "Even";
+  if (
+    score.stronger_draft !== expectedDraftSide
+    || ((score.model_units === 0) !== (score.edge_percentage_points === 0))
+    || score.model_units * score.edge_percentage_points < 0
+  ) {
+    throw new Error("Controlled Draft Score direction is inconsistent");
+  }
+  if (result.side_recommendation !== (blue >= red ? "Blue" : "Red")) {
+    throw new Error("Public side recommendation conflicts with probability");
+  }
+  const window = result.evidence_window;
+  if (
+    !window
+    || !exactKeys(window, ["start", "end"])
+    || typeof window.start !== "string"
+    || typeof window.end !== "string"
+    || !Number.isFinite(Date.parse(window.start))
+    || !Number.isFinite(Date.parse(window.end))
+    || Date.parse(window.start) >= Date.parse(window.end)
+  ) {
+    throw new Error("Promoted Draft evidence window is invalid");
+  }
+}
+
+/** Validate the complete promoted result asset before exposing any row. */
+export function validatePromotedDraftResultsPayload(
+  value: unknown,
+  manifest: PackManifest,
+): asserts value is PromotedDraftResultsPayload {
+  if (!value || typeof value !== "object") throw new Error("Promoted Draft result asset is malformed");
+  const payload = value as Partial<PromotedDraftResultsPayload>;
+  if (
+    !exactKeys(value, ["schema_version", "authority", "release_id", "model_version", "receipt_sha256", "results"])
+    || payload.schema_version !== PROMOTED_DRAFT_RESULTS_SCHEMA
+    || payload.authority !== "promoted"
+    || payload.release_id !== manifest.pack_id
+    || payload.model_version !== manifest.draft_authority?.model_version
+    || payload.receipt_sha256 !== manifest.draft_authority?.receipt_sha256
+    || !payload.results
+    || typeof payload.results !== "object"
+    || Array.isArray(payload.results)
+    || Object.keys(payload.results).length === 0
+    || Object.keys(payload.results).length > 10_000
+  ) {
+    throw new Error("Promoted Draft result asset is not release-bound");
+  }
+  for (const [gameUid, result] of Object.entries(payload.results)) {
+    if (!gameUid) throw new Error("Promoted Draft result game ID is empty");
+    validatePromotedDraftScoreResult(result, manifest);
+  }
+}
 const RPC_TIMEOUT_MS = 5_000;
 const PUBLIC_ROW_LIMIT = 20;
 const PUBLIC_RATINGS_ROW_LIMIT = 100;
@@ -348,12 +517,27 @@ const DRAFT_PROBABILITY_KEYS = new Set([
   "draft_probability",
   "draft_win_share",
   "average_win_share",
+  "match_win_probability",
   "p_blue",
   "p_red",
   "probability",
-  "fair_odds",
-  "expected_value",
+]);
+
+const PERMANENTLY_FORBIDDEN_PUBLIC_KEYS = new Set([
+  "bet",
+  "betting",
   "ev",
+  "expected_value",
+  "fair_odds",
+  "odds",
+  "stake",
+  "wager",
+]);
+
+const DRAFT_RECOMMENDATION_KEYS = new Set([
+  "recommendation",
+  "recommended_side",
+  "side_recommendation",
 ]);
 
 function containsDraftProbability(value: unknown): boolean {
@@ -361,6 +545,14 @@ function containsDraftProbability(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   return Object.entries(value as Record<string, unknown>).some(([key, child]) => (
     DRAFT_PROBABILITY_KEYS.has(key.toLowerCase()) || containsDraftProbability(child)
+  ));
+}
+
+function containsAnyKey(value: unknown, keys: ReadonlySet<string>): boolean {
+  if (Array.isArray(value)) return value.some((entry) => containsAnyKey(entry, keys));
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value as Record<string, unknown>).some(([key, child]) => (
+    keys.has(key.toLowerCase()) || containsAnyKey(child, keys)
   ));
 }
 
@@ -388,15 +580,25 @@ function validateDraftResponse(value: unknown, manifest: PackManifest): void {
   if (!value || typeof value !== "object") return;
   const record = value as Record<string, unknown>;
   const authority = responseAuthority(record);
+  if (containsAnyKey(value, PERMANENTLY_FORBIDDEN_PUBLIC_KEYS)) {
+    throw new Error("Public Draft response contains a permanently forbidden betting field");
+  }
   if (authority !== "promoted" && containsDraftProbability(value)) {
     throw new Error("Public Draft response contains probability fields without promoted authority");
   }
+  if (authority !== "promoted" && containsAnyKey(value, DRAFT_RECOMMENDATION_KEYS)) {
+    throw new Error("Public Draft response contains a recommendation without promoted authority");
+  }
   const declared = draftAuthorityStatus(manifest);
-  if (authority && authority !== declared) {
+  if (
+    authority
+    && authority !== declared
+    && !(authority === "descriptive" && hasDescriptiveDraftAuthority(manifest))
+  ) {
     throw new Error("Public Draft response has an unbound authority");
   }
   if (containsKey(value, "draft_metric") || containsKey(value, "draft_pool") || containsKey(value, "draft_contribution")) {
-    if (authority !== "descriptive" || declared !== "descriptive") {
+    if (authority !== "descriptive" || !hasDescriptiveDraftAuthority(manifest)) {
       throw new Error("Public Draft response is missing descriptive release authority");
     }
   }
