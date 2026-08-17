@@ -4,7 +4,6 @@ from argparse import Namespace
 from pathlib import Path
 
 import lol_kills.research.private_draft_score_wrapper as wrapper
-from lol_kills.research.private_draft_score_wrapper import run
 
 
 def _args(scorer: Path, binding: Path) -> Namespace:
@@ -45,7 +44,7 @@ def _fake_scorer(tmp_path: Path) -> Path:
 
 
 def test_wrapper_preserves_owner_score_and_adds_private_recipe(tmp_path: Path) -> None:
-    result = run(_args(_fake_scorer(tmp_path), tmp_path / "missing-binding.json"))
+    result = wrapper.run(_args(_fake_scorer(tmp_path), tmp_path / "missing-binding.json"))
 
     assert result["draft_score"] == {"blue": 0.12, "red": -0.12}
     assert result["selected_model"] == "team_only"
@@ -74,7 +73,7 @@ def test_wrapper_reports_the_exact_r9e_query_contract(tmp_path: Path) -> None:
     binding.write_text("{}", encoding="utf-8")
     args = _args(_fake_scorer(tmp_path), binding)
 
-    result = run(args)
+    result = wrapper.run(args)
 
     assert result["draft_score_recipe"]["reason"] == "r9e_query_inputs_missing"
     assert result["draft_score_recipe"]["missing_inputs"] == [
@@ -93,7 +92,7 @@ def test_wrapper_keeps_r9e_composite_out_of_draft_score(tmp_path: Path, monkeypa
     }
     monkeypatch.setattr(wrapper, "_build_recipe", lambda _args: composite)
 
-    result = run(_args(_fake_scorer(tmp_path), tmp_path / "binding.json"))
+    result = wrapper.run(_args(_fake_scorer(tmp_path), tmp_path / "binding.json"))
 
     assert result["development_composite"] is composite
     assert result["draft_score_recipe"]["reason"] == "r9e_checkpoint_is_composite_not_draft_score"
