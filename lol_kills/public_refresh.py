@@ -24,10 +24,13 @@ from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.export import supabase_publication
 from lol_kills.export.public_pack import source_identity_sha256
 from lol_kills.postgame_sync import (
+    RefreshValidationError,
     SyncConfig,
     _load_json,
     _iso,
     _atomic_json,
+    _manifest_window_years,
+    _year_filtered_ids,
     exclusive_lock,
     rollback_public_pack,
     sync_once,
@@ -460,7 +463,7 @@ def seed_supabase_continuity(config: RefreshConfig) -> dict[str, Any] | None:
     game_ids = sorted(str(game_id) for game_id in games)
     source = "profile_index"
     if len(game_ids) != expected_count or source_identity_sha256(game_ids) != expected_digest:
-        local_source = validate_live_source(config.runtime_root, [])
+        local_source = validate_live_source(config.runtime_root, [], years=config.sync.years)
         local_ids = local_source.get("game_ids")
         if not isinstance(local_ids, list):
             raise PublicRefreshError("Supabase continuity bootstrap has no complete source index")
@@ -470,27 +473,40 @@ def seed_supabase_continuity(config: RefreshConfig) -> dict[str, Any] | None:
         # Recovery: the local worker can be ahead of the active release when a
         # local pack was published but Supabase activation was interrupted.
         # Verify that the active release's own published game index is fully
-        # covered by the validated local source, then seed from the local
-        # source so the next publish continues from it.
+        # covered by the validated local source. The raw local superset is
+        # never trusted directly — it can be contaminated with games outside
+        # the release's declared publication window (the source of the
+        # 2026-08 continuity incident) — so only a restriction of it to the
+        # release's declared window years is ever seeded, and only when that
+        # restriction reproduces the published binding exactly.
         release_index_ids = _release_index_game_ids(client, release_id)
         if release_index_ids and release_index_ids <= set(game_ids):
-            _atomic_json(config.public_root / "manifest.json", manifest)
-            _atomic_json(
-                config.sync.state_path,
-                {
-                    **state,
+            try:
+                window_years = _manifest_window_years(manifest)
+            except RefreshValidationError as error:
+                raise PublicRefreshError(str(error)) from error
+            filtered_ids = _year_filtered_ids(config.runtime_root, game_ids, window_years)
+            if (
+                len(filtered_ids) == expected_count
+                and source_identity_sha256(filtered_ids) == expected_digest
+            ):
+                _atomic_json(config.public_root / "manifest.json", manifest)
+                _atomic_json(
+                    config.sync.state_path,
+                    {
+                        **state,
+                        "pack_id": release_id,
+                        "published_game_ids": filtered_ids,
+                        "release_index_game_ids": sorted(release_index_ids),
+                        "status": "bootstrapped",
+                    },
+                )
+                return {
+                    "status": "seeded",
                     "pack_id": release_id,
-                    "published_game_ids": game_ids,
-                    "release_index_game_ids": sorted(release_index_ids),
-                    "status": "bootstrapped",
-                },
-            )
-            return {
-                "status": "seeded",
-                "pack_id": release_id,
-                "game_count": len(game_ids),
-                "source": "validated_local_cache_superset",
-            }
+                    "game_count": len(filtered_ids),
+                    "source": "validated_local_cache_superset",
+                }
         raise PublicRefreshError("Supabase continuity bootstrap does not match the active release")
 
     _atomic_json(config.public_root / "manifest.json", manifest)
@@ -666,7 +682,7 @@ def _tier_publication_for_source(
     candidate_artifact = str(candidate.get("artifact_sha256") or "")
     if not supabase_publication.SHA256_RE.fullmatch(candidate_artifact):
         raise PublicRefreshError("tier-list candidate has no artifact digest")
-    live_census = validate_live_source(config.runtime_root, [])
+    live_census = validate_live_source(config.runtime_root, [], years=config.sync.years)
     expected_count = int(source.get("game_count", -1))
     candidate_count = int(candidate.get("maps_replayed", -1))
     if (
