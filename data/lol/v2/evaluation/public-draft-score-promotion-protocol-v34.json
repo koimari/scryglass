@@ -10,6 +10,7 @@
     "constituent_implementation_sha256": "452bfb54b7cff4cac2cbc4f0156af11acf3a39adb0d8af033e23c81824d1c794",
     "quantum_implementation_sha256": "565398d9ae2c8e032d9e48c592405521ec7511f37798814f1231bc5198b0b1ed",
     "draft_builder_implementation_sha256": "d59e49ff6dd2f48a08406c3e6b4000883537298719cc05f028418e472a792c62",
+    "holdout_source_preparer_sha256": "31dca4bc0f3d2b5324b24806fb706736863919ad13b920472f62a992d9d3370a",
     "holdout_sealer_sha256": "cea3fe8d65f85b20fd1b19d80f70391b8046894941a915809ed3d633d09ba88d",
     "holdout_inventory_sha256": "bc7fbe7bb275dbb6368f5cdeb394fbcef6eb081e05a5ceedb409cc807d5faae3",
     "matrix_sha256": "36d48e7bd68066d782d8ad8164a87084871203feb72ae7259241909fb62fdd96",
