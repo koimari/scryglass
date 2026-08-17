@@ -7,6 +7,7 @@ import pytest
 
 from lol_kills.export.leaderboards import (
     LEADERBOARDS_SCHEMA,
+    _teams_draft,
     build_leaderboards,
 )
 
@@ -200,3 +201,20 @@ def test_team_draft_uses_whole_archive_when_player_pool_is_narrower() -> None:
         "league": "LCS",
         "tier": "tier1",
     }
+
+
+def test_team_draft_keeps_every_supported_team_scope() -> None:
+    games = {}
+    for team_index in range(60):
+        for game_index in range(5):
+            games[f"{team_index}-{game_index}"] = {
+                "blue_team": f"Team {team_index}",
+                "red_team": "Shared Opponent",
+                "draft_edge": team_index / 100,
+                "league": "LCS",
+                "competition_tier": "tier1",
+            }
+
+    rows = _teams_draft({"games": games})
+
+    assert len([row for row in rows if row["team"].startswith("Team ")]) == 60

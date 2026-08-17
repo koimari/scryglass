@@ -214,7 +214,7 @@ def _teams_draft(draft_records: Mapping[str, Any] | None) -> list[dict[str, Any]
             "tier": tier,
         })
     rows.sort(key=lambda row: (-row["draft_edge"], -row["games"], row["team"]))
-    return rows[:TOP_LIMIT]
+    return rows
 
 
 def _teams_draft_from_profile(profile_records: Mapping[str, Any] | None) -> list[dict[str, Any]]:
