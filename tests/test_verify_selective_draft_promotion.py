@@ -31,6 +31,7 @@ def _inputs(tmp_path: Path) -> tuple[Path, str, Path, str]:
             "candidate_receipt_sha256": "a" * 64,
             "protocol_file_sha256": "c" * 64,
             "outcomes_sha256": "b" * 64,
+            "controlled_intervention_receipt_sha256": ["d" * 64],
             "public_probability": False,
             "public_recommendation": False,
         },
@@ -71,6 +72,35 @@ def test_independent_decision_creates_promoted_receipt(tmp_path: Path) -> None:
     assert receipt["public_probability"] is True
     assert receipt["public_recommendation"] is True
     assert receipt["betting_odds_ev_stake"] is False
+    assert receipt["controlled_intervention_receipt_sha256"] == ["d" * 64]
+
+
+def test_missing_paired_intervention_evidence_fails_closed(tmp_path: Path) -> None:
+    evaluation_path, _evaluation_sha, decision_path, _decision_sha = _inputs(tmp_path)
+    evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
+    evaluation.pop("controlled_intervention_receipt_sha256")
+    evaluation.pop("receipt_sha256")
+    evaluation["receipt_sha256"] = canonical_sha256(evaluation)
+    evaluation_path.write_text(json.dumps(evaluation), encoding="utf-8")
+
+    decision = json.loads(decision_path.read_text(encoding="utf-8"))
+    decision["evaluation_file_sha256"] = sha256_path(evaluation_path)
+    decision["evaluation_receipt_sha256"] = evaluation["receipt_sha256"]
+    decision.pop("receipt_sha256")
+    decision["receipt_sha256"] = canonical_sha256(decision)
+    decision_path.write_text(json.dumps(decision), encoding="utf-8")
+
+    with pytest.raises(
+        SelectiveDraftPromotionVerificationError,
+        match="paired Draft intervention",
+    ):
+        verify_promotion_decision(
+            evaluation_path=evaluation_path,
+            expected_evaluation_sha256=sha256_path(evaluation_path),
+            decision_path=decision_path,
+            expected_decision_sha256=sha256_path(decision_path),
+            output_path=tmp_path / "promotion.json",
+        )
 
 
 def test_developer_authored_decision_fails_closed(tmp_path: Path) -> None:

@@ -81,6 +81,18 @@ def verify_promotion_decision(
         or evaluation.get("public_recommendation") is not False
     ):
         raise SelectiveDraftPromotionVerificationError("evaluation did not pass")
+    paired_receipts = evaluation.get("controlled_intervention_receipt_sha256")
+    if (
+        not isinstance(paired_receipts, list)
+        or not paired_receipts
+        or any(
+            not isinstance(value, str) or not SHA256_PATTERN.fullmatch(value)
+            for value in paired_receipts
+        )
+    ):
+        raise SelectiveDraftPromotionVerificationError(
+            "paired Draft intervention evidence is invalid"
+        )
     if (
         decision.get("schema_version") != DECISION_SCHEMA_VERSION
         or decision.get("decision") != "promoted"
@@ -123,6 +135,7 @@ def verify_promotion_decision(
         "decision_file_sha256": expected_decision_sha256,
         "decision_receipt_sha256": decision["receipt_sha256"],
         "outcomes_sha256": evaluation["outcomes_sha256"],
+        "controlled_intervention_receipt_sha256": paired_receipts,
         "reviewer_identity": decision["reviewer_identity"],
         "issued_utc": issued,
         "approved_public_fields": list(APPROVED_FIELDS),
