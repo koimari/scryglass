@@ -5,7 +5,13 @@ from __future__ import annotations
 import math
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Mapping
+
+from lol_kills.research.selective_draft_probability import canonical_sha256
+from lol_kills.research.verify_selective_draft_promotion import (
+    APPROVED_FIELDS,
+    RECEIPT_SCHEMA_VERSION as PROMOTION_RECEIPT_SCHEMA_VERSION,
+)
 
 
 SCHEMA_VERSION = "scryglass:public-draft-score-result:v1"
@@ -24,7 +30,7 @@ def build_public_draft_score_result(
     *,
     release_id: str,
     model_version: str,
-    receipt_sha256: str,
+    promotion_receipt: Mapping[str, Any],
     evidence_start: str,
     evidence_end: str,
     blue_win_probability: float,
@@ -38,8 +44,23 @@ def build_public_draft_score_result(
         raise PublicDraftScoreResultError("release ID is invalid")
     if not model_version.strip():
         raise PublicDraftScoreResultError("model version is empty")
-    if not SHA256_PATTERN.fullmatch(receipt_sha256):
-        raise PublicDraftScoreResultError("promotion receipt SHA-256 is invalid")
+    receipt = dict(promotion_receipt)
+    receipt_sha256 = receipt.get("receipt_sha256")
+    unsigned = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
+    if (
+        receipt.get("schema_version") != PROMOTION_RECEIPT_SCHEMA_VERSION
+        or receipt.get("status") != "promoted"
+        or receipt.get("authority") != "promoted"
+        or receipt.get("public_probability") is not True
+        or receipt.get("public_recommendation") is not True
+        or receipt.get("betting_odds_ev_stake") is not False
+        or tuple(receipt.get("approved_public_fields") or ()) != APPROVED_FIELDS
+        or receipt.get("model_version") != model_version
+        or not isinstance(receipt_sha256, str)
+        or not SHA256_PATTERN.fullmatch(receipt_sha256)
+        or receipt_sha256 != canonical_sha256(unsigned)
+    ):
+        raise PublicDraftScoreResultError("promotion receipt is invalid")
     if not UTC_PATTERN.fullmatch(evidence_start) or not UTC_PATTERN.fullmatch(
         evidence_end
     ):
