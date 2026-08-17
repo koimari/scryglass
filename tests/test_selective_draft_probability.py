@@ -11,6 +11,7 @@ from lol_kills.research import selective_draft_probability as selective_module
 from lol_kills.research import selective_draft_constituents as constituent_module
 from lol_kills.research import public_draft_score_promotion as promotion_module
 from lol_kills.research import seal_selective_draft_holdout as sealer_module
+from lol_kills.research import selective_draft_holdout_inventory as inventory_module
 from lol_kills.research.selective_draft_probability import (
     CONFIDENCE_COLUMNS,
     PREDICTORS,
@@ -286,6 +287,9 @@ def test_latest_protocol_binds_the_frozen_candidate_and_implementation() -> None
     ] == file_sha256(Path(promotion_module.__file__))
     assert protocol["iteration"]["holdout_sealer_sha256"] == file_sha256(
         Path(sealer_module.__file__)
+    )
+    assert protocol["iteration"]["holdout_inventory_sha256"] == file_sha256(
+        Path(inventory_module.__file__)
     )
     assert protocol["quantum_reproducibility"] == {
         "protocol_file_sha256": constituent_module.V24_QUANTUM_PROTOCOL_FILE_SHA256,

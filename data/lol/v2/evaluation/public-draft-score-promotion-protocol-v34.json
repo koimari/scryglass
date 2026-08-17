@@ -9,7 +9,8 @@
     "implementation_sha256": "bac43f72a001d24cb6e09e61a96aa530c6209398104e31e8a6dff26c6322af5a",
     "constituent_implementation_sha256": "b9166f6206ebeb4bc25fef0ed03199263f037b26c661027ff83d4a622ac078a1",
     "quantum_implementation_sha256": "25dcfbdd665ca299c59978971a46386b2718db93491fe8e3196ee86ca0e6d108",
-    "holdout_sealer_sha256": "10ecb7e17cc6e8a0fe0e0c3e8d0253648cdd5c535f2972dbdea5bbe36e2ddd01",
+    "holdout_sealer_sha256": "cea3fe8d65f85b20fd1b19d80f70391b8046894941a915809ed3d633d09ba88d",
+    "holdout_inventory_sha256": "bc7fbe7bb275dbb6368f5cdeb394fbcef6eb081e05a5ceedb409cc807d5faae3",
     "matrix_sha256": "36d48e7bd68066d782d8ad8164a87084871203feb72ae7259241909fb62fdd96",
     "matrix_manifest_sha256": "3faec8f2c46e4c0c139a007f80481f256f40866a3d693a2b38dc84ec2be69765"
   },

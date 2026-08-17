@@ -168,6 +168,7 @@ def seal_holdout_batch(
         },
         "output_sha256": output_sha256,
         "rows": len(sealed),
+        "game_ids": feature_ids,
         "game_ids_sha256": canonical_sha256(feature_ids),
         "selected_rows": int(sealed["probability_authorized"].sum()),
         "coverage": float(sealed["probability_authorized"].mean()),

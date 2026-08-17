@@ -97,6 +97,8 @@ def test_seal_holdout_batch_is_outcome_blind_and_receipt_bound(
     assert receipt["outcome_blind"] is True
     assert receipt["selected_rows"] == 1
     assert receipt["coverage"] == 0.5
+    assert receipt["game_ids"] == ["game-a", "game-b"]
+    assert receipt["game_ids_sha256"] == canonical_sha256(receipt["game_ids"])
     assert receipt["output_sha256"] == _sha(output)
     assert receipt["receipt_sha256"] == canonical_sha256(
         {key: value for key, value in receipt.items() if key != "receipt_sha256"}
