@@ -13,14 +13,115 @@ ally, enemy, patch, and phase features may change after the swap.
 from __future__ import annotations
 
 import math
-from typing import Any
+import hashlib
+import json
+from typing import Any, Mapping, Sequence
 
 
 SCHEMA_VERSION = "scryglass:controlled-draft-contribution:v1"
+INTERVENTION_RECEIPT_SCHEMA = "scryglass:role-matched-draft-swap:v1"
+SIDES = ("Blue", "Red")
+ROLES = ("top", "jng", "mid", "bot", "sup")
+FIXED_FIELDS = (
+    "game_uid",
+    "date",
+    "side",
+    "position",
+    "playername",
+    "teamname",
+    "league",
+)
 
 
 class ControlledDraftContributionError(ValueError):
     """Raised when a paired Draft intervention is invalid."""
+
+
+def _canonical_sha256(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _normalized_slots(
+    rows: Sequence[Mapping[str, Any]], *, label: str
+) -> dict[tuple[str, str], dict[str, str]]:
+    if len(rows) != 10:
+        raise ControlledDraftContributionError(f"{label} draft must have ten rows")
+    slots: dict[tuple[str, str], dict[str, str]] = {}
+    for raw in rows:
+        row = {field: str(raw.get(field, "")).strip() for field in FIXED_FIELDS}
+        row["champion"] = str(raw.get("champion", "")).strip()
+        side = row["side"].title()
+        role = row["position"].lower()
+        role = {"jungle": "jng", "support": "sup"}.get(role, role)
+        row["side"] = side
+        row["position"] = role
+        if side not in SIDES or role not in ROLES:
+            raise ControlledDraftContributionError(f"{label} draft has an invalid slot")
+        if any(not row[field] for field in (*FIXED_FIELDS, "champion")):
+            raise ControlledDraftContributionError(f"{label} draft has an empty field")
+        key = (side, role)
+        if key in slots:
+            raise ControlledDraftContributionError(f"{label} draft repeats a slot")
+        slots[key] = row
+    expected = {(side, role) for side in SIDES for role in ROLES}
+    if set(slots) != expected:
+        raise ControlledDraftContributionError(f"{label} draft has incomplete slots")
+    champions = [row["champion"].casefold() for row in slots.values()]
+    if len(set(champions)) != 10:
+        raise ControlledDraftContributionError(f"{label} draft repeats a champion")
+    return slots
+
+
+def validate_role_matched_champion_swap(
+    *,
+    observed_rows: Sequence[Mapping[str, Any]],
+    swapped_rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Prove that a paired input changes only role-matched champions."""
+
+    observed = _normalized_slots(observed_rows, label="observed")
+    swapped = _normalized_slots(swapped_rows, label="swapped")
+    for key, observed_row in observed.items():
+        swapped_row = swapped[key]
+        if any(observed_row[field] != swapped_row[field] for field in FIXED_FIELDS):
+            raise ControlledDraftContributionError(
+                "paired draft changed a fixed control field"
+            )
+        side, role = key
+        other_side = "Red" if side == "Blue" else "Blue"
+        if swapped_row["champion"] != observed[(other_side, role)]["champion"]:
+            raise ControlledDraftContributionError(
+                "paired draft is not an exact role-matched champion swap"
+            )
+
+    ordered_observed = [
+        observed[(side, role)] for side in SIDES for role in ROLES
+    ]
+    ordered_swapped = [swapped[(side, role)] for side in SIDES for role in ROLES]
+    fixed_controls = [
+        {field: row[field] for field in FIXED_FIELDS}
+        for row in ordered_observed
+    ]
+    receipt = {
+        "schema_version": INTERVENTION_RECEIPT_SCHEMA,
+        "method": "role_matched_champion_swap",
+        "observed_rows_sha256": _canonical_sha256(ordered_observed),
+        "swapped_rows_sha256": _canonical_sha256(ordered_swapped),
+        "fixed_controls_sha256": _canonical_sha256(fixed_controls),
+        "fixed_fields": list(FIXED_FIELDS),
+        "changed_field": "champion",
+        "slots": len(ordered_observed),
+    }
+    receipt["receipt_sha256"] = _canonical_sha256(receipt)
+    return receipt
 
 
 def _logit(probability: float) -> float:
