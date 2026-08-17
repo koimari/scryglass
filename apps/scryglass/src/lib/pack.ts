@@ -126,6 +126,8 @@ export type PackManifest = {
   ratings?: {
     source_mode?: string;
     source_as_of?: string;
+    source_game_count?: number;
+    source_identity_sha256?: string;
     window_years?: number[];
     map_rows?: number;
     team_rating_rows?: number;

@@ -291,8 +291,16 @@ test("public asset paths use the canonical allowlist", () => {
 });
 
 test("public manifest removes internal fields and binds same-origin asset URLs", () => {
-  const result = publicPackManifest(manifest());
+  const candidate = manifest();
+  candidate.ratings = {
+    source_as_of: "2026-08-13T18:00:00Z",
+    source_game_count: 2,
+    source_identity_sha256: "c".repeat(64),
+  };
+  const result = publicPackManifest(candidate);
   assert.equal(result.release_id, RELEASE_ID);
+  assert.equal(result.source_game_count, 2);
+  assert.equal(result.source_identity_sha256, "c".repeat(64));
   assert.equal(result.files[0]?.url, `/api/assets/${RELEASE_ID}/features%2Fteam_records.json`);
   assert.deepEqual(Object.keys(result.files[0] ?? {}).sort(), ["bytes", "path", "sha256", "url"]);
 });

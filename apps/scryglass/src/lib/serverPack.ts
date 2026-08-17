@@ -589,6 +589,8 @@ export function publicPackManifest(manifest: PackManifest) {
     created_utc: manifest.created_utc,
     data_backend: "supabase" as const,
     source_as_of: manifest.ratings?.source_as_of ?? null,
+    source_game_count: manifest.ratings?.source_game_count ?? null,
+    source_identity_sha256: manifest.ratings?.source_identity_sha256 ?? null,
     total_files: files.length,
     total_bytes: files.reduce((total, file) => total + file.bytes, 0),
     files,
