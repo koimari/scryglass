@@ -2037,14 +2037,34 @@ def export_public_pack(
                 profile_game = profile_records_payload.get("games", {}).get(game_id)
                 if isinstance(profile_game, Mapping) and isinstance(profile_game.get("draft_pool"), Mapping):
                     entry["draft_pool"] = profile_game["draft_pool"]
-        # Trim the archive and the Draft records together. The injection above
-        # leaves both sides holding exactly the same pool set; gating only the
-        # archive here would drop its incomplete pools while the records kept
-        # theirs, and the bounded query projection rejects that asymmetry.
         _gate_published_draft_contributions(
             profile_records_payload,
-            draft_records_payload,
         )
+        # Player best-available evidence needs complete ban, order and pool
+        # evidence, a narrower denominator than team Draft coverage, which
+        # keeps every scoreable complete draft in team_draft_records_payload.
+        # Restrict the published Draft records to games whose pool survived the
+        # archive gate above. This keeps pool presence identical on both sides,
+        # which the bounded query projection requires, and leaves every
+        # published record pool-complete, which the Supabase publisher
+        # requires. Records are dropped only when their pool evidence is
+        # incomplete; the whole-archive team payload is untouched.
+        if draft_records_payload is not None:
+            gated_games = profile_records_payload.get("games", {})
+            records = draft_records_payload.get("games")
+            if isinstance(records, dict):
+                for record_game_id in list(records):
+                    archive_game = gated_games.get(record_game_id)
+                    archive_pool = (
+                        archive_game.get("draft_pool")
+                        if isinstance(archive_game, Mapping)
+                        else None
+                    )
+                    if (
+                        not isinstance(archive_pool, Mapping)
+                        or archive_pool.get("status") != "complete"
+                    ):
+                        records.pop(record_game_id, None)
         if not tier_payload_source:
             raise RuntimeError(
                 "descriptive Draft release requires an available generated tier payload"
