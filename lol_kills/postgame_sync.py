@@ -380,8 +380,20 @@ def validate_live_source(
     new_game_ids: Sequence[str],
     *,
     years: Sequence[int],
+    exclude_out_of_window: bool = False,
 ) -> dict[str, Any]:
-    """Return the complete canonical source set and verify every new game."""
+    """Return the complete canonical source set and verify every new game.
+
+    By default a cache holding any game outside ``years`` fails closed: the
+    refresh path must never derive a release from an out-of-window population.
+
+    ``exclude_out_of_window`` exists for the continuity bootstrap alone. That
+    caller has to read the in-window population out of a cache it already knows
+    is contaminated, because the sanctioned release entrypoint is the only
+    command permitted to run a production release. Excluded identities are always
+    reported back, so an exclusion is visible rather than silent, and the caller
+    must still reproduce the published binding digest before it seeds anything.
+    """
 
     requested = set(_canonical_ids(list(new_game_ids)))
     if len(requested) != len(new_game_ids):
@@ -416,11 +428,14 @@ def validate_live_source(
                 if pd.notna(year_by_id.get(game_id))
             }
         )
-        raise RefreshValidationError(
-            f"live source contains {len(offending_ids)} games outside the publication window "
-            f"{tuple(sorted(allowed_years))}; offending years="
-            f"{offending_years or ['unresolved']}"
-        )
+        if not exclude_out_of_window:
+            raise RefreshValidationError(
+                f"live source contains {len(offending_ids)} games outside the publication window "
+                f"{tuple(sorted(allowed_years))}; offending years="
+                f"{offending_years or ['unresolved']}"
+            )
+        excluded = set(offending_ids)
+        map_ids = [game_id for game_id in map_ids if game_id not in excluded]
     valid_team_ids: set[str] = set()
     for game_id, team_rows in teams.groupby("_game_id", sort=False):
         sides = set(team_rows["side"].astype(str).str.title())
@@ -493,6 +508,11 @@ def validate_live_source(
         "identity_sha256": source_identity_sha256(accepted_ids),
         "candidate_game_count": len(map_ids),
         "rejected_incomplete_game_count": len(set(map_ids).difference(accepted_ids)),
+        # Always reported, so an out-of-window exclusion is auditable rather
+        # than silent. Empty unless the caller opted into exclusion and the
+        # cache actually held games outside the publication window.
+        "out_of_window_game_ids": sorted(offending_ids),
+        "out_of_window_identity_sha256": source_identity_sha256(offending_ids),
     }
 
 

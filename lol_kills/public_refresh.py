@@ -462,11 +462,26 @@ def seed_supabase_continuity(config: RefreshConfig) -> dict[str, Any] | None:
         raise PublicRefreshError("Supabase continuity bootstrap has no game index")
     game_ids = sorted(str(game_id) for game_id in games)
     source = "profile_index"
+    out_of_window_ids: list[str] = []
     if len(game_ids) != expected_count or source_identity_sha256(game_ids) != expected_digest:
-        local_source = validate_live_source(config.runtime_root, [], years=config.sync.years)
+        # The window restriction has to happen while the candidate ids are being
+        # read, not after. A contaminated cache is the exact state this bootstrap
+        # exists to recover from, so validating the whole cache strictly here
+        # would abort before the recovery below could ever discard the
+        # out-of-window rows. Exclusion is safe because nothing is seeded until
+        # the surviving set reproduces the published binding digest exactly, and
+        # the excluded identities are recorded for audit.
+        local_source = validate_live_source(
+            config.runtime_root,
+            [],
+            years=config.sync.years,
+            exclude_out_of_window=True,
+        )
         local_ids = local_source.get("game_ids")
         if not isinstance(local_ids, list):
             raise PublicRefreshError("Supabase continuity bootstrap has no complete source index")
+        excluded = local_source.get("out_of_window_game_ids")
+        out_of_window_ids = sorted(str(value) for value in excluded) if excluded else []
         game_ids = sorted(str(game_id) for game_id in local_ids)
         source = "validated_local_cache"
     if len(game_ids) != expected_count or source_identity_sha256(game_ids) != expected_digest:
@@ -506,6 +521,8 @@ def seed_supabase_continuity(config: RefreshConfig) -> dict[str, Any] | None:
                     "pack_id": release_id,
                     "game_count": len(filtered_ids),
                     "source": "validated_local_cache_superset",
+                    "out_of_window_game_count": len(out_of_window_ids),
+                    "out_of_window_identity_sha256": source_identity_sha256(out_of_window_ids),
                 }
         raise PublicRefreshError("Supabase continuity bootstrap does not match the active release")
 
@@ -524,6 +541,8 @@ def seed_supabase_continuity(config: RefreshConfig) -> dict[str, Any] | None:
         "pack_id": release_id,
         "game_count": expected_count,
         "source": source,
+        "out_of_window_game_count": len(out_of_window_ids),
+        "out_of_window_identity_sha256": source_identity_sha256(out_of_window_ids),
     }
 
 

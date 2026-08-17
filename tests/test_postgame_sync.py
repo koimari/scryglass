@@ -628,6 +628,59 @@ def test_live_validation_rejects_a_map_outside_the_publication_window(
     assert "2024" in message
 
 
+def test_live_validation_can_exclude_out_of_window_maps_for_the_bootstrap(
+    tmp_path: Path,
+) -> None:
+    """The bootstrap must be able to read a contaminated cache, unmocked.
+
+    This exercises the real validator against a real contaminated cache. The
+    continuity bootstrap has to obtain the in-window population from a cache it
+    already knows holds out-of-window rows; if this mode were absent or ordered
+    after the strict whole-cache check, the bootstrap could never recover from
+    the exact scenario it exists for.
+    """
+
+    _write_live(
+        tmp_path,
+        ["game-1", "game-2", "game-3"],
+        dates={
+            "game-1": "2026-06-01T00:00:00Z",
+            "game-2": "2025-04-02T00:00:00Z",
+            "game-3": "2024-11-03T00:00:00Z",
+        },
+    )
+
+    source = validate_live_source(
+        tmp_path,
+        [],
+        years=(2025, 2026),
+        exclude_out_of_window=True,
+    )
+
+    assert source["game_ids"] == ["game-1", "game-2"]
+    assert "game-3" not in source["game_ids"]
+    assert source["game_count"] == 2
+    assert source["identity_sha256"] == source_identity_sha256(["game-1", "game-2"])
+    # The exclusion is auditable, never silent.
+    assert source["out_of_window_game_ids"] == ["game-3"]
+    assert source["out_of_window_identity_sha256"] == source_identity_sha256(["game-3"])
+
+    # The same cache still fails closed by default.
+    with pytest.raises(RefreshValidationError, match="outside the publication window"):
+        validate_live_source(tmp_path, [], years=(2025, 2026))
+
+
+def test_live_validation_reports_no_exclusions_for_a_clean_cache(tmp_path: Path) -> None:
+    """A clean cache reports an empty exclusion set in both modes."""
+
+    _write_live(tmp_path, ["game-1", "game-2"])
+
+    for kwargs in ({}, {"exclude_out_of_window": True}):
+        source = validate_live_source(tmp_path, [], years=(2025, 2026), **kwargs)
+        assert source["out_of_window_game_ids"] == []
+        assert source["game_count"] == 2
+
+
 def test_source_continuity_rejects_a_disappearing_published_game(tmp_path: Path) -> None:
     config = _config(tmp_path)
     _write_receipt(tmp_path, ["game-1"])
