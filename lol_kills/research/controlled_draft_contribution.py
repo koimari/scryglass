@@ -15,6 +15,7 @@ from __future__ import annotations
 import math
 import hashlib
 import json
+from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
 
@@ -49,6 +50,20 @@ def _canonical_sha256(value: Any) -> str:
     ).hexdigest()
 
 
+def _canonical_date(value: str, *, label: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ControlledDraftContributionError(
+            f"{label} draft has an invalid date"
+        ) from error
+    if parsed.tzinfo is None:
+        raise ControlledDraftContributionError(
+            f"{label} draft has an invalid date"
+        )
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _normalized_slots(
     rows: Sequence[Mapping[str, Any]], *, label: str
 ) -> dict[tuple[str, str], dict[str, str]]:
@@ -58,6 +73,7 @@ def _normalized_slots(
     for raw in rows:
         row = {field: str(raw.get(field, "")).strip() for field in FIXED_FIELDS}
         row["champion"] = str(raw.get("champion", "")).strip()
+        row["date"] = _canonical_date(row["date"], label=label)
         side = row["side"].title()
         role = row["position"].lower()
         role = {"jungle": "jng", "support": "sup"}.get(role, role)

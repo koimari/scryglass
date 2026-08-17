@@ -33,6 +33,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss, mean_squared_error, roc_auc_score
 
 from lol_kills.etl.aliases import normalize_team
+from lol_kills.research.controlled_draft_contribution import (
+    validate_role_matched_champion_swap,
+)
 
 
 SCHEMA_VERSION = "scryglass:atomized-rf-composite-research:v3"
@@ -1525,6 +1528,35 @@ def _load_frames(maps_path: Path, players_path: Path, team_path: Path) -> tuple[
     return maps, players, teams
 
 
+def _controlled_feature_lineup(
+    observed_rows: Sequence[Mapping[str, Any]],
+    override_rows: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Apply an exact champion swap while preserving observed update rows."""
+
+    receipt = validate_role_matched_champion_swap(
+        observed_rows=observed_rows,
+        swapped_rows=override_rows,
+    )
+
+    def slot(row: Mapping[str, Any]) -> tuple[str, str]:
+        role = str(row.get("position") or "").strip().casefold()
+        role = {"jungle": "jng", "support": "sup"}.get(role, role)
+        return _side(row.get("side")), role
+
+    override_champions = {
+        slot(row): str(row.get("champion") or "").strip()
+        for row in override_rows
+    }
+    return (
+        [
+            {**row, "champion": override_champions[slot(row)]}
+            for row in observed_rows
+        ],
+        receipt,
+    )
+
+
 def layer_a_build_preflight(
     *,
     base_dataset: Path,
@@ -1536,6 +1568,9 @@ def layer_a_build_preflight(
     cache_dir: Path,
     expected_base_sha256: str,
     history_end: Any = CONSUMED_TEST_END,
+    feature_lineup_overrides: Mapping[
+        str, Sequence[Mapping[str, Any]]
+    ] | None = None,
 ) -> dict[str, Any]:
     """Bind every matrix source without constructing the feature matrix."""
 
@@ -1566,6 +1601,16 @@ def layer_a_build_preflight(
         "momentum_window": MOMENTUM_WINDOW_GAMES,
         "momentum_scale": MOMENTUM_SCALE,
         "history_end_exclusive": normalized_history_end.isoformat(),
+        "feature_lineup_overrides": (
+            canonical_sha256(
+                {
+                    str(game_uid): [dict(row) for row in rows]
+                    for game_uid, rows in sorted(feature_lineup_overrides.items())
+                }
+            )
+            if feature_lineup_overrides
+            else None
+        ),
     }
     if sources["base_dataset"] != expected_base_sha256:
         raise AtomizedResearchError("locked baseline dataset SHA-256 changed")
@@ -1604,6 +1649,9 @@ def build_layer_a_matrix(
     force: bool = False,
     expected_base_sha256: str = LOCKED_DATASET_SHA256,
     history_end: Any = CONSUMED_TEST_END,
+    feature_lineup_overrides: Mapping[
+        str, Sequence[Mapping[str, Any]]
+    ] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Build the strictly lagged statistical-atom matrix.
 
@@ -1622,6 +1670,7 @@ def build_layer_a_matrix(
         cache_dir=cache_dir,
         expected_base_sha256=expected_base_sha256,
         history_end=history_end,
+        feature_lineup_overrides=feature_lineup_overrides,
     )
     normalized_history_end = pd.Timestamp(
         source_receipt["sources"]["history_end_exclusive"]
@@ -1679,6 +1728,16 @@ def build_layer_a_matrix(
                     )
                 ] = (player, team)
     base_ids = set(base["game_uid"].astype(str))
+    normalized_lineup_overrides = {
+        str(game_uid): [dict(row) for row in rows]
+        for game_uid, rows in (feature_lineup_overrides or {}).items()
+    }
+    unknown_override_ids = sorted(set(normalized_lineup_overrides) - base_ids)
+    if unknown_override_ids:
+        raise AtomizedResearchError(
+            "feature lineup override contains an unknown baseline map"
+        )
+    lineup_override_receipts: dict[str, dict[str, Any]] = {}
     maps_by_id = maps.set_index("game_uid", drop=False)
     missing_maps = sorted(base_ids - set(maps_by_id.index))
     if missing_maps:
@@ -1812,9 +1871,23 @@ def build_layer_a_matrix(
                 if game_uid in base_ids:
                     exclusion_reasons[game_uid] = "stable_identity_unresolved_or_ambiguous"
                 continue
-            lineup = pd.DataFrame(rows)
+            observed_lineup = pd.DataFrame(rows)
+            feature_rows = rows
+            if game_uid in normalized_lineup_overrides:
+                override_rows = normalized_lineup_overrides[game_uid]
+                try:
+                    feature_rows, lineup_override_receipts[game_uid] = (
+                        _controlled_feature_lineup(rows, override_rows)
+                    )
+                except ValueError as error:
+                    raise AtomizedResearchError(
+                        "feature lineup override is not a controlled draft swap"
+                    ) from error
+            lineup = pd.DataFrame(feature_rows)
             by_side = {
-                side: [row for row in rows if _side(row.get("side")) == side]
+                side: [
+                    row for row in feature_rows if _side(row.get("side")) == side
+                ]
                 for side in ("Blue", "Red")
             }
             if any(len(by_side[side]) != 5 for side in by_side):
@@ -2232,7 +2305,7 @@ def build_layer_a_matrix(
                     )
                 )
                 output.append(feature_row)
-            pending.append((map_row, lineup, team_rows))
+            pending.append((map_row, observed_lineup, team_rows))
 
         # Equal timestamps update only after every feature row at this time exists.
         for map_row, lineup, _team_rows in pending:
@@ -2460,6 +2533,17 @@ def build_layer_a_matrix(
             "unresolved_locked_games": len(excluded_locked_maps),
             "exact_same_map_rows_only": True,
             "drive_revision": RAW_2026_DRIVE_REVISION,
+        },
+        "feature_lineup_overrides": {
+            "method": "role_matched_champion_swap",
+            "games": len(lineup_override_receipts),
+            "game_receipt_sha256": {
+                game_uid: receipt["receipt_sha256"]
+                for game_uid, receipt in sorted(lineup_override_receipts.items())
+            },
+            "history_updates_use_observed_lineups": True,
+            "current_features_use_override_lineups": True,
+            "source_sha256": sources["feature_lineup_overrides"],
         },
         "coverage_bias": coverage_bias,
         "material_undercoverage": material_undercoverage,
@@ -3861,6 +3945,11 @@ def main() -> None:
     parser.add_argument("--prospective-start")
     parser.add_argument("--prospective-end")
     parser.add_argument(
+        "--feature-lineup-overrides",
+        type=Path,
+        help="Receipt-bound outcome-blind role-matched champion swaps.",
+    )
+    parser.add_argument(
         "--history-end",
         default=CONSUMED_TEST_END.isoformat(),
         help="Exclusive feature-history boundary for an explicitly opened holdout.",
@@ -3873,6 +3962,28 @@ def main() -> None:
         help="Hash and validate layer-a sources without constructing features.",
     )
     args = parser.parse_args()
+    feature_lineup_overrides = None
+    if args.feature_lineup_overrides is not None:
+        override_document = json.loads(
+            args.feature_lineup_overrides.read_text(encoding="utf-8")
+        )
+        unsigned_override = {
+            key: value
+            for key, value in override_document.items()
+            if key != "receipt_sha256"
+        }
+        if (
+            override_document.get("schema_version")
+            != "scryglass:controlled-draft-swap-batch:v1"
+            or override_document.get("outcome_blind") is not True
+            or override_document.get("receipt_sha256")
+            != canonical_sha256(unsigned_override)
+            or not isinstance(override_document.get("games"), dict)
+        ):
+            raise AtomizedResearchError(
+                "feature lineup override receipt is invalid"
+            )
+        feature_lineup_overrides = override_document["games"]
     if args.preflight_only:
         if args.mode != "layer-a":
             raise AtomizedResearchError(
@@ -3889,6 +4000,7 @@ def main() -> None:
             cache_dir=args.cache_dir,
             expected_base_sha256=args.expected_base_sha256,
             history_end=args.history_end,
+            feature_lineup_overrides=feature_lineup_overrides,
         )
         _write_json(args.output, preflight)
         print(json.dumps(preflight, indent=2, sort_keys=True))
@@ -3933,6 +4045,7 @@ def main() -> None:
             expected_base_sha256=args.expected_base_sha256,
             history_end=args.history_end,
             force=args.force,
+            feature_lineup_overrides=feature_lineup_overrides,
         )
         report["layer_a_matrix"] = manifest
         report["layer_a_experiment"] = run_layer_a_experiment(

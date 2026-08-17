@@ -23,6 +23,7 @@ from lol_kills.research.atomized_rf_composite import (
     _categorical_context,
     _expanding_series_folds,
     _cluster_bootstrap_differences,
+    _controlled_feature_lineup,
     _emit_role_metric_families,
     _equal_weight_team_forecast,
     _locked_rating_authority,
@@ -80,6 +81,51 @@ def test_layer_a_preflight_binds_all_sources(
         "public_probability": False,
         "promotion": False,
     }
+
+
+def test_controlled_feature_lineup_changes_only_role_matched_champions() -> None:
+    observed = []
+    for side in ("Blue", "Red"):
+        for index, role in enumerate(("top", "jng", "mid", "bot", "sup")):
+            observed.append(
+                {
+                    "game_uid": "map-1",
+                    "date": "2026-08-17T12:00:00Z",
+                    "side": side,
+                    "position": role,
+                    "champion": f"{side}-champion-{index}",
+                    "playername": f"{side}-player-{index}",
+                    "teamname": f"{side}-team",
+                    "league": "LCK",
+                    "playerid": f"oe:player:{side}-{index}",
+                    "teamid": f"oe:team:{side}",
+                    "golddiffat10": index,
+                }
+            )
+    champions = {
+        (row["side"], row["position"]): row["champion"] for row in observed
+    }
+    swapped = [
+        {
+            **row,
+            "champion": champions[
+                ("Red" if row["side"] == "Blue" else "Blue", row["position"])
+            ],
+        }
+        for row in observed
+    ]
+
+    feature_rows, receipt = _controlled_feature_lineup(observed, swapped)
+
+    assert receipt["slots"] == 10
+    for original, feature in zip(observed, feature_rows):
+        other_side = "Red" if original["side"] == "Blue" else "Blue"
+        assert feature["champion"] == champions[
+            (other_side, original["position"])
+        ]
+        assert feature["playerid"] == original["playerid"]
+        assert feature["teamid"] == original["teamid"]
+        assert feature["golddiffat10"] == original["golddiffat10"]
 
 
 PRODUCER_GAME_TIME = "2026-08-01T12:00:00Z"

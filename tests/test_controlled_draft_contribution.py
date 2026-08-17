@@ -131,6 +131,8 @@ def test_invalid_probability_fails_closed(value: float) -> None:
 
 def test_role_matched_swap_binds_fixed_controls_and_champions() -> None:
     observed = _draft_rows()
+    for row in observed:
+        row["date"] = "2026-08-17 12:00:00+00:00"
     receipt = validate_role_matched_champion_swap(
         observed_rows=observed,
         swapped_rows=_swapped_rows(observed),
