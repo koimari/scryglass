@@ -317,6 +317,9 @@ projection still need implementation. The same Python module now validates the
 proposed `features/promoted_draft_results.json` payload, including release and
 receipt binding, probabilities, controlled direction, paired receipt, evidence
 window, recommendation, and the permanent betting-field ban.
+`apps/scryglass/src/lib/publicData.ts` now applies the matching wrapper and row
+checks before a product surface can render the asset. The app suite passes 156
+tests after this change.
 
 Do not open the browser gate alone. Implement the promoted lane after a valid
 promotion receipt exists, or in a separate fail-closed slice that requires that
