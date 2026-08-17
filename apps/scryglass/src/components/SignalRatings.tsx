@@ -65,6 +65,8 @@ export type PlayerRecordView = Pick<
 type Props = {
   loadedTab: RatingsTab;
   draftAuthorized: boolean;
+  draftProbabilityAuthorized: boolean;
+  draftModelVersion: string | null;
   draftUnavailableReason: string;
   draftTeams: DraftTeamRow[];
   draftPlayers: DraftPlayerRow[];
@@ -126,6 +128,8 @@ function parseLeagues(value: string | null): string[] {
 export function SignalRatings({
   loadedTab,
   draftAuthorized,
+  draftProbabilityAuthorized,
+  draftModelVersion,
   draftUnavailableReason,
   draftTeams,
   draftPlayers,
@@ -446,7 +450,7 @@ export function SignalRatings({
         </section>
       ) : tab === "draft" ? (
         draftRows.teams.length || draftRows.players.length ? <>
-          <p className={styles.draftNote}>{draftScopeLabel} · {draftEvidenceLabel}. Team rows use average descriptive draft edge in model units. Player rows use the best-available rate: the share of evaluated picks that were the highest-ranked unbanned champion available for the role.</p>
+          <p className={styles.draftNote}>{draftProbabilityAuthorized ? `Draft win probability is live${draftModelVersion ? ` · ${draftModelVersion}` : ""}. ` : ""}{draftScopeLabel} · {draftEvidenceLabel}. Team rows use average descriptive draft edge in model units. Player rows use the best-available rate: the share of evaluated picks that were the highest-ranked unbanned champion available for the role.</p>
           <section className={styles.draftVisuals} aria-label="Draft visualizations">
             <DataBars
               title="Team draft edge"

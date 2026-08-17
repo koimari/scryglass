@@ -389,6 +389,8 @@ export default async function EloPage({ searchParams }: PageProps) {
         key={`${tab}|${showInactive ? "all" : "active"}`}
         loadedTab={tab}
         draftAuthorized={draftAuthorized}
+        draftProbabilityAuthorized={manifest.draft_authority?.probability_authority === true}
+        draftModelVersion={manifest.draft_authority?.model_version ?? null}
         draftUnavailableReason={manifest.draft_authority?.reason ?? "Draft Score is waiting for an independent promotion receipt."}
         draftTeams={draftTeams}
         draftPlayers={draftPlayers}

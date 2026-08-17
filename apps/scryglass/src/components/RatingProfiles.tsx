@@ -31,6 +31,7 @@ import { objectiveFieldsForPatch } from "@/lib/objectiveSupport";
 import { matchTeamHref } from "@/lib/matchFilters";
 import type { DraftRankingsScope } from "@/lib/draftRankings";
 import { hasCompleteDraftEvidence } from "@/lib/draftRankings";
+import type { PublicDraftScoreResult } from "@/lib/publicData";
 import { PlayerPortrait } from "./PlayerPortrait";
 import { RecentGames } from "./RecentGames";
 import { TeamMark } from "./TeamMark";
@@ -428,6 +429,7 @@ function sideComponentRows(components: DraftContribution["blue"]["components"]):
 function CompositionEvidence({
   contribution,
   draftPool,
+  draftScore,
   completeDraft,
   blueTeam,
   redTeam,
@@ -435,6 +437,7 @@ function CompositionEvidence({
 }: {
   contribution?: DraftContribution;
   draftPool?: DraftPool;
+  draftScore?: PublicDraftScoreResult | null;
   completeDraft: boolean;
   blueTeam: string;
   redTeam: string;
@@ -463,6 +466,28 @@ function CompositionEvidence({
           {status === "available" ? "Available" : status === "limited" ? "Limited evidence" : "Unavailable"}
         </span>
       </div>
+      {draftScore ? (
+        <div className={styles.compositionCompare} aria-label="Draft Score prediction">
+          <div className={styles.compositionTeam}>
+            <div>
+              <strong>Draft Score</strong>
+              <span>{draftScore.controlled_draft_score.stronger_draft} has the stronger draft</span>
+              <small className={styles.compositionSignalDetail}>
+                {draftScore.controlled_draft_score.edge_percentage_points >= 0 ? "+" : ""}
+                {draftScore.controlled_draft_score.edge_percentage_points.toFixed(2)} percentage points
+              </small>
+            </div>
+          </div>
+          <span className={styles.compositionVs}>Model pick</span>
+          <div className={`${styles.compositionTeam} ${styles.compositionTeamRight}`}>
+            <div>
+              <strong>{draftScore.side_recommendation}</strong>
+              <span>{Math.round(draftScore.match_win_probability[draftScore.side_recommendation] * 100)}% win expectation</span>
+              <small className={styles.compositionSignalDetail}>{draftScore.model_version}</small>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {draftPool ? (
         <details className={styles.draftPool}>
           <summary>
@@ -584,10 +609,12 @@ export function MatchRatingProfile({
   game,
   championImages,
   releaseId,
+  draftScore,
 }: {
   game: ProfileGame;
   championImages: Record<string, string>;
   releaseId: string;
+  draftScore?: PublicDraftScoreResult | null;
 }) {
   const gradesAvailable = game.players.some((player) => player.grade?.status === "available");
   const blueWon = game.blue_win === 1;
@@ -623,6 +650,7 @@ export function MatchRatingProfile({
       <CompositionEvidence
         contribution={game.draft_contribution}
         draftPool={game.draft_pool}
+        draftScore={draftScore}
         completeDraft={completeDraft}
         blueTeam={game.blue_team}
         redTeam={game.red_team}

@@ -92,6 +92,20 @@ export type PackManifest = {
     recommendation_authority?: boolean;
     betting_authority?: boolean;
     reason?: string | null;
+    descriptive_authority?: {
+      schema_version: "scryglass:draft-authority:v1";
+      status: "descriptive";
+      authority: "descriptive";
+      release_id: string;
+      model_version: string;
+      artifact_sha256: string;
+      receipt_sha256: string;
+      issued_utc: string;
+      estimand: "composition_only";
+      probability_authority: false;
+      recommendation_authority: false;
+      betting_authority: false;
+    };
   };
   query_api?: {
     schema_version?: "scryglass:query-api:v1";

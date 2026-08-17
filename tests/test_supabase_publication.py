@@ -449,7 +449,7 @@ def test_descriptive_draft_asset_requires_complete_pool_and_ten_valid_picks() ->
         supabase_publication._validate_descriptive_draft_records(payload)
 
 
-def test_publish_release_rejects_promoted_draft_until_independent_verification() -> None:
+def test_publish_release_rejects_incomplete_promoted_draft_authority() -> None:
     with TemporaryDirectory() as temporary:
         pack, manifest, tier = _fixture(Path(temporary))
         model_version = "draft-promoted-v1"
@@ -473,7 +473,7 @@ def test_publish_release_rejects_promoted_draft_until_independent_verification()
         }
         with pytest.raises(
             supabase_publication.SupabasePublicationError,
-            match="independent receipt verifier",
+            match="promoted Draft Score authority is invalid",
         ):
             supabase_publication.prepare_release(
                 pack,
@@ -496,7 +496,7 @@ def test_publish_release_rejects_unbound_promoted_draft_authority() -> None:
 
         with pytest.raises(
             supabase_publication.SupabasePublicationError,
-            match="independent receipt verifier",
+            match="promoted Draft Score authority is invalid",
         ):
             supabase_publication.prepare_release(
                 pack,

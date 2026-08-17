@@ -8,9 +8,8 @@ from datetime import datetime
 from typing import Any, Mapping
 
 from lol_kills.research.selective_draft_probability import canonical_sha256
-from lol_kills.research.verify_selective_draft_promotion import (
-    APPROVED_FIELDS,
-    RECEIPT_SCHEMA_VERSION as PROMOTION_RECEIPT_SCHEMA_VERSION,
+from lol_kills.export.promoted_draft_authority import (
+    is_authorized_public_release_receipt,
 )
 
 
@@ -48,13 +47,7 @@ def build_public_draft_score_result(
     receipt_sha256 = receipt.get("receipt_sha256")
     unsigned = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
     if (
-        receipt.get("schema_version") != PROMOTION_RECEIPT_SCHEMA_VERSION
-        or receipt.get("status") != "promoted"
-        or receipt.get("authority") != "promoted"
-        or receipt.get("public_probability") is not True
-        or receipt.get("public_recommendation") is not True
-        or receipt.get("betting_odds_ev_stake") is not False
-        or tuple(receipt.get("approved_public_fields") or ()) != APPROVED_FIELDS
+        not is_authorized_public_release_receipt(receipt)
         or receipt.get("model_version") != model_version
         or not isinstance(receipt_sha256, str)
         or not SHA256_PATTERN.fullmatch(receipt_sha256)

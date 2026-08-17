@@ -70,6 +70,25 @@ def test_verified_receipt_builds_release_bound_promoted_authority(
     }
 
 
+def test_owner_release_receipt_binds_checked_in_candidate_and_evaluation() -> None:
+    root = Path(__file__).resolve().parents[1]
+    path = (
+        root
+        / "data/lol/v2/evaluation/public-draft-score-v34-owner-release-receipt.json"
+    )
+
+    authority, receipt = load_promoted_draft_authority(
+        receipt_path=path,
+        expected_file_sha256=sha256_path(path),
+        release_id="v2026.08.17.072859",
+    )
+
+    assert authority["status"] == "promoted"
+    assert authority["model_version"] == "public-draft-score-v34"
+    assert authority["receipt_sha256"] == receipt["receipt_sha256"]
+    assert authority["probability_authority"] is True
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

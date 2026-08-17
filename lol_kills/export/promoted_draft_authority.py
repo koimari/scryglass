@@ -13,7 +13,7 @@ from lol_kills.research.public_draft_score_promotion import sha256_path
 from lol_kills.research.selective_draft_probability import canonical_sha256
 from lol_kills.research.verify_selective_draft_promotion import (
     APPROVED_FIELDS,
-    RECEIPT_SCHEMA_VERSION,
+RECEIPT_SCHEMA_VERSION,
 )
 
 
@@ -35,6 +35,17 @@ BOUND_HASH_FIELDS = (
 )
 PROMOTED_RESULTS_SCHEMA = "scryglass:promoted-draft-results:v1"
 PUBLIC_RESULT_SCHEMA = "scryglass:public-draft-score-result:v1"
+OWNER_RELEASE_RECEIPT_SCHEMA = "scryglass:public-draft-score-owner-release-receipt:v1"
+OWNER_MODEL_VERSION = "public-draft-score-v34"
+OWNER_CANDIDATE_PATH = Path(
+    "data/lol/v2/evaluation/public-draft-score-selective-candidate-v34.json"
+)
+OWNER_DEVELOPMENT_EVALUATION_PATH = Path(
+    "data/lol/v2/evaluation/public-draft-score-v34-development-evaluation.json"
+)
+OWNER_SUPPORTING_EVALUATION_PATH = Path(
+    "data/lol/v2/evaluation/public-draft-score-v34-supporting-evaluation.json"
+)
 FORBIDDEN_PUBLIC_KEYS = frozenset(
     {"betting", "odds", "fair_odds", "expected_value", "ev", "stake", "wager"}
 )
@@ -78,6 +89,125 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def _valid_owner_release_contract(receipt: Mapping[str, Any]) -> bool:
+    evaluation = receipt.get("evaluation")
+    window = receipt.get("evidence_window")
+    if not isinstance(evaluation, Mapping) or not isinstance(window, Mapping):
+        return False
+    numeric_fields = (
+        "coverage",
+        "auc",
+        "brier",
+        "log_loss",
+        "ece_10",
+        "series_bootstrap_auc_median",
+    )
+    return (
+        receipt.get("schema_version") == OWNER_RELEASE_RECEIPT_SCHEMA
+        and receipt.get("status") == "promoted"
+        and receipt.get("authority") == "promoted"
+        and receipt.get("model_version") == OWNER_MODEL_VERSION
+        and receipt.get("release_basis")
+        == "owner_authorized_development_validation"
+        and isinstance(receipt.get("owner_identity"), str)
+        and bool(str(receipt["owner_identity"]).strip())
+        and tuple(receipt.get("approved_public_fields") or ()) == APPROVED_FIELDS
+        and receipt.get("public_probability") is True
+        and receipt.get("public_recommendation") is True
+        and receipt.get("betting_odds_ev_stake") is False
+        and all(
+            isinstance(receipt.get(field), str)
+            and bool(SHA256_PATTERN.fullmatch(str(receipt[field])))
+            for field in (
+                "candidate_artifact_sha256",
+                "candidate_receipt_sha256",
+                "development_evaluation_file_sha256",
+                "development_evaluation_receipt_sha256",
+                "supporting_evaluation_file_sha256",
+            )
+        )
+        and isinstance(evaluation.get("eligible_rows"), int)
+        and isinstance(evaluation.get("selected_rows"), int)
+        and evaluation["eligible_rows"] > 0
+        and 0 < evaluation["selected_rows"] <= evaluation["eligible_rows"]
+        and all(
+            isinstance(evaluation.get(field), (int, float))
+            and not isinstance(evaluation.get(field), bool)
+            and math.isfinite(float(evaluation[field]))
+            for field in numeric_fields
+        )
+        and float(evaluation["auc"]) > 0.710
+        and float(evaluation["series_bootstrap_auc_median"]) > 0.710
+        and float(evaluation["ece_10"]) <= 0.08
+        and isinstance(window.get("start"), str)
+        and isinstance(window.get("end_exclusive"), str)
+    )
+
+
+def is_authorized_public_release_receipt(receipt: Mapping[str, Any]) -> bool:
+    """Return whether a receipt has one accepted public-release contract."""
+
+    if receipt.get("schema_version") == OWNER_RELEASE_RECEIPT_SCHEMA:
+        return _valid_owner_release_contract(receipt)
+    return (
+        receipt.get("schema_version") == RECEIPT_SCHEMA_VERSION
+        and receipt.get("status") == "promoted"
+        and receipt.get("authority") == "promoted"
+        and tuple(receipt.get("approved_public_fields") or ()) == APPROVED_FIELDS
+        and receipt.get("public_probability") is True
+        and receipt.get("public_recommendation") is True
+        and receipt.get("betting_odds_ev_stake") is False
+    )
+
+
+def _verify_owner_release_evidence(receipt: Mapping[str, Any]) -> None:
+    """Bind the owner decision to the checked-in candidate and evaluations."""
+
+    if not _valid_owner_release_contract(receipt):
+        raise PromotedDraftAuthorityError("owner release receipt contract is invalid")
+    root = Path(__file__).resolve().parents[2]
+    candidate_path = root / OWNER_CANDIDATE_PATH
+    development_path = root / OWNER_DEVELOPMENT_EVALUATION_PATH
+    supporting_path = root / OWNER_SUPPORTING_EVALUATION_PATH
+    try:
+        candidate = _load_json(candidate_path)
+        development = _load_json(development_path)
+    except PromotedDraftAuthorityError as error:
+        raise PromotedDraftAuthorityError("owner release evidence is unavailable") from error
+    if (
+        sha256_path(candidate_path) != receipt.get("candidate_artifact_sha256")
+        or candidate.get("receipt_sha256") != receipt.get("candidate_receipt_sha256")
+        or sha256_path(development_path)
+        != receipt.get("development_evaluation_file_sha256")
+        or development.get("receipt_sha256")
+        != receipt.get("development_evaluation_receipt_sha256")
+        or sha256_path(supporting_path)
+        != receipt.get("supporting_evaluation_file_sha256")
+        or development.get("gates", {}).get("passed") is not True
+    ):
+        raise PromotedDraftAuthorityError("owner release evidence changed")
+    expected = {
+        "eligible_rows": development.get("eligible_rows"),
+        "selected_rows": development.get("selected_rows"),
+        "coverage": development.get("coverage"),
+        "auc": development.get("auc"),
+        "brier": development.get("brier"),
+        "log_loss": development.get("log_loss"),
+        "ece_10": development.get("ece_10"),
+        "series_bootstrap_auc_median": development.get(
+            "series_bootstrap_auc", {}
+        ).get("median"),
+    }
+    if dict(receipt.get("evaluation") or {}) != expected:
+        raise PromotedDraftAuthorityError("owner release metrics changed")
+    start = _utc(receipt["evidence_window"]["start"], label="evidence start")
+    end = _utc(
+        receipt["evidence_window"]["end_exclusive"], label="evidence end"
+    )
+    if start >= end:
+        raise PromotedDraftAuthorityError("owner release evidence window is invalid")
+
+
 def load_promoted_draft_authority(
     *,
     receipt_path: Path,
@@ -106,6 +236,27 @@ def load_promoted_draft_authority(
     model_version = receipt.get("model_version")
     issued_utc = receipt.get("issued_utc")
     paired_receipts = receipt.get("controlled_intervention_receipt_sha256")
+    if receipt.get("schema_version") == OWNER_RELEASE_RECEIPT_SCHEMA:
+        _verify_owner_release_evidence(receipt)
+        if not isinstance(model_version, str) or not model_version.strip():
+            raise PromotedDraftAuthorityError("owner release model version is invalid")
+        _utc(issued_utc, label="owner release receipt time")
+        authority = {
+            "schema_version": DRAFT_AUTHORITY_SCHEMA,
+            "status": "promoted",
+            "authority": "promoted",
+            "release_id": release_id,
+            "model_version": model_version.strip(),
+            "artifact_sha256": receipt["candidate_artifact_sha256"],
+            "receipt_sha256": receipt_sha256,
+            "issued_utc": issued_utc,
+            "estimand": "prematch_map_win_probability_with_controlled_draft_intervention",
+            "probability_authority": True,
+            "recommendation_authority": True,
+            "betting_authority": False,
+            "reason": None,
+        }
+        return authority, receipt
     if (
         receipt.get("schema_version") != RECEIPT_SCHEMA_VERSION
         or receipt.get("status") != "promoted"
