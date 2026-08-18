@@ -1216,7 +1216,11 @@ def test_public_release_probes_skip_the_retired_tier_artifact_route() -> None:
 def test_public_release_probes_reject_a_stale_page_marker(tmp_path: Path) -> None:
     release_id = "v2026.08.11.184500"
     stale_release_id = "v2026.08.10.001500"
-    config = replace(_config(tmp_path), production=True)
+    # Zero propagation window: this page is stale forever, so the retry loop
+    # would otherwise sleep out the full production deadline on every run.
+    config = replace(
+        _config(tmp_path), production=True, probe_propagation_seconds=0.0
+    )
 
     def read(url: str, **_kwargs):
         if url.endswith("/api/health"):
