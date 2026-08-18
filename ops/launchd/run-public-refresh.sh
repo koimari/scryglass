@@ -37,6 +37,24 @@ export SCRYGLASS_STEP_TIMEOUT_MINUTES=15
 export SCRYGLASS_STALE_AFTER_HOURS=12
 export SCRYGLASS_OE_BROWSER_REFRESHED=1
 export SCRYGLASS_OE_DATABASE_REFRESHED=1
+# Ask Python where the annual CSV lives instead of hardcoding it. The Python
+# side resolves RAW_OE_DIR to the Worker inbox when it exists and falls back to
+# "${runtime_root}/data/lol/warehouse/raw" otherwise, which is exactly what this
+# script used to hardcode. Two independent resolvers had already drifted: the
+# downloader accepted the fresh inbox CSV and wrote a receipt binding its bytes,
+# then this script handed the importer the stale warehouse copy and the receipt
+# check refused the run.
+raw_oe_dir="$(cd "${repo_root}" && "${python}" -m lol_kills.etl.paths --raw-oe-dir)"
+if [[ -z "${raw_oe_dir}" || ! -d "${raw_oe_dir}" ]]; then
+  print -u2 "Could not resolve the Oracle's Elixir source directory."
+  exit 78
+fi
+oe_csv="${raw_oe_dir}/${oe_name}"
+if [[ ! -f "${oe_csv}" ]]; then
+  print -u2 "Oracle's Elixir annual CSV is missing at ${oe_csv}."
+  exit 78
+fi
+
 real_worker_commit="$(/usr/bin/git -C "${repo_root}" rev-parse --verify HEAD)"
 if [[ ! "${SCRYGLASS_WORKER_COMMIT:-}" =~ '^[0-9a-f]{40}$' ]]; then
   print -u2 "SCRYGLASS_WORKER_COMMIT must name the tested worker commit."
@@ -99,7 +117,7 @@ export PYTHONPATH="${repo_root}${PYTHONPATH:+:${PYTHONPATH}}"
 resume_cycle=0
 if [[ ! -f "${patch_receipt_catalog}" && -f "${source_receipt}" && -f "${import_receipt}" ]]; then
   if "${python}" -m lol_kills.etl.oe_database \
-    --csv "${runtime_root}/data/lol/warehouse/raw/${oe_name}" \
+    --csv "${oe_csv}" \
     --year "${oe_year}" \
     --parquet-dir "${runtime_root}/data/lol/warehouse/parquet" \
     --source-receipt "${source_receipt}" \
@@ -138,7 +156,7 @@ if [[ "${resume_cycle}" -eq 0 ]]; then
     --year "${oe_year}" \
     --receipt-output "${source_receipt}"
   "${python}" -m lol_kills.etl.oe_database \
-    --csv "${runtime_root}/data/lol/warehouse/raw/${oe_name}" \
+    --csv "${oe_csv}" \
     --year "${oe_year}" \
     --parquet-dir "${runtime_root}/data/lol/warehouse/parquet" \
     --source-receipt "${source_receipt}" \
