@@ -2,22 +2,57 @@
   "acceptance_gates": {
     "archetype_discovery_leakage_gate": {
       "failure_action": "Any violation voids the entire evaluation run. No partial credit.",
-      "requirement": "For every fold, representation_fit_window_end <= validation_min must hold and be published."
+      "requirement": "For every fold, representation_fit_window_end < validation_min must hold STRICTLY and be published.",
+      "why_strict": "An equal timestamp would admit rows at the evaluated instant, which leakage_constraint.forbidden already rejects and which _expanding_series_folds asserts against at atomized_rf_composite.py:2871 using a strict comparison. v5 as drafted used <=, which was inconsistent with both.",
+      "window_end_is_exclusive": true
     },
     "brier_no_worse_than_v3": true,
     "ece_10_max": 0.08,
     "estimability_gate": {
-      "coverage_floor": "At least 90 percent of holdout player-maps at >=5 games per parameter. Measured expectation for low_rank_3 is 94.3 percent.",
-      "requirement": "Publish, per player, the observed game count and the resulting per-parameter sample size. Players below 5 games per free parameter must be flagged in the published output, not silently rated."
+      "corrects": "v5 as drafted claimed 94.3 percent, which counted only the 3 loading coordinates and used a 15-game threshold. The correct figure against 4 parameters at 20 games is 92.0 percent. Rank 3 still clears the 90 percent floor, but the earlier number was overstated.",
+      "coverage_floor": 0.9,
+      "free_per_player_parameters": 4,
+      "measured_coverage_at_4_params": {
+        "player_maps": 0.92,
+        "players": 0.505
+      },
+      "parameter_accounting": "1 global player term + 3 low-rank loading coordinates. The rank alone is NOT the parameter count.",
+      "requirement": "Publish, per player, the observed game count and the resulting per-parameter sample size against ALL fitted per-player terms. Players below 5 games per free parameter must be flagged in the published output, not silently rated.",
+      "threshold_games": 20
     },
     "forward_auc_paired_interval_excludes_zero": {
-      "interval": "95 percent, predeclared, two-sided, series-clustered, paired on identical rows",
+      "frozen_bootstrap_procedure": {
+        "cluster_unit": "series_id",
+        "interval_level": 0.95,
+        "interval_method": "BCa",
+        "no_reruns": "The seed and resample count are frozen here. Rerunning with a different seed after observing a result voids the run.",
+        "one_class_resample_rule": "A resample in which either outcome class is absent is DISCARDED and redrawn, with the discard count published. It is never scored as 0.5 or dropped silently.",
+        "paired_on": "identical rows, same fold assignment, same holdout batch",
+        "resample_scheme": "cluster bootstrap, resample series with replacement, keep whole series",
+        "resamples": 10000,
+        "rng": "numpy PCG64",
+        "rng_seed": 20260818,
+        "sided": "two-sided"
+      },
+      "receipt_must_bind": [
+        "interval_lower",
+        "interval_upper",
+        "point_estimate",
+        "resamples",
+        "rng_seed",
+        "interval_method",
+        "cluster_membership_sha256",
+        "discarded_one_class_resamples"
+      ],
       "requirement": "The LOWER bound of the predeclared paired series-clustered bootstrap confidence interval for the AUC difference against the fitted v3 null model must be strictly greater than zero.",
-      "supersedes": "v4's median-exceeds rule, which admitted null results."
+      "supersedes": "v4's median-exceeds rule, which admitted null results.",
+      "why": "v5 as drafted named a clustered two-sided interval but left resample count, seed, interval construction and one-class handling open, so choices made after seeing a near-zero lower bound could change the promotion decision."
     },
     "international_coverage_gate": {
-      "failure_condition": "Any international map scored with an unattributed team-outcome-only update while international rows remain in the reported metrics.",
-      "requirement": "Attribution must be applied on all four insertion points. The receipt must publish the count of international player-maps attributed and the count skipped."
+      "eligibility": "An international player-map is eligible when _is_intl(league, tournament) is true at player_elo.py:558 and the row carries the stage 1 inputs required to attribute.",
+      "failure_condition": "skipped > 0 for any eligible international player-map. Hard failure.",
+      "no_exclusion_escape_hatch": "v5 as drafted permitted removing international rows from every reported figure and reporting them as skipped, which meant the failure condition could never fire. Removed.",
+      "requirement": "Attribution must be applied on all four insertion points. The receipt must publish international player-maps eligible, attributed, and skipped."
     },
     "league_sub_gate": {
       "minimum_games_per_league": 20,
@@ -25,13 +60,18 @@
     },
     "log_loss_no_worse_than_v3": true,
     "metric_weights_were_fit_gate": {
-      "failure_condition": "An unfitted or hard-coded equal-weight average.",
-      "requirement": "The promotion receipt must publish a fitted weight vector over the stage 1 inputs and the fold in which it was selected."
+      "failure_condition": "An unfitted or hard-coded equal-weight average, or any search outside the frozen specification.",
+      "requirement": "The promotion receipt must publish a fitted weight vector, the selected regularization penalty, the fold of selection, and the inner-fold objective values, all conforming to metric_weighting_contract.frozen_search_specification."
     },
     "minimum_holdout_games": 100,
     "null_model_is_identified_gate": {
       "failure_action": "Promotion blocked. Fitting and development reporting may proceed.",
       "requirement": "baseline_models.null_model_that_must_be_beaten.fitted_receipt_sha256 must be non-null and resolvable before any promotion claim."
+    },
+    "promotion_requires_betting_enforcement_decision": {
+      "failure_condition": "An unsupported claim of code enforcement.",
+      "rationale": "Fail-closed: an unenforced prohibition must be labelled as unenforced rather than asserted as enforced.",
+      "requirement": "Before promotion, either a receipt-bound authority check exists at every player-rating consumer boundary, or the receipt explicitly records policy-only enforcement and enumerates the unguarded consumers."
     },
     "provisional_promotion_prohibited": true,
     "representation_is_not_authored_gate": {
@@ -40,9 +80,10 @@
     },
     "teammate_duplicate_rating_gate": {
       "rationale": "This is the literal defect the owner reported. Hard gate, independent of any predictive metric.",
-      "requirement": "No two players on the same team may share byte-identical mu_total, mu_regional, mu_meta, sigma and n_maps after fitting.",
+      "requirement": "No two players on the same team may share a byte-identical COMPLETE rating tuple (mu_total, mu_regional, mu_meta, sigma, n_maps).",
       "scope": "Evaluated separately on regional maps and on international maps. Passing on regional while tying on international is a FAILURE.",
-      "tolerance": "Exact equality on any of these fields for any same-team pair is a FAILURE."
+      "tolerance": "Failure requires equality on ALL five fields simultaneously. Equality on a subset is NOT a failure.",
+      "why_not_any_field": "For stable rosters n_maps is normally identical and sigma commonly saturates at cfg.sigma_min, so an any-field rule would fail correctly differentiated rosters. v5 as drafted said any field, which contradicted its own byte-identical-tuple requirement."
     }
   },
   "amendment_provenance": {
@@ -67,7 +108,19 @@
         "ally_composition_atom_profile",
         "enemy_composition_atom_profile"
       ],
-      "input_derivation_requirement": "gold_share_pct and damage_share_pct are SHARES of the player's team total on the same map, not raw totals. kda_role_weighted is weighted by role, not a raw ratio and not a kill-participation substitute. Raw totalgold and earnedgold are admissible only as the denominators used to derive shares.",
+      "derivation_roles": {
+        "cs_per_min": "player creep score / (gamelength minutes)",
+        "damage_per_min": "player damage / (gamelength minutes)",
+        "damage_share_pct": "player damage / sum of team damage on the same map and side",
+        "forbidden_as_direct_feature": [
+          "totalgold",
+          "earnedgold",
+          "raw damage totals"
+        ],
+        "gold_per_min": "player totalgold / (gamelength minutes)",
+        "gold_share_pct": "player totalgold / sum of team totalgold on the same map and side"
+      },
+      "input_derivation_requirement": "gold_share_pct and damage_share_pct are SHARES of the player's team total on the same map. kda_role_weighted is weighted by role, not a raw ratio and not a kill-participation substitute. Raw totalgold and earnedgold ARE required to derive these: the player's own gold is the NUMERATOR of both gold_per_min and gold_share_pct, and the team total is the DENOMINATOR of gold_share_pct. The constraint is that raw gold may not enter the model as a direct feature; it may only appear through a rate or share. v5 as drafted said 'denominators only', which made the mandated inputs impossible to compute.",
       "inputs": [
         "cs_per_min",
         "gold_per_min",
@@ -129,11 +182,28 @@
         }
       ],
       "invariant": "The per-player update term must differ across teammates on the first map in which their in-game metric residuals differ, on both the regional and the international branch.",
-      "partial_coverage_is_a_failure": "A candidate that attributes on the regional branches only FAILS the international coverage gate. Explicit exclusion of international rows is permitted ONLY if the excluded rows are also removed from every reported metric, coverage figure and holdout, and the exclusion is stated in the promotion receipt."
+      "partial_coverage_is_a_failure": "A candidate that attributes on the regional branches only FAILS. Any ELIGIBLE international player-map that is scored with an unattributed team-outcome-only update is a hard failure. There is no exclusion escape hatch: international rows may not be removed from metrics, coverage or the holdout in order to avoid the gate.",
+      "within_team_conservation": {
+        "centering": "role-weighted within-team conservation, applied per side per map",
+        "receipt_must_bind": [
+          "conservation_mode",
+          "per_map_aggregate_drift_max",
+          "ablation_result"
+        ],
+        "required_ablation": "If exact conservation is not imposed, the candidate MUST report an ablation isolating the team-level channel: the same model with projections centered, compared against the uncentered fit, on identical rows. Promotion requires that the claimed gain survive centering.",
+        "requirement": "The five contextual projections on a side MUST be centered within the team so their aggregate update equals the team-outcome update the baseline would have applied.",
+        "why": "_aggregate() at player_elo.py:254-260 turns player ratings into pregame team strength. Uncentered projections would add or remove team rating mass, so a forward-AUC gain could come from an extra team-level update channel rather than better allocation among teammates, while this protocol declares team ratings out of scope."
+      }
     }
   },
   "authority": {
-    "betting_odds_ev_stake": "PROHIBITED. No betting, odds, expected-value or stake output may be derived from this protocol. Enforced in code at promoted_draft_authority.py:69.",
+    "betting_enforcement_status": {
+      "code_enforced": false,
+      "correction": "v5 as drafted cited promoted_draft_authority.py:69 as code enforcement. That locator is a forbidden-key constant inside the hard-coded public Draft Score authority path; it never loads this player-rating protocol or a v5 promotion receipt. Promoting these ratings would NOT cause a downstream odds or EV derivation to fail. The enforcement claim was unsupported and is withdrawn.",
+      "gate": "promotion_requires_betting_enforcement_decision",
+      "required_before_promotion": "Add an authority check bound to the player-rating receipt at every consumer boundary, or record in the promotion receipt that enforcement is policy-only and name the unguarded consumers."
+    },
+    "betting_odds_ev_stake": "PROHIBITED as policy. No betting, odds, expected-value or stake output may be derived from these ratings.",
     "candidate_ratings": "development_only until all acceptance gates pass and the owner approves promotion.",
     "development_result": "may be published as development evidence only, clearly labelled as such",
     "public_player_ladder": "unchanged until promotion"
@@ -203,11 +273,24 @@
   },
   "fitting_unlock_condition": "Frozen prospective holdout must reach 100 games with at least 3 leagues x 20 games, starting strictly after frozen_utc, before any candidate is evaluated.",
   "frozen_prospective_holdout": {
-    "audit": "The promotion receipt must publish frozen_utc, start_inclusive, and a count of maps excluded by this rule.",
+    "audit": "The promotion receipt must publish frozen_utc, start_inclusive, the cohort receipt digest, and a count of maps excluded by the freeze rule.",
+    "cohort_predeclaration_requirement": {
+      "inclusion_predicate_is_frozen": "The predicate may not be amended after the first outcome is opened. Amending it voids the cohort and requires a fresh seal.",
+      "ordering_gate": "predeclared_utc < first_outcome_opened_utc must hold and be published.",
+      "receipt_binds": [
+        "start_inclusive",
+        "end_exclusive",
+        "inclusion_predicate_sha256",
+        "predeclared_utc",
+        "first_outcome_opened_utc"
+      ],
+      "requirement": "Before the FIRST eligible result is opened, a cohort receipt must be written that binds start_inclusive, end_exclusive, and a DETERMINISTIC inclusion predicate over league, tier and tournament. The cohort is then whatever that predicate admits.",
+      "why": "With both boundaries null and single-game incremental batches permitted, an evaluator could accumulate games, observe outcomes, and only then choose the final game_ids_sha256, selecting favourable games or leagues while still satisfying the 100-game and 3-league gates. The interval would no longer be prospective."
+    },
     "definition": "Outcome-blind sealed batch of maps occurring strictly after the protocol freeze.",
     "end_exclusive": null,
     "start_inclusive": null,
-    "start_rule": "start_inclusive MUST be strictly after frozen_utc. Where source timestamps lack sufficient precision, use the next complete source-date boundary after frozen_utc. Any map already completed at frozen_utc is excluded."
+    "start_rule": "start_inclusive MUST be strictly after frozen_utc. Where source timestamps lack precision, use the next complete source-date boundary after frozen_utc. Any map already completed at frozen_utc is excluded."
   },
   "frozen_utc": "2026-08-18T00:40:00Z",
   "independent_reviewer": {
@@ -218,7 +301,7 @@
     "scope": "Verify leakage gates, estimability accounting, international coverage, null model identification, and that the representation is discovered rather than authored."
   },
   "leakage_constraint": {
-    "enforcement": "Reuse the expanding series-grouped walk-forward harness at lol_kills/research/atomized_rf_composite.py:2834-2888, which keeps whole series together and asserts train_max < validation_min at line 2871. The representation refit must occur INSIDE each fold.",
+    "enforcement": "Reuse the expanding series-grouped walk-forward harness at lol_kills/research/atomized_rf_composite.py:2834-2888, which keeps whole series together and asserts train_max < validation_min at line 2871. The representation refit must occur INSIDE each fold, with an EXCLUSIVE window end strictly before validation_min.",
     "forbidden": [
       "fitting or refitting the champion embedding or player loadings on any data at or after the evaluated timestamp",
       "using map outcome as a stage 1 or stage 2 input feature",
@@ -252,19 +335,15 @@
       "player_maps": 166440
     },
     "estimability_by_parameterization": {
-      "full_12_dim": {
-        "player_maps": 0.717,
-        "players": 0.264
-      },
-      "low_rank_2": {
-        "player_maps": 0.968,
-        "players": 0.659
-      },
+      "corrects": "The 94.3 percent figure in the drafted v5 counted only 3 loading coordinates at a 15-game threshold and omitted the global player term. Against all 4 fitted per-player parameters the coverage is 92.0 percent, which still clears the 90 percent floor.",
+      "free_per_player_parameters": 4,
       "low_rank_3": {
-        "player_maps": 0.943,
-        "players": 0.567
+        "player_maps": 0.92,
+        "players": 0.505
       },
-      "selected": "low_rank_3"
+      "rank_choice_survives_correction": true,
+      "selected": "low_rank_3",
+      "threshold_games_at_5_per_param": 20
     },
     "games_per_player": {
       "median": 20,
@@ -285,6 +364,18 @@
     "role_stability": {
       "consequence": "Role is a fixed effect. No role-switching component is modelled.",
       "median_share_of_games_in_main_role": 1.0
+    },
+    "source_census": {
+      "atom_bridge_file_sha256": "bff75179d93a6c5d9bf4bc3927e1ca7b12f31335cef9249449f2595093ed1942",
+      "atom_bridge_path": "data/lol/v2/champions/lcc-atom-bridge-26.16.json",
+      "atom_bridge_self_declared_artifact_sha256": "e5d37ddf4a20fcbdc1e2fc90fb0bd988be82b3563a8ec8bc3a21792313a239a8",
+      "revalidation_rule": "If source_identity_sha256 or atom_bridge_file_sha256 changes, the estimability figures in this artifact are STALE and must be recomputed before promotion. A stale figure is reported as unavailable with reason, never carried forward.",
+      "source_as_of": "2026-07-28T23:45:16+00:00",
+      "source_game_count": 16644,
+      "source_identity_sha256": "a35d95a0474bb2c50c77604a072379fdae86d9ae39c1a99af81b9ce6faf022ef",
+      "source_path": "data/lol/warehouse/parquet/oe_player_games.parquet",
+      "source_player_maps": 166440,
+      "why": "v5 as drafted bound the frozen evidence only to mutable warehouse and bridge PATHS. After an OE backfill or source replacement the coverage figures could not be reproduced or shown to describe the accepted census. These digests pin the census the evidence describes."
     }
   },
   "metric_set": {
@@ -295,10 +386,20 @@
     "series_cluster_bootstrap": "Bootstrap resampled at the series level, never the map level."
   },
   "metric_weighting_contract": {
-    "audit": "The promotion receipt must publish the fitted weight vector and the fold in which it was selected. An equal-weight vector is an admissible OUTCOME of fitting, but only if it was fit and reported as such.",
-    "defect_being_corrected": "player_map_grades.py:166 computes an equal-weight mean over the z-scored inputs. Fitting only an outer beta on top of a fixed equal-weight average cannot satisfy the owner's requirement that weighting be mathematically determined against the win objective.",
-    "owner_decision_reference": "All metric weights are fit against the draft-score composite win objective. Inherited unchanged from v3 and v4.",
-    "requirement": "The relative weights of the stage 1 inputs are FIT against forward win prediction inside the development folds. They are not hand-assigned and not an equal-weight average."
+    "audit": "The receipt must publish the fitted weight vector, the selected penalty, the fold in which it was selected, and the inner-fold objective values.",
+    "defect_being_corrected": "player_map_grades.py:166 computes an equal-weight mean over the z-scored inputs. Fitting only an outer beta on a fixed equal-weight average cannot satisfy the owner's requirement that weighting be determined against the win objective.",
+    "frozen_search_specification": {
+      "candidate_family": "linear weights over the 9 standardized stage 1 inputs, applied before role and league-tier normalization",
+      "normalization": "weights are L1-normalized to sum to 1 after fitting, so scale is not confounded with the outer attribution coefficient",
+      "optimizer": "closed-form ridge solution; no stochastic search",
+      "per_fold_fit_windows": "weights are refit inside each outer fold from strictly prior data, on the same exclusive window rule as the representation",
+      "regularization": "ridge, penalty selected from the frozen grid [0.01, 0.1, 1.0, 10.0] by inner-fold forward log loss only",
+      "selection_objective": "forward log loss on the inner development fold. AUC is REPORTED but never used to select weights.",
+      "selection_rule": "lowest mean inner-fold forward log loss; ties broken by the smaller penalty, then by lower L2 norm of the weight vector",
+      "sign_constraints": "none imposed; a negative fitted weight is an admissible finding and must be reported rather than clipped"
+    },
+    "requirement": "The relative weights of the stage 1 inputs are FIT against forward win prediction inside the development folds. They are not hand-assigned and not an equal-weight average.",
+    "why_frozen": "v5 as drafted specified neither family, constraints, regularization, optimizer nor selection metric, so different implementations could search materially different models after inspecting development results and still satisfy the protocol. The experiment would be neither preregistered nor reproducible."
   },
   "out_of_scope_this_protocol": [
     "fitting, training, or evaluating any candidate (this document is design and protocol only)",
