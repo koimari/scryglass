@@ -130,6 +130,16 @@ ATTRIBUTION_WEIGHTS_STATUS = "unfitted_development_default"
 # floor the metric is unavailable and the player falls back to neutral.
 ATTRIBUTION_MIN_BASELINE_OBS = 20
 
+# Consistency constants for the ROBUST baseline used by ``_prior_baseline_z``.
+# Mirrors ``lol_kills.ratings.global_player_bt._MAD_TO_SIGMA`` /
+# ``_IQR_TO_SIGMA``; see that module for why the baseline is a median and a
+# MAD rather than a mean and a standard deviation.  In short: mean/std has a
+# breakdown point of 1/n, so one malformed but ingestible statistic poisons the
+# baseline every LATER row in the pool is measured against, and clipping the
+# resulting z cannot undo that.  Median and MAD both break down only at 50%.
+_MAD_TO_SIGMA = 1.4826
+_IQR_TO_SIGMA = 1.349
+
 # Guard for the post-tanh renormalization divisor.
 _ATTRIBUTION_MEAN_FLOOR = 1e-9
 
@@ -458,71 +468,145 @@ def _attribution_features(metrics: pd.DataFrame) -> pd.DataFrame:
     return features
 
 
+def _robust_block_baseline(
+    pool: np.ndarray,
+    available: np.ndarray,
+    min_obs: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Expanding median and robust scale for one group's blocks.
+
+    Mirrors ``lol_kills.ratings.global_player_bt._robust_block_baseline``.
+
+    ``pool`` holds a single group's PRESENT values in date order and
+    ``available[k]`` is how many of them exist strictly before block ``k``
+    begins, so ``pool[:available[k]]`` is exactly that block's baseline sample.
+
+    The scale is the MAD rescaled by ``_MAD_TO_SIGMA``.  Its one known failure
+    mode is MAD == 0, which happens whenever more than half the sample ties --
+    entirely plausible for wards-per-minute pools where many rows are exactly
+    0.  The fallback is the interquartile range rescaled by ``_IQR_TO_SIGMA``,
+    which is still robust (25% breakdown) and survives ties the MAD cannot.
+
+    FAIL CLOSED: a sample under the floor, or one where BOTH robust scales are
+    zero or non-finite, returns NaN.  Nothing is imputed, no group mean is
+    substituted, and nothing is ever divided by zero.
+    """
+
+    location = np.full(len(available), np.nan, dtype=float)
+    scale = np.full(len(available), np.nan, dtype=float)
+    if len(pool) == 0:
+        return location, scale
+    # ``expanding().median()`` is pandas' C skiplist, and it is bit-identical
+    # to ``np.median(pool[:n])`` for every n (pinned by
+    # ``test_expanding_median_is_bit_identical_to_numpy_median``).  Only the
+    # MAD needs the per-block pass, because its deviations are taken against
+    # that block's own median and so cannot be accumulated.
+    running_median = pd.Series(pool).expanding().median().to_numpy(dtype=float)
+    floor = max(int(min_obs), 1)
+    previous = -1
+    for position in range(len(available)):
+        count = int(available[position])
+        if count < floor:
+            continue
+        if count == previous:
+            # A block with no present rows leaves the sample untouched.
+            location[position] = location[position - 1]
+            scale[position] = scale[position - 1]
+            continue
+        previous = count
+        prefix = pool[:count]
+        centre = float(running_median[count - 1])
+        if not np.isfinite(centre):
+            continue
+        deviation = np.abs(prefix - centre)
+        spread = _MAD_TO_SIGMA * float(np.median(deviation, overwrite_input=True))
+        if not np.isfinite(spread) or spread <= 0.0:
+            low, high = np.quantile(prefix, (0.25, 0.75))
+            spread = float(high - low) / _IQR_TO_SIGMA
+        if not np.isfinite(spread) or spread <= 0.0:
+            continue
+        location[position] = centre
+        scale[position] = spread
+    return location, scale
+
+
 def _prior_baseline_z(
     values: pd.Series,
     group: pd.Series,
     date: pd.Series,
     min_obs: int,
 ) -> pd.Series:
-    """Z-score against a baseline built only from strictly earlier dates.
+    """Robust z-score against a baseline built only from strictly earlier dates.
 
-    The baseline for a row is the expanding mean/std over every row in the same
-    ``group`` whose date is strictly before the row's own date, so map ``t``
-    never contributes to its own baseline.  Rows sharing a timestamp form one
-    block and cannot see each other.  A baseline thinner than ``min_obs`` or
-    with a degenerate spread yields an unavailable (NaN) z-score.
+    Mirrors ``lol_kills.ratings.global_player_bt._prior_baseline_z``, which
+    additionally returns the prior observation count; the two are pinned
+    together by ``test_prior_baseline_z_matches_the_elo_implementation``.
+
+    The baseline for a row is the expanding MEDIAN and MAD over every row in
+    the same ``group`` whose date is strictly before the row's own date, so map
+    ``t`` never contributes to its own baseline.  Rows sharing a timestamp form
+    one block and cannot see each other.  A baseline thinner than ``min_obs``
+    or with a degenerate robust spread yields an unavailable (NaN) z-score.
+
+    Median/MAD rather than mean/std is the whole point: see ``_MAD_TO_SIGMA``.
+    A single malformed row cannot move a 50%-breakdown estimator, so it cannot
+    poison the baseline that every LATER row in the pool is measured against.
     """
 
     index = values.index
+    x = values.to_numpy(dtype=float)
+    present = np.isfinite(x)
+
+    location = np.full(len(index), np.nan, dtype=float)
+    scale = np.full(len(index), np.nan, dtype=float)
+    prior_count = np.zeros(len(index), dtype=float)
+
     work = pd.DataFrame(
-        {
-            "_g": group.to_numpy(),
-            "_d": date.to_numpy(),
-            "_x": values.to_numpy(dtype=float),
-        }
+        {"_g": group.to_numpy(), "_d": date.to_numpy()},
+        index=pd.RangeIndex(len(index)),
     )
-    present = np.isfinite(work["_x"].to_numpy(dtype=float))
-    work["_n"] = present.astype(float)
-    filled = np.where(present, work["_x"].to_numpy(dtype=float), 0.0)
-    work["_s"] = filled
-    work["_q"] = filled * filled
+    work["_x"] = x
+    work["_p"] = present
+    # A row with no group or no date cannot be placed in the prior ordering, so
+    # it is left unavailable rather than scored against a baseline it might
+    # belong inside.  This is what ``dropna=True`` did for the block groupby.
+    placed = work["_g"].notna().to_numpy() & work["_d"].notna().to_numpy()
 
-    blocks = (
-        work.groupby(["_g", "_d"], sort=True, dropna=True)[["_n", "_s", "_q"]]
-        .sum()
-        .reset_index()
-    )
-    if blocks.empty:
-        return pd.Series(np.nan, index=index, dtype=float)
-    blocks = blocks.sort_values(["_g", "_d"], kind="mergesort")
-    cumulative = blocks.groupby("_g", sort=False)[["_n", "_s", "_q"]].cumsum()
-    prior = cumulative.groupby(blocks["_g"], sort=False).shift(1)
-    blocks["_pn"] = prior["_n"].to_numpy()
-    blocks["_ps"] = prior["_s"].to_numpy()
-    blocks["_pq"] = prior["_q"].to_numpy()
+    for _key, sub in work[placed].groupby("_g", sort=False):
+        if sub.empty:
+            continue
+        sub = sub.sort_values("_d", kind="mergesort")
+        positions = sub.index.to_numpy()
+        dates = sub["_d"].to_numpy()
+        rows_present = sub["_p"].to_numpy(dtype=bool)
+        pool = sub["_x"].to_numpy(dtype=float)[rows_present]
 
-    merged = work[["_g", "_d"]].merge(
-        blocks[["_g", "_d", "_pn", "_ps", "_pq"]], on=["_g", "_d"], how="left"
-    )
-    n = merged["_pn"].to_numpy(dtype=float)
-    s = merged["_ps"].to_numpy(dtype=float)
-    q = merged["_pq"].to_numpy(dtype=float)
-    x = work["_x"].to_numpy(dtype=float)
+        # One block per distinct timestamp; every row in a block shares the
+        # baseline taken as of the last row STRICTLY BEFORE the block starts.
+        starts = np.empty(len(sub), dtype=bool)
+        starts[0] = True
+        starts[1:] = dates[1:] != dates[:-1]
+        block_of_row = np.cumsum(starts) - 1
+        available = np.concatenate(([0], np.cumsum(rows_present)))[
+            np.flatnonzero(starts)
+        ]
+
+        block_location, block_scale = _robust_block_baseline(
+            pool, available, min_obs
+        )
+        location[positions] = block_location[block_of_row]
+        scale[positions] = block_scale[block_of_row]
+        prior_count[positions] = available[block_of_row].astype(float)
 
     with np.errstate(invalid="ignore", divide="ignore"):
-        mean = s / n
-        variance = (q - n * mean * mean) / (n - 1.0)
-        variance = np.where(np.isfinite(variance), np.maximum(variance, 0.0), np.nan)
-        std = np.sqrt(variance)
         usable = (
             present
-            & np.isfinite(n)
-            & (n >= float(min_obs))
-            & np.isfinite(std)
-            & (std > 0.0)
-            & np.isfinite(mean)
+            & (prior_count >= float(min_obs))
+            & np.isfinite(location)
+            & np.isfinite(scale)
+            & (scale > 0.0)
         )
-        z = np.where(usable, (x - mean) / std, np.nan)
+        z = np.where(usable, (x - location) / scale, np.nan)
     return pd.Series(z, index=index, dtype=float)
 
 
