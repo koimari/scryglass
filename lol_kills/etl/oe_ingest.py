@@ -906,6 +906,69 @@ def _year_from_name(name: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+# How many days a local annual OE CSV may lag before the refresh is
+# considered stale.  A Drive quota block leaves the previous download in
+# place, so age - not absence - is the signal that the upstream feed stopped
+# reaching us.
+OE_SOURCE_MAX_AGE_DAYS = 3
+
+
+def check_oe_source_freshness(
+    paths: list[Path],
+    *,
+    now: datetime | None = None,
+    max_age_days: int = OE_SOURCE_MAX_AGE_DAYS,
+) -> None:
+    """Decide how a stale local OE export should affect a refresh.
+
+    ``paths`` are the annual CSVs the ingest is about to parse.  The freshest
+    file's modification time is the cheapest available staleness signal: a
+    quota-blocked download leaves the prior CSV untouched, so its mtime stops
+    advancing while the pipeline keeps reporting success.
+
+    Policy: warn loudly, do not refuse.  A hard failure here would also stop
+    the ``oe_api`` completed-game bridge, and that bridge is what keeps result
+    based ratings current while detail statistics are missing - refusing to
+    build would turn a partial outage into a total one.  Publishing correctness
+    is already enforced downstream, where absent statistics produce an explicit
+    ``unavailable`` grade rather than a wrong number.
+
+    Set ``SCRYGLASS_OE_STRICT_FRESHNESS=1`` to raise instead, which is the
+    right setting for a scheduled job that should page someone.
+
+    Caveat: modification time answers "when did we last download", not "how
+    fresh is the data inside".  A quota-blocked download leaves the previous
+    file untouched, which is exactly the case this catches, but a re-download
+    of an upstream file that itself stopped advancing would still look fresh.
+    ``_validate_oe_csv`` reports ``date_max_utc`` per file and is the stronger
+    signal once the CSVs are parsed.
+    """
+
+    if not paths:
+        return None
+
+    now = now or datetime.now(timezone.utc)
+    newest = max(paths, key=lambda path: path.stat().st_mtime)
+    fetched_at = datetime.fromtimestamp(newest.stat().st_mtime, tz=timezone.utc)
+    age_days = (now - fetched_at).total_seconds() / 86400.0
+    if age_days <= max_age_days:
+        return None
+
+    message = (
+        f"stale Oracle's Elixir source: newest local CSV {newest.name} was "
+        f"last written {age_days:.1f} days ago "
+        f"({fetched_at.isoformat(timespec='seconds')}), over the "
+        f"{max_age_days}-day limit. Detail statistics will be missing for "
+        f"games after that date and grades will report unavailable. "
+        f"Refresh {RAW_OE_DIR} from {OE_FOLDER} "
+        f"(a Google Drive quota block leaves the previous file in place)."
+    )
+    if os.environ.get("SCRYGLASS_OE_STRICT_FRESHNESS") == "1":
+        raise OeDownloadError(message)
+    print(f"[oe] WARNING: {message}")
+    return None
+
+
 def ingest_oe(
     years: list[str] | None = None,
     download: bool = False,
@@ -924,6 +987,8 @@ def ingest_oe(
     if years:
         want = {str(y) for y in years}
         paths = [p for p in paths if any(p.name.startswith(y) for y in want)]
+
+    check_oe_source_freshness(paths)
 
     if not paths:
         cached_team, cached_players = load_cached_oe(years)
