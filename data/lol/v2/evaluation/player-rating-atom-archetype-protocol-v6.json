@@ -16,18 +16,33 @@
   },
   "frozen_utc": "2026-08-18T10:15:00Z",
   "honest_labelling_constraint": {
+    "accuracy_word_guidance": {
+      "forbidden_sense": "accurate as in better at predicting future results",
+      "internal_evidence_note": "The anchored fit improved out-of-sample holdout log loss from 0.64763 to 0.64535, gain 0.04292 to 0.04519 against a 0.005 floor, using a TRAIN-ONLY anchor so the gate is not contaminated. This is real internal evidence of predictive improvement but is NOT the frozen paired comparison, so it does not unlock a public predictive claim.",
+      "permitted_sense": "accurate as in faithful to the observed record",
+      "requirement": "Where the word accurate is used on a public surface it must be qualified so a reader cannot reasonably read it as a forecasting claim."
+    },
     "additional_required_disclosure": "Any release note must state that player ladder positions change substantially because teammates were previously tied, and that team ratings move slightly (mean 0.05 percent, max 0.72 percent) through feedback under roster churn. Do not describe team ratings as unaffected.",
     "forbidden_claims_until_evidence_exists": [
-      "more accurate",
       "more predictive",
-      "better calibrated",
+      "better at forecasting match outcomes",
       "improved forecasting",
-      "beats the previous model"
+      "better calibrated",
+      "beats the previous model at prediction"
     ],
+    "owner_definition_of_accuracy": {
+      "consequence_for_this_change": "Under this definition the anchored model is more accurate and the previous model was descriptively WRONG. The unanchored model asserted that Kiin and Duro performed identically, to eleven decimal places, when Kiin recorded 8.14 cs/min against Duro's 0.87, 20.4 percent gold share against 13.2, and 0.23 damage share against 0.07. A rating that states two players are identical when the measured record says otherwise is a false statement about the data.",
+      "decided_utc": "2026-08-18T12:10:00Z",
+      "definition": "A rating is ACCURATE when it correctly renders a player's standing relative to other players given the observed matrix of data points. Accuracy is a DESCRIPTIVE property of the rating against the data it summarizes. It does not require external confirmation by future results.",
+      "distinction_retained": "Descriptive accuracy is NOT predictive accuracy. Claims that the rating forecasts match outcomes better still require the frozen paired forward comparison.",
+      "owner_statement": "Chovy is most likely the best player in the world and has been for some time, but that does not mean he will have good results. The rating should render that standing correctly regardless."
+    },
     "permitted_claims": [
       "player ratings differentiate teammates by measured in-game contribution",
       "contribution is computed from cs per minute, gold per minute, gold share, damage per minute, damage share, role-weighted KDA and vision rates",
-      "each map's team-level rating update is conserved exactly; only its allocation among the five players changes"
+      "each map's team-level rating update is conserved exactly; only its allocation among the five players changes",
+      "ratings render a player's standing relative to their peers more faithfully to the observed record",
+      "the previous rating could not distinguish players who always appeared in the same games; this one can"
     ],
     "rationale": "This is the only thing the removed evidence actually cost. It constrains wording, not release.",
     "removed_permitted_claim": {
@@ -115,6 +130,49 @@
         1805
       ]
     }
+  },
+  "measured_impact_global_bt_anchor": {
+    "gates": {
+      "connected_share_after": 1.0,
+      "connected_share_before": 1.0,
+      "holdout_gain_after": 0.04551,
+      "holdout_gain_before": 0.04292,
+      "holdout_gain_floor": 0.005
+    },
+    "measured_utc": "2026-08-18T13:30:00Z",
+    "players_anchored": 2989,
+    "players_left_neutral": 808,
+    "players_total": 3797,
+    "published_snapshot": {
+      "distinct_ratings_after": "3505/3797",
+      "distinct_ratings_before": "3118/3797",
+      "global_mean_after": 1500.0,
+      "global_mean_before": 1500.0,
+      "same_team_identical_pairs_after": 547,
+      "same_team_identical_pairs_before": 1136,
+      "sd_after": 68.26,
+      "sd_before": 59.04
+    },
+    "regression": {
+      "base_fd88efd6": "95 failed / 437 passed / 48 errors",
+      "delta": "+30 passing, zero new failures",
+      "with_anchor": "95 failed / 467 passed / 48 errors"
+    },
+    "residual_risk": "export_public_pack has NOT been driven end to end; only its exact column projection was replicated. That should be closed before merge given this PR's history of passing verification while being inert in production.",
+    "robust_baseline": {
+      "contamination_test": "one malformed 1e12 row shifts downstream z by at most 0.098 under the robust baseline versus 3.18 under mean/std, about a 32x reduction",
+      "estimator": "median and MAD scaled by 1.4826",
+      "fallback": "IQR divided by 1.349 when scaled MAD is zero",
+      "final_fallback": "metric withheld and the player left neutral"
+    },
+    "tie_resolution": {
+      "Chovy_Ruler": 13.7376,
+      "Kiin_Duro": 19.0247,
+      "Zeka_Zeus": 0.691,
+      "direction_check": "Kiin 1745.91 now ranks above Duro 1726.88, matching Kiin's 8.14 cs per minute against Duro's 0.87 and 20.4 percent gold share against 13.2."
+    },
+    "verified_through": "the production column projection in lol_kills/export/public_pack.py, not a hand-built frame. Two earlier measurements were invalid because they fed the full parquet directly.",
+    "why_547_remain": "808 players fall below the fail-closed floors: fewer than 20 prior observations in their role/tier baseline, or fewer than 5 of their own scored maps. They stay exactly neutral and retain the previous behaviour, so their ties persist. This is the fail-closed rule working, not a partial fix. An earlier 1136 to 0 result was produced WITHOUT these floors and anchored players with as few as two games, which the reviewer correctly flagged as unsafe."
   },
   "out_of_scope_this_protocol": [
     "any change to the public Draft Score publication path",

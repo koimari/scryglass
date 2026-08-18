@@ -271,6 +271,66 @@ def _present(cols: Sequence[str], available: Iterable[str]) -> list[str]:
     return [c for c in cols if c in avail]
 
 
+# Measured contribution statistics consumed by the global BT performance anchor
+# (lol_kills/ratings/global_player_bt.py). They are projected into the player
+# rating input so the anchor is not inert in the release path.
+PLAYER_CONTRIBUTION_COLUMNS: tuple[str, ...] = (
+    "cspm",
+    "dpm",
+    "damageshare",
+    "totalgold",
+    "earnedgold",
+    "kills",
+    "deaths",
+    "assists",
+    "teamkills",
+    "gamelength",
+    "wpm",
+    "wcpm",
+)
+
+
+class PublicPlayerAnchorError(RuntimeError):
+    """Raised when the release would publish an unanchored player ladder."""
+
+
+def require_player_performance_anchor(meta_path: Path) -> dict[str, Any]:
+    """Refuse to publish a ladder whose performance anchor reached no player.
+
+    FAIL CLOSED.  ``fit_global_player_bt`` already refuses a release-grade fit
+    that anchors nobody, but that check lives one call away from the projection
+    that caused the defect.  This re-reads the meta the rating build actually
+    wrote, so a future edit that drops a contribution column from
+    ``player_rating_columns`` fails the release here as well as there, and can
+    never no-op silently.
+    """
+
+    if not meta_path.exists():
+        raise PublicPlayerAnchorError(
+            f"player rating meta is missing at {meta_path}; the release cannot "
+            "confirm that the performance anchor reached any player"
+        )
+    meta = json.loads(meta_path.read_text())
+    anchor = ((meta.get("global_rating") or {}).get("performance_anchor")) or {}
+    if not anchor:
+        raise PublicPlayerAnchorError(
+            f"player rating meta at {meta_path} carries no performance anchor "
+            "evidence; the release cannot confirm the ladder is anchored"
+        )
+    if not anchor.get("enabled"):
+        return anchor
+    anchored = int(anchor.get("players_anchored") or 0)
+    if anchored <= 0:
+        raise PublicPlayerAnchorError(
+            "public pack refuses to publish: the global player performance "
+            "anchor is enabled but anchored 0 players, so every teammate tie "
+            "would survive into the published ladder. The player rating input "
+            "is missing its contribution columns "
+            f"({', '.join(PLAYER_CONTRIBUTION_COLUMNS)})"
+        )
+    return anchor
+
+
 def serialize_rating_snapshot_rows(
     table: pa.Table,
     columns: Sequence[str],
@@ -1547,6 +1607,14 @@ def export_public_pack(
         (
             "gameid", "game_uid", "date", "year", "oe_year", "league", "result",
             "side", "position", "teamname", "playername",
+            # The global BT performance anchor is built from measured
+            # contribution, so the rating input must carry it. Without these
+            # columns the anchor reads all-NaN, anchors zero players, and the
+            # published ladder hands byte-identical ratings to every player who
+            # never appears apart from a teammate. `_present` keeps a source
+            # that lacks a column degrading to an unavailable metric rather
+            # than raising on read.
+            *PLAYER_CONTRIBUTION_COLUMNS,
         ),
         player_available,
     )
@@ -1592,6 +1660,14 @@ def export_public_pack(
         cfg=player_rating_cfg,
         output_dir=features_root,
         player_records=player_records_payload,
+    )
+    progress("checking player performance anchor")
+    player_anchor_evidence = require_player_performance_anchor(
+        features_root / "player_ratings_meta.json"
+    )
+    progress(
+        "player performance anchor covers "
+        f"{player_anchor_evidence.get('players_anchored')} players"
     )
     player_snapshot_path = features_root / "player_ratings_snapshot.parquet"
     if player_snapshot_path.exists():
