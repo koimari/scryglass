@@ -45,15 +45,20 @@ export SCRYGLASS_OE_DATABASE_REFRESHED=1
 # then this script handed the importer the stale warehouse copy and the receipt
 # check refused the run.
 raw_oe_dir="$(cd "${repo_root}" && "${python}" -m lol_kills.etl.paths --raw-oe-dir)"
-if [[ -z "${raw_oe_dir}" || ! -d "${raw_oe_dir}" ]]; then
+if [[ -z "${raw_oe_dir}" ]]; then
   print -u2 "Could not resolve the Oracle's Elixir source directory."
   exit 78
 fi
+# Create the directory rather than requiring it: on a fresh worker the download
+# below is what first populates it.
+/bin/mkdir -p "${raw_oe_dir}" || exit 78
 oe_csv="${raw_oe_dir}/${oe_name}"
-if [[ ! -f "${oe_csv}" ]]; then
-  print -u2 "Oracle's Elixir annual CSV is missing at ${oe_csv}."
-  exit 78
-fi
+# Deliberately NOT asserting that ${oe_csv} exists here. The browser-download
+# block further down is what creates it, and it deletes the candidate before
+# opening Brave. Failing here would wedge a fresh worker permanently, and would
+# also make a timed-out download unrecoverable without hand-placing a CSV. A
+# genuinely missing file is still caught downstream by _validate_oe_csv and by
+# the source-receipt check, which fail loudly and name the path.
 
 real_worker_commit="$(/usr/bin/git -C "${repo_root}" rev-parse --verify HEAD)"
 if [[ ! "${SCRYGLASS_WORKER_COMMIT:-}" =~ '^[0-9a-f]{40}$' ]]; then
