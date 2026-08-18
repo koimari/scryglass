@@ -6,6 +6,7 @@ import pytest
 from lol_kills.ratings.global_player_bt import (
     GlobalPlayerBTConfig,
     GlobalPlayerRatingError,
+    _contribution_metrics,
     fit_global_player_bt,
 )
 from lol_kills.ratings.player_elo import PlayerEloConfig, _apply_bridge_uncertainty
@@ -41,6 +42,49 @@ def _fixture(
                     }
                 )
     return pd.DataFrame(maps), pd.DataFrame(players)
+
+
+def _with_metrics(
+    players: pd.DataFrame,
+    profiles: dict[str, dict[str, float]],
+    *,
+    tier: str | None = "tier1",
+) -> pd.DataFrame:
+    """Attach per player contribution metrics to a fixture player frame."""
+
+    frame = players.copy()
+    if tier is not None:
+        frame["competition_tier"] = tier
+    frame["gamelength"] = 1800.0
+    columns = sorted({column for profile in profiles.values() for column in profile})
+    for column in columns:
+        frame[column] = [
+            profiles.get(str(name), {}).get(column, float("nan"))
+            for name in frame["playername"]
+        ]
+    return frame
+
+
+def _profile(
+    cs: float,
+    gold: float,
+    damage: float,
+    share: float,
+    kills: float,
+    deaths: float,
+    assists: float,
+) -> dict[str, float]:
+    return {
+        "cspm": cs,
+        "totalgold": gold,
+        "dpm": damage,
+        "damageshare": share,
+        "kills": kills,
+        "deaths": deaths,
+        "assists": assists,
+        "wpm": 0.5,
+        "wcpm": 0.2,
+    }
 
 
 def _config(**changes: object) -> GlobalPlayerBTConfig:
@@ -169,3 +213,201 @@ def test_holdout_evidence_is_chronological_and_beats_side_only_baseline() -> Non
     assert meta["holdout"]["train_maps"] == 96
     assert meta["holdout"]["test_maps"] == 24
     assert meta["holdout"]["gain"] >= 0.001
+
+
+_TEAMS = ("alpha", "beta", "gamma", "delta")
+
+# Role-typical output, so a support is never compared against a top laner.
+_ROLE_BASE = {
+    "top": _profile(8.0, 12500.0, 520.0, 0.23, 3.0, 3.0, 5.0),
+    "jng": _profile(5.0, 11000.0, 400.0, 0.18, 3.0, 3.0, 7.0),
+    "mid": _profile(9.1, 13000.0, 650.0, 0.27, 4.0, 3.0, 5.0),
+    "bot": _profile(9.8, 13500.0, 700.0, 0.29, 5.0, 3.0, 4.0),
+    "sup": _profile(1.0, 8700.0, 210.0, 0.10, 1.0, 4.0, 10.0),
+}
+
+
+def _quality_profile(role: str, quality: float) -> dict[str, float]:
+    base = _ROLE_BASE[role]
+    profile = {key: value * quality for key, value in base.items()}
+    profile["deaths"] = base["deaths"] / quality
+    return profile
+
+
+def _roster_profiles(
+    overrides: dict[str, dict[str, float]] | None = None,
+    *,
+    drop: tuple[str, ...] = (),
+) -> dict[str, dict[str, float]]:
+    """Four locked rosters, every role peer on a distinct quality level.
+
+    Distinct levels matter: with only two players per role a z-score collapses
+    to a sign, which is not a fair exercise of the anchor.
+    """
+
+    profiles: dict[str, dict[str, float]] = {}
+    for team_index, team in enumerate(_TEAMS):
+        for role_index, role in enumerate(ROLES):
+            quality = 1.0 + 0.05 * (((team_index * 5 + role_index) % 7) - 3)
+            profiles[f"{team}-{role}"] = _quality_profile(role, quality)
+    profiles.update(overrides or {})
+    for name in drop:
+        profiles.pop(name, None)
+    return profiles
+
+
+def _locked_roster_games(rounds: int = 6) -> list[tuple[str, str, str, int, str]]:
+    """Locked rosters in a full round robin, so teammates always co-occur."""
+
+    pairs = [
+        (left, right)
+        for index, left in enumerate(_TEAMS)
+        for right in _TEAMS[index + 1 :]
+    ]
+    games = []
+    for round_number in range(rounds):
+        for index, (left, right) in enumerate(pairs):
+            blue_win = int((round_number + index) % 3 != 0)
+            home, away = (left, right) if (round_number + index) % 2 == 0 else (right, left)
+            games.append((f"game-{round_number}-{index}", home, away, blue_win, "LCK"))
+    return games
+
+
+def test_always_together_players_separate_by_role_normalized_contribution() -> None:
+    maps, players = _fixture(_locked_roster_games())
+    frame = _with_metrics(
+        players,
+        _roster_profiles(
+            {
+                "alpha-top": _quality_profile("top", 1.25),
+                "alpha-sup": _quality_profile("sup", 0.75),
+            }
+        ),
+    )
+
+    snapshot, meta = fit_global_player_bt(maps, players=frame, cfg=_config(), validate=False)
+    ratings = snapshot.set_index("player")["global_rating"]
+
+    assert meta["performance_anchor"]["enabled"] is True
+    assert meta["performance_anchor"]["players_anchored"] == 20
+    assert meta["performance_anchor"]["players_without_metrics"] == 0
+    assert meta["performance_anchor"]["normalization"] == "role+competition_tier"
+    assert meta["player_statistics_used"] is True
+    # The whole point: identical design columns, different ratings.
+    assert ratings["alpha-top"] != ratings["alpha-sup"]
+    assert ratings["alpha-top"] > ratings["alpha-sup"]
+    assert len({ratings[f"alpha-{role}"] for role in ROLES}) == 5
+
+
+def test_role_normalization_does_not_punish_a_low_cs_support() -> None:
+    maps, players = _fixture(_locked_roster_games())
+    # The support farms about 1 cs/min against the top laner's 6, but is the
+    # better player *for their own role*.
+    frame = _with_metrics(
+        players,
+        _roster_profiles(
+            {
+                "alpha-top": _quality_profile("top", 0.75),
+                "alpha-sup": _quality_profile("sup", 1.25),
+            }
+        ),
+    )
+
+    snapshot, _ = fit_global_player_bt(maps, players=frame, cfg=_config(), validate=False)
+    anchors = snapshot.set_index("player")["global_performance_anchor_logit"]
+    ratings = snapshot.set_index("player")["global_rating"]
+
+    assert _ROLE_BASE["sup"]["cspm"] * 1.25 < _ROLE_BASE["top"]["cspm"] * 0.75
+    assert anchors["alpha-sup"] > 0.0
+    assert anchors["alpha-top"] < 0.0
+    assert ratings["alpha-sup"] > ratings["alpha-top"]
+
+
+def test_disabled_performance_anchor_restores_shrink_to_zero_behaviour() -> None:
+    maps, players = _fixture(_locked_roster_games())
+    frame = _with_metrics(
+        players,
+        _roster_profiles(
+            {
+                "alpha-top": _quality_profile("top", 1.25),
+                "alpha-sup": _quality_profile("sup", 0.75),
+            }
+        ),
+    )
+    off = _config(performance_anchor_enabled=False)
+
+    bare, bare_meta = fit_global_player_bt(maps, players=players, cfg=off, validate=False)
+    rich, rich_meta = fit_global_player_bt(maps, players=frame, cfg=off, validate=False)
+
+    # Contribution metrics are inert while the anchor is off, and the snapshot
+    # carries no anchor columns at all.
+    pd.testing.assert_frame_equal(bare, rich)
+    assert "global_performance_anchor_logit" not in rich.columns
+    assert rich_meta["player_statistics_used"] is False
+    assert rich_meta["performance_anchor"]["enabled"] is False
+    assert bare_meta["performance_anchor"]["players_anchored"] == 0
+    ratings = rich.set_index("player")["global_rating"]
+    assert len({ratings[f"alpha-{role}"] for role in ROLES}) == 1
+
+
+def test_players_without_contribution_metrics_keep_a_zero_anchor() -> None:
+    maps, players = _fixture(_locked_roster_games())
+    # These two seats carry no usable metric at all, so they must fall back to
+    # exactly the old shrink-to-zero behaviour rather than borrow a mean.
+    frame = _with_metrics(
+        players, _roster_profiles(drop=("alpha-sup", "beta-sup"))
+    )
+
+    snapshot, meta = fit_global_player_bt(maps, players=frame, cfg=_config(), validate=False)
+    anchored = snapshot.set_index("player")["global_performance_anchored"]
+    anchors = snapshot.set_index("player")["global_performance_anchor_logit"]
+
+    assert anchored["alpha-sup"] == 0
+    assert anchored["beta-sup"] == 0
+    assert anchors["alpha-sup"] == 0.0
+    assert anchors["beta-sup"] == 0.0
+    assert meta["performance_anchor"]["players_without_metrics"] == 2
+    assert meta["performance_anchor"]["players_anchored"] == 18
+
+
+def test_incomplete_team_gold_withholds_the_share_metric() -> None:
+    maps, players = _fixture(_locked_roster_games())
+    profiles = _roster_profiles()
+    without_gold = dict(profiles["alpha-sup"])
+    without_gold.pop("totalgold")
+    profiles["alpha-sup"] = without_gold
+    frame = _with_metrics(players, profiles)
+
+    metrics = _contribution_metrics(frame)
+    alpha_rows = metrics[metrics["_player"].astype(str).str.startswith("alpha-")]
+    beta_rows = metrics[metrics["_player"].astype(str).str.startswith("beta-")]
+
+    # One missing seat would otherwise inflate every teammate's gold share.
+    assert alpha_rows["gold_share_pct"].isna().all()
+    assert beta_rows["gold_share_pct"].notna().all()
+
+
+def test_performance_anchor_is_zero_mean_and_leaves_the_scale_unchanged() -> None:
+    maps, players = _fixture(_locked_roster_games())
+    frame = _with_metrics(
+        players,
+        _roster_profiles(
+            {
+                "alpha-top": _quality_profile("top", 1.25),
+                "alpha-sup": _quality_profile("sup", 0.75),
+            }
+        ),
+    )
+
+    cfg = _config()
+    anchored, meta = fit_global_player_bt(maps, players=frame, cfg=cfg, validate=False)
+    plain, _ = fit_global_player_bt(
+        maps, players=frame, cfg=_config(performance_anchor_enabled=False), validate=False
+    )
+
+    assert abs(float(anchored["global_performance_anchor_logit"].sum())) < 1e-12
+    assert abs(float(meta["performance_anchor"]["anchor_mean_logit"])) < 1e-12
+    assert abs(
+        float(anchored["global_rating"].mean()) - float(plain["global_rating"].mean())
+    ) < 1e-6
+    assert abs(float(anchored["global_rating"].mean()) - cfg.prior_rating) < 1e-6

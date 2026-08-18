@@ -4,6 +4,15 @@ The fit uses only completed map results and verified ten-player lineups. Each
 player has one coefficient across every league, team, and competition tier.
 Roster transfers and cross-circuit matches connect domestic pools. Competition
 tier is never used as a rating bonus or penalty.
+
+Map results alone cannot separate two players who never appear apart: their
+design columns are identical, so a shrink-to-zero ridge hands them identical
+coefficients. The ridge therefore shrinks toward a per-player performance
+anchor instead of toward zero. The anchor is built from role-normalized
+contribution metrics, is centered to exactly zero mean, and never adds a
+competition-tier level bonus: metrics are z-scored *within* their own
+(role, competition tier) pool, so tier labels only choose the comparison
+group and cannot lift or lower a player's anchor on their own.
 """
 
 from __future__ import annotations
@@ -33,6 +42,23 @@ ROLE_ALIAS = {
     "utility": "sup",
 }
 
+# UNFITTED DEVELOPMENT DEFAULT.  These weights have never been fitted, tuned,
+# or validated against any outcome; they are a deliberate equal-weight
+# placeholder so the anchor stays inspectable while a weight study is pending.
+# Do not describe a fit that uses them as a fitted contribution model.
+PERFORMANCE_ANCHOR_METRIC_WEIGHTS: dict[str, float] = {
+    "cs_per_min": 1.0,
+    "gold_per_min": 1.0,
+    "gold_share_pct": 1.0,
+    "damage_per_min": 1.0,
+    "damage_share_pct": 1.0,
+    "kda_role_weighted": 1.0,
+    "wards_per_min": 1.0,
+    "wards_cleared_per_min": 1.0,
+}
+PERFORMANCE_ANCHOR_WEIGHTS_STATUS = "unfitted_development_default"
+_ANCHOR_ZERO_MEAN_TOLERANCE = 1e-9
+
 
 class GlobalPlayerRatingError(RuntimeError):
     """Raised when the shared player scale cannot pass its release checks."""
@@ -48,6 +74,8 @@ class GlobalPlayerBTConfig:
     minimum_connected_share: float = 0.95
     minimum_holdout_gain: float = 0.005
     max_iterations: int = 400
+    performance_anchor_scale: float = 0.15
+    performance_anchor_enabled: bool = True
 
 
 class _Components:
@@ -196,10 +224,200 @@ def _design(
     return csr_matrix((values, (row_index, columns)), shape=(len(frame), len(names)))
 
 
+def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
+    """Finite numeric view of one column; an absent column reads as all-NaN."""
+
+    if column not in frame.columns:
+        return pd.Series(np.nan, index=frame.index, dtype=float)
+    values = pd.to_numeric(frame[column], errors="coerce").astype(float)
+    return values.where(np.isfinite(values))
+
+
+def _contribution_metrics(players: pd.DataFrame) -> pd.DataFrame:
+    """Per player-map contribution metrics used to build the ridge anchor.
+
+    Every metric is fail-closed: a missing column, a missing value, or an
+    impossible denominator yields NaN for that metric on that map. Nothing is
+    imputed and no league or role mean is ever substituted.
+    """
+
+    required = {"side", "position", "playername"}
+    if players is None or players.empty or not required.issubset(players.columns):
+        return pd.DataFrame()
+
+    frame = pd.DataFrame(index=players.index)
+    frame["_game_id"] = _canonical_game_ids(players)
+    frame["_side"] = players["side"].astype(str).str.title()
+    frame["_role"] = players["position"].map(_role)
+    frame["_player"] = players["playername"].astype("string").str.strip()
+    if "competition_tier" in players.columns:
+        frame["_tier"] = players["competition_tier"].astype("string").str.strip().str.casefold()
+    else:
+        frame["_tier"] = pd.Series(pd.NA, index=players.index, dtype="string")
+    for source in ("gamelength", "totalgold", "cspm", "dpm", "damageshare", "kills", "deaths", "assists", "wpm", "wcpm"):
+        frame[f"_raw_{source}"] = _numeric(players, source)
+
+    frame = frame[
+        frame["_game_id"].notna()
+        & frame["_game_id"].astype(str).str.strip().ne("")
+        & frame["_side"].isin({"Blue", "Red"})
+        & frame["_role"].notna()
+        & frame["_player"].notna()
+        & frame["_player"].ne("")
+        & frame["_player"].str.casefold().ne("nan")
+    ]
+    # One row per player and map so a duplicated feed row cannot double-weight
+    # a single performance, and so team totals stay a five-player sum.
+    frame = frame.drop_duplicates(["_game_id", "_player"], keep="first")
+    if frame.empty:
+        return pd.DataFrame()
+
+    minutes = frame["_raw_gamelength"].where(frame["_raw_gamelength"] > 0) / 60.0
+    total_gold = frame["_raw_totalgold"].where(frame["_raw_totalgold"] >= 0)
+    # A share needs a complete denominator. If any seat on the team is missing
+    # its gold, the team total is short and every teammate's share would be
+    # silently inflated, so the whole side's share is withheld instead.
+    side_keys = [frame["_game_id"], frame["_side"]]
+    gold_by_side = total_gold.groupby(side_keys, dropna=False)
+    team_gold = gold_by_side.transform("sum", min_count=1)
+    team_gold = team_gold.where(
+        gold_by_side.transform("count").eq(gold_by_side.transform("size"))
+    )
+    deaths = frame["_raw_deaths"].where(frame["_raw_deaths"] >= 0)
+
+    frame["cs_per_min"] = frame["_raw_cspm"]
+    frame["gold_per_min"] = total_gold / minutes
+    frame["gold_share_pct"] = 100.0 * total_gold / team_gold.where(team_gold > 0)
+    frame["damage_per_min"] = frame["_raw_dpm"]
+    frame["damage_share_pct"] = frame["_raw_damageshare"]
+    frame["kda_role_weighted"] = (
+        frame["_raw_kills"] + frame["_raw_assists"]
+    ) / deaths.clip(lower=1.0)
+    frame["wards_per_min"] = frame["_raw_wpm"]
+    frame["wards_cleared_per_min"] = frame["_raw_wcpm"]
+
+    keep = ["_game_id", "_side", "_role", "_player", "_tier", *PERFORMANCE_ANCHOR_METRIC_WEIGHTS]
+    metrics = frame[keep].copy()
+    for metric in PERFORMANCE_ANCHOR_METRIC_WEIGHTS:
+        values = metrics[metric].astype(float)
+        metrics[metric] = values.where(np.isfinite(values))
+    return metrics
+
+
+def _role_normalized_composite(metrics: pd.DataFrame) -> tuple[pd.Series, str]:
+    """Weighted mean of within-(role, tier) z-scores for each player-map row.
+
+    Role normalization is what makes the anchor fair: a support's 0.87 cs/min
+    is normal for a support and must not read as a bad performance.
+    """
+
+    group_keys = ["_role"]
+    normalization = "role"
+    if "_tier" in metrics.columns and metrics["_tier"].notna().any():
+        group_keys = ["_role", "_tier"]
+        normalization = "role+competition_tier"
+    keys = [metrics[key] for key in group_keys]
+
+    weighted_sum = pd.Series(0.0, index=metrics.index)
+    weight_total = pd.Series(0.0, index=metrics.index)
+    for metric, weight in PERFORMANCE_ANCHOR_METRIC_WEIGHTS.items():
+        if weight <= 0.0 or metric not in metrics.columns:
+            continue
+        values = metrics[metric]
+        grouped = values.groupby(keys, dropna=False)
+        # A group with fewer than two observed values has an undefined spread,
+        # so its z-score stays NaN rather than collapsing to a guessed zero.
+        spread = grouped.transform("std")
+        centered = values - grouped.transform("mean")
+        z = centered / spread.where(spread > 0)
+        z = z.where(np.isfinite(z))
+        observed = z.notna()
+        weighted_sum = weighted_sum + z.where(observed, 0.0) * weight
+        weight_total = weight_total + observed.astype(float) * weight
+    composite = weighted_sum / weight_total.where(weight_total > 0)
+    return composite.where(np.isfinite(composite)), normalization
+
+
+def _performance_anchor(
+    metrics: pd.DataFrame,
+    names: list[str],
+    game_ids: set[str],
+    cfg: GlobalPlayerBTConfig,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Zero-mean ridge anchor in logit units, one entry per fitted player.
+
+    Returns the anchor, a boolean mask of players that actually received one,
+    and the release evidence for the anchor itself.
+    """
+
+    anchor = np.zeros(len(names), dtype=float)
+    anchored = np.zeros(len(names), dtype=bool)
+    evidence: dict[str, Any] = {
+        "enabled": bool(cfg.performance_anchor_enabled),
+        "scale_logit": float(cfg.performance_anchor_scale),
+        "elo_per_contribution_sd": float(LOGIT_TO_ELO * cfg.performance_anchor_scale),
+        "metric_weights": dict(PERFORMANCE_ANCHOR_METRIC_WEIGHTS),
+        "weights_status": PERFORMANCE_ANCHOR_WEIGHTS_STATUS,
+        "normalization": None,
+        "player_map_rows_used": 0,
+        "players_anchored": 0,
+        "players_without_metrics": len(names),
+        "anchor_mean_logit": 0.0,
+        "anchor_sd_logit": 0.0,
+    }
+    if not cfg.performance_anchor_enabled or metrics is None or metrics.empty or not names:
+        return anchor, anchored, evidence
+
+    wanted = set(names)
+    scoped = metrics[
+        metrics["_game_id"].astype(str).isin(game_ids)
+        & metrics["_player"].astype(str).isin(wanted)
+    ]
+    if scoped.empty:
+        return anchor, anchored, evidence
+
+    composite, normalization = _role_normalized_composite(scoped)
+    evidence["normalization"] = normalization
+    evidence["player_map_rows_used"] = int(composite.notna().sum())
+    per_player = composite.groupby(scoped["_player"].astype(str)).mean()
+    aligned = per_player.reindex(names).to_numpy(dtype=float)
+
+    observed = np.isfinite(aligned)
+    # Fewer than two anchored players leaves the spread undefined, so the whole
+    # anchor stays at zero rather than inventing a scale.
+    if int(observed.sum()) < 2:
+        return anchor, anchored, evidence
+    sample = aligned[observed]
+    spread = float(np.std(sample, ddof=0))
+    if not np.isfinite(spread) or spread <= 0.0:
+        return anchor, anchored, evidence
+
+    standardized = (sample - float(sample.mean())) / spread
+    # Two centering passes so the residual float drift of the mean lands at
+    # machine zero: the global rating scale must not move at all.
+    standardized = standardized - float(standardized.mean())
+    standardized = standardized - float(standardized.mean())
+
+    anchor[observed] = cfg.performance_anchor_scale * standardized
+    anchored = observed
+    drift = float(anchor.sum())
+    if abs(drift) > _ANCHOR_ZERO_MEAN_TOLERANCE * max(len(names), 1):
+        raise GlobalPlayerRatingError(
+            f"performance anchor is not zero-mean: total drift {drift:.3e}"
+        )
+    evidence["players_anchored"] = int(observed.sum())
+    evidence["players_without_metrics"] = int(len(names) - observed.sum())
+    evidence["anchor_mean_logit"] = float(anchor.mean())
+    evidence["anchor_sd_logit"] = float(np.std(anchor[observed], ddof=0))
+    return anchor, anchored, evidence
+
+
 def _fit(
     design: csr_matrix,
     outcome: np.ndarray,
     cfg: GlobalPlayerBTConfig,
+    *,
+    anchor: np.ndarray | None = None,
 ) -> tuple[np.ndarray, float]:
     side = csr_matrix(np.ones((design.shape[0], 1), dtype=float))
     matrix = hstack([design, side], format="csr")
@@ -209,13 +427,27 @@ def _fit(
             np.asarray([cfg.side_l2], dtype=float),
         ]
     )
+    # The side term is always anchored at zero; a zero player anchor reproduces
+    # the plain shrink-to-zero ridge exactly.
+    if anchor is None:
+        player_anchor = np.zeros(design.shape[1], dtype=float)
+    else:
+        player_anchor = np.asarray(anchor, dtype=float).reshape(-1)
+        if player_anchor.shape[0] != design.shape[1]:
+            raise GlobalPlayerRatingError(
+                f"anchor has {player_anchor.shape[0]} entries for {design.shape[1]} players"
+            )
+        if not np.isfinite(player_anchor).all():
+            raise GlobalPlayerRatingError("anchor contains non-finite entries")
+    anchor_vector = np.concatenate([player_anchor, np.zeros(1, dtype=float)])
 
     def objective(parameters: np.ndarray) -> tuple[float, np.ndarray]:
         logits = np.asarray(matrix @ parameters).reshape(-1)
         residual = 1.0 / (1.0 + np.exp(-np.clip(logits, -35, 35))) - outcome
         loss = float(np.logaddexp(0.0, logits).sum() - np.dot(outcome, logits))
-        loss += 0.5 * float(np.dot(penalty, parameters**2))
-        gradient = np.asarray(matrix.T @ residual).reshape(-1) + penalty * parameters
+        delta = parameters - anchor_vector
+        loss += 0.5 * float(np.dot(penalty, delta**2))
+        gradient = np.asarray(matrix.T @ residual).reshape(-1) + penalty * delta
         return loss, gradient
 
     fitted = minimize(
@@ -280,6 +512,9 @@ def fit_global_player_bt(
     )
     design = _design(frame, lineups, names)
     outcome = frame["result"].to_numpy(dtype=float)
+    game_ids = frame["game_id"].astype(str)
+    metrics = _contribution_metrics(players) if cfg.performance_anchor_enabled else pd.DataFrame()
+    anchor, anchored, anchor_evidence = _performance_anchor(metrics, names, set(game_ids), cfg)
     roots, component_sizes, largest, connected_share = _component_summary(frame, lineups)
     if connected_share < cfg.minimum_connected_share:
         raise GlobalPlayerRatingError(
@@ -300,7 +535,13 @@ def fit_global_player_bt(
         test_x = design[split:]
         train_y = outcome[:split]
         test_y = outcome[split:]
-        train_coefficients, train_side = _fit(train_x, train_y, cfg)
+        # The holdout anchor sees train maps only. Contribution metrics are
+        # measured on the same maps as the outcome, so a full-census anchor
+        # would leak test-window performance into the gate.
+        train_anchor, _train_anchored, _train_evidence = _performance_anchor(
+            metrics, names, set(game_ids.iloc[:split]), cfg
+        )
+        train_coefficients, train_side = _fit(train_x, train_y, cfg, anchor=train_anchor)
         model_loss = _log_loss(test_y, np.asarray(test_x @ train_coefficients).reshape(-1) + train_side)
         blue_rate = min(max(float(train_y.mean()), 1e-6), 1.0 - 1e-6)
         side_only = math.log(blue_rate / (1.0 - blue_rate))
@@ -318,26 +559,28 @@ def fit_global_player_bt(
                 f"holdout log-loss gain is {gain:.6f}; {cfg.minimum_holdout_gain:.6f} required"
             )
 
-    coefficients, side_advantage = _fit(design, outcome, cfg)
+    coefficients, side_advantage = _fit(design, outcome, cfg, anchor=anchor)
     appearances: dict[str, int] = {name: 0 for name in names}
     for game_id in frame["game_id"].astype(str):
         for side in ("Blue", "Red"):
             for player, _ in lineups[game_id][side]:
                 appearances[player] += 1
     rows = []
-    for name, coefficient in zip(names, coefficients):
+    for position, (name, coefficient) in enumerate(zip(names, coefficients)):
         root = roots[name]
-        rows.append(
-            {
-                "player": name,
-                "global_rating": cfg.prior_rating + LOGIT_TO_ELO * float(coefficient),
-                "global_logit": float(coefficient),
-                "global_connected": int(root == largest),
-                "global_component_id": str(root),
-                "global_component_size": int(component_sizes[root]),
-                "global_model_maps": int(appearances[name]),
-            }
-        )
+        row = {
+            "player": name,
+            "global_rating": cfg.prior_rating + LOGIT_TO_ELO * float(coefficient),
+            "global_logit": float(coefficient),
+            "global_connected": int(root == largest),
+            "global_component_id": str(root),
+            "global_component_size": int(component_sizes[root]),
+            "global_model_maps": int(appearances[name]),
+        }
+        if cfg.performance_anchor_enabled:
+            row["global_performance_anchor_logit"] = float(anchor[position])
+            row["global_performance_anchored"] = int(bool(anchored[position]))
+        rows.append(row)
     snapshot = pd.DataFrame(rows).sort_values(
         ["global_connected", "global_rating", "player"],
         ascending=[False, False, True],
@@ -355,6 +598,7 @@ def fit_global_player_bt(
         "config": asdict(cfg),
         "holdout": holdout,
         "tier_adjustments": False,
-        "player_statistics_used": False,
+        "player_statistics_used": bool(anchor_evidence["players_anchored"] > 0),
+        "performance_anchor": anchor_evidence,
     }
     return snapshot.reset_index(drop=True), meta

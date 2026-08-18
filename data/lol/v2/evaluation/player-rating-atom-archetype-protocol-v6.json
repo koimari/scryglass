@@ -16,18 +16,33 @@
   },
   "frozen_utc": "2026-08-18T10:15:00Z",
   "honest_labelling_constraint": {
+    "accuracy_word_guidance": {
+      "forbidden_sense": "accurate as in better at predicting future results",
+      "internal_evidence_note": "The anchored fit improved out-of-sample holdout log loss from 0.64763 to 0.64535, gain 0.04292 to 0.04519 against a 0.005 floor, using a TRAIN-ONLY anchor so the gate is not contaminated. This is real internal evidence of predictive improvement but is NOT the frozen paired comparison, so it does not unlock a public predictive claim.",
+      "permitted_sense": "accurate as in faithful to the observed record",
+      "requirement": "Where the word accurate is used on a public surface it must be qualified so a reader cannot reasonably read it as a forecasting claim."
+    },
     "additional_required_disclosure": "Any release note must state that player ladder positions change substantially because teammates were previously tied, and that team ratings move slightly (mean 0.05 percent, max 0.72 percent) through feedback under roster churn. Do not describe team ratings as unaffected.",
     "forbidden_claims_until_evidence_exists": [
-      "more accurate",
       "more predictive",
-      "better calibrated",
+      "better at forecasting match outcomes",
       "improved forecasting",
-      "beats the previous model"
+      "better calibrated",
+      "beats the previous model at prediction"
     ],
+    "owner_definition_of_accuracy": {
+      "consequence_for_this_change": "Under this definition the anchored model is more accurate and the previous model was descriptively WRONG. The unanchored model asserted that Kiin and Duro performed identically, to eleven decimal places, when Kiin recorded 8.14 cs/min against Duro's 0.87, 20.4 percent gold share against 13.2, and 0.23 damage share against 0.07. A rating that states two players are identical when the measured record says otherwise is a false statement about the data.",
+      "decided_utc": "2026-08-18T12:10:00Z",
+      "definition": "A rating is ACCURATE when it correctly renders a player's standing relative to other players given the observed matrix of data points. Accuracy is a DESCRIPTIVE property of the rating against the data it summarizes. It does not require external confirmation by future results.",
+      "distinction_retained": "Descriptive accuracy is NOT predictive accuracy. Claims that the rating forecasts match outcomes better still require the frozen paired forward comparison.",
+      "owner_statement": "Chovy is most likely the best player in the world and has been for some time, but that does not mean he will have good results. The rating should render that standing correctly regardless."
+    },
     "permitted_claims": [
       "player ratings differentiate teammates by measured in-game contribution",
       "contribution is computed from cs per minute, gold per minute, gold share, damage per minute, damage share, role-weighted KDA and vision rates",
-      "each map's team-level rating update is conserved exactly; only its allocation among the five players changes"
+      "each map's team-level rating update is conserved exactly; only its allocation among the five players changes",
+      "ratings render a player's standing relative to their peers more faithfully to the observed record",
+      "the previous rating could not distinguish players who always appeared in the same games; this one can"
     ],
     "rationale": "This is the only thing the removed evidence actually cost. It constrains wording, not release.",
     "removed_permitted_claim": {
