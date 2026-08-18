@@ -55,6 +55,7 @@ DEFAULT_ATTEMPTS = 3
 # is a race we lost, so the probe waits for propagation instead of condemning
 # the release on the first look. The assertion itself is unchanged: after the
 # deadline a stale marker or release header still fails the run.
+_HTTP_TIMEOUT_SECONDS = 45.0
 DEFAULT_PROBE_PROPAGATION_SECONDS = 180.0
 PROBE_PROPAGATION_FIRST_DELAY_SECONDS = 2.0
 PROBE_PROPAGATION_MAX_DELAY_SECONDS = 20.0
@@ -174,9 +175,17 @@ def config_from_environment(root: Path, public_root: Path) -> RefreshConfig:
         raise PublicRefreshError(
             "SCRYGLASS_PROBE_PROPAGATION_SECONDS must be numeric"
         ) from error
-    if probe_propagation_seconds < 0.0 or probe_propagation_seconds > 900.0:
+    if (
+        not math.isfinite(probe_propagation_seconds)
+        or probe_propagation_seconds < 0.0
+        or probe_propagation_seconds > 900.0
+    ):
+        # NaN passes both range comparisons, and a NaN deadline makes the
+        # elapsed check in _fetch_probe_with_propagation false forever, so a
+        # stale probe would retry indefinitely and never roll back.
         raise PublicRefreshError(
-            "SCRYGLASS_PROBE_PROPAGATION_SECONDS must be between zero and 900"
+            "SCRYGLASS_PROBE_PROPAGATION_SECONDS must be a finite number "
+            "between zero and 900"
         )
     try:
         step_timeout_minutes = float(
@@ -777,13 +786,14 @@ def _http_bytes(
     headers: dict[str, str] | None = None,
     attempts: int = 1,
     expected_release_id: str | None = None,
+    timeout: float = _HTTP_TIMEOUT_SECONDS,
 ) -> bytes:
     if attempts < 1 or attempts > 5:
         raise PublicRefreshError("HTTP attempts must be between one and five")
     request = urllib.request.Request(url, method=method, data=body, headers=headers or {})
     for attempt in range(attempts):
         try:
-            with urllib.request.urlopen(request, timeout=45) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 if expected_release_id is not None:
                     served_release_id = response.headers.get("X-Scryglass-Release", "")
                     if served_release_id != expected_release_id:
@@ -840,15 +850,31 @@ def _fetch_probe_with_propagation(
     the error it would have raised immediately, so nothing is weakened.
     """
 
-    started = time.monotonic()
+    deadline = time.monotonic() + max(0.0, deadline_seconds)
     delay = PROBE_PROPAGATION_FIRST_DELAY_SECONDS
+    first = True
     while True:
+        # The window bounds RETRIES, not the first look: a zero window still
+        # takes exactly one attempt and then raises the original error. The
+        # total wall bound is therefore the window plus one request timeout.
+        remaining = deadline - time.monotonic()
+        timeout = (
+            _HTTP_TIMEOUT_SECONDS
+            if first
+            else min(_HTTP_TIMEOUT_SECONDS, max(remaining, 1.0))
+        )
+        first = False
         try:
+            # One attempt per pass, with the socket timeout capped by the time
+            # actually left. Delegating retries to the inner loop would let a
+            # single call consume attempts * 45s and overshoot the deadline, so
+            # the bound would not be a bound.
             raw = _http_bytes(
                 url,
                 headers=headers,
-                attempts=attempts,
+                attempts=1,
                 expected_release_id=expected_release_id,
+                timeout=timeout,
             )
             if marker_release_id is not None:
                 _assert_html_release_marker(raw, marker_release_id, path)
@@ -858,8 +884,7 @@ def _fetch_probe_with_propagation(
                 status = getattr(error, "status", None)
                 if status is not None and status not in RETRYABLE_HTTP_STATUS:
                     raise
-            elapsed = time.monotonic() - started
-            if elapsed + delay >= deadline_seconds:
+            if time.monotonic() + delay >= deadline:
                 raise
             time.sleep(delay)
             delay = min(delay * 2.0, PROBE_PROPAGATION_MAX_DELAY_SECONDS)
