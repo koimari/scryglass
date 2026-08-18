@@ -50,6 +50,14 @@ STATE_FILE = "public-refresh.json"
 LOCK_FILE = "public-refresh.lock"
 DEFAULT_SITE = "https://scryglass.xyz"
 DEFAULT_ATTEMPTS = 3
+# Post-publish probes verify that an eventually-consistent CDN has caught up
+# with the release we just activated. A stale edge is not a failed release, it
+# is a race we lost, so the probe waits for propagation instead of condemning
+# the release on the first look. The assertion itself is unchanged: after the
+# deadline a stale marker or release header still fails the run.
+DEFAULT_PROBE_PROPAGATION_SECONDS = 180.0
+PROBE_PROPAGATION_FIRST_DELAY_SECONDS = 2.0
+PROBE_PROPAGATION_MAX_DELAY_SECONDS = 20.0
 DEFAULT_STALE_AFTER_HOURS = 12
 DEFAULT_STEP_TIMEOUT_MINUTES = 30
 RETRYABLE_ERRORS = (OeDownloadError, TimeoutError, urllib.error.URLError)
@@ -116,6 +124,7 @@ class RefreshConfig:
     accepted_import_receipt: Path | None = None
     attempts: int = DEFAULT_ATTEMPTS
     step_timeout_seconds: float = DEFAULT_STEP_TIMEOUT_MINUTES * 60
+    probe_propagation_seconds: float = DEFAULT_PROBE_PROPAGATION_SECONDS
 
     @property
     def sync(self) -> SyncConfig:
@@ -157,6 +166,19 @@ def config_from_environment(root: Path, public_root: Path) -> RefreshConfig:
     if attempts < 1 or attempts > 5:
         raise PublicRefreshError("SCRYGLASS_REFRESH_ATTEMPTS must be between one and five")
     try:
+        probe_propagation_seconds = float(
+            _read_env("SCRYGLASS_PROBE_PROPAGATION_SECONDS")
+            or DEFAULT_PROBE_PROPAGATION_SECONDS
+        )
+    except ValueError as error:
+        raise PublicRefreshError(
+            "SCRYGLASS_PROBE_PROPAGATION_SECONDS must be numeric"
+        ) from error
+    if probe_propagation_seconds < 0.0 or probe_propagation_seconds > 900.0:
+        raise PublicRefreshError(
+            "SCRYGLASS_PROBE_PROPAGATION_SECONDS must be between zero and 900"
+        )
+    try:
         step_timeout_minutes = float(
             _read_env("SCRYGLASS_STEP_TIMEOUT_MINUTES") or DEFAULT_STEP_TIMEOUT_MINUTES
         )
@@ -194,6 +216,7 @@ def config_from_environment(root: Path, public_root: Path) -> RefreshConfig:
             else None
         ),
         attempts=attempts,
+        probe_propagation_seconds=probe_propagation_seconds,
         step_timeout_seconds=step_timeout_minutes * 60,
     )
 
@@ -793,6 +816,55 @@ def _assert_html_release_marker(raw: bytes, release_id: str, path: str) -> None:
         )
 
 
+class _ReleaseNotPropagated(Exception):
+    """A probe saw an older release than the one just activated."""
+
+
+def _fetch_probe_with_propagation(
+    url: str,
+    *,
+    headers: dict[str, str],
+    attempts: int,
+    expected_release_id: str | None,
+    marker_release_id: str | None,
+    path: str,
+    deadline_seconds: float,
+) -> bytes:
+    """Fetch one probe, waiting for the edge to serve the activated release.
+
+    Both staleness checks are propagation checks, not correctness checks: the
+    ``X-Scryglass-Release`` header inside ``_http_bytes`` and the HTML marker
+    asserted afterwards. Neither could retry before, so a CDN that had not yet
+    revalidated rolled back an otherwise good release. This retries the whole
+    fetch-and-assert until ``deadline_seconds`` elapses, then raises exactly
+    the error it would have raised immediately, so nothing is weakened.
+    """
+
+    started = time.monotonic()
+    delay = PROBE_PROPAGATION_FIRST_DELAY_SECONDS
+    while True:
+        try:
+            raw = _http_bytes(
+                url,
+                headers=headers,
+                attempts=attempts,
+                expected_release_id=expected_release_id,
+            )
+            if marker_release_id is not None:
+                _assert_html_release_marker(raw, marker_release_id, path)
+            return raw
+        except (PublicRefreshError, PublicRefreshHttpError) as error:
+            if isinstance(error, PublicRefreshHttpError):
+                status = getattr(error, "status", None)
+                if status is not None and status not in RETRYABLE_HTTP_STATUS:
+                    raise
+            elapsed = time.monotonic() - started
+            if elapsed + delay >= deadline_seconds:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2.0, PROBE_PROPAGATION_MAX_DELAY_SECONDS)
+
+
 def _probe_deployed_manifest_asset(
     config: RefreshConfig,
     manifest: dict[str, Any],
@@ -1121,7 +1193,7 @@ def probe_public_release_families(
     checked: list[str] = []
     payloads: dict[str, Any] = {}
     for path in PUBLIC_RELEASE_PROBES:
-        raw = _http_bytes(
+        raw = _fetch_probe_with_propagation(
             f"{config.site}{path}",
             headers={"Cache-Control": "no-cache"},
             attempts=config.attempts,
@@ -1132,6 +1204,11 @@ def probe_public_release_families(
                 or path == "/packs/manifest.json"
                 else None
             ),
+            marker_release_id=(
+                release_id if path in RELEASE_BOUND_PAGE_PROBES else None
+            ),
+            path=path,
+            deadline_seconds=config.probe_propagation_seconds,
         )
         if path.startswith("/api/") or path == "/packs/manifest.json":
             try:
@@ -1141,8 +1218,6 @@ def probe_public_release_families(
             if not isinstance(payload, (dict, list)):
                 raise PublicRefreshError(f"public probe returned an invalid payload: {path}")
             payloads[path] = payload
-        if path in RELEASE_BOUND_PAGE_PROBES:
-            _assert_html_release_marker(raw, release_id, path)
         checked.append(path)
 
     manifest_payload = payloads.get("/packs/manifest.json")
