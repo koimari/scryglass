@@ -2,12 +2,19 @@
 """Player Dual-Elo team aggregate (DESCRIPTIVE BASELINE).
 
 This track is the descriptive baseline for the public player ladder.  It is
-NOT the v2 dynamic Player Rating: a shared team outcome updates every player
-on a side with the same residual scaled only by fixed role weights, so the
-baseline cannot identify individual contribution, posterior displacement,
-precision, or source/context coverage.  Roster moves travel with the player:
-team strength is the mean of the five pre-match player μs (regional + meta),
-not a sticky org rating.
+NOT the v2 dynamic Player Rating.  A shared team outcome still drives every
+player on a side; the per-player attribution below only reallocates that one
+shared residual using leakage-safe, role-normalized box-score evidence, and
+the multipliers average to 1 within a side.  The baseline therefore still
+cannot identify individual causal contribution, posterior displacement,
+precision, or source/context coverage — reallocating a team residual is a
+descriptive split, not an identification result.  Roster moves travel with
+the player: team strength is the mean of the five pre-match player μs
+(regional + meta), not a sticky org rating.
+
+The attribution composite weights are an UNFITTED development default (see
+``ATTRIBUTION_FEATURE_WEIGHTS``).  Protocol v5 requires fitted weights and an
+independent acceptance record before any promotion.
 
 The v2 dynamic Player Rating lives in ``lol_kills/v2/ratings/player/`` and
 remains development-only until its acceptance record passes; until then this
@@ -33,7 +40,11 @@ import numpy as np
 import pandas as pd
 
 from lol_kills.etl.aliases import normalize_team
-from lol_kills.etl.competition import canonicalize_competition_frame, is_team_affiliation_league
+from lol_kills.etl.competition import (
+    canonicalize_competition_frame,
+    classify_competition,
+    is_team_affiliation_league,
+)
 from lol_kills.etl.paths import FEATURES_DIR, PARQUET_DIR
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.dual_elo import _is_intl, expected_score
@@ -61,6 +72,71 @@ ROLE_WEIGHT = {
     "support": 0.90,
     "utility": 0.90,
 }
+
+# ---------------------------------------------------------------------------
+# Per-player performance attribution (DEVELOPMENT ONLY)
+#
+# The baseline applies one shared team-outcome residual to all five players on
+# a side, so teammates whose sigma has converged receive byte-identical rating
+# updates forever.  Attribution reallocates that same team update among the
+# five players using per-player, leakage-safe, role-normalized box-score
+# evidence.  It is CONSERVATIVE by construction: the multipliers are
+# re-centered so their mean over a side is exactly 1, therefore the side's
+# aggregate update is unchanged and only the split among teammates moves.
+#
+# This does not identify causal contribution.  It reallocates a descriptive
+# team residual using descriptive per-map evidence.
+# ---------------------------------------------------------------------------
+
+# Raw per-player columns carried out of the lineup builder.  Everything here is
+# read straight from the OE player frame; nothing is imputed.
+ATTRIBUTION_METRIC_COLUMNS: tuple[str, ...] = (
+    "cspm",
+    "dpm",
+    "damageshare",
+    "totalgold",
+    "earnedgold",
+    "kills",
+    "deaths",
+    "assists",
+    "teamkills",
+    "gamelength",
+    "wpm",
+    "wcpm",
+)
+
+# !!! UNFITTED DEVELOPMENT DEFAULT — NOT A FITTED RESULT !!!
+# These are equal weights chosen so the composite is a plain mean of the
+# available z-scores.  They have been fitted against nothing, validated
+# against nothing, and carry no public, production, probability,
+# recommendation, odds, EV, or promotion authority.  Protocol v5 requires
+# fitted weights with an independent acceptance record before this composite
+# may be promoted.  Treat any ordering produced with these weights as
+# development scaffolding only.
+ATTRIBUTION_FEATURE_WEIGHTS: dict[str, float] = {
+    "cs_per_min": 1.0,
+    "gold_per_min": 1.0,
+    "gold_share_pct": 1.0,
+    "damage_per_min": 1.0,
+    "damage_share_pct": 1.0,
+    "kda_role_weighted": 1.0,
+    "wpm": 1.0,
+    "wcpm": 1.0,
+}
+ATTRIBUTION_WEIGHTS_STATUS = "unfitted_development_default"
+
+# A (role, competition_tier) baseline needs at least this many observations
+# from strictly earlier maps before it may standardize anything.  Below the
+# floor the metric is unavailable and the player falls back to neutral.
+ATTRIBUTION_MIN_BASELINE_OBS = 20
+
+# Guard for the post-tanh renormalization divisor.
+_ATTRIBUTION_MEAN_FLOOR = 1e-9
+
+# Diagnostic record from the most recent ``_run_player_elo`` call.  Read-only
+# for callers; it exists so the run manifest can report attribution coverage
+# and fail-closed fallbacks without changing the replay return contract.
+LAST_ATTRIBUTION_STATS: dict[str, object] = {}
 
 
 @dataclass
@@ -93,6 +169,12 @@ class PlayerEloConfig:
     prior_mu: float = 1500.0
     momentum_window_games: int = DEFAULT_MOMENTUM_WINDOW_GAMES
     momentum_scale: float = DEFAULT_MOMENTUM_SCALE
+    # Per-player attribution.  ``attribution_beta`` is the maximum fractional
+    # deviation of a teammate's share of the shared team update; the tanh with
+    # ``attribution_clip`` bounds the effect of extreme composite grades.
+    attribution_beta: float = 0.25
+    attribution_clip: float = 1.5
+    attribution_enabled: bool = True
 
     def __post_init__(self) -> None:
         if (
@@ -108,6 +190,24 @@ class PlayerEloConfig:
         if not math.isfinite(scale) or scale < 0:
             raise ValueError("momentum_scale must be a finite non-negative value")
         self.momentum_scale = scale
+        try:
+            beta = float(self.attribution_beta)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("attribution_beta must be a finite value in [0, 1)") from exc
+        if not math.isfinite(beta) or beta < 0.0 or beta >= 1.0:
+            # beta >= 1 would let a multiplier reach zero or flip sign, which
+            # would silently invert a teammate's update.  Fail closed.
+            raise ValueError("attribution_beta must be a finite value in [0, 1)")
+        self.attribution_beta = beta
+        try:
+            clip = float(self.attribution_clip)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("attribution_clip must be a finite positive value") from exc
+        if not math.isfinite(clip) or clip <= 0.0:
+            raise ValueError("attribution_clip must be a finite positive value")
+        self.attribution_clip = clip
+        if not isinstance(self.attribution_enabled, bool):
+            raise ValueError("attribution_enabled must be a bool")
 
 
 def total_mu(st: PlayerState) -> float:
@@ -162,13 +262,26 @@ def _role_w(role: str, cfg: PlayerEloConfig) -> float:
     return float(ROLE_WEIGHT.get(_norm_role(role), 1.0))
 
 
-def _lineups_by_game(players: pd.DataFrame) -> dict[str, dict[str, list[tuple[str, str]]]]:
+def _lineups_by_game(
+    players: pd.DataFrame,
+    *,
+    with_metrics: bool = False,
+):
     """
     game_uid → {Blue|Red: [(playername, role), ...]}
     Only position rows with a player name (skip team aggregates).
+
+    With ``with_metrics=True`` this also returns the per-player metric frame for
+    exactly the rows that survived role dedupe and the five-slot cap, so the
+    attribution baseline sees the same population the rating update sees.  The
+    ``(playername, role)`` tuple contract and ordering are unchanged, so the
+    default call site and every existing consumer keep the old return value.
     """
+    empty_metrics = pd.DataFrame(
+        columns=["_gid", "side", "_name", "_role", "_attr_date", "_attr_tier"]
+    )
     if players is None or players.empty or "playername" not in players.columns:
-        return {}
+        return ({}, empty_metrics) if with_metrics else {}
     p = players.copy()
     if "game_uid" in p.columns:
         fallback = p["gameid"] if "gameid" in p.columns else None
@@ -179,7 +292,7 @@ def _lineups_by_game(players: pd.DataFrame) -> dict[str, dict[str, list[tuple[st
     elif "gameid" in p.columns:
         p["_gid"] = p["gameid"].map(canonical_source_game_key)
     else:
-        return {}
+        return ({}, empty_metrics) if with_metrics else {}
     p = p[p["_gid"].notna() & p["_gid"].str.strip().ne("")]
     p["side"] = p["side"].astype(str).str.title()
     p["position"] = p.get("position", pd.Series("unk", index=p.index)).astype(str)
@@ -189,25 +302,370 @@ def _lineups_by_game(players: pd.DataFrame) -> dict[str, dict[str, list[tuple[st
     p["_role"] = p["position"].map(_norm_role)
     p["_name"] = p["playername"].astype(str).str.strip()
     p = p[p["_name"].str.lower() != "nan"]
+    # Positional labels so the accepted-row index below is unambiguous even if
+    # the caller handed us a frame with a duplicated index.
+    p = p.reset_index(drop=True)
 
     out: dict[str, dict[str, list[tuple[str, str]]]] = defaultdict(lambda: {"Blue": [], "Red": []})
+    accepted: list[int] = []
     for (gid, side), g in p.groupby(["_gid", "side"], sort=False):
         if side not in ("Blue", "Red"):
             continue
         # stable role order
         order = {"top": 0, "jng": 1, "mid": 2, "bot": 3, "sup": 4}
-        rows = list(zip(g["_name"].tolist(), g["_role"].tolist()))
-        rows.sort(key=lambda x: order.get(x[1], 9))
+        rows = list(zip(g.index.tolist(), g["_name"].tolist(), g["_role"].tolist()))
+        # Sort only on role, and stably, so the (name, role) order is identical
+        # to the pre-attribution implementation.
+        rows.sort(key=lambda item: order.get(item[2], 9))
         # dedupe by role keep first
         seen = set()
         cleaned = []
-        for name, role in rows:
+        kept: list[int] = []
+        for label, name, role in rows:
             if role in seen:
                 continue
             seen.add(role)
             cleaned.append((name, role))
+            kept.append(label)
         out[str(gid)][side] = cleaned[:5]
-    return out
+        if with_metrics:
+            accepted.extend(kept[:5])
+    if not with_metrics:
+        return out
+    return out, _attribution_metric_frame(p, accepted)
+
+
+def _attribution_metric_frame(p: pd.DataFrame, accepted: list[int]) -> pd.DataFrame:
+    """Per-player metric rows for exactly the accepted lineup slots.
+
+    Missing metric columns stay missing.  Nothing is imputed here: a column the
+    source does not carry simply never becomes an available feature.
+    """
+
+    keep = ["_gid", "side", "_name", "_role"]
+    metrics = pd.DataFrame(index=p.index)
+    for column in keep:
+        metrics[column] = p[column]
+    metrics["_gid"] = metrics["_gid"].astype(str)
+    metrics["side"] = metrics["side"].astype(str)
+    metrics["_name"] = metrics["_name"].astype(str)
+    metrics["_role"] = metrics["_role"].astype(str)
+
+    if "date" in p.columns:
+        metrics["_attr_date"] = pd.to_datetime(
+            p["date"], errors="coerce", utc=True
+        ).dt.tz_localize(None)
+    else:
+        metrics["_attr_date"] = pd.NaT
+    metrics["_attr_tier"] = _attribution_tier(p)
+
+    for column in ATTRIBUTION_METRIC_COLUMNS:
+        if column in p.columns:
+            metrics[column] = pd.to_numeric(p[column], errors="coerce")
+    return metrics.loc[accepted].reset_index(drop=True)
+
+
+def _attribution_tier(p: pd.DataFrame) -> pd.Series:
+    """Competition tier used to group the role baselines.
+
+    Prefers the canonical column already carried by the warehouse frame.  When
+    it is absent the tier is derived from the unique (league, tournament)
+    labels — cheap, and identical to what ``canonicalize_competition_frame``
+    would produce — rather than guessed.  When neither is available the tier is
+    missing and every row fails closed to a neutral multiplier.
+    """
+
+    if "competition_tier" in p.columns:
+        tier = p["competition_tier"].astype("string").str.strip()
+        return tier.mask(tier.isna() | tier.eq(""), pd.NA)
+    if "league" not in p.columns:
+        return pd.Series(pd.NA, index=p.index, dtype="string")
+    league = p["league"].astype("string")
+    if "tournament" in p.columns:
+        tournament = p["tournament"].astype("string")
+    else:
+        tournament = pd.Series(pd.NA, index=p.index, dtype="string")
+    pairs = pd.DataFrame({"league": league, "tournament": tournament})
+    unique = pairs.drop_duplicates()
+    lookup = {
+        (row.league, row.tournament): classify_competition(row.league, row.tournament).tier
+        for row in unique.itertuples(index=False)
+    }
+    resolved = [
+        lookup.get((lg, tn)) for lg, tn in zip(pairs["league"], pairs["tournament"])
+    ]
+    tier = pd.Series(resolved, index=p.index, dtype="string").str.strip()
+    return tier.mask(tier.isna() | tier.eq(""), pd.NA)
+
+
+def _finite(values: pd.Series | None, index: pd.Index) -> pd.Series:
+    """Float series with every non-finite entry marked unavailable (NaN)."""
+
+    if values is None:
+        return pd.Series(np.nan, index=index, dtype=float)
+    numeric = pd.to_numeric(values, errors="coerce").astype(float)
+    return numeric.where(np.isfinite(numeric.to_numpy(dtype=float)), np.nan)
+
+
+def _attribution_features(metrics: pd.DataFrame) -> pd.DataFrame:
+    """Derived per-player inputs.
+
+    Raw gold is never a direct feature: it enters only as a per-minute rate and
+    as a within-team share.  Any input the source does not carry stays NaN and
+    is reported as unavailable rather than replaced by zero.
+    """
+
+    index = metrics.index
+    column = lambda name: metrics[name] if name in metrics.columns else None  # noqa: E731
+
+    cspm = _finite(column("cspm"), index)
+    dpm = _finite(column("dpm"), index)
+    damageshare = _finite(column("damageshare"), index)
+    totalgold = _finite(column("totalgold"), index)
+    gamelength = _finite(column("gamelength"), index)
+    kills = _finite(column("kills"), index)
+    deaths = _finite(column("deaths"), index)
+    assists = _finite(column("assists"), index)
+    wpm = _finite(column("wpm"), index)
+    wcpm = _finite(column("wcpm"), index)
+
+    # gamelength is seconds in the OE frame; a non-positive length is unusable.
+    minutes = gamelength / 60.0
+    minutes = minutes.where(minutes > 0.0, np.nan)
+
+    if totalgold.notna().any():
+        team_gold = totalgold.groupby(
+            [metrics["_gid"], metrics["side"]], sort=False
+        ).transform("sum", min_count=1)
+    else:
+        team_gold = pd.Series(np.nan, index=index, dtype=float)
+    team_gold = team_gold.where(team_gold > 0.0, np.nan)
+
+    kda = (kills + assists) / deaths.clip(lower=1.0)
+
+    features = pd.DataFrame(index=index)
+    features["cs_per_min"] = cspm
+    features["gold_per_min"] = totalgold / minutes
+    features["gold_share_pct"] = totalgold / team_gold
+    features["damage_per_min"] = dpm
+    features["damage_share_pct"] = damageshare
+    features["kda_role_weighted"] = kda
+    features["wpm"] = wpm
+    features["wcpm"] = wcpm
+    for name in features.columns:
+        values = features[name].to_numpy(dtype=float)
+        features[name] = features[name].where(np.isfinite(values), np.nan)
+    return features
+
+
+def _prior_baseline_z(
+    values: pd.Series,
+    group: pd.Series,
+    date: pd.Series,
+    min_obs: int,
+) -> pd.Series:
+    """Z-score against a baseline built only from strictly earlier dates.
+
+    The baseline for a row is the expanding mean/std over every row in the same
+    ``group`` whose date is strictly before the row's own date, so map ``t``
+    never contributes to its own baseline.  Rows sharing a timestamp form one
+    block and cannot see each other.  A baseline thinner than ``min_obs`` or
+    with a degenerate spread yields an unavailable (NaN) z-score.
+    """
+
+    index = values.index
+    work = pd.DataFrame(
+        {
+            "_g": group.to_numpy(),
+            "_d": date.to_numpy(),
+            "_x": values.to_numpy(dtype=float),
+        }
+    )
+    present = np.isfinite(work["_x"].to_numpy(dtype=float))
+    work["_n"] = present.astype(float)
+    filled = np.where(present, work["_x"].to_numpy(dtype=float), 0.0)
+    work["_s"] = filled
+    work["_q"] = filled * filled
+
+    blocks = (
+        work.groupby(["_g", "_d"], sort=True, dropna=True)[["_n", "_s", "_q"]]
+        .sum()
+        .reset_index()
+    )
+    if blocks.empty:
+        return pd.Series(np.nan, index=index, dtype=float)
+    blocks = blocks.sort_values(["_g", "_d"], kind="mergesort")
+    cumulative = blocks.groupby("_g", sort=False)[["_n", "_s", "_q"]].cumsum()
+    prior = cumulative.groupby(blocks["_g"], sort=False).shift(1)
+    blocks["_pn"] = prior["_n"].to_numpy()
+    blocks["_ps"] = prior["_s"].to_numpy()
+    blocks["_pq"] = prior["_q"].to_numpy()
+
+    merged = work[["_g", "_d"]].merge(
+        blocks[["_g", "_d", "_pn", "_ps", "_pq"]], on=["_g", "_d"], how="left"
+    )
+    n = merged["_pn"].to_numpy(dtype=float)
+    s = merged["_ps"].to_numpy(dtype=float)
+    q = merged["_pq"].to_numpy(dtype=float)
+    x = work["_x"].to_numpy(dtype=float)
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean = s / n
+        variance = (q - n * mean * mean) / (n - 1.0)
+        variance = np.where(np.isfinite(variance), np.maximum(variance, 0.0), np.nan)
+        std = np.sqrt(variance)
+        usable = (
+            present
+            & np.isfinite(n)
+            & (n >= float(min_obs))
+            & np.isfinite(std)
+            & (std > 0.0)
+            & np.isfinite(mean)
+        )
+        z = np.where(usable, (x - mean) / std, np.nan)
+    return pd.Series(z, index=index, dtype=float)
+
+
+def player_attribution_multipliers(
+    metrics: pd.DataFrame,
+    cfg: PlayerEloConfig,
+) -> tuple[dict[tuple[str, str, str], float], dict[str, object]]:
+    """Conservative per-player multipliers for the shared team update.
+
+    Returns ``{(game_uid, side, playername): a_i}`` plus a diagnostic record.
+    A player absent from the mapping is neutral (``a_i = 1.0``, i.e. exactly
+    the pre-attribution behaviour).  Within a side the returned multipliers
+    average to exactly 1, so the side's aggregate update is unchanged.
+    """
+
+    weights = dict(ATTRIBUTION_FEATURE_WEIGHTS)
+    stats: dict[str, object] = {
+        "enabled": bool(cfg.attribution_enabled),
+        "weights": weights,
+        "weights_status": ATTRIBUTION_WEIGHTS_STATUS,
+        "min_baseline_obs": int(ATTRIBUTION_MIN_BASELINE_OBS),
+        "beta": float(cfg.attribution_beta),
+        "clip": float(cfg.attribution_clip),
+        "rows_total": 0,
+        "rows_graded": 0,
+        "rows_attributed": 0,
+        "rows_neutral_total": 0,
+        "rows_neutral_no_composite": 0,
+        "rows_neutral_single_graded_side": 0,
+        "rows_neutral_renorm_guard": 0,
+        "feature_available_rows": {name: 0 for name in weights},
+        "unavailable_reason": None,
+    }
+    if not cfg.attribution_enabled:
+        stats["unavailable_reason"] = "attribution_disabled"
+        return {}, stats
+    if metrics is None or metrics.empty:
+        stats["unavailable_reason"] = "no_player_metric_rows"
+        return {}, stats
+
+    stats["rows_total"] = int(len(metrics))
+    if "_attr_date" not in metrics.columns or metrics["_attr_date"].isna().all():
+        stats["unavailable_reason"] = "no_usable_map_date"
+        stats["rows_neutral_no_composite"] = int(len(metrics))
+        stats["rows_neutral_total"] = int(len(metrics))
+        return {}, stats
+    if "_attr_tier" not in metrics.columns or metrics["_attr_tier"].isna().all():
+        stats["unavailable_reason"] = "no_usable_competition_tier"
+        stats["rows_neutral_no_composite"] = int(len(metrics))
+        stats["rows_neutral_total"] = int(len(metrics))
+        return {}, stats
+
+    features = _attribution_features(metrics)
+    # Role normalization happens here: the baseline is grouped by role so every
+    # z-score is relative to same-role, same-tier prior maps.
+    group = (
+        metrics["_role"].astype("string") + "|" + metrics["_attr_tier"].astype("string")
+    )
+    date = metrics["_attr_date"]
+
+    ordered = [name for name in weights if name in features.columns]
+    if not ordered:
+        stats["unavailable_reason"] = "no_attribution_features_present"
+        stats["rows_neutral_no_composite"] = int(len(metrics))
+        stats["rows_neutral_total"] = int(len(metrics))
+        return {}, stats
+
+    z_frame = pd.DataFrame(index=metrics.index)
+    for name in ordered:
+        z_frame[name] = _prior_baseline_z(
+            features[name], group, date, ATTRIBUTION_MIN_BASELINE_OBS
+        )
+        stats["feature_available_rows"][name] = int(z_frame[name].notna().sum())
+
+    z_values = z_frame.to_numpy(dtype=float)
+    weight_row = np.array([float(weights[name]) for name in ordered], dtype=float)
+    available = np.isfinite(z_values)
+    weight_sum = (available * weight_row).sum(axis=1)
+    weighted = np.where(available, z_values * weight_row, 0.0).sum(axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        composite = np.where(weight_sum > 0.0, weighted / weight_sum, np.nan)
+    composite = np.where(np.isfinite(composite), composite, np.nan)
+
+    graded_mask = np.isfinite(composite)
+    stats["rows_graded"] = int(graded_mask.sum())
+    stats["rows_neutral_no_composite"] = int((~graded_mask).sum())
+    if not graded_mask.any():
+        stats["unavailable_reason"] = "no_row_cleared_the_baseline_floor"
+        stats["rows_neutral_total"] = int(len(metrics))
+        return {}, stats
+
+    graded = pd.DataFrame(
+        {
+            "_gid": metrics["_gid"].to_numpy()[graded_mask],
+            "side": metrics["side"].to_numpy()[graded_mask],
+            "_name": metrics["_name"].to_numpy()[graded_mask],
+            "_g": composite[graded_mask],
+        }
+    )
+    side_key = graded["_gid"].astype(str) + "|" + graded["side"].astype(str)
+    grouped = graded["_g"].groupby(side_key, sort=False)
+    side_size = grouped.transform("size").to_numpy(dtype=float)
+
+    # Within-team centering: only the graded members of a side participate, so
+    # an ungraded teammate keeps a_i exactly 1.0 and the mean over the whole
+    # side is still exactly 1.
+    centered = graded["_g"].to_numpy(dtype=float) - grouped.transform("mean").to_numpy(
+        dtype=float
+    )
+    raw = 1.0 + float(cfg.attribution_beta) * np.tanh(
+        centered / float(cfg.attribution_clip)
+    )
+    # The tanh is nonlinear, so the centered grades do not give mean(a) == 1.
+    # Renormalize within the side to restore exact conservation of the team's
+    # aggregate update.
+    raw_series = pd.Series(raw, index=graded.index)
+    raw_mean = raw_series.groupby(side_key, sort=False).transform("mean").to_numpy(
+        dtype=float
+    )
+    guard = np.isfinite(raw_mean) & (raw_mean > _ATTRIBUTION_MEAN_FLOOR)
+    multipliers = np.where(guard, raw / np.where(guard, raw_mean, 1.0), 1.0)
+    multipliers = np.where(np.isfinite(multipliers), multipliers, 1.0)
+
+    stats["rows_neutral_renorm_guard"] = int((~guard).sum())
+    single = side_size < 2.0
+    stats["rows_neutral_single_graded_side"] = int(single.sum())
+    stats["rows_attributed"] = int((guard & ~single).sum())
+    stats["rows_neutral_total"] = int(
+        stats["rows_neutral_no_composite"]
+        + stats["rows_neutral_single_graded_side"]
+        + stats["rows_neutral_renorm_guard"]
+    )
+
+    mapping = {
+        (str(gid), str(side), str(name)): float(value)
+        for gid, side, name, value in zip(
+            graded["_gid"].to_numpy(),
+            graded["side"].to_numpy(),
+            graded["_name"].to_numpy(),
+            multipliers,
+        )
+    }
+    return mapping, stats
 
 
 def _aggregate(
@@ -422,7 +880,18 @@ def _run_player_elo(
         raise ValueError("player Elo maps have no game identity column")
     df = df[df["game_uid"].str.strip().ne("")].copy()
     df = df.sort_values(["date", "game_uid"], kind="mergesort").reset_index(drop=True)
-    lineups = _lineups_by_game(players)
+    if cfg.attribution_enabled:
+        lineups, attribution_metrics = _lineups_by_game(players, with_metrics=True)
+        attribution, attribution_stats = player_attribution_multipliers(
+            attribution_metrics, cfg
+        )
+    else:
+        lineups = _lineups_by_game(players)
+        attribution, attribution_stats = player_attribution_multipliers(
+            pd.DataFrame(), cfg
+        )
+    global LAST_ATTRIBUTION_STATS
+    LAST_ATTRIBUTION_STATS = attribution_stats
     states: dict[str, PlayerState] = {}
     recent_mus: dict[str, list[float]] = {}
     targets = sorted({pd.Timestamp(value).tz_localize(None) for value in (checkpoint_dates or [])})
@@ -576,10 +1045,13 @@ def _run_player_elo(
         for name, role in blue_lu[:5]:
             st = states.setdefault(name, PlayerState(sigma=cfg.sigma0))
             k_scale = st.sigma / cfg.sigma0
+            # Conservative per-player share of the shared team update.  Neutral
+            # (1.0) whenever attribution is unavailable for this player-map.
+            a_i = attribution.get((gid, "Blue", name), 1.0)
             if intl:
-                st.mu_meta += cfg.k_meta * k_scale * mov * (y - exp_b)
+                st.mu_meta += cfg.k_meta * k_scale * mov * (y - exp_b) * a_i
             else:
-                st.mu_regional += cfg.k_regional * k_scale * mov * (y - exp_b)
+                st.mu_regional += cfg.k_regional * k_scale * mov * (y - exp_b) * a_i
             st.sigma = max(cfg.sigma_min, st.sigma * 0.985)
             st.n_maps += 1
             if d is not None:
@@ -593,10 +1065,15 @@ def _run_player_elo(
         for name, role in red_lu[:5]:
             st = states.setdefault(name, PlayerState(sigma=cfg.sigma0))
             k_scale = st.sigma / cfg.sigma0
+            # Conservative per-player share of the shared team update.  Neutral
+            # (1.0) whenever attribution is unavailable for this player-map.
+            a_i = attribution.get((gid, "Red", name), 1.0)
             if intl:
-                st.mu_meta += cfg.k_meta * k_scale * mov * ((1 - y) - (1 - exp_b))
+                st.mu_meta += cfg.k_meta * k_scale * mov * ((1 - y) - (1 - exp_b)) * a_i
             else:
-                st.mu_regional += cfg.k_regional * k_scale * mov * ((1 - y) - (1 - exp_b))
+                st.mu_regional += (
+                    cfg.k_regional * k_scale * mov * ((1 - y) - (1 - exp_b)) * a_i
+                )
             st.sigma = max(cfg.sigma_min, st.sigma * 0.985)
             st.n_maps += 1
             if d is not None:
@@ -633,6 +1110,7 @@ def build_player_ratings(
 
     cfg = cfg or PlayerEloConfig()
     out, states, _checkpoints, recent_mus = _run_player_elo(maps, players, cfg)
+    attribution_stats = dict(LAST_ATTRIBUTION_STATS)
     destination = Path(output_dir or FEATURES_DIR)
     destination.mkdir(parents=True, exist_ok=True)
     path = destination / "player_ratings.parquet"
@@ -664,6 +1142,25 @@ def build_player_ratings(
                 ),
                 "registered_momentum": registered_momentum_bundle(),
                 "global_rating": global_meta,
+                "player_attribution": {
+                    **attribution_stats,
+                    "authority": {
+                        "public": False,
+                        "production": False,
+                        "probability": False,
+                        "recommendation": False,
+                        "odds": False,
+                        "ev": False,
+                        "promotion": False,
+                    },
+                    "note": (
+                        "Development-only reallocation of the shared team update. "
+                        "Weights are an UNFITTED equal-weight default; protocol v5 "
+                        "requires fitted weights and an independent acceptance "
+                        "record before promotion. Multipliers average to exactly 1 "
+                        "within a side, so the team aggregate update is unchanged."
+                    ),
+                },
                 "note": (
                     "PUBLIC RESULTS RATING: one regularized Bradley-Terry fit uses every "
                     "accepted complete lineup on one connected scale. Competition tier is "

@@ -1,0 +1,252 @@
+{
+  "deferred_not_cancelled": {
+    "frozen_bootstrap_procedure_inherited_from_v5": {
+      "cluster_unit": "series_id",
+      "interval_level": 0.95,
+      "interval_method": "BCa",
+      "one_class_resample_rule": "discarded and redrawn, discard count published",
+      "resamples": 10000,
+      "rng": "numpy PCG64",
+      "rng_seed": 20260818,
+      "sided": "two-sided"
+    },
+    "note": "The prospective holdout and paired interval are NOT abandoned. They are decoupled from release.",
+    "purpose": "Unlocks the predictive claims listed as forbidden above. Does not gate any release.",
+    "when_run": "Once forward data accumulates naturally, run the paired comparison against the fitted v3 null model using the frozen bootstrap procedure inherited from v5."
+  },
+  "frozen_utc": "2026-08-18T10:15:00Z",
+  "honest_labelling_constraint": {
+    "additional_required_disclosure": "Any release note must state that player ladder positions change substantially because teammates were previously tied, and that team ratings move slightly (mean 0.05 percent, max 0.72 percent) through feedback under roster churn. Do not describe team ratings as unaffected.",
+    "forbidden_claims_until_evidence_exists": [
+      "more accurate",
+      "more predictive",
+      "better calibrated",
+      "improved forecasting",
+      "beats the previous model"
+    ],
+    "permitted_claims": [
+      "player ratings differentiate teammates by measured in-game contribution",
+      "contribution is computed from cs per minute, gold per minute, gold share, damage per minute, damage share, role-weighted KDA and vision rates",
+      "each map's team-level rating update is conserved exactly; only its allocation among the five players changes"
+    ],
+    "rationale": "This is the only thing the removed evidence actually cost. It constrains wording, not release.",
+    "removed_permitted_claim": {
+      "claim": "team ratings are unchanged by this change",
+      "replacement": "State the per-update conservation property, which is true, rather than an end-to-end invariance property, which is false.",
+      "status": "REMOVED as impermissible. Measured team ladder movement is up to 12 places and per-team rating drift up to 0.72 percent."
+    },
+    "requirement": "No published surface may claim the new ratings are more accurate, more predictive, better calibrated, or superior at forecasting, unless and until a paired forward comparison against the fitted v3 null model has been run and bound in a receipt.",
+    "surfaces_to_check_before_promotion": [
+      "/api/chat/methodology?topic=ratings",
+      "the ratings methodology page",
+      "any release notes"
+    ]
+  },
+  "independent_reviewer": {
+    "note": "Review is advisory for this promotion. The owner has authorized release on correctness grounds.",
+    "reviewer": "Codex CLI reviewer",
+    "scope": "Verify the seven promotion gates, the per-update conservation proof and its correctly limited scope, leakage-safety of the baselines, the ladder-impact disclosure, and that no published surface claims predictive superiority or team-rating invariance."
+  },
+  "measured_impact": {
+    "attribution_coverage": {
+      "neutral_breakdown": {
+        "no_composite": 500,
+        "renorm_guard": 0,
+        "single_graded_side": 0
+      },
+      "neutral_rate": 0.003,
+      "rows_attributed": 165940,
+      "rows_neutral": 500,
+      "rows_total": 166440
+    },
+    "census": {
+      "maps": 16644,
+      "player_maps": 166440,
+      "players": 3797,
+      "teams": 573
+    },
+    "conservation": {
+      "end_to_end_global_mu_mass_drift": 82.69,
+      "mechanism": "feedback through pregame expected score under roster churn",
+      "per_team_sum_drift_max": 34.4,
+      "per_update_mean_a_i": "exactly 1 to 1e-12"
+    },
+    "defect_repair": {
+      "after": 0,
+      "same_team_byte_identical_tuple_pairs_before": 1136,
+      "tied_groups_before": 377
+    },
+    "drift_relative": {
+      "per_player_max": 18.998,
+      "per_player_mean_abs": 2.785,
+      "per_player_pct_of_mean_mu": 0.186,
+      "per_team_relative_max_pct": 0.715,
+      "per_team_relative_mean_pct": 0.0518
+    },
+    "ladder_impact": {
+      "interpretation": "The player ladder changes substantially. This is the intended effect, not a defect: teammates were previously tied, so within-team ordering was arbitrary. It is nonetheless a large visible change and must be disclosed rather than shipped quietly.",
+      "player_ladder_min_20_maps": {
+        "max_rank_move": 166,
+        "moved_more_than_10_pct": 70.7,
+        "moved_within_3_pct": 11.4,
+        "n": 1917,
+        "rank_unchanged_pct": 1.4,
+        "top20_membership_overlap": "18/20",
+        "top20_order_identical": false
+      },
+      "regression_suite": {
+        "base_edcb3e6f": "93 failed / 363 passed / 48 errors",
+        "delta": "+18 passing, zero new failures; the 93/48 are pre-existing in this venv",
+        "with_attribution": "93 failed / 381 passed / 48 errors"
+      },
+      "team_ladder_proxy_min_3_rated_players": {
+        "max_rank_move": 12,
+        "moved_within_2_pct": 76.3,
+        "n": 291,
+        "rank_unchanged_pct": 26.1
+      }
+    },
+    "measured_utc": "2026-08-18T10:40:00Z",
+    "rating_scale": {
+      "mu_total_mean": 1495.6,
+      "mu_total_sd": 60.2,
+      "range": [
+        1223,
+        1805
+      ]
+    }
+  },
+  "out_of_scope_this_protocol": [
+    "any change to the public Draft Score publication path",
+    "any DIRECT change to the team rating model (team ratings nonetheless move indirectly, because they are derived from player mu; see measured_impact.ladder_impact)",
+    "predictive team ratings at tournament boundaries",
+    "the movement redesign",
+    "amending v3, v4 or v5 in place, which is impossible without breaking the committed digest chain"
+  ],
+  "owner_decision_record": {
+    "assistant_correction_recorded": "Earlier framing that promotion was 'blocked' was wrong. Every gate in v3 through v5 is self-imposed and owner-amendable. Nothing external ever blocked promotion.",
+    "decided_utc": "2026-08-18T10:15:00Z",
+    "decision": "The 100-game prospective holdout is REMOVED as a promotion precondition. The owner fundamentally disagrees with it as a gate on shipping.",
+    "owner_rationale": "The rating is proprietary internal development. It may be published once it passes the owner's own internal checks. No external party, regulation or dependency gates this release.",
+    "scope_of_removal": "Removed as PROMOTION preconditions. They remain the required basis for any PREDICTIVE SUPERIORITY CLAIM, which is a labelling matter, not a release matter.",
+    "what_the_owner_kept": "All correctness, conservation, leakage and fail-closed gates. These are cheap, run in minutes, and protect against shipping a change that only appears to work.",
+    "what_the_owner_removed": [
+      "minimum_holdout_games",
+      "league_sub_gate",
+      "forward_auc_paired_interval_excludes_zero",
+      "null_model_is_identified_gate",
+      "provisional_promotion_prohibited"
+    ]
+  },
+  "promotion_basis": {
+    "blast_radius_argument": "CORRECTED 2026-08-18 after end-to-end measurement. The attribution multiplier is renormalized so mean(a_i) == 1 within each side, and per-update conservation is exact: verified to 1e-12 in test_multipliers_average_to_exactly_one_within_every_side and test_side_aggregate_update_is_unchanged_by_reallocation. However conservation is INSTANTANEOUS, not invariant across roster churn. Pregame team strength is derived from the fielded players' mu, so once mu is reallocated among teammates, any map with a different lineup produces a different expected score and therefore a different update. Team ratings DO move.",
+    "justification": "The defect being repaired is a visible product defect: teammates carry byte-identical mu_total, mu_regional, mu_meta, sigma and n_maps, verified across 370 of 370 single-team rating groups. A rating that differentiates teammates by in-game contribution is a strictly better product than one that does not, independent of any change in forward AUC.",
+    "principle": "Promotion is authorized on demonstrated CORRECTNESS, not on demonstrated predictive superiority.",
+    "retracted_claim": {
+      "claim": "Team aggregate updates are bit-for-bit unchanged, and every team-level rating, ladder position and derived metric is unaffected.",
+      "found_by": "End-to-end comparison of final player states with attribution off vs on over the full 16644-map census.",
+      "status": "RETRACTED. False as an end-to-end statement.",
+      "why_it_was_wrong": "It generalized an exact per-update property into a claim about the whole sequential history. A unit test on the multiplier cannot detect this; it appears only when the full history is run and aggregates are compared."
+    },
+    "what_promotion_does_NOT_assert": "Promotion under v6 asserts NOTHING about predictive accuracy. It asserts that player ratings now differentiate teammates by measured in-game contribution, computed leakage-safe and fail-closed."
+  },
+  "promotion_gates_required": {
+    "fail_closed_gate": {
+      "pass_condition": "The neutral-fallback row count is published. A fallback rate high enough to make the change cosmetic is itself a FAILURE: report the rate and the owner decides.",
+      "requirement": "A player whose metrics are unavailable, or whose role/tier baseline has fewer than 20 prior observations, receives a_i = 1.0 exactly, which reproduces current behaviour. Missing values are NEVER imputed as zero and NEVER guessed."
+    },
+    "international_coverage_gate": {
+      "pass_condition": "Publish international player-maps eligible, attributed and skipped. Skipped eligible maps are a failure.",
+      "requirement": "Attribution is applied at all four insertion points, including the international mu_meta branches at player_elo.py:580 and :597, not only the regional branches at :582 and :599."
+    },
+    "ladder_impact_disclosure_gate": {
+      "measured": "Player ladder: 70.7 percent of rated players move more than 10 places, max 166. Team ladder proxy: 76.3 percent move at most 2 places, max 12.",
+      "rationale": "The earlier retracted claim asserted no team-level effect without measuring it. This gate exists so that failure mode cannot recur.",
+      "requirement": "Before promotion, measure and publish the player-ladder and team-ladder rank movement induced by the change. Promotion may not proceed on an unmeasured assumption that movement is small.",
+      "status": "PASS, measured and disclosed."
+    },
+    "leakage_gate": {
+      "pass_condition": "Baseline construction is shifted/expanding and this is demonstrated, not asserted.",
+      "requirement": "Role and tier baselines used to normalize a player's metrics must be computed from maps strictly EARLIER than the map being scored. A map may never contribute to its own baseline."
+    },
+    "no_publication_path_change_gate": {
+      "pass_condition": "The diff is confined to the ratings module and its tests.",
+      "requirement": "The change touches lol_kills/ratings/player_elo.py only. No change to the public Draft Score path, the query projection, the Supabase publisher, or apps/."
+    },
+    "team_update_conservation_gate": {
+      "requirement": "mean(a_i) == 1 within each side on every map, to tolerance <= 1e-9.",
+      "scope_correction": "This gate proves INSTANTANEOUS conservation only. It does NOT prove team ratings are unchanged over the sequential history, and must not be cited as if it did.",
+      "status": "PASS, verified to 1e-12."
+    },
+    "teammate_duplicate_rating_gate": {
+      "measurement": "Report the same-team byte-identical-tuple count BEFORE and AFTER the change on the real accepted census.",
+      "pass_condition": "AFTER count is zero, or every residual is explained by genuinely identical measured inputs and enumerated individually.",
+      "requirement": "No two players on the same team may share a byte-identical COMPLETE rating tuple (mu_total, mu_regional, mu_meta, sigma, n_maps).",
+      "scope": "Evaluated separately on regional maps and on international maps.",
+      "tolerance": "Failure requires equality on ALL five fields simultaneously. Subset equality is NOT a failure, because n_maps is normally identical for stable rosters and sigma commonly saturates at cfg.sigma_min."
+    }
+  },
+  "promotion_procedure": {
+    "rollback": "The existing refresh rollback path restores the previous release automatically on any failure stage tier, publication, cache or smoke. No bespoke rollback is required.",
+    "step_1": "Land the attribution change in lol_kills/ratings/player_elo.py on main via PR, with the six promotion gates reported in the PR body.",
+    "step_2": "Re-pin the launch agent: render xyz.scryglass.public-refresh.plist with the new tested commit, since the launcher aborts when SCRYGLASS_WORKER_COMMIT differs from worker HEAD.",
+    "step_3": "Sync the worker checkout to the new commit and confirm it is clean.",
+    "step_4": "Run one refresh manually to completion before relying on the schedule, and confirm status published with a new release id.",
+    "step_5": "Verify on production that same-team players now show differing ratings, and that team ratings and ladder positions are unchanged.",
+    "step_6": "Check the methodology surfaces against honest_labelling_constraint and correct any predictive-superiority wording."
+  },
+  "promotion_receipt_shape": {
+    "binds": [
+      "protocol_sha256",
+      "candidate_code_sha256",
+      "worker_commit",
+      "source_as_of",
+      "source_game_count",
+      "source_identity_sha256",
+      "teammate_duplicate_count_before",
+      "teammate_duplicate_count_after",
+      "conservation_max_abs_deviation",
+      "neutral_fallback_rows",
+      "neutral_fallback_rate",
+      "international_eligible_attributed_skipped",
+      "metric_weight_vector",
+      "metric_weight_vector_is_fitted",
+      "predictive_comparison_status"
+    ],
+    "predictive_comparison_status_values": [
+      "not_run_release_did_not_depend_on_it",
+      "run_and_bound"
+    ],
+    "schema_version": "scryglass:player-rating-promotion-receipt:v6",
+    "unlock_condition": "All promotion_gates_required pass AND the owner approves the release."
+  },
+  "retained_from_v5_unchanged": {
+    "archetype_discovery_direction": "The atom-derived rank-3 per-archetype representation remains the authorized direction. The correctness fix promoted under v6 is the first stage of it, not a replacement for it.",
+    "betting_prohibition": "PROHIBITED as policy. code_enforced is FALSE; promoted_draft_authority.py:69 governs the Draft Score path only and never loads a player-rating receipt. Unguarded consumers must be enumerated in the promotion receipt.",
+    "branch_predicate": "player_elo.py:558 _is_intl(league, tournament)",
+    "fail_closed_rule": "No value may be inferred, imputed or defaulted. Unavailable inputs are explicit null with a machine-readable reason.",
+    "insertion_points_all_four_required": [
+      "lol_kills/ratings/player_elo.py:580 blue international mu_meta",
+      "lol_kills/ratings/player_elo.py:582 blue regional mu_regional",
+      "lol_kills/ratings/player_elo.py:597 red international mu_meta",
+      "lol_kills/ratings/player_elo.py:599 red regional mu_regional"
+    ],
+    "metric_weighting_contract": "Weights over the stage 1 inputs are FIT, not hand-assigned. NOTE: the initial promoted build may ship with an UNFITTED equal-weight default, which MUST be labelled as unfitted in the receipt and in code. Fitting the weights remains required before any predictive claim.",
+    "stage_1_input_derivation": "gold_share_pct and damage_share_pct are team shares; kda_role_weighted is role-weighted; raw gold may supply numerators for rates and shares but may not enter as a direct model feature."
+  },
+  "schema_version": "scryglass:player-rating-atom-archetype-protocol:v6",
+  "status": "promotion_authorized_on_correctness",
+  "supersedes": {
+    "chain": {
+      "v1": "e1998c94c266650cea928c00078fe86a0a4ce2daad14ce8d0788098f3c998612",
+      "v2": "cfb5b81c82b0b7f9241fc23162dead26a6134b474d93229007a7a7d9c98cdc7f",
+      "v3": "ac60895e46cd8217affbfb45dea9e8153f5bb4a9bf36e9f0fc277f8f53526f7b",
+      "v4": "5d2892a4d12e04bd16ebc762463e35cd05bdb99d93204fd6a353af7a4849c40d",
+      "v5": "cf6ff40437016ab189ff9274ac28912bb78eadcd3ec5955250ad59933bdb97ff"
+    },
+    "protocol": "scryglass:player-rating-atom-archetype-protocol:v5",
+    "protocol_sha256": "cf6ff40437016ab189ff9274ac28912bb78eadcd3ec5955250ad59933bdb97ff",
+    "relationship": "v6 changes the PROMOTION BASIS only. Every correctness, leakage and fail-closed requirement in v5 is retained unchanged. The prospective-holdout and paired-interval requirements are removed as promotion preconditions by explicit owner decision."
+  },
+  "target": "blue_map_win"
+}
