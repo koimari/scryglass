@@ -10,7 +10,42 @@ SOURCE_ROOT = Path(__file__).resolve().parents[2]
 ROOT = Path(os.environ.get("SCRYGLASS_RUNTIME_ROOT", SOURCE_ROOT)).resolve()
 DATA = ROOT / "data" / "lol"
 WAREHOUSE_DIR = DATA / "warehouse"
-RAW_OE_DIR = WAREHOUSE_DIR / "raw"
+
+# Oracle's Elixir raw CSV staging directory.
+#
+# The Scryglass Worker downloads the annual OE exports into a macOS
+# Application Support inbox.  Reading from that inbox directly means a Google
+# Drive quota block - or a one-off manual browser download - is recovered
+# without copying files into the checkout.  RAW_OE_DIR is both a read path
+# (annual CSV globs) and a write path (Drive downloads, plus the `archive/`
+# subdirectory), so every consumer moves together.
+#
+# Resolution order:
+#   1. SCRYGLASS_OE_RAW_DIR - explicit override (hosted worker, CI, tests)
+#   2. SCRYGLASS_OE_INBOX   - override for the Worker inbox location
+#   3. the default Worker inbox, when it exists on this machine
+#   4. <warehouse>/raw      - in-checkout fallback (Linux hosts, CI)
+WAREHOUSE_RAW_DIR = WAREHOUSE_DIR / "raw"
+DEFAULT_OE_INBOX = (
+    Path.home() / "Library" / "Application Support" / "Scryglass Worker" / "oe-inbox"
+)
+OE_INBOX_DIR = Path(
+    os.environ.get("SCRYGLASS_OE_INBOX", DEFAULT_OE_INBOX)
+).expanduser()
+
+
+def _resolve_raw_oe_dir() -> Path:
+    """Return the directory holding the annual Oracle's Elixir CSV exports."""
+
+    override = os.environ.get("SCRYGLASS_OE_RAW_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    if OE_INBOX_DIR.is_dir():
+        return OE_INBOX_DIR.resolve()
+    return WAREHOUSE_RAW_DIR
+
+
+RAW_OE_DIR = _resolve_raw_oe_dir()
 OE_RECEIPT_DIR = WAREHOUSE_DIR / "receipts" / "oracles_elixir"
 PARQUET_DIR = WAREHOUSE_DIR / "parquet"
 FEATURES_DIR = DATA / "features"
