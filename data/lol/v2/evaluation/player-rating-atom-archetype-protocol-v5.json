@@ -1,0 +1,378 @@
+{
+  "acceptance_gates": {
+    "archetype_discovery_leakage_gate": {
+      "failure_action": "Any violation voids the entire evaluation run. No partial credit.",
+      "requirement": "For every fold, representation_fit_window_end <= validation_min must hold and be published."
+    },
+    "brier_no_worse_than_v3": true,
+    "ece_10_max": 0.08,
+    "estimability_gate": {
+      "coverage_floor": "At least 90 percent of holdout player-maps at >=5 games per parameter. Measured expectation for low_rank_3 is 94.3 percent.",
+      "requirement": "Publish, per player, the observed game count and the resulting per-parameter sample size. Players below 5 games per free parameter must be flagged in the published output, not silently rated."
+    },
+    "forward_auc_paired_interval_excludes_zero": {
+      "interval": "95 percent, predeclared, two-sided, series-clustered, paired on identical rows",
+      "requirement": "The LOWER bound of the predeclared paired series-clustered bootstrap confidence interval for the AUC difference against the fitted v3 null model must be strictly greater than zero.",
+      "supersedes": "v4's median-exceeds rule, which admitted null results."
+    },
+    "international_coverage_gate": {
+      "failure_condition": "Any international map scored with an unattributed team-outcome-only update while international rows remain in the reported metrics.",
+      "requirement": "Attribution must be applied on all four insertion points. The receipt must publish the count of international player-maps attributed and the count skipped."
+    },
+    "league_sub_gate": {
+      "minimum_games_per_league": 20,
+      "minimum_leagues": 3
+    },
+    "log_loss_no_worse_than_v3": true,
+    "metric_weights_were_fit_gate": {
+      "failure_condition": "An unfitted or hard-coded equal-weight average.",
+      "requirement": "The promotion receipt must publish a fitted weight vector over the stage 1 inputs and the fold in which it was selected."
+    },
+    "minimum_holdout_games": 100,
+    "null_model_is_identified_gate": {
+      "failure_action": "Promotion blocked. Fitting and development reporting may proceed.",
+      "requirement": "baseline_models.null_model_that_must_be_beaten.fitted_receipt_sha256 must be non-null and resolvable before any promotion claim."
+    },
+    "provisional_promotion_prohibited": true,
+    "representation_is_not_authored_gate": {
+      "audit": "The candidate's input digest set must not contain the authored archetype module.",
+      "requirement": "The fitted representation must not be initialized from, regularized toward, or evaluated against lol_kills/draft_archetypes.py tags."
+    },
+    "teammate_duplicate_rating_gate": {
+      "rationale": "This is the literal defect the owner reported. Hard gate, independent of any predictive metric.",
+      "requirement": "No two players on the same team may share byte-identical mu_total, mu_regional, mu_meta, sigma and n_maps after fitting.",
+      "scope": "Evaluated separately on regional maps and on international maps. Passing on regional while tying on international is a FAILURE.",
+      "tolerance": "Exact equality on any of these fields for any same-team pair is a FAILURE."
+    }
+  },
+  "amendment_provenance": {
+    "findings_carried_into_v4": 4,
+    "findings_specific_to_v3": 5,
+    "reviewed_utc": "2026-08-18T00:05:00Z",
+    "source": "Independent review by the assigned Codex CLI reviewer on PR #294, 7 P1 and 2 P2 findings against the v3 artifact.",
+    "why_v5_and_not_an_edit": "v4 is merged and its digest is bound by downstream references. Editing v4 in place would change its sha256 and break the chain. Corrections are therefore issued as a superseding version, per the same discipline that required v1 through v3 to land byte-for-byte."
+  },
+  "archetype_discovery": {
+    "principle": "Archetype is an OUTPUT of the fitting procedure, never an input. No authored tag set, cluster name, or champion-to-archetype assignment may enter the model as a fixed input.",
+    "rejected_precedent": {
+      "locator": "lol_kills/draft_archetypes.py:13-182",
+      "reason": "38 hand-authored tags. Assigned, not discovered. Owner instruction 2026-08-17: the archetype is built ground up from performance of atomized champions in specific drafts."
+    },
+    "stage_1_atom_context_performance": {
+      "context_conditioning": [
+        "role",
+        "league_tier",
+        "patch",
+        "international_flag",
+        "ally_composition_atom_profile",
+        "enemy_composition_atom_profile"
+      ],
+      "input_derivation_requirement": "gold_share_pct and damage_share_pct are SHARES of the player's team total on the same map, not raw totals. kda_role_weighted is weighted by role, not a raw ratio and not a kill-participation substitute. Raw totalgold and earnedgold are admissible only as the denominators used to derive shares.",
+      "inputs": [
+        "cs_per_min",
+        "gold_per_min",
+        "gold_share_pct",
+        "damage_per_min",
+        "damage_share_pct",
+        "kda_role_weighted",
+        "wpm",
+        "wcpm",
+        "gamelength"
+      ],
+      "requirement": "Performance is measured conditional on the draft context the champion was played into. Marginal per-champion performance without context conditioning is NOT admissible.",
+      "supersedes_v4_input_list": "v4 listed raw totalgold and earnedgold and omitted an explicit gold share, while naming gold_share_pct in the owner's required metrics. That inconsistency is resolved here in favour of the owner's requirement.",
+      "unit": "player-map"
+    },
+    "stage_2_representation_learning": {
+      "champion_feature_basis": "44-dimensional ontology prior vector derived from the atom bridge, effective rank 12.",
+      "output": "A champion embedding and a low-rank player loading learned jointly from the stage 1 conditional performance geometry.",
+      "player_loading_rank": 3,
+      "refit_cadence": "Refit on the same schedule as the ratings, from strictly prior data only.",
+      "versioning": "Each fitted representation is a digest-bound artifact carrying its own sha256, fit window, and input digests."
+    },
+    "stage_3_player_attribution": {
+      "attribution_operator_applies_to_all_four": true,
+      "branch_predicate": "lol_kills/ratings/player_elo.py:558, intl = _is_intl(league, tournament). The predicate is authoritative; league-name heuristics are not.",
+      "form": "player rating = global player term + low-rank-3 loading projected onto the champion's atom embedding, evaluated in the realized draft context.",
+      "insertion_points_all_four_required": [
+        {
+          "accumulator": "mu_meta",
+          "base_expression": "st.mu_meta += cfg.k_meta * k_scale * mov * (y - exp_b)",
+          "branch": "international",
+          "locator": "lol_kills/ratings/player_elo.py:580",
+          "rate": "cfg.k_meta",
+          "side": "blue"
+        },
+        {
+          "accumulator": "mu_regional",
+          "base_expression": "st.mu_regional += cfg.k_regional * k_scale * mov * (y - exp_b)",
+          "branch": "regional",
+          "locator": "lol_kills/ratings/player_elo.py:582",
+          "rate": "cfg.k_regional",
+          "side": "blue"
+        },
+        {
+          "accumulator": "mu_meta",
+          "base_expression": "st.mu_meta += cfg.k_meta * k_scale * mov * ((1 - y) - (1 - exp_b))",
+          "branch": "international",
+          "locator": "lol_kills/ratings/player_elo.py:597",
+          "rate": "cfg.k_meta",
+          "side": "red"
+        },
+        {
+          "accumulator": "mu_regional",
+          "base_expression": "st.mu_regional += cfg.k_regional * k_scale * mov * ((1 - y) - (1 - exp_b))",
+          "branch": "regional",
+          "locator": "lol_kills/ratings/player_elo.py:599",
+          "rate": "cfg.k_regional",
+          "side": "red"
+        }
+      ],
+      "invariant": "The per-player update term must differ across teammates on the first map in which their in-game metric residuals differ, on both the regional and the international branch.",
+      "partial_coverage_is_a_failure": "A candidate that attributes on the regional branches only FAILS the international coverage gate. Explicit exclusion of international rows is permitted ONLY if the excluded rows are also removed from every reported metric, coverage figure and holdout, and the exclusion is stated in the promotion receipt."
+    }
+  },
+  "authority": {
+    "betting_odds_ev_stake": "PROHIBITED. No betting, odds, expected-value or stake output may be derived from this protocol. Enforced in code at promoted_draft_authority.py:69.",
+    "candidate_ratings": "development_only until all acceptance gates pass and the owner approves promotion.",
+    "development_result": "may be published as development evidence only, clearly labelled as such",
+    "public_player_ladder": "unchanged until promotion"
+  },
+  "baseline_models": {
+    "null_model_that_must_be_beaten": {
+      "claim": "Champion-agnostic scalar grade attribution. v5 must demonstrate that per-archetype structure adds predictive value BEYOND the fitted v3 model on identical rows, paired.",
+      "fitted_receipt_sha256": null,
+      "id": "fitted v3 candidate",
+      "identified_by": "fitted_receipt_sha256",
+      "must_bind": [
+        "selected_family",
+        "beta",
+        "z_clip",
+        "floor",
+        "source_as_of",
+        "source_game_count",
+        "source_identity_sha256",
+        "candidate_code_sha256"
+      ],
+      "negative_result_rule": "If it does not, that is reported as a negative result, not absorbed into a larger model.",
+      "protocol_sha256": "ac60895e46cd8217affbfb45dea9e8153f5bb4a9bf36e9f0fc277f8f53526f7b",
+      "rule": "The protocol digest alone does NOT identify the null model. Until a fitted v3 receipt exists and its digest is recorded here, no v5 promotion claim may be made. Fitting v5 may proceed; PROMOTION may not."
+    },
+    "primary": {
+      "claim": "Team-outcome-only Dual-Elo. Produces byte-identical teammate ratings.",
+      "id": "player_elo_dual",
+      "locator": "lol_kills/ratings/player_elo.py"
+    }
+  },
+  "corrections_from_v4": {
+    "C1_international_attribution": {
+      "correction": "All four branches are in scope and named explicitly.",
+      "defect": "v4 listed insertion points player_elo.py:582 and :599 only. Those are the REGIONAL branches. For international maps the module updates mu_meta at :580 and :597 instead. A candidate implemented to v4 as frozen would leave every international map at the team-outcome baseline, so teammates remain unidentified after MSI and EWC.",
+      "measured_blast_radius": {
+        "international_games": 496,
+        "international_player_maps": 4960,
+        "measurement_caveat": "League-name heuristic over EWC, FST and MSI. The authoritative predicate is _is_intl at player_elo.py:558, which also consults the tournament field, so the true count may differ. Treat as an approximation, not a bound.",
+        "players_with_any_international_map": 267,
+        "share": 0.03,
+        "total_player_maps": 166440,
+        "total_players": 3797
+      },
+      "severity": "P1",
+      "why_it_matters": "The owner's stated purpose includes identifying under and overvalued teams at tournament start. Tournaments are international. v4 attributed nothing on exactly those maps."
+    },
+    "C2_paired_interval_must_exclude_zero": {
+      "correction": "The lower bound of the predeclared paired interval must exceed zero.",
+      "defect": "v4's forward_auc gate required only that the bootstrap median exceed the baseline. A null result such as +0.001 AUC with a paired 95 percent interval of [-0.05, +0.05] passes. Combined with provisional_promotion_prohibited, sampling noise could trigger a full production promotion.",
+      "severity": "P1"
+    },
+    "C3_null_model_identity": {
+      "correction": "The null model is referenced by a FITTED RECEIPT digest that binds its selected parameters and its source census, not by the protocol digest.",
+      "defect": "v4 bound baseline_models.null_model_that_must_be_beaten.sha256 to the v3 PROTOCOL digest. A protocol admits many fitted models: the selected family and the values of beta, z_clip and floor are unconstrained, and warehouse backfills can change development-fold selection. Two different fitted null models can therefore share every bound digest, so 'v5 beat v3' remains underdetermined even with v3 committed.",
+      "severity": "P1"
+    },
+    "C4_holdout_must_start_after_freeze": {
+      "correction": "The boundary must be strictly after frozen_utc, with already-completed maps excluded.",
+      "defect": "v4 left frozen_prospective_holdout.start_inclusive null, to be set at owner approval, with nothing forbidding a boundary that includes maps already completed before frozen_utc. Such rows are not prospective and would void the leakage guarantee.",
+      "severity": "P1"
+    }
+  },
+  "fail_closed_rule": {
+    "no_fabrication_rule": "A missing metric, an absent champion profile, or an unfitted representation blocks scoring for that row and is reported as unavailable. It never degrades silently to a baseline value.",
+    "ontology_availability_rule": "Only 7.18 of 12 ontology dimensions are status=available per champion on average. Unavailable dimensions MUST be carried as null with reason and MUST NOT be imputed as zero, because a zero asserts a factual claim about the champion's kit that the artifact does not support.",
+    "statement": "No value may be inferred, imputed, or defaulted. Unavailable inputs are encoded as explicit null with a machine-readable reason."
+  },
+  "fitting_unlock_condition": "Frozen prospective holdout must reach 100 games with at least 3 leagues x 20 games, starting strictly after frozen_utc, before any candidate is evaluated.",
+  "frozen_prospective_holdout": {
+    "audit": "The promotion receipt must publish frozen_utc, start_inclusive, and a count of maps excluded by this rule.",
+    "definition": "Outcome-blind sealed batch of maps occurring strictly after the protocol freeze.",
+    "end_exclusive": null,
+    "start_inclusive": null,
+    "start_rule": "start_inclusive MUST be strictly after frozen_utc. Where source timestamps lack sufficient precision, use the next complete source-date boundary after frozen_utc. Any map already completed at frozen_utc is excluded."
+  },
+  "frozen_utc": "2026-08-18T00:40:00Z",
+  "independent_reviewer": {
+    "assigned_utc": "2026-08-17T22:55:00Z",
+    "independence_basis": "Did not author the candidate implementation.",
+    "note": "This reviewer produced the 7 P1 and 2 P2 findings that v5 corrects. The assignment is working as intended and is retained.",
+    "reviewer": "Codex CLI reviewer",
+    "scope": "Verify leakage gates, estimability accounting, international coverage, null model identification, and that the representation is discovered rather than authored."
+  },
+  "leakage_constraint": {
+    "enforcement": "Reuse the expanding series-grouped walk-forward harness at lol_kills/research/atomized_rf_composite.py:2834-2888, which keeps whole series together and asserts train_max < validation_min at line 2871. The representation refit must occur INSIDE each fold.",
+    "forbidden": [
+      "fitting or refitting the champion embedding or player loadings on any data at or after the evaluated timestamp",
+      "using map outcome as a stage 1 or stage 2 input feature",
+      "selecting the representation rank, cadence, or hyperparameters using holdout performance",
+      "carrying a representation digest forward without recording its fit window"
+    ],
+    "measured_cost": {
+      "conclusion": "Not a constraint.",
+      "fit_once_seconds": 17.37,
+      "fold_internal_three_folds_seconds": 20.26,
+      "overhead_ratio": 1.17
+    },
+    "statement": "Archetype discovery is itself a model fit and therefore a leakage surface. Any representation used to score a map at time t must have been fit exclusively on data strictly earlier than t."
+  },
+  "measured_sparsity_evidence": {
+    "champion_representation": {
+      "champions_in_data_without_atom_profile": 0,
+      "dense_feature_dimension": 44,
+      "effective_rank_90pct_variance": 12,
+      "indistinguishable_champion_pairs": 0,
+      "mean_available_ontology_dimensions_per_champion": 7.18,
+      "min_pairwise_l2": 0.225
+    },
+    "corpus": {
+      "date_range_utc": [
+        "2025-01-11T11:11:24Z",
+        "2026-07-28T23:45:16Z"
+      ],
+      "distinct_champions": 173,
+      "distinct_players": 3797,
+      "player_maps": 166440
+    },
+    "estimability_by_parameterization": {
+      "full_12_dim": {
+        "player_maps": 0.717,
+        "players": 0.264
+      },
+      "low_rank_2": {
+        "player_maps": 0.968,
+        "players": 0.659
+      },
+      "low_rank_3": {
+        "player_maps": 0.943,
+        "players": 0.567
+      },
+      "selected": "low_rank_3"
+    },
+    "games_per_player": {
+      "median": 20,
+      "p10": 2,
+      "p25": 6,
+      "p75": 63,
+      "p90": 120
+    },
+    "inherited_from": "v4, unchanged and still current",
+    "measured_utc": "2026-08-17T20:30:00Z",
+    "per_champion_grain_is_not_viable": {
+      "fraction_under_10_games": 0.898,
+      "fraction_under_5_games": 0.734,
+      "median_games_per_pair": 2,
+      "player_champion_pairs": 42184
+    },
+    "provenance": "Read-only measurement over data/lol/warehouse/parquet/oe_player_games.parquet and data/lol/v2/champions/lcc-atom-bridge-26.16.json.",
+    "role_stability": {
+      "consequence": "Role is a fixed effect. No role-switching component is modelled.",
+      "median_share_of_games_in_main_role": 1.0
+    }
+  },
+  "metric_set": {
+    "brier_score": "Reported against both baselines.",
+    "ece_10": "10-bin expected calibration error.",
+    "forward_auc": "Forward-chained AUC on the frozen prospective holdout.",
+    "log_loss": "Reported against both baselines.",
+    "series_cluster_bootstrap": "Bootstrap resampled at the series level, never the map level."
+  },
+  "metric_weighting_contract": {
+    "audit": "The promotion receipt must publish the fitted weight vector and the fold in which it was selected. An equal-weight vector is an admissible OUTCOME of fitting, but only if it was fit and reported as such.",
+    "defect_being_corrected": "player_map_grades.py:166 computes an equal-weight mean over the z-scored inputs. Fitting only an outer beta on top of a fixed equal-weight average cannot satisfy the owner's requirement that weighting be mathematically determined against the win objective.",
+    "owner_decision_reference": "All metric weights are fit against the draft-score composite win objective. Inherited unchanged from v3 and v4.",
+    "requirement": "The relative weights of the stage 1 inputs are FIT against forward win prediction inside the development folds. They are not hand-assigned and not an equal-weight average."
+  },
+  "out_of_scope_this_protocol": [
+    "fitting, training, or evaluating any candidate (this document is design and protocol only)",
+    "any change to the public Draft Score publication path",
+    "any change to team ratings",
+    "predictive team ratings at tournament boundaries, which require their own frozen protocol",
+    "the movement redesign (OE-update movement, delta since last played, position delta)",
+    "amending v3 in place, which is impossible without breaking the committed digest chain"
+  ],
+  "owner_approval_record": {
+    "approvals": {
+      "1_all_four_insertion_points": "APPROVED. Attribution applies to the international mu_meta branches at :580 and :597 as well as the regional branches at :582 and :599. Partial coverage is a failure.",
+      "2_paired_interval_excludes_zero": "APPROVED. Replaces v4's median-exceeds rule.",
+      "3_promotion_blocked_until_null_model_identified": "APPROVED. Fitting and development reporting may proceed; promotion may not, until a fitted v3 receipt digest is recorded.",
+      "4_holdout_strictly_after_freeze": "APPROVED. Boundary strictly after frozen_utc, excluded maps counted in the receipt.",
+      "5_stage_1_shares_and_role_weighted_kda": "APPROVED. gold_share_pct and damage_share_pct as team shares, kda_role_weighted role-weighted; raw gold admissible only as a denominator.",
+      "6_metric_weights_fit_and_published": "APPROVED. Weights fit inside development folds, fitted vector published in the receipt."
+    },
+    "approved_as_written": true,
+    "decision": "approve all six",
+    "reviewed_utc": "2026-08-18T00:40:00Z",
+    "supersedes_protocol_sha256": "5d2892a4d12e04bd16ebc762463e35cd05bdb99d93204fd6a353af7a4849c40d",
+    "supersedes_schema_version": "scryglass:player-rating-atom-archetype-protocol:v4"
+  },
+  "owner_approvals_required_before_fitting_begins": [],
+  "problem_statement": "Unchanged from v4. Public player ratings are byte-identical among teammates because player_elo.py applies one team-outcome update term to all five players, with k_scale the only per-player factor. v3 breaks the tie with a champion-agnostic scalar, leaving the Draft Score's controlled counterfactual unable to move the player term. v5 resolves contribution per champion and per atomized archetype, with the defects found in review corrected.",
+  "promotion_receipt_shape": {
+    "binds": [
+      "protocol_sha256",
+      "representation_digest",
+      "representation_fit_window_end",
+      "candidate_code_sha256",
+      "holdout_batch_sha256",
+      "game_ids_sha256",
+      "per_fold_leakage_audit",
+      "teammate_duplicate_gate_result",
+      "international_coverage_counts",
+      "fitted_metric_weight_vector",
+      "estimability_coverage",
+      "paired_interval_bounds",
+      "null_model_fitted_receipt_sha256",
+      "source_as_of",
+      "source_game_count",
+      "source_identity_sha256",
+      "holdout_start_inclusive",
+      "maps_excluded_by_freeze_rule"
+    ],
+    "schema_version": "scryglass:player-rating-atom-archetype-receipt:v5",
+    "unlock_condition": "All acceptance gates pass AND the null model is identified by a fitted receipt AND the owner approves promotion in writing."
+  },
+  "schema_version": "scryglass:player-rating-atom-archetype-protocol:v5",
+  "sealing_procedure": {
+    "defect_being_corrected": "A sealed batch spanning multiple chronological games cannot produce sequential Elo forecasts. Predicting game t+1 requires applying game t's outcome residual, but outcomes may not be opened until the whole batch is forecast and sealed. Using stale ratings changes the evaluated model; opening outcomes during inference violates the seal.",
+    "never_refit_after_seal": true,
+    "required_form": "EITHER single-game chronological batches, OR an incremental forecast-and-update receipt in which only already-forecast outcomes are opened, in strict chronological order, with each step's forecast digest recorded before the corresponding outcome is revealed.",
+    "reseal_on_candidate_change": true
+  },
+  "status": "fitting_authorized",
+  "supersedes": {
+    "chain": {
+      "v1": "e1998c94c266650cea928c00078fe86a0a4ce2daad14ce8d0788098f3c998612",
+      "v2": "cfb5b81c82b0b7f9241fc23162dead26a6134b474d93229007a7a7d9c98cdc7f",
+      "v3": "ac60895e46cd8217affbfb45dea9e8153f5bb4a9bf36e9f0fc277f8f53526f7b",
+      "v4": "5d2892a4d12e04bd16ebc762463e35cd05bdb99d93204fd6a353af7a4849c40d"
+    },
+    "protocol": "scryglass:player-rating-atom-archetype-protocol:v4",
+    "protocol_sha256": "5d2892a4d12e04bd16ebc762463e35cd05bdb99d93204fd6a353af7a4849c40d",
+    "relationship": "v5 is a corrective amendment to v4. v4 was frozen as fitting_authorized before an independent review of the v3 chain surfaced defects that carry into v4. v4 must NOT be fitted as frozen; v5 replaces it as the authorized direction once approved."
+  },
+  "target": "blue_map_win",
+  "v3_only_findings_not_applicable_to_v5": {
+    "note": "Recorded so they are not lost. These concern the v3 artifact, which is frozen and cannot be edited without breaking the chain. They constrain any future FITTING of v3 as the null model.",
+    "role_specific_beta_breaks_zero_sum": "With role-specific betas, sum(beta_role(i) * grade_team_i) is not generally zero, so multipliers no longer have team mean one and total team rating mass can shift while still labelled multiplicative_zero_sum_within_team. If that family is selected when fitting the v3 null model, the multipliers must be recentered or the role coefficients constrained.",
+    "unreachable_attribution_floor": "With five teammates, grade_team is bounded by sqrt(4) = 2; soft_clip only reduces magnitude, and beta <= 0.25 keeps every multiplier at or above 0.5. A floor capped at 0.3 can never activate, so all three grid values yield identical candidates. Treat the floor as fixed, not as a fitted free parameter, and do not report it as one.",
+    "v3_status_contradiction": "v3 carries status fitting_authorized while its owner_approvals_required_before_fitting_begins list is nonempty and the five-fold development window and holdout start are unrecorded. When fitting v3 as the null model, those approvals must be recorded first."
+  }
+}
