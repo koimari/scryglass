@@ -21,6 +21,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from lol_kills.etl.oe_ingest import ingest_oe, validate_accepted_source_receipt
+from lol_kills.etl.paths import RAW_OE_DIR
 from lol_kills.etl.oe_live_source import (
     _complete_player_game_ids,
     _identity_complete_player_game_ids,
@@ -203,9 +204,13 @@ def ingest_oe_csv(
     accepted_source: dict[str, Any] | None = None
     if source_receipt is not None:
         current_year = max(years)
+        # Resolve through RAW_OE_DIR, the same resolver the downloader and the
+        # launcher use. This call site used to hardcode the warehouse copy, so
+        # once the Worker inbox existed the downloader accepted the fresh CSV
+        # and wrote a receipt binding its bytes while this check was handed the
+        # stale warehouse file, and the receipt validator refused the run.
         source_path = (
-            root
-            / "data/lol/warehouse/raw"
+            RAW_OE_DIR
             / f"{current_year}_LoL_esports_match_data_from_OraclesElixir.csv"
         )
         accepted_source = validate_accepted_source_receipt(
