@@ -46,6 +46,13 @@ const TOOL_NAMES = new Set<string>(TOOLS.map((tool) => tool.name));
 export const SUPPORT_QUESTION_MAX_CHARS = 500;
 const SUPPORT_ARGUMENT_MAX_CHARS = 100;
 const SUPPORT_TOOL_TIMEOUT_MS = 5_000;
+// The planner query routes carry a 10s server budget (CHAT_QUERY_ROUTE_TIMEOUT_MS
+// in chatApi.ts) because their non-trivial questions chain several sequential
+// network legs. A 5s client abort would cancel exactly the slow-but-successful
+// case that budget exists to recover, so the client allows the server budget
+// plus transport overhead for these tools only.
+const SUPPORT_PLANNER_TOOLS = new Set(["query_players", "query_champions", "query_drafts"]);
+const SUPPORT_PLANNER_TOOL_TIMEOUT_MS = 12_000;
 
 // --- Deterministic fallback router -----------------------------------------
 
@@ -314,9 +321,12 @@ export async function executeTool(call: ToolCall): Promise<unknown> {
     if (Array.from(value).length > maximum) throw new Error("A chat tool argument is too long");
     if (value) params.set(key, value);
   }
+  const toolTimeoutMs = SUPPORT_PLANNER_TOOLS.has(call.tool)
+    ? SUPPORT_PLANNER_TOOL_TIMEOUT_MS
+    : SUPPORT_TOOL_TIMEOUT_MS;
   const response = await fetch(`/api/chat/${call.tool}?${params.toString()}`, {
     headers: { Accept: "application/json" },
-    signal: AbortSignal.timeout(SUPPORT_TOOL_TIMEOUT_MS),
+    signal: AbortSignal.timeout(toolTimeoutMs),
   });
   const payload = (await response.json()) as { ok: boolean; data?: unknown; reason?: string };
   if (!response.ok || !payload.ok) {

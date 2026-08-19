@@ -1,4 +1,4 @@
-import { chatError, chatJson, clean, searchParams, secureChatRoute } from "@/lib/chatApi";
+import { chatError, chatJson, clean, searchParams, secureChatRoute, CHAT_QUERY_ROUTE_TIMEOUT_MS } from "@/lib/chatApi";
 import { queryTeamDraftScores } from "@/lib/draftQuery";
 import { hasDescriptiveDraftAuthority, type ProfileRecords } from "@/lib/pack";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
@@ -27,4 +27,4 @@ async function get(request: Request, signal: AbortSignal) {
   });
 }
 
-export const GET = secureChatRoute(get);
+export const GET = secureChatRoute(get, CHAT_QUERY_ROUTE_TIMEOUT_MS);
