@@ -443,6 +443,53 @@ def _classify_http_error(exc: urllib.error.HTTPError, *, what: str) -> OeOauthEr
     )
 
 
+# Hosts a bearer-carrying request may ever touch. urllib's default redirect
+# handler copies the Authorization header onto the redirected request BEFORE
+# any caller-side check can run, so a Drive response carrying an off-Google
+# Location would disclose the full-scope token to an arbitrary host. This
+# handler validates every destination BEFORE following it; within these hosts
+# the copied header is intended (googleusercontent serves alt=media bodies).
+_ALLOWED_TOKEN_HOSTS = (
+    ".googleapis.com",
+    ".google.com",
+    ".googleusercontent.com",
+)
+
+
+def _host_may_receive_token(url: str) -> bool:
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    return bool(host) and any(
+        host == allowed.lstrip(".") or host.endswith(allowed)
+        for allowed in _ALLOWED_TOKEN_HOSTS
+    )
+
+
+class _GoogleOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse to follow any redirect whose destination is not a Google host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: N802
+        if not _host_may_receive_token(newurl):
+            raise OeOauthError(
+                "Drive redirected an authorized request to a non-Google host; "
+                "refusing to follow it"
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_AUTHORIZED_OPENER = urllib.request.build_opener(_GoogleOnlyRedirectHandler())
+
+
+def _open_authorized(request, *, timeout: float):
+    """Open a bearer-carrying request through the redirect-validating opener."""
+
+    if not _host_may_receive_token(request.full_url):
+        raise OeOauthError(
+            "refusing to send the Drive token to a non-Google host: "
+            + urllib.parse.urlsplit(request.full_url).netloc
+        )
+    return _AUTHORIZED_OPENER.open(request, timeout=timeout)
+
+
 def _api_json(
     method: str,
     url: str,
@@ -454,7 +501,7 @@ def _api_json(
 ) -> dict[str, Any]:
     request = _authorized_request(method, url, access_token=access_token, body=body)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _open_authorized(request, timeout=timeout) as response:
             raw = response.read(MAX_JSON_BYTES)
     except urllib.error.HTTPError as exc:
         raise _classify_http_error(exc, what=what) from exc
@@ -498,7 +545,7 @@ def _token_endpoint(form: Mapping[str, str], *, timeout: float, what: str) -> di
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _open_authorized(request, timeout=timeout) as response:
             raw = response.read(MAX_JSON_BYTES)
     except urllib.error.HTTPError as exc:
         detail = _error_detail(exc)
@@ -599,7 +646,7 @@ def _delete_drive_file(copy_id: str, *, access_token: str, timeout: float) -> bo
     url = _api_url(f"/drive/v3/files/{copy_id}")
     request = _authorized_request("DELETE", url, access_token=access_token)
     try:
-        with urllib.request.urlopen(request, timeout=timeout):
+        with _open_authorized(request, timeout=timeout):
             return True
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
@@ -641,7 +688,7 @@ def _download_copy(
         )
         timeout = min(SOCKET_TIMEOUT_SECONDS, _remaining(deadline))
         try:
-            response = urllib.request.urlopen(request, timeout=timeout)
+            response = _open_authorized(request, timeout=timeout)
         except urllib.error.HTTPError as exc:
             raise _classify_http_error(exc, what=f"download Drive file {copy_id}") from exc
         except urllib.error.URLError as exc:

@@ -179,6 +179,17 @@ def _install_router(
             raise result
         return result
 
+    # Authorized traffic now flows through the module's redirect-validating
+    # opener, not bare urlopen, so the router patches BOTH: the opener object
+    # (whose .open the production code calls after its initial-host check, so
+    # that check still runs under test) and urllib.request.urlopen for the
+    # unauthenticated login exchange.
+    class _RoutedOpener:
+        @staticmethod
+        def open(request: Any, timeout: float | None = None) -> object:
+            return fake_urlopen(request, timeout=timeout)
+
+    monkeypatch.setattr(oe_oauth_fetch, "_AUTHORIZED_OPENER", _RoutedOpener())
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     return calls
 
@@ -708,3 +719,37 @@ def test_the_launcher_places_the_oauth_rung_between_headless_and_reuse() -> None
     # Exit 69 must not be treated as a failure of the feed.
     assert "oe_oauth_status == 69" in script or "69)" in script
     assert 'SCRYGLASS_OE_TRANSPORT="oauth_drive_copy"' in script
+
+
+def test_offsite_redirect_is_refused_before_the_token_travels() -> None:
+    """The redirect handler must reject a non-Google Location outright."""
+    handler = oe_oauth_fetch._GoogleOnlyRedirectHandler()
+    request = urllib.request.Request(
+        "https://www.googleapis.com/drive/v3/files/x?alt=media",
+        headers={"Authorization": "Bearer sekrit"},
+    )
+    with pytest.raises(oe_oauth_fetch.OeOauthError):
+        handler.redirect_request(
+            request, None, 302, "Found", {}, "https://evil.example/steal"
+        )
+
+
+def test_google_redirect_is_followed() -> None:
+    handler = oe_oauth_fetch._GoogleOnlyRedirectHandler()
+    request = urllib.request.Request(
+        "https://www.googleapis.com/drive/v3/files/x?alt=media",
+        headers={"Authorization": "Bearer sekrit"},
+    )
+    followed = handler.redirect_request(
+        request, None, 302, "Found", {},
+        "https://doc-00-xyz.googleusercontent.com/download",
+    )
+    assert followed is not None
+
+
+def test_initial_offsite_url_is_refused() -> None:
+    request = urllib.request.Request(
+        "https://evil.example/api", headers={"Authorization": "Bearer sekrit"}
+    )
+    with pytest.raises(oe_oauth_fetch.OeOauthError):
+        oe_oauth_fetch._open_authorized(request, timeout=5.0)
