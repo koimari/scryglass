@@ -8,11 +8,6 @@
   <array>
     <string>__WORKER_ROOT__/run-public-refresh.sh</string>
   </array>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>SCRYGLASS_WORKER_COMMIT</key>
-    <string>__TESTED_WORKER_COMMIT__</string>
-  </dict>
   <key>StartCalendarInterval</key>
   <array>
     <dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>0</integer></dict>
