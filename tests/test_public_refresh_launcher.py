@@ -356,3 +356,60 @@ def test_argument_validation_survives_the_new_preamble(worker: Worker) -> None:
 
     assert result.returncode == 64
     assert "Usage: run-public-refresh.sh [--force]" in result.stderr
+
+
+def test_contended_reap_defers_and_preserves_the_lock(worker: Worker) -> None:
+    """A second launch observing the same dead owner must not delete a lock the
+    reap winner may already have replaced; the mkdir guard makes it defer."""
+    worker.lock.write_text(f"{_dead_pid()}\n", encoding="utf-8")
+    guard = worker.lock.with_name(worker.lock.name + ".reap.d")
+    guard.mkdir()
+    try:
+        result = _run(worker)
+        assert result.returncode == 75
+        assert "another launch is reaping" in result.stderr
+        assert worker.lock.exists()
+    finally:
+        guard.rmdir()
+
+
+def test_abandoned_reap_guard_is_cleared(worker: Worker) -> None:
+    """A guard stranded by a killed process must not block reaping forever."""
+    worker.lock.write_text(f"{_dead_pid()}\n", encoding="utf-8")
+    guard = worker.lock.with_name(worker.lock.name + ".reap.d")
+    guard.mkdir()
+    os.utime(guard, (0, 0))
+
+    result = _run(worker)
+
+    assert result.returncode == 75
+    assert "abandoned reap guard" in result.stderr
+    assert not guard.exists()
+
+
+def test_pinned_run_skips_the_origin_main_sync(worker: Worker) -> None:
+    """An explicit pin means run exactly this commit; the launcher must not
+    reset the checkout to origin/main and then fail its own pin check."""
+    _git("commit", "--allow-empty", "-m", "off-main test commit", cwd=worker.repo)
+    off_main = _head(worker.repo)
+
+    result = _run(worker, SCRYGLASS_WORKER_COMMIT=off_main)
+
+    assert result.returncode == PREAMBLE_STOP, result.stderr
+    assert "skipping the origin/main sync" in result.stdout
+    assert _head(worker.repo) == off_main
+    assert f"commit={off_main}" in result.stdout
+
+
+def test_fetch_failure_refuses_an_off_main_head(worker: Worker) -> None:
+    """Fail-open fetch is only safe for commits already on main; an off-main
+    leftover must not run because the network blipped."""
+    _git("commit", "--allow-empty", "-m", "off-main leftover", cwd=worker.repo)
+    off_main = _head(worker.repo)
+    _git("remote", "set-url", "origin", str(worker.root / "no-such-origin.git"), cwd=worker.repo)
+
+    result = _run(worker)
+
+    assert result.returncode == 78
+    assert "refusing to run unreviewed code" in result.stderr
+    assert _head(worker.repo) == off_main

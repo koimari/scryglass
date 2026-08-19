@@ -42,18 +42,51 @@ if [[ -f "${worker_lock}" ]]; then
     exit 75
   fi
   lock_owner="${lock_owner//[[:space:]]/}"
-  if [[ "${lock_owner}" =~ '^[1-9][0-9]*$' ]]; then
+  if [[ "${lock_owner}" =~ '^[1-9][0-9]*$' ]] && /bin/kill -0 "${lock_owner}" 2>/dev/null; then
     # Never signal pid 0: kill(0, 0) addresses the whole process group and
     # would report a dead owner as live. The pattern above excludes it.
-    if /bin/kill -0 "${lock_owner}" 2>/dev/null; then
-      print -u2 "Another Scryglass public refresh owns ${worker_lock} (pid ${lock_owner})."
+    print -u2 "Another Scryglass public refresh owns ${worker_lock} (pid ${lock_owner})."
+    exit 75
+  fi
+  # Reap inside a critical section. Two overlapping launches can both observe
+  # the same dead owner; without mutual exclusion the slower one may delete a
+  # NEW live lock that the faster one already acquired, and two refreshes then
+  # write the same cycle receipts concurrently. mkdir is atomic, so exactly one
+  # process wins the reap; the loser treats the lock as contended and exits.
+  reap_guard="${worker_lock}.reap.d"
+  if /bin/mkdir "${reap_guard}" 2>/dev/null; then
+    {
+      current_owner="$(/bin/cat "${worker_lock}" 2>/dev/null || true)"
+      current_owner="${current_owner//[[:space:]]/}"
+      if [[ "${current_owner}" == "${lock_owner}" ]]; then
+        /bin/rm -f "${worker_lock}"
+        if [[ "${lock_owner}" =~ '^[1-9][0-9]*$' ]]; then
+          print -r -- "public-refresh: reaped stale lock from pid ${lock_owner}"
+        else
+          print -r -- "public-refresh: reaped unreadable lock ${worker_lock}"
+        fi
+      else
+        print -u2 "public-refresh: lock changed owner during reap; leaving it."
+      fi
+    } always {
+      /bin/rmdir "${reap_guard}" 2>/dev/null || true
+    }
+    if [[ -f "${worker_lock}" ]]; then
       exit 75
     fi
-    /bin/rm -f "${worker_lock}"
-    print -r -- "public-refresh: reaped stale lock from pid ${lock_owner}"
   else
-    /bin/rm -f "${worker_lock}"
-    print -r -- "public-refresh: reaped unreadable lock ${worker_lock}"
+    # The guard itself must not become a new species of stale lock: a process
+    # killed inside the critical section would strand the directory and block
+    # every future reap. An abandoned guard is removed once it is clearly old;
+    # this run still defers, and the next scheduled run proceeds normally.
+    guard_age="$(( $(/bin/date +%s) - $(/usr/bin/stat -f %m "${reap_guard}" 2>/dev/null || /bin/date +%s) ))"
+    if (( guard_age > 600 )); then
+      /bin/rmdir "${reap_guard}" 2>/dev/null || true
+      print -u2 "public-refresh: cleared an abandoned reap guard (age ${guard_age}s); deferring to the next run."
+    else
+      print -u2 "public-refresh: another launch is reaping ${worker_lock}; deferring."
+    fi
+    exit 75
   fi
 fi
 
@@ -114,6 +147,24 @@ if (( fetch_ok )); then
   sync_target="$(/usr/bin/git -C "${repo_root}" rev-parse --verify --quiet refs/remotes/origin/main || true)"
 fi
 head_commit="$(/usr/bin/git -C "${repo_root}" rev-parse --verify HEAD)"
+if [[ -n "${SCRYGLASS_WORKER_COMMIT:-}" ]]; then
+  # An explicit pin is the operator saying "run exactly this commit". Resetting
+  # to origin/main here would move the checkout and then fail the pin check,
+  # which made the documented off-main testing workflow unusable. Pinned runs
+  # skip the sync; every downstream consistency check still applies.
+  print -r -- "public-refresh: SCRYGLASS_WORKER_COMMIT is set; skipping the origin/main sync."
+  sync_target=""
+elif (( ! fetch_ok )); then
+  # The fail-open fetch is only safe when the commit we would run has already
+  # passed the main branch gates. With no fresh origin/main, require HEAD to be
+  # an ancestor of the CACHED origin/main; an off-main leftover from a manual
+  # test must not publish just because the network blipped.
+  cached_main="$(/usr/bin/git -C "${repo_root}" rev-parse --verify --quiet refs/remotes/origin/main || true)"
+  if [[ -z "${cached_main}" ]] || ! /usr/bin/git -C "${repo_root}" merge-base --is-ancestor "${head_commit}" "${cached_main}"; then
+    print -u2 "public-refresh: fetch failed and HEAD ${head_commit} is not on the cached origin/main; refusing to run unreviewed code."
+    exit 78
+  fi
+fi
 if [[ -n "${sync_target}" && "${sync_target}" != "${head_commit}" ]]; then
   # Never reset over local work. A dirty checkout keeps its commit and still
   # fails the mandatory check below, which is the loud outcome an operator who
@@ -130,7 +181,12 @@ fi
 # the worker root, so an improvement to this file would otherwise never reach a
 # scheduled run. Re-exec at most once: if the copy still differs afterwards the
 # install is broken, and looping would be worse than stopping.
-if [[ -f "${launcher_source}" ]] && ! /usr/bin/cmp -s "${launcher_source}" "${launcher_installed}"; then
+# Never adopt a launcher from a dirty checkout. When HEAD already equals
+# origin/main the sync block above does not run its cleanliness check, and
+# copying here would execute unreviewed local edits BEFORE the mandatory
+# dirty-checkout guard below could refuse the run.
+if [[ -f "${launcher_source}" ]] && ! /usr/bin/cmp -s "${launcher_source}" "${launcher_installed}" \
+  && [[ -z "$(/usr/bin/git -C "${repo_root}" status --porcelain=v1 --untracked-files=normal)" ]]; then
   if [[ "${SCRYGLASS_LAUNCHER_REEXEC:-}" == "1" ]]; then
     print -u2 "The installed launcher still differs from ${launcher_source} after one re-exec."
     exit 78
