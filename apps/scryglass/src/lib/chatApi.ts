@@ -255,7 +255,17 @@ export async function readChatJson<T>(relativePath: string, signal?: AbortSignal
  * retries 503.
  */
 export function chatQueryFailureStatus(error: unknown): 422 | 503 {
-  return error instanceof Error && /has a different release/.test(error.message) ? 503 : 422;
+  if (!(error instanceof Error)) return 422;
+  // Timeouts are transient by definition. The bounded-query RPC carries its
+  // own 5s AbortSignal.timeout, and in the seconds after a release activates
+  // the new release's query rows are cold, so that inner abort fires and the
+  // catch-all used to publish it as 422 - a permanent status the post-publish
+  // probe refuses to retry. Measured live: {"reason":"The operation was
+  // aborted due to timeout"} at exactly the activation window, rolling back
+  // an otherwise good release.
+  if (error.name === "TimeoutError" || error.name === "AbortError") return 503;
+  if (/aborted due to.*timeout/i.test(error.message)) return 503;
+  return /has a different release/.test(error.message) ? 503 : 422;
 }
 
 export function searchParams(request: Request): URLSearchParams {
