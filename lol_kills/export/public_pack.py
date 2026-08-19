@@ -26,6 +26,10 @@ import pyarrow.parquet as pq
 from lol_kills.etl.aliases import normalize_champ
 from lol_kills.export import pack_spec as spec
 from lol_kills.export.leaderboards import build_leaderboards
+from lol_kills.export.player_map_stats import (
+    build_player_map_stats,
+    player_map_stats_row_count,
+)
 from lol_kills.export.pack_records import (
     _draft_text,
     build_maps_frame_from_team_games,
@@ -1842,6 +1846,11 @@ def export_public_pack(
         draft_metadata=_draft_metadata_from_maps(maps_for_records),
         include_archive=True,
     )
+    # Built from the same canonical archive frame as the profile records above,
+    # so the Stats tab can never describe a map the rest of the profile — or the
+    # ratings fit on this census — does not have.
+    progress("building per-map profile statistics")
+    player_map_stats_payload = build_player_map_stats(player_profile_frame)
     progress("checking composition publication authority")
     composition_source_digest = source_identity_sha256(source_game_ids)
     composition_worker_commit = resolve_worker_commit(project)
@@ -2274,6 +2283,22 @@ def export_public_pack(
             "columns": None,
         },
         "features/profile_records.json",
+    )
+
+    player_map_stats_dest = feat_dir / "player_map_stats.json"
+    player_map_stats_dest.write_text(
+        json.dumps(player_map_stats_payload, separators=(",", ":"), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    register(
+        {
+            "rows": player_map_stats_row_count(player_map_stats_payload),
+            "cols": None,
+            "bytes": player_map_stats_dest.stat().st_size,
+            "sha256": _sha256(player_map_stats_dest),
+            "columns": None,
+        },
+        "features/player_map_stats.json",
     )
 
     if draft_records_payload is not None and draft_published:

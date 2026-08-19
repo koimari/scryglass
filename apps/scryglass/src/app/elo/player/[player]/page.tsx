@@ -13,6 +13,7 @@ import { compactPlayerRatings, findPlayerByRouteName, hasPublishedDraftAuthority
 import { draftRankingsFromProfile, filterDraftRankings } from "@/lib/draftRankings";
 import { playerPortrait } from "@/lib/playerPortraits";
 import { playerPositionDeltas } from "@/lib/playerMovement";
+import { readMapStatsEntry } from "@/lib/playerMapStats";
 import { getPlayerProfile, queryApiAvailable } from "@/lib/publicData";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
@@ -53,6 +54,7 @@ export default async function PlayerEloPage({ params }: Props) {
       profile.row.payload.weekly,
       record?.current_tier ?? profile.row.tier,
     );
+    const mapStats = await readMapStatsEntry(man, "players", player.player);
     return (
       <PlayerRatingProfile
         player={player}
@@ -77,6 +79,11 @@ export default async function PlayerEloPage({ params }: Props) {
           poolDefinition: profile.draft_metric.pool_definition ?? null,
           banCoverage: profile.draft_metric.ban_coverage ?? null,
           scope: profile.draft_metric.scope === "whole_archive" ? "whole_archive" : "profile_window",
+        } : null}
+        mapStats={mapStats ? {
+          entry: mapStats.entry,
+          windowDays: mapStats.window_days,
+          mapLimit: mapStats.map_limit,
         } : null}
       />
     );
