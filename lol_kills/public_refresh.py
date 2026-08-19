@@ -1205,39 +1205,68 @@ _PROBE_TIMELINE_PATHS = (
 )
 
 
-def _sample_probe_timeline(config: "RefreshConfig", release_id: str) -> None:
-    """Record how the public app behaves in the seconds after activation."""
+def _sample_probe_timeline(
+    config: "RefreshConfig",
+    release_id: str,
+    *,
+    activated: bool,
+) -> None:
+    """Record how the public app behaves in the seconds after activation.
+
+    Only meaningful immediately after a real activation, so it is skipped when a
+    refresh made no change: a no-change run would otherwise append steady-state
+    sweeps carrying the existing release id, in the same shape as genuine
+    post-activation samples, and quietly contaminate the dataset.
+
+    Each record carries the OBSERVED offset, not the intended one. Sweeps run
+    their endpoints sequentially, so one slow or timing-out request pushes the
+    rest late and the following sweep fires immediately to catch up. Stamping
+    the nominal offset made samples taken at 16.5s read as 5s in the first run
+    of this diagnostic, which is measuring the schedule rather than the system.
+    """
 
     destination = os.environ.get("SCRYGLASS_PROBE_TIMELINE_PATH")
-    if not destination:
+    if not destination or not activated:
         return
     started = time.monotonic()
-    for offset in _PROBE_TIMELINE_OFFSETS:
-        wait = offset - (time.monotonic() - started)
+    for nominal in _PROBE_TIMELINE_OFFSETS:
+        wait = nominal - (time.monotonic() - started)
         if wait > 0:
             time.sleep(wait)
         for path in _PROBE_TIMELINE_PATHS:
+            begin = time.monotonic()
             record: dict[str, Any] = {
                 "release_id": release_id,
-                "offset_s": offset,
+                "nominal_offset_s": nominal,
+                "offset_s": round(begin - started, 3),
                 "path": path,
                 "utc": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             }
-            begin = time.monotonic()
+            request = urllib.request.Request(
+                f"{config.site}{path}",
+                headers={"Cache-Control": "no-cache"},
+                method="GET",
+            )
             try:
-                raw = _http_bytes(
-                    f"{config.site}{path}",
-                    headers={"Cache-Control": "no-cache"},
-                    attempts=1,
-                    timeout=45.0,
-                )
+                # Read the response directly rather than through _http_bytes so
+                # the canonical X-Scryglass-Release header is visible. The chat
+                # routes do not serialize the release into the body, so a body
+                # substring search reported has_release_marker false for healthy,
+                # correctly aligned responses.
+                with urllib.request.urlopen(request, timeout=45.0) as response:
+                    raw = response.read()
+                    served = response.headers.get("X-Scryglass-Release", "")
                 record["ok"] = True
                 record["bytes"] = len(raw)
-                served = raw.decode("utf-8", "replace")
-                record["has_release_marker"] = (
-                    f'data-scryglass-release="{release_id}"' in served
-                    or f'"{release_id}"' in served
-                )
+                record["served_release"] = served or None
+                if served:
+                    record["release_matches"] = served == release_id
+                else:
+                    body = raw.decode("utf-8", "replace")
+                    marker = f'data-scryglass-release="{release_id}"'
+                    record["release_matches"] = (
+                        marker in body if "data-scryglass-release" in body else None
+                    )
             except Exception as error:  # noqa: BLE001 - measurement must not break a run
                 record["ok"] = False
                 record["error"] = f"{type(error).__name__}: {error}"[:160]
@@ -1631,7 +1660,11 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             ledger.advance("invalidate_cache", release_id=ledger_release_id)
         active_release_id = str(ratings.get("pack_id") or "")
         cache = invalidate_public_cache(config, active_release_id) if changed else None
-        _sample_probe_timeline(config, active_release_id)
+        _sample_probe_timeline(
+            config,
+            active_release_id,
+            activated=bool(changed and database_publication is not None),
+        )
         cache_probes = probe_public_release_families(config, active_release_id)
         failure_stage = "smoke"
         if ledger is not None:
