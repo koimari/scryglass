@@ -289,7 +289,7 @@ function MapStatsSection({ stats, kind, subject }: { stats: MapStats; kind: MapS
   // same-day series by lexicographic game id (suffix _10 ahead of _9).
   const games = entry.games;
   return (
-    <section className={styles.section} aria-label={`${subject} per-game statistics`}>
+    <section id="stats" className={styles.section} aria-label={`${subject} per-game statistics`}>
       <div className={styles.sectionHeader}>
         <div><p>Last {windowDays} days</p><h2>Stats</h2></div>
         <span>{gameCount(entry.maps)}{entry.maps >= mapLimit ? ` · newest ${mapLimit}` : ""}</span>
