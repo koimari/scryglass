@@ -1187,6 +1187,98 @@ def invalidate_public_cache(config: RefreshConfig, release_id: str) -> dict[str,
     return payload
 
 
+
+# Optional post-activation diagnostic. Inert unless SCRYGLASS_PROBE_TIMELINE_PATH
+# is set, so it costs nothing on a normal run.
+# Four consecutive releases rolled back in the cache stage on four DIFFERENT
+# probe endpoints. A steady-state sweep of all 26 probes is clean (0 failures,
+# 21s), so the degradation is specific to the window after activation. This
+# samples the heaviest endpoints on a timeline so the recovery curve is measured
+# rather than inferred.
+_PROBE_TIMELINE_OFFSETS = (0.0, 5.0, 15.0, 30.0, 60.0, 120.0)
+_PROBE_TIMELINE_PATHS = (
+    "/api/chat/query_players?q=who+has+the+better+rating+between+Faker+and+Chovy",
+    "/api/chat/query_champions?q=who+is+the+best+Galio+player",
+    "/api/chat/query_drafts?q=which+team+has+the+best+draft",
+    "/tiers",
+    "/packs/manifest.json",
+)
+
+
+def _sample_probe_timeline(
+    config: "RefreshConfig",
+    release_id: str,
+    *,
+    activated: bool,
+) -> None:
+    """Record how the public app behaves in the seconds after activation.
+
+    Only meaningful immediately after a real activation, so it is skipped when a
+    refresh made no change: a no-change run would otherwise append steady-state
+    sweeps carrying the existing release id, in the same shape as genuine
+    post-activation samples, and quietly contaminate the dataset.
+
+    Each record carries the OBSERVED offset, not the intended one. Sweeps run
+    their endpoints sequentially, so one slow or timing-out request pushes the
+    rest late and the following sweep fires immediately to catch up. Stamping
+    the nominal offset made samples taken at 16.5s read as 5s in the first run
+    of this diagnostic, which is measuring the schedule rather than the system.
+    """
+
+    destination = os.environ.get("SCRYGLASS_PROBE_TIMELINE_PATH")
+    if not destination or not activated:
+        return
+    started = time.monotonic()
+    for nominal in _PROBE_TIMELINE_OFFSETS:
+        wait = nominal - (time.monotonic() - started)
+        if wait > 0:
+            time.sleep(wait)
+        for path in _PROBE_TIMELINE_PATHS:
+            begin = time.monotonic()
+            record: dict[str, Any] = {
+                "release_id": release_id,
+                "nominal_offset_s": nominal,
+                "offset_s": round(begin - started, 3),
+                "path": path,
+                "utc": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            }
+            request = urllib.request.Request(
+                f"{config.site}{path}",
+                headers={"Cache-Control": "no-cache"},
+                method="GET",
+            )
+            try:
+                # Read the response directly rather than through _http_bytes so
+                # the canonical X-Scryglass-Release header is visible. The chat
+                # routes do not serialize the release into the body, so a body
+                # substring search reported has_release_marker false for healthy,
+                # correctly aligned responses.
+                with urllib.request.urlopen(request, timeout=45.0) as response:
+                    raw = response.read()
+                    served = response.headers.get("X-Scryglass-Release", "")
+                record["ok"] = True
+                record["bytes"] = len(raw)
+                record["served_release"] = served or None
+                if served:
+                    record["release_matches"] = served == release_id
+                else:
+                    body = raw.decode("utf-8", "replace")
+                    marker = f'data-scryglass-release="{release_id}"'
+                    record["release_matches"] = (
+                        marker in body if "data-scryglass-release" in body else None
+                    )
+            except Exception as error:  # noqa: BLE001 - measurement must not break a run
+                record["ok"] = False
+                record["error"] = f"{type(error).__name__}: {error}"[:160]
+            record["seconds"] = round(time.monotonic() - begin, 3)
+            try:
+                with open(destination, "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, sort_keys=True) + "\n")
+                    handle.flush()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def probe_public_release_families(
     config: RefreshConfig,
     release_id: str,
@@ -1568,6 +1660,11 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             ledger.advance("invalidate_cache", release_id=ledger_release_id)
         active_release_id = str(ratings.get("pack_id") or "")
         cache = invalidate_public_cache(config, active_release_id) if changed else None
+        _sample_probe_timeline(
+            config,
+            active_release_id,
+            activated=bool(changed and database_publication is not None),
+        )
         cache_probes = probe_public_release_families(config, active_release_id)
         failure_stage = "smoke"
         if ledger is not None:
