@@ -297,6 +297,7 @@ if [[ "${resume_cycle}" -eq 0 ]]; then
   need_browser_download=0
   if (( oe_fetch_status == 0 )); then
     print -r -- "public-refresh: headless Oracle's Elixir download wrote ${oe_candidate}"
+    export SCRYGLASS_OE_TRANSPORT="anonymous_https_drive_download"
   elif (( oe_fetch_status == 75 )); then
     # A Drive quota block leaves the previous download in place, and that file
     # is real data - only its age is in question. Reuse it while it is inside
@@ -321,6 +322,7 @@ if [[ "${resume_cycle}" -eq 0 ]]; then
     if (( oe_existing_mtime > oe_fresh_after )); then
       print -r -- "public-refresh: headless blocked by quota; existing CSV is fresh enough (${oe_csv}, within ${oe_max_age_days} days) - proceeding without Brave"
       oe_install_source="${oe_csv}"
+      export SCRYGLASS_OE_TRANSPORT="cached_inbox_reuse"
     else
       print -u2 "public-refresh: headless blocked by quota and ${oe_csv} is missing or older than ${oe_max_age_days} days; falling back to the Brave download."
       need_browser_download=1
@@ -331,6 +333,7 @@ if [[ "${resume_cycle}" -eq 0 ]]; then
   fi
 
   if (( need_browser_download )); then
+    export SCRYGLASS_OE_TRANSPORT="brave_origin_browser_download"
     rm -f "${oe_candidate}" "${oe_candidate}.crdownload" "${oe_partial}"
     /usr/bin/open -a "Brave Origin" "${oe_download_url}"
 

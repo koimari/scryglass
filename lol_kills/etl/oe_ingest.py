@@ -644,6 +644,13 @@ def install_browser_download(candidate_path: Path, year: str | int) -> Path:
     """Validate and atomically install an annual CSV downloaded by Brave Origin."""
 
     y = str(year)
+    # The transport is whatever acquisition path actually won in the launcher
+    # ladder, exported as SCRYGLASS_OE_TRANSPORT. The receipt must record what
+    # HAPPENED, not what this function was historically named for: after the
+    # headless-first change the common path is anonymous HTTPS, and a receipt
+    # asserting browser transport for those bytes would be false provenance.
+    # An unset variable proves nothing, so it is recorded as exactly that.
+    transport = os.environ.get("SCRYGLASS_OE_TRANSPORT") or "local_candidate_unverified_transport"
     source = candidate_path.expanduser().resolve()
     destination = oe_csv_path(y)
     RAW_OE_DIR.mkdir(parents=True, exist_ok=True)
@@ -708,7 +715,7 @@ def install_browser_download(candidate_path: Path, year: str | int) -> Path:
         "status": status,
         "source": {
             "provider": "Oracle's Elixir",
-            "transport": "brave_origin_browser_download",
+            "transport": transport,
             "locator": f"https://drive.google.com/uc?export=download&id={OE_DRIVE_IDS.get(y, '')}",
             "drive_file_id": OE_DRIVE_IDS.get(y),
             "folder_locator": OE_FOLDER,
@@ -725,14 +732,14 @@ def install_browser_download(candidate_path: Path, year: str | int) -> Path:
             "betting_authority": False,
         },
         "claim_ceiling": (
-            "This receipt proves browser transport, structural validation, temporal coverage, "
-            "and exact source bytes only. It does not validate a model, probability, odds, "
-            "recommendation, or wager."
+            "This receipt proves the recorded transport, structural validation, temporal "
+            "coverage, and exact source bytes only. It does not validate a model, "
+            "probability, odds, recommendation, or wager."
         ),
     }
     receipt_path = _write_refresh_receipt(receipt)
     print(
-        f"[oe] {status} browser download {destination.name}; "
+        f"[oe] {status} {transport} {destination.name}; "
         f"max={candidate['date_max_utc']} sha256={candidate['raw_sha256']} "
         f"receipt={receipt_path.name}"
     )
