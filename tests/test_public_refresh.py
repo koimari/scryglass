@@ -1589,4 +1589,10 @@ def test_systemd_worker_cannot_start_without_production_environment() -> None:
     plist = (
         root / "ops/launchd/xyz.scryglass.public-refresh.plist.template"
     ).read_text(encoding="utf-8")
-    assert "__TESTED_WORKER_COMMIT__" in plist
+    # The launch agent no longer injects a commit. The launcher syncs the
+    # checkout to origin/main and derives SCRYGLASS_WORKER_COMMIT from HEAD, so
+    # a template placeholder would only reintroduce the re-render step whose
+    # omission failed scheduled runs against refresh_ledger.worker_commit.
+    assert "__TESTED_WORKER_COMMIT__" not in plist
+    assert "SCRYGLASS_WORKER_COMMIT" not in plist
+    assert "__WORKER_ROOT__/run-public-refresh.sh" in plist

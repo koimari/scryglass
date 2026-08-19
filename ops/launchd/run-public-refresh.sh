@@ -11,22 +11,171 @@ elif [[ "$#" -ne 0 ]]; then
   exit 64
 fi
 
+# Curate PATH before anything else runs: the self-healing preamble below shells
+# out to git, and launchd hands this script a minimal environment.
+export PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
 worker_root="${SCRYGLASS_WORKER_ROOT:-${HOME}/Library/Application Support/Scryglass Worker}"
 repo_root="${worker_root}/repo"
 public_root="${worker_root}/public-packs"
 runtime_root="${worker_root}/runtime"
 python="${worker_root}/venv/bin/python"
+worker_lock="${runtime_root}/data/lol/runtime/public-refresh-worker.lock"
+launcher_installed="${worker_root}/run-public-refresh.sh"
+launcher_source="${repo_root}/ops/launchd/run-public-refresh.sh"
+
+# Reap a lock whose owner is gone, before anything else touches the worker.
+#
+# /usr/bin/shlock is documented to reclaim a lock held by a dead process, but
+# the macOS implementation gates that takeover on the lock file's ctime and
+# refuses whenever that ctime is not strictly older than the invocation. A lock
+# left behind by a killed run therefore keeps blocking every later run as soon
+# as anything restamps its ctime: a same-second restart, a chmod, a copy, a
+# restore from backup. Runs were wedged this way and had to be unblocked by
+# hand. Decide staleness here so the cycle never depends on that heuristic.
+# A lock whose owner is still running is left alone and still refuses the run.
+if [[ -f "${worker_lock}" ]]; then
+  # A lock that cannot be read cannot be proven stale, so it is refused rather
+  # than reaped: removing it might remove a live owner's lock.
+  if ! lock_owner="$(/bin/cat "${worker_lock}" 2>/dev/null)"; then
+    print -u2 "Cannot read ${worker_lock} to identify its owner."
+    exit 75
+  fi
+  lock_owner="${lock_owner//[[:space:]]/}"
+  if [[ "${lock_owner}" =~ '^[1-9][0-9]*$' ]]; then
+    # Never signal pid 0: kill(0, 0) addresses the whole process group and
+    # would report a dead owner as live. The pattern above excludes it.
+    if /bin/kill -0 "${lock_owner}" 2>/dev/null; then
+      print -u2 "Another Scryglass public refresh owns ${worker_lock} (pid ${lock_owner})."
+      exit 75
+    fi
+    /bin/rm -f "${worker_lock}"
+    print -r -- "public-refresh: reaped stale lock from pid ${lock_owner}"
+  else
+    /bin/rm -f "${worker_lock}"
+    print -r -- "public-refresh: reaped unreadable lock ${worker_lock}"
+  fi
+fi
+
+# Run a command under a wall-clock bound. macOS ships no timeout(1), and a
+# stalled fetch must never hold the schedule open. Returns the command's own
+# status, or 124 when the bound is reached.
+bounded_run () {
+  local timeout_seconds=$1
+  shift
+  local waited=0
+  # Not named "status": zsh reserves that as a read-only alias for $?.
+  local job_status=0
+  "$@" &
+  local job_pid=$!
+  while (( waited < timeout_seconds )); do
+    /bin/kill -0 "${job_pid}" 2>/dev/null || break
+    /bin/sleep 1
+    (( waited += 1 ))
+  done
+  if /bin/kill -0 "${job_pid}" 2>/dev/null; then
+    /bin/kill -TERM "${job_pid}" 2>/dev/null || true
+    /bin/sleep 1
+    /bin/kill -KILL "${job_pid}" 2>/dev/null || true
+    wait "${job_pid}" 2>/dev/null || true
+    return 124
+  fi
+  if wait "${job_pid}"; then
+    job_status=0
+  else
+    job_status=$?
+  fi
+  return ${job_status}
+}
+
+# Sync the worker checkout to origin/main.
+#
+# Pinning the tested commit by hand took four steps -- sync the repo, copy this
+# launcher, render the plist, reload the agent -- and skipping any one of them
+# failed the run against refresh_ledger.worker_commit after an hour of work.
+# main is the tested branch: merging into it requires green required checks and
+# resolved review threads. So the launcher moves itself to origin/main and
+# derives the commit from the checkout instead of trusting an injected pin.
+#
+# Fetch is fail-open and consistency is fail-closed: a network blip must not
+# cancel a refresh, but a checkout that disagrees with itself must still stop.
+fetch_ok=0
+if bounded_run 120 /usr/bin/env GIT_TERMINAL_PROMPT=0 /usr/bin/git -C "${repo_root}" \
+  -c http.lowSpeedLimit=1024 \
+  -c http.lowSpeedTime=30 \
+  fetch --quiet origin '+refs/heads/main:refs/remotes/origin/main'; then
+  fetch_ok=1
+else
+  print -u2 "public-refresh: could not fetch origin/main; continuing on the current checkout."
+fi
+
+sync_target=""
+if (( fetch_ok )); then
+  sync_target="$(/usr/bin/git -C "${repo_root}" rev-parse --verify --quiet refs/remotes/origin/main || true)"
+fi
+head_commit="$(/usr/bin/git -C "${repo_root}" rev-parse --verify HEAD)"
+if [[ -n "${sync_target}" && "${sync_target}" != "${head_commit}" ]]; then
+  # Never reset over local work. A dirty checkout keeps its commit and still
+  # fails the mandatory check below, which is the loud outcome an operator who
+  # is editing the worker in place needs to see.
+  if [[ -n "$(/usr/bin/git -C "${repo_root}" status --porcelain=v1 --untracked-files=normal)" ]]; then
+    print -u2 "public-refresh: worker checkout is dirty; not syncing ${head_commit} to ${sync_target}."
+  else
+    print -r -- "public-refresh: syncing worker checkout ${head_commit} to ${sync_target}"
+    /usr/bin/git -C "${repo_root}" reset --hard --quiet "${sync_target}"
+  fi
+fi
+
+# Adopt the launcher that the synced commit ships. launchd invokes the copy at
+# the worker root, so an improvement to this file would otherwise never reach a
+# scheduled run. Re-exec at most once: if the copy still differs afterwards the
+# install is broken, and looping would be worse than stopping.
+if [[ -f "${launcher_source}" ]] && ! /usr/bin/cmp -s "${launcher_source}" "${launcher_installed}"; then
+  if [[ "${SCRYGLASS_LAUNCHER_REEXEC:-}" == "1" ]]; then
+    print -u2 "The installed launcher still differs from ${launcher_source} after one re-exec."
+    exit 78
+  fi
+  /bin/cp -f "${launcher_source}" "${launcher_installed}"
+  /bin/chmod 700 "${launcher_installed}"
+  print -r -- "public-refresh: installed launcher from ${launcher_source}; re-executing"
+  export SCRYGLASS_LAUNCHER_REEXEC=1
+  exec "${launcher_installed}" "$@"
+fi
+
+# Bind the run to a commit. SCRYGLASS_WORKER_COMMIT is still honoured when it is
+# set, so an operator can pin a manual test run to an exact commit. When it is
+# unset the launcher derives it from the synced checkout, which makes the
+# refresh_ledger.worker_commit check hold by construction rather than by an
+# operator remembering to re-render the launch agent. The clean-checkout
+# requirement is mandatory in both modes.
+real_worker_commit="$(/usr/bin/git -C "${repo_root}" rev-parse --verify HEAD)"
+if [[ -n "${SCRYGLASS_WORKER_COMMIT:-}" ]]; then
+  if [[ ! "${SCRYGLASS_WORKER_COMMIT}" =~ '^[0-9a-f]{40}$' ]]; then
+    print -u2 "SCRYGLASS_WORKER_COMMIT must name the tested worker commit."
+    exit 78
+  fi
+  if [[ "${SCRYGLASS_WORKER_COMMIT}" != "${real_worker_commit}" ]]; then
+    print -u2 "The worker HEAD differs from SCRYGLASS_WORKER_COMMIT."
+    exit 78
+  fi
+else
+  SCRYGLASS_WORKER_COMMIT="${real_worker_commit}"
+fi
+if [[ -n "$(/usr/bin/git -C "${repo_root}" status --porcelain=v1 --untracked-files=normal)" ]]; then
+  print -u2 "The worker checkout contains uncommitted files."
+  exit 78
+fi
+export SCRYGLASS_WORKER_COMMIT
+
 "${repo_root}/ops/verify-public-refresh-env.sh" "${repo_root}" "${worker_root}/venv"
 oe_inbox="${worker_root}/oe-inbox"
 cycle_id="$("${python}" -c 'from datetime import datetime; now=datetime.now(); print(f"{now:%Y%m%d}T{now.hour // 6 * 6:02d}0000")')"
 run_root="${runtime_root}/data/lol/runtime/cycles/${cycle_id}"
-worker_lock="${runtime_root}/data/lol/runtime/public-refresh-worker.lock"
 oe_year="2026"
 oe_name="${oe_year}_LoL_esports_match_data_from_OraclesElixir.csv"
 oe_candidate="${oe_inbox}/${oe_name}"
 oe_download_url="https://drive.google.com/uc?export=download&id=1hnpbrUpBMS1TZI7IovfpKeZfWJH1Aptm"
 
-export PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export SCRYGLASS_PUBLIC_RELEASE=1
 export SCRYGLASS_PUBLISH_ORIGIN="https://scryglass.xyz"
 export SCRYGLASS_PUBLICATION_BACKEND="supabase"
@@ -60,20 +209,6 @@ oe_csv="${raw_oe_dir}/${oe_name}"
 # genuinely missing file is still caught downstream by _validate_oe_csv and by
 # the source-receipt check, which fail loudly and name the path.
 
-real_worker_commit="$(/usr/bin/git -C "${repo_root}" rev-parse --verify HEAD)"
-if [[ ! "${SCRYGLASS_WORKER_COMMIT:-}" =~ '^[0-9a-f]{40}$' ]]; then
-  print -u2 "SCRYGLASS_WORKER_COMMIT must name the tested worker commit."
-  exit 78
-fi
-if [[ "${SCRYGLASS_WORKER_COMMIT}" != "${real_worker_commit}" ]]; then
-  print -u2 "The worker HEAD differs from SCRYGLASS_WORKER_COMMIT."
-  exit 78
-fi
-if [[ -n "$(/usr/bin/git -C "${repo_root}" status --porcelain=v1 --untracked-files=normal)" ]]; then
-  print -u2 "The worker checkout contains uncommitted files."
-  exit 78
-fi
-export SCRYGLASS_WORKER_COMMIT
 export SCRYGLASS_SUPABASE_SECRET_KEY="$(
   /usr/bin/security find-generic-password \
     -a scryglass-public-worker \

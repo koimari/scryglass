@@ -30,11 +30,46 @@ The installed runtime uses these paths:
 - `~/Library/Application Support/Scryglass Worker/oe-inbox`
 - `~/Library/LaunchAgents/xyz.scryglass.public-refresh.plist`
 
-Use `ops/launchd/run-public-refresh.sh` for manual runs. The repository remains
-detached at a tested production commit until an operator updates it. Replace
-`__TESTED_WORKER_COMMIT__` in the launch-agent template with the exact
-40-character commit. The worker stops when the real HEAD differs or the
-checkout contains uncommitted files.
+Use `ops/launchd/run-public-refresh.sh` for manual runs.
+
+The launcher pins itself. Every run starts by fetching `origin/main` and, when
+the checkout is clean and behind, resetting the worker checkout onto it. It
+then reinstalls itself from `ops/launchd/run-public-refresh.sh` in the synced
+commit if the installed copy differs, re-executes once, and derives
+`SCRYGLASS_WORKER_COMMIT` from the resulting HEAD. The launch agent therefore
+carries no commit and needs no re-render when main moves.
+
+This is safe because main is the tested branch: merging into it requires green
+required checks and resolved review threads, so nothing reaches main untested.
+The binding is not weakened either. `refresh_ledger.worker_commit` still
+verifies the environment against the real HEAD and still refuses a dirty
+checkout; deriving the value simply makes that check hold by construction
+instead of by an operator remembering to re-render the launch agent. Every
+receipt and ledger entry stays bound to the exact commit that produced it.
+
+Failure handling is deliberately asymmetric. A failed fetch is fail-open: the
+run logs a warning and continues on the commit already checked out, because a
+network blip must not cancel a refresh. Everything about consistency is
+fail-closed: a dirty checkout is never reset and never synced over, and it
+still stops the run with `The worker checkout contains uncommitted files`.
+
+Export `SCRYGLASS_WORKER_COMMIT` to pin a manual run to an exact commit. The
+launcher then requires the real HEAD to equal it and stops otherwise, which is
+the behaviour to use when testing a commit that is not on main yet.
+
+A run that is killed leaves `runtime/data/lol/runtime/public-refresh-worker.lock`
+behind. `shlock` is documented to reclaim such a lock, but the macOS build gates
+the takeover on the lock file's ctime and refuses when that ctime is not
+strictly older than the invocation, so a leftover lock could block every later
+run until it was deleted by hand. The launcher now reads the owning pid first
+and removes the lock only when that process is gone. A lock held by a live
+process is never removed and still refuses the run.
+
+Because the checkout syncs before `ops/verify-public-refresh-env.sh` runs, a
+commit that changes `requirements.lock` stops the run with
+`The worker environment does not match requirements.lock` until an operator
+reinstalls the worker venv. That is intended: the worker must not publish from
+an environment that does not match the commit it is attesting to.
 
 The launch script locks the complete cycle before it opens Brave. The accepted
 source receipt and import receipt bind all later stages to the same 2026 file.
