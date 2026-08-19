@@ -252,7 +252,7 @@ const TEAM_MAP_STATS_COLUMNS: MapStatsColumn[] = [
 
 function mapStatsSummary(entry: MapStatsEntry, kind: MapStatsKind): Array<[string, string]> {
   const shared: Array<[string, string]> = [
-    ["Maps", String(entry.maps)],
+    ["Games", String(entry.maps)],
     ["Record", `${entry.wins}–${entry.losses}`],
     ["Win rate", entry.win_rate == null ? "—" : percentLabel(entry.win_rate)],
   ];
@@ -284,11 +284,12 @@ function mapStatsSummary(entry: MapStatsEntry, kind: MapStatsKind): Array<[strin
 function MapStatsSection({ stats, kind, subject }: { stats: MapStats; kind: MapStatsKind; subject: string }) {
   const { entry, windowDays, mapLimit } = stats;
   const columns = kind === "teams" ? TEAM_MAP_STATS_COLUMNS : PLAYER_MAP_STATS_COLUMNS;
-  const games = [...entry.games].sort((a, b) => (
-    a.date === b.date ? b.game_id.localeCompare(a.game_id) : b.date.localeCompare(a.date)
-  ));
+  // The artifact is already ordered newest-first by full timestamp and source
+  // sequence; re-sorting on the calendar-day string here would scramble
+  // same-day series by lexicographic game id (suffix _10 ahead of _9).
+  const games = entry.games;
   return (
-    <section className={styles.section} aria-label={`${subject} per-map statistics`}>
+    <section className={styles.section} aria-label={`${subject} per-game statistics`}>
       <div className={styles.sectionHeader}>
         <div><p>Last {windowDays} days</p><h2>Stats</h2></div>
         <span>{gameCount(entry.maps)}{entry.maps >= mapLimit ? ` · newest ${mapLimit}` : ""}</span>
@@ -299,11 +300,12 @@ function MapStatsSection({ stats, kind, subject }: { stats: MapStats; kind: MapS
         ))}
       </dl>
       {games.length ? (
-        <div className={styles.mapStatsScroll} data-testid="map-stats-scroll" tabIndex={0} role="region" aria-label={`${subject} per-map statistics table`}>
+        <div className={styles.mapStatsScroll} data-testid="map-stats-scroll" tabIndex={0} role="region" aria-label={`${subject} per-game statistics table`}>
           <table className={styles.mapStatsTable} data-testid="map-stats-table">
             <thead>
               <tr>
                 <th scope="col">Date</th>
+                <th scope="col">League</th>
                 <th scope="col">Opponent</th>
                 <th scope="col">Result</th>
                 {columns.map((column) => (
@@ -316,6 +318,7 @@ function MapStatsSection({ stats, kind, subject }: { stats: MapStats; kind: MapS
               {games.map((game) => (
                 <tr key={game.game_id}>
                   <td>{shortDate(game.date)}</td>
+                  <td>{game.league ?? "—"}</td>
                   <td>{game.opponent ?? "—"}</td>
                   <td className={game.win ? styles.win : styles.loss}>{game.win ? "Win" : "Loss"}</td>
                   {columns.map((column) => <td key={column.key}>{column.value(game)}</td>)}
@@ -325,9 +328,9 @@ function MapStatsSection({ stats, kind, subject }: { stats: MapStats; kind: MapS
             </tbody>
           </table>
         </div>
-      ) : <p className={styles.empty}>No published maps fall inside this window.</p>}
+      ) : <p className={styles.empty}>No published games fall inside this window.</p>}
       <p className={styles.mapStatsLegend}>
-        Descriptive per-map measurements from the same accepted games the ratings are fit on.
+        Descriptive per-game measurements from the same accepted games the ratings are fit on.
         A dash means the source did not publish that measurement for that game; it is not a zero.
       </p>
     </section>

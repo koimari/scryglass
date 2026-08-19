@@ -132,6 +132,7 @@ export default async function PlayerEloPage({ params }: Props) {
   const draftMetric = draftProfile?.players.find(
     (row) => row.player.toLowerCase() === player.player.toLowerCase(),
   );
+  const mapStats = await readMapStatsEntry(man, "players", player.player);
 
   return (
     <PlayerRatingProfile
@@ -157,6 +158,11 @@ export default async function PlayerEloPage({ params }: Props) {
         poolDefinition: "Best available champion in the published unbanned role pool",
         banCoverage: null,
         scope: draftProfile.scope,
+      } : null}
+      mapStats={mapStats ? {
+        entry: mapStats.entry,
+        windowDays: mapStats.window_days,
+        mapLimit: mapStats.map_limit,
       } : null}
     />
   );

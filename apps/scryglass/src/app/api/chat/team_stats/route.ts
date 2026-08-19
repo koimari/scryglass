@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 async function get(request: Request, signal: AbortSignal) {
   const name = clean(searchParams(request).get("name"));
   if (!name) return chatError("A team name is required.", 422);
-  const stats = await lookupMapStats("teams", name, signal);
+  const stats = await lookupMapStats("teams", name);
   if (!stats) return chatError("Per-map statistics are not published for that team.");
   return chatJson({
     kind: "team",
