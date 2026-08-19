@@ -40,7 +40,10 @@ jobs:
         run: |
           set -euo pipefail
           if ! command -v zsh >/dev/null 2>&1; then
-            sudo timeout --foreground 60s apt-get install --no-install-recommends -y zsh
+            # 60s was killed by a slow mirror once (exit 124); allow a real
+            # download window and one retry before failing the job over apt.
+            sudo timeout --foreground 180s apt-get install --no-install-recommends -y zsh \
+              || sudo timeout --foreground 180s apt-get install --no-install-recommends -y zsh
           fi
           while IFS= read -r -d '' script; do
             zsh -n "$script"
@@ -443,7 +446,10 @@ jobs:
           # zsh install in the workflow-security job does not carry over to
           # this runner.
           if ! command -v zsh >/dev/null 2>&1; then
-            sudo timeout --foreground 60s apt-get install --no-install-recommends -y zsh
+            # 60s was killed by a slow mirror once (exit 124); allow a real
+            # download window and one retry before failing the job over apt.
+            sudo timeout --foreground 180s apt-get install --no-install-recommends -y zsh \
+              || sudo timeout --foreground 180s apt-get install --no-install-recommends -y zsh
           fi
       - name: Run the public release Python suite, pass 1
         timeout-minutes: 110
