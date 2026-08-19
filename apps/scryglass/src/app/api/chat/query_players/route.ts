@@ -1,4 +1,4 @@
-import { chatError, chatJson, clean, readJsonBody, searchParams, secureChatRoute } from "@/lib/chatApi";
+import { chatError, chatJson, clean, readJsonBody, searchParams, secureChatRoute, CHAT_QUERY_ROUTE_TIMEOUT_MS } from "@/lib/chatApi";
 import {
   executePublishedQueryPlan,
   loadSupportQueryIndex,
@@ -60,5 +60,5 @@ async function post(request: Request, signal: AbortSignal) {
   }
 }
 
-export const GET = secureChatRoute(get);
-export const POST = secureChatRoute(post);
+export const GET = secureChatRoute(get, CHAT_QUERY_ROUTE_TIMEOUT_MS);
+export const POST = secureChatRoute(post, CHAT_QUERY_ROUTE_TIMEOUT_MS);

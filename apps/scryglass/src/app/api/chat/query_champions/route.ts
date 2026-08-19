@@ -1,4 +1,4 @@
-import { chatError, chatJson, clean, readChatJson, searchParams, secureChatRoute } from "@/lib/chatApi";
+import { chatError, chatJson, clean, readChatJson, searchParams, secureChatRoute, CHAT_QUERY_ROUTE_TIMEOUT_MS } from "@/lib/chatApi";
 import { getChampionAggregates, getTierRows, queryApiAvailable } from "@/lib/publicData";
 import { loadSupportQueryIndex } from "@/lib/supportQuery";
 import { queryChampions, type PublishedTierBoard } from "@/lib/championQuery";
@@ -164,4 +164,4 @@ async function get(request: Request, signal: AbortSignal) {
   }
 }
 
-export const GET = secureChatRoute(get);
+export const GET = secureChatRoute(get, CHAT_QUERY_ROUTE_TIMEOUT_MS);
