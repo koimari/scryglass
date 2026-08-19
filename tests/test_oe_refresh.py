@@ -239,7 +239,9 @@ def test_browser_download_is_validated_archived_and_installed(
     assert archive.read_bytes() == original
     receipt_path = next(receipts.glob("*.json"))
     receipt = oe_ingest.load_refresh_receipt(receipt_path)
-    assert receipt["source"]["transport"] == "brave_origin_browser_download"
+    # No SCRYGLASS_OE_TRANSPORT in this test's environment, so the receipt
+    # must record that the transport is unproven rather than assert Brave.
+    assert receipt["source"]["transport"] == "local_candidate_unverified_transport"
     assert receipt["candidate"]["date_max_utc"] == "2026-08-11T10:50:41+00:00"
 
     accepted = oe_ingest.validate_accepted_source_receipt(receipt_path, destination, 2026)
@@ -324,3 +326,26 @@ def test_parse_applies_exact_riot_patch_receipt_by_game_id(tmp_path: Path) -> No
         "riot_live_feed"
     }
     assert teams.loc[teams["gameid"] == "g2", "patch"].astype(str).tolist() == ["16.15"]
+
+
+def test_install_records_the_exported_transport(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The receipt records the acquisition path the launcher exported.
+
+    Uses _configure_paths like every other install test. An earlier draft
+    reloaded the ETL modules instead, which rebound module-level classes and
+    left later tests holding stale exception identities.
+    """
+
+    raw, receipts = _configure_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("SCRYGLASS_OE_TRANSPORT", "anonymous_https_drive_download")
+    destination = raw / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+    destination.write_bytes(_csv_bytes(date="2026-06-14T22:24:48Z"))
+    candidate = tmp_path / "headless.csv"
+    candidate.write_bytes(_csv_bytes(date="2026-08-11T10:50:41Z", gameid="g2"))
+
+    oe_ingest.install_browser_download(candidate, 2026)
+
+    receipt = oe_ingest.load_refresh_receipt(next(receipts.glob("*.json")))
+    assert receipt["source"]["transport"] == "anonymous_https_drive_download"

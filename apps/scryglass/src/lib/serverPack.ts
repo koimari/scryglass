@@ -49,6 +49,7 @@ export const PUBLIC_ASSET_PATHS = new Set([
   "features/leaderboards.json",
   "features/draft_records.json",
   "features/promoted_draft_results.json",
+  "features/player_map_stats.json",
   "rankings/tierlists.json",
   "rankings/tierlists-latest.json",
 ]);

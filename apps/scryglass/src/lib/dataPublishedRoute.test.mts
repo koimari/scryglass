@@ -55,9 +55,13 @@ test("matching publication release invalidates the manifest and route targets", 
       matches: true,
     });
     assert.equal(events[0], "tag");
-    assert.equal(events.length, 1 + 26);
+    // 28 targets: the Stats section added /api/chat/player_stats and
+    // /api/chat/team_stats, which must revalidate when a release publishes.
+    assert.equal(events.length, 1 + 28);
     assert.ok(events.includes("path:page:/elo"));
     assert.ok(events.includes("path:route:/api/assets/[...path]"));
+    assert.ok(events.includes("path:route:/api/chat/player_stats"));
+    assert.ok(events.includes("path:route:/api/chat/team_stats"));
   } finally {
     if (previousSecret === undefined) delete process.env.SCRYGLASS_DATA_PUBLISH_TOKEN;
     else process.env.SCRYGLASS_DATA_PUBLISH_TOKEN = previousSecret;

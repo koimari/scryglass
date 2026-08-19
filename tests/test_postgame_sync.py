@@ -58,6 +58,8 @@ def test_browser_refreshed_source_skips_network_download(
     receipt = postgame_sync.ingest_oe_csv(tmp_path)
 
     assert calls == [{"years": ["2025", "2026"], "download": False, "force_download": False}]
+    # SCRYGLASS_OE_TRANSPORT is unset here, so the legacy browser flag still
+    # yields the Brave label for backward compatibility.
     assert receipt["source_transport"] == "brave_origin_browser_download"
     assert receipt["source_game_count"] == 1
 

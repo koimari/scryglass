@@ -151,6 +151,7 @@ OPTIONAL_PUBLIC_FILES: tuple[str, ...] = (
     "features/leaderboards.json",
     "features/draft_records.json",
     "features/promoted_draft_results.json",
+    "features/player_map_stats.json",
 )
 
 MATCH_YEAR_COMPATIBILITY_FILES: tuple[str, ...] = tuple(
