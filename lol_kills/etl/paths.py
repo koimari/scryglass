@@ -77,3 +77,38 @@ OE_DRIVE_IDS = {
 }
 
 OE_FOLDER = "https://drive.google.com/drive/folders/1gLSw0RLjBbtaNy0dgnGQDAZOHIgCe-HH"
+
+
+def _print_path(name: str) -> int:
+    """Expose one resolved path to shell callers.
+
+    The launcher used to hardcode ``<runtime>/data/lol/warehouse/raw`` while the
+    Python side resolved ``RAW_OE_DIR`` independently. When the inbox appeared,
+    the two disagreed: the downloader accepted the fresh inbox CSV and wrote a
+    receipt binding its bytes, then the importer was handed the stale warehouse
+    copy and the receipt check refused the run. One resolver removes that split
+    by construction.
+    """
+
+    known = {
+        "--raw-oe-dir": RAW_OE_DIR,
+        "--oe-inbox-dir": OE_INBOX_DIR,
+        "--warehouse-raw-dir": WAREHOUSE_RAW_DIR,
+    }
+    value = known.get(name)
+    if value is None:
+        import sys
+
+        print(f"unknown path request: {name}", file=sys.stderr)
+        print(f"expected one of: {' '.join(sorted(known))}", file=sys.stderr)
+        return 64
+    print(value)
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - thin shell entry point
+    import sys
+
+    raise SystemExit(
+        _print_path(sys.argv[1]) if len(sys.argv) == 2 else _print_path("")
+    )
