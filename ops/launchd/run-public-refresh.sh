@@ -81,8 +81,20 @@ if [[ -f "${worker_lock}" ]]; then
     # this run still defers, and the next scheduled run proceeds normally.
     guard_age="$(( $(/bin/date +%s) - $(/usr/bin/stat -f %m "${reap_guard}" 2>/dev/null || /bin/date +%s) ))"
     if (( guard_age > 600 )); then
-      /bin/rmdir "${reap_guard}" 2>/dev/null || true
-      print -u2 "public-refresh: cleared an abandoned reap guard (age ${guard_age}s); deferring to the next run."
+      # Identity-safe removal. Age-check-then-rmdir is itself a TOCTOU: between
+      # this launch's stat and its rmdir, another launch can clear the old
+      # guard and a third can create a NEW live one at the same path, which the
+      # stale rmdir would then destroy, reopening the reap race. rename(2) is
+      # atomic and moves EXACTLY the directory inode this launch observed:
+      # exactly one launch wins the rename, and a guard created after the stat
+      # has a different inode at the original path and is left untouched.
+      reap_tomb="${reap_guard}.stale.$$"
+      if /bin/mv "${reap_guard}" "${reap_tomb}" 2>/dev/null; then
+        /bin/rmdir "${reap_tomb}" 2>/dev/null || true
+        print -u2 "public-refresh: cleared an abandoned reap guard (age ${guard_age}s); deferring to the next run."
+      else
+        print -u2 "public-refresh: abandoned reap guard vanished before removal; deferring."
+      fi
     else
       print -u2 "public-refresh: another launch is reaping ${worker_lock}; deferring."
     fi

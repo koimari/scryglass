@@ -435,6 +435,16 @@ jobs:
       - name: Create Python SBOM
         run: python -m pip_audit --disable-pip -r requirements.lock --format cyclonedx-json --output python-sbom.cdx.json
 
+      - name: Install zsh for the launcher behaviour tests
+        run: |
+          # tests/test_public_refresh_launcher.py executes
+          # ops/launchd/run-public-refresh.sh directly and its shebang is
+          # /bin/zsh, which ubuntu-latest does not guarantee. The conditional
+          # zsh install in the workflow-security job does not carry over to
+          # this runner.
+          if ! command -v zsh >/dev/null 2>&1; then
+            sudo timeout --foreground 60s apt-get install --no-install-recommends -y zsh
+          fi
       - name: Run the public release Python suite, pass 1
         timeout-minutes: 110
         run: |

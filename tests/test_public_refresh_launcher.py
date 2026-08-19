@@ -19,6 +19,13 @@ from pathlib import Path
 
 import pytest
 
+ZSH = shutil.which("zsh")
+
+pytestmark = pytest.mark.skipif(
+    ZSH is None,
+    reason="the launcher is zsh; these tests execute it directly",
+)
+
 GIT = "/usr/bin/git"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER_SOURCE = REPO_ROOT / "ops/launchd/run-public-refresh.sh"
