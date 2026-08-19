@@ -72,7 +72,10 @@ test("fallback router returns an explanation for off-topic input", () => {
 test("the tool schema covers each supported domain with unique names", () => {
   const names = TOOLS.map((tool) => tool.name);
   assert.equal(new Set(names).size, names.length);
-  assert.deepEqual(names, ["query_players", "query_champions", "query_drafts", "leaderboards", "player", "compare_players", "team", "matches", "tier", "schedule", "methodology", "navigation"]);
+  // player_stats and team_stats serve the profile Stats sections, so chat
+  // questions about per-game cs/min, gold share or damage share can reach the
+  // published statistics instead of routing to the profile summary tools.
+  assert.deepEqual(names, ["query_players", "query_champions", "query_drafts", "leaderboards", "player", "player_stats", "compare_players", "team", "team_stats", "matches", "tier", "schedule", "methodology", "navigation"]);
 });
 
 test("high-confidence ranking routes bypass model inference", async () => {

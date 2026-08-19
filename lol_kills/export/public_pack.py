@@ -26,6 +26,10 @@ import pyarrow.parquet as pq
 from lol_kills.etl.aliases import normalize_champ
 from lol_kills.export import pack_spec as spec
 from lol_kills.export.leaderboards import build_leaderboards
+from lol_kills.export.player_map_stats import (
+    build_player_map_stats,
+    player_map_stats_row_count,
+)
 from lol_kills.export.pack_records import (
     _draft_text,
     build_maps_frame_from_team_games,
@@ -1511,6 +1515,14 @@ def export_public_pack(
     rating_input = filter_public_team_rating_maps(rating_input)
     if rating_input.empty:
         raise RuntimeError("public pack team rating source has no eligible team maps")
+    # The accepted rating population, frozen beside the filter that defines it.
+    # The profile archive frame read later is wider than this: it still carries
+    # excluded organizations, invalid competition labels and the "other"
+    # competition tier. Any artifact that claims to describe the games the
+    # ratings are fit on must be restricted to these identities.
+    rating_game_ids = set(_normalized_game_uid(rating_input).dropna().astype(str))
+    if not rating_game_ids:
+        raise RuntimeError("public pack team rating source has no game identities")
     progress("checking source identity alignment")
     if (warehouse / "meta.json").exists():
         map_ids = set(_normalized_game_uid(maps_for_records).dropna().astype(str))
@@ -1844,6 +1856,18 @@ def export_public_pack(
     )
     progress("checking composition publication authority")
     composition_source_digest = source_identity_sha256(source_game_ids)
+    # Restricted to the accepted rating game identities rather than to the
+    # wider profile archive, so "the same games the ratings are fit on" is true
+    # by construction, and bound to this release's accepted census the same way
+    # the manifest and the draft artifacts are.
+    progress("building per-map profile statistics")
+    player_map_stats_payload = build_player_map_stats(
+        player_profile_frame,
+        accepted_game_ids=rating_game_ids,
+        source_as_of=source_as_of.isoformat().replace("+00:00", "Z"),
+        source_game_count=len(source_game_ids),
+        source_identity_sha256=composition_source_digest,
+    )
     composition_worker_commit = resolve_worker_commit(project)
     composition_model_dir = runtime / "data" / "lol" / "models" / "composition_signal"
     descriptive_authority: dict[str, Any] | None = None
@@ -2274,6 +2298,22 @@ def export_public_pack(
             "columns": None,
         },
         "features/profile_records.json",
+    )
+
+    player_map_stats_dest = feat_dir / "player_map_stats.json"
+    player_map_stats_dest.write_text(
+        json.dumps(player_map_stats_payload, separators=(",", ":"), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    register(
+        {
+            "rows": player_map_stats_row_count(player_map_stats_payload),
+            "cols": None,
+            "bytes": player_map_stats_dest.stat().st_size,
+            "sha256": _sha256(player_map_stats_dest),
+            "columns": None,
+        },
+        "features/player_map_stats.json",
     )
 
     if draft_records_payload is not None and draft_published:

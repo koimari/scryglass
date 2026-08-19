@@ -12,6 +12,7 @@ import {
   TEAM_SIGMA_MIN,
 } from "@/lib/pack";
 import { draftRankingsFromProfile, filterDraftRankings } from "@/lib/draftRankings";
+import { readMapStatsEntry } from "@/lib/playerMapStats";
 import { getTeamProfile, queryApiAvailable } from "@/lib/publicData";
 import { readPackJson, readPackManifest } from "@/lib/serverPack";
 
@@ -46,6 +47,7 @@ export default async function TeamEloPage({ params }: Props) {
       { rank: row.role_rank, total: row.role_total },
     ]));
     const standing = profile.standing ?? { tier_rank: 0, tier_total: 0 };
+    const mapStats = await readMapStatsEntry(man, "teams", team.team);
     return (
       <TeamRatingProfile
         team={team}
@@ -62,6 +64,11 @@ export default async function TeamEloPage({ params }: Props) {
           positiveEdgeRate: profile.draft_metric.positive_edge_rate ?? null,
           games: profile.draft_metric.games,
           scope: profile.draft_metric.scope === "whole_archive" ? "whole_archive" : "profile_window",
+        } : null}
+        mapStats={mapStats ? {
+          entry: mapStats.entry,
+          windowDays: mapStats.window_days,
+          mapLimit: mapStats.map_limit,
         } : null}
       />
     );
@@ -164,6 +171,7 @@ export default async function TeamEloPage({ params }: Props) {
   const draftMetric = draftProfile?.teams.find(
     (row) => row.team.toLowerCase() === team.team.toLowerCase(),
   );
+  const mapStats = await readMapStatsEntry(man, "teams", team.team);
   return (
     <TeamRatingProfile
       team={team}
@@ -183,6 +191,11 @@ export default async function TeamEloPage({ params }: Props) {
         positiveEdgeRate: draftMetric.positive_edge_rate ?? null,
         games: draftMetric.games,
         scope: draftProfile.scope,
+      } : null}
+      mapStats={mapStats ? {
+        entry: mapStats.entry,
+        windowDays: mapStats.window_days,
+        mapLimit: mapStats.map_limit,
       } : null}
     />
   );

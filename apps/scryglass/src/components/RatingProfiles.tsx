@@ -32,6 +32,7 @@ import { matchTeamHref } from "@/lib/matchFilters";
 import type { DraftRankingsScope } from "@/lib/draftRankings";
 import { hasCompleteCompositionEvidence } from "@/lib/draftRankings";
 import type { PublicDraftScoreResult } from "@/lib/publicData";
+import type { MapStatsEntry, MapStatsGame, MapStatsKind } from "@/lib/playerMapStats";
 import { PlayerPortrait } from "./PlayerPortrait";
 import { RecentGames } from "./RecentGames";
 import { TeamMark } from "./TeamMark";
@@ -208,6 +209,134 @@ function gradeSummary(games: ProfileGame[], player: string): { grade: string; tr
   };
 }
 
+export type MapStats = {
+  entry: MapStatsEntry;
+  windowDays: number;
+  mapLimit: number;
+};
+
+/** A dash is an unavailable measurement. It is never a zero. */
+function metricLabel(value: number | null | undefined, digits = 1, suffix = ""): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `${value.toFixed(digits)}${suffix}`;
+}
+
+function countLabel(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return String(Math.round(value));
+}
+
+type MapStatsColumn = {
+  key: string;
+  label: string;
+  title?: string;
+  value: (game: MapStatsGame) => string;
+};
+
+const PLAYER_MAP_STATS_COLUMNS: MapStatsColumn[] = [
+  { key: "champion", label: "Champion", value: (game) => game.champion ?? "—" },
+  { key: "cs_per_min", label: "CS/m", value: (game) => metricLabel(game.cs_per_min) },
+  { key: "gold_per_min", label: "Gold/m", value: (game) => countLabel(game.gold_per_min) },
+  { key: "gold_share_pct", label: "Gold share", title: "Share of the player's own side's total gold in this game", value: (game) => metricLabel(game.gold_share_pct, 1, "%") },
+  { key: "damage_per_min", label: "Dmg/m", value: (game) => countLabel(game.damage_per_min) },
+  { key: "damage_share_pct", label: "Dmg share", title: "Share of the player's own side's champion damage in this game", value: (game) => metricLabel(game.damage_share_pct, 1, "%") },
+  { key: "kda", label: "KDA", title: "(kills + assists) / max(deaths, 1)", value: (game) => metricLabel(game.kda, 2) },
+];
+
+const TEAM_MAP_STATS_COLUMNS: MapStatsColumn[] = [
+  { key: "gold_per_min", label: "Gold/m", title: "Team total gold per minute. Unavailable unless all five players are measured.", value: (game) => countLabel(game.gold_per_min) },
+  { key: "damage_per_min", label: "Dmg/m", title: "Team champion damage per minute. Unavailable unless all five players are measured.", value: (game) => countLabel(game.damage_per_min) },
+  { key: "kills", label: "Kills", value: (game) => countLabel(game.kills) },
+  { key: "deaths", label: "Deaths", value: (game) => countLabel(game.deaths) },
+];
+
+function mapStatsSummary(entry: MapStatsEntry, kind: MapStatsKind): Array<[string, string]> {
+  const shared: Array<[string, string]> = [
+    ["Games", String(entry.maps)],
+    ["Record", `${entry.wins}–${entry.losses}`],
+    ["Win rate", entry.win_rate == null ? "—" : percentLabel(entry.win_rate)],
+  ];
+  if (kind === "teams") {
+    return [
+      ...shared,
+      ["Gold/m", countLabel(entry.gold_per_min)],
+      ["Dmg/m", countLabel(entry.damage_per_min)],
+      ["Kills", metricLabel(entry.kills)],
+      ["Deaths", metricLabel(entry.deaths)],
+      ["Game length", metricLabel(entry.game_length_min, 1)],
+    ];
+  }
+  return [
+    ...shared,
+    ["CS/m", metricLabel(entry.cs_per_min)],
+    ["Gold/m", countLabel(entry.gold_per_min)],
+    ["Gold share", metricLabel(entry.gold_share_pct, 1, "%")],
+    ["Dmg/m", countLabel(entry.damage_per_min)],
+    ["Dmg share", metricLabel(entry.damage_share_pct, 1, "%")],
+    ["KDA", metricLabel(entry.kda, 2)],
+  ];
+}
+
+/**
+ * Per-map Stats section. The aggregate header is the mean over exactly the
+ * rows in the table beneath it, so the two can never disagree.
+ */
+function MapStatsSection({ stats, kind, subject }: { stats: MapStats; kind: MapStatsKind; subject: string }) {
+  const { entry, windowDays, mapLimit } = stats;
+  const columns = kind === "teams" ? TEAM_MAP_STATS_COLUMNS : PLAYER_MAP_STATS_COLUMNS;
+  // The artifact is already ordered newest-first by full timestamp and source
+  // sequence; re-sorting on the calendar-day string here would scramble
+  // same-day series by lexicographic game id (suffix _10 ahead of _9).
+  const games = entry.games;
+  return (
+    <section id="stats" className={styles.section} aria-label={`${subject} per-game statistics`}>
+      <div className={styles.sectionHeader}>
+        <div><p>Last {windowDays} days</p><h2>Stats</h2></div>
+        <span>{gameCount(entry.maps)}{entry.maps >= mapLimit ? ` · newest ${mapLimit}` : ""}</span>
+      </div>
+      <dl className={styles.statBand}>
+        {mapStatsSummary(entry, kind).map(([label, value]) => (
+          <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
+        ))}
+      </dl>
+      {games.length ? (
+        <div className={styles.mapStatsScroll} data-testid="map-stats-scroll" tabIndex={0} role="region" aria-label={`${subject} per-game statistics table`}>
+          <table className={styles.mapStatsTable} data-testid="map-stats-table">
+            <thead>
+              <tr>
+                <th scope="col">Date</th>
+                <th scope="col">League</th>
+                <th scope="col">Opponent</th>
+                <th scope="col">Result</th>
+                {columns.map((column) => (
+                  <th key={column.key} scope="col" title={column.title}>{column.label}</th>
+                ))}
+                <th scope="col">Length</th>
+              </tr>
+            </thead>
+            <tbody>
+              {games.map((game) => (
+                <tr key={game.game_id}>
+                  <td>{shortDate(game.date)}</td>
+                  <td>{game.league ?? "—"}</td>
+                  <td>{game.opponent ?? "—"}</td>
+                  <td className={game.win ? styles.win : styles.loss}>{game.win ? "Win" : "Loss"}</td>
+                  {columns.map((column) => <td key={column.key}>{column.value(game)}</td>)}
+                  <td>{metricLabel(game.game_length_min, 1)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <p className={styles.empty}>No published games fall inside this window.</p>}
+      <p className={styles.mapStatsLegend}>
+        Descriptive per-game measurements from the same accepted games the ratings are fit on.
+        A dash means the source did not publish that measurement for that game; it is not a zero.
+      </p>
+    </section>
+  );
+}
+
 function ChampionPortrait({ name, imageUrl, size = "small" }: { name: string | null; imageUrl?: string | null; size?: "small" | "large" }) {
   const resolvedImageUrl = championImageUrl(name, imageUrl);
   return (
@@ -232,6 +361,7 @@ export function TeamRatingProfile({
   championImages,
   manifest,
   draftMetric,
+  mapStats,
 }: {
   team: TeamRating;
   roster: TeamRosterEntry[];
@@ -243,6 +373,7 @@ export function TeamRatingProfile({
   championImages: Record<string, string>;
   manifest: PackManifest;
   draftMetric?: TeamDraftMetric | null;
+  mapStats?: MapStats | null;
 }) {
   const draftAuthorized = hasPublishedDraftAuthority(manifest);
   const trust = evidenceInfo(evidenceFields(team as unknown as Record<string, unknown>), team.sigma, record?.games);
@@ -333,6 +464,8 @@ export function TeamRatingProfile({
         <div className={styles.sectionHeader}><div><p>Latest results</p><h2>Recent games</h2></div><Link className="row-link" href={matchTeamHref(team.team)}>All matches →</Link></div>
         <RecentGames games={recentGames} championImages={championImages} team={team.team} />
       </section>
+
+      {mapStats ? <MapStatsSection stats={mapStats} kind="teams" subject={team.team} /> : null}
     </div>
   );
 }
@@ -690,6 +823,7 @@ export function PlayerRatingProfile({
   championImages,
   manifest,
   draftMetric,
+  mapStats,
 }: {
   player: PlayerRating;
   portrait?: PlayerVisualIdentity | null;
@@ -702,6 +836,7 @@ export function PlayerRatingProfile({
   championImages: Record<string, string>;
   manifest: PackManifest;
   draftMetric?: PlayerDraftMetric | null;
+  mapStats?: MapStats | null;
 }) {
   const draftAuthorized = hasPublishedDraftAuthority(manifest);
   const trust = evidenceInfo(evidenceFields(player as unknown as Record<string, unknown>), player.sigma, player.n_maps);
@@ -796,6 +931,8 @@ export function PlayerRatingProfile({
         </aside>
         <RecentGames games={recentGames} championImages={championImages} player={player.player} />
       </section>
+
+      {mapStats ? <MapStatsSection stats={mapStats} kind="players" subject={player.player} /> : null}
 
       <section className={styles.section}>
         <div className={styles.sectionHeader}><div><p>Career in this window</p><h2>Champion pool</h2></div><span>{champions.length} played</span></div>
