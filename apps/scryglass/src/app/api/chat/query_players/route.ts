@@ -1,4 +1,4 @@
-import { chatError, chatJson, clean, readJsonBody, searchParams, secureChatRoute, CHAT_QUERY_ROUTE_TIMEOUT_MS } from "@/lib/chatApi";
+import { chatError, chatJson, clean, readJsonBody, searchParams, secureChatRoute, CHAT_QUERY_ROUTE_TIMEOUT_MS, chatQueryFailureStatus } from "@/lib/chatApi";
 import {
   executePublishedQueryPlan,
   loadSupportQueryIndex,
@@ -40,7 +40,7 @@ async function get(request: Request, signal: AbortSignal) {
     if (!planned.ok) return chatError("The player question could not be resolved.", 422);
     return chatJson(await executePublishedQueryPlan(planned.plan, signal));
   } catch (error) {
-    return chatError(error instanceof Error ? error.message : "The player query is unavailable.", 422);
+    return chatError(error instanceof Error ? error.message : "The player query is unavailable.", chatQueryFailureStatus(error));
   }
 }
 

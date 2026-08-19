@@ -1,4 +1,4 @@
-import { chatError, chatJson, clean, readChatJson, searchParams, secureChatRoute, CHAT_QUERY_ROUTE_TIMEOUT_MS } from "@/lib/chatApi";
+import { chatError, chatJson, clean, readChatJson, searchParams, secureChatRoute, CHAT_QUERY_ROUTE_TIMEOUT_MS, chatQueryFailureStatus } from "@/lib/chatApi";
 import { getChampionAggregates, getTierRows, queryApiAvailable } from "@/lib/publicData";
 import { loadSupportQueryIndex } from "@/lib/supportQuery";
 import { queryChampions, type PublishedTierBoard } from "@/lib/championQuery";
@@ -159,8 +159,11 @@ async function get(request: Request, signal: AbortSignal) {
       readChatJson<PublishedTierBoard>("rankings/tierlists.json", signal),
     ]);
     return chatJson(queryChampions(index, question, tierBoard));
-  } catch {
-    return chatError("Champion rankings are unavailable for the active release.", 422);
+  } catch (error) {
+    return chatError(
+      "Champion rankings are unavailable for the active release.",
+      chatQueryFailureStatus(error),
+    );
   }
 }
 

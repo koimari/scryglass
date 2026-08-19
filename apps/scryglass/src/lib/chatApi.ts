@@ -244,6 +244,20 @@ export async function readChatJson<T>(relativePath: string, signal?: AbortSignal
   return readPackJson<T>(manifest, relativePath, signal);
 }
 
+/** Status for a thrown query error.
+ *
+ * "Public query ... has a different release" is a transient release
+ * transition, not a bad request: for a few seconds after activation this
+ * function instance's cached manifest can lag the release the RPC already
+ * serves. Mapping it to 422 made the post-publish probe treat the window as a
+ * permanent failure and roll back an otherwise good release twice. 503 tells
+ * the truth (retry shortly) and the probe's propagation window already
+ * retries 503.
+ */
+export function chatQueryFailureStatus(error: unknown): 422 | 503 {
+  return error instanceof Error && /has a different release/.test(error.message) ? 503 : 422;
+}
+
 export function searchParams(request: Request): URLSearchParams {
   return new URL(request.url).searchParams;
 }
