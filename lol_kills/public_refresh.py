@@ -1187,6 +1187,68 @@ def invalidate_public_cache(config: RefreshConfig, release_id: str) -> dict[str,
     return payload
 
 
+
+# TEMPORARY instrumentation. Inert unless SCRYGLASS_PROBE_TIMELINE_PATH is set.
+# Four consecutive releases rolled back in the cache stage on four DIFFERENT
+# probe endpoints. A steady-state sweep of all 26 probes is clean (0 failures,
+# 21s), so the degradation is specific to the window after activation. This
+# samples the heaviest endpoints on a timeline so the recovery curve is measured
+# rather than inferred.
+_PROBE_TIMELINE_OFFSETS = (0.0, 5.0, 15.0, 30.0, 60.0, 120.0)
+_PROBE_TIMELINE_PATHS = (
+    "/api/chat/query_players?q=who+has+the+better+rating+between+Faker+and+Chovy",
+    "/api/chat/query_champions?q=who+is+the+best+Galio+player",
+    "/api/chat/query_drafts?q=which+team+has+the+best+draft",
+    "/tiers",
+    "/packs/manifest.json",
+)
+
+
+def _sample_probe_timeline(config: "RefreshConfig", release_id: str) -> None:
+    """Record how the public app behaves in the seconds after activation."""
+
+    destination = os.environ.get("SCRYGLASS_PROBE_TIMELINE_PATH")
+    if not destination:
+        return
+    started = time.monotonic()
+    for offset in _PROBE_TIMELINE_OFFSETS:
+        wait = offset - (time.monotonic() - started)
+        if wait > 0:
+            time.sleep(wait)
+        for path in _PROBE_TIMELINE_PATHS:
+            record: dict[str, Any] = {
+                "release_id": release_id,
+                "offset_s": offset,
+                "path": path,
+                "utc": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            }
+            begin = time.monotonic()
+            try:
+                raw = _http_bytes(
+                    f"{config.site}{path}",
+                    headers={"Cache-Control": "no-cache"},
+                    attempts=1,
+                    timeout=45.0,
+                )
+                record["ok"] = True
+                record["bytes"] = len(raw)
+                served = raw.decode("utf-8", "replace")
+                record["has_release_marker"] = (
+                    f'data-scryglass-release="{release_id}"' in served
+                    or f'"{release_id}"' in served
+                )
+            except Exception as error:  # noqa: BLE001 - measurement must not break a run
+                record["ok"] = False
+                record["error"] = f"{type(error).__name__}: {error}"[:160]
+            record["seconds"] = round(time.monotonic() - begin, 3)
+            try:
+                with open(destination, "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, sort_keys=True) + "\n")
+                    handle.flush()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def probe_public_release_families(
     config: RefreshConfig,
     release_id: str,
@@ -1568,6 +1630,7 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             ledger.advance("invalidate_cache", release_id=ledger_release_id)
         active_release_id = str(ratings.get("pack_id") or "")
         cache = invalidate_public_cache(config, active_release_id) if changed else None
+        _sample_probe_timeline(config, active_release_id)
         cache_probes = probe_public_release_families(config, active_release_id)
         failure_stage = "smoke"
         if ledger is not None:
