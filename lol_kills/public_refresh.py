@@ -1188,7 +1188,8 @@ def invalidate_public_cache(config: RefreshConfig, release_id: str) -> dict[str,
 
 
 
-# TEMPORARY instrumentation. Inert unless SCRYGLASS_PROBE_TIMELINE_PATH is set.
+# Optional post-activation diagnostic. Inert unless SCRYGLASS_PROBE_TIMELINE_PATH
+# is set, so it costs nothing on a normal run.
 # Four consecutive releases rolled back in the cache stage on four DIFFERENT
 # probe endpoints. A steady-state sweep of all 26 probes is clean (0 failures,
 # 21s), so the degradation is specific to the window after activation. This
