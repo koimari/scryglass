@@ -383,12 +383,66 @@ if [[ "${resume_cycle}" -eq 0 ]]; then
 
   oe_install_source="${oe_headless_stage}"
   need_browser_download=0
-  if (( oe_fetch_status == 0 )); then
-    print -r -- "public-refresh: headless Oracle's Elixir download wrote ${oe_headless_stage}"
-    export SCRYGLASS_OE_TRANSPORT="anonymous_https_drive_download"
+
+  # The OAuth "make a copy" rung, between the anonymous fetch and the reuse of
+  # an older CSV.
+  #
+  # The anonymous fetch above fails for exactly one reason that no retry ever
+  # fixes: a public Drive object carries a per-file ANONYMOUS download quota,
+  # and once it is exhausted every anonymous request gets an HTML interstitial
+  # instead of the bytes. That quota is charged against the anonymous pool, not
+  # against the file, so an authenticated user can copy the file into their own
+  # Drive - a new object with an untouched budget - download the copy, and
+  # delete it. That is what lol_kills.etl.oe_oauth_fetch does, and it is the
+  # only rung that produces FRESH bytes on a quota-blocked day without a
+  # logged-in desktop.
+  #
+  # It is optional by construction: a worker that has never run --login exits
+  # 69 here, which is "this rung is not configured", not "the feed is broken".
+  # The ladder below is then exactly what it was before this rung existed.
+  #
+  # -1 means "not attempted", which is the case whenever the anonymous fetch
+  # already succeeded. set -u requires it to be defined either way.
+  oe_oauth_status=-1
+  if (( oe_fetch_status != 0 )); then
+    oe_oauth_status=0
+    # Same staging file, same fail-closed guarantees: oe_oauth_fetch reuses
+    # oe_fetch's interstitial sniff, Content-Length reconciliation and atomic
+    # rename rather than reimplementing them, so nothing reaches this path that
+    # the anonymous fetcher would have refused. Truncating the evidence file is
+    # safe: a failed anonymous fetch writes its error to stderr, not here.
+    bounded_run 300 "${python}" -m lol_kills.etl.oe_oauth_fetch \
+      --year "${oe_year}" \
+      --destination "${oe_headless_stage}" > "${oe_fetch_evidence}" || oe_oauth_status=$?
+    case "${oe_oauth_status}" in
+      0)
+        print -r -- "public-refresh: OAuth Drive copy supplied ${oe_headless_stage} after the anonymous fetch failed (status ${oe_fetch_status})"
+        ;;
+      69)
+        print -r -- "public-refresh: OAuth rung not configured; continuing to the reuse and Brave ladder."
+        ;;
+      75)
+        print -u2 "public-refresh: OAuth rung was quota-blocked too; continuing to the reuse and Brave ladder."
+        ;;
+      *)
+        print -u2 "public-refresh: OAuth rung failed (status ${oe_oauth_status}); continuing to the reuse and Brave ladder."
+        ;;
+    esac
+  fi
+
+  if (( oe_fetch_status == 0 || oe_oauth_status == 0 )); then
+    if (( oe_fetch_status == 0 )); then
+      print -r -- "public-refresh: headless Oracle's Elixir download wrote ${oe_headless_stage}"
+      export SCRYGLASS_OE_TRANSPORT="anonymous_https_drive_download"
+    else
+      export SCRYGLASS_OE_TRANSPORT="oauth_drive_copy"
+    fi
     # The pinned id can rotate; when the folder re-resolution supplied the
     # bytes, the receipt must name the file that ACTUALLY served them, not the
     # pinned object that failed. The fetcher printed its evidence as JSON.
+    # Both fetchers print the same two keys, and oe_oauth_fetch reports the
+    # SOURCE object rather than the throwaway copy, so the receipt binds to the
+    # Drive file the bytes really came from either way.
     oe_resolved_id="$("${python}" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("drive_file_id") or "")' "${oe_fetch_evidence}" 2>/dev/null || true)"
     oe_resolved_url="$("${python}" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("url") or "")' "${oe_fetch_evidence}" 2>/dev/null || true)"
     if [[ -n "${oe_resolved_id}" ]]; then

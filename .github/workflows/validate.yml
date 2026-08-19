@@ -36,7 +36,12 @@ jobs:
           version: v0.11.0
 
       - name: Parse zsh operator scripts
-        timeout-minutes: 2
+        # The inner apt bound is 180s with one retry (a 60s bound was killed
+        # by a slow mirror once), so the step ceiling must sit ABOVE the sum
+        # of both attempts, not squeeze them: 2 minutes killed this step on
+        # the very next slow-mirror day. 8 minutes bounds a hung apt without
+        # racing a healthy one.
+        timeout-minutes: 8
         run: |
           set -euo pipefail
           if ! command -v zsh >/dev/null 2>&1; then
@@ -474,6 +479,7 @@ jobs:
             tests/test_public_refresh.py \
             tests/test_public_refresh_launcher.py \
             tests/test_oe_fetch.py \
+            tests/test_oe_oauth_fetch.py \
             tests/test_refresh_ledger.py \
             tests/test_supabase_publication.py \
             tests/test_upload_pack.py \
@@ -506,6 +512,7 @@ jobs:
             tests/test_public_refresh.py \
             tests/test_public_refresh_launcher.py \
             tests/test_oe_fetch.py \
+            tests/test_oe_oauth_fetch.py \
             tests/test_refresh_ledger.py \
             tests/test_supabase_publication.py \
             tests/test_upload_pack.py \

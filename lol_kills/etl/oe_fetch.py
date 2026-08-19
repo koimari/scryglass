@@ -55,12 +55,15 @@ __all__ = [
     "DEFAULT_DRIVE_FILE_IDS",
     "OeFetchError",
     "OeFetchQuotaError",
+    "commit_staged_download",
     "download_url",
     "fetch_oe_csv",
     "folder_listing_url",
     "main",
     "parse_folder_listing",
     "resolve_drive_file_id",
+    "staging_path",
+    "stream_validated_body",
 ]
 
 
@@ -354,63 +357,115 @@ def resolve_drive_file_id(
     return _select_annual_file_id(entries, str(year))
 
 
-def _stream_to_part(url: str, part_path: Path, *, deadline: float) -> tuple[int, str]:
-    """Stream a validated body into ``part_path``; return (bytes, sha256).
+def staging_path(destination: Path) -> Path:
+    """Return the sibling ``.part`` file a download stages into."""
+
+    part_path = destination.with_suffix(".part")
+    if part_path == destination:
+        raise OeFetchError(
+            f"destination leaves no room for a staging file: {destination}"
+        )
+    return part_path
+
+
+def stream_validated_body(
+    response: Any, part_path: Path, *, url: str, deadline: float
+) -> tuple[int, str]:
+    """Stream one already-open response into ``part_path``; return (bytes, sha256).
+
+    Split out of :func:`_stream_to_part` so a second transport reuses these
+    refusals instead of re-implementing them.  ``lol_kills.etl.oe_oauth_fetch``
+    downloads through an authenticated Drive API request that this module has
+    no business building, but the bytes it receives must clear exactly the same
+    bar: sniff before the output file is opened, refuse an interstitial, refuse
+    a body that disagrees with its own Content-Length, refuse one too small to
+    be an annual export.  A second copy of this loop would be a second copy of
+    those refusals, free to drift out of step with the first.
 
     The head of the body is inspected *before* the output file is opened, so an
-    interstitial never reaches the filesystem at all.
+    interstitial never reaches the filesystem at all.  ``part_path`` is left
+    where it lies when this raises; removing it is the caller's job, because
+    only the caller knows whether a later attempt still wants the path.
     """
 
     digest = hashlib.sha256()
     total = 0
-    timeout = min(SOCKET_TIMEOUT_SECONDS, _remaining(deadline))
-    with _open(url, timeout=timeout) as response:
-        final_url = _final_url(response, url)
-        _require_google_response(final_url)
-        try:
-            head = response.read(SNIFF_BYTES)
-        except OSError as exc:
-            raise OeFetchError(f"Drive read failed for {final_url}: {exc}") from exc
-        _require_csv_head(bytes(head), url=final_url, origin="wire")
-        declared = _declared_length(response)
+    try:
+        head = response.read(SNIFF_BYTES)
+    except OSError as exc:
+        raise OeFetchError(f"Drive read failed for {url}: {exc}") from exc
+    _require_csv_head(bytes(head), url=url, origin="wire")
+    declared = _declared_length(response)
 
-        part_path.parent.mkdir(parents=True, exist_ok=True)
-        part_path.unlink(missing_ok=True)
-        with part_path.open("wb") as handle:
-            digest.update(head)
-            total += len(head)
-            handle.write(head)
-            while True:
-                if time.monotonic() > deadline:
-                    raise OeFetchError(
-                        f"headless download exceeded its time budget after "
-                        f"{total} bytes from {final_url}"
-                    )
-                try:
-                    chunk = response.read(CHUNK_BYTES)
-                except OSError as exc:
-                    raise OeFetchError(
-                        f"Drive read failed after {total} bytes from {final_url}: {exc}"
-                    ) from exc
-                if not chunk:
-                    break
-                digest.update(chunk)
-                total += len(chunk)
-                handle.write(chunk)
-            handle.flush()
-            os.fsync(handle.fileno())
+    part_path.parent.mkdir(parents=True, exist_ok=True)
+    part_path.unlink(missing_ok=True)
+    with part_path.open("wb") as handle:
+        digest.update(head)
+        total += len(head)
+        handle.write(head)
+        while True:
+            if time.monotonic() > deadline:
+                raise OeFetchError(
+                    f"headless download exceeded its time budget after "
+                    f"{total} bytes from {url}"
+                )
+            try:
+                chunk = response.read(CHUNK_BYTES)
+            except OSError as exc:
+                raise OeFetchError(
+                    f"Drive read failed after {total} bytes from {url}: {exc}"
+                ) from exc
+            if not chunk:
+                break
+            digest.update(chunk)
+            total += len(chunk)
+            handle.write(chunk)
+        handle.flush()
+        os.fsync(handle.fileno())
 
     if declared is not None and declared != total:
         raise OeFetchError(
             f"headless download is truncated: Content-Length declared "
-            f"{declared} bytes, {total} arrived from {final_url}"
+            f"{declared} bytes, {total} arrived from {url}"
         )
     if total < MIN_CSV_BYTES:
         raise OeFetchError(
             f"headless download is too small to be an annual export "
-            f"({total} bytes, minimum {MIN_CSV_BYTES}) from {final_url}"
+            f"({total} bytes, minimum {MIN_CSV_BYTES}) from {url}"
         )
     return total, digest.hexdigest()
+
+
+def commit_staged_download(
+    part_path: Path, destination: Path, *, url: str, total: int
+) -> None:
+    """Re-check the staged bytes on disk, then rename them onto ``destination``.
+
+    The wire sniff saw a buffer; this sees the bytes that are about to become
+    the annual CSV.  The rename is the only moment ``destination`` changes, and
+    it happens after both checks pass.
+    """
+
+    with part_path.open("rb") as handle:
+        _require_csv_head(handle.read(SNIFF_BYTES), url=url, origin="staged file")
+    on_disk = part_path.stat().st_size
+    if on_disk != total:
+        raise OeFetchError(
+            f"staged file is {on_disk} bytes but {total} were written: {part_path}"
+        )
+    os.replace(part_path, destination)
+
+
+def _stream_to_part(url: str, part_path: Path, *, deadline: float) -> tuple[int, str]:
+    """Stream a validated body into ``part_path`` over an anonymous GET."""
+
+    timeout = min(SOCKET_TIMEOUT_SECONDS, _remaining(deadline))
+    with _open(url, timeout=timeout) as response:
+        final_url = _final_url(response, url)
+        _require_google_response(final_url)
+        return stream_validated_body(
+            response, part_path, url=final_url, deadline=deadline
+        )
 
 
 def _attempt_download(
@@ -425,22 +480,11 @@ def _attempt_download(
     """Download one Drive file id into ``destination``, atomically."""
 
     url = download_url(file_id)
-    part_path = destination.with_suffix(".part")
-    if part_path == destination:
-        raise OeFetchError(f"destination leaves no room for a staging file: {destination}")
+    part_path = staging_path(destination)
 
     try:
         total, sha256 = _stream_to_part(url, part_path, deadline=deadline)
-        # Re-read what actually landed.  The wire sniff saw a buffer; this sees
-        # the bytes that are about to become the annual CSV.
-        with part_path.open("rb") as handle:
-            _require_csv_head(handle.read(SNIFF_BYTES), url=url, origin="staged file")
-        on_disk = part_path.stat().st_size
-        if on_disk != total:
-            raise OeFetchError(
-                f"staged file is {on_disk} bytes but {total} were written: {part_path}"
-            )
-        os.replace(part_path, destination)
+        commit_staged_download(part_path, destination, url=url, total=total)
     except BaseException:
         # Never leave a partial or rejected body behind for the launcher's
         # stable-size poll - or for a later run - to mistake for real data.
