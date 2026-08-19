@@ -328,32 +328,24 @@ def test_parse_applies_exact_riot_patch_receipt_by_game_id(tmp_path: Path) -> No
     assert teams.loc[teams["gameid"] == "g2", "patch"].astype(str).tolist() == ["16.15"]
 
 
-def test_install_records_the_exported_transport(tmp_path, monkeypatch) -> None:
-    """The receipt records the acquisition path the launcher exported."""
-    import hashlib
-    from lol_kills.etl import oe_ingest
+def test_install_records_the_exported_transport(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The receipt records the acquisition path the launcher exported.
 
-    monkeypatch.setenv("SCRYGLASS_RUNTIME_ROOT", str(tmp_path))
+    Uses _configure_paths like every other install test. An earlier draft
+    reloaded the ETL modules instead, which rebound module-level classes and
+    left later tests holding stale exception identities.
+    """
+
+    raw, receipts = _configure_paths(monkeypatch, tmp_path)
     monkeypatch.setenv("SCRYGLASS_OE_TRANSPORT", "anonymous_https_drive_download")
-    import importlib
-    from lol_kills.etl import paths as etl_paths
-    importlib.reload(etl_paths)
-    importlib.reload(oe_ingest)
-    header = ",".join(f"c{i}" for i in range(30)) + ",gameid,date\n"
-    row = ",".join("x" for _ in range(30)) + ",game-1,2026-08-11 10:50:41\n"
-    body = (header + row).encode()
-    candidate = tmp_path / "candidate.csv"
-    candidate.write_bytes(body)
-    try:
-        oe_ingest.install_browser_download(candidate, 2026)
-    except Exception:
-        # Structural validation may reject this minimal fixture; the receipt
-        # transport is decided before validation, so fall through to inspect
-        # whatever receipt exists, and skip if none was written.
-        pass
-    receipts = list((tmp_path / "data/lol/warehouse/receipts/oracles_elixir").glob("*.json"))
-    if not receipts:
-        import pytest
-        pytest.skip("fixture too minimal for a receipt; covered by the env-unset test")
-    receipt = oe_ingest.load_refresh_receipt(receipts[0])
+    destination = raw / "2026_LoL_esports_match_data_from_OraclesElixir.csv"
+    destination.write_bytes(_csv_bytes(date="2026-06-14T22:24:48Z"))
+    candidate = tmp_path / "headless.csv"
+    candidate.write_bytes(_csv_bytes(date="2026-08-11T10:50:41Z", gameid="g2"))
+
+    oe_ingest.install_browser_download(candidate, 2026)
+
+    receipt = oe_ingest.load_refresh_receipt(next(receipts.glob("*.json")))
     assert receipt["source"]["transport"] == "anonymous_https_drive_download"

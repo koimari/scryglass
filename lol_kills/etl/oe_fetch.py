@@ -491,7 +491,6 @@ def fetch_oe_csv(
         raise OeFetchError(f"destination is a directory: {destination}")
 
     attempted: list[str] = []
-    quota_seen = False
     last_error: BaseException | None = None
 
     pinned = DEFAULT_DRIVE_FILE_IDS.get(normalized_year)
@@ -507,7 +506,6 @@ def fetch_oe_csv(
                 resolved_from_folder=False,
             )
         except OeFetchQuotaError as exc:
-            quota_seen = True
             last_error = exc
         except OeFetchError as exc:
             last_error = exc
@@ -535,7 +533,6 @@ def fetch_oe_csv(
                 resolved_from_folder=True,
             )
         except OeFetchQuotaError as exc:
-            quota_seen = True
             last_error = exc
         except OeFetchError as exc:
             last_error = exc
@@ -550,7 +547,14 @@ def fetch_oe_csv(
         f"headless Oracle's Elixir download failed for {normalized_year} after "
         f"{len(attempted)} attempt(s): {last_error}"
     )
-    if quota_seen:
+    # Classify by the TERMINAL attempt. Exit 75 tells the launcher "blocked,
+    # not broken - the cached inbox file may be reused". If the pinned id was
+    # quota-blocked but the folder resolved a CURRENT id whose download then
+    # failed with a network error or truncation, the current file is NOT known
+    # to be quota-blocked, and reporting quota would let a stale cache paper
+    # over a real transport failure. Quota is only reported when the final
+    # attempt itself was a quota interstitial.
+    if isinstance(last_error, OeFetchQuotaError):
         raise OeFetchQuotaError(summary) from last_error
     raise OeFetchError(summary) from last_error
 

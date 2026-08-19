@@ -288,16 +288,37 @@ if [[ "${resume_cycle}" -eq 0 ]]; then
   # exits 75 for "blocked, not broken" and non-zero otherwise, which is the
   # distinction this ladder needs. Every downstream check is unchanged: the
   # bytes still go through _validate_oe_csv and the source-receipt binding.
+  # Fetch into a hidden staging file, NEVER the accepted CSV's own path. On
+  # the worker RAW_OE_DIR resolves to this same inbox, so ${oe_candidate} IS
+  # the previously accepted annual CSV: writing the fetch result there would
+  # destroy the known-good file before install_browser_download has validated
+  # the new bytes, and a regression (rotated file serving an older export, or
+  # a wide malformed CSV) would then be compared against itself and installed.
+  # The dot prefix keeps the staging file out of the annual-CSV glob.
+  oe_headless_stage="${oe_inbox}/.headless-${oe_name}"
+  oe_fetch_evidence="${run_root}/oe-headless-fetch.json"
+  /bin/mkdir -p "${run_root}"
   oe_fetch_status=0
   bounded_run 300 "${python}" -m lol_kills.etl.oe_fetch \
     --year "${oe_year}" \
-    --destination "${oe_candidate}" || oe_fetch_status=$?
+    --destination "${oe_headless_stage}" > "${oe_fetch_evidence}" || oe_fetch_status=$?
 
-  oe_install_source="${oe_candidate}"
+  oe_install_source="${oe_headless_stage}"
   need_browser_download=0
   if (( oe_fetch_status == 0 )); then
-    print -r -- "public-refresh: headless Oracle's Elixir download wrote ${oe_candidate}"
+    print -r -- "public-refresh: headless Oracle's Elixir download wrote ${oe_headless_stage}"
     export SCRYGLASS_OE_TRANSPORT="anonymous_https_drive_download"
+    # The pinned id can rotate; when the folder re-resolution supplied the
+    # bytes, the receipt must name the file that ACTUALLY served them, not the
+    # pinned object that failed. The fetcher printed its evidence as JSON.
+    oe_resolved_id="$("${python}" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("drive_file_id") or "")' "${oe_fetch_evidence}" 2>/dev/null || true)"
+    oe_resolved_url="$("${python}" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("url") or "")' "${oe_fetch_evidence}" 2>/dev/null || true)"
+    if [[ -n "${oe_resolved_id}" ]]; then
+      export SCRYGLASS_OE_DRIVE_FILE_ID="${oe_resolved_id}"
+    fi
+    if [[ -n "${oe_resolved_url}" ]]; then
+      export SCRYGLASS_OE_LOCATOR="${oe_resolved_url}"
+    fi
   elif (( oe_fetch_status == 75 )); then
     # A Drive quota block leaves the previous download in place, and that file
     # is real data - only its age is in question. Reuse it while it is inside
@@ -334,7 +355,8 @@ if [[ "${resume_cycle}" -eq 0 ]]; then
 
   if (( need_browser_download )); then
     export SCRYGLASS_OE_TRANSPORT="brave_origin_browser_download"
-    rm -f "${oe_candidate}" "${oe_candidate}.crdownload" "${oe_partial}"
+    oe_install_source="${oe_candidate}"
+    rm -f "${oe_candidate}" "${oe_candidate}.crdownload" "${oe_partial}" "${oe_headless_stage}"
     /usr/bin/open -a "Brave Origin" "${oe_download_url}"
 
     download_ready=0
@@ -361,6 +383,7 @@ if [[ "${resume_cycle}" -eq 0 ]]; then
     --install-browser-candidate "${oe_install_source}" \
     --year "${oe_year}" \
     --receipt-output "${source_receipt}"
+  /bin/rm -f "${oe_headless_stage}"
   "${python}" -m lol_kills.etl.oe_database \
     --csv "${oe_csv}" \
     --year "${oe_year}" \

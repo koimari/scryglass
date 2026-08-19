@@ -716,8 +716,17 @@ def install_browser_download(candidate_path: Path, year: str | int) -> Path:
         "source": {
             "provider": "Oracle's Elixir",
             "transport": transport,
-            "locator": f"https://drive.google.com/uc?export=download&id={OE_DRIVE_IDS.get(y, '')}",
-            "drive_file_id": OE_DRIVE_IDS.get(y),
+            # The pinned id can rotate. When the headless fetcher re-resolved
+            # the folder, the launcher exports the identity that ACTUALLY
+            # served the bytes; hardcoding the pinned id here would attribute
+            # the accepted bytes to an object that failed.
+            "locator": (
+                os.environ.get("SCRYGLASS_OE_LOCATOR")
+                or f"https://drive.google.com/uc?export=download&id={OE_DRIVE_IDS.get(y, '')}"
+            ),
+            "drive_file_id": (
+                os.environ.get("SCRYGLASS_OE_DRIVE_FILE_ID") or OE_DRIVE_IDS.get(y)
+            ),
             "folder_locator": OE_FOLDER,
             "remote_signature": None,
         },
