@@ -474,6 +474,7 @@ jobs:
             tests/test_public_refresh.py \
             tests/test_public_refresh_launcher.py \
             tests/test_oe_fetch.py \
+            tests/test_oe_oauth_fetch.py \
             tests/test_refresh_ledger.py \
             tests/test_supabase_publication.py \
             tests/test_upload_pack.py \
@@ -506,6 +507,7 @@ jobs:
             tests/test_public_refresh.py \
             tests/test_public_refresh_launcher.py \
             tests/test_oe_fetch.py \
+            tests/test_oe_oauth_fetch.py \
             tests/test_refresh_ledger.py \
             tests/test_supabase_publication.py \
             tests/test_upload_pack.py \
