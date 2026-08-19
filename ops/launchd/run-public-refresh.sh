@@ -174,6 +174,11 @@ run_root="${runtime_root}/data/lol/runtime/cycles/${cycle_id}"
 oe_year="2026"
 oe_name="${oe_year}_LoL_esports_match_data_from_OraclesElixir.csv"
 oe_candidate="${oe_inbox}/${oe_name}"
+# Mirrors Path.with_suffix(".part") in lol_kills.etl.oe_fetch: the staging file
+# the headless downloader writes before its atomic rename. A run killed by the
+# wall-clock bound below can leave one behind; it never matches the annual-CSV
+# glob, and the next fetch removes it, but the Brave fallback clears it too.
+oe_partial="${oe_candidate:r}.part"
 oe_download_url="https://drive.google.com/uc?export=download&id=1hnpbrUpBMS1TZI7IovfpKeZfWJH1Aptm"
 
 export SCRYGLASS_PUBLIC_RELEASE=1
@@ -269,30 +274,88 @@ if [[ ! -f "${patch_receipt_catalog}" && -f "${source_receipt}" && -f "${import_
 fi
 
 if [[ "${resume_cycle}" -eq 0 ]]; then
-  rm -f "${oe_candidate}" "${oe_candidate}.crdownload"
-  /usr/bin/open -a "Brave Origin" "${oe_download_url}"
+  # Headless first; Brave is the last resort.
+  #
+  # This block used to open Brave on every single run and then poll the
+  # browser's download directory for a stable file size. That tied an
+  # unattended, scheduled job to a logged-in GUI session: no desktop, no CSV,
+  # no refresh. The annual export is a public Google Drive object, so an
+  # anonymous HTTPS GET fetches the same bytes with no GUI at all.
+  #
+  # lol_kills.etl.oe_fetch is fail-closed about what it will write: Drive
+  # answers a quota-blocked or consent-gated request with HTTP 200 and a small
+  # HTML page, and the fetcher refuses to let that reach ${oe_candidate}. It
+  # exits 75 for "blocked, not broken" and non-zero otherwise, which is the
+  # distinction this ladder needs. Every downstream check is unchanged: the
+  # bytes still go through _validate_oe_csv and the source-receipt binding.
+  oe_fetch_status=0
+  bounded_run 300 "${python}" -m lol_kills.etl.oe_fetch \
+    --year "${oe_year}" \
+    --destination "${oe_candidate}" || oe_fetch_status=$?
 
-  download_ready=0
-  for _attempt in {1..180}; do
-    if [[ -f "${oe_candidate}" && ! -f "${oe_candidate}.crdownload" ]]; then
-      first_size="$(/usr/bin/stat -f %z "${oe_candidate}")"
-      /bin/sleep 2
-      second_size="$(/usr/bin/stat -f %z "${oe_candidate}")"
-      if [[ "${first_size}" -ge 10000 && "${first_size}" -eq "${second_size}" ]]; then
-        download_ready=1
-        break
-      fi
+  oe_install_source="${oe_candidate}"
+  need_browser_download=0
+  if (( oe_fetch_status == 0 )); then
+    print -r -- "public-refresh: headless Oracle's Elixir download wrote ${oe_candidate}"
+  elif (( oe_fetch_status == 75 )); then
+    # A Drive quota block leaves the previous download in place, and that file
+    # is real data - only its age is in question. Reuse it while it is inside
+    # the same limit the ingest applies to a stale source, so a quota block
+    # costs a few hours of freshness instead of reintroducing the GUI
+    # dependency. The importer dedupes unchanged bytes, so re-presenting the
+    # same file is cheap and records "unchanged" rather than a false refresh.
+    oe_max_age_days="$(
+      "${python}" -c \
+        'from lol_kills.etl.oe_ingest import OE_SOURCE_MAX_AGE_DAYS; print(int(OE_SOURCE_MAX_AGE_DAYS))' \
+        2>/dev/null || true
+    )"
+    if [[ ! "${oe_max_age_days}" =~ '^[1-9][0-9]*$' ]]; then
+      # Import failed; do not invent a longer grace period than the code's.
+      oe_max_age_days=3
     fi
-    /bin/sleep 1
-  done
+    oe_fresh_after=$(( $(/bin/date +%s) - oe_max_age_days * 86400 ))
+    oe_existing_mtime=0
+    if [[ -f "${oe_csv}" ]]; then
+      oe_existing_mtime="$(/usr/bin/stat -f %m "${oe_csv}" 2>/dev/null || print -r -- 0)"
+    fi
+    if (( oe_existing_mtime > oe_fresh_after )); then
+      print -r -- "public-refresh: headless blocked by quota; existing CSV is fresh enough (${oe_csv}, within ${oe_max_age_days} days) - proceeding without Brave"
+      oe_install_source="${oe_csv}"
+    else
+      print -u2 "public-refresh: headless blocked by quota and ${oe_csv} is missing or older than ${oe_max_age_days} days; falling back to the Brave download."
+      need_browser_download=1
+    fi
+  else
+    print -u2 "public-refresh: headless Oracle's Elixir download failed (status ${oe_fetch_status}); falling back to the Brave download."
+    need_browser_download=1
+  fi
 
-  if [[ "${download_ready}" -ne 1 ]]; then
-    print -u2 "Fresh Oracle's Elixir browser download did not arrive within 180 seconds."
-    exit 1
+  if (( need_browser_download )); then
+    rm -f "${oe_candidate}" "${oe_candidate}.crdownload" "${oe_partial}"
+    /usr/bin/open -a "Brave Origin" "${oe_download_url}"
+
+    download_ready=0
+    for _attempt in {1..180}; do
+      if [[ -f "${oe_candidate}" && ! -f "${oe_candidate}.crdownload" ]]; then
+        first_size="$(/usr/bin/stat -f %z "${oe_candidate}")"
+        /bin/sleep 2
+        second_size="$(/usr/bin/stat -f %z "${oe_candidate}")"
+        if [[ "${first_size}" -ge 10000 && "${first_size}" -eq "${second_size}" ]]; then
+          download_ready=1
+          break
+        fi
+      fi
+      /bin/sleep 1
+    done
+
+    if [[ "${download_ready}" -ne 1 ]]; then
+      print -u2 "Fresh Oracle's Elixir browser download did not arrive within 180 seconds."
+      exit 1
+    fi
   fi
 
   "${python}" -m lol_kills.etl.oe_ingest \
-    --install-browser-candidate "${oe_candidate}" \
+    --install-browser-candidate "${oe_install_source}" \
     --year "${oe_year}" \
     --receipt-output "${source_receipt}"
   "${python}" -m lol_kills.etl.oe_database \
