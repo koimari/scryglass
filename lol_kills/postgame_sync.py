@@ -242,9 +242,15 @@ def ingest_oe_csv(
             "supabase_incremental_oe"
             if database_refreshed
             else (
-                "brave_origin_browser_download"
-                if browser_refreshed
-                else "public_google_drive_file"
+                # The launcher exports the acquisition path that actually won;
+                # the browser flag alone claimed Brave even when the bytes
+                # arrived over anonymous HTTPS or were reused from the inbox.
+                os.environ.get("SCRYGLASS_OE_TRANSPORT")
+                or (
+                    "brave_origin_browser_download"
+                    if browser_refreshed
+                    else "public_google_drive_file"
+                )
             )
         ),
         "source_latest": _annual_source_latest(root),
