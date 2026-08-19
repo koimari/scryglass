@@ -6,8 +6,10 @@ export type ToolName =
   | "query_drafts"
   | "leaderboards"
   | "player"
+  | "player_stats"
   | "compare_players"
   | "team"
+  | "team_stats"
   | "matches"
   | "tier"
   | "schedule"
@@ -29,8 +31,10 @@ export const TOOLS: ToolSpec[] = [
   { name: "query_drafts", description: "Rank teams by descriptive draft edge or compare two named teams over complete published drafts. Use for best, worst, top, bottom, named-team, between-team, versus-team, or league-specific draft questions. The response states the scope, profile window, and sample floor.", args: [{ name: "q", description: "the complete original team draft question" }] },
   { name: "leaderboards", description: "Top players by A-grade games, rating, or win rate; top teams; or draft rankings. Team draft rankings use descriptive model-unit edge. Player rankings use best-available rate from published bans and tier pools. Filters support role and competitive tier.", args: [{ name: "category", description: "a_grades | rating | win_rate | teams | teams_draft | players_draft" }, { name: "role", description: "top | jng | mid | bot | sup (optional)" }, { name: "tier", description: "tier1 | tier2 | tier3 (optional; use tier1 by default)" }, { name: "limit", description: "number of results (optional)" }] },
   { name: "player", description: "Player profile: rating, role, team, grades, win rate, recent form.", args: [{ name: "name", description: "player name" }] },
+  { name: "player_stats", description: "Per-game performance statistics for one player inside the profile window: CS per minute, gold per minute, gold share, damage per minute, damage share, and KDA, with an aggregate header and the most recent games listed individually.", args: [{ name: "name", description: "player name" }] },
   { name: "compare_players", description: "Compare the ratings of two named players and answer which rating is higher.", args: [{ name: "player1", description: "first player name" }, { name: "player2", description: "second player name" }] },
   { name: "team", description: "Team profile: rating, record, recent results.", args: [{ name: "name", description: "team name" }] },
+  { name: "team_stats", description: "Per-game team statistics inside the profile window: gold per minute, damage per minute, kills, deaths, and game length, with an aggregate header and the most recent games listed individually.", args: [{ name: "name", description: "team name" }] },
   { name: "matches", description: "Recent completed matches, optionally filtered by team, league, or champion.", args: [{ name: "team", description: "team name (optional)" }, { name: "league", description: "league code such as LEC or LCK (optional)" }, { name: "champion", description: "champion name (optional)" }, { name: "limit", description: "number of matches (optional)" }] },
   { name: "tier", description: "Patch-wide champion tier list, optionally per role.", args: [{ name: "role", description: "top | jng | mid | bot | sup (optional)" }, { name: "patch", description: "public patch such as 26.15 (optional)" }] },
   { name: "schedule", description: "Upcoming fixtures, optionally for a league.", args: [{ name: "league", description: "league or tournament (optional)" }] },

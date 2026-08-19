@@ -1,9 +1,20 @@
 """Per-map contribution statistics for the public player and team profiles.
 
-The rows here are the *same* census the published ratings are fit on: this
-module consumes the canonical player archive frame that
-:func:`lol_kills.export.pack_records.build_profile_records` reads, so a profile
-can never show a map the ratings did not see.
+The rows here are the *same* games the published ratings are fit on.  The
+canonical player archive frame that
+:func:`lol_kills.export.pack_records.build_profile_records` reads is *wider*
+than the rating population: the public team ladder is fit on the output of
+:func:`lol_kills.export.pack_records.filter_public_team_rating_maps`, which
+drops excluded organizations, invalid competition labels and the ``other``
+competition tier.  ``accepted_game_ids`` carries that accepted rating game set
+into this module so a profile can never show a game the ratings did not see.
+When it is omitted the payload reports ``rating_game_count: null`` rather than
+implying a restriction that was never applied.
+
+The payload is bound to the release census the same way the draft artifacts and
+the manifest are, through ``source_as_of``, ``source_game_count`` and
+``source_identity_sha256``.  Each is ``null`` when the caller does not supply
+it: an unbound artifact says so instead of carrying a plausible-looking value.
 
 FAIL CLOSED.  Every metric is emitted as ``null`` when its source column is
 absent or unusable.  A missing metric is never coerced to ``0``, because a
@@ -30,7 +41,9 @@ we do not control.  As values, names are never inspected.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+import math
+import re
+from typing import Any, Iterable, Mapping
 
 import pandas as pd
 
@@ -89,9 +102,41 @@ def _round(value: Any, digits: int = 2) -> float | None:
         number = float(value)
     except (TypeError, ValueError):
         return None
-    if number != number or number in (float("inf"), float("-inf")):
+    if math.isnan(number) or math.isinf(number):
         return None
     return round(number, digits)
+
+
+# Private per-row sort key.  Stripped from every emitted row by
+# ``_identity_payload`` so it can never reach a published artifact.
+_ORDER_KEY = "_sort"
+
+_DIGIT_RUN = re.compile(r"\d+")
+
+# Wide enough for any source game identity's numeric run.
+_NATURAL_PAD = 12
+
+
+def _natural_key(text: str) -> str:
+    """Zero-pad digit runs so ``..._9`` orders before ``..._10``.
+
+    Games inside one series differ only by a numeric suffix, and plain
+    lexicographic order puts ``_10`` ahead of ``_9``.
+    """
+
+    return _DIGIT_RUN.sub(lambda match: match.group().zfill(_NATURAL_PAD), text)
+
+
+def _order_key(moment: pd.Timestamp, game_id: str) -> tuple[str, str]:
+    """Order rows by the *full* source timestamp, not the calendar day.
+
+    ``date`` is truncated to a day for display.  Sorting and capping on that
+    truncation would order a same-day series by game identity instead of by
+    when the games were played, so the untruncated timestamp is kept here and
+    the identity is only a deterministic tie-break.
+    """
+
+    return (moment.isoformat(), _natural_key(game_id))
 
 
 def _positive(value: float | None) -> float | None:
@@ -109,17 +154,59 @@ def _mean(values: list[float | None]) -> float | None:
     return round(sum(present) / len(present), 2)
 
 
-def _empty_payload(window_days: int, map_limit: int) -> dict[str, Any]:
+def _census(
+    source_as_of: str | None,
+    source_game_count: int | None,
+    source_identity_sha256: str | None,
+    rating_game_count: int | None,
+) -> dict[str, Any]:
+    """Release census binding.  ``None`` means unbound, never zero."""
+
+    return {
+        "source_as_of": str(source_as_of) if source_as_of else None,
+        "source_game_count": int(source_game_count) if source_game_count is not None else None,
+        "source_identity_sha256": (
+            str(source_identity_sha256) if source_identity_sha256 else None
+        ),
+        # Distinct accepted rating games this payload was restricted to. ``None``
+        # means no rating restriction was applied, so the payload must not be
+        # read as describing the rating population.
+        "rating_game_count": int(rating_game_count) if rating_game_count is not None else None,
+    }
+
+
+def _empty_payload(
+    window_days: int,
+    map_limit: int,
+    census: Mapping[str, Any],
+) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "window_days": window_days,
         "map_limit": map_limit,
+        **dict(census),
         "players": [],
         "teams": [],
     }
 
 
-def _prepared_frame(players: pd.DataFrame, window_days: int) -> pd.DataFrame:
+def _accepted_ids(accepted_game_ids: Iterable[str] | None) -> set[str] | None:
+    """Normalize the accepted rating game set, or ``None`` when unrestricted."""
+
+    if accepted_game_ids is None:
+        return None
+    return {
+        text
+        for text in (str(value).strip() for value in accepted_game_ids)
+        if text and text.casefold() not in {"nan", "nat", "none", "<na>"}
+    }
+
+
+def _prepared_frame(
+    players: pd.DataFrame,
+    window_days: int,
+    accepted: set[str] | None,
+) -> pd.DataFrame:
     """Restrict the archive to complete, windowed, identifiable player maps."""
 
     frame = players.copy()
@@ -146,6 +233,10 @@ def _prepared_frame(players: pd.DataFrame, window_days: int) -> pd.DataFrame:
         & frame["_team"].ne("")
         & frame["_win"].isin({0, 1})
     ].copy()
+    if accepted is not None:
+        # Applied before the window is measured so an excluded game can never
+        # define "latest" and pull the window off the rating population.
+        frame = frame[frame["_game_id"].astype(str).str.strip().isin(accepted)].copy()
     if frame.empty:
         return frame
     latest = frame["_date"].max()
@@ -197,20 +288,36 @@ def build_player_map_stats(
     *,
     window_days: int = DEFAULT_WINDOW_DAYS,
     map_limit: int = DEFAULT_MAP_LIMIT,
+    accepted_game_ids: Iterable[str] | None = None,
+    source_as_of: str | None = None,
+    source_game_count: int | None = None,
+    source_identity_sha256: str | None = None,
 ) -> dict[str, Any]:
-    """Build the per-map Stats payload for every windowed player and team."""
+    """Build the per-map Stats payload for every windowed player and team.
+
+    ``accepted_game_ids`` is the accepted rating game set.  When supplied the
+    payload describes only those games, so the published claim that the Stats
+    section shows the games the ratings are fit on is true by construction.
+    """
 
     if window_days < 1 or map_limit < 1:
         raise ValueError("window_days and map_limit must be positive")
+    accepted = _accepted_ids(accepted_game_ids)
+    census = _census(
+        source_as_of,
+        source_game_count,
+        source_identity_sha256,
+        None if accepted is None else len(accepted),
+    )
     required = {"playername", "teamname", "side", "position", "result", "date"}
     if players is None or players.empty or not required.issubset(players.columns):
-        return _empty_payload(window_days, map_limit)
+        return _empty_payload(window_days, map_limit, census)
     if "gameid" not in players.columns and "game_uid" not in players.columns:
-        return _empty_payload(window_days, map_limit)
+        return _empty_payload(window_days, map_limit, census)
 
-    frame = _prepared_frame(players, window_days)
+    frame = _prepared_frame(players, window_days, accepted)
     if frame.empty:
-        return _empty_payload(window_days, map_limit)
+        return _empty_payload(window_days, map_limit, census)
 
     side_gold = _side_gold_totals(frame)
     opponents = _opponents(frame)
@@ -243,6 +350,7 @@ def build_player_map_stats(
         won = int(row["_win"]) == 1
 
         entry = {
+            _ORDER_KEY: _order_key(row["_date"], game_id),
             "game_id": game_id,
             "date": row["_date"].date().isoformat(),
             "league": str(row["league"]) if has_league and pd.notna(row["league"]) else None,
@@ -277,6 +385,7 @@ def build_player_map_stats(
         aggregate = bucket.get(game_id)
         if aggregate is None:
             aggregate = {
+                _ORDER_KEY: entry[_ORDER_KEY],
                 "game_id": game_id,
                 "date": entry["date"],
                 "league": entry["league"],
@@ -315,6 +424,7 @@ def build_player_map_stats(
         "schema_version": SCHEMA_VERSION,
         "window_days": window_days,
         "map_limit": map_limit,
+        **census,
         "players": players_payload,
         "teams": teams_payload,
     }
@@ -347,13 +457,20 @@ def _identity_payload(
     metric_keys: tuple[str, ...],
     map_limit: int,
 ) -> dict[str, Any]:
-    """Aggregate header plus the most recent capped map rows."""
+    """Aggregate header plus the most recent capped map rows.
+
+    Ordering and capping run on the untruncated source timestamp carried in
+    ``_ORDER_KEY``; the key is stripped from every surviving row so no private
+    field reaches the artifact.
+    """
 
     ordered = sorted(
         rows,
-        key=lambda row: (str(row.get("date") or ""), str(row.get("game_id") or "")),
+        key=lambda row: row.get(_ORDER_KEY) or ("", str(row.get("game_id") or "")),
         reverse=True,
     )[:map_limit]
+    for row in ordered:
+        row.pop(_ORDER_KEY, None)
     maps = len(ordered)
     wins = sum(1 for row in ordered if row.get("win") is True)
     payload: dict[str, Any] = {

@@ -226,6 +226,46 @@ def test_rows_are_most_recent_first_and_capped() -> None:
     assert _find(payload["players"], "BBlue0")["maps"] == 3
 
 
+def test_same_day_series_orders_by_timestamp_not_by_game_id() -> None:
+    """A ten-game day must not order ``_10`` ahead of ``_9``.
+
+    ``date`` is truncated to the calendar day for display.  Sorting on that
+    truncation leaves the game identity as the only tie-break, and lexically
+    ``series_10`` precedes ``series_9``.  The full source timestamp decides.
+    """
+
+    rows: list[dict[str, object]] = []
+    for game in range(1, 11):
+        rows.extend(_game(f"series_{game}", f"2026-01-05T{game + 6:02d}:00:00Z"))
+    payload = build_player_map_stats(_frame(rows), map_limit=3)
+    games = _find(payload["players"], "BBlue0")["games"]
+    assert [row["game_id"] for row in games] == ["series_10", "series_9", "series_8"]
+    assert {row["date"] for row in games} == {"2026-01-05"}
+    # The team rows follow the same order.
+    team_games = _find(payload["teams"], "Blue Team")["games"]
+    assert [row["game_id"] for row in team_games] == ["series_10", "series_9", "series_8"]
+
+
+def test_identical_timestamps_break_ties_on_natural_game_order() -> None:
+    """Without a distinguishing timestamp the identity still orders naturally."""
+
+    rows: list[dict[str, object]] = []
+    for game in (9, 10):
+        rows.extend(_game(f"series_{game}", "2026-01-05T09:00:00Z"))
+    payload = build_player_map_stats(_frame(rows))
+    games = _find(payload["players"], "BBlue0")["games"]
+    assert [row["game_id"] for row in games] == ["series_10", "series_9"]
+
+
+def test_no_private_ordering_key_reaches_the_payload() -> None:
+    rows = [*_game("g1", "2026-01-10T09:00:00Z"), *_game("g2", "2026-01-10T11:00:00Z")]
+    payload = build_player_map_stats(_frame(rows))
+    for kind in ("players", "teams"):
+        for entry in payload[kind]:
+            for row in entry["games"]:
+                assert not any(str(key).startswith("_") for key in row), row
+
+
 def test_missing_metric_is_null_never_zero() -> None:
     rows = _game("g1", "2026-01-10")
     for row in rows:

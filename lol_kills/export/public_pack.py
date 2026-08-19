@@ -1515,6 +1515,14 @@ def export_public_pack(
     rating_input = filter_public_team_rating_maps(rating_input)
     if rating_input.empty:
         raise RuntimeError("public pack team rating source has no eligible team maps")
+    # The accepted rating population, frozen beside the filter that defines it.
+    # The profile archive frame read later is wider than this: it still carries
+    # excluded organizations, invalid competition labels and the "other"
+    # competition tier. Any artifact that claims to describe the games the
+    # ratings are fit on must be restricted to these identities.
+    rating_game_ids = set(_normalized_game_uid(rating_input).dropna().astype(str))
+    if not rating_game_ids:
+        raise RuntimeError("public pack team rating source has no game identities")
     progress("checking source identity alignment")
     if (warehouse / "meta.json").exists():
         map_ids = set(_normalized_game_uid(maps_for_records).dropna().astype(str))
@@ -1846,13 +1854,20 @@ def export_public_pack(
         draft_metadata=_draft_metadata_from_maps(maps_for_records),
         include_archive=True,
     )
-    # Built from the same canonical archive frame as the profile records above,
-    # so the Stats tab can never describe a map the rest of the profile — or the
-    # ratings fit on this census — does not have.
-    progress("building per-map profile statistics")
-    player_map_stats_payload = build_player_map_stats(player_profile_frame)
     progress("checking composition publication authority")
     composition_source_digest = source_identity_sha256(source_game_ids)
+    # Restricted to the accepted rating game identities rather than to the
+    # wider profile archive, so "the same games the ratings are fit on" is true
+    # by construction, and bound to this release's accepted census the same way
+    # the manifest and the draft artifacts are.
+    progress("building per-map profile statistics")
+    player_map_stats_payload = build_player_map_stats(
+        player_profile_frame,
+        accepted_game_ids=rating_game_ids,
+        source_as_of=source_as_of.isoformat().replace("+00:00", "Z"),
+        source_game_count=len(source_game_ids),
+        source_identity_sha256=composition_source_digest,
+    )
     composition_worker_commit = resolve_worker_commit(project)
     composition_model_dir = runtime / "data" / "lol" / "models" / "composition_signal"
     descriptive_authority: dict[str, Any] | None = None
