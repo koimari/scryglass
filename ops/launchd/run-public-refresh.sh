@@ -79,7 +79,17 @@ if [[ -f "${worker_lock}" ]]; then
     # killed inside the critical section would strand the directory and block
     # every future reap. An abandoned guard is removed once it is clearly old;
     # this run still defers, and the next scheduled run proceeds normally.
-    guard_age="$(( $(/bin/date +%s) - $(/usr/bin/stat -f %m "${reap_guard}" 2>/dev/null || /bin/date +%s) ))"
+    # Portable mtime. GNU stat treats -f as "file system status" and %m as the
+    # MOUNT POINT, so on Linux (where the CI behaviour tests run) the BSD form
+    # does not fail - it "succeeds" with a path string that then breaks the
+    # arithmetic. The GNU form -c %Y errors cleanly on macOS and falls through
+    # to the BSD form; the reverse order cannot work.
+    guard_mtime="$(/usr/bin/stat -c %Y "${reap_guard}" 2>/dev/null || /usr/bin/stat -f %m "${reap_guard}" 2>/dev/null || true)"
+    if [[ ! "${guard_mtime}" =~ '^[0-9]+$' ]]; then
+      # An unreadable mtime proves nothing; treat the guard as fresh and defer.
+      guard_mtime="$(/bin/date +%s)"
+    fi
+    guard_age="$(( $(/bin/date +%s) - guard_mtime ))"
     if (( guard_age > 600 )); then
       # Identity-safe removal. Age-check-then-rmdir is itself a TOCTOU: between
       # this launch's stat and its rmdir, another launch can clear the old
