@@ -8,6 +8,17 @@ export const CHAT_QUESTION_MAX_CHARS = 500;
 export const CHAT_NAME_MAX_CHARS = 100;
 export const CHAT_BODY_MAX_BYTES = 8 * 1024;
 export const CHAT_HANDLER_TIMEOUT_MS = 5_000;
+// The planner query routes chain several sequential network legs: a manifest
+// read, the support query index, a second manifest read inside
+// executePublishedQueryPlan, and the bounded Supabase RPC (which itself holds
+// a 5s statement_timeout). Healthy totals are 1.5-2.1s, but the sum against a
+// 5s wall intermittently loses: measured failures returned at 5.27s and 5.28s,
+// which is the wall budget itself, and post-activation samples put
+// query_champions at 4.28s and query_drafts at 4.30s. Ten seconds gives the
+// sum honest headroom while remaining far under the platform function limit.
+// This is a wall-clock budget for a synthetic 504, not a slow-query allowance:
+// the RPC statement timeout still caps real database work at 5s.
+export const CHAT_QUERY_ROUTE_TIMEOUT_MS = 10_000;
 
 export const CHAT_CACHE_HEADERS = {
   "Cache-Control": "public, max-age=0, must-revalidate",
