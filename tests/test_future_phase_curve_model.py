@@ -116,7 +116,11 @@ def test_prepare_phase_frame_derives_outcome_free_series_provenance() -> None:
                 "game_uid": game,
                 "date": date,
                 "side": side,
-                "teamid": f"{side}-{game}",
+                "teamid": (
+                    None
+                    if game == "oe:game:fallback"
+                    else f"oe:team:{side.casefold()}"
+                ),
                 **{f"goldat{phase}": base + phase for phase in (10, 15, 20, 25)},
                 **{f"xpat{phase}": base + phase for phase in (10, 15, 20, 25)},
             }
@@ -126,7 +130,7 @@ def test_prepare_phase_frame_derives_outcome_free_series_provenance() -> None:
     )
     result = prepare_phase_frame(maps, teams)
     source = dict(result["series_id_source"].value_counts())
-    assert source == {"team_date_proxy": 2, "exact_id_proxy": 2, "game_fallback": 1}
+    assert source == {"team_tournament_proxy": 2, "exact_id_proxy": 2, "game_fallback": 1}
     numeric = result.loc[result["game_uid"].eq("123-123_game_2"), "series_id"].item()
     assert numeric == "123-123_game"
     bridge = result.loc[result["game_uid"].eq("oe:game:bridge-b"), "series_id"].item()
@@ -134,6 +138,105 @@ def test_prepare_phase_frame_derives_outcome_free_series_provenance() -> None:
     assert result.loc[result["game_uid"].eq("oe:game:fallback"), "series_id"].item() == (
         "game-fallback:oe:game:fallback"
     )
+
+
+def test_team_tournament_proxy_keeps_cross_date_matchups_together() -> None:
+    maps = pd.DataFrame(
+        [
+            {
+                "game_uid": "oe:game:cross-date-a",
+                "date": "2026-01-01T00:00:00Z",
+                "league": "LCK",
+                "tournament": "Spring",
+                "blue_team_key": "blue",
+                "red_team_key": "red",
+            },
+            {
+                "game_uid": "oe:game:cross-date-b",
+                "date": "2026-01-03T00:00:00Z",
+                "league": "LCK",
+                "tournament": "Spring",
+                "blue_team_key": "blue",
+                "red_team_key": "red",
+            },
+        ]
+    )
+    teams = pd.DataFrame(
+        [
+            {
+                "game_uid": game,
+                "date": date,
+                "side": side,
+                **{f"goldat{phase}": base + phase for phase in (10, 15, 20, 25)},
+                **{f"xpat{phase}": base + phase for phase in (10, 15, 20, 25)},
+            }
+            for game, date in (
+                ("oe:game:cross-date-a", "2026-01-01T00:00:00Z"),
+                ("oe:game:cross-date-b", "2026-01-03T00:00:00Z"),
+            )
+            for side, base in (("Blue", 1000), ("Red", 900))
+        ]
+    )
+    result = prepare_phase_frame(maps, teams)
+    assert set(result["series_id_source"]) == {"team_tournament_proxy"}
+    assert result["series_id"].nunique() == 1
+    assert result.loc[0, "series_id"] == result.loc[1, "series_id"]
+
+
+def test_team_tournament_proxy_prefers_stable_oe_team_ids() -> None:
+    maps = pd.DataFrame(
+        [
+            {
+                "game_uid": "oe:game:stable-team-ids",
+                "date": "2026-01-01T00:00:00Z",
+                "league": "LCK",
+                "tournament": "Spring",
+                "blue_team_key": "old-blue-alias",
+                "red_team_key": "old-red-alias",
+            }
+        ]
+    )
+    teams = pd.DataFrame(
+        [
+            {
+                "game_uid": "oe:game:stable-team-ids",
+                "date": "2026-01-01T00:00:00Z",
+                "side": side,
+                "teamid": team_id,
+                **{f"goldat{phase}": base + phase for phase in (10, 15, 20, 25)},
+                **{f"xpat{phase}": base + phase for phase in (10, 15, 20, 25)},
+            }
+            for side, team_id, base in (
+                ("Blue", "oe:blue-stable", 1000),
+                ("Red", "oe:red-stable", 900),
+            )
+        ]
+    )
+    result = prepare_phase_frame(maps, teams)
+    assert result.loc[0, "series_id"] == (
+        "team-tournament:LCK|Spring|oe:blue-stable|oe:red-stable"
+    )
+
+
+def test_team_tournament_proxy_reports_possible_collisions() -> None:
+    frame = _phase_frame(4)
+    frame["series_id"] = "team-tournament:LCK|Spring|blue|red"
+    frame["series_id_source"] = "team_tournament_proxy"
+    receipt = _receipt(frame["game_uid"].tolist())
+    report = evaluate_phase_curve(
+        frame,
+        source_receipt=receipt,
+        feature_columns=["prior_form_gold_diff"],
+        n_splits=2,
+        cluster_column="series_id",
+    )
+    identity = report["series_identity"]
+    assert report["cluster_safe"] is False
+    assert identity["source_counts"]["team_tournament_proxy"] == len(frame)
+    assert identity["cluster_counts"]["team_tournament_proxy"] == 1
+    assert identity["possible_collisions"]["clusters"] == 1
+    assert identity["possible_collisions"]["cross_date_clusters"] == 1
+    assert identity["blockers"]
 
 
 def test_phase_pregame_feature_gate_rejects_bare_final_metrics() -> None:
@@ -290,9 +393,9 @@ def test_evaluation_has_transfer_and_missingness_sections() -> None:
                     assert group["metrics"][kind][phase]["baseline_rows_match"]
 
 
-def test_evaluation_blocks_non_authoritative_team_date_series_proxies() -> None:
+def test_evaluation_blocks_non_authoritative_team_tournament_series_proxies() -> None:
     frame = _phase_frame(16)
-    frame["series_id_source"] = "team_date_proxy"
+    frame["series_id_source"] = "team_tournament_proxy"
     receipt = _receipt(frame["game_uid"].tolist())
     report = evaluate_phase_curve(
         frame,
@@ -304,7 +407,7 @@ def test_evaluation_blocks_non_authoritative_team_date_series_proxies() -> None:
     assert report["cluster_safe"] is False
     assert report["series_identity"]["authoritative"] is False
     assert report["series_identity"]["status"] == "blocked"
-    assert report["series_identity"]["source_counts"]["team_date_proxy"] == len(frame)
+    assert report["series_identity"]["source_counts"]["team_tournament_proxy"] == len(frame)
     assert report["series_identity"]["blockers"]
 
 

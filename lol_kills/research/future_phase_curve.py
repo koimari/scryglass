@@ -181,7 +181,10 @@ def _series_cluster_labels(metadata: pd.DataFrame) -> tuple[pd.Series, pd.Series
     """Build outcome-free series clusters and record their provenance.
 
     Numeric annual IDs provide a stable series proxy.  Other rows use the
-    UTC date, competition label, tournament, and unordered stable team keys.
+    competition label, tournament, and unordered stable team keys.  The
+    conservative proxy has no date.  It keeps the same matchup and event
+    together when a series crosses a date boundary.  It can merge separate
+    series with the same matchup and event.
     A row with incomplete identity keeps a game-level fallback and remains a
     promotion blocker.
     """
@@ -210,19 +213,22 @@ def _series_cluster_labels(metadata: pd.DataFrame) -> tuple[pd.Series, pd.Series
             labels.append(numeric_match.group(1))
             sources.append("exact_id_proxy")
             continue
-        date_value = pd.to_datetime(row.get("date"), utc=True, errors="coerce")
-        date_token = date_value.strftime("%Y-%m-%d") if pd.notna(date_value) else None
         league = token(row.get("league_source")) or token(row.get("league"))
         tournament = token(row.get("tournament")) or "<missing>"
-        blue_team = token(row.get("blue_team_key"))
-        red_team = token(row.get("red_team_key"))
+        blue_team_id = token(row.get("blue_team_id"))
+        red_team_id = token(row.get("red_team_id"))
+        if blue_team_id is not None and red_team_id is not None:
+            blue_team, red_team = blue_team_id, red_team_id
+        else:
+            blue_team = token(row.get("blue_team_key"))
+            red_team = token(row.get("red_team_key"))
         team_keys = sorted(value for value in (blue_team, red_team) if value is not None)
-        if date_token is not None and league is not None and len(team_keys) == 2:
+        if league is not None and len(team_keys) == 2:
             labels.append(
-                "team-date:"
-                + "|".join((date_token, league, tournament, team_keys[0], team_keys[1]))
+                "team-tournament:"
+                + "|".join((league, tournament, team_keys[0], team_keys[1]))
             )
-            sources.append("team_date_proxy")
+            sources.append("team_tournament_proxy")
             continue
         labels.append("game-fallback:" + game_uid)
         sources.append("game_fallback")
@@ -248,24 +254,66 @@ def _series_identity_report(frame: pd.DataFrame) -> dict[str, Any]:
         for key, value in values.value_counts(dropna=False).items()
     }
     blockers: list[str] = []
-    if counts.get("team_date_proxy", 0):
+    if counts.get("team_tournament_proxy", 0):
         blockers.append(
-            "team_date_proxy identities can split one series across dates and collide on same-day events"
+            "team_tournament_proxy identities keep cross-date matchup events together but can merge separate series"
         )
     if counts.get("game_fallback", 0):
         blockers.append("game-level fallback identities cannot prove whole-series membership")
     unknown = sorted(
         key
         for key in counts
-        if key not in {"exact_id_proxy", "team_date_proxy", "game_fallback"}
+        if key not in {"exact_id_proxy", "team_tournament_proxy", "game_fallback"}
     )
     if unknown:
         blockers.append("unknown series identity provenance: " + ", ".join(unknown))
+    cluster_frame = frame.loc[:, ["series_id", "series_id_source"]].copy()
+    cluster_frame["date"] = _date_series(frame, "phase frame")
+    cluster_frame["calendar_date"] = cluster_frame["date"].dt.floor("D")
+    proxy = cluster_frame["series_id_source"].eq("team_tournament_proxy")
+    proxy_clusters = cluster_frame.loc[proxy].groupby("series_id", dropna=False).agg(
+        rows=("series_id", "size"), dates=("calendar_date", "nunique")
+    )
+    possible_collision_clusters = int((proxy_clusters["rows"] > 1).sum())
+    possible_collision_rows = int(
+        proxy_clusters.loc[proxy_clusters["rows"] > 1, "rows"].sum()
+    )
+    cross_date_clusters = int((proxy_clusters["dates"] > 1).sum())
+    cross_date_rows = int(
+        proxy_clusters.loc[proxy_clusters["dates"] > 1, "rows"].sum()
+    )
     authoritative = not blockers and bool(counts)
     return {
         "status": "verified" if authoritative else "blocked",
         "authoritative": authoritative,
         "source_counts": counts,
+        "cluster_counts": {
+            str(source): int(cluster_frame.loc[cluster_frame["series_id_source"].eq(source), "series_id"].nunique())
+            for source in counts
+        },
+        "unique_clusters": int(cluster_frame["series_id"].nunique()),
+        "possible_collisions": {
+            "source": "team_tournament_proxy",
+            "clusters": possible_collision_clusters,
+            "rows": possible_collision_rows,
+            "cross_date_clusters": cross_date_clusters,
+            "cross_date_rows": cross_date_rows,
+            "definition": "proxy clusters with multiple maps may contain separate series because authoritative series IDs are unavailable",
+        },
+        "cross_model_partition": {
+            "status": "non_comparable",
+            "phase_key_fields": [
+                "league",
+                "tournament",
+                "unordered_stable_oe_team_pair",
+            ],
+            "other_model_key_fields": [
+                "league",
+                "tournament",
+                "unordered_team_pair_alias_key",
+            ],
+            "reason": "phase and future-value evaluation must use one shared team crosswalk before their cluster metrics can be compared",
+        },
         "blockers": blockers,
     }
 
@@ -470,6 +518,16 @@ def prepare_phase_frame(
             cluster_metadata[name] = map_index[name]
         else:
             cluster_metadata[name] = pd.NA
+    team_id_column = next(
+        (name for name in ("teamid", "team_id") if name in teams_value.columns),
+        None,
+    )
+    if team_id_column is not None:
+        cluster_metadata["blue_team_id"] = blue.reindex(map_index.index)[team_id_column]
+        cluster_metadata["red_team_id"] = red.reindex(map_index.index)[team_id_column]
+    else:
+        cluster_metadata["blue_team_id"] = pd.NA
+        cluster_metadata["red_team_id"] = pd.NA
     series_labels, series_sources = _series_cluster_labels(cluster_metadata)
     result["series_id"] = series_labels
     result["series_id_source"] = series_sources
@@ -1203,7 +1261,7 @@ def chronological_folds(
     cluster_dates = (
         cluster_frame.groupby("cluster", sort=False, observed=True)["date"]
         .agg(first="min", last="max")
-        .sort_values(["last", "first"], kind="stable")
+        .sort_values(["first", "last"], kind="stable")
     )
     if len(cluster_dates) < 2:
         return ()
@@ -1591,7 +1649,7 @@ def evaluate_phase_curve(
                 )
             ),
             "folds": [row["cluster_boundary_exclusions"] for row in fold_rows],
-            "definition": "cluster last date must be before test start for train eligibility",
+            "definition": "test clusters are ordered by first date; a train cluster must end before test start",
         },
         "missingness": {
             kind: {
