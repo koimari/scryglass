@@ -103,7 +103,9 @@ The adapter writes one JSON output manifest to the path in
       "rows": 10
     },
     "team_ratings": {
+      "path": "/path/to/team-ratings.json",
       "sha256": "...",
+      "bytes": 456,
       "rows": 4
     }
   },
