@@ -27,6 +27,7 @@ from lol_kills.v2.patch_identity import CURRENT_PUBLIC_PATCH, PatchIdentityError
 from .champion_elo import (
     DEFAULT_OUTPUT,
     DEFAULT_SOURCE_MODE,
+    _load_source,
     build_candidate,
     write_candidate,
 )
@@ -375,6 +376,18 @@ def _bind_rating_step_to_census(
     }
 
 
+def _accepted_source_latest(root: Path, game_ids: list[str]) -> str:
+    frame, _, _ = _load_source(root, allowed_game_ids=game_ids)
+    latest = pd.Timestamp(frame["date"].max())
+    if pd.isna(latest):
+        raise RuntimeError("accepted tier census has no source watermark")
+    if latest.tzinfo is None:
+        latest = latest.tz_localize("UTC")
+    else:
+        latest = latest.tz_convert("UTC")
+    return latest.isoformat().replace("+00:00", "Z")
+
+
 def _previous_week_start(value: str) -> pd.Timestamp:
     stamp = pd.Timestamp(value)
     if stamp.tzinfo is None:
@@ -506,6 +519,11 @@ def refresh_candidate(
         )
         observed_as_of = _oe_source_latest(root) if live_source_step["completed"] else None
         candidate_expected_live_as_of = observed_as_of or expected_live_as_of
+        if accepted is not None and live_source_step["completed"]:
+            candidate_expected_live_as_of = _accepted_source_latest(
+                root,
+                accepted["game_ids"],
+            )
         rating_step = (
             run_step(
                 [
@@ -540,6 +558,11 @@ def refresh_candidate(
         raise RuntimeError(
             "tier refresh source preparation failed: "
             + _source_step_failure(source_steps)
+        )
+    if accepted is not None and prepared_source is not None:
+        candidate_expected_live_as_of = _accepted_source_latest(
+            root,
+            accepted["game_ids"],
         )
 
     previous = None
@@ -729,6 +752,7 @@ def refresh_candidate(
             {
                 "game_count": accepted["game_count"],
                 "source_identity_sha256": accepted["source_identity_sha256"],
+                "source_observed_through": candidate_expected_live_as_of,
             }
             if accepted is not None
             else None
