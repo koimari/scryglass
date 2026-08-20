@@ -19,8 +19,9 @@
     "regional and patch transfer slices with training-support checks",
     "roster-change and tournament-boundary slices",
     "complete-case and withheld-row missingness counts",
+    "fold-local equal-side imputation with signed missingness and support indicators",
     "sparse-support slice and support-uncertainty diagnostics",
-    "side-swap probability-complement tolerance gate"
+    "structural side-swap probability-complement identity"
   ],
   "estimands": {
     "future_player_value": "Development-only marginal map-win logit contribution for one player in the next eligible map, using strictly prior form, role, champion-role atoms, and explicit support diagnostics.",
@@ -28,15 +29,16 @@
   },
   "fit_contract": {
     "metric_weights": "fit inside development folds; no hand-assigned performance weights",
+    "missing_values": "fit one fold-local median per side-level feature and apply it equally to blue and red before subtraction",
     "player_state": "strictly prior time-decayed form with fold-local rank-3 atoms and support diagnostics",
     "representation": "atom-derived rank-3 champion embedding refit inside each chronological fold",
+    "side_symmetry": "zero-intercept linear logit over blue-minus-red features after equal fold-local side imputation",
     "team_state": "exact-five roster aggregation plus strictly prior team win state and roster continuity"
   },
   "future_scope_blockers": [
     "current_player_team_rating_comparison",
     "composition_specific_phase_curve",
     "calibrated_uncertainty",
-    "missingness_robust_fit",
     "authoritative_series_identity",
     "authoritative_series_cluster_evaluation",
     "phase_model_series_partition_comparability"
@@ -59,11 +61,11 @@
     },
     "future_value_model_builder": {
       "locator": "lol_kills/research/future_value_rating.py",
-      "raw_sha256": "b0a269c9faa8066b460a2a90c39a1e0e928720d9e350b8c42df9655015de4426"
+      "raw_sha256": "a2435abdaebfe73fd9086f058ec6f21c4336049b765ef78061e03239d418b481"
     },
     "phase_curve_builder": {
       "locator": "lol_kills/research/future_phase_curve.py",
-      "raw_sha256": "0a370a30c714490b862cc4a9c4da60c2b86e5736c8c93f4ea0330f1aee4331e0"
+      "raw_sha256": "69595423051603744251c418bd7a519cd402d33c799820cc3902d8ba9f6c1f69"
     }
   },
   "phase_outputs": [

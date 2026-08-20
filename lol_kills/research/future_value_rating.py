@@ -44,8 +44,8 @@ MODEL_CONTRACT_VERSION = "scryglass:future-value-rating-contract:v1"
 MODEL_FIT_SCHEMA_VERSION = "scryglass:future-value-model-fit:v1"
 TIME_DECAY_HALF_LIFE_DAYS = 120.0
 RANK_3 = 3
-SIDE_SWAP_MEAN_TOLERANCE = 0.01
-SIDE_SWAP_MAX_TOLERANCE = 0.02
+SIDE_SWAP_MEAN_TOLERANCE = 1e-12
+SIDE_SWAP_MAX_TOLERANCE = 1e-12
 FORM_METRICS = (
     "cs_per_min",
     "gold_per_min",
@@ -1104,18 +1104,37 @@ def _team_history_features(
     ]]
 
 
-MODEL_FEATURES = tuple(
-    [f"player_form_{metric}" for metric in FORM_METRICS]
-    + [f"rank_3_player_atom_{index}" for index in range(1, RANK_3 + 1)]
-    + [f"rank_3_champion_role_atom_{index}" for index in range(1, RANK_3 + 1)]
-    + [
-        "team_prior_win_diff",
-        "roster_continuity_diff",
-        "player_form_missing_rate",
-        "rank_3_atom_missing",
-        "rank_3_champion_role_atom_missing",
-    ]
-)
+SIDE_LEVEL_TO_MODEL_FEATURE = {
+    **{f"player_form_{metric}": f"player_form_{metric}" for metric in FORM_METRICS},
+    **{
+        f"rank_3_player_atom_{index}": f"rank_3_player_atom_{index}"
+        for index in range(1, RANK_3 + 1)
+    },
+    **{
+        f"rank_3_champion_role_atom_{index}": f"rank_3_champion_role_atom_{index}"
+        for index in range(1, RANK_3 + 1)
+    },
+    "team_prior_win": "team_prior_win_diff",
+    "roster_continuity": "roster_continuity_diff",
+    "player_form_missing_rate": "player_form_missing_rate_diff",
+    "rank_3_atom_missing_rate": "rank_3_atom_missing_rate_diff",
+    "rank_3_champion_role_atom_missing_rate": (
+        "rank_3_champion_role_atom_missing_rate_diff"
+    ),
+    "player_form_support_mean": "player_form_support_mean_diff",
+    "player_form_effective_support_mean": "player_form_effective_support_mean_diff",
+    "player_form_support_uncertainty_proxy": (
+        "player_form_support_uncertainty_proxy_diff"
+    ),
+    "rank_3_atom_support_uncertainty_proxy": (
+        "rank_3_atom_support_uncertainty_proxy_diff"
+    ),
+}
+MODEL_FEATURES = tuple(SIDE_LEVEL_TO_MODEL_FEATURE.values())
+
+
+def _side_level_column(side: str, feature: str) -> str:
+    return f"__{side}_{feature}"
 
 
 def build_future_value_design(
@@ -1184,12 +1203,6 @@ def build_future_value_design(
         .groupby([work["game_id"], work["side"]], sort=False, observed=True)
         .mean()
         .mean(axis=1)
-        .groupby(level=0, sort=False)
-        .mean()
-    )
-    side_values[champion_atom_columns] = side_values[champion_atom_columns].fillna(0.0)
-    grouped_values = side_values.groupby(
-        ["game_id", "side"], sort=False, observed=True
     )
     side_means = grouped_values[side_feature_names].mean()
     side_finite_counts = grouped_values[side_feature_names].count()
@@ -1200,8 +1213,6 @@ def build_future_value_design(
         .groupby([side_values["game_id"], side_values["side"]], sort=False, observed=True)
         .mean()
         .mean(axis=1)
-        .groupby(level=0, sort=False)
-        .mean()
     )
     support_columns = [f"prior_form_{metric}_support" for metric in FORM_METRICS]
     effective_support_columns = [
@@ -1225,8 +1236,6 @@ def build_future_value_design(
         .groupby([work["game_id"], work["side"]], sort=False, observed=True)
         .mean()
         .mean(axis=1)
-        .groupby(level=0, sort=False)
-        .mean()
     )
     rank_support = work[["game_id", "side", "rank_3_champion_role_support"]].copy()
     rank_support["rank_3_champion_role_support"] = pd.to_numeric(
@@ -1243,21 +1252,20 @@ def build_future_value_design(
     ].unstack("side")
     design = map_frame[["game_id", "date", "series_id", "target"]].copy()
     design = design.set_index("game_id", drop=False)
+
+    def put_side_levels(source_name: str, levels: pd.DataFrame) -> None:
+        model_name = SIDE_LEVEL_TO_MODEL_FEATURE[source_name]
+        blue = levels.get("blue", pd.Series(dtype=float)).reindex(design.index)
+        red = levels.get("red", pd.Series(dtype=float)).reindex(design.index)
+        design[_side_level_column("blue", source_name)] = blue
+        design[_side_level_column("red", source_name)] = red
+        design[model_name] = blue.sub(red)
+
     for source_name in side_feature_names:
         output_name = source_name.replace("prior_form_", "player_form_")
-        blue = side_wide[source_name].get("blue", pd.Series(dtype=float))
-        red = side_wide[source_name].get("red", pd.Series(dtype=float))
-        design[output_name] = blue.sub(red).reindex(design.index)
-    design["team_prior_win_diff"] = (
-        team_wide["prior_team_win"].get("blue", pd.Series(dtype=float))
-        .sub(team_wide["prior_team_win"].get("red", pd.Series(dtype=float)))
-        .reindex(design.index)
-    )
-    design["roster_continuity_diff"] = (
-        team_wide["roster_continuity"].get("blue", pd.Series(dtype=float))
-        .sub(team_wide["roster_continuity"].get("red", pd.Series(dtype=float)))
-        .reindex(design.index)
-    )
+        put_side_levels(output_name, side_wide[source_name])
+    put_side_levels("team_prior_win", team_wide["prior_team_win"])
+    put_side_levels("roster_continuity", team_wide["roster_continuity"])
     design["blue_roster_continuity"] = (
         team_wide["roster_continuity"].get("blue", pd.Series(dtype=float))
         .reindex(design.index)
@@ -1266,25 +1274,33 @@ def build_future_value_design(
         team_wide["roster_continuity"].get("red", pd.Series(dtype=float))
         .reindex(design.index)
     )
-    design["player_form_missing_rate"] = side_missing.reindex(design.index)
-    support_mean = support_summary.groupby(level=0, sort=False)[support_columns].mean().mean(axis=1)
-    effective_support_mean = support_summary.groupby(level=0, sort=False)[
-        effective_support_columns
-    ].mean().mean(axis=1)
-    design["player_form_support_mean"] = support_mean.reindex(design.index)
-    design["player_form_effective_support_mean"] = effective_support_mean.reindex(design.index)
-    design["player_form_support_uncertainty_proxy"] = 1.0 / np.sqrt(
-        1.0 + design["player_form_effective_support_mean"]
+    put_side_levels("player_form_missing_rate", side_missing.unstack("side"))
+    put_side_levels("rank_3_atom_missing_rate", rank_missing.unstack("side"))
+    put_side_levels(
+        "rank_3_champion_role_atom_missing_rate",
+        champion_atom_missing.unstack("side"),
     )
-    design["rank_3_atom_missing"] = rank_missing.reindex(design.index)
-    design["rank_3_champion_role_atom_missing"] = champion_atom_missing.reindex(
-        design.index
+    support_mean = support_summary[support_columns].mean(axis=1).unstack("side")
+    effective_support_mean = support_summary[effective_support_columns].mean(axis=1).unstack(
+        "side"
     )
-    design["rank_3_atom_support_uncertainty_proxy"] = 1.0 / np.sqrt(
-        1.0 + rank_support.mean(axis=1).reindex(design.index)
+    put_side_levels("player_form_support_mean", support_mean)
+    put_side_levels("player_form_effective_support_mean", effective_support_mean)
+    put_side_levels(
+        "player_form_support_uncertainty_proxy",
+        1.0 / np.sqrt(1.0 + effective_support_mean),
     )
+    put_side_levels(
+        "rank_3_atom_support_uncertainty_proxy",
+        1.0 / np.sqrt(1.0 + rank_support),
+    )
+    raw_side_columns = [
+        _side_level_column(side, source_name)
+        for source_name in SIDE_LEVEL_TO_MODEL_FEATURE
+        for side in SIDES
+    ]
     design["model_features_complete"] = np.isfinite(
-        design[list(MODEL_FEATURES)].to_numpy(dtype=float)
+        design[raw_side_columns].to_numpy(dtype=float)
     ).all(axis=1)
     for metadata_name in (
         "league",
@@ -1314,6 +1330,59 @@ def build_future_value_design(
     return design
 
 
+def _fold_level_imputation_values(train: pd.DataFrame) -> np.ndarray:
+    """Fit one side-neutral imputation value per side-level feature."""
+
+    values: list[float] = []
+    for source_name in SIDE_LEVEL_TO_MODEL_FEATURE:
+        columns = [
+            _side_level_column("blue", source_name),
+            _side_level_column("red", source_name),
+        ]
+        missing = sorted(set(columns) - set(train.columns))
+        if missing:
+            raise FutureValueSourceError(
+                "imputation design is missing: " + ", ".join(missing)
+            )
+        pooled = train[columns].apply(pd.to_numeric, errors="coerce").to_numpy(
+            dtype=float
+        )
+        finite = pooled[np.isfinite(pooled)]
+        values.append(float(np.median(finite)) if finite.size else 0.0)
+    return np.asarray(values, dtype=float)
+
+
+def _antisymmetric_design_matrix(
+    design: pd.DataFrame,
+    imputation_values: np.ndarray,
+) -> np.ndarray:
+    """Build blue-minus-red values after equal fold-local side imputation."""
+
+    imputation = np.asarray(imputation_values, dtype=float)
+    if imputation.shape != (len(SIDE_LEVEL_TO_MODEL_FEATURE),) or not np.isfinite(
+        imputation
+    ).all():
+        raise FutureValueSourceError("fold-local imputation values are invalid")
+    columns: list[np.ndarray] = []
+    for feature_index, source_name in enumerate(SIDE_LEVEL_TO_MODEL_FEATURE):
+        side_values: list[np.ndarray] = []
+        for side in SIDES:
+            column = _side_level_column(side, source_name)
+            if column not in design.columns:
+                raise FutureValueSourceError("prediction design is missing: " + column)
+            numeric = pd.to_numeric(design[column], errors="coerce").to_numpy(
+                dtype=float
+            )
+            side_values.append(
+                np.where(np.isfinite(numeric), numeric, imputation[feature_index])
+            )
+        columns.append(side_values[0] - side_values[1])
+    matrix = np.column_stack(columns)
+    if not np.isfinite(matrix).all():
+        raise FutureValueSourceError("antisymmetric design matrix is non-finite")
+    return matrix
+
+
 @dataclass(frozen=True)
 class FutureValueFoldModel:
     """A fitted development model for one chronological fold."""
@@ -1321,6 +1390,7 @@ class FutureValueFoldModel:
     feature_names: tuple[str, ...]
     means: np.ndarray
     scales: np.ndarray
+    imputation_values: np.ndarray
     coefficients: np.ndarray
     intercept: float
     atom_model: Rank3AtomModel
@@ -1359,8 +1429,19 @@ class FutureValueFoldModel:
                 feature: float(value)
                 for feature, value in zip(self.feature_names, self.scales)
             },
+            "fold_local_side_imputation": {
+                feature: float(value)
+                for feature, value in zip(
+                    SIDE_LEVEL_TO_MODEL_FEATURE, self.imputation_values
+                )
+            },
             "coefficients": self.coefficient_map,
             "intercept": float(self.intercept),
+            "antisymmetric_fit": {
+                "side_operation": "blue_minus_red_after_equal_side_imputation",
+                "centering": "zero",
+                "fit_intercept": False,
+            },
             "rank_3": self.atom_model.parameter_receipt(),
         }
         parameters["parameter_sha256"] = hashlib.sha256(
@@ -1369,19 +1450,11 @@ class FutureValueFoldModel:
         return parameters
 
     def predict_logit(self, design: pd.DataFrame) -> pd.Series:
-        missing = sorted(set(self.feature_names) - set(design.columns))
-        if missing:
-            raise FutureValueSourceError("prediction design is missing: " + ", ".join(missing))
-        values = design[list(self.feature_names)].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=float)
-        available = np.isfinite(values).all(axis=1)
-        output = np.full(len(design), np.nan, dtype=float)
-        if available.any():
-            scaled = (values[available] - self.means) / self.scales
-            with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-                candidate = self.intercept + scaled @ self.coefficients
-            available_positions = np.flatnonzero(available)
-            finite_candidate = np.isfinite(candidate)
-            output[available_positions[finite_candidate]] = candidate[finite_candidate]
+        values = _antisymmetric_design_matrix(design, self.imputation_values)
+        scaled = values / self.scales
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            output = scaled @ self.coefficients
+        output[~np.isfinite(output)] = np.nan
         return pd.Series(output, index=design.index, name="future_value_logit")
 
     def predict_probability(self, design: pd.DataFrame) -> pd.Series:
@@ -1446,6 +1519,10 @@ class FutureValueFoldModel:
             "intercept": float(self.intercept),
             "feature_means": parameters["feature_means"],
             "feature_scales": parameters["feature_scales"],
+            "fold_local_side_imputation": parameters[
+                "fold_local_side_imputation"
+            ],
+            "antisymmetric_fit": parameters["antisymmetric_fit"],
             "parameter_sha256": parameters["parameter_sha256"],
             "rank_3": parameters["rank_3"],
             "train_rows": int(self.train_rows),
@@ -1516,37 +1593,38 @@ def fit_future_value_model(
     design = build_future_value_design(map_frame, form, atom_model)
     train = design[design["game_id"].isin(train_ids)].copy()
     feature_names = tuple(MODEL_FEATURES)
-    numeric_train = train[list(feature_names)].apply(pd.to_numeric, errors="coerce")
-    complete = np.isfinite(numeric_train.to_numpy(dtype=float)).all(axis=1)
     target = pd.to_numeric(train["target"], errors="coerce")
-    usable = complete & target.isin({0, 1})
+    usable = target.isin({0, 1})
     usable_train = train.loc[usable]
     if len(usable_train) < 20 or usable_train["target"].nunique() != 2:
-        raise FutureValueSourceError("future-value fold has insufficient complete two-class training rows")
-    matrix = usable_train[list(feature_names)].to_numpy(dtype=float)
-    means = matrix.mean(axis=0)
+        raise FutureValueSourceError("future-value fold has insufficient two-class training rows")
+    imputation_values = _fold_level_imputation_values(usable_train)
+    matrix = _antisymmetric_design_matrix(usable_train, imputation_values)
+    means = np.zeros(matrix.shape[1], dtype=float)
     scales = matrix.std(axis=0, ddof=0)
     scales = np.where(np.isfinite(scales) & (scales > 1e-12), scales, 1.0)
     classifier = LogisticRegression(
         C=1.0,
         penalty="l2",
         solver="lbfgs",
+        fit_intercept=False,
         max_iter=1000,
         random_state=0,
     )
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
         classifier.fit(
-            (matrix - means) / scales,
+            matrix / scales,
             usable_train["target"].to_numpy(dtype=int),
         )
-    if not np.isfinite(classifier.coef_).all() or not np.isfinite(classifier.intercept_).all():
+    if not np.isfinite(classifier.coef_).all():
         raise FutureValueSourceError("future-value classifier fit is non-finite")
     model = FutureValueFoldModel(
         feature_names=feature_names,
         means=means,
         scales=scales,
+        imputation_values=imputation_values,
         coefficients=classifier.coef_[0].astype(float),
-        intercept=float(classifier.intercept_[0]),
+        intercept=0.0,
         atom_model=atom_model,
         fit_game_ids=train_ids,
         fit_window_end=_utc_text(boundary),
@@ -1736,12 +1814,17 @@ def _missingness_metrics(
     target: pd.Series,
     probability: pd.Series,
 ) -> dict[str, Any]:
-    """Report complete-case coverage without hiding withheld rows."""
+    """Report fold-local imputation coverage for complete and incomplete rows."""
 
     if "model_features_complete" not in validation.columns:
         return {"status": "unavailable", "blockers": ["missingness_indicator_missing"]}
     complete = validation["model_features_complete"].astype(bool)
     paired = target.notna() & probability.notna()
+    incomplete_target = target.notna() & ~complete
+    incomplete_predicted = paired & ~complete
+    blockers = []
+    if int(incomplete_predicted.sum()) != int(incomplete_target.sum()):
+        blockers.append("incomplete_feature_prediction_missing")
     return {
         "status": "available",
         "total_rows": int(len(validation)),
@@ -1752,7 +1835,17 @@ def _missingness_metrics(
         "complete_case_metrics": _classification_metrics(
             target.loc[paired & complete], probability.loc[paired & complete]
         ),
-        "blockers": ["complete_case_missingness_only"] if (~complete).any() else [],
+        "incomplete_case_metrics": _classification_metrics(
+            target.loc[incomplete_predicted], probability.loc[incomplete_predicted]
+        ),
+        "imputed_prediction_rows": int(incomplete_predicted.sum()),
+        "imputed_prediction_coverage": (
+            float(incomplete_predicted.sum() / incomplete_target.sum())
+            if incomplete_target.any()
+            else 1.0
+        ),
+        "imputation_contract": "fold_local_equal_side_median",
+        "blockers": blockers,
     }
 
 
@@ -1768,14 +1861,12 @@ def _side_swap_metrics(
     if not paired.any():
         return {"status": "unavailable", "rows": 0, "blockers": ["side_swap_rows_missing"]}
     swapped = validation.copy()
-    scalar_features = {
-        "player_form_missing_rate",
-        "rank_3_atom_missing",
-        "rank_3_champion_role_atom_missing",
-    }
-    for feature in MODEL_FEATURES:
-        if feature not in scalar_features:
-            swapped[feature] = -pd.to_numeric(swapped[feature], errors="coerce")
+    for source_name in SIDE_LEVEL_TO_MODEL_FEATURE:
+        blue_column = _side_level_column("blue", source_name)
+        red_column = _side_level_column("red", source_name)
+        blue = swapped[blue_column].copy()
+        swapped[blue_column] = swapped[red_column].to_numpy()
+        swapped[red_column] = blue.to_numpy()
     swapped_probability = model.predict_probability(swapped).loc[paired]
     swapped_target = 1.0 - target.loc[paired]
     original_probability = probability.loc[paired]
@@ -2584,6 +2675,10 @@ def evaluate_future_value(
                 "model_intercept": float(model.intercept),
                 "feature_means": model_parameters["feature_means"],
                 "feature_scales": model_parameters["feature_scales"],
+                "fold_local_side_imputation": model_parameters[
+                    "fold_local_side_imputation"
+                ],
+                "antisymmetric_fit": model_parameters["antisymmetric_fit"],
                 "coefficients": model_parameters["coefficients"],
                 "model_parameter_sha256": model_parameters["parameter_sha256"],
                 "rank_3": model_parameters["rank_3"],
@@ -2831,6 +2926,8 @@ def future_value_model_contract() -> dict[str, Any]:
             "player_state": "strictly prior time-decayed form with fold-local rank-3 atoms and support diagnostics",
             "team_state": "exact-five roster aggregation plus strictly prior team win state and roster continuity",
             "metric_weights": "fit inside development folds; no hand-assigned performance weights",
+            "side_symmetry": "zero-intercept linear logit over blue-minus-red features after equal fold-local side imputation",
+            "missing_values": "fit one fold-local median per side-level feature and apply it equally to blue and red before subtraction",
         },
         "evaluation": [
             "chronological whole-series folds",
@@ -2840,14 +2937,14 @@ def future_value_model_contract() -> dict[str, Any]:
             "regional and patch transfer slices with training-support checks",
             "roster-change and tournament-boundary slices",
             "complete-case and withheld-row missingness counts",
+            "fold-local equal-side imputation with signed missingness and support indicators",
             "sparse-support slice and support-uncertainty diagnostics",
-            "side-swap probability-complement tolerance gate",
+            "structural side-swap probability-complement identity",
         ],
         "future_scope_blockers": [
             "current_player_team_rating_comparison",
             "composition_specific_phase_curve",
             "calibrated_uncertainty",
-            "missingness_robust_fit",
             "authoritative_series_identity",
             "authoritative_series_cluster_evaluation",
             "phase_model_series_partition_comparability",

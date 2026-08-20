@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import numpy as np
 import pandas as pd
 import pytest
 
 from lol_kills.research.future_value_rating import (
     FutureValueSourceError,
+    SIDE_LEVEL_TO_MODEL_FEATURE,
+    _side_level_column,
     _map_model_frame,
     _frame_game_ids,
     _baseline_output_alignment,
@@ -212,6 +215,60 @@ def test_future_value_fit_returns_fitted_metric_weights_and_prediction() -> None
     assert len(parameters["parameter_sha256"]) == 64
     assert len(parameters["rank_3"]["parameter_sha256"]) == 64
     assert parameters["rank_3"]["champion_role_coordinates"]
+    assert parameters["intercept"] == 0.0
+    assert set(parameters["fold_local_side_imputation"]) == set(
+        SIDE_LEVEL_TO_MODEL_FEATURE
+    )
+    assert parameters["antisymmetric_fit"]["fit_intercept"] is False
+
+
+def test_fold_local_imputation_predicts_incomplete_rows_and_preserves_side_swap() -> None:
+    maps, form = _manual_form(24)
+    form.loc[
+        form["game_id"].eq("10") & form["side"].eq("red") & form["role"].eq("mid"),
+        "prior_form_gold_per_min",
+    ] = np.nan
+    form.loc[
+        form["game_id"].eq("22") & form["side"].eq("blue") & form["role"].eq("top"),
+        "prior_form_cs_per_min",
+    ] = np.nan
+    receipt = _source_receipt([str(index) for index in range(1, 25)])
+    model, design = fit_future_value_model(
+        maps,
+        form,
+        train_game_ids=[str(index) for index in range(1, 22)],
+        fit_window_end="2026-01-22T00:00:00Z",
+        source_receipt=receipt,
+    )
+    incomplete = design.loc[design["game_id"].eq("22")].copy()
+    assert incomplete["model_features_complete"].eq(False).all()
+    probability = model.predict_probability(incomplete)
+    assert probability.notna().all()
+
+    swapped = incomplete.copy()
+    for source_name in SIDE_LEVEL_TO_MODEL_FEATURE:
+        blue_column = _side_level_column("blue", source_name)
+        red_column = _side_level_column("red", source_name)
+        blue = swapped[blue_column].copy()
+        swapped[blue_column] = swapped[red_column].to_numpy()
+        swapped[red_column] = blue.to_numpy()
+    swapped_probability = model.predict_probability(swapped)
+    assert swapped_probability.iloc[0] == pytest.approx(
+        1.0 - probability.iloc[0], abs=1e-12
+    )
+
+    changed_future = form.copy()
+    future_mask = changed_future["game_id"].eq("24")
+    changed_future.loc[future_mask, "prior_form_cs_per_min"] = 1_000_000.0
+    future_model, _ = fit_future_value_model(
+        maps,
+        changed_future,
+        train_game_ids=[str(index) for index in range(1, 22)],
+        fit_window_end="2026-01-22T00:00:00Z",
+        source_receipt=receipt,
+    )
+    np.testing.assert_array_equal(model.imputation_values, future_model.imputation_values)
+    np.testing.assert_allclose(model.coefficients, future_model.coefficients, atol=0.0)
 
 
 def test_fit_requires_a_verified_source_receipt() -> None:
@@ -344,11 +401,10 @@ def test_evaluation_pairs_candidate_and_baseline_on_identical_game_ids() -> None
     assert fold["calibration"]["status"] == "available"
     assert fold["calibration"]["rows"] == fold["paired_rows"]
     assert fold["missingness"]["status"] == "available"
-    assert fold["side_swap"]["status"] == "blocked"
-    assert fold["side_swap"]["within_tolerance"] is False
-    assert fold["side_swap"]["blockers"] == [
-        "side_swap_probability_complement_tolerance_exceeded"
-    ]
+    assert fold["side_swap"]["status"] == "available"
+    assert fold["side_swap"]["within_tolerance"] is True
+    assert fold["side_swap"]["max_probability_complement_error"] <= 1e-12
+    assert fold["side_swap"]["blockers"] == []
     assert fold["regional_transfer"]["status"] == "unavailable"
     assert fold["patch_transfer"]["status"] == "unavailable"
     assert fold["tournament_boundary"]["status"] == "unavailable"
