@@ -62,7 +62,7 @@ def test_refresh_writes_rating_artifacts_under_runtime_root(
         write_frame(output_dir / "player_ratings_snapshot.parquet")
         (output_dir / "player_ratings_meta.json").write_text("{}", encoding="utf-8")
 
-    def fake_hierarchical(_maps, *, write, output_dir):
+    def fake_hierarchical(_maps, *, write, output_dir, **_kwargs):
         write_frame(output_dir / "ratings_snapshot.parquet")
         return pd.DataFrame({"team": ["Blue"], "mu_total": [1500.0]}), {"model": "test"}
 

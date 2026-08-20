@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -115,3 +116,98 @@ def test_fused_hierarchical_optimizer_preserves_fit_and_reduces_callbacks(monkey
     pd.testing.assert_frame_equal(fused_snapshot, split_snapshot, check_exact=True)
     assert fused_meta["optimizer_success"] == split_meta["optimizer_success"]
     assert fused_meta["optimizer_message"] == split_meta["optimizer_message"]
+
+
+def test_hierarchical_cache_reuses_current_and_previous_source_bound_fits(
+    tmp_path,
+    monkeypatch: Any,
+) -> None:
+    maps = _fixture()
+    source_identity = "source-a"
+    real_minimize = hierarchical_bt.minimize
+    optimizer_calls: list[None] = []
+
+    def counted_minimize(*args: Any, **kwargs: Any) -> Any:
+        optimizer_calls.append(None)
+        return real_minimize(*args, **kwargs)
+
+    monkeypatch.setattr(hierarchical_bt, "minimize", counted_minimize)
+    current, _ = hierarchical_bt.fit_hierarchical_bt(
+        maps,
+        write=True,
+        output_dir=tmp_path,
+        cache_dir=tmp_path,
+        source_identity_sha256=source_identity,
+    )
+    first_weekly = hierarchical_bt.build_team_weekly_ranks(
+        maps,
+        as_of=pd.Timestamp("2026-01-12"),
+        min_series=1,
+        current=current,
+        cache_dir=tmp_path,
+        source_identity_sha256=source_identity,
+    )
+    assert len(optimizer_calls) == 2
+
+    cached_current, _ = hierarchical_bt.fit_hierarchical_bt(
+        maps,
+        write=True,
+        output_dir=tmp_path,
+        cache_dir=tmp_path,
+        source_identity_sha256=source_identity,
+    )
+    cached_weekly = hierarchical_bt.build_team_weekly_ranks(
+        maps,
+        as_of=pd.Timestamp("2026-01-12"),
+        min_series=1,
+        current=cached_current,
+        cache_dir=tmp_path,
+        source_identity_sha256=source_identity,
+    )
+    assert len(optimizer_calls) == 2
+    pd.testing.assert_frame_equal(current, cached_current, check_exact=True)
+    assert first_weekly == cached_weekly
+
+    manifest = json.loads(
+        (tmp_path / hierarchical_bt.HIERARCHICAL_CACHE_MANIFEST).read_text(encoding="utf-8")
+    )
+    assert set(manifest) == {"current", "previous"}
+    assert manifest["current"]["key"]["source_identity_sha256"] == source_identity
+    assert manifest["previous"]["key"]["slot"] == "previous"
+
+
+def test_hierarchical_cache_rejects_changed_source_rows_and_binding(
+    tmp_path,
+    monkeypatch: Any,
+) -> None:
+    maps = _fixture()
+    real_minimize = hierarchical_bt.minimize
+    optimizer_calls: list[None] = []
+
+    def counted_minimize(*args: Any, **kwargs: Any) -> Any:
+        optimizer_calls.append(None)
+        return real_minimize(*args, **kwargs)
+
+    monkeypatch.setattr(hierarchical_bt, "minimize", counted_minimize)
+    hierarchical_bt.fit_hierarchical_bt(
+        maps,
+        write=True,
+        output_dir=tmp_path,
+        cache_dir=tmp_path,
+        source_identity_sha256="source-a",
+    )
+    changed = maps.copy()
+    changed.loc[0, "y_blue_win"] = 0
+    hierarchical_bt.fit_hierarchical_bt(
+        changed,
+        write=False,
+        cache_dir=tmp_path,
+        source_identity_sha256="source-a",
+    )
+    hierarchical_bt.fit_hierarchical_bt(
+        maps,
+        write=False,
+        cache_dir=tmp_path,
+        source_identity_sha256="source-b",
+    )
+    assert len(optimizer_calls) == 3

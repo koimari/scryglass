@@ -1523,6 +1523,7 @@ def export_public_pack(
     rating_game_ids = set(_normalized_game_uid(rating_input).dropna().astype(str))
     if not rating_game_ids:
         raise RuntimeError("public pack team rating source has no game identities")
+    rating_source_identity = source_identity_sha256(rating_game_ids)
     progress("checking source identity alignment")
     if (warehouse / "meta.json").exists():
         map_ids = set(_normalized_game_uid(maps_for_records).dropna().astype(str))
@@ -1695,6 +1696,8 @@ def export_public_pack(
         rating_input,
         write=True,
         output_dir=features_root,
+        cache_dir=features_root,
+        source_identity_sha256=rating_source_identity,
     )
     sequential_team_snapshot = pd.read_parquet(features_root / "ratings_dual_snapshot.parquet")
     public_ratings = apply_team_momentum_snapshot(
@@ -1733,6 +1736,8 @@ def export_public_pack(
         as_of=source_as_of,
         min_series=5,
         current=public_ratings,
+        cache_dir=features_root,
+        source_identity_sha256=rating_source_identity,
     )
     public_ratings = _attach_public_team_evidence(
         public_ratings,

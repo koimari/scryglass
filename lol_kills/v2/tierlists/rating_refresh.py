@@ -179,6 +179,7 @@ def refresh_ratings(
         if maps.empty:
             raise ValueError("accepted release census leaves the rating source empty")
     map_ids = set(maps["game_uid"].astype(str))
+    rating_source_identity = identity_sha256(map_ids)
     team_games = _bind_game_ids(
         _window_frame(team_games, cutoff=cutoff, label="team"),
         map_ids=map_ids,
@@ -231,6 +232,8 @@ def refresh_ratings(
         maps,
         write=True,
         output_dir=features_dir,
+        cache_dir=features_dir,
+        source_identity_sha256=rating_source_identity,
     )
     sequential_team_snapshot = pd.read_parquet(features_dir / "ratings_dual_snapshot.parquet")
     team_snapshot = apply_team_momentum_snapshot(
@@ -253,6 +256,8 @@ def refresh_ratings(
         min_series=min_series,
         previous_as_of=previous_as_of,
         current=team_snapshot,
+        cache_dir=features_dir,
+        source_identity_sha256=rating_source_identity,
     )
     player_weekly = build_player_weekly_ranks(
         player_maps,
@@ -298,7 +303,7 @@ def refresh_ratings(
             "as_of": source_as_of,
             "maps": int(len(maps)),
             "source_game_count": int(len(map_ids)),
-            "source_identity_sha256": identity_sha256(map_ids),
+            "source_identity_sha256": rating_source_identity,
             "maps_by_year": maps_by_year,
             "team_rows": int(len(team_games)),
             "player_rows": int(len(players)),

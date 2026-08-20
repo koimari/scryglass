@@ -24,8 +24,10 @@ it is not presented as a fully sampled Bayesian posterior.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -43,10 +45,17 @@ from lol_kills.etl.competition import (
     team_identity_key,
 )
 from lol_kills.etl.paths import FEATURES_DIR
+from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.validation import audit_rating_inputs
 
 
 LOGIT_TO_ELO = 400.0 / math.log(10.0)
+HIERARCHICAL_CACHE_SCHEMA = "scryglass:hierarchical-bt-cache:v1"
+HIERARCHICAL_CACHE_MANIFEST = "ratings_hierarchical_cache.json"
+_CACHE_SLOTS = {
+    "current": "ratings_hierarchical_snapshot.parquet",
+    "previous": "ratings_hierarchical_previous_snapshot.parquet",
+}
 
 
 @dataclass(frozen=True)
@@ -61,6 +70,164 @@ class HierarchicalBTConfig:
     bridge_target_series: int = 8
     conservative_z: float = 1.6448536269514722  # one-sided 90th percentile
     max_iter: int = 500
+
+
+def _cache_as_of(as_of: pd.Timestamp | None) -> str | None:
+    if as_of is None:
+        return None
+    stamp = pd.Timestamp(as_of)
+    if stamp.tzinfo is not None:
+        stamp = stamp.tz_convert("UTC").tz_localize(None)
+    return stamp.isoformat()
+
+
+def _cache_text(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def _cache_date(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    stamp = pd.Timestamp(value)
+    if stamp.tzinfo is not None:
+        stamp = stamp.tz_convert("UTC").tz_localize(None)
+    return stamp.isoformat()
+
+
+def _frame_source_identity(
+    maps: pd.DataFrame,
+) -> tuple[str | None, int | None, str | None]:
+    """Return stable identities for the exact map rows supplied to the fit."""
+
+    if maps is None or maps.empty:
+        return None, None, None
+    source_column = next(
+        (column for column in ("game_uid", "gameid", "oe_gameid") if column in maps.columns),
+        None,
+    )
+    if source_column is None:
+        return None, None, None
+    game_ids = [canonical_source_game_key(value) for value in maps[source_column]]
+    if not game_ids or any(not value for value in game_ids) or len(set(game_ids)) != len(game_ids):
+        return None, None, None
+    identity = hashlib.sha256(("\n".join(sorted(game_ids)) + "\n").encode("utf-8")).hexdigest()
+    rows: list[list[str]] = []
+    for game_id, (_, row) in zip(game_ids, maps.iterrows()):
+        source_league = _cache_text(row.get("league")) or "UNKNOWN"
+        is_international = (
+            row.get("is_international")
+            if "is_international" in maps.columns
+            else source_league in INTERNATIONAL_LEAGUES
+        )
+        rows.append(
+            [
+                game_id,
+                _cache_date(row.get("date")),
+                _cache_text(row.get("blue_team")),
+                _cache_text(row.get("red_team")),
+                _cache_text(row.get("y_blue_win")),
+                source_league,
+                _cache_text(is_international),
+                _cache_text(row.get("grid_series_id")),
+                _cache_text(row.get("game")),
+            ]
+        )
+    rows.sort(key=lambda values: values[0])
+    content = "\n".join("\x1f".join(values) for values in rows) + "\n"
+    content_identity = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return identity, len(game_ids), content_identity
+
+
+def _cache_key(
+    maps: pd.DataFrame,
+    *,
+    as_of: pd.Timestamp | None,
+    cfg: HierarchicalBTConfig,
+    source_identity_sha256: str | None,
+    cache_slot: str,
+) -> dict[str, Any] | None:
+    frame_identity, frame_game_count, frame_content_identity = _frame_source_identity(maps)
+    if frame_identity is None or frame_game_count is None or frame_content_identity is None:
+        return None
+    source_identity = str(source_identity_sha256 or frame_identity).strip()
+    if not source_identity:
+        return None
+    return {
+        "schema": HIERARCHICAL_CACHE_SCHEMA,
+        "slot": cache_slot,
+        "source_identity_sha256": source_identity,
+        "frame_identity_sha256": frame_identity,
+        "frame_content_sha256": frame_content_identity,
+        "source_game_count": frame_game_count,
+        "as_of": _cache_as_of(as_of),
+        "config": dict(cfg.__dict__),
+    }
+
+
+def _cache_paths(cache_dir: Path, cache_slot: str) -> tuple[Path, Path]:
+    try:
+        snapshot_name = _CACHE_SLOTS[cache_slot]
+    except KeyError as error:
+        raise ValueError(f"unknown hierarchical cache slot: {cache_slot}") from error
+    return cache_dir / snapshot_name, cache_dir / HIERARCHICAL_CACHE_MANIFEST
+
+
+def _read_cache_manifest(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _load_cached_fit(
+    cache_dir: Path,
+    *,
+    cache_slot: str,
+    key: dict[str, Any],
+) -> tuple[pd.DataFrame, dict[str, Any]] | None:
+    snapshot_path, manifest_path = _cache_paths(cache_dir, cache_slot)
+    manifest = _read_cache_manifest(manifest_path)
+    entry = manifest.get(cache_slot) if manifest is not None else None
+    if not isinstance(entry, dict) or entry.get("key") != key:
+        return None
+    metadata = entry.get("metadata")
+    if not isinstance(metadata, dict) or not snapshot_path.is_file():
+        return None
+    try:
+        snapshot = pd.read_parquet(snapshot_path)
+    except (OSError, ValueError, ImportError):
+        return None
+    return snapshot, metadata
+
+
+def _write_cached_fit(
+    cache_dir: Path,
+    *,
+    cache_slot: str,
+    key: dict[str, Any],
+    snapshot: pd.DataFrame,
+    metadata: dict[str, Any],
+) -> None:
+    snapshot_path, manifest_path = _cache_paths(cache_dir, cache_slot)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_tmp = snapshot_path.with_name(f".{snapshot_path.name}.{os.getpid()}.tmp")
+    manifest_tmp = manifest_path.with_name(f".{manifest_path.name}.{os.getpid()}.tmp")
+    try:
+        snapshot.to_parquet(snapshot_tmp, index=False)
+        os.replace(snapshot_tmp, snapshot_path)
+        manifest = _read_cache_manifest(manifest_path) or {}
+        manifest[cache_slot] = {"key": key, "metadata": metadata}
+        manifest_tmp.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(manifest_tmp, manifest_path)
+    finally:
+        snapshot_tmp.unlink(missing_ok=True)
+        manifest_tmp.unlink(missing_ok=True)
 
 
 def _is_missing(value: Any) -> bool:
@@ -348,10 +515,42 @@ def fit_hierarchical_bt(
     as_of: pd.Timestamp | None = None,
     write: bool = True,
     output_dir: Path | None = None,
+    cache_dir: Path | None = None,
+    source_identity_sha256: str | None = None,
+    cache_slot: str = "current",
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Fit the current conservative ladder and optionally persist its snapshot."""
 
     cfg = cfg or HierarchicalBTConfig()
+    cache_key = _cache_key(
+        maps,
+        as_of=as_of,
+        cfg=cfg,
+        source_identity_sha256=source_identity_sha256,
+        cache_slot=cache_slot,
+    )
+    if cache_dir is not None and cache_key is not None:
+        cached = _load_cached_fit(
+            Path(cache_dir),
+            cache_slot=cache_slot,
+            key=cache_key,
+        )
+        if cached is not None:
+            snapshot, metadata = cached
+            if write and cache_slot == "current":
+                destination = Path(output_dir or FEATURES_DIR)
+                destination.mkdir(parents=True, exist_ok=True)
+                snapshot.to_parquet(destination / "ratings_hierarchical_snapshot.parquet", index=False)
+                snapshot.to_parquet(destination / "ratings_snapshot.parquet", index=False)
+                (destination / "ratings_meta.json").write_text(
+                    json.dumps(metadata, indent=2),
+                    encoding="utf-8",
+                )
+                (destination / "ratings_hierarchical_meta.json").write_text(
+                    json.dumps(metadata, indent=2),
+                    encoding="utf-8",
+                )
+            return snapshot, metadata
     input_audit = audit_rating_inputs(maps)
     obs, series_audit = _observations(maps, as_of, cfg.half_life_days)
     if obs.empty:
@@ -483,6 +682,16 @@ def fit_hierarchical_bt(
         },
         "note": "Series-collapsed penalized MAP Bradley-Terry with explicit series identity (authoritative GRID series id when safe, stable game-level keys otherwise) and local Laplace uncertainty plus explicit uncertainty inflation for teams without international bridges; use rating_p10 for conservative rank.",
     }
+    if cache_key is not None:
+        meta["cache_binding"] = cache_key
+    if cache_dir is not None and cache_key is not None:
+        _write_cached_fit(
+            Path(cache_dir),
+            cache_slot=cache_slot,
+            key=cache_key,
+            snapshot=snapshot,
+            metadata=meta,
+        )
     if write:
         destination = Path(output_dir or FEATURES_DIR)
         destination.mkdir(parents=True, exist_ok=True)
@@ -536,6 +745,8 @@ def build_team_weekly_ranks(
     min_series: int = 5,
     previous_as_of: pd.Timestamp | None = None,
     current: pd.DataFrame | None = None,
+    cache_dir: Path | None = None,
+    source_identity_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Return team rank movement against the previous refresh's ladder.
 
@@ -555,7 +766,14 @@ def build_team_weekly_ranks(
     recent_anchor = _recent_team_baseline_anchor(previous_as_of, previous_start, cutoff)
     if current is None:
         current, _ = fit_hierarchical_bt(maps, as_of=cutoff, write=False)
-    previous, _ = fit_hierarchical_bt(maps, as_of=recent_anchor - pd.Timedelta(microseconds=1), write=False)
+    previous, _ = fit_hierarchical_bt(
+        maps,
+        as_of=recent_anchor - pd.Timedelta(microseconds=1),
+        write=False,
+        cache_dir=cache_dir,
+        source_identity_sha256=source_identity_sha256,
+        cache_slot="previous",
+    )
 
     def order(snapshot: pd.DataFrame) -> tuple[dict[str, int], dict[str, float]]:
         if snapshot.empty:
