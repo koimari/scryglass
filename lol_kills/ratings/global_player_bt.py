@@ -189,11 +189,12 @@ class PrefixBaselineCache:
 
     The cache stores outputs from the existing reference implementation. It
     never approximates the median, MAD, IQR, or z-score. A later request may
-    reuse an entry only when every requested row matches its source row and
-    each group contains a complete prefix through the latest requested date.
-    Rows at that latest date may be partial because they cannot affect their
-    own strict-prior baseline. Any other shape is a cache miss and is computed
-    by the caller's reference path.
+    reuse a complete prefix, or it may add rows before the cached latest date
+    when every old row is unchanged and only the affected strict-prior suffix
+    is rebuilt. Rows at a latest date may be partial because they cannot affect
+    their own strict-prior baseline. Any source correction, deletion, or other
+    unproven shape is a cache miss and is computed by the caller's reference
+    path.
 
     When ``storage_path`` is set, the row catalog and every metric entry use a
     checksummed JSON manifest plus a NumPy payload. A source with later
@@ -828,6 +829,179 @@ class PrefixBaselineCache:
             )
         return None
 
+    def _try_insert(
+        self,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        min_obs: int,
+        *,
+        metric_key: str,
+        row_key: pd.Series,
+        block_baseline: Callable[
+            [np.ndarray, np.ndarray, int], tuple[np.ndarray, np.ndarray]
+        ],
+        prepared_query: _PrefixBaselineQuery | None = None,
+        numeric_values: np.ndarray | None = None,
+        arrays: tuple[
+            tuple[tuple[str, ...], ...],
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+        ] | None = None,
+    ) -> tuple[pd.Series, pd.Series] | None:
+        """Reuse an entry when new rows insert before its latest date.
+
+        A source census can add an older map after a later map already exists.
+        Such a change is not an append-only prefix, but it only changes strict
+        prior baselines at the new map's date and later. Keep the proven rows
+        before that boundary and recompute the affected suffix exactly.
+        """
+
+        if arrays is not None:
+            _keys, row_ids, groups, dates, numeric = arrays
+        elif prepared_query is not None:
+            try:
+                self._refresh_query_catalog(prepared_query, values, group, date, row_key)
+            except PrefixBaselineCacheError as exc:
+                self.last_miss_reason = str(exc)
+                return None
+            _keys = prepared_query.keys
+            row_ids = prepared_query.row_ids
+            groups = prepared_query.groups
+            dates = prepared_query.dates
+            numeric = self._numeric(values) if numeric_values is None else numeric_values
+        else:
+            try:
+                _keys, row_ids, groups, dates, numeric = self._arrays(
+                    values, group, date, row_key
+                )
+            except PrefixBaselineCacheError as exc:
+                self.last_miss_reason = str(exc)
+                return None
+
+        entries = self._entries.get((str(metric_key), int(min_obs)), [])
+        for entry_index, entry in enumerate(entries):
+            cached_positions, known = self._matched_positions(entry, row_ids)
+            # An insertion may add rows. It cannot delete an old row.
+            if int(known.sum()) != len(entry.row_ids) or known.all():
+                continue
+            cached_known = cached_positions[known]
+            if bool(
+                np.any(entry.groups[cached_known] != groups[known])
+                or np.any(entry.dates[cached_known] != dates[known])
+                or not self._same_float_array(
+                    entry.values[cached_known], numeric[known]
+                ).all()
+            ):
+                continue
+
+            new_mask = ~known
+            if (
+                np.any(groups[new_mask] == None)  # noqa: E711
+                or np.any(dates[new_mask] == _PREFIX_CACHE_MISSING_DATE)
+            ):
+                continue
+
+            output_z = np.full(len(values), np.nan, dtype=float)
+            output_prior = np.zeros(len(values), dtype=float)
+            output_z[known] = entry.z[cached_positions[known]]
+            output_prior[known] = entry.prior_count[cached_positions[known]]
+
+            for current_group in set(groups.tolist()):
+                group_positions = np.flatnonzero(groups == current_group)
+                if current_group is None or len(group_positions) == 0:
+                    continue
+                if not new_mask[group_positions].any():
+                    continue
+                group_dates = dates[group_positions]
+                if len(group_positions) > 1 and np.all(
+                    group_dates[1:] >= group_dates[:-1]
+                ):
+                    order = group_positions
+                else:
+                    order = group_positions[np.argsort(group_dates, kind="stable")]
+                # Match _prior_baseline_z: rows without a usable date are
+                # excluded from the baseline pool and retain their cached
+                # neutral output.
+                order = order[dates[order] != _PREFIX_CACHE_MISSING_DATE]
+                if len(order) == 0:
+                    continue
+                ordered_dates = dates[order]
+                starts = np.empty(len(order), dtype=bool)
+                starts[0] = True
+                starts[1:] = ordered_dates[1:] != ordered_dates[:-1]
+                block_starts = np.flatnonzero(starts)
+                block_of_row = np.cumsum(starts) - 1
+                ordered_new = new_mask[order]
+                block_has_new = np.zeros(len(block_starts), dtype=bool)
+                for block_index, local_position in enumerate(block_starts):
+                    end = (
+                        block_starts[block_index + 1]
+                        if block_index + 1 < len(block_starts)
+                        else len(order)
+                    )
+                    block_has_new[block_index] = bool(
+                        ordered_new[local_position:end].any()
+                    )
+                first_affected = int(np.flatnonzero(block_has_new)[0])
+
+                present = np.isfinite(numeric[order])
+                pool = numeric[order][present]
+                available_all = np.concatenate(([0], np.cumsum(present)))[
+                    block_starts
+                ]
+                available = available_all[first_affected:]
+                block_location, block_scale = block_baseline(
+                    pool, available, min_obs
+                )
+                affected_rows = np.flatnonzero(
+                    block_of_row >= first_affected
+                )
+                for local_position in affected_rows:
+                    target_position = order[local_position]
+                    offset = int(block_of_row[local_position]) - first_affected
+                    count = int(available[offset])
+                    output_prior[target_position] = float(count)
+                    centre = float(block_location[offset])
+                    spread = float(block_scale[offset])
+                    if (
+                        count < max(int(min_obs), 1)
+                        or not np.isfinite(centre)
+                        or not np.isfinite(spread)
+                        or spread <= 0.0
+                        or not np.isfinite(numeric[target_position])
+                    ):
+                        continue
+                    output_z[target_position] = (
+                        numeric[target_position] - centre
+                    ) / spread
+
+            replacement = self._make_entry(
+                values,
+                group,
+                date,
+                min_obs,
+                metric_key=metric_key,
+                row_key=row_key,
+                z=pd.Series(output_z, index=values.index, dtype=float),
+                prior_count=pd.Series(output_prior, index=values.index, dtype=float),
+                arrays=(_keys, row_ids, groups, dates, numeric),
+            )
+            if replacement is None:
+                return None
+            self._entries[(str(metric_key), int(min_obs))] = [
+                value for index, value in enumerate(entries) if index != entry_index
+            ] + [replacement]
+            self._dirty = True
+            self.stores += 1
+            return (
+                pd.Series(output_z, index=values.index, dtype=float),
+                pd.Series(output_prior, index=values.index, dtype=float),
+            )
+        return None
+
     def lookup(
         self,
         values: pd.Series,
@@ -910,6 +1084,23 @@ class PrefixBaselineCache:
             if appended is not None:
                 self.hits += 1
                 return appended
+            inserted = self._try_insert(
+                values,
+                group,
+                date,
+                min_obs,
+                metric_key=metric_key,
+                row_key=row_key,
+                block_baseline=block_baseline,
+                prepared_query=query_for_append,
+                numeric_values=numeric,
+                arrays=(keys, row_ids, groups, dates, numeric)
+                if query_for_append is None
+                else None,
+            )
+            if inserted is not None:
+                self.hits += 1
+                return inserted
         self.misses += 1
         self.last_miss_reason = "source_drift_or_non_prefix"
         if self.persistent:

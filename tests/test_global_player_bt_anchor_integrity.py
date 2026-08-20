@@ -1303,6 +1303,139 @@ def test_shared_prefix_cache_is_exact_for_full_and_historical_prefixes() -> None
     assert cache.hits == 2
 
 
+def test_shared_prefix_cache_reuses_exact_suffix_after_historical_insertion() -> None:
+    """A late census insertion only rebuilds affected strict-prior suffixes."""
+
+    size = 48
+    values = pd.Series(np.arange(1.0, size + 1))
+    group = pd.Series(["mid"] * size)
+    date = pd.Series(
+        pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D")
+    )
+    date.iloc[3] = pd.NaT
+    row_key = pd.Series(
+        [("game", "Blue", f"player-{index}", "mid") for index in range(size)],
+        dtype=object,
+    )
+    cache = PrefixBaselineCache()
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+
+    target_values = pd.concat(
+        [values, pd.Series([101.0, 102.0])], ignore_index=True
+    )
+    target_group = pd.concat(
+        [group, pd.Series(["mid", "mid"])], ignore_index=True
+    )
+    target_date = pd.concat(
+        [
+            date,
+            pd.Series(
+                [
+                    pd.Timestamp("2026-01-21T12:00:00"),
+                    pd.Timestamp("2026-02-05T12:00:00"),
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
+    target_keys = pd.concat(
+        [
+            row_key,
+            pd.Series(
+                [
+                    ("game", "Blue", "inserted-0", "mid"),
+                    ("game", "Blue", "inserted-1", "mid"),
+                ],
+                dtype=object,
+            ),
+        ],
+        ignore_index=True,
+    )
+    cached, cached_prior = _prior_baseline_z(
+        target_values,
+        target_group,
+        target_date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=target_keys,
+    )
+    reference, reference_prior = _prior_baseline_z(
+        target_values, target_group, target_date, min_obs=2
+    )
+
+    pd.testing.assert_series_equal(cached, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(
+        cached_prior, reference_prior, check_names=False, check_exact=True
+    )
+    assert cache.hits == 1
+    assert cache.stores == 2
+
+
+def test_global_composite_cache_reuses_insertions_with_exact_components() -> None:
+    """Composite, z, prior-count, and diagnostics stay byte-equivalent."""
+
+    size = 48
+    metrics = pd.DataFrame(
+        {
+            "_game_id": [f"game-{index}" for index in range(size)],
+            "_date": pd.Timestamp("2026-01-01")
+            + pd.to_timedelta(np.arange(size), unit="D"),
+            "_side": ["Blue"] * size,
+            "_role": ["mid"] * size,
+            "_player": [f"player-{index}" for index in range(size)],
+            "_tier": ["tier1"] * size,
+        }
+    )
+    for offset, metric in enumerate(PERFORMANCE_ANCHOR_METRIC_WEIGHTS):
+        metrics[metric] = np.arange(1.0, size + 1.0) + offset * 0.25
+
+    cache = PrefixBaselineCache()
+    _role_normalized_composite(
+        metrics,
+        baseline_cache=cache,
+        _return_components=True,
+        _group_mode="role+competition_tier",
+    )
+    inserted = metrics.iloc[:0].copy()
+    inserted.loc[0, "_game_id"] = "inserted-game"
+    inserted.loc[0, "_date"] = pd.Timestamp("2026-01-21T12:00:00")
+    inserted.loc[0, "_side"] = "Blue"
+    inserted.loc[0, "_role"] = "mid"
+    inserted.loc[0, "_player"] = "inserted-player"
+    inserted.loc[0, "_tier"] = "tier1"
+    for offset, metric in enumerate(PERFORMANCE_ANCHOR_METRIC_WEIGHTS):
+        inserted.loc[0, metric] = 101.0 + offset * 0.25
+    target = pd.concat([metrics, inserted], ignore_index=True)
+
+    cached = _role_normalized_composite(
+        target,
+        baseline_cache=cache,
+        _return_components=True,
+        _group_mode="role+competition_tier",
+    )
+    reference = _role_normalized_composite(
+        target,
+        _return_components=True,
+        _group_mode="role+competition_tier",
+    )
+
+    pd.testing.assert_series_equal(cached[0], reference[0], check_names=False, check_exact=True)
+    assert cached[1] == reference[1]
+    assert cached[2] == reference[2]
+    pd.testing.assert_frame_equal(cached[3], reference[3], check_exact=True)
+    pd.testing.assert_frame_equal(cached[4], reference[4], check_exact=True)
+    assert cache.hits == len(PERFORMANCE_ANCHOR_METRIC_WEIGHTS)
+
+
 def test_shared_prefix_cache_keeps_same_timestamp_rows_and_rejects_drift() -> None:
     """Partial final blocks are safe; gaps and changed source rows miss closed."""
 
