@@ -276,6 +276,49 @@ def test_tier_step_timeout_is_recorded(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert result["returncode"] == 124
 
 
+def test_step_timeout_default_is_2700_seconds() -> None:
+    assert live_refresh._step_timeout_seconds() == 2700.0
+
+
+def test_step_timeout_env_override_is_respected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SCRYGLASS_TIER_STEP_TIMEOUT_SECONDS", "1800")
+
+    assert live_refresh._step_timeout_seconds() == 1800.0
+
+
+def test_step_timeout_empty_env_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SCRYGLASS_TIER_STEP_TIMEOUT_SECONDS", "")
+
+    assert live_refresh._step_timeout_seconds() == 2700.0
+
+
+def test_step_timeout_whitespace_env_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SCRYGLASS_TIER_STEP_TIMEOUT_SECONDS", "   ")
+
+    assert live_refresh._step_timeout_seconds() == 2700.0
+
+
+def test_step_timeout_non_numeric_env_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SCRYGLASS_TIER_STEP_TIMEOUT_SECONDS", "not-a-number")
+
+    with pytest.raises(ValueError):
+        live_refresh._step_timeout_seconds()
+
+
+def test_step_timeout_zero_env_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SCRYGLASS_TIER_STEP_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(ValueError, match="must be positive"):
+        live_refresh._step_timeout_seconds()
+
+
+def test_step_timeout_negative_env_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SCRYGLASS_TIER_STEP_TIMEOUT_SECONDS", "-1")
+
+    with pytest.raises(ValueError, match="must be positive"):
+        live_refresh._step_timeout_seconds()
+
+
 def test_oe_only_skips_grid_and_can_be_ready_from_a_complete_oe_source(tmp_path: Path) -> None:
     oe_step = {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0}
     meta_path = tmp_path / "data/lol/warehouse/parquet/oe_live/meta.json"
