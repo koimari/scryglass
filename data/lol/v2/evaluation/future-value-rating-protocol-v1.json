@@ -14,7 +14,7 @@
   "evaluation": [
     "chronological whole-series folds",
     "intercept baseline and proper scores",
-    "proxy series clusters with an authoritative-series blocker",
+    "conservative series-superset clusters with collision audit",
     "validation calibration bins and pooled proper scores",
     "regional and patch transfer slices with training-support checks",
     "roster-change and tournament-boundary slices",
