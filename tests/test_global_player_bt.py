@@ -107,7 +107,7 @@ def _config(**changes: object) -> GlobalPlayerBTConfig:
     return GlobalPlayerBTConfig(**values)
 
 
-def test_complete_lineups_keeps_sorted_duplicate_selection_and_valid_groups() -> None:
+def test_complete_lineups_keeps_source_order_for_duplicate_roles() -> None:
     rows: list[dict[str, object]] = []
 
     def add_side(game_id: str, side: str, names: dict[str, object]) -> None:
@@ -162,7 +162,7 @@ def test_complete_lineups_keeps_sorted_duplicate_selection_and_valid_groups() ->
 
     assert _complete_lineups(pd.DataFrame(rows)) == {
         "g1": {
-            "Blue": [("Alpha", "top"), ("J1", "jng"), ("M1", "mid"), ("B1", "bot"), ("S1", "sup")],
+            "Blue": [("Zulu", "top"), ("J1", "jng"), ("M1", "mid"), ("B1", "bot"), ("S1", "sup")],
             "Red": [("T2", "top"), ("J2", "jng"), ("M2", "mid"), ("B2", "bot"), ("S2", "sup")],
         },
         "g3": {

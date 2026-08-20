@@ -1599,22 +1599,19 @@ def _complete_lineups(players: pd.DataFrame) -> dict[str, dict[str, list[tuple[s
     if frame.empty:
         return {}
     order = {"top": 0, "jng": 1, "mid": 2, "bot": 3, "sup": 4}
-    # Keep the first-seen group order while letting pandas perform the row
-    # ordering and duplicate selection in one pass. This matches the old
-    # per-group sort and ``setdefault`` behavior, including repeated identical
-    # rows and ambiguous player aliases.
+    # Keep the first-seen group order while letting pandas perform the role
+    # ordering and duplicate selection in one pass. Source order decides which
+    # row wins when one role occurs more than once.
     frame["_group_order"] = frame.groupby(
         ["_game_id", "_side"], sort=False, observed=True
     ).ngroup()
+    frame["_source_order"] = np.arange(len(frame), dtype=np.int64)
     frame["_role_order"] = frame["_role"].map(order)
-    frame["_player_text"] = frame["_player"].astype(str)
-    frame["_player_casefold"] = frame["_player"].str.casefold()
     ordered = frame.sort_values(
         [
             "_group_order",
             "_role_order",
-            "_player_casefold",
-            "_player_text",
+            "_source_order",
         ],
         kind="stable",
     )
@@ -2653,27 +2650,65 @@ def _workspace_source_digest(frame: pd.DataFrame | None) -> str:
 
 
 def _global_fit_schema_fingerprint() -> str:
-    """Fingerprint the implementation that can change a fitted snapshot."""
+    """Fingerprint code and constants that can change a fitted snapshot.
 
-    implementation = (
-        _model_rows,
-        _design,
-        _contribution_metrics,
-        _role_normalized_composite,
-        GlobalPlayerFitWorkspace,
-        _performance_anchor,
-        _fit,
-        fit_global_player_bt,
-    )
-    source_parts: list[str] = []
-    for function in implementation:
+    Keep the model contract explicit. A module-wide source digest would include
+    this function and make the cache contract difficult to audit. The listed
+    constants are serialized values, so changing a model floor, scale, alias,
+    metric weight, or robust-baseline setting selects a new cache entry.
+    """
+
+    implementation = {
+        name: function
+        for name, function in (
+            ("_canonical_game_ids", _canonical_game_ids),
+            ("_role", _role),
+            ("_complete_lineups", _complete_lineups),
+            ("_model_rows", _model_rows),
+            ("_design", _design),
+            ("_contribution_metrics", _contribution_metrics),
+            ("_baseline_group", _baseline_group),
+            ("_role_normalized_composite", _role_normalized_composite),
+            ("_prior_baseline_z", _prior_baseline_z),
+            ("_robust_block_baseline", _robust_block_baseline),
+            ("_robust_block_baseline_fast", _robust_block_baseline_fast),
+            ("GlobalPlayerFitWorkspace", GlobalPlayerFitWorkspace),
+            ("_performance_anchor", _performance_anchor),
+            ("_fit", _fit),
+            ("fit_global_player_bt", fit_global_player_bt),
+        )
+    }
+    source_parts: dict[str, str] = {}
+    for name, function in implementation.items():
         try:
             source = inspect.getsource(function)
         except (OSError, TypeError):
             source = repr(function)
-        source_parts.append(source)
-    return "global-player-fit:v2:" + hashlib.sha256(
-        "\n".join(source_parts).encode("utf-8")
+        source_parts[name] = source
+    model_constants = {
+        "LOGIT_TO_ELO": float(LOGIT_TO_ELO),
+        "ROLE_ALIAS": dict(ROLE_ALIAS),
+        "PERFORMANCE_ANCHOR_METRIC_WEIGHTS": dict(
+            PERFORMANCE_ANCHOR_METRIC_WEIGHTS
+        ),
+        "PERFORMANCE_ANCHOR_WEIGHTS_STATUS": PERFORMANCE_ANCHOR_WEIGHTS_STATUS,
+        "PERFORMANCE_ANCHOR_SOURCE_COLUMNS": list(PERFORMANCE_ANCHOR_SOURCE_COLUMNS),
+        "_ANCHOR_ZERO_MEAN_TOLERANCE": float(_ANCHOR_ZERO_MEAN_TOLERANCE),
+        "_PREFIX_CACHE_SCHEMA_VERSION": int(_PREFIX_CACHE_SCHEMA_VERSION),
+        "_PREFIX_CACHE_SCHEMA_FINGERPRINT": _PREFIX_CACHE_SCHEMA_FINGERPRINT,
+        "_PREFIX_CACHE_MISSING_DATE": int(_PREFIX_CACHE_MISSING_DATE),
+        "_BASELINE_GROUP_SEPARATOR": _BASELINE_GROUP_SEPARATOR,
+        "ANCHOR_MIN_BASELINE_OBS": int(ANCHOR_MIN_BASELINE_OBS),
+        "ANCHOR_MIN_PLAYER_MAPS": int(ANCHOR_MIN_PLAYER_MAPS),
+        "ANCHOR_METRIC_Z_CLIP": float(ANCHOR_METRIC_Z_CLIP),
+        "_MAD_TO_SIGMA": float(_MAD_TO_SIGMA),
+        "_IQR_TO_SIGMA": float(_IQR_TO_SIGMA),
+        "_GLOBAL_FIT_CACHE_SCHEMA_VERSION": int(_GLOBAL_FIT_CACHE_SCHEMA_VERSION),
+        "_GLOBAL_FIT_CACHE_SCHEMA_FINGERPRINT": _GLOBAL_FIT_CACHE_SCHEMA_FINGERPRINT,
+    }
+    contract = {"implementation": source_parts, "model_constants": model_constants}
+    return "global-player-fit:v3:" + hashlib.sha256(
+        json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
 
 

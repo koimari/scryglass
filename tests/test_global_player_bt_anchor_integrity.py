@@ -403,6 +403,33 @@ def test_rating_cache_schema_binds_baseline_implementation(monkeypatch) -> None:
     assert first != second
 
 
+def test_global_fit_cache_key_binds_model_constants(monkeypatch) -> None:
+    """Changing an anchor constant selects a new global-fit cache key."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=1))
+    frame, lineups = global_player_bt_module._model_rows(maps, players)
+    cfg = _config(minimum_maps=1)
+    baseline = global_player_bt_module._global_fit_cache_key(
+        frame, lineups, players, cfg
+    )
+    changed_weights = dict(PERFORMANCE_ANCHOR_METRIC_WEIGHTS)
+    changed_weights["cs_per_min"] += 0.25
+    changes = {
+        "PERFORMANCE_ANCHOR_METRIC_WEIGHTS": changed_weights,
+        "ANCHOR_MIN_PLAYER_MAPS": global_player_bt_module.ANCHOR_MIN_PLAYER_MAPS + 1,
+        "ANCHOR_METRIC_Z_CLIP": global_player_bt_module.ANCHOR_METRIC_Z_CLIP + 0.25,
+        "LOGIT_TO_ELO": global_player_bt_module.LOGIT_TO_ELO * 1.01,
+    }
+
+    for name, value in changes.items():
+        with monkeypatch.context() as patch:
+            patch.setattr(global_player_bt_module, name, value)
+            changed = global_player_bt_module._global_fit_cache_key(
+                frame, lineups, players, cfg
+            )
+        assert changed != baseline, name
+
+
 def test_global_fit_cache_round_trips_exact_snapshot_and_meta(tmp_path: Path) -> None:
     """A private fit cache reuses the exact snapshot and evidence payload."""
 
