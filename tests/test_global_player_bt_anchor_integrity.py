@@ -34,6 +34,8 @@ from lol_kills.ratings.global_player_bt import (
     PrefixBaselineCache,
     PERFORMANCE_ANCHOR_SOURCE_COLUMNS,
     _contribution_metrics,
+    _baseline_group,
+    _player_baseline_group,
     _prior_baseline_z,
     _robust_block_baseline,
     _robust_block_baseline_fast,
@@ -264,6 +266,51 @@ def test_sorted_prefix_baseline_preserves_strict_prior_blocks() -> None:
         assert np.array_equal(expected, actual, equal_nan=True)
     assert accelerated[0][2] == accelerated[0][3]
     assert accelerated[1][2] == accelerated[1][3]
+
+
+def test_sorted_prefix_baseline_keeps_exactness_when_append_starts_late() -> None:
+    """Append-only calls may provide only high-count new blocks."""
+
+    rng = np.random.default_rng(20260820)
+    values = rng.normal(size=2400)
+    available = np.asarray([1800, 1801, 1810, 2000, 2399])
+    reference = _robust_block_baseline(values, available, min_obs=20)
+    accelerated = _robust_block_baseline_fast(values, available, min_obs=20)
+    for expected, actual in zip(reference, accelerated):
+        assert np.array_equal(expected, actual, equal_nan=True)
+
+
+def test_global_missing_tier_keeps_an_explicit_bucket() -> None:
+    """The global path keeps its historical string bucket for missing tiers."""
+
+    roles = pd.Series(["top", "mid", pd.NA], dtype="string")
+    tiers = pd.Series([pd.NA, "tier1", pd.NA], dtype="string")
+    actual = _baseline_group(roles, tiers)
+    expected = pd.Series(["top\x1f<NA>", "mid\x1ftier1", "<NA>\x1f<NA>"], dtype=object)
+    pd.testing.assert_series_equal(actual, expected, check_names=False)
+
+
+def test_player_missing_tier_stays_nullable_and_ungraded() -> None:
+    """The player path leaves a missing tier outside every baseline pool."""
+
+    roles = pd.Series(["top", "mid", pd.NA], dtype="string")
+    tiers = pd.Series([pd.NA, "tier1", pd.NA], dtype="string")
+    actual = _player_baseline_group(roles, tiers)
+    assert actual.isna().tolist() == [True, False, True]
+
+
+def test_rating_cache_schema_binds_baseline_implementation(monkeypatch) -> None:
+    """Changing a baseline callable creates a new persistent-cache schema."""
+
+    frame = pd.DataFrame(columns=["date", "cspm", "competition_tier"])
+    first = player_elo._rating_cache_schema(frame)
+    monkeypatch.setattr(
+        player_elo,
+        "_robust_block_baseline_fast",
+        lambda pool, available, min_obs: (available, available),
+    )
+    second = player_elo._rating_cache_schema(frame)
+    assert first != second
 
 
 def test_rows_sharing_a_timestamp_cannot_see_each_other() -> None:

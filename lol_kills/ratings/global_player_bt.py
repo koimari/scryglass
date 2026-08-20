@@ -86,10 +86,38 @@ _PREFIX_CACHE_SCHEMA_FINGERPRINT = (
     "robust-prefix-baseline:v1:median-mad-iqr:strict-prior-blocks:float64"
 )
 _PREFIX_CACHE_MISSING_DATE = np.iinfo(np.int64).min
+_BASELINE_GROUP_SEPARATOR = "\x1f"
 
 
 class PrefixBaselineCacheError(RuntimeError):
     """Raised when a cached baseline cannot prove source equivalence."""
+
+
+def _baseline_group(
+    role: pd.Series,
+    tier: pd.Series | None = None,
+) -> pd.Series:
+    """Build the global anchor's role/tier key.
+
+    The global path has always kept an explicit string bucket for a missing
+    tier. Preserve that bucket so an unlabelled row stays eligible for the
+    global anchor without joining a labelled tier.
+    """
+
+    role_key = role.astype(str)
+    if tier is None:
+        return role_key
+    return role_key + _BASELINE_GROUP_SEPARATOR + tier.astype(str).fillna("")
+
+
+def _player_baseline_group(role: pd.Series, tier: pd.Series) -> pd.Series:
+    """Build the player attribution key with nullable missing tiers.
+
+    Player attribution has always dropped rows whose tier is unavailable.
+    Nullable string concatenation preserves that fail-closed behavior.
+    """
+
+    return role.astype("string") + _BASELINE_GROUP_SEPARATOR + tier.astype("string")
 
 
 @dataclass
@@ -366,6 +394,18 @@ class PrefixBaselineCache:
             return True
         return np.float64(left_value).tobytes() == np.float64(right_value).tobytes()
 
+    @staticmethod
+    def _same_float_array(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+        """Compare float bytes while treating every NaN payload as equal."""
+
+        left_array = np.asarray(left, dtype=np.float64)
+        right_array = np.asarray(right, dtype=np.float64)
+        same = (
+            left_array.view(np.uint64) == right_array.view(np.uint64)
+        )
+        same |= np.isnan(left_array) & np.isnan(right_array)
+        return same
+
     def _arrays(
         self,
         values: pd.Series,
@@ -394,8 +434,13 @@ class PrefixBaselineCache:
             dtype=object,
         )
         dates = np.asarray(
-            [PrefixBaselineCache._date(value) for value in date.to_numpy(dtype=object)],
-            dtype=object,
+            [
+                _PREFIX_CACHE_MISSING_DATE
+                if (value := PrefixBaselineCache._date(raw)) is None
+                else value
+                for raw in date.to_numpy(dtype=object)
+            ],
+            dtype=np.int64,
         )
         numeric = pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
         return keys, row_ids, groups, dates, numeric
@@ -456,26 +501,30 @@ class PrefixBaselineCache:
         row_key: pd.Series,
         z: pd.Series,
         prior_count: pd.Series,
+        arrays: tuple[
+            tuple[tuple[str, ...], ...],
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+        ] | None = None,
     ) -> _PrefixBaselineEntry | None:
-        try:
-            _keys, row_ids, groups, dates, numeric = self._arrays(
-                values, group, date, row_key
-            )
-        except PrefixBaselineCacheError:
-            return None
+        if arrays is None:
+            try:
+                _keys, row_ids, groups, dates, numeric = self._arrays(
+                    values, group, date, row_key
+                )
+            except PrefixBaselineCacheError:
+                return None
+        else:
+            _keys, row_ids, groups, dates, numeric = arrays
         order = np.argsort(row_ids, kind="stable")
         return _PrefixBaselineEntry(
             metric_key=str(metric_key),
             min_obs=int(min_obs),
             row_ids=row_ids[order],
             groups=groups[order],
-            dates=np.asarray(
-                [
-                    _PREFIX_CACHE_MISSING_DATE if value is None else int(value)
-                    for value in dates[order].tolist()
-                ],
-                dtype=np.int64,
-            ),
+            dates=dates[order].astype(np.int64, copy=False),
             values=numeric[order],
             z=z.to_numpy(dtype=float)[order],
             prior_count=prior_count.to_numpy(dtype=float)[order],
@@ -493,53 +542,51 @@ class PrefixBaselineCache:
         block_baseline: Callable[
             [np.ndarray, np.ndarray, int], tuple[np.ndarray, np.ndarray]
         ],
+        arrays: tuple[
+            tuple[tuple[str, ...], ...],
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+        ] | None = None,
     ) -> tuple[pd.Series, pd.Series] | None:
         """Extend one entry when every new row is a later timestamp block."""
 
-        try:
-            _keys, row_ids, groups, dates, numeric = self._arrays(
-                values, group, date, row_key
-            )
-        except PrefixBaselineCacheError as exc:
-            self.last_miss_reason = str(exc)
-            return None
+        if arrays is None:
+            try:
+                _keys, row_ids, groups, dates, numeric = self._arrays(
+                    values, group, date, row_key
+                )
+            except PrefixBaselineCacheError as exc:
+                self.last_miss_reason = str(exc)
+                return None
+        else:
+            _keys, row_ids, groups, dates, numeric = arrays
         entries = self._entries.get((str(metric_key), int(min_obs)), [])
         for entry_index, entry in enumerate(entries):
             cached_positions, known = self._matched_positions(entry, row_ids)
             if int(known.sum()) != len(entry.row_ids):
                 continue
             drift = False
-            for target_position in np.flatnonzero(known):
-                cached_position = cached_positions[target_position]
-                target_date = (
-                    _PREFIX_CACHE_MISSING_DATE
-                    if dates[target_position] is None
-                    else int(dates[target_position])
-                )
-                if (
-                    entry.groups[cached_position] != groups[target_position]
-                    or entry.dates[cached_position] != target_date
-                    or not self._same_float(
-                        entry.values[cached_position], numeric[target_position]
-                    )
-                ):
-                    drift = True
-                    break
+            cached_known = cached_positions[known]
+            drift = bool(
+                np.any(entry.groups[cached_known] != groups[known])
+                or np.any(entry.dates[cached_known] != dates[known])
+                or not self._same_float_array(
+                    entry.values[cached_known], numeric[known]
+                ).all()
+            )
             if drift:
                 continue
             if known.all():
                 continue
             if not known.all():
-                old_dates = [
-                    int(value)
-                    for value in entry.dates.tolist()
-                    if int(value) != _PREFIX_CACHE_MISSING_DATE
-                ]
-                new_dates = [dates[index] for index in np.flatnonzero(~known)]
-                if not old_dates or any(value is None for value in new_dates):
+                old_dates = entry.dates[entry.dates != _PREFIX_CACHE_MISSING_DATE]
+                new_dates = dates[~known]
+                if len(old_dates) == 0 or (new_dates == _PREFIX_CACHE_MISSING_DATE).any():
                     continue
-                latest_old = max(old_dates)
-                if any(int(value) <= latest_old for value in new_dates):
+                latest_old = int(old_dates.max())
+                if (new_dates <= latest_old).any():
                     continue
 
             output_z = np.full(len(values), np.nan, dtype=float)
@@ -551,20 +598,11 @@ class PrefixBaselineCache:
                 group_positions = np.flatnonzero(groups == current_group)
                 if current_group is None or len(group_positions) == 0:
                     continue
-                order = group_positions[
-                    np.argsort(
-                        np.asarray(
-                            [
-                                _PREFIX_CACHE_MISSING_DATE
-                                if dates[position] is None
-                                else int(dates[position])
-                                for position in group_positions
-                            ],
-                            dtype=np.int64,
-                        ),
-                        kind="stable",
-                    )
-                ]
+                group_dates = dates[group_positions]
+                if len(group_positions) > 1 and np.all(group_dates[1:] >= group_dates[:-1]):
+                    order = group_positions
+                else:
+                    order = group_positions[np.argsort(group_dates, kind="stable")]
                 group_dates = dates[order]
                 starts = np.empty(len(order), dtype=bool)
                 starts[0] = True
@@ -589,9 +627,9 @@ class PrefixBaselineCache:
                     for offset, block_index in enumerate(new_blocks)
                 }
                 block_of_row = np.cumsum(starts) - 1
-                for local_position, target_position in enumerate(order):
-                    if known[target_position]:
-                        continue
+                new_local_positions = np.flatnonzero(~known[order])
+                for local_position in new_local_positions:
+                    target_position = order[local_position]
                     offset = block_lookup.get(int(block_of_row[local_position]))
                     if offset is None:
                         continue
@@ -620,6 +658,7 @@ class PrefixBaselineCache:
                 row_key=row_key,
                 z=pd.Series(output_z, index=values.index, dtype=float),
                 prior_count=pd.Series(output_prior, index=values.index, dtype=float),
+                arrays=(_keys, row_ids, groups, dates, numeric),
             )
             if replacement is None:
                 return None
@@ -668,22 +707,14 @@ class PrefixBaselineCache:
             missing = not bool(known.all())
             if missing:
                 continue
-            drift = False
-            for target_position, cached_position in enumerate(target_positions):
-                target_date = (
-                    _PREFIX_CACHE_MISSING_DATE
-                    if dates[target_position] is None
-                    else int(dates[target_position])
-                )
-                if (
-                    entry.groups[cached_position] != groups[target_position]
-                    or entry.dates[cached_position] != target_date
-                    or not self._same_float(
-                        entry.values[cached_position], numeric[target_position]
-                    )
-                ):
-                    drift = True
-                    break
+            cached_targets = target_positions
+            drift = bool(
+                np.any(entry.groups[cached_targets] != groups)
+                or np.any(entry.dates[cached_targets] != dates)
+                or not self._same_float_array(
+                    entry.values[cached_targets], numeric
+                ).all()
+            )
             if drift:
                 continue
             target_array = np.asarray(target_positions, dtype=int)
@@ -704,6 +735,7 @@ class PrefixBaselineCache:
                 metric_key=metric_key,
                 row_key=row_key,
                 block_baseline=block_baseline,
+                arrays=(keys, row_ids, groups, dates, numeric),
             )
             if appended is not None:
                 self.hits += 1
@@ -740,13 +772,7 @@ class PrefixBaselineCache:
             min_obs=int(min_obs),
             row_ids=row_ids[order],
             groups=groups[order],
-            dates=np.asarray(
-                [
-                    _PREFIX_CACHE_MISSING_DATE if value is None else int(value)
-                    for value in dates[order].tolist()
-                ],
-                dtype=np.int64,
-            ),
+            dates=dates[order].astype(np.int64, copy=False),
             values=numeric[order],
             z=z.to_numpy(dtype=float)[order],
             prior_count=prior_count.to_numpy(dtype=float)[order],
@@ -1133,6 +1159,12 @@ def _robust_block_baseline_fast(
         or (len(counts) > 1 and (np.diff(counts) < 0).any())
     ):
         return _robust_block_baseline(pool_array, available, min_obs)
+    if len(counts) <= 16 and int(counts[-1]) > 1024:
+        # Append-only lookups usually ask for a handful of new blocks after a
+        # large history. The reference path builds its expanding median once
+        # and scans only those few MAD prefixes. That is cheaper than sorting
+        # the entire history for each sparse request.
+        return _robust_block_baseline(pool_array, available, min_obs)
 
     sorted_values: list[np.float64] = []
     inserted = 0
@@ -1141,8 +1173,18 @@ def _robust_block_baseline_fast(
     for position, count_value in enumerate(counts):
         count = int(count_value)
         if count != inserted:
-            for value in pool_array[inserted:count]:
-                insort(sorted_values, np.float64(value))
+            # Append-only lookups pass only the new blocks. Their first
+            # available count can be near the end of a large history, so
+            # initialise that prefix with one C-level sort. Cold builds still
+            # start at zero and retain the cheaper incremental inserts.
+            if inserted == 0 and count > 1024:
+                sorted_values = [
+                    np.float64(value)
+                    for value in np.sort(pool_array[:count], kind="stable")
+                ]
+            else:
+                for value in pool_array[inserted:count]:
+                    insort(sorted_values, np.float64(value))
             inserted = count
         if count < floor:
             continue
@@ -1408,9 +1450,10 @@ def _role_normalized_composite(
         normalization = "role+competition_tier"
     # Missing tier stays an explicit bucket instead of collapsing into another
     # pool or being silently discarded.
-    group = metrics[group_keys[0]].astype(str)
-    for key in group_keys[1:]:
-        group = group + "\x1f" + metrics[key].astype(str).fillna("")
+    group = _baseline_group(
+        metrics[group_keys[0]],
+        metrics[group_keys[1]] if len(group_keys) > 1 else None,
+    )
     date = metrics["_date"]
     row_key = pd.Series(
         list(

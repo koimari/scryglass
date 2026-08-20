@@ -29,6 +29,7 @@ causal contribution and does not authorize predictions or betting decisions.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import math
 from collections import defaultdict
@@ -59,6 +60,11 @@ from lol_kills.ratings.global_player_bt import (
     GlobalPlayerBTConfig,
     GlobalPlayerRatingError,
     PrefixBaselineCache,
+    _player_baseline_group as _shared_player_baseline_group,
+    _kth_abs_distance as _shared_kth_abs_distance,
+    _linear_quantile_sorted as _shared_linear_quantile_sorted,
+    _prior_baseline_z as _shared_prior_baseline_z,
+    _robust_block_baseline as _shared_robust_block_baseline_reference,
     _robust_block_baseline_fast as _shared_robust_block_baseline_fast,
     fit_global_player_bt,
 )
@@ -159,11 +165,28 @@ def _rating_source_identity(maps: pd.DataFrame | None) -> str:
 
 
 def _rating_cache_schema(players: pd.DataFrame | None) -> str:
-    """Fingerprint the player input schema used by both baseline paths."""
+    """Fingerprint input columns and the exact baseline implementation."""
 
     columns = sorted(str(column) for column in (players.columns if players is not None else []))
-    raw = ("\n".join(columns) + "\n").encode("utf-8")
-    return "rating-input:" + hashlib.sha256(raw).hexdigest()
+    implementation = (
+        _robust_block_baseline,
+        _robust_block_baseline_fast,
+        _shared_robust_block_baseline_reference,
+        _shared_robust_block_baseline_fast,
+        _shared_kth_abs_distance,
+        _shared_linear_quantile_sorted,
+        _shared_prior_baseline_z,
+        PrefixBaselineCache,
+    )
+    source_parts: list[str] = []
+    for function in implementation:
+        try:
+            source = inspect.getsource(function)
+        except (OSError, TypeError):
+            source = repr(function)
+        source_parts.append(source)
+    raw = ("\n".join(columns) + "\n" + "\n".join(source_parts)).encode("utf-8")
+    return "rating-input:v2:" + hashlib.sha256(raw).hexdigest()
 
 # Consistency constants for the ROBUST baseline used by ``_prior_baseline_z``.
 # Mirrors ``lol_kills.ratings.global_player_bt._MAD_TO_SIGMA`` /
@@ -738,11 +761,7 @@ def player_attribution_multipliers(
     features = _attribution_features(metrics)
     # Role normalization happens here: the baseline is grouped by role so every
     # z-score is relative to same-role, same-tier prior maps.
-    group = (
-        metrics["_role"].astype("string")
-        + "\x1f"
-        + metrics["_attr_tier"].astype("string")
-    )
+    group = _shared_player_baseline_group(metrics["_role"], metrics["_attr_tier"])
     date = metrics["_attr_date"]
 
     ordered = [name for name in weights if name in features.columns]
