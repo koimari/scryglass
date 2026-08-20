@@ -84,12 +84,18 @@ jobs:
             --skip-lp \
             --skip-grid
 
+      - name: Build the full OE research source
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          python -m lol_kills.etl.oe_live_source \
+            --root "${SCRYGLASS_RUNTIME_ROOT}"
+
       - name: Verify the exact census and research receipt
         if: github.event_name == 'workflow_dispatch'
         run: |
           python -m lol_kills.research.future_value_training \
             --annual-root "${SCRYGLASS_OE_RAW_DIR}" \
-            --oe-root "${SCRYGLASS_RUNTIME_ROOT}/data/lol/warehouse/parquet" \
+            --oe-root "${SCRYGLASS_RUNTIME_ROOT}/data/lol/warehouse/parquet/oe_live" \
             --freeze data/lol/v2/evaluation/future-value-source-freeze-20260820.json \
             --output-root "${FUTURE_VALUE_OUTPUT_ROOT}"
 
