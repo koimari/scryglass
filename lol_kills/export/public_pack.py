@@ -1761,6 +1761,7 @@ def export_public_pack(
         player_maps_for_ratings,
         player_rating_input,
         cfg=player_rating_cfg,
+        output_dir=features_root,
         as_of=pd.to_datetime(maps_for_records["date"], utc=True, errors="coerce").max(),
         min_games=20,
         player_records=player_records_payload,
