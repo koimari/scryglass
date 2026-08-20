@@ -27,6 +27,7 @@ def _map(
         "blue_team": blue,
         "red_team": red,
         "league": league,
+        "grid_series_id": f"series-{game_id}",
         "y_blue_win": result,
     }
 
@@ -55,6 +56,7 @@ def _validation() -> pd.DataFrame:
                 "blue_team": "A",
                 "red_team": "C",
                 "league": "LEC",
+                "grid_series_id": "series-g9",
             },
             {
                 "game_uid": "g10",
@@ -62,21 +64,50 @@ def _validation() -> pd.DataFrame:
                 "blue_team": "C",
                 "red_team": "A",
                 "league": "LEC",
+                "grid_series_id": "series-g10",
             },
         ]
+    )
+
+
+def _source_receipt(ids: list[str]) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "source_as_of": "2026-01-10T23:00:00Z",
+        "source_game_count": len(ids),
+        "source_identity_sha256": identity_sha256(ids),
+        "accepted_game_ids": sorted(ids),
+        "model_eligible_game_count": len(ids),
+        "model_eligible_identity_sha256": identity_sha256(ids),
+        "model_eligible_game_ids": sorted(ids),
+    }
+    return {
+        **payload,
+        "receipt_sha256": hierarchical_bt._research_sha256(payload),
+    }
+
+
+def _run(
+    train: pd.DataFrame,
+    validation: pd.DataFrame,
+    **kwargs: object,
+) -> dict[str, object]:
+    receipt = _source_receipt(
+        [*train["game_uid"].astype(str).tolist(), *validation["game_uid"].astype(str).tolist()]
+    )
+    return fit_hierarchical_bt_research_prediction(
+        train,
+        validation,
+        cutoff=pd.Timestamp("2026-01-08T23:59:59Z"),
+        source_receipt=receipt,
+        source_identity_sha256=str(receipt["source_identity_sha256"]),
+        **kwargs,
     )
 
 
 def _fit(**kwargs: object) -> dict[str, object]:
     train = _training()
     validation = _validation()
-    return fit_hierarchical_bt_research_prediction(
-        train,
-        validation,
-        cutoff=pd.Timestamp("2026-01-08T23:59:59Z"),
-        source_identity_sha256=identity_sha256([*train.game_uid, *validation.game_uid]),
-        **kwargs,
-    )
+    return _run(train, validation, **kwargs)
 
 
 def test_research_prediction_has_exact_receipts_and_digests() -> None:
@@ -92,6 +123,10 @@ def test_research_prediction_has_exact_receipts_and_digests() -> None:
     assert report["train_receipt"]["identity_sha256"] == identity_sha256(train_ids)
     assert report["validation_receipt"]["identity_sha256"] == identity_sha256(validation_ids)
     assert report["source_identity_sha256"] == identity_sha256([*train_ids, *validation_ids])
+    assert report["source"]["source_as_of"] == "2026-01-10T23:00:00+00:00"
+    assert report["source"]["receipt_sha256"] == _source_receipt(
+        [*train_ids, *validation_ids]
+    )["receipt_sha256"]
     assert report["config_sha256"] == hierarchical_bt._research_sha256(report["config"])
     assert report["implementation_sha256"] == hierarchical_bt.HIERARCHICAL_IMPLEMENTATION_SHA256
     assert set(report["terms"]["team_logit"]) == {"a", "b", "c", "d"}
@@ -102,16 +137,8 @@ def test_research_prediction_has_exact_receipts_and_digests() -> None:
 def test_research_prediction_uses_side_and_league_terms() -> None:
     train = _training()
     validation = _validation()
-    first = fit_hierarchical_bt_research_prediction(
-        train,
-        validation.iloc[[0]],
-        cutoff=pd.Timestamp("2026-01-08T23:59:59Z"),
-    )
-    second = fit_hierarchical_bt_research_prediction(
-        train,
-        validation.iloc[[1]],
-        cutoff=pd.Timestamp("2026-01-08T23:59:59Z"),
-    )
+    first = _run(train, validation.iloc[[0]])
+    second = _run(train, validation.iloc[[1]])
     first_row = first["predictions"][0]
     second_row = second["predictions"][0]
     assert first_row["side_term"] == 1.0
@@ -129,11 +156,9 @@ def test_research_prediction_uses_side_and_league_terms() -> None:
 def test_validation_outcomes_are_not_required_or_consumed() -> None:
     validation = _validation()
     without_outcomes = _fit()
-    with_outcomes = fit_hierarchical_bt_research_prediction(
+    with_outcomes = _run(
         _training(),
         validation.assign(y_blue_win=["not-read", "not-read"]),
-        cutoff=pd.Timestamp("2026-01-08T23:59:59Z"),
-        source_identity_sha256=identity_sha256([*list(_training().game_uid), *list(validation.game_uid)]),
     )
     assert without_outcomes["predictions"] == with_outcomes["predictions"]
     assert without_outcomes["output_sha256"] == with_outcomes["output_sha256"]
@@ -143,19 +168,14 @@ def test_validation_outcomes_are_not_required_or_consumed() -> None:
 def test_strict_cutoff_rejects_boundary_and_future_training_rows() -> None:
     validation = _validation()
     with pytest.raises(ValueError, match="at or before the strict cutoff"):
-        fit_hierarchical_bt_research_prediction(
+        _run(
             _training(),
             validation.assign(date=["2026-01-08T23:59:59Z", "2026-01-10T10:00:00Z"]),
-            cutoff=pd.Timestamp("2026-01-08T23:59:59Z"),
         )
     late_train = _training().copy()
     late_train.loc[0, "date"] = "2026-01-09T00:00:00Z"
     with pytest.raises(ValueError, match="after the strict cutoff"):
-        fit_hierarchical_bt_research_prediction(
-            late_train,
-            validation,
-            cutoff=pd.Timestamp("2026-01-08T23:59:59Z"),
-        )
+        _run(late_train, validation)
 
 
 def test_missing_validation_ids_are_reported_and_unknown_teams_are_explicit() -> None:
@@ -164,9 +184,10 @@ def test_missing_validation_ids_are_reported_and_unknown_teams_are_explicit() ->
             {
                 "game_uid": "g9",
                 "date": "2026-01-09T10:00:00Z",
-                "blue_team": None,
+                "blue_team": "Ood Team",
                 "red_team": "A",
                 "league": "LEC",
+                "grid_series_id": "series-g9",
             },
             {
                 "game_uid": "g10",
@@ -174,21 +195,19 @@ def test_missing_validation_ids_are_reported_and_unknown_teams_are_explicit() ->
                 "blue_team": "New Team",
                 "red_team": "A",
                 "league": "LEC",
+                "grid_series_id": "series-g10",
             },
         ]
     )
     train = _training()
-    report = fit_hierarchical_bt_research_prediction(
-        train,
-        validation,
-        cutoff=pd.Timestamp("2026-01-08T23:59:59Z"),
-    )
-    assert report["missing_ids"] == ["g9"]
-    assert report["validation_receipt"]["missing_game_ids"] == ["g9"]
-    assert report["validation_receipt"]["scored_game_ids"] == ["g10"]
-    assert report["missing"]["unseen_team_keys"] == ["new-team"]
-    assert report["missing"]["unseen_model_game_ids"] == ["g10"]
-    assert report["output_row_count"] == 1
+    report = _run(train, validation)
+    assert report["missing_ids"] == ["g10", "g9"]
+    assert report["validation_receipt"]["missing_game_ids"] == ["g10", "g9"]
+    assert report["validation_receipt"]["scored_game_ids"] == []
+    assert report["missing"]["unseen_team_keys"] == ["new-team", "ood-team"]
+    assert report["missing"]["unseen_model_game_ids"] == ["g10", "g9"]
+    assert report["missing"]["blockers"]
+    assert report["output_row_count"] == 0
 
 
 def test_output_hash_is_canonical_and_config_changes_are_bound() -> None:
@@ -205,3 +224,88 @@ def test_output_hash_is_canonical_and_config_changes_are_bound() -> None:
     assert report["output_sha256"] == hashlib.sha256(payload).hexdigest()
     other = _fit(cfg=HierarchicalBTConfig(side_l2=50.0))
     assert report["config_sha256"] != other["config_sha256"]
+
+
+def test_reordering_train_and_validation_rows_keeps_predictions_and_receipts() -> None:
+    baseline = _fit()
+    train = _training().iloc[::-1].reset_index(drop=True)
+    validation = _validation().iloc[::-1].reset_index(drop=True)
+    reordered = _run(train, validation)
+    assert baseline["predictions"] == reordered["predictions"]
+    assert baseline["output_sha256"] == reordered["output_sha256"]
+    assert baseline["train_receipt"] == reordered["train_receipt"]
+    assert baseline["validation_receipt"] == reordered["validation_receipt"]
+
+
+def test_source_receipt_and_caller_identity_mutations_fail_closed() -> None:
+    train = _training()
+    validation = _validation()
+    ids = [*train["game_uid"].tolist(), *validation["game_uid"].tolist()]
+    receipt = _source_receipt(ids)
+    bad_hash = dict(receipt)
+    bad_hash["receipt_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="receipt hash"):
+        fit_hierarchical_bt_research_prediction(
+            train,
+            validation,
+            cutoff=pd.Timestamp("2026-01-08T23:59:59Z"),
+            source_receipt=bad_hash,
+            source_identity_sha256=str(receipt["source_identity_sha256"]),
+        )
+    with pytest.raises(ValueError, match="source identity"):
+        fit_hierarchical_bt_research_prediction(
+            train,
+            validation,
+            cutoff=pd.Timestamp("2026-01-08T23:59:59Z"),
+            source_receipt=receipt,
+            source_identity_sha256="0" * 64,
+        )
+    duplicate_payload = dict(receipt)
+    duplicate_payload["model_eligible_game_ids"] = [*ids, ids[0]]
+    duplicate_payload["receipt_sha256"] = hierarchical_bt._research_sha256(
+        {key: value for key, value in duplicate_payload.items() if key != "receipt_sha256"}
+    )
+    with pytest.raises(ValueError, match="canonical and unique"):
+        fit_hierarchical_bt_research_prediction(
+            train,
+            validation,
+            cutoff=pd.Timestamp("2026-01-08T23:59:59Z"),
+            source_receipt=duplicate_payload,
+            source_identity_sha256=str(receipt["source_identity_sha256"]),
+        )
+    outside_payload = dict(receipt)
+    outside_payload["accepted_game_ids"] = sorted(train["game_uid"].tolist())
+    outside_payload["source_game_count"] = len(train)
+    outside_payload["source_identity_sha256"] = identity_sha256(
+        outside_payload["accepted_game_ids"]
+    )
+    outside_payload["receipt_sha256"] = hierarchical_bt._research_sha256(
+        {
+            key: value
+            for key, value in outside_payload.items()
+            if key != "receipt_sha256"
+        }
+    )
+    with pytest.raises(ValueError, match="outside the accepted census"):
+        fit_hierarchical_bt_research_prediction(
+            train,
+            validation,
+            cutoff=pd.Timestamp("2026-01-08T23:59:59Z"),
+            source_receipt=outside_payload,
+            source_identity_sha256=str(outside_payload["source_identity_sha256"]),
+        )
+
+
+def test_series_identity_is_required_and_cannot_cross_the_fold() -> None:
+    train = _training()
+    validation = _validation()
+    validation.loc[0, "grid_series_id"] = "series-g1"
+    with pytest.raises(ValueError, match="share grid_series_id"):
+        _run(train, validation)
+    with pytest.raises(ValueError, match="no safe grid_series_id"):
+        _run(train.drop(columns=["grid_series_id"]), _validation())
+    unsafe_train = train.copy()
+    unsafe_train.loc[1, "blue_team"] = "C"
+    unsafe_train.loc[1, "grid_series_id"] = "series-g1"
+    with pytest.raises(ValueError, match="multiple team pairs"):
+        _run(unsafe_train, _validation())

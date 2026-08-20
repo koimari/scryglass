@@ -28,6 +28,7 @@ import hashlib
 import json
 import math
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -47,7 +48,7 @@ from lol_kills.etl.competition import (
 from lol_kills.etl.paths import FEATURES_DIR
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.validation import audit_rating_inputs
-from lol_kills.v2.tierlists.accepted_census import identity_sha256
+from lol_kills.v2.tierlists.accepted_census import canonical_game_ids, identity_sha256
 
 
 LOGIT_TO_ELO = 400.0 / math.log(10.0)
@@ -650,6 +651,132 @@ def _research_id_identity(game_ids: tuple[str, ...] | list[str]) -> str:
     return identity_sha256(game_ids)
 
 
+def _research_verified_source_receipt(
+    source_receipt: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Verify the exact source receipt used by a research prediction."""
+
+    if not isinstance(source_receipt, Mapping):
+        raise ValueError("verified source receipt is required")
+    receipt = dict(source_receipt)
+    receipt_hash = str(receipt.get("receipt_sha256") or "").lower()
+    if len(receipt_hash) != 64 or any(
+        character not in "0123456789abcdef" for character in receipt_hash
+    ):
+        raise ValueError("source receipt hash is invalid")
+    unsigned = dict(receipt)
+    unsigned.pop("receipt_sha256", None)
+    if _research_sha256(unsigned) != receipt_hash:
+        raise ValueError("source receipt hash does not match its payload")
+
+    accepted_raw = receipt.get("accepted_game_ids")
+    eligible_raw = receipt.get("model_eligible_game_ids")
+    if not isinstance(accepted_raw, list) or not isinstance(eligible_raw, list):
+        raise ValueError("source receipt game ID lists are required")
+    if not all(isinstance(value, str) for value in (*accepted_raw, *eligible_raw)):
+        raise ValueError("source receipt game IDs must be strings")
+    accepted_ids = tuple(str(value) for value in accepted_raw)
+    eligible_ids = tuple(str(value) for value in eligible_raw)
+    if not accepted_ids:
+        raise ValueError("source receipt accepted game IDs are empty")
+    if tuple(canonical_game_ids(accepted_ids)) != accepted_ids:
+        raise ValueError("source receipt accepted game IDs are not canonical and unique")
+    if tuple(canonical_game_ids(eligible_ids)) != eligible_ids:
+        raise ValueError("source receipt eligible game IDs are not canonical and unique")
+    if not set(eligible_ids).issubset(set(accepted_ids)):
+        raise ValueError("source receipt eligible IDs are outside the accepted census")
+    source_identity = str(receipt.get("source_identity_sha256") or "").lower()
+    eligible_identity = str(
+        receipt.get("model_eligible_identity_sha256") or ""
+    ).lower()
+    if source_identity != _research_id_identity(accepted_ids):
+        raise ValueError("source receipt accepted identity is invalid")
+    if eligible_identity != _research_id_identity(eligible_ids):
+        raise ValueError("source receipt eligible identity is invalid")
+    if receipt.get("source_game_count") != len(accepted_ids):
+        raise ValueError("source receipt accepted count is invalid")
+    if receipt.get("model_eligible_game_count") != len(eligible_ids):
+        raise ValueError("source receipt eligible count is invalid")
+    if "source_as_of" not in receipt:
+        raise ValueError("source receipt source_as_of is required")
+    source_as_of = _research_cutoff(receipt["source_as_of"]).isoformat()
+    return {
+        "receipt_sha256": receipt_hash,
+        "source_as_of": source_as_of,
+        "source_identity_sha256": source_identity,
+        "source_game_count": len(accepted_ids),
+        "accepted_game_ids": accepted_ids,
+        "model_eligible_identity_sha256": eligible_identity,
+        "model_eligible_game_count": len(eligible_ids),
+        "model_eligible_game_ids": eligible_ids,
+    }
+
+
+def _research_series_ids(frame: pd.DataFrame, label: str) -> tuple[str, ...]:
+    """Require authoritative series IDs for leakage-safe fold boundaries."""
+
+    if "grid_series_id" not in frame.columns:
+        raise ValueError(f"{label} frame has no safe grid_series_id")
+    values = tuple(_cache_text(value) for value in frame["grid_series_id"].tolist())
+    if any(not value for value in values):
+        raise ValueError(f"{label} frame has missing safe grid_series_id")
+    return values
+
+
+def _research_series_pairs(frame: pd.DataFrame, label: str) -> dict[str, str]:
+    """Bind each source series ID to one unordered team pair."""
+
+    _research_series_ids(frame, label)
+    blue_column = next(
+        (column for column in ("blue_team", "blue_teamname") if column in frame.columns),
+        None,
+    )
+    red_column = next(
+        (column for column in ("red_team", "red_teamname") if column in frame.columns),
+        None,
+    )
+    if blue_column is None or red_column is None:
+        raise ValueError(f"{label} frame has no safe team pair columns")
+    pairs: dict[str, str] = {}
+    for series_id, blue_value, red_value in zip(
+        frame["grid_series_id"], frame[blue_column], frame[red_column]
+    ):
+        blue = team_identity_key(blue_value)
+        red = team_identity_key(red_value)
+        if blue == "unknown-team" or red == "unknown-team":
+            raise ValueError(f"{label} frame has an unsafe team pair")
+        pair = "|".join(sorted((blue, red)))
+        key = _cache_text(series_id)
+        previous = pairs.get(key)
+        if previous is not None and previous != pair:
+            raise ValueError(f"{label} grid_series_id maps to multiple team pairs: {key}")
+        pairs[key] = pair
+    return pairs
+
+
+def _research_order_frame(frame: pd.DataFrame, label: str) -> pd.DataFrame:
+    """Sort source rows by stable metadata before fitting the fold."""
+
+    ordered = frame.copy()
+    game_ids, _ = _research_game_ids(ordered, label)
+    dates = _research_dates(ordered, label)
+    series_ids = _research_series_ids(ordered, label)
+    ordered["_research_order_date"] = dates.to_numpy()
+    ordered["_research_order_game"] = game_ids
+    ordered["_research_order_series"] = series_ids
+    ordered = ordered.sort_values(
+        ["_research_order_date", "_research_order_series", "_research_order_game"],
+        kind="mergesort",
+    )
+    return ordered.drop(
+        columns=[
+            "_research_order_date",
+            "_research_order_game",
+            "_research_order_series",
+        ]
+    ).reset_index(drop=True)
+
+
 def _research_game_ids(frame: pd.DataFrame, label: str) -> tuple[list[str], tuple[str, ...]]:
     if frame is None or frame.empty:
         raise ValueError(f"{label} frame is empty")
@@ -769,7 +896,13 @@ def _research_fit_state(
 
 def _research_home_state(observations: pd.DataFrame) -> dict[str, str]:
     home: dict[str, str] = {}
-    for row in observations.sort_values("date").itertuples(index=False):
+    sort_columns = [
+        column
+        for column in ("date", "series_key", "game_uid")
+        if column in observations.columns
+    ]
+    ordered = observations.sort_values(sort_columns, kind="mergesort")
+    for row in ordered.itertuples(index=False):
         for team, league in ((row.team_a, row.home_a), (row.team_b, row.home_b)):
             if str(league) != "UNKNOWN":
                 home[str(team)] = str(league)
@@ -821,6 +954,8 @@ def _research_validation_rows(
             unseen_teams.add(team_b)
         if team_a not in team_index or team_b not in team_index:
             unseen_game_ids.add(game_id)
+            missing_ids.append(game_id)
+            continue
         vector = np.zeros(len(beta), dtype=float)
         if team_a in team_index:
             vector[team_index[team_a]] += 1.0
@@ -860,9 +995,6 @@ def _research_validation_rows(
                 "predicted_blue_win": float(expit(logit)),
             }
         )
-        if league in REGIONAL_LEAGUES:
-            home[blue] = league
-            home[red] = league
     return rows, sorted(set(missing_ids)), sorted(unseen_teams), sorted(unseen_game_ids)
 
 
@@ -872,6 +1004,7 @@ def fit_hierarchical_bt_research_prediction(
     *,
     cutoff: pd.Timestamp,
     cfg: HierarchicalBTConfig | None = None,
+    source_receipt: Mapping[str, Any] | None = None,
     source_identity_sha256: str | None = None,
     train_source_identity_sha256: str | None = None,
     validation_source_identity_sha256: str | None = None,
@@ -886,8 +1019,18 @@ def fit_hierarchical_bt_research_prediction(
 
     cfg = cfg or HierarchicalBTConfig()
     cutoff_value = _research_cutoff(cutoff)
-    train_ordered_ids, train_ids = _research_game_ids(train_maps, "training")
-    validation_ordered_ids, validation_ids = _research_game_ids(validation_maps, "validation")
+    _train_ordered_ids, train_ids = _research_game_ids(train_maps, "training")
+    _validation_ordered_ids, validation_ids = _research_game_ids(
+        validation_maps, "validation"
+    )
+    train_series_pairs = _research_series_pairs(train_maps, "training")
+    validation_series_pairs = _research_series_pairs(validation_maps, "validation")
+    shared_series_ids = sorted(set(train_series_pairs) & set(validation_series_pairs))
+    if shared_series_ids:
+        raise ValueError(
+            "training and validation share grid_series_id: "
+            + ", ".join(shared_series_ids)
+        )
     if set(train_ids) & set(validation_ids):
         raise ValueError("training and validation game identities overlap")
     train_dates = _research_dates(train_maps, "training")
@@ -897,26 +1040,55 @@ def fit_hierarchical_bt_research_prediction(
     if (validation_dates <= cutoff_value).any():
         raise ValueError("validation frame contains rows at or before the strict cutoff")
     _research_train_outcomes(train_maps)
+    verified_source = _research_verified_source_receipt(source_receipt)
+    source_as_of = pd.Timestamp(verified_source["source_as_of"])
+    if (train_dates > source_as_of).any() or (validation_dates > source_as_of).any():
+        raise ValueError("training or validation rows exceed the verified source_as_of")
+    eligible_ids = set(verified_source["model_eligible_game_ids"])
+    requested_ids = set(train_ids) | set(validation_ids)
+    if not requested_ids.issubset(eligible_ids):
+        raise ValueError("train or validation IDs are outside the verified source census")
+    computed_train_identity = _research_id_identity(train_ids)
+    computed_validation_identity = _research_id_identity(validation_ids)
+    if (
+        train_source_identity_sha256 is not None
+        and str(train_source_identity_sha256).lower() != computed_train_identity
+    ):
+        raise ValueError("training source identity does not match the exact training IDs")
+    if (
+        validation_source_identity_sha256 is not None
+        and str(validation_source_identity_sha256).lower() != computed_validation_identity
+    ):
+        raise ValueError(
+            "validation source identity does not match the exact validation IDs"
+        )
+    source_identity = verified_source["source_identity_sha256"]
+    if (
+        source_identity_sha256 is not None
+        and str(source_identity_sha256).lower() != source_identity
+    ):
+        raise ValueError("source identity does not match the verified source receipt")
     train_identity = _research_identity(
         train_source_identity_sha256,
-        _research_id_identity(train_ids),
+        computed_train_identity,
         "training",
     )
     validation_identity = _research_identity(
         validation_source_identity_sha256,
-        _research_id_identity(validation_ids),
+        computed_validation_identity,
         "validation",
     )
-    combined_identity = _research_id_identity(sorted(set(train_ids) | set(validation_ids)))
-    source_identity = _research_identity(source_identity_sha256, combined_identity, "source")
+    ordered_train_maps = _research_order_frame(train_maps, "training")
 
     observations, series_audit = _observations(
-        train_maps,
+        ordered_train_maps,
         cutoff_value,
         cfg.half_life_days,
     )
     if observations.empty:
         raise ValueError("training frame has no resolvable observations")
+    if series_audit.get("n_unsafe_maps") or series_audit.get("n_unresolved_maps"):
+        raise ValueError("training series identity is not safe for paired evaluation")
     fit_state = _research_fit_state(observations, cfg)
     prediction_rows, missing_ids, unseen_teams, unseen_game_ids = _research_validation_rows(
         validation_maps,
@@ -943,14 +1115,16 @@ def fit_hierarchical_bt_research_prediction(
         "game_count": len(train_ids),
         "identity_sha256": _research_id_identity(train_ids),
         "source_identity_sha256": train_identity,
-        "ordered_input_ids": train_ordered_ids,
+        "ordered_input_ids": list(train_ids),
+        "input_game_ids": list(train_ids),
     }
     validation_receipt = {
         "game_ids": list(validation_ids),
         "game_count": len(validation_ids),
         "identity_sha256": _research_id_identity(validation_ids),
         "source_identity_sha256": validation_identity,
-        "ordered_input_ids": validation_ordered_ids,
+        "ordered_input_ids": list(validation_ids),
+        "input_game_ids": list(validation_ids),
         "scored_game_ids": [row["game_id"] for row in prediction_rows],
         "missing_game_ids": missing_ids,
     }
@@ -963,9 +1137,19 @@ def fit_hierarchical_bt_research_prediction(
         "source_identity_sha256": source_identity,
         "source": {
             "source_identity_sha256": source_identity,
+            "receipt_sha256": verified_source["receipt_sha256"],
+            "source_as_of": verified_source["source_as_of"],
+            "source_game_count": verified_source["source_game_count"],
             "train_source_identity_sha256": train_identity,
             "validation_source_identity_sha256": validation_identity,
+            "model_eligible_game_count": verified_source["model_eligible_game_count"],
+            "model_eligible_identity_sha256": verified_source[
+                "model_eligible_identity_sha256"
+            ],
         },
+        "scope_game_identity_sha256": _research_id_identity(
+            sorted(requested_ids)
+        ),
         "train_game_ids": list(train_ids),
         "validation_game_ids": list(validation_ids),
         "train_receipt": train_receipt,
@@ -975,6 +1159,18 @@ def fit_hierarchical_bt_research_prediction(
             "validation_game_ids": missing_ids,
             "unseen_team_keys": unseen_teams,
             "unseen_model_game_ids": unseen_game_ids,
+            "blockers": [
+                blocker
+                for blocker in (
+                    "validation rows with unseen teams are excluded"
+                    if unseen_game_ids
+                    else None,
+                    "validation rows without a finite prediction are missing"
+                    if missing_ids and not unseen_game_ids
+                    else None,
+                )
+                if blocker is not None
+            ],
         },
         "config": config_payload,
         "config_sha256": config_sha256,
