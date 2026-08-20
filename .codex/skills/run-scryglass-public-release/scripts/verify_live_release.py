@@ -40,7 +40,11 @@ def _timestamp(value: object, label: str) -> datetime:
     if not isinstance(value, str):
         raise RuntimeError(f"{label} is missing")
     try:
-        parsed = datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
+        # Manifest timestamps arrive in two shapes: writers that normalize to
+        # a trailing Z, and receipt passthroughs that keep +00:00. Appending a
+        # suffix blindly turned the second shape into "...+00:00+00:00" and
+        # failed the smoke against a perfectly valid release.
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as error:
         raise RuntimeError(f"{label} is invalid") from error
     if parsed.tzinfo is None:
