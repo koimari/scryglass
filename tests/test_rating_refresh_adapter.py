@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -36,7 +37,8 @@ def _freeze_runtime_fixture(tmp_path: Path) -> tuple[dict, Path]:
         ):
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(relative.encode("utf-8"))
+            suffix = "-append" if root == append_source else ""
+            path.write_bytes((relative + suffix).encode("utf-8"))
     base_census = tmp_path / "base-census.json"
     append_census = tmp_path / "append-census.json"
     _write_census(base_census, ["game-a"])
@@ -60,7 +62,7 @@ def _freeze_runtime_fixture(tmp_path: Path) -> tuple[dict, Path]:
 def _fake_refresh(root: Path, **kwargs) -> dict:
     census = json.loads((root / "accepted-census.json").read_text(encoding="utf-8"))
     feature_root = root / "data/lol/features"
-    feature_root.mkdir(parents=True)
+    feature_root.mkdir(parents=True, exist_ok=True)
     artifact_names = {
         "team_snapshot": "ratings_snapshot.parquet",
         "player_snapshot": "player_ratings_snapshot.parquet",
@@ -94,22 +96,34 @@ def _fake_refresh(root: Path, **kwargs) -> dict:
     return payload
 
 
-def _set_adapter_environment(monkeypatch, output_root: Path, freeze: dict) -> tuple[Path, Path]:
-    fixture_root = output_root / "frozen" / "cold"
-    run_root = output_root / "runs" / "cold"
-    run_root.mkdir(parents=True)
-    output_path = run_root / "candidate.output.json"
-    calls_path = run_root / "candidate.calls.json"
+def _set_adapter_environment(
+    monkeypatch,
+    output_root: Path,
+    freeze: dict,
+    *,
+    phase: str = "cold",
+    variant: str = "candidate",
+) -> tuple[Path, Path]:
+    fixture_root = output_root / "frozen" / ("cold" if phase == "cold" else "append_only")
+    run_root = output_root / "runs" / phase
+    run_root.mkdir(parents=True, exist_ok=True)
+    output_path = run_root / f"{variant}.output.json"
+    calls_path = run_root / f"{variant}.calls.json"
     monkeypatch.setenv("SCRYGLASS_RATING_AUTORESEARCH_INPUT_ROOT", str(fixture_root))
     monkeypatch.setenv("SCRYGLASS_RATING_AUTORESEARCH_FIXTURE_MANIFEST", str(fixture_root / "manifest.json"))
     monkeypatch.setenv(
         "SCRYGLASS_RATING_AUTORESEARCH_FIXTURE_MANIFEST_SHA256",
-        freeze["base"]["manifest_sha256"],
+        freeze["base" if phase == "cold" else "append_only"]["manifest_sha256"],
     )
     monkeypatch.setenv("SCRYGLASS_RATING_AUTORESEARCH_OUTPUT_MANIFEST", str(output_path))
     monkeypatch.setenv("SCRYGLASS_RATING_AUTORESEARCH_CALL_COUNTS_PATH", str(calls_path))
-    monkeypatch.setenv("SCRYGLASS_RATING_AUTORESEARCH_PHASE", "cold")
-    monkeypatch.setenv("SCRYGLASS_RATING_AUTORESEARCH_VARIANT", "candidate")
+    monkeypatch.setenv("SCRYGLASS_RATING_AUTORESEARCH_RUNTIME_ROOT", str(output_root / "runtimes" / variant))
+    monkeypatch.setenv(
+        "SCRYGLASS_RATING_AUTORESEARCH_RUNTIME_OWNER",
+        f"{freeze['freeze_sha256']}:{variant}",
+    )
+    monkeypatch.setenv("SCRYGLASS_RATING_AUTORESEARCH_PHASE", phase)
+    monkeypatch.setenv("SCRYGLASS_RATING_AUTORESEARCH_VARIANT", variant)
     return output_path, calls_path
 
 
@@ -126,17 +140,55 @@ def test_adapter_stages_fixture_invokes_refresh_and_emits_contract(tmp_path: Pat
     monkeypatch.setattr(adapter, "refresh_ratings", fake)
     result = adapter.run_from_environment(min_games=1, min_series=1)
 
-    assert seen["root"] == output_path.parent / "candidate.output.runtime"
+    assert seen["root"] == output_root / "runtimes" / "candidate"
     assert seen["kwargs"]["allowed_game_ids"] == ["game-a"]
     assert (seen["root"] / "data/lol/warehouse/parquet/oe_live/maps.parquet").is_file()
     assert result["source"]["source_game_count"] == 1
     assert result["run"]["entrypoint"].endswith("rating_refresh.refresh_ratings")
     assert result["run"]["runtime_isolated"] is True
+    assert result["run"]["runtime_persistent"] is True
     assert json.loads(output_path.read_text(encoding="utf-8"))["outputs"]["rating_manifest"]["sha256"]
     assert json.loads(calls_path.read_text(encoding="utf-8"))["counts"] == {
         "load_census": 1,
         "refresh_ratings": 1,
     }
+
+
+def test_variant_runtime_cache_reuses_own_cold_state_for_append(tmp_path: Path, monkeypatch) -> None:
+    freeze, output_root = _freeze_runtime_fixture(tmp_path)
+    seen: list[tuple[str, Path]] = []
+
+    def cached_refresh(root: Path, **kwargs):
+        variant = os.environ["SCRYGLASS_RATING_AUTORESEARCH_VARIANT"]
+        phase = os.environ["SCRYGLASS_RATING_AUTORESEARCH_PHASE"]
+        cache_marker = root / "cache-marker.txt"
+        if phase == "cold":
+            assert not cache_marker.exists(), f"{variant} cold phase saw stale cache"
+            cache_marker.write_text(variant, encoding="utf-8")
+        else:
+            assert cache_marker.read_text(encoding="utf-8") == variant
+        seen.append((phase, root))
+        return _fake_refresh(root, **kwargs)
+
+    monkeypatch.setattr(adapter, "refresh_ratings", cached_refresh)
+    _set_adapter_environment(monkeypatch, output_root, freeze, phase="cold", variant="baseline")
+    adapter.run_from_environment(min_games=1, min_series=1)
+    _set_adapter_environment(monkeypatch, output_root, freeze, phase="cold", variant="candidate")
+    adapter.run_from_environment(min_games=1, min_series=1)
+    _set_adapter_environment(monkeypatch, output_root, freeze, phase="append_only", variant="candidate")
+    adapter.run_from_environment(min_games=1, min_series=1)
+
+    assert [phase for phase, _root in seen] == ["cold", "cold", "append_only"]
+    assert seen[0][1] == output_root / "runtimes" / "baseline"
+    assert seen[1][1] == output_root / "runtimes" / "candidate"
+    assert seen[2][1] == output_root / "runtimes" / "candidate"
+    assert (output_root / "runtimes" / "baseline" / "cache-marker.txt").read_text() == "baseline"
+    assert (output_root / "runtimes" / "candidate" / "cache-marker.txt").read_text() == "candidate"
+    assert (
+        output_root / "runtimes" / "candidate" / "data/lol/warehouse/parquet/oe_live/maps.parquet"
+    ).read_bytes().endswith(b"-append")
+    assert (output_root / "runs" / "cold" / "candidate.output.artifacts").is_dir()
+    assert (output_root / "runs" / "append_only" / "candidate.output.artifacts").is_dir()
 
 
 def test_adapter_rejects_refresh_identity_mismatch(tmp_path: Path, monkeypatch) -> None:

@@ -139,7 +139,11 @@ through the environment. The shell is not used.
 The repository adapter calls
 `lol_kills.v2.tierlists.rating_refresh.refresh_ratings`. It stages the frozen
 files under a private runtime directory and copies the production rating
-manifest and four rating artifacts into the harness output contract.
+manifest and four rating artifacts into the harness output contract. The
+harness gives baseline and candidate separate owner-marked runtime roots. Each
+variant keeps its runtime from cold through append_only. The active source
+files and accepted census are restaged for every phase. Output artifacts go to
+a phase-specific directory.
 
 ```sh
 python3 benchmarks/rating_refresh_autoresearch.py \

@@ -98,41 +98,139 @@ def _load_fixture() -> tuple[Path, dict[str, Any], dict[str, Any], str, str]:
     return fixture_root, dict(manifest), accepted, phase, variant
 
 
-def _stage_runtime(fixture_root: Path, manifest: Mapping[str, Any], accepted: Mapping[str, Any], output_path: Path) -> Path:
-    runtime_root = output_path.parent / f"{output_path.stem}.runtime"
+def _safe_runtime_relative(value: object, label: str) -> Path:
+    relative = Path(str(value or ""))
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        raise AdapterError(f"{label} path is invalid: {relative}")
+    return relative
+
+
+def _stage_runtime(
+    fixture_root: Path,
+    manifest: Mapping[str, Any],
+    accepted: Mapping[str, Any],
+    *,
+    variant: str,
+    runtime_owner: str,
+) -> Path:
+    runtime_value = _env_path("SCRYGLASS_RATING_AUTORESEARCH_RUNTIME_ROOT")
+    runtime_root = runtime_value
+    owner_path = runtime_root / ".rating-autoresearch-runtime-owner.json"
     if runtime_root.exists():
-        if runtime_root.is_symlink() or not runtime_root.is_dir() or any(runtime_root.iterdir()):
-            raise AdapterError(f"runtime destination must be a new empty directory: {runtime_root}")
+        if runtime_root.is_symlink() or not runtime_root.is_dir():
+            raise AdapterError(f"runtime destination must be a regular directory: {runtime_root}")
+        if owner_path.is_symlink():
+            raise AdapterError(f"runtime owner file is a symlink: {owner_path}")
+        if owner_path.is_file():
+            try:
+                owner = json.loads(owner_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise AdapterError(f"runtime owner file cannot be read: {owner_path}") from error
+            if (
+                not isinstance(owner, Mapping)
+                or owner.get("variant") != variant
+                or owner.get("runtime_owner") != runtime_owner
+            ):
+                raise AdapterError(f"runtime owner does not match variant: {runtime_root}")
+        elif any(runtime_root.iterdir()):
+            raise AdapterError(f"runtime destination has no owner and is not empty: {runtime_root}")
     runtime_root.mkdir(parents=True, exist_ok=True)
+    if not owner_path.exists():
+        _write_json(
+            owner_path,
+            {
+                "schema_version": "scryglass:rating-autoresearch-runtime-owner:v1",
+                "variant": variant,
+                "runtime_owner": runtime_owner,
+            },
+        )
+
+    current_paths: set[str] = set()
     for raw_record in manifest.get("files", []):
         if not isinstance(raw_record, Mapping):
             raise AdapterError("fixture input record is invalid")
-        relative = Path(str(raw_record.get("path") or ""))
-        if not relative.parts or relative.parts[0] != "inputs" or ".." in relative.parts:
-            raise AdapterError(f"fixture input path is invalid: {relative}")
-        source = fixture_root / relative
-        destination = runtime_root.joinpath(*relative.parts[1:])
+        fixture_relative = _safe_runtime_relative(raw_record.get("path"), "fixture input")
+        if fixture_relative.parts[0] != "inputs":
+            raise AdapterError(f"fixture input path is invalid: {fixture_relative}")
+        relative = Path(*fixture_relative.parts[1:])
+        current_paths.add(relative.as_posix())
+        source = fixture_root / fixture_relative
+        destination = runtime_root / relative
         if source.is_symlink() or not source.is_file():
             raise AdapterError(f"fixture input is missing: {source}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
         if destination.stat().st_size != int(raw_record["bytes"]) or _sha256(destination) != raw_record["sha256"]:
-            raise AdapterError(f"staged input changed: {relative}")
+            raise AdapterError(f"staged input changed: {fixture_relative}")
+    stage_path = runtime_root / ".rating-autoresearch-stage.json"
+    if stage_path.is_symlink():
+        raise AdapterError(f"runtime stage file is a symlink: {stage_path}")
+    if stage_path.is_file():
+        try:
+            previous_stage = json.loads(stage_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise AdapterError(f"runtime stage file cannot be read: {stage_path}") from error
+        previous_paths = previous_stage.get("paths", []) if isinstance(previous_stage, Mapping) else []
+        if not isinstance(previous_paths, list):
+            raise AdapterError(f"runtime stage paths are invalid: {stage_path}")
+        for raw_previous in previous_paths:
+            previous = _safe_runtime_relative(raw_previous, "previous staged input")
+            if previous.as_posix() in current_paths:
+                continue
+            stale = runtime_root / previous
+            if stale.is_symlink():
+                raise AdapterError(f"stale staged input is a symlink: {stale}")
+            if stale.is_file():
+                stale.unlink()
+    _write_json(
+        stage_path,
+        {
+            "schema_version": "scryglass:rating-autoresearch-stage:v1",
+            "phase": str(manifest["phase"]),
+            "fixture_manifest_sha256": str(manifest["manifest_sha256"]),
+            "paths": sorted(current_paths),
+        },
+    )
     census_destination = runtime_root / "accepted-census.json"
-    census_source = fixture_root / str(manifest["census"]["path"])
+    census_source = fixture_root / _safe_runtime_relative(manifest["census"]["path"], "census")
     shutil.copy2(census_source, census_destination)
     if _sha256(census_destination) != accepted["sha256"]:
         raise AdapterError("staged census changed")
     return runtime_root
 
 
-def _artifact_descriptor(runtime_root: Path, locator: str, metadata: Mapping[str, Any]) -> dict[str, Any]:
-    path = runtime_root / locator
-    if path.is_symlink() or not path.is_file():
-        raise AdapterError(f"production artifact is missing: {path}")
-    digest = _sha256(path)
+def _copy_artifact(
+    runtime_root: Path,
+    artifact_root: Path,
+    locator: str,
+    expected_sha256: str | None = None,
+) -> tuple[Path, str]:
+    relative = _safe_runtime_relative(locator, "production artifact")
+    source = runtime_root / relative
+    if source.is_symlink() or not source.is_file():
+        raise AdapterError(f"production artifact is missing: {source}")
+    digest = _sha256(source)
+    if expected_sha256 is not None and digest != expected_sha256:
+        raise AdapterError(f"production artifact digest changed: {locator}")
+    destination = artifact_root / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    if _sha256(destination) != digest:
+        raise AdapterError(f"copied production artifact changed: {locator}")
+    return destination, digest
+
+
+def _artifact_descriptor(
+    runtime_root: Path,
+    artifact_root: Path,
+    locator: str,
+    metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    path, digest = _copy_artifact(runtime_root, artifact_root, locator, str(metadata.get("sha256")))
     if digest != metadata.get("sha256"):
         raise AdapterError(f"production artifact digest changed: {locator}")
+    if "bytes" in metadata and int(metadata["bytes"]) != path.stat().st_size:
+        raise AdapterError(f"production artifact byte count changed: {locator}")
     descriptor: dict[str, Any] = {
         "path": str(path),
         "sha256": digest,
@@ -167,7 +265,14 @@ def run_from_environment(
     fixture_root, manifest, accepted, phase, variant = _load_fixture()
     output_path = _env_path("SCRYGLASS_RATING_AUTORESEARCH_OUTPUT_MANIFEST")
     calls_path = _env_path("SCRYGLASS_RATING_AUTORESEARCH_CALL_COUNTS_PATH")
-    runtime_root = _stage_runtime(fixture_root, manifest, accepted, output_path)
+    runtime_owner = _env_text("SCRYGLASS_RATING_AUTORESEARCH_RUNTIME_OWNER")
+    runtime_root = _stage_runtime(
+        fixture_root,
+        manifest,
+        accepted,
+        variant=variant,
+        runtime_owner=runtime_owner,
+    )
     refresh_kwargs: dict[str, Any] = {
         "root": runtime_root,
         "min_games": min_games,
@@ -195,11 +300,21 @@ def run_from_environment(
     production_manifest_path = runtime_root / OUTPUT
     if not production_manifest_path.is_file():
         raise AdapterError(f"rating refresh manifest is missing: {production_manifest_path}")
+    artifact_root = output_path.parent / f"{output_path.stem}.artifacts"
+    if artifact_root.exists():
+        if artifact_root.is_symlink() or not artifact_root.is_dir() or any(artifact_root.iterdir()):
+            raise AdapterError(f"artifact destination must be a new empty directory: {artifact_root}")
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    copied_manifest, manifest_digest = _copy_artifact(
+        runtime_root,
+        artifact_root,
+        str(OUTPUT),
+    )
     artifacts: dict[str, Any] = {
         "rating_manifest": {
-            "path": str(production_manifest_path),
-            "sha256": _sha256(production_manifest_path),
-            "bytes": int(production_manifest_path.stat().st_size),
+            "path": str(copied_manifest),
+            "sha256": manifest_digest,
+            "bytes": int(copied_manifest.stat().st_size),
         }
     }
     raw_artifacts = payload.get("artifacts")
@@ -208,7 +323,12 @@ def run_from_environment(
     for name, metadata in raw_artifacts.items():
         if not isinstance(metadata, Mapping) or not isinstance(metadata.get("locator"), str):
             raise AdapterError(f"rating refresh artifact metadata is invalid: {name}")
-        artifacts[str(name)] = _artifact_descriptor(runtime_root, metadata["locator"], metadata)
+        artifacts[str(name)] = _artifact_descriptor(
+            runtime_root,
+            artifact_root,
+            metadata["locator"],
+            metadata,
+        )
     team = payload.get("team", {})
     player = payload.get("player", {})
     if not isinstance(team, Mapping) or not isinstance(player, Mapping):
@@ -227,6 +347,9 @@ def run_from_environment(
             "variant": variant,
             "entrypoint": "lol_kills.v2.tierlists.rating_refresh.refresh_ratings",
             "runtime_isolated": True,
+            "runtime_persistent": True,
+            "runtime_owner": runtime_owner,
+            "phase_input_manifest_sha256": str(manifest["manifest_sha256"]),
             "accepted_census_bound": True,
         },
         "outputs": artifacts,

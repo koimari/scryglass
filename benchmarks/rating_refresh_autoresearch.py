@@ -456,6 +456,8 @@ def _run_adapter(
     command_cwd: Path,
     fixture_root: Path,
     fixture_manifest: Mapping[str, Any],
+    runtime_root: Path,
+    runtime_owner: str,
     phase: str,
     variant: str,
     expected_binding: Mapping[str, Any],
@@ -481,6 +483,8 @@ def _run_adapter(
             "SCRYGLASS_RATING_AUTORESEARCH_FIXTURE_MANIFEST_SHA256": str(expected_binding["input_manifest_sha256"]),
             "SCRYGLASS_RATING_AUTORESEARCH_OUTPUT_MANIFEST": str(output_path),
             "SCRYGLASS_RATING_AUTORESEARCH_CALL_COUNTS_PATH": str(calls_path),
+            "SCRYGLASS_RATING_AUTORESEARCH_RUNTIME_ROOT": str(runtime_root),
+            "SCRYGLASS_RATING_AUTORESEARCH_RUNTIME_OWNER": runtime_owner,
             "SCRYGLASS_RATING_AUTORESEARCH_PHASE": phase,
             "SCRYGLASS_RATING_AUTORESEARCH_VARIANT": variant,
         }
@@ -624,6 +628,14 @@ def run_benchmark(
     if not freeze_manifest.get("append_only_checks", {}).get("valid"):
         raise HarnessError("append-only fixture contract is invalid")
     phases: dict[str, Any] = {}
+    runtime_roots = {
+        variant: output_root / "runtimes" / variant
+        for variant in ("baseline", "candidate")
+    }
+    runtime_owners = {
+        variant: f"{freeze_manifest.get('freeze_sha256')}:{variant}"
+        for variant in ("baseline", "candidate")
+    }
     for phase_name, fixture_key in (("cold", "base"), ("append_only", "append_only")):
         fixture_manifest = freeze_manifest[fixture_key]
         fixture_root = output_root / "frozen" / phase_name
@@ -634,6 +646,8 @@ def run_benchmark(
             command_cwd=command_cwd,
             fixture_root=fixture_root,
             fixture_manifest=fixture_manifest,
+            runtime_root=runtime_roots["baseline"],
+            runtime_owner=runtime_owners["baseline"],
             phase=phase_name,
             variant="baseline",
             expected_binding=expected_binding,
@@ -645,6 +659,8 @@ def run_benchmark(
             command_cwd=command_cwd,
             fixture_root=fixture_root,
             fixture_manifest=fixture_manifest,
+            runtime_root=runtime_roots["candidate"],
+            runtime_owner=runtime_owners["candidate"],
             phase=phase_name,
             variant="candidate",
             expected_binding=expected_binding,
@@ -684,6 +700,7 @@ def run_benchmark(
         "timeout_seconds": timeout_seconds,
         "require_speedup": require_speedup,
         "freeze_sha256": freeze_manifest.get("freeze_sha256"),
+        "runtime_roots": {variant: str(path) for variant, path in runtime_roots.items()},
         "append_only_checks": freeze_manifest.get("append_only_checks"),
         "invocation_budget": {"phases": ["cold", "append_only"], "variants_per_phase": 2, "total_adapter_calls": 4},
         "phases": phases,
