@@ -1,53 +1,133 @@
 {
   "authority": "development_only",
+  "evaluation_rows": 17756,
+  "cluster_safe": true,
+  "cluster_column": "series_id",
+  "fold_count": 2,
+  "folds": [
+    {"fold": 0, "train_rows": 5424, "test_rows": 6159, "boundary_excluded_rows": 0, "boundary_excluded_clusters": 0},
+    {"fold": 1, "train_rows": 11580, "test_rows": 6173, "boundary_excluded_rows": 2, "boundary_excluded_clusters": 1}
+  ],
+  "evaluation_window": {
+    "date_start": "2025-01-11T11:11:24Z",
+    "date_end": "2026-08-20T14:51:29Z",
+    "regions": 50,
+    "patches": 40,
+    "accepted_phase_rows": 17756,
+    "team_form_feature_rows": 16948,
+    "team_form_feature_missing_rows": 808,
+    "series_cluster_provenance": {
+      "exact_id_proxy_rows": 1349,
+      "team_date_proxy_rows": 16407,
+      "game_fallback_rows": 0,
+      "unique_clusters": 8636,
+      "oe_bridge_rows": 524,
+      "oe_bridge_team_date_proxy_rows": 524
+    }
+  },
   "checks": {
     "chronological_whole_series": {
-      "cluster_column": "game_uid",
-      "fold_count": 2,
-      "status": "checked"
+      "cluster_column": "series_id",
+      "requested_fold_count": 3,
+      "valid_fold_count": 2,
+      "status": "checked",
+      "blocker": "the first chronological block has no earlier training rows and is excluded",
+      "fallback_cluster_rows": 0,
+      "boundary_excluded_rows": 2,
+      "boundary_excluded_clusters": 1,
+      "boundary_cluster_ids": [
+        "team-date:2026-02-24|HLL|<missing>|almo-players|zerolag-esports"
+      ]
     },
     "missingness": {
       "status": "reported",
-      "groups": ["complete", "any_missing"]
+      "groups": ["complete", "any_missing"],
+      "team_form_missing_rows": 808
     },
     "regional_transfer": {
-      "status": "checked_on_bounded_sample",
-      "groups_checked": ["AC", "AL"]
+      "status": "checked_on_full_accepted_population",
+      "groups_checked": 50,
+      "available_groups": 49,
+      "unavailable_groups": {"LFL2": {"train_rows": 0, "test_rows": 233}},
+      "group_support": {"test_rows": 17756, "available_train_rows_min": 4, "available_train_rows_max": 16364},
+      "baseline_rows_match_on_available_groups": true
     },
     "patch_transfer": {
-      "status": "checked_on_bounded_sample",
-      "groups_checked": ["15.01", "15.02"]
+      "status": "checked_on_full_accepted_population",
+      "groups_checked": 40,
+      "available_groups": 39,
+      "unavailable_groups": {"15.01": {"train_rows": 0, "test_rows": 315}},
+      "group_support": {"test_rows": 17756, "available_train_rows_min": 264, "available_train_rows_max": 17539},
+      "baseline_rows_match_on_available_groups": true
     },
     "short_game_censoring": {
       "status": "checked",
-      "censored_gold_25_rows": 1220,
-      "censored_xp_25_rows": 1220
+      "at_risk_rows": {"10": 17756, "15": 17756, "20": 17700, "25": 16403},
+      "censored_gold_rows": {"10": 0, "15": 0, "20": 56, "25": 1353},
+      "censored_xp_rows": {"10": 0, "15": 0, "20": 56, "25": 1353}
     },
     "side_swap_invariance": {
       "status": "passed_on_complete_feature_rows",
-      "max_abs_prediction_sum": 0.0
+      "max_abs_prediction_sum": 0.0,
+      "missing_feature_rows_excluded": true
     },
     "strict_pregame_leakage": {
       "status": "checked",
       "current_checkpoint_targets": "target_only",
       "final_metrics": "strict_prior_timestamp_blocks_only"
+    },
+    "paired_zero_baseline": {
+      "status": "checked",
+      "definition": "zero prediction on the same finite target rows as the fold-internal model",
+      "all_checkpoints_rows_match": true
     }
   },
   "chronological_metrics": {
     "gold": {
-      "10": {"mae": 1108.1654, "rmse": 1440.9525, "rows": 679},
-      "15": {"mae": 2167.492, "rmse": 2857.1929, "rows": 679},
-      "20": {"mae": 3631.0755, "rmse": 4679.7859, "rows": 677},
-      "25": {"mae": 4725.6426, "rmse": 5882.9836, "rows": 614}
+      "10": {"rows": 11874, "mae": 1113.714920845711, "rmse": 1441.8417808825518, "bias": 118.7182028176472, "baseline_zero": {"rows": 11874, "mae": 1133.4106451069563, "rmse": 1467.8883502130732, "bias": 126.40458143843692}, "rmse_gain_vs_zero": 26.04656933052138, "mae_gain_vs_zero": 19.695724261245232, "baseline_rows_match": true},
+      "15": {"rows": 11874, "mae": 2162.1749876655545, "rmse": 2842.996136149128, "bias": 243.05467284459885, "baseline_zero": {"rows": 11874, "mae": 2209.4836617820447, "rmse": 2910.5548873277667, "bias": 257.8655044635338}, "rmse_gain_vs_zero": 67.55875117863889, "mae_gain_vs_zero": 47.30867411649024, "baseline_rows_match": true},
+      "20": {"rows": 11836, "mae": 3562.4068757941077, "rmse": 4566.828875182117, "bias": 429.6753246943838, "baseline_zero": {"rows": 11836, "mae": 3669.786752281176, "rmse": 4705.09763887155, "bias": 455.4418722541399}, "rmse_gain_vs_zero": 138.2687636894325, "mae_gain_vs_zero": 107.37987648706849, "baseline_rows_match": true},
+      "25": {"rows": 10879, "mae": 4827.869208820101, "rmse": 5997.540668482859, "bias": 473.53659872306815, "baseline_zero": {"rows": 10879, "mae": 4945.186230352055, "rmse": 6137.473337548181, "bias": 499.70153506756134}, "rmse_gain_vs_zero": 139.93266906532244, "mae_gain_vs_zero": 117.31702153195329, "baseline_rows_match": true}
     },
     "xp": {
-      "10": {"mae": 838.3141, "rmse": 1106.6407, "rows": 679},
-      "15": {"mae": 1775.8397, "rmse": 2322.5567, "rows": 679},
-      "20": {"mae": 3047.9561, "rmse": 3901.6985, "rows": 677},
-      "25": {"mae": 5346.3722, "rmse": 6519.7149, "rows": 614}
+      "10": {"rows": 11874, "mae": 817.0132336588675, "rmse": 1061.9930769810544, "bias": 79.05727275996215, "baseline_zero": {"rows": 11874, "mae": 831.4272359777666, "rmse": 1082.151989322173, "bias": 80.41426646454438}, "rmse_gain_vs_zero": 20.158912341118594, "mae_gain_vs_zero": 14.414002318899065, "baseline_rows_match": true},
+      "15": {"rows": 11874, "mae": 1759.2467163337103, "rmse": 2291.702313309076, "bias": 144.4056686218699, "baseline_zero": {"rows": 11874, "mae": 1793.9559541856156, "rmse": 2341.232386839559, "bias": 147.54547751389592}, "rmse_gain_vs_zero": 49.530073530482696, "mae_gain_vs_zero": 34.7092378519053, "baseline_rows_match": true},
+      "20": {"rows": 11836, "mae": 2981.4621781000637, "rmse": 3820.4406032175166, "bias": 157.38175250827658, "baseline_zero": {"rows": 11836, "mae": 3061.405119972964, "rmse": 3926.892864965015, "bias": 166.8409090909091}, "rmse_gain_vs_zero": 106.4522617474986, "mae_gain_vs_zero": 79.94294187290006, "baseline_rows_match": true},
+      "25": {"rows": 10879, "mae": 5658.08928568746, "rmse": 6891.021483261251, "bias": 268.4084519662627, "baseline_zero": {"rows": 10879, "mae": 5784.8153322915705, "rmse": 7032.479518684369, "bias": 280.33514109752736}, "rmse_gain_vs_zero": 141.45803542311842, "mae_gain_vs_zero": 126.7260466041107, "baseline_rows_match": true}
     }
   },
-  "evaluation_rows": 1060,
+  "missingness_metrics": {
+    "definition": "complete and any_missing feature rows are reported separately",
+    "note": "any_missing rows have materially larger errors and remain a promotion blocker",
+    "rows_by_checkpoint": {
+      "gold": {
+        "10": {"complete": 11268, "any_missing": 606},
+        "15": {"complete": 11268, "any_missing": 606},
+        "20": {"complete": 11235, "any_missing": 601},
+        "25": {"complete": 10357, "any_missing": 522}
+      },
+      "xp": {
+        "10": {"complete": 11268, "any_missing": 606},
+        "15": {"complete": 11268, "any_missing": 606},
+        "20": {"complete": 11235, "any_missing": 601},
+        "25": {"complete": 10357, "any_missing": 522}
+      }
+    }
+  },
+  "group_support": {
+    "region": {
+      "groups_checked": 50,
+      "available_groups": 49,
+      "unavailable": {"LFL2": {"train_rows": 0, "test_rows": 233}},
+      "all_groups_evaluated": true
+    },
+    "patch": {
+      "groups_checked": 40,
+      "available_groups": 39,
+      "unavailable": {"15.01": {"train_rows": 0, "test_rows": 315}},
+      "all_groups_evaluated": true
+    }
+  },
   "model_version": "future-phase-curve-v1",
   "schema_version": "scryglass:future-phase-curve-evaluation:v1",
   "source_identity_sha256": "b83e45561932469b4b7ff3b88d383b473ff17e0a10f612d3fb97f83e30e2e8b1",

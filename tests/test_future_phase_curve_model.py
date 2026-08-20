@@ -81,6 +81,55 @@ def test_prepare_phase_frame_marks_short_game_targets_as_censored() -> None:
     assert result.loc[0, "duration_seconds"] == 19 * 60
 
 
+def test_prepare_phase_frame_derives_outcome_free_series_provenance() -> None:
+    games = [
+        "123-123_game_1",
+        "123-123_game_2",
+        "oe:game:bridge-a",
+        "oe:game:bridge-b",
+        "oe:game:fallback",
+    ]
+    date = "2026-01-01T00:00:00Z"
+    maps = pd.DataFrame(
+        [
+            {
+                "game_uid": game,
+                "date": date,
+                "league": "LCK",
+                "tournament": "Spring",
+                "blue_team_key": "blue",
+                "red_team_key": "red",
+            }
+            for game in games
+        ]
+    )
+    maps.loc[maps["game_uid"].eq("oe:game:fallback"), ["blue_team_key", "red_team_key"]] = None
+    teams = pd.DataFrame(
+        [
+            {
+                "game_uid": game,
+                "date": date,
+                "side": side,
+                "teamid": f"{side}-{game}",
+                **{f"goldat{phase}": base + phase for phase in (10, 15, 20, 25)},
+                **{f"xpat{phase}": base + phase for phase in (10, 15, 20, 25)},
+            }
+            for game in games
+            for side, base in (("Blue", 1000), ("Red", 900))
+        ]
+    )
+    result = prepare_phase_frame(maps, teams)
+    source = dict(result["series_id_source"].value_counts())
+    assert source == {"team_date_proxy": 2, "exact_id_proxy": 2, "game_fallback": 1}
+    numeric = result.loc[result["game_uid"].eq("123-123_game_2"), "series_id"].item()
+    assert numeric == "123-123_game"
+    bridge = result.loc[result["game_uid"].eq("oe:game:bridge-b"), "series_id"].item()
+    assert bridge == result.loc[result["game_uid"].eq("oe:game:bridge-a"), "series_id"].item()
+    assert result.loc[result["game_uid"].eq("oe:game:fallback"), "series_id"].item() == (
+        "game-fallback:oe:game:fallback"
+    )
+
+
 def test_phase_pregame_feature_gate_rejects_bare_final_metrics() -> None:
     frame = _phase_frame(4)
     receipt = _receipt(frame["game_uid"].tolist())
@@ -141,6 +190,35 @@ def test_chronological_folds_keep_series_whole() -> None:
         seen.update(test_series)
 
 
+def test_chronological_folds_exclude_clusters_that_continue_into_test() -> None:
+    frame = _phase_frame(8)
+    frame["date"] = pd.to_datetime(
+        [
+            "2026-01-01T00:00:00Z",
+            "2026-01-04T00:00:00Z",
+            "2026-01-02T00:00:00Z",
+            "2026-01-05T00:00:00Z",
+            "2026-01-03T00:00:00Z",
+            "2026-01-06T00:00:00Z",
+            "2026-01-07T00:00:00Z",
+            "2026-01-08T00:00:00Z",
+        ],
+        utc=True,
+    )
+    frame["series_id"] = ["A", "A", "B", "B", "C", "C", "D", "D"]
+    folds = chronological_folds(frame, n_splits=2, min_train_rows=0, cluster_column="series_id")
+    for train_indices, test_indices in folds:
+        test_start = frame.iloc[test_indices]["date"].min()
+        test_clusters = set(frame.iloc[test_indices]["series_id"])
+        train = frame.iloc[train_indices]
+        last_by_cluster = frame.groupby("series_id")["date"].max()
+        assert all(
+            last_by_cluster[cluster] < test_start
+            for cluster in train["series_id"]
+            if cluster not in test_clusters
+        )
+
+
 def test_side_swap_changes_targets_and_model_sign() -> None:
     frame = _phase_frame()
     receipt = _receipt(frame["game_uid"].tolist())
@@ -169,4 +247,16 @@ def test_evaluation_has_transfer_and_missingness_sections() -> None:
     assert report["cluster_safe"]
     assert "groups" in report["regional_transfer"]
     assert "groups" in report["patch_transfer"]
+    assert "cluster_boundary_exclusions" in report
     assert "missingness" in report["metrics"]["gold"]["10"]
+    assert report["metrics"]["gold"]["10"]["baseline_rows_match"]
+    assert report["metrics"]["gold"]["10"]["baseline_zero"]["rows"] == report[
+        "metrics"
+    ]["gold"]["10"]["rows"]
+    for transfer in (report["regional_transfer"], report["patch_transfer"]):
+        for group in transfer["groups"].values():
+            if not group["available"]:
+                continue
+            for kind in ("gold", "xp"):
+                for phase in ("10", "15", "20", "25"):
+                    assert group["metrics"][kind][phase]["baseline_rows_match"]

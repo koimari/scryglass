@@ -169,6 +169,61 @@ def _date_series(frame: pd.DataFrame, label: str = "phase frame") -> pd.Series:
     return result
 
 
+def _series_cluster_labels(metadata: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    """Build outcome-free series clusters and record their provenance.
+
+    Numeric annual IDs provide a stable series proxy.  Other rows use the
+    UTC date, competition label, tournament, and unordered stable team keys.
+    A row with incomplete identity keeps a game-level fallback and remains a
+    promotion blocker.
+    """
+
+    labels: list[str] = []
+    sources: list[str] = []
+    numeric_pattern = re.compile(r"^(\d+-\d+_game)(?:_\d+)?$")
+
+    def token(value: Any) -> str | None:
+        if value is None or pd.isna(value):
+            return None
+        text = str(value).strip()
+        return text or None
+
+    for _, row in metadata.iterrows():
+        game_uid = token(row.get("game_uid"))
+        if game_uid is None:
+            raise FuturePhaseCurveError("series cluster input has an empty game identity")
+        existing = token(row.get("series_id"))
+        numeric_match = numeric_pattern.fullmatch(game_uid)
+        if existing is not None:
+            labels.append(existing)
+            sources.append("exact_id_proxy")
+            continue
+        if numeric_match is not None:
+            labels.append(numeric_match.group(1))
+            sources.append("exact_id_proxy")
+            continue
+        date_value = pd.to_datetime(row.get("date"), utc=True, errors="coerce")
+        date_token = date_value.strftime("%Y-%m-%d") if pd.notna(date_value) else None
+        league = token(row.get("league_source")) or token(row.get("league"))
+        tournament = token(row.get("tournament")) or "<missing>"
+        blue_team = token(row.get("blue_team_key"))
+        red_team = token(row.get("red_team_key"))
+        team_keys = sorted(value for value in (blue_team, red_team) if value is not None)
+        if date_token is not None and league is not None and len(team_keys) == 2:
+            labels.append(
+                "team-date:"
+                + "|".join((date_token, league, tournament, team_keys[0], team_keys[1]))
+            )
+            sources.append("team_date_proxy")
+            continue
+        labels.append("game-fallback:" + game_uid)
+        sources.append("game_fallback")
+    return (
+        pd.Series(labels, index=metadata.index, dtype="string"),
+        pd.Series(sources, index=metadata.index, dtype="string"),
+    )
+
+
 def _normalised_name(value: Any) -> str:
     return re.sub(r"[^a-z0-9]", "", str(value).strip().casefold())
 
@@ -352,7 +407,7 @@ def prepare_phase_frame(
         ("league", ("league",)),
         ("region", ("region", "league_source")),
         ("patch", ("patch", "oe_patch_token")),
-        ("series_id", ("series_id", "seriesid", "game")),
+        ("series_id", ("series_id", "seriesid")),
     ):
         source = next((name for name in names if name in map_index.columns), None)
         if source is not None:
@@ -360,6 +415,18 @@ def prepare_phase_frame(
         else:
             fallback = next((name for name in names if name in blue.columns), None)
             result[output] = blue.reindex(map_index.index)[fallback] if fallback else pd.NA
+    cluster_metadata = pd.DataFrame(index=map_index.index)
+    cluster_metadata["game_uid"] = result["game_uid"]
+    cluster_metadata["date"] = result["date"]
+    cluster_metadata["series_id"] = result["series_id"]
+    for name in ("league", "league_source", "tournament", "blue_team_key", "red_team_key"):
+        if name in map_index.columns:
+            cluster_metadata[name] = map_index[name]
+        else:
+            cluster_metadata[name] = pd.NA
+    series_labels, series_sources = _series_cluster_labels(cluster_metadata)
+    result["series_id"] = series_labels
+    result["series_id_source"] = series_sources
 
     duration = numeric_coalesce(map_index, ("gamelength", "game_length", "duration_seconds", "duration"))
     duration = duration.combine_first(
@@ -1006,7 +1073,8 @@ def chronological_folds(
         cluster_values = frame[cluster_column].astype("string")
     else:
         cluster_values = _game_series(frame, "phase frame")
-    cluster_values = cluster_values.fillna(_game_series(frame, "phase frame"))
+    fallback_values = _game_series(frame, "phase frame")
+    cluster_values = cluster_values.fillna(fallback_values)
     cluster_frame = pd.DataFrame({"cluster": cluster_values, "date": dates})
     cluster_dates = (
         cluster_frame.groupby("cluster", sort=False, observed=True)["date"]
@@ -1023,13 +1091,62 @@ def chronological_folds(
         test_clusters = set(block.tolist())
         test_mask = cluster_values.isin(test_clusters)
         test_start = dates.loc[test_mask].min()
-        train_mask = dates.lt(test_start) & ~cluster_values.isin(test_clusters)
+        cluster_last = cluster_values.map(cluster_dates["last"])
+        train_mask = (
+            dates.lt(test_start)
+            & ~cluster_values.isin(test_clusters)
+            & cluster_last.lt(test_start)
+        )
         train = np.flatnonzero(train_mask.to_numpy())
         test = np.flatnonzero(test_mask.to_numpy())
         if len(train) < min_train_rows or len(test) == 0:
             continue
         output.append((train, test))
     return tuple(output)
+
+
+def _cluster_boundary_diagnostics(
+    frame: pd.DataFrame,
+    test_indices: np.ndarray,
+    cluster_column: str | None,
+) -> dict[str, Any]:
+    """Report rows kept out because their cluster continues into the future."""
+
+    dates = _date_series(frame)
+    if cluster_column and cluster_column in frame.columns:
+        cluster_values = frame[cluster_column].astype("string")
+    else:
+        cluster_values = _game_series(frame, "phase frame")
+    cluster_values = cluster_values.fillna(_game_series(frame, "phase frame"))
+    test_mask = pd.Series(False, index=frame.index)
+    test_mask.iloc[test_indices] = True
+    test_start = dates.loc[test_mask].min()
+    cluster_last = pd.DataFrame(
+        {"cluster": cluster_values, "date": dates}, index=frame.index
+    ).groupby("cluster", sort=False, observed=True)["date"].transform("max")
+    boundary_mask = (
+        dates.lt(test_start)
+        & ~test_mask
+        & ~cluster_values.isin(set(cluster_values.loc[test_mask].tolist()))
+        & cluster_last.ge(test_start)
+    )
+    boundary_clusters = sorted(str(value) for value in cluster_values.loc[boundary_mask].unique())
+    test_cluster_prior_rows = int(
+        (
+            dates.lt(test_start)
+            & ~test_mask
+            & cluster_values.isin(set(cluster_values.loc[test_mask].tolist()))
+        ).sum()
+    )
+    return {
+        "test_start": test_start.isoformat() if pd.notna(test_start) else None,
+        "test_clusters": int(cluster_values.loc[test_mask].nunique()),
+        "boundary_excluded_rows": int(boundary_mask.sum()),
+        "boundary_excluded_clusters": len(boundary_clusters),
+        "boundary_cluster_ids": boundary_clusters,
+        "test_cluster_prior_rows": test_cluster_prior_rows,
+        "definition": "rows before test start whose cluster has a row at or after test start",
+    }
 
 
 def _prediction_errors(
@@ -1162,10 +1279,20 @@ def _evaluate_transfer_slices(
             residuals, _missing = _prediction_errors(artifact, test, feature_columns)
             metric_report: dict[str, Any] = {}
             for kind in ("gold", "xp"):
-                metric_report[kind] = {
-                    str(phase): _error_summary(residuals[kind][str(phase)])
-                    for phase in PHASES
-                }
+                metric_report[kind] = {}
+                for phase in PHASES:
+                    residual = residuals[kind][str(phase)]
+                    target = _target(test, kind, phase)
+                    valid = np.isfinite(residual) & np.isfinite(target)
+                    model_summary = _error_summary(residual[valid])
+                    baseline_summary = _error_summary(target[valid])
+                    metric_report[kind][str(phase)] = {
+                        **model_summary,
+                        "baseline_zero": baseline_summary,
+                        "baseline_rows_match": bool(
+                            model_summary["rows"] == baseline_summary["rows"]
+                        ),
+                    }
             reports[group] = {
                 "train_rows": int(len(train)),
                 "test_rows": int(len(test)),
@@ -1202,6 +1329,9 @@ def evaluate_phase_curve(
     errors: dict[str, dict[str, list[float]]] = {
         kind: {str(phase): [] for phase in PHASES} for kind in ("gold", "xp")
     }
+    baseline_errors: dict[str, dict[str, list[float]]] = {
+        kind: {str(phase): [] for phase in PHASES} for kind in ("gold", "xp")
+    }
     missingness_errors: dict[str, dict[str, dict[str, list[float]]]] = {
         kind: {
             str(phase): {"complete": [], "any_missing": []}
@@ -1222,13 +1352,23 @@ def evaluate_phase_curve(
         )
         prediction_errors, missing_count = _prediction_errors(artifact, test, feature_columns)
         side_swap_checks.append(side_swap_invariance_report(artifact, test, feature_columns))
-        row: dict[str, Any] = {"fold": fold_number, "train_rows": len(train), "test_rows": len(test)}
+        boundary = _cluster_boundary_diagnostics(frame, test_indices, cluster_column)
+        row: dict[str, Any] = {
+            "fold": fold_number,
+            "train_rows": len(train),
+            "test_rows": len(test),
+            "cluster_boundary_exclusions": boundary,
+        }
         for kind in ("gold", "xp"):
             for phase in PHASES:
                 residual = prediction_errors[kind][str(phase)]
+                target = _target(test, kind, phase)
                 valid = np.isfinite(residual)
                 if valid.any():
                     errors[kind][str(phase)].extend(float(value) for value in residual)
+                    baseline_errors[kind][str(phase)].extend(
+                        float(value) for value in target[valid]
+                    )
                     missingness_errors[kind][str(phase)]["complete"].extend(
                         float(value)
                         for value in residual[valid & (missing_count == 0)]
@@ -1243,6 +1383,26 @@ def evaluate_phase_curve(
     for kind in ("gold", "xp"):
         for phase in PHASES:
             metrics[kind][str(phase)] = _error_summary(errors[kind][str(phase)])
+            baseline = _error_summary(baseline_errors[kind][str(phase)])
+            metrics[kind][str(phase)]["baseline_zero"] = baseline
+            model_rows = metrics[kind][str(phase)]["rows"]
+            metrics[kind][str(phase)]["baseline_rows_match"] = bool(
+                baseline["rows"] == model_rows
+            )
+            if (
+                baseline["rmse"] is not None
+                and metrics[kind][str(phase)]["rmse"] is not None
+            ):
+                metrics[kind][str(phase)]["rmse_gain_vs_zero"] = float(
+                    baseline["rmse"] - metrics[kind][str(phase)]["rmse"]
+                )
+            if (
+                baseline["mae"] is not None
+                and metrics[kind][str(phase)]["mae"] is not None
+            ):
+                metrics[kind][str(phase)]["mae_gain_vs_zero"] = float(
+                    baseline["mae"] - metrics[kind][str(phase)]["mae"]
+                )
             metrics[kind][str(phase)]["missingness"] = {
                 key: _error_summary(value)
                 for key, value in missingness_errors[kind][str(phase)].items()
@@ -1260,14 +1420,36 @@ def evaluate_phase_curve(
         "folds": side_swap_checks,
         "definition": "predicted blue-minus-red curve plus swapped red-minus-blue curve",
     }
+    fallback_rows = int(
+        frame["series_id_source"].astype("string").eq("game_fallback").sum()
+        if "series_id_source" in frame.columns
+        else 0
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "method": "chronological_fold_internal_ridge",
         "folds": fold_rows,
         "metrics": metrics,
         "fold_count": len(fold_rows),
-        "cluster_safe": True,
+        "cluster_safe": fallback_rows == 0,
         "cluster_column": cluster_column or "game_uid",
+        "cluster_fallback_rows": fallback_rows,
+        "cluster_boundary_exclusions": {
+            "rows": int(
+                sum(
+                    int(row["cluster_boundary_exclusions"]["boundary_excluded_rows"])
+                    for row in fold_rows
+                )
+            ),
+            "clusters": int(
+                sum(
+                    int(row["cluster_boundary_exclusions"]["boundary_excluded_clusters"])
+                    for row in fold_rows
+                )
+            ),
+            "folds": [row["cluster_boundary_exclusions"] for row in fold_rows],
+            "definition": "cluster last date must be before test start for train eligibility",
+        },
         "missingness": {
             kind: {
                 phase: metrics[kind][phase]["missingness"]

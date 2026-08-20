@@ -2,10 +2,28 @@
   "authority": "development_only",
   "blockers": [
     "fold-internal fitted weights have no independent promotion receipt",
-    "808 accepted maps have incomplete stable team identity and stay outside the team-form fit",
-    "regional and patch transfer results use a bounded evaluation sample",
+    "808 accepted maps have incomplete stable team identity and retain explicit missing pregame team-form features",
+    "the requested three chronological folds produce two valid folds because the first block has no earlier training rows",
+    "regional transfer has one unavailable group, LFL2, and patch transfer has one unavailable group, 15.01",
     "current output is not wired into public ratings or public phase forecasts"
   ],
+  "evaluation_scope": {
+    "population": "all accepted phase rows",
+    "accepted_phase_rows": 17756,
+    "date_start": "2025-01-11T11:11:24Z",
+    "date_end": "2026-08-20T14:51:29Z",
+    "regions": 50,
+    "patches": 40,
+    "series_cluster_column": "series_id",
+    "series_cluster_provenance": {
+      "exact_id_proxy_rows": 1349,
+      "team_date_proxy_rows": 16407,
+      "game_fallback_rows": 0,
+      "unique_clusters": 8636,
+      "oe_bridge_rows": 524,
+      "oe_bridge_team_date_proxy_rows": 524
+    }
+  },
   "curve_definitions": {
     "comeback_resilience": "share of early-behind maps with a smaller later gold deficit",
     "scaling_index": "(xp25 - xp20) - (xp15 - xp10)",
@@ -19,25 +37,40 @@
   "feature_family": "checkpoint_forecasts",
   "fit": {
     "complete_team_maps": 16948,
+    "incomplete_team_identity_maps": 808,
     "model_rows": 16948,
     "observed_curve_measures": {
-      "scaling_index": 77.73076208479472,
-      "snowball_index": 84.06588038774049
+      "scaling_index": 65.74618627862571,
+      "snowball_index": 86.30134272956616
     },
     "comeback_resilience": {
-      "10_to_15": {"support": 7788, "value": 0.3744222},
-      "10_to_20": {"support": 7766, "value": 0.3655679},
-      "10_to_25": {"support": 7215, "value": 0.3860014},
-      "15_to_20": {"support": 7836, "value": 0.3594946},
-      "15_to_25": {"support": 7299, "value": 0.3610084}
+      "10_to_15": {"support": 7788, "value": 0.37442218798151},
+      "10_to_20": {"support": 7766, "value": 0.3655678599021375},
+      "10_to_25": {"support": 7215, "value": 0.386001386001386},
+      "15_to_20": {"support": 7836, "value": 0.3594946401225115},
+      "15_to_25": {"support": 7299, "value": 0.36100835730922043}
+    },
+    "coverage": {
+      "gold": {
+        "10": {"rows": 17756, "at_risk_rows": 17756, "observed_rows": 16834, "coverage": 0.9480738905158826, "at_risk_coverage": 0.9480738905158826, "censored_rows": 0, "uncensored_missing_rows": 922},
+        "15": {"rows": 17756, "at_risk_rows": 17756, "observed_rows": 16834, "coverage": 0.9480738905158826, "at_risk_coverage": 0.9480738905158826, "censored_rows": 0, "uncensored_missing_rows": 922},
+        "20": {"rows": 17756, "at_risk_rows": 17700, "observed_rows": 16777, "coverage": 0.9448637080423519, "at_risk_coverage": 0.9478531073446328, "censored_rows": 56, "uncensored_missing_rows": 923},
+        "25": {"rows": 17756, "at_risk_rows": 16403, "observed_rows": 15506, "coverage": 0.8732822707817076, "at_risk_coverage": 0.9453148814241298, "censored_rows": 1353, "uncensored_missing_rows": 897}
+      },
+      "xp": {
+        "10": {"rows": 17756, "at_risk_rows": 17756, "observed_rows": 16834, "coverage": 0.9480738905158826, "at_risk_coverage": 0.9480738905158826, "censored_rows": 0, "uncensored_missing_rows": 922},
+        "15": {"rows": 17756, "at_risk_rows": 17756, "observed_rows": 16834, "coverage": 0.9480738905158826, "at_risk_coverage": 0.9480738905158826, "censored_rows": 0, "uncensored_missing_rows": 922},
+        "20": {"rows": 17756, "at_risk_rows": 17700, "observed_rows": 16777, "coverage": 0.9448637080423519, "at_risk_coverage": 0.9478531073446328, "censored_rows": 56, "uncensored_missing_rows": 923},
+        "25": {"rows": 17756, "at_risk_rows": 16403, "observed_rows": 15506, "coverage": 0.8732822707817076, "at_risk_coverage": 0.9453148814241298, "censored_rows": 1353, "uncensored_missing_rows": 897}
+      }
     },
     "support": {
-      "gold": {"10": 16034, "15": 16034, "20": 15988, "25": 14839},
-      "xp": {"10": 16034, "15": 16034, "20": 15988, "25": 14839}
+      "gold": {"10": 16834, "15": 16834, "20": 16777, "25": 15506},
+      "xp": {"10": 16834, "15": 16834, "20": 16777, "25": 15506}
     },
     "uncertainty": {
-      "gold": {"10": 1371.9047, "15": 2694.5589, "20": 4345.5013, "25": 5751.1525},
-      "xp": {"10": 1020.6961, "15": 2153.7498, "20": 3667.5582, "25": 6657.8729}
+      "gold": {"10": 1397.9175806473054, "15": 2754.9195097463016, "20": 4431.8434967616595, "25": 5802.764115141017},
+      "xp": {"10": 1035.048318352702, "15": 2186.646282601284, "20": 3722.88835783061, "25": 6694.30108914845}
     }
   },
   "model_version": "future-phase-curve-v1",
