@@ -79,6 +79,8 @@ _CACHE_CONTENT_COLUMNS = (
     "red_team",
     "blue_teamname",
     "red_teamname",
+    "teamname",
+    "team",
     "y_blue_win",
     "league",
     "league_source",
