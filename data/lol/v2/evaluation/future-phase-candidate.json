@@ -87,7 +87,7 @@
     "source_as_of": "2026-08-20T11:31:37Z",
     "transport": "official_public_oracles_elixir_annual_exports",
     "accepted_game_ids_artifact": {
-      "locator": "runtime/data/lol/runtime/tier-censuses/b83e45561932469b4b7ff3b88d383b473ff17e0a10f612d3fb97f83e30e2e8b1.json",
+      "locator": "data/lol/v2/evaluation/future-phase-accepted-census.json",
       "sha256": "aa38b8a4eb9eee71406c834536bbdd200ca0fd2e6402acf0121defc0fb076227",
       "bytes": 441354,
       "schema_version": "scryglass:accepted-game-census:v1",

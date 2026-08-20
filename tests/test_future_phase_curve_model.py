@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -269,6 +270,8 @@ def test_evaluation_has_transfer_and_missingness_sections() -> None:
     assert report["source_identity_sha256"] == receipt["source_identity_sha256"]
     assert report["accepted_game_ids"] == receipt["accepted_game_ids"]
     assert len(report["source_receipt_sha256"]) == 64
+    expected_end = pd.to_datetime(frame["date"], utc=True).max().isoformat().replace("+00:00", "Z")
+    assert report["evaluation_window"]["date_end"] == expected_end
     assert report["cluster_safe"]
     assert "groups" in report["regional_transfer"]
     assert "groups" in report["patch_transfer"]
@@ -323,11 +326,16 @@ def test_static_phase_artifacts_bind_the_accepted_census_reference() -> None:
     assert evaluation["cluster_safe"] is False
     assert evaluation["authoritative_series_identity"] is False
     assert reference == evaluation["accepted_game_ids_artifact"]
+    assert reference["locator"] == "data/lol/v2/evaluation/future-phase-accepted-census.json"
+    census_path = root / reference["locator"]
+    assert census_path.is_file()
+    assert census_path.stat().st_size == reference["bytes"]
+    assert hashlib.sha256(census_path.read_bytes()).hexdigest() == reference["sha256"]
     assert len(reference["sha256"]) == 64
     assert reference["game_ids_field"] == "game_ids"
     verified = verify_accepted_census_artifact(
         reference,
-        runtime_root=Path("/Users/river/Library/Application Support/Scryglass Worker"),
+        runtime_root=root,
         expected_source_game_count=evaluation["source_game_count"],
         expected_source_identity_sha256=evaluation["source_identity_sha256"],
     )

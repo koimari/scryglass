@@ -171,6 +171,12 @@ def _date_series(frame: pd.DataFrame, label: str = "phase frame") -> pd.Series:
     return result
 
 
+def _timestamp_text(value: pd.Timestamp) -> str:
+    """Serialize a UTC timestamp with the artifact's stable Z suffix."""
+
+    return value.tz_convert("UTC").isoformat().replace("+00:00", "Z")
+
+
 def _series_cluster_labels(metadata: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
     """Build outcome-free series clusters and record their provenance.
 
@@ -1547,6 +1553,7 @@ def evaluate_phase_curve(
         else 0
     )
     series_identity = _series_identity_report(value)
+    evaluation_dates = _date_series(value, "bound phase frame")
     return {
         "schema_version": SCHEMA_VERSION,
         "method": "chronological_fold_internal_ridge",
@@ -1558,6 +1565,11 @@ def evaluate_phase_curve(
         "source_receipt_sha256": _sha256_bytes(_canonical_json_bytes(bound.receipt)),
         "evaluation_game_count": int(len(value)),
         "evaluation_identity_sha256": identity_sha256(_game_series(value, "phase frame")),
+        "evaluation_window": {
+            "date_start": _timestamp_text(evaluation_dates.min()),
+            "date_end": _timestamp_text(evaluation_dates.max()),
+            "definition": "UTC bounds of the exact accepted rows evaluated",
+        },
         "folds": fold_rows,
         "metrics": metrics,
         "fold_count": len(fold_rows),
