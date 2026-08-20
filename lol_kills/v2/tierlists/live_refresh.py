@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -34,10 +35,25 @@ HISTORY_START = "2025-01-01T00:00:00Z"
 LIVE_WINDOW_START = "2026-07-18T00:00:00Z"
 RECEIPT_SCHEMA = "scryglass:tierlist-live-refresh:v1"
 DEFAULT_RECEIPT = Path("data/lol/v2/tierlists/refresh-receipts")
-DEFAULT_STEP_TIMEOUT_SECONDS = 15 * 60
+# Successful ratings runs measured 682-760s in production 2026-08-11 through
+# 2026-08-19 against the prior 900s (15 min) ceiling. Scheduled runs on
+# 2026-08-20 were killed at exactly 900.1s as the season dataset grew to
+# 7,698 games. 45 min keeps the step well inside the 6-hour cycle budget
+# while leaving headroom for continued dataset growth.
+DEFAULT_STEP_TIMEOUT_SECONDS = 45 * 60
 LEGACY_BLOB_PUBLICATION_DISABLED = (
     "Vercel Blob tier-list publication is retired; use Supabase public release publication"
 )
+
+
+def _step_timeout_seconds() -> float:
+    raw = os.environ.get("SCRYGLASS_TIER_STEP_TIMEOUT_SECONDS")
+    if raw is None or not raw.strip():
+        return float(DEFAULT_STEP_TIMEOUT_SECONDS)
+    value = float(raw)  # let ValueError propagate: a mis-set override must not silently fall back
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("SCRYGLASS_TIER_STEP_TIMEOUT_SECONDS must be positive")
+    return value
 
 
 class PublicationError(RuntimeError):
@@ -153,8 +169,10 @@ def _run_step(
     args: list[str],
     *,
     source: str,
-    step_timeout_seconds: float = DEFAULT_STEP_TIMEOUT_SECONDS,
+    step_timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
+    if step_timeout_seconds is None:
+        step_timeout_seconds = _step_timeout_seconds()
     if step_timeout_seconds <= 0:
         raise ValueError("step timeout must be positive")
     started = time.monotonic()
@@ -343,11 +361,13 @@ def refresh_candidate(
     skip_live_source: bool = False,
     skip_atom_bridge: bool = False,
     prepared_source: dict[str, Any] | None = None,
-    step_timeout_seconds: float = DEFAULT_STEP_TIMEOUT_SECONDS,
+    step_timeout_seconds: float | None = None,
     publish: bool = True,
 ) -> dict[str, Any]:
     if source_mode != "oe_only":
         raise ValueError("public tier refresh source_mode must be oe_only")
+    if step_timeout_seconds is None:
+        step_timeout_seconds = _step_timeout_seconds()
     if step_timeout_seconds <= 0:
         raise ValueError("step timeout must be positive")
 

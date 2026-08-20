@@ -265,7 +265,11 @@ export SCRYGLASS_PUBLICATION_BACKEND="supabase"
 export SCRYGLASS_RUNTIME_ROOT="${runtime_root}"
 export SCRYGLASS_SUPABASE_URL="https://uytblwbtkwuukbbrugdi.supabase.co"
 export SCRYGLASS_REFRESH_ATTEMPTS=3
-export SCRYGLASS_STEP_TIMEOUT_MINUTES=15
+# Ratings step measured 682-760s in production and was killed at the prior
+# 900s (15 min) ceiling on 2026-08-20. 45 min keeps this well inside the
+# 6-hour cycle budget; public_refresh's SCRYGLASS_STEP_TIMEOUT_MINUTES
+# validator caps at 55.
+export SCRYGLASS_STEP_TIMEOUT_MINUTES=45
 export SCRYGLASS_STALE_AFTER_HOURS=12
 export SCRYGLASS_OE_BROWSER_REFRESHED=1
 export SCRYGLASS_OE_DATABASE_REFRESHED=1
