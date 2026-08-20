@@ -46,6 +46,7 @@ TIME_DECAY_HALF_LIFE_DAYS = 120.0
 RANK_3 = 3
 SIDE_SWAP_MEAN_TOLERANCE = 1e-12
 SIDE_SWAP_MAX_TOLERANCE = 1e-12
+REGULARIZATION_GRID = (0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0)
 FORM_METRICS = (
     "cs_per_min",
     "gold_per_min",
@@ -1383,6 +1384,92 @@ def _antisymmetric_design_matrix(
     return matrix
 
 
+def _select_fold_regularization(
+    map_frame: pd.DataFrame,
+    form: pd.DataFrame,
+    *,
+    train_game_ids: tuple[str, ...],
+    rank: int,
+    min_cell_support: int,
+) -> dict[str, Any]:
+    """Select L2 strength on one strictly earlier nested chronological fold."""
+
+    outer_train_maps = map_frame[map_frame["game_id"].isin(train_game_ids)].copy()
+    inner_fold = chronological_whole_series_folds(outer_train_maps, n_folds=1)[0]
+    inner_train_ids = tuple(str(value) for value in inner_fold["train_game_ids"])
+    inner_validation_ids = tuple(
+        str(value) for value in inner_fold["validation_game_ids"]
+    )
+    atom_model = fit_rank3_player_champion_role_atoms(
+        form,
+        train_game_ids=inner_train_ids,
+        rank=rank,
+        min_cell_support=min_cell_support,
+        fit_window_end=inner_fold["validation_start"],
+    )
+    design = build_future_value_design(map_frame, form, atom_model)
+    inner_train = design[design["game_id"].isin(inner_train_ids)].copy()
+    inner_validation = design[
+        design["game_id"].isin(inner_validation_ids)
+    ].copy()
+    train_target = pd.to_numeric(inner_train["target"], errors="coerce")
+    validation_target = pd.to_numeric(inner_validation["target"], errors="coerce")
+    if (
+        len(inner_train) < 10
+        or len(inner_validation) < 10
+        or train_target.nunique() != 2
+        or validation_target.nunique() != 2
+    ):
+        raise FutureValueSourceError(
+            "nested regularization fold has insufficient two-class rows"
+        )
+    imputation = _fold_level_imputation_values(inner_train)
+    matrix = _antisymmetric_design_matrix(inner_train, imputation)
+    validation_matrix = _antisymmetric_design_matrix(inner_validation, imputation)
+    scales = matrix.std(axis=0, ddof=0)
+    scales = np.where(np.isfinite(scales) & (scales > 1e-12), scales, 1.0)
+    candidate_scores: list[dict[str, float]] = []
+    for regularization_c in REGULARIZATION_GRID:
+        classifier = LogisticRegression(
+            C=float(regularization_c),
+            penalty="l2",
+            solver="lbfgs",
+            fit_intercept=False,
+            max_iter=1000,
+            random_state=0,
+        )
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            classifier.fit(
+                matrix / scales,
+                train_target.to_numpy(dtype=int),
+            )
+            probability = classifier.predict_proba(validation_matrix / scales)[:, 1]
+        if not np.isfinite(probability).all():
+            raise FutureValueSourceError(
+                "nested regularization prediction is non-finite"
+            )
+        candidate_scores.append(
+            {
+                "c": float(regularization_c),
+                "log_loss": float(
+                    log_loss(validation_target.to_numpy(dtype=int), probability)
+                ),
+            }
+        )
+    selected = min(candidate_scores, key=lambda row: (row["log_loss"], row["c"]))
+    return {
+        "method": "nested_chronological_whole_series_log_loss",
+        "candidate_grid": [float(value) for value in REGULARIZATION_GRID],
+        "candidate_scores": candidate_scores,
+        "selected_c": float(selected["c"]),
+        "inner_train_game_count": len(inner_train_ids),
+        "inner_train_identity_sha256": identity_sha256(inner_train_ids),
+        "inner_validation_game_count": len(inner_validation_ids),
+        "inner_validation_identity_sha256": identity_sha256(inner_validation_ids),
+        "inner_validation_start": str(inner_fold["validation_start"]),
+    }
+
+
 @dataclass(frozen=True)
 class FutureValueFoldModel:
     """A fitted development model for one chronological fold."""
@@ -1393,6 +1480,7 @@ class FutureValueFoldModel:
     imputation_values: np.ndarray
     coefficients: np.ndarray
     intercept: float
+    regularization_selection: Mapping[str, Any]
     atom_model: Rank3AtomModel
     fit_game_ids: tuple[str, ...]
     fit_window_end: str
@@ -1442,6 +1530,7 @@ class FutureValueFoldModel:
                 "centering": "zero",
                 "fit_intercept": False,
             },
+            "regularization_selection": dict(self.regularization_selection),
             "rank_3": self.atom_model.parameter_receipt(),
         }
         parameters["parameter_sha256"] = hashlib.sha256(
@@ -1523,6 +1612,7 @@ class FutureValueFoldModel:
                 "fold_local_side_imputation"
             ],
             "antisymmetric_fit": parameters["antisymmetric_fit"],
+            "regularization_selection": parameters["regularization_selection"],
             "parameter_sha256": parameters["parameter_sha256"],
             "rank_3": parameters["rank_3"],
             "train_rows": int(self.train_rows),
@@ -1583,6 +1673,13 @@ def fit_future_value_model(
     if train_dates.empty:
         raise FutureValueSourceError("future-value training games are absent")
     boundary = fit_window_end if fit_window_end is not None else train_dates.max()
+    regularization_selection = _select_fold_regularization(
+        map_frame,
+        form,
+        train_game_ids=train_ids,
+        rank=rank,
+        min_cell_support=min_cell_support,
+    )
     atom_model = fit_rank3_player_champion_role_atoms(
         form,
         train_game_ids=train_ids,
@@ -1604,7 +1701,7 @@ def fit_future_value_model(
     scales = matrix.std(axis=0, ddof=0)
     scales = np.where(np.isfinite(scales) & (scales > 1e-12), scales, 1.0)
     classifier = LogisticRegression(
-        C=1.0,
+        C=float(regularization_selection["selected_c"]),
         penalty="l2",
         solver="lbfgs",
         fit_intercept=False,
@@ -1625,6 +1722,7 @@ def fit_future_value_model(
         imputation_values=imputation_values,
         coefficients=classifier.coef_[0].astype(float),
         intercept=0.0,
+        regularization_selection=regularization_selection,
         atom_model=atom_model,
         fit_game_ids=train_ids,
         fit_window_end=_utc_text(boundary),
@@ -2679,6 +2777,9 @@ def evaluate_future_value(
                     "fold_local_side_imputation"
                 ],
                 "antisymmetric_fit": model_parameters["antisymmetric_fit"],
+                "regularization_selection": model_parameters[
+                    "regularization_selection"
+                ],
                 "coefficients": model_parameters["coefficients"],
                 "model_parameter_sha256": model_parameters["parameter_sha256"],
                 "rank_3": model_parameters["rank_3"],
@@ -2928,6 +3029,7 @@ def future_value_model_contract() -> dict[str, Any]:
             "metric_weights": "fit inside development folds; no hand-assigned performance weights",
             "side_symmetry": "zero-intercept linear logit over blue-minus-red features after equal fold-local side imputation",
             "missing_values": "fit one fold-local median per side-level feature and apply it equally to blue and red before subtraction",
+            "regularization": "select L2 strength inside each outer training fold with a nested chronological whole-series log-loss comparison",
         },
         "evaluation": [
             "chronological whole-series folds",

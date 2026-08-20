@@ -31,6 +31,7 @@
     "metric_weights": "fit inside development folds; no hand-assigned performance weights",
     "missing_values": "fit one fold-local median per side-level feature and apply it equally to blue and red before subtraction",
     "player_state": "strictly prior time-decayed form with fold-local rank-3 atoms and support diagnostics",
+    "regularization": "select L2 strength inside each outer training fold with a nested chronological whole-series log-loss comparison",
     "representation": "atom-derived rank-3 champion embedding refit inside each chronological fold",
     "side_symmetry": "zero-intercept linear logit over blue-minus-red features after equal fold-local side imputation",
     "team_state": "exact-five roster aggregation plus strictly prior team win state and roster continuity"
@@ -61,7 +62,7 @@
     },
     "future_value_model_builder": {
       "locator": "lol_kills/research/future_value_rating.py",
-      "raw_sha256": "a2435abdaebfe73fd9086f058ec6f21c4336049b765ef78061e03239d418b481"
+      "raw_sha256": "86ca06fd072831aae49957055ce8e27b8f9c6a50224ab0d46f7be4fd3f65acde"
     },
     "phase_curve_builder": {
       "locator": "lol_kills/research/future_phase_curve.py",

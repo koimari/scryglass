@@ -269,6 +269,13 @@ def test_fold_local_imputation_predicts_incomplete_rows_and_preserves_side_swap(
     )
     np.testing.assert_array_equal(model.imputation_values, future_model.imputation_values)
     np.testing.assert_allclose(model.coefficients, future_model.coefficients, atol=0.0)
+    assert model.regularization_selection == future_model.regularization_selection
+    assert model.regularization_selection["method"] == (
+        "nested_chronological_whole_series_log_loss"
+    )
+    assert model.regularization_selection["selected_c"] in model.regularization_selection[
+        "candidate_grid"
+    ]
 
 
 def test_fit_requires_a_verified_source_receipt() -> None:
