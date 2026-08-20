@@ -1,0 +1,55 @@
+{
+  "authority": "development_only",
+  "checks": {
+    "chronological_whole_series": {
+      "cluster_column": "game_uid",
+      "fold_count": 2,
+      "status": "checked"
+    },
+    "missingness": {
+      "status": "reported",
+      "groups": ["complete", "any_missing"]
+    },
+    "regional_transfer": {
+      "status": "checked_on_bounded_sample",
+      "groups_checked": ["AC", "AL"]
+    },
+    "patch_transfer": {
+      "status": "checked_on_bounded_sample",
+      "groups_checked": ["15.01", "15.02"]
+    },
+    "short_game_censoring": {
+      "status": "checked",
+      "censored_gold_25_rows": 1220,
+      "censored_xp_25_rows": 1220
+    },
+    "side_swap_invariance": {
+      "status": "passed_on_complete_feature_rows",
+      "max_abs_prediction_sum": 0.0
+    },
+    "strict_pregame_leakage": {
+      "status": "checked",
+      "current_checkpoint_targets": "target_only",
+      "final_metrics": "strict_prior_timestamp_blocks_only"
+    }
+  },
+  "chronological_metrics": {
+    "gold": {
+      "10": {"mae": 1108.1654, "rmse": 1440.9525, "rows": 679},
+      "15": {"mae": 2167.492, "rmse": 2857.1929, "rows": 679},
+      "20": {"mae": 3631.0755, "rmse": 4679.7859, "rows": 677},
+      "25": {"mae": 4725.6426, "rmse": 5882.9836, "rows": 614}
+    },
+    "xp": {
+      "10": {"mae": 838.3141, "rmse": 1106.6407, "rows": 679},
+      "15": {"mae": 1775.8397, "rmse": 2322.5567, "rows": 679},
+      "20": {"mae": 3047.9561, "rmse": 3901.6985, "rows": 677},
+      "25": {"mae": 5346.3722, "rmse": 6519.7149, "rows": 614}
+    }
+  },
+  "evaluation_rows": 1060,
+  "model_version": "future-phase-curve-v1",
+  "schema_version": "scryglass:future-phase-curve-evaluation:v1",
+  "source_identity_sha256": "b83e45561932469b4b7ff3b88d383b473ff17e0a10f612d3fb97f83e30e2e8b1",
+  "status": "research_candidate_only"
+}

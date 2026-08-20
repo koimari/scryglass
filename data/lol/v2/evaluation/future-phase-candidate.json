@@ -1,0 +1,51 @@
+{
+  "authority": "development_only",
+  "blockers": [
+    "fold-internal fitted weights have no independent promotion receipt",
+    "808 accepted maps have incomplete stable team identity and stay outside the team-form fit",
+    "regional and patch transfer results use a bounded evaluation sample",
+    "current output is not wired into public ratings or public phase forecasts"
+  ],
+  "curve_definitions": {
+    "comeback_resilience": "share of early-behind maps with a smaller later gold deficit",
+    "scaling_index": "(xp25 - xp20) - (xp15 - xp10)",
+    "snowball_index": "(gold15 - gold10) - (gold25 - gold20)"
+  },
+  "feature_columns": [
+    "prior_form_earnedgold_diff",
+    "prior_form_dpm_diff",
+    "prior_form_visionscore_diff"
+  ],
+  "feature_family": "checkpoint_forecasts",
+  "fit": {
+    "complete_team_maps": 16948,
+    "model_rows": 16948,
+    "observed_curve_measures": {
+      "scaling_index": 77.73076208479472,
+      "snowball_index": 84.06588038774049
+    },
+    "comeback_resilience": {
+      "10_to_15": {"support": 7788, "value": 0.3744222},
+      "10_to_20": {"support": 7766, "value": 0.3655679},
+      "10_to_25": {"support": 7215, "value": 0.3860014},
+      "15_to_20": {"support": 7836, "value": 0.3594946},
+      "15_to_25": {"support": 7299, "value": 0.3610084}
+    },
+    "support": {
+      "gold": {"10": 16034, "15": 16034, "20": 15988, "25": 14839},
+      "xp": {"10": 16034, "15": 16034, "20": 15988, "25": 14839}
+    },
+    "uncertainty": {
+      "gold": {"10": 1371.9047, "15": 2694.5589, "20": 4345.5013, "25": 5751.1525},
+      "xp": {"10": 1020.6961, "15": 2153.7498, "20": 3667.5582, "25": 6657.8729}
+    }
+  },
+  "model_version": "future-phase-curve-v1",
+  "schema_version": "scryglass:future-phase-curve:v1",
+  "source": {
+    "accepted_game_count": 17756,
+    "accepted_identity_sha256": "b83e45561932469b4b7ff3b88d383b473ff17e0a10f612d3fb97f83e30e2e8b1",
+    "source_as_of": "2026-08-20T11:31:37Z",
+    "transport": "official_public_oracles_elixir_annual_exports"
+  }
+}

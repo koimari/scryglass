@@ -24,14 +24,20 @@ import pandas as pd
 from sklearn.linear_model import Ridge
 
 from lol_kills.etl.source_keys import canonical_source_game_key
+from lol_kills.research.atomized_rf_composite import (
+    CHECKPOINTS as ATOM_CHECKPOINTS,
+    GROUP_COLUMNS as ATOM_GROUP_COLUMNS,
+)
 from lol_kills.v2.tierlists.accepted_census import canonical_game_ids, identity_sha256
 
 
-PHASES = (10, 15, 20, 25)
+PHASES = tuple(int(value) for value in ATOM_CHECKPOINTS)
 PHASE_KEYS = tuple(str(value) for value in PHASES)
 SCHEMA_VERSION = "scryglass:future-phase-curve:v1"
 MODEL_VERSION = "future-phase-curve-v1"
 SOURCE = "oracle_elixir_only"
+PHASE_FEATURE_FAMILY = "checkpoint_forecasts"
+PHASE_FEATURE_DECLARATION = tuple(ATOM_GROUP_COLUMNS[PHASE_FEATURE_FAMILY])
 
 # These are final map metrics.  The function accepts aliases that occur in
 # OE exports, but checkpoint columns never enter this list.
@@ -182,13 +188,34 @@ def _is_forbidden_pregame_name(value: Any) -> bool:
     name = _normalised_name(value)
     if _is_checkpoint_name(value):
         return True
+    # A historical value is safe only when its name declares the lagged
+    # boundary.  Bare final-map fields can otherwise enter a pregame vector.
+    history_prefix = (
+        "prior_",
+        "history_",
+        "rolling_",
+        "lag_",
+        "form_",
+        "rating_",
+        "atom_",
+        "continuity_",
+        "roster_",
+    )
+    if name in {_normalised_name(alias) for alias in FINAL_METRIC_ALIASES} and not name.startswith(
+        history_prefix
+    ):
+        return True
     forbidden = (
+        "target",
+        "observed",
+        "current",
         "result",
         "winner",
         "bluewin",
         "finalresult",
         "gamelength",
         "duration",
+        "gameclock",
         "objectives",
         "firstblood",
         "firstdragon",
@@ -296,8 +323,53 @@ def prepare_phase_frame(
     teams_value["_side"] = teams_value[side_column].map(_side)
     if teams_value["_side"].isna().any():
         raise FuturePhaseCurveError("teams contains an unknown side")
-    grouped = {key: group for key, group in teams_value.groupby("_game_id", sort=False)}
-    feature_map: dict[str, Mapping[str, Any]] = {}
+    counts = teams_value.groupby("_game_id", sort=False, observed=True)["_side"].agg(
+        rows="size", sides="nunique"
+    )
+    invalid = counts[(counts["rows"] != 2) | (counts["sides"] != 2)]
+    if not invalid.empty:
+        raise FuturePhaseCurveError(
+            f"game {str(invalid.index[0])} does not have two team rows"
+        )
+    blue = teams_value.loc[teams_value["_side"].eq("blue")].set_index("_game_id", drop=False)
+    red = teams_value.loc[teams_value["_side"].eq("red")].set_index("_game_id", drop=False)
+    map_index = maps_value.set_index("_game_id", drop=False)
+    if not set(map_index.index).issubset(blue.index) or not set(map_index.index).issubset(red.index):
+        missing = sorted(set(map_index.index) - set(blue.index) - set(red.index))
+        raise FuturePhaseCurveError(f"phase source is missing team rows: {missing[:3]}")
+
+    def numeric_coalesce(source: pd.DataFrame, names: Sequence[str]) -> pd.Series:
+        result = pd.Series(np.nan, index=source.index, dtype=float)
+        for name in names:
+            if name in source.columns:
+                result = result.fillna(pd.to_numeric(source[name], errors="coerce"))
+        return result
+
+    result = pd.DataFrame(index=map_index.index)
+    result["game_uid"] = map_index["_game_id"].astype(str)
+    result["date"] = map_index["_date"]
+    for output, names in (
+        ("league", ("league",)),
+        ("region", ("region", "league_source")),
+        ("patch", ("patch", "oe_patch_token")),
+        ("series_id", ("series_id", "seriesid", "game")),
+    ):
+        source = next((name for name in names if name in map_index.columns), None)
+        if source is not None:
+            result[output] = map_index[source]
+        else:
+            fallback = next((name for name in names if name in blue.columns), None)
+            result[output] = blue.reindex(map_index.index)[fallback] if fallback else pd.NA
+
+    duration = numeric_coalesce(map_index, ("gamelength", "game_length", "duration_seconds", "duration"))
+    duration = duration.combine_first(
+        numeric_coalesce(blue.reindex(map_index.index), ("gamelength", "game_length", "duration_seconds", "duration"))
+    )
+    duration = duration.combine_first(
+        numeric_coalesce(red.reindex(map_index.index), ("gamelength", "game_length", "duration_seconds", "duration"))
+    )
+    result["duration_seconds"] = duration
+
     if pregame_features is not None:
         feature_value = pregame_features.copy()
         feature_value["_game_id"] = _game_series(feature_value, "pregame features")
@@ -309,57 +381,36 @@ def prepare_phase_frame(
             if name not in {"_game_id", "game_uid", "gameid", "game_id"}
         ]
         assert_pregame_feature_names(feature_names)
-        feature_map = {
-            str(row["_game_id"]): row.to_dict()
-            for _, row in feature_value.iterrows()
-        }
+        feature_value = feature_value.set_index("_game_id").drop(
+            columns=[name for name in ("game_uid", "gameid", "game_id") if name in feature_value],
+            errors="ignore",
+        )
+        result = result.join(feature_value, how="left")
 
-    rows: list[dict[str, Any]] = []
-    map_index = maps_value.set_index("_game_id", drop=False)
-    for game_id, map_row in map_index.iterrows():
-        current_teams = grouped.get(game_id)
-        if current_teams is None or len(current_teams) != 2:
-            raise FuturePhaseCurveError(f"game {game_id} does not have two team rows")
-        sides = set(current_teams["_side"])
-        if sides != {"blue", "red"}:
-            raise FuturePhaseCurveError(f"game {game_id} has invalid team sides")
-        blue = current_teams.loc[current_teams["_side"].eq("blue")].iloc[0].to_dict()
-        red = current_teams.loc[current_teams["_side"].eq("red")].iloc[0].to_dict()
-        map_dict = map_row.to_dict()
-        row: dict[str, Any] = {
-            "game_uid": str(game_id),
-            "date": map_row["_date"],
-            "league": map_dict.get("league", blue.get("league")),
-            "region": map_dict.get("region", blue.get("region")),
-            "patch": map_dict.get("patch", map_dict.get("oe_patch_token", blue.get("patch"))),
-            "series_id": map_dict.get("series_id", map_dict.get("seriesid")),
-        }
-        for name, value in feature_map.get(str(game_id), {}).items():
-            if name not in {"_game_id", "game_uid", "gameid", "game_id"}:
-                row[name] = value
-        duration = _duration_seconds(map_dict)
-        if duration is None:
-            duration = _duration_seconds(blue) or _duration_seconds(red)
-        for phase in PHASES:
-            for kind in ("gold", "xp"):
-                target = _target_value(blue, kind, phase)
-                if target is None:
-                    left = _state_value(blue, kind, phase)
-                    right = _state_value(red, kind, phase)
-                    if left is not None and right is not None:
-                        target = left - right
-                censored = duration is not None and duration < float(phase * 60)
-                if censored:
-                    target = None
-                target_name = f"{kind}_diff_{phase}"
-                row[target_name] = target
-                row[f"{target_name}_missing"] = target is None
-                row[f"{target_name}_censored"] = bool(censored)
-        rows.append(row)
-    result = pd.DataFrame(rows)
+    for phase in PHASES:
+        for kind in ("gold", "xp"):
+            direct = numeric_coalesce(
+                blue.reindex(map_index.index),
+                (f"{kind}diffat{phase}", f"{kind}_diff_{phase}", f"{kind}_diffat{phase}"),
+            )
+            left = numeric_coalesce(
+                blue.reindex(map_index.index),
+                (f"{kind}at{phase}", f"{kind}_at_{phase}", f"{kind}At{phase}"),
+            )
+            right = numeric_coalesce(
+                red.reindex(map_index.index),
+                (f"{kind}at{phase}", f"{kind}_at_{phase}", f"{kind}At{phase}"),
+            )
+            target = direct.combine_first(left - right)
+            censored = duration.notna() & duration.lt(float(phase * 60))
+            target = target.mask(censored)
+            target_name = f"{kind}_diff_{phase}"
+            result[target_name] = target
+            result[f"{target_name}_missing"] = target.isna()
+            result[f"{target_name}_censored"] = censored.astype(bool)
     if result.empty:
         raise FuturePhaseCurveError("phase source has no maps")
-    return result
+    return result.reset_index(drop=True)
 
 
 def _infer_final_metrics(frame: pd.DataFrame) -> tuple[str, ...]:
@@ -394,7 +445,19 @@ def strict_prior_final_history(
     metrics = tuple(metric_columns or _infer_final_metrics(frame))
     if not metrics:
         raise FuturePhaseCurveError("prior history has no approved final metrics")
-    assert_pregame_feature_names(metrics)
+    forbidden_history = sorted(
+        name
+        for name in metrics
+        if _is_checkpoint_name(name)
+        or (
+            _is_forbidden_pregame_name(name)
+            and _normalised_name(name) in {"result", "winner", "ybluewin"}
+        )
+    )
+    if forbidden_history:
+        raise FuturePhaseCurveError(
+            "prior history contains current-map fields: " + ", ".join(forbidden_history)
+        )
     work = frame[[entity_column, date_column, *metrics]].copy()
     work[date_column] = pd.to_datetime(work[date_column], utc=True, errors="coerce")
     if work[entity_column].isna().any() or work[date_column].isna().any():
@@ -583,6 +646,21 @@ def _design(
         values = pd.to_numeric(frame[name], errors="coerce")
         missing = (~np.isfinite(values.to_numpy(dtype=float))).astype(float)
         numeric = values.fillna(0.0).to_numpy(dtype=float)
+        # OE metrics have different native units.  Fixed source units keep
+        # Ridge conditioning stable and make train/test scoring reproducible.
+        normalized_name = _normalised_name(name)
+        if "gold" in normalized_name or "xp" in normalized_name:
+            numeric = numeric / 10000.0
+        elif "dpm" in normalized_name or "damage" in normalized_name:
+            numeric = numeric / 1000.0
+        elif "vision" in normalized_name or "ward" in normalized_name:
+            numeric = numeric / 100.0
+        elif (
+            "cs" in normalized_name
+            or "kill" in normalized_name
+            or "assist" in normalized_name
+        ):
+            numeric = numeric / 100.0
         names.append(str(name))
         columns.append(numeric)
         names.append(f"{name}__missing")
@@ -600,11 +678,80 @@ def _target(frame: pd.DataFrame, kind: str, phase: int) -> np.ndarray:
     return np.where(np.isfinite(values), values, np.nan)
 
 
+def _target_coverage(frame: pd.DataFrame, kind: str, phase: int) -> dict[str, Any]:
+    """Describe target support while keeping short maps out of the denominator.
+
+    A target is at risk when its duration reaches the checkpoint.  Unknown
+    duration stays in the source denominator because an observed checkpoint is
+    still usable.  A missing value at an at-risk row is ordinary source
+    missingness, not censoring.
+    """
+
+    target = _target(frame, kind, phase)
+    target_name = f"{kind}_diff_{phase}"
+    observed = np.isfinite(target)
+    censored = (
+        frame[f"{target_name}_censored"].fillna(False).astype(bool).to_numpy()
+        if f"{target_name}_censored" in frame
+        else np.zeros(len(frame), dtype=bool)
+    )
+    missing = ~observed
+    duration_known = None
+    if "duration_seconds" in frame:
+        duration_known = pd.to_numeric(frame["duration_seconds"], errors="coerce").to_numpy(
+            dtype=float
+        )
+    elif "gamelength" in frame:
+        duration_known = pd.to_numeric(frame["gamelength"], errors="coerce").to_numpy(dtype=float)
+    if duration_known is None:
+        at_risk = ~censored
+    else:
+        at_risk = (~np.isfinite(duration_known)) | (duration_known >= float(phase * 60))
+    return {
+        "rows": int(len(frame)),
+        "at_risk_rows": int(at_risk.sum()),
+        "observed_rows": int(observed.sum()),
+        "coverage": float(observed.mean()) if len(frame) else 0.0,
+        "at_risk_coverage": float(observed[at_risk].mean()) if at_risk.any() else None,
+        "missing_rows": int(missing.sum()),
+        "censored_rows": int(censored.sum()),
+        "uncensored_missing_rows": int((missing & ~censored).sum()),
+    }
+
+
+def phase_curve_measures(
+    gold_values: Sequence[float | None],
+    xp_values: Sequence[float | None],
+) -> dict[str, float | None]:
+    """Derive signed curve measures from four checkpoint predictions."""
+
+    if len(gold_values) != len(PHASES) or len(xp_values) != len(PHASES):
+        raise FuturePhaseCurveError("phase measures need all four checkpoints")
+    gold = [float(value) if value is not None and math.isfinite(float(value)) else None for value in gold_values]
+    xp = [float(value) if value is not None and math.isfinite(float(value)) else None for value in xp_values]
+    scaling = (
+        (xp[3] - xp[2]) - (xp[1] - xp[0])
+        if all(value is not None for value in xp)
+        else None
+    )
+    snowball = (
+        (gold[1] - gold[0]) - (gold[3] - gold[2])
+        if all(value is not None for value in gold)
+        else None
+    )
+    return {
+        "scaling_index": float(scaling) if scaling is not None else None,
+        "snowball_index": float(snowball) if snowball is not None else None,
+    }
+
+
 def _fit_one(matrix: np.ndarray, target: np.ndarray, alpha: float) -> dict[str, Any] | None:
     valid = np.isfinite(target)
     if int(valid.sum()) < 2:
         return None
-    model = Ridge(alpha=float(alpha), fit_intercept=True)
+    # Phase targets are blue-minus-red quantities.  A zero intercept keeps the
+    # fitted curve antisymmetric under a blue/red relabeling.
+    model = Ridge(alpha=float(alpha), fit_intercept=False, solver="lsqr")
     model.fit(matrix[valid], target[valid])
     residuals = target[valid] - model.predict(matrix[valid])
     sigma = float(np.std(residuals, ddof=1)) if len(residuals) > 1 else 0.0
@@ -619,16 +766,26 @@ def _fit_one(matrix: np.ndarray, target: np.ndarray, alpha: float) -> dict[str, 
 
 
 def _observed_comeback(frame: pd.DataFrame) -> dict[str, Any]:
-    early = _target(frame, "gold", 10)
-    late = _target(frame, "gold", 25)
-    valid = np.isfinite(early) & np.isfinite(late) & (early < 0.0)
-    if not valid.any():
-        return {"value": None, "support": 0, "definition": "share of early-behind maps with a smaller late deficit"}
-    recovered = (late[valid] > early[valid]).astype(float)
+    by_window: dict[str, dict[str, Any]] = {}
+    for start, end in ((10, 15), (10, 20), (10, 25), (15, 20), (15, 25)):
+        early = _target(frame, "gold", start)
+        late = _target(frame, "gold", end)
+        valid = np.isfinite(early) & np.isfinite(late) & (early < 0.0)
+        key = f"{start}_to_{end}"
+        if not valid.any():
+            by_window[key] = {"value": None, "support": 0}
+            continue
+        recovered = (late[valid] > early[valid]).astype(float)
+        by_window[key] = {
+            "value": float(np.mean(recovered)),
+            "support": int(valid.sum()),
+        }
+    primary = by_window["10_to_25"]
     return {
-        "value": float(np.mean(recovered)),
-        "support": int(valid.sum()),
-        "definition": "share of early-behind maps with a smaller late deficit",
+        "value": primary["value"],
+        "support": primary["support"],
+        "by_window": by_window,
+        "definition": "share of early-behind maps with a smaller late gold deficit",
     }
 
 
@@ -657,16 +814,21 @@ def fit_phase_curve(
     for kind in ("gold", "xp"):
         for phase in PHASES:
             target = _target(value, kind, phase)
-            valid = np.isfinite(target)
-            censored_name = f"{kind}_diff_{phase}_censored"
-            censored_count = int(value[censored_name].fillna(False).astype(bool).sum()) if censored_name in value else 0
-            coverage[kind][str(phase)] = {
-                "rows": int(valid.sum()),
-                "coverage": float(valid.mean()) if len(valid) else 0.0,
-                "missing_rows": int((~valid).sum()),
-                "censored_rows": censored_count,
-            }
+            coverage[kind][str(phase)] = _target_coverage(value, kind, phase)
             models[kind][str(phase)] = _fit_one(matrix, target, alpha)
+    observed_gold = [
+        float(value[f"gold_diff_{phase}"].mean())
+        if f"gold_diff_{phase}" in value and value[f"gold_diff_{phase}"].notna().any()
+        else None
+        for phase in PHASES
+    ]
+    observed_xp = [
+        float(value[f"xp_diff_{phase}"].mean())
+        if f"xp_diff_{phase}" in value and value[f"xp_diff_{phase}"].notna().any()
+        else None
+        for phase in PHASES
+    ]
+    observed_measures = phase_curve_measures(observed_gold, observed_xp)
     return {
         "schema_version": SCHEMA_VERSION,
         "model_version": model_version,
@@ -679,6 +841,8 @@ def fit_phase_curve(
         "source_receipt_sha256": _sha256_bytes(_canonical_json_bytes(bound.receipt)),
         "feature_columns": list(selected_features),
         "design_columns": list(design_names),
+        "feature_family": PHASE_FEATURE_FAMILY,
+        "feature_declaration": list(PHASE_FEATURE_DECLARATION),
         "models": models,
         "coverage": coverage,
         "support": {
@@ -700,6 +864,7 @@ def fit_phase_curve(
             "snowball_index": "gold slope acceleration: (gold15-gold10) - (gold25-gold20)",
             "comeback_resilience": "descriptive conditional recovery share, not a win probability",
         },
+        "observed_curve_measures": observed_measures,
         "comeback_resilience": _observed_comeback(value),
         "leakage_contract": {
             "source": "OE only",
@@ -777,14 +942,17 @@ def score_phase_curve(
         uncertainty_xp[str(phase)] = round(sigma, 4) if sigma is not None else None
     gold_values = [expected_gold[str(phase)] for phase in PHASES]
     xp_values = [expected_xp[str(phase)] for phase in PHASES]
-    scaling = (
-        (xp_values[3] - xp_values[2]) - (xp_values[1] - xp_values[0])
-        if all(value is not None for value in xp_values)
+    measures = phase_curve_measures(gold_values, xp_values)
+    gold_sigma = [uncertainty_gold[str(phase)] for phase in PHASES]
+    xp_sigma = [uncertainty_xp[str(phase)] for phase in PHASES]
+    scaling_sigma = (
+        float(math.sqrt(sum(float(xp_sigma[index]) ** 2 for index in (0, 1, 2, 3))))
+        if all(value is not None for value in xp_sigma)
         else None
     )
-    snowball = (
-        (gold_values[1] - gold_values[0]) - (gold_values[3] - gold_values[2])
-        if all(value is not None for value in gold_values)
+    snowball_sigma = (
+        float(math.sqrt(sum(float(gold_sigma[index]) ** 2 for index in (0, 1, 2, 3))))
+        if all(value is not None for value in gold_sigma)
         else None
     )
     return {
@@ -798,8 +966,18 @@ def score_phase_curve(
         "uncertainty_xp": uncertainty_xp,
         "support": artifact.get("support", {}),
         "coverage": artifact.get("coverage", {}),
-        "scaling_index": round(float(scaling), 4) if scaling is not None else None,
-        "snowball_index": round(float(snowball), 4) if snowball is not None else None,
+        "scaling_index": (
+            round(float(measures["scaling_index"]), 4)
+            if measures["scaling_index"] is not None
+            else None
+        ),
+        "snowball_index": (
+            round(float(measures["snowball_index"]), 4)
+            if measures["snowball_index"] is not None
+            else None
+        ),
+        "uncertainty_scaling_index": round(scaling_sigma, 4) if scaling_sigma is not None else None,
+        "uncertainty_snowball_index": round(snowball_sigma, 4) if snowball_sigma is not None else None,
         "comeback_resilience": artifact.get("comeback_resilience"),
         "missing_features": missing_features,
         "authority_gates": artifact.get("authority_gates", {}),
@@ -822,27 +1000,184 @@ def chronological_folds(
     if n_splits < 1:
         raise FuturePhaseCurveError("n_splits must be positive")
     dates = _date_series(frame)
-    groups = dates.dt.floor("s")
-    unique_dates = pd.Series(groups.unique()).sort_values().tolist()
-    if len(unique_dates) < 2:
+    # A series is one evaluation unit.  A series can span several timestamps,
+    # so splitting by timestamp would put one series in several test folds.
+    if cluster_column and cluster_column in frame.columns:
+        cluster_values = frame[cluster_column].astype("string")
+    else:
+        cluster_values = _game_series(frame, "phase frame")
+    cluster_values = cluster_values.fillna(_game_series(frame, "phase frame"))
+    cluster_frame = pd.DataFrame({"cluster": cluster_values, "date": dates})
+    cluster_dates = (
+        cluster_frame.groupby("cluster", sort=False, observed=True)["date"]
+        .agg(first="min", last="max")
+        .sort_values(["last", "first"], kind="stable")
+    )
+    if len(cluster_dates) < 2:
         return ()
-    boundaries = np.array_split(np.asarray(unique_dates, dtype=object), n_splits)
+    boundaries = np.array_split(cluster_dates.index.to_numpy(dtype=object), n_splits)
     output: list[tuple[np.ndarray, np.ndarray]] = []
-    cluster_values = frame[cluster_column].astype("string") if cluster_column and cluster_column in frame else None
     for block in boundaries:
         if len(block) == 0:
             continue
-        test_mask = groups.isin(block)
-        train_mask = groups < min(block)
-        if cluster_values is not None:
-            test_clusters = set(cluster_values.loc[test_mask].dropna().tolist())
-            train_mask &= ~cluster_values.isin(test_clusters)
+        test_clusters = set(block.tolist())
+        test_mask = cluster_values.isin(test_clusters)
+        test_start = dates.loc[test_mask].min()
+        train_mask = dates.lt(test_start) & ~cluster_values.isin(test_clusters)
         train = np.flatnonzero(train_mask.to_numpy())
         test = np.flatnonzero(test_mask.to_numpy())
         if len(train) < min_train_rows or len(test) == 0:
             continue
         output.append((train, test))
     return tuple(output)
+
+
+def _prediction_errors(
+    artifact: Mapping[str, Any],
+    frame: pd.DataFrame,
+    feature_columns: Sequence[str],
+) -> tuple[dict[str, dict[str, np.ndarray]], np.ndarray]:
+    matrix, _ = _design(frame, feature_columns)
+    missing_count = np.zeros(len(frame), dtype=int)
+    for name in feature_columns:
+        values = pd.to_numeric(frame[name], errors="coerce")
+        missing_count += (~np.isfinite(values.to_numpy(dtype=float))).astype(int)
+    errors: dict[str, dict[str, np.ndarray]] = {
+        kind: {} for kind in ("gold", "xp")
+    }
+    for kind in ("gold", "xp"):
+        for phase in PHASES:
+            model = (artifact.get("models") or {}).get(kind, {}).get(str(phase))
+            target = _target(frame, kind, phase)
+            if isinstance(model, Mapping):
+                coefficients = np.asarray(model.get("coefficients") or [], dtype=float)
+                prediction = float(model.get("intercept") or 0.0) + matrix @ coefficients
+            else:
+                prediction = np.full(len(frame), np.nan)
+            errors[kind][str(phase)] = target - prediction
+    return errors, missing_count
+
+
+def side_swap_invariance_report(
+    artifact: Mapping[str, Any],
+    frame: pd.DataFrame,
+    feature_columns: Sequence[str],
+) -> dict[str, Any]:
+    """Check that model outputs change sign after a blue/red swap."""
+
+    swapped = side_swap_frame(frame)
+    original_matrix, _ = _design(frame, feature_columns)
+    swapped_matrix, _ = _design(swapped, feature_columns)
+    complete = np.ones(len(frame), dtype=bool)
+    for name in feature_columns:
+        complete &= np.isfinite(
+            pd.to_numeric(frame[name], errors="coerce").to_numpy(dtype=float)
+        )
+    report: dict[str, Any] = {}
+    for kind in ("gold", "xp"):
+        for phase in PHASES:
+            model = (artifact.get("models") or {}).get(kind, {}).get(str(phase))
+            key = f"{kind}_{phase}"
+            if not isinstance(model, Mapping):
+                report[key] = {"rows": 0, "max_abs_sum": None, "passed": False}
+                continue
+            coefficients = np.asarray(model.get("coefficients") or [], dtype=float)
+            original = float(model.get("intercept") or 0.0) + original_matrix @ coefficients
+            swapped_values = float(model.get("intercept") or 0.0) + swapped_matrix @ coefficients
+            finite = np.isfinite(original) & np.isfinite(swapped_values) & complete
+            max_abs_sum = (
+                float(np.max(np.abs(original[finite] + swapped_values[finite])))
+                if finite.any()
+                else None
+            )
+            report[key] = {
+                "rows": int(finite.sum()),
+                "excluded_missing_rows": int((~complete).sum()),
+                "max_abs_sum": max_abs_sum,
+                "passed": bool(max_abs_sum is not None and max_abs_sum <= 1e-8),
+            }
+    return {
+        "passed": bool(report) and all(bool(item["passed"]) for item in report.values()),
+        "metrics": report,
+        "definition": "predicted blue-minus-red curve plus swapped red-minus-blue curve",
+    }
+
+
+def _error_summary(values: Sequence[float]) -> dict[str, Any]:
+    residual = np.asarray(values, dtype=float)
+    valid = residual[np.isfinite(residual)]
+    return {
+        "rows": int(len(valid)),
+        "rmse": float(np.sqrt(np.mean(valid * valid))) if len(valid) else None,
+        "mae": float(np.mean(np.abs(valid))) if len(valid) else None,
+        "bias": float(np.mean(valid)) if len(valid) else None,
+    }
+
+
+def _evaluate_transfer_slices(
+    frame: pd.DataFrame,
+    *,
+    source_receipt: Mapping[str, Any],
+    feature_columns: Sequence[str],
+    columns: Sequence[str],
+    alpha: float,
+    max_groups_per_column: int | None = None,
+) -> dict[str, Any]:
+    """Evaluate earlier rows from other groups against each transfer group."""
+
+    dates = _date_series(frame)
+    output: dict[str, Any] = {}
+    for column in columns:
+        if column not in frame.columns:
+            output[column] = {"available": False, "reason": "column_missing", "groups": {}}
+            continue
+        groups = frame[column].astype("string")
+        groups = groups.where(groups.notna() & groups.str.strip().ne(""), "__missing__")
+        reports: dict[str, Any] = {}
+        unique_groups = sorted(str(value) for value in groups.unique())
+        if max_groups_per_column is not None:
+            unique_groups = unique_groups[: max(0, int(max_groups_per_column))]
+        for group in unique_groups:
+            test_mask = groups.eq(group)
+            if not test_mask.any():
+                continue
+            test_start = dates.loc[test_mask].min()
+            train_mask = dates.lt(test_start) & ~test_mask
+            train = frame.loc[train_mask].copy()
+            test = frame.loc[test_mask & dates.ge(test_start)].copy()
+            if len(train) < max(1, len(feature_columns) + 1) or test.empty:
+                reports[group] = {
+                    "train_rows": int(len(train)),
+                    "test_rows": int(len(test)),
+                    "available": False,
+                    "reason": "insufficient_chronological_support",
+                }
+                continue
+            artifact = fit_phase_curve(
+                train,
+                source_receipt=source_receipt,
+                feature_columns=feature_columns,
+                alpha=alpha,
+            )
+            residuals, _missing = _prediction_errors(artifact, test, feature_columns)
+            metric_report: dict[str, Any] = {}
+            for kind in ("gold", "xp"):
+                metric_report[kind] = {
+                    str(phase): _error_summary(residuals[kind][str(phase)])
+                    for phase in PHASES
+                }
+            reports[group] = {
+                "train_rows": int(len(train)),
+                "test_rows": int(len(test)),
+                "available": True,
+                "metrics": metric_report,
+            }
+        output[column] = {
+            "available": bool(reports),
+            "groups": reports,
+            "definition": "train on earlier rows from other groups; test on later held-out group",
+        }
+    return output
 
 
 def evaluate_phase_curve(
@@ -853,6 +1188,8 @@ def evaluate_phase_curve(
     n_splits: int = 3,
     cluster_column: str | None = None,
     alpha: float = 10.0,
+    transfer_columns: Sequence[str] = ("region", "patch"),
+    max_transfer_groups: int | None = None,
 ) -> dict[str, Any]:
     """Evaluate each phase on future rows with fold-internal fitting."""
 
@@ -865,7 +1202,15 @@ def evaluate_phase_curve(
     errors: dict[str, dict[str, list[float]]] = {
         kind: {str(phase): [] for phase in PHASES} for kind in ("gold", "xp")
     }
+    missingness_errors: dict[str, dict[str, dict[str, list[float]]]] = {
+        kind: {
+            str(phase): {"complete": [], "any_missing": []}
+            for phase in PHASES
+        }
+        for kind in ("gold", "xp")
+    }
     fold_rows: list[dict[str, Any]] = []
+    side_swap_checks: list[dict[str, Any]] = []
     for fold_number, (train_indices, test_indices) in enumerate(folds):
         train = frame.iloc[train_indices].copy()
         test = frame.iloc[test_indices].copy()
@@ -875,39 +1220,65 @@ def evaluate_phase_curve(
             feature_columns=feature_columns,
             alpha=alpha,
         )
-        matrix, _ = _design(test, feature_columns)
+        prediction_errors, missing_count = _prediction_errors(artifact, test, feature_columns)
+        side_swap_checks.append(side_swap_invariance_report(artifact, test, feature_columns))
         row: dict[str, Any] = {"fold": fold_number, "train_rows": len(train), "test_rows": len(test)}
         for kind in ("gold", "xp"):
             for phase in PHASES:
-                model = (artifact.get("models") or {}).get(kind, {}).get(str(phase))
-                target = _target(test, kind, phase)
-                if isinstance(model, Mapping):
-                    coefficients = np.asarray(model.get("coefficients") or [], dtype=float)
-                    prediction = float(model.get("intercept") or 0.0) + matrix @ coefficients
-                else:
-                    prediction = np.full(len(test), np.nan)
-                valid = np.isfinite(target) & np.isfinite(prediction)
+                residual = prediction_errors[kind][str(phase)]
+                valid = np.isfinite(residual)
                 if valid.any():
-                    residual = target[valid] - prediction[valid]
                     errors[kind][str(phase)].extend(float(value) for value in residual)
+                    missingness_errors[kind][str(phase)]["complete"].extend(
+                        float(value)
+                        for value in residual[valid & (missing_count == 0)]
+                    )
+                    missingness_errors[kind][str(phase)]["any_missing"].extend(
+                        float(value)
+                        for value in residual[valid & (missing_count > 0)]
+                    )
                 row[f"{kind}_{phase}_rows"] = int(valid.sum())
         fold_rows.append(row)
     metrics: dict[str, dict[str, Any]] = {kind: {} for kind in ("gold", "xp")}
     for kind in ("gold", "xp"):
         for phase in PHASES:
-            residual = np.asarray(errors[kind][str(phase)], dtype=float)
-            metrics[kind][str(phase)] = {
-                "rows": int(len(residual)),
-                "rmse": float(np.sqrt(np.mean(residual * residual))) if len(residual) else None,
-                "mae": float(np.mean(np.abs(residual))) if len(residual) else None,
+            metrics[kind][str(phase)] = _error_summary(errors[kind][str(phase)])
+            metrics[kind][str(phase)]["missingness"] = {
+                key: _error_summary(value)
+                for key, value in missingness_errors[kind][str(phase)].items()
             }
+    transfer = _evaluate_transfer_slices(
+        frame,
+        source_receipt=source_receipt,
+        feature_columns=feature_columns,
+        columns=transfer_columns,
+        alpha=alpha,
+        max_groups_per_column=max_transfer_groups,
+    )
+    side_swap = {
+        "passed": bool(side_swap_checks) and all(item["passed"] for item in side_swap_checks),
+        "folds": side_swap_checks,
+        "definition": "predicted blue-minus-red curve plus swapped red-minus-blue curve",
+    }
     return {
         "schema_version": SCHEMA_VERSION,
         "method": "chronological_fold_internal_ridge",
         "folds": fold_rows,
         "metrics": metrics,
         "fold_count": len(fold_rows),
-        "cluster_safe": bool(cluster_column),
+        "cluster_safe": True,
+        "cluster_column": cluster_column or "game_uid",
+        "missingness": {
+            kind: {
+                phase: metrics[kind][phase]["missingness"]
+                for phase in PHASE_KEYS
+            }
+            for kind in ("gold", "xp")
+        },
+        "transfer": transfer,
+        "regional_transfer": transfer.get("region", {}),
+        "patch_transfer": transfer.get("patch", {}),
+        "side_swap_invariance": side_swap,
         "authority": "development_only",
     }
 
@@ -934,6 +1305,8 @@ __all__ = [
     "FINAL_METRIC_ALIASES",
     "FuturePhaseCurveError",
     "MODEL_VERSION",
+    "PHASE_FEATURE_DECLARATION",
+    "PHASE_FEATURE_FAMILY",
     "PHASES",
     "SCHEMA_VERSION",
     "assert_pregame_feature_names",
@@ -942,8 +1315,10 @@ __all__ = [
     "chronological_folds",
     "evaluate_phase_curve",
     "fit_phase_curve",
+    "phase_curve_measures",
     "prepare_phase_frame",
     "score_phase_curve",
+    "side_swap_invariance_report",
     "side_swap_frame",
     "strict_prior_final_history",
 ]
