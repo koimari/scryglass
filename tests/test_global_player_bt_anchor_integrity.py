@@ -26,12 +26,14 @@ from lol_kills.export.public_pack import (
     PublicPlayerAnchorError,
     require_player_performance_anchor,
 )
+from lol_kills.ratings import global_player_bt as global_player_bt_module
 from lol_kills.ratings import player_elo
 from lol_kills.ratings.global_player_bt import (
     ANCHOR_METRIC_Z_CLIP,
     ANCHOR_MIN_BASELINE_OBS,
     GlobalPlayerRatingError,
     GlobalPlayerFitCache,
+    GlobalPlayerFitWorkspace,
     PrefixBaselineCache,
     PERFORMANCE_ANCHOR_SOURCE_COLUMNS,
     _contribution_metrics,
@@ -416,6 +418,342 @@ def test_global_fit_cache_reuses_equivalent_cutoff_and_rejects_drift() -> None:
         fit_cache_slot="current",
     )
     assert cache.misses == 3
+
+
+def test_global_anchor_metric_keys_do_not_collide_with_player_attribution() -> None:
+    """Global entries coexist with player entries and retain subset hits."""
+
+    size = 40
+    dates = pd.Series(
+        pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D")
+    )
+    metrics = pd.DataFrame(
+        {
+            "_game_id": [f"g{index}" for index in range(size)],
+            "_date": dates,
+            "_side": ["Blue"] * size,
+            "_role": ["top"] * size,
+            "_player": [f"p{index}" for index in range(size)],
+            "_tier": ["tier1"] * size,
+        }
+    )
+    values = np.linspace(1.0, 80.0, size)
+    for index, metric in enumerate(PERFORMANCE_ANCHOR_METRIC_WEIGHTS):
+        metrics[metric] = values + index * 0.1
+    cache = PrefixBaselineCache()
+
+    _role_normalized_composite(metrics, baseline_cache=cache)
+    global_hits_before = cache.hits
+    player_group = player_elo._shared_player_baseline_group(
+        metrics["_role"], metrics["_tier"]
+    )
+    row_key = pd.Series(
+        list(
+            zip(
+                metrics["_game_id"],
+                metrics["_side"],
+                metrics["_player"],
+                metrics["_role"],
+            )
+        ),
+        index=metrics.index,
+    )
+    # Deliberately change the player source values. A bare global key would
+    # treat this as drift and clear every global entry.
+    player_elo._prior_baseline_z(
+        pd.Series(values + 100.0),
+        player_group,
+        dates,
+        20,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    assert not cache.invalidated
+
+    _role_normalized_composite(metrics.iloc[:30].copy(), baseline_cache=cache)
+    assert cache.hits >= global_hits_before + len(PERFORMANCE_ANCHOR_METRIC_WEIGHTS)
+
+
+def test_global_fit_workspace_preserves_current_and_historical_outputs() -> None:
+    """One shared normalized workspace is exact at every cutoff."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=3))
+    players = _with_metrics(players, _roster_profiles())
+    cfg = _config(minimum_maps=1)
+    current_cache = PrefixBaselineCache()
+    workspace = GlobalPlayerFitWorkspace.build(
+        maps,
+        players,
+        baseline_cache=current_cache,
+    )
+    current_expected, current_expected_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        validate=False,
+        baseline_cache=PrefixBaselineCache(),
+    )
+    current_actual, current_actual_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        validate=False,
+        baseline_cache=current_cache,
+        workspace=workspace,
+    )
+    pd.testing.assert_frame_equal(current_expected, current_actual)
+    assert current_expected_meta == current_actual_meta
+
+    validated_expected, validated_expected_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        validate=True,
+        baseline_cache=PrefixBaselineCache(),
+    )
+    validated_actual, validated_actual_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        validate=True,
+        baseline_cache=current_cache,
+        workspace=workspace,
+    )
+    pd.testing.assert_frame_equal(validated_expected, validated_actual)
+    assert validated_expected_meta == validated_actual_meta
+
+    cutoff = pd.Timestamp("2026-01-01T19:30:00Z")
+    historical_expected, historical_expected_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        through=cutoff,
+        validate=False,
+        baseline_cache=PrefixBaselineCache(),
+    )
+    historical_actual, historical_actual_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        through=cutoff,
+        validate=False,
+        baseline_cache=current_cache,
+        workspace=workspace,
+    )
+    pd.testing.assert_frame_equal(historical_expected, historical_actual)
+    assert historical_expected_meta == historical_actual_meta
+
+
+def test_global_fit_workspace_uses_the_prefix_grouping_mode() -> None:
+    """A later tier label cannot change a historical role-only prefix."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=6))
+    frame = _with_metrics(players, _roster_profiles())
+    cutoff = pd.Timestamp("2026-01-01T19:30:00Z")
+    source_dates = pd.to_datetime(frame["date"], utc=True)
+    frame.loc[source_dates.le(cutoff), "competition_tier"] = pd.NA
+    assert frame.loc[source_dates.le(cutoff), "competition_tier"].isna().all()
+    assert frame.loc[source_dates.gt(cutoff), "competition_tier"].notna().any()
+
+    expected, expected_meta = fit_global_player_bt(
+        maps,
+        frame,
+        _config(),
+        through=cutoff,
+        validate=False,
+        baseline_cache=PrefixBaselineCache(),
+    )
+    cache = PrefixBaselineCache()
+    workspace = GlobalPlayerFitWorkspace.build(
+        maps,
+        frame,
+        baseline_cache=cache,
+    )
+    assert set(workspace.components_by_mode) == {"role+competition_tier"}
+    prefix_game_ids = set(
+        maps.loc[
+            pd.to_datetime(maps["date"], utc=True).le(cutoff),
+            "gameid",
+        ].astype(str)
+    )
+    assert workspace.anchor_inputs(
+        sorted(frame["playername"].astype(str).unique()),
+        prefix_game_ids,
+    ) is None
+    actual, actual_meta = fit_global_player_bt(
+        maps,
+        frame,
+        _config(),
+        through=cutoff,
+        validate=False,
+        baseline_cache=cache,
+        workspace=workspace,
+    )
+    pd.testing.assert_frame_equal(expected, actual)
+    assert expected_meta == actual_meta
+
+
+def test_weekly_builder_reuses_one_workspace_for_all_global_fits(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The integrated weekly path builds shared work once and passes it to each fit."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=2))
+    players = _with_metrics(players, _roster_profiles())
+    cfg = player_elo.PlayerEloConfig(attribution_enabled=False)
+    cutoff = pd.Timestamp("2026-02-01T12:00:00Z")
+    names = sorted(players["playername"].unique())
+    states = {
+        name: player_elo.PlayerState(n_maps=3, last_date=pd.Timestamp("2026-01-01"))
+        for name in names
+    }
+    checkpoint_dates = player_elo.weekly_replay_checkpoint_dates(cutoff)
+    checkpoint_rows = player_elo._snapshot_rows(states, cfg=cfg)
+    checkpoints = {pd.Timestamp(date): checkpoint_rows for date in checkpoint_dates}
+    global_snapshot = pd.DataFrame(
+        {
+            "player": names,
+            "global_rating": np.full(len(names), 1500.0),
+            "global_connected": np.ones(len(names), dtype=int),
+            "global_component_size": np.full(len(names), len(names), dtype=int),
+            "global_model_maps": np.full(len(names), 3, dtype=int),
+        }
+    )
+    calls = {"replay": 0, "fit": 0, "model_rows": 0, "metrics": 0}
+    workspace_ids: list[int] = []
+    real_model_rows = global_player_bt_module._model_rows
+    real_contribution_metrics = global_player_bt_module._contribution_metrics
+
+    def counted_model_rows(*args, **kwargs):
+        calls["model_rows"] += 1
+        return real_model_rows(*args, **kwargs)
+
+    def counted_contribution_metrics(*args, **kwargs):
+        calls["metrics"] += 1
+        return real_contribution_metrics(*args, **kwargs)
+
+    def fake_replay(*_args, **_kwargs):
+        calls["replay"] += 1
+        return pd.DataFrame(), states, checkpoints, {}
+
+    def fake_fit(*_args, **kwargs):
+        calls["fit"] += 1
+        workspace_ids.append(id(kwargs["workspace"]))
+        return global_snapshot.copy(deep=True), {}
+
+    monkeypatch.setattr(global_player_bt_module, "_model_rows", counted_model_rows)
+    monkeypatch.setattr(
+        global_player_bt_module,
+        "_contribution_metrics",
+        counted_contribution_metrics,
+    )
+    monkeypatch.setattr(player_elo, "_run_player_elo", fake_replay)
+    monkeypatch.setattr(player_elo, "fit_global_player_bt", fake_fit)
+    player_elo.build_player_weekly_ranks(
+        maps,
+        players,
+        cfg=cfg,
+        output_dir=tmp_path / "first",
+        as_of=cutoff,
+        min_games=1,
+        player_records={},
+    )
+    assert calls == {"replay": 1, "fit": 5, "model_rows": 1, "metrics": 1}
+    assert len(set(workspace_ids)) == 1
+
+    replay_workspace = global_player_bt_module.GlobalPlayerFitWorkspace.build(
+        maps,
+        players,
+    )
+    replay = {
+        "source_identity": player_elo._replay_source_identity(maps, players),
+        "config": dict(cfg.__dict__),
+        "states": states,
+        "checkpoints": checkpoints,
+        "recent_mus": {},
+        "current_global": global_snapshot,
+        "global_workspace": replay_workspace,
+    }
+    calls.update({"replay": 0, "fit": 0, "model_rows": 0, "metrics": 0})
+    workspace_ids.clear()
+
+    def fail_replay(*_args, **_kwargs):
+        raise AssertionError("weekly replay was not reused")
+
+    def reused_fit(*_args, **kwargs):
+        calls["fit"] += 1
+        workspace_ids.append(id(kwargs["workspace"]))
+        assert kwargs.get("fit_cache_slot") != "current"
+        return global_snapshot.copy(deep=True), {}
+
+    monkeypatch.setattr(player_elo, "_run_player_elo", fail_replay)
+    monkeypatch.setattr(player_elo, "fit_global_player_bt", reused_fit)
+    player_elo.build_player_weekly_ranks(
+        maps,
+        players,
+        cfg=cfg,
+        output_dir=tmp_path / "second",
+        as_of=cutoff,
+        min_games=1,
+        player_records={},
+        replay=replay,
+    )
+    assert calls == {"replay": 0, "fit": 4, "model_rows": 0, "metrics": 0}
+    assert workspace_ids == [id(replay_workspace)] * 4
+
+
+def test_player_rating_builder_stores_workspace_in_object_local_replay(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The first builder hands its exact workspace to the weekly pass."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=2))
+    players = _with_metrics(players, _roster_profiles())
+    cfg = player_elo.PlayerEloConfig(attribution_enabled=False)
+    names = sorted(players["playername"].unique())
+    states = {
+        name: player_elo.PlayerState(n_maps=3, last_date=pd.Timestamp("2026-01-01"))
+        for name in names
+    }
+    checkpoint_dates = player_elo.weekly_replay_checkpoint_dates(
+        pd.Timestamp("2026-02-01T12:00:00Z")
+    )
+    checkpoint_rows = player_elo._snapshot_rows(states, cfg=cfg)
+    checkpoints = {pd.Timestamp(date): checkpoint_rows for date in checkpoint_dates}
+    global_snapshot = pd.DataFrame(
+        {
+            "player": names,
+            "global_rating": np.full(len(names), 1500.0),
+            "global_connected": np.ones(len(names), dtype=int),
+            "global_component_size": np.full(len(names), len(names), dtype=int),
+            "global_model_maps": np.full(len(names), 3, dtype=int),
+        }
+    )
+    fit_workspaces: list[GlobalPlayerFitWorkspace] = []
+
+    def fake_replay(*_args, **_kwargs):
+        return pd.DataFrame(), states, checkpoints, {}
+
+    def fake_fit(*_args, **kwargs):
+        fit_workspaces.append(kwargs["workspace"])
+        return global_snapshot.copy(deep=True), {"model": "test"}
+
+    monkeypatch.setattr(player_elo, "_run_player_elo", fake_replay)
+    monkeypatch.setattr(player_elo, "fit_global_player_bt", fake_fit)
+    replay: dict[str, object] = {}
+    player_elo.build_player_ratings(
+        maps,
+        players,
+        cfg=cfg,
+        output_dir=tmp_path,
+        player_records={},
+        checkpoint_dates=checkpoint_dates,
+        replay_out=replay,
+    )
+    saved = replay.get("global_workspace")
+    assert isinstance(saved, GlobalPlayerFitWorkspace)
+    assert fit_workspaces == [saved]
 
 
 def test_weekly_replay_context_keeps_json_exact_and_skips_replay(monkeypatch, tmp_path: Path) -> None:

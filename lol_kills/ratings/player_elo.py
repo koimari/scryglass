@@ -59,6 +59,7 @@ from lol_kills.ratings.momentum_config import (
 from lol_kills.ratings.global_player_bt import (
     GlobalPlayerBTConfig,
     GlobalPlayerFitCache,
+    GlobalPlayerFitWorkspace,
     GlobalPlayerRatingError,
     PrefixBaselineCache,
     _frame_digest as _global_frame_digest,
@@ -66,6 +67,7 @@ from lol_kills.ratings.global_player_bt import (
     _kth_abs_distance as _shared_kth_abs_distance,
     _linear_quantile_sorted as _shared_linear_quantile_sorted,
     _prior_baseline_z as _shared_prior_baseline_z,
+    _role_normalized_composite as _shared_role_normalized_composite,
     _robust_block_baseline as _shared_robust_block_baseline_reference,
     _robust_block_baseline_fast as _shared_robust_block_baseline_fast,
     fit_global_player_bt,
@@ -229,6 +231,8 @@ def _rating_cache_schema(players: pd.DataFrame | None) -> str:
         _shared_kth_abs_distance,
         _shared_linear_quantile_sorted,
         _shared_prior_baseline_z,
+        _shared_role_normalized_composite,
+        GlobalPlayerFitWorkspace,
         PrefixBaselineCache,
     )
     source_parts: list[str] = []
@@ -1387,12 +1391,18 @@ def build_player_ratings(
     path = destination / "player_ratings.parquet"
     out.to_parquet(path, index=False)
 
+    global_workspace = GlobalPlayerFitWorkspace.build(
+        maps,
+        players,
+        baseline_cache=baseline_cache,
+    )
     global_snapshot, global_meta = fit_global_player_bt(
         maps,
         players,
         baseline_cache=baseline_cache,
         fit_cache=fit_cache,
         fit_cache_slot="current",
+        workspace=global_workspace,
     )
     snap = _apply_global_scale(
         _snapshot_rows(states, recent_mus, cfg), global_snapshot, cfg
@@ -1418,6 +1428,7 @@ def build_player_ratings(
                 "recent_mus": recent_mus,
                 "current_global": global_snapshot.copy(deep=True),
                 "current_global_meta": dict(global_meta),
+                "global_workspace": global_workspace,
             }
         )
     (destination / "player_ratings_meta.json").write_text(
@@ -1572,6 +1583,7 @@ def build_player_weekly_ranks(
     recent_anchor = _recent_baseline_anchor(previous_as_of, previous_start, cutoff)
     required_checkpoints = [recent_anchor, *comparison_cutoffs.values()]
     replay_hit = False
+    saved_workspace = None
     if replay is not None:
         saved_source = replay.get("source_identity")
         saved_config = replay.get("config")
@@ -1579,6 +1591,7 @@ def build_player_weekly_ranks(
         saved_checkpoints = replay.get("checkpoints")
         saved_recent_mus = replay.get("recent_mus")
         saved_global = replay.get("current_global")
+        saved_workspace = replay.get("global_workspace")
         checkpoint_keys = set(saved_checkpoints) if isinstance(saved_checkpoints, dict) else set()
         replay_hit = bool(
             saved_source == _replay_source_identity(frame, players)
@@ -1588,6 +1601,16 @@ def build_player_weekly_ranks(
             and set(required_checkpoints).issubset(checkpoint_keys)
             and isinstance(saved_recent_mus, dict)
             and isinstance(saved_global, pd.DataFrame)
+        )
+    global_workspace = None
+    if isinstance(saved_workspace, GlobalPlayerFitWorkspace):
+        if saved_workspace.matches_source(frame, players):
+            global_workspace = saved_workspace
+    if global_workspace is None:
+        global_workspace = GlobalPlayerFitWorkspace.build(
+            frame,
+            players,
+            baseline_cache=baseline_cache,
         )
     if replay_hit:
         states = saved_states
@@ -1611,6 +1634,7 @@ def build_player_weekly_ranks(
             baseline_cache=baseline_cache,
             fit_cache=fit_cache,
             fit_cache_slot="current",
+            workspace=global_workspace,
         )
     # Current affiliation is the publication filter.  Historical matches in a
     # different circuit remain evidence for the rating but cannot place a
@@ -1639,6 +1663,7 @@ def build_player_weekly_ranks(
                 baseline_cache=baseline_cache,
                 fit_cache=fit_cache,
                 fit_cache_slot=anchor_label,
+                workspace=global_workspace,
             )
         except GlobalPlayerRatingError:
             return []

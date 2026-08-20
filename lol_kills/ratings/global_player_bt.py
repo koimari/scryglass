@@ -1678,7 +1678,9 @@ def _role_normalized_composite(
     metrics: pd.DataFrame,
     *,
     baseline_cache: PrefixBaselineCache | None = None,
-) -> tuple[pd.Series, str, dict[str, Any]]:
+    _return_components: bool = False,
+    _group_mode: str | None = None,
+) -> tuple[Any, ...]:
     """Weighted mean of within-(role, tier) z-scores for each player-map row.
 
     Role normalization is what makes the anchor fair: a support's 0.87 cs/min
@@ -1695,7 +1697,12 @@ def _role_normalized_composite(
 
     group_keys = ["_role"]
     normalization = "role"
-    if "_tier" in metrics.columns and metrics["_tier"].notna().any():
+    if _group_mode == "role+competition_tier":
+        group_keys = ["_role", "_tier"]
+        normalization = "role+competition_tier"
+    elif _group_mode == "role":
+        group_keys = ["_role"]
+    elif "_tier" in metrics.columns and metrics["_tier"].notna().any():
         group_keys = ["_role", "_tier"]
         normalization = "role+competition_tier"
     # Missing tier stays an explicit bucket instead of collapsing into another
@@ -1731,20 +1738,19 @@ def _role_normalized_composite(
 
     weighted_sum = pd.Series(0.0, index=metrics.index)
     weight_total = pd.Series(0.0, index=metrics.index)
+    normalized_z = pd.DataFrame(index=metrics.index)
+    prior_counts = pd.DataFrame(index=metrics.index)
     observed_low: float | None = None
     observed_high: float | None = None
     for metric, weight in PERFORMANCE_ANCHOR_METRIC_WEIGHTS.items():
         if weight <= 0.0 or metric not in metrics.columns:
             continue
         values = metrics[metric]
-        cache_metric_key = (
-            "global:gold_share_pct"
-            if metric == "gold_share_pct"
-            else {
-                "wards_per_min": "wpm",
-                "wards_cleared_per_min": "wcpm",
-            }.get(metric, metric)
-        )
+        # The player Elo attribution path shares this cache object, but its
+        # nullable-tier grouping and source scope are different. A bare metric
+        # name would let one path inspect the other's entry and clear the
+        # whole cache on a legitimate source difference.
+        cache_metric_key = f"global:{normalization}:{metric}"
         raw_z, prior_obs = _prior_baseline_z(
             values,
             group,
@@ -1759,6 +1765,8 @@ def _role_normalized_composite(
         withheld = present & raw_z.isna()
         z = raw_z.clip(lower=-ANCHOR_METRIC_Z_CLIP, upper=ANCHOR_METRIC_Z_CLIP)
         observed = z.notna()
+        normalized_z[metric] = raw_z
+        prior_counts[metric] = prior_obs
 
         diagnostics["metric_cells_present"] += int(present.sum())
         diagnostics["metric_cells_observed"] += int(observed.sum())
@@ -1781,7 +1789,185 @@ def _role_normalized_composite(
     diagnostics["normalized_metric_min"] = observed_low
     diagnostics["normalized_metric_max"] = observed_high
     composite = weighted_sum / weight_total.where(weight_total > 0)
-    return composite.where(np.isfinite(composite)), normalization, diagnostics
+    composite = composite.where(np.isfinite(composite))
+    if _return_components:
+        return composite, normalization, diagnostics, normalized_z, prior_counts
+    return composite, normalization, diagnostics
+
+
+@dataclass
+class GlobalPlayerFitWorkspace:
+    """Shared immutable work for current and historical global fits.
+
+    The lineups, contribution metrics, and strict-prior normalized values are
+    independent of the fit cutoff. A cutoff only selects complete model rows
+    and the already computed rows before that cutoff. The source digests keep
+    the object fail-closed when a caller passes a different frame.
+    """
+
+    model_frame: pd.DataFrame
+    lineups: dict[str, dict[str, list[tuple[str, str]]]]
+    metrics: pd.DataFrame
+    composite: pd.Series
+    normalization: str
+    normalized_z: pd.DataFrame
+    prior_counts: pd.DataFrame
+    components_by_mode: dict[str, tuple[pd.Series, str, pd.DataFrame, pd.DataFrame]]
+    source_maps_digest: str
+    source_players_digest: str
+
+    @classmethod
+    def build(
+        cls,
+        maps: pd.DataFrame,
+        players: pd.DataFrame,
+        *,
+        baseline_cache: PrefixBaselineCache | None = None,
+    ) -> "GlobalPlayerFitWorkspace":
+        model_frame, lineups = _model_rows(maps, players)
+        if model_frame.empty:
+            metrics = pd.DataFrame()
+            composite = pd.Series(dtype=float)
+            normalization = "role"
+            normalized_z = pd.DataFrame()
+            prior_counts = pd.DataFrame()
+            components_by_mode: dict[str, tuple[pd.Series, str, pd.DataFrame, pd.DataFrame]] = {}
+        else:
+            metrics = _contribution_metrics(players, _map_dates(model_frame))
+            if metrics.empty:
+                composite = pd.Series(np.nan, index=metrics.index, dtype=float)
+                normalization = "role"
+                normalized_z = pd.DataFrame(index=metrics.index)
+                prior_counts = pd.DataFrame(index=metrics.index)
+                components_by_mode = {}
+            else:
+                full_mode = (
+                    "role+competition_tier"
+                    if "_tier" in metrics.columns and metrics["_tier"].notna().any()
+                    else "role"
+                )
+                (
+                    composite,
+                    normalization,
+                    _diagnostics,
+                    normalized_z,
+                    prior_counts,
+                ) = _role_normalized_composite(
+                    metrics,
+                    baseline_cache=baseline_cache,
+                    _return_components=True,
+                    _group_mode=full_mode,
+                )
+                components_by_mode = {
+                    full_mode: (
+                        composite,
+                        normalization,
+                        normalized_z,
+                        prior_counts,
+                    )
+                }
+        return cls(
+            model_frame=model_frame,
+            lineups=lineups,
+            metrics=metrics,
+            composite=composite,
+            normalization=normalization,
+            normalized_z=normalized_z,
+            prior_counts=prior_counts,
+            components_by_mode=components_by_mode,
+            source_maps_digest=_workspace_source_digest(maps),
+            source_players_digest=_workspace_source_digest(players),
+        )
+
+    def matches_source(self, maps: pd.DataFrame, players: pd.DataFrame) -> bool:
+        """Prove that this workspace belongs to the requested source frame."""
+
+        return bool(
+            self.source_maps_digest == _workspace_source_digest(maps)
+            and self.source_players_digest == _workspace_source_digest(players)
+        )
+
+    def frame_for(self, through: pd.Timestamp | None) -> pd.DataFrame:
+        """Select a cutoff without rebuilding canonical lineups."""
+
+        if through is None:
+            return self.model_frame
+        cutoff = pd.Timestamp(through)
+        if cutoff.tzinfo is not None:
+            cutoff = cutoff.tz_convert("UTC").tz_localize(None)
+        return self.model_frame[self.model_frame["date"].le(cutoff)].reset_index(drop=True)
+
+    def anchor_inputs(
+        self,
+        names: list[str],
+        game_ids: set[str],
+    ) -> tuple[pd.Series, str, dict[str, Any], pd.DataFrame] | None:
+        """Return exact cutoff-scoped composite values and diagnostics."""
+
+        anchor_mask = (
+            self.metrics["_game_id"].astype(str).isin(game_ids)
+            & self.metrics["_player"].astype(str).isin(set(names))
+        )
+        scoped = self.metrics.loc[anchor_mask]
+        mode = "role"
+        if "_tier" in scoped.columns and scoped["_tier"].notna().any():
+            mode = "role+competition_tier"
+        components = self.components_by_mode.get(mode)
+        if components is None:
+            # A full frame can contain tier labels that are absent from an
+            # earlier prefix. Reusing the full-frame mode would change the
+            # historical baseline groups. The caller must run the exact
+            # prefix-scoped path in that case.
+            return None
+        composite_source, normalization, normalized_z, prior_counts = components
+        diagnostics: dict[str, Any] = {
+            "baseline_min_prior_observations": int(ANCHOR_MIN_BASELINE_OBS),
+            "normalized_metric_clip": float(ANCHOR_METRIC_Z_CLIP),
+            "metric_cells_present": 0,
+            "metric_cells_observed": 0,
+            "metric_cells_withheld_below_baseline_floor": 0,
+            "metric_cells_withheld_degenerate_baseline": 0,
+            "metric_cells_clipped": 0,
+            "normalized_metric_min": None,
+            "normalized_metric_max": None,
+        }
+        if scoped.empty:
+            return (
+                pd.Series(np.nan, index=scoped.index, dtype=float),
+                self.normalization,
+                diagnostics,
+                scoped,
+            )
+        observed_low: float | None = None
+        observed_high: float | None = None
+        for metric, weight in PERFORMANCE_ANCHOR_METRIC_WEIGHTS.items():
+            if weight <= 0.0 or metric not in scoped.columns or metric not in self.normalized_z.columns:
+                continue
+            values = scoped[metric]
+            raw_z = normalized_z.loc[scoped.index, metric]
+            prior_obs = prior_counts.loc[scoped.index, metric]
+            present = values.notna() & np.isfinite(values.astype(float))
+            below_floor = present & prior_obs.lt(float(ANCHOR_MIN_BASELINE_OBS))
+            withheld = present & raw_z.isna()
+            z = raw_z.clip(lower=-ANCHOR_METRIC_Z_CLIP, upper=ANCHOR_METRIC_Z_CLIP)
+            observed = z.notna()
+            diagnostics["metric_cells_present"] += int(present.sum())
+            diagnostics["metric_cells_observed"] += int(observed.sum())
+            diagnostics["metric_cells_withheld_below_baseline_floor"] += int(below_floor.sum())
+            diagnostics["metric_cells_withheld_degenerate_baseline"] += int(
+                (withheld & ~below_floor).sum()
+            )
+            diagnostics["metric_cells_clipped"] += int(
+                (raw_z.abs() > ANCHOR_METRIC_Z_CLIP).sum()
+            )
+            if observed.any():
+                low = float(z[observed].min())
+                high = float(z[observed].max())
+                observed_low = low if observed_low is None else min(observed_low, low)
+                observed_high = high if observed_high is None else max(observed_high, high)
+        diagnostics["normalized_metric_min"] = observed_low
+        diagnostics["normalized_metric_max"] = observed_high
+        return composite_source.loc[scoped.index], normalization, diagnostics, scoped
 
 
 def _performance_anchor(
@@ -1791,6 +1977,7 @@ def _performance_anchor(
     cfg: GlobalPlayerBTConfig,
     *,
     baseline_cache: PrefixBaselineCache | None = None,
+    workspace: GlobalPlayerFitWorkspace | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Zero-mean ridge anchor in logit units, one entry per fitted player.
 
@@ -1833,10 +2020,16 @@ def _performance_anchor(
     if scoped.empty:
         return anchor, anchored, evidence
 
-    composite, normalization, diagnostics = _role_normalized_composite(
-        scoped,
-        baseline_cache=baseline_cache,
+    workspace_inputs = (
+        workspace.anchor_inputs(names, game_ids) if workspace is not None else None
     )
+    if workspace_inputs is not None:
+        composite, normalization, diagnostics, scoped = workspace_inputs
+    else:
+        composite, normalization, diagnostics = _role_normalized_composite(
+            scoped,
+            baseline_cache=baseline_cache,
+        )
     evidence["normalization"] = normalization
     evidence.update(diagnostics)
     evidence["player_map_rows_used"] = int(composite.notna().sum())
@@ -1961,6 +2154,27 @@ def _frame_digest(frame: pd.DataFrame) -> str:
     return digest.hexdigest()
 
 
+def _workspace_source_digest(frame: pd.DataFrame | None) -> str:
+    """Hash the source columns after normalizing the common date view.
+
+    The weekly builder copies the map frame and converts ``date`` to a
+    timezone-naive datetime before applying its cutoff. The rating builder
+    receives the same rows with the source date column often still as strings.
+    Normalize that representation so an object-local workspace can move
+    between the two builders while still detecting row, value, and schema
+    drift.
+    """
+
+    if frame is None:
+        return _frame_digest(pd.DataFrame())
+    normalized = frame.reset_index(drop=True).copy()
+    if "date" in normalized.columns:
+        normalized["date"] = pd.to_datetime(
+            normalized["date"], errors="coerce", utc=True
+        ).dt.tz_localize(None)
+    return _frame_digest(normalized)
+
+
 def _global_fit_schema_fingerprint() -> str:
     """Fingerprint the implementation that can change a fitted snapshot."""
 
@@ -1968,6 +2182,8 @@ def _global_fit_schema_fingerprint() -> str:
         _model_rows,
         _design,
         _contribution_metrics,
+        _role_normalized_composite,
+        GlobalPlayerFitWorkspace,
         _performance_anchor,
         _fit,
         fit_global_player_bt,
@@ -2054,11 +2270,20 @@ def fit_global_player_bt(
     baseline_cache: PrefixBaselineCache | None = None,
     fit_cache: GlobalPlayerFitCache | None = None,
     fit_cache_slot: str | None = None,
+    workspace: GlobalPlayerFitWorkspace | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Fit one player-results scale and return its release evidence."""
 
     cfg = cfg or GlobalPlayerBTConfig()
-    frame, lineups = _model_rows(maps, players, through=through)
+    workspace_used = bool(
+        workspace is not None and workspace.matches_source(maps, players)
+    )
+    if workspace_used:
+        assert workspace is not None
+        frame = workspace.frame_for(through)
+        lineups = workspace.lineups
+    else:
+        frame, lineups = _model_rows(maps, players, through=through)
     if len(frame) < cfg.minimum_maps:
         raise GlobalPlayerRatingError(
             f"global player fit has {len(frame)} complete maps; {cfg.minimum_maps} required"
@@ -2086,7 +2311,9 @@ def fit_global_player_bt(
     outcome = frame["result"].to_numpy(dtype=float)
     game_ids = frame["game_id"].astype(str)
     metrics = (
-        _contribution_metrics(players, _map_dates(frame))
+        workspace.metrics
+        if workspace_used and workspace is not None
+        else _contribution_metrics(players, _map_dates(frame))
         if cfg.performance_anchor_enabled
         else pd.DataFrame()
     )
@@ -2096,6 +2323,7 @@ def fit_global_player_bt(
         set(game_ids),
         cfg,
         baseline_cache=baseline_cache,
+        workspace=workspace if workspace_used else None,
     )
     # FAIL CLOSED.  An anchor that reaches zero players is not a neutral
     # anchor, it is a silently inert one: the published ladder would go back to
@@ -2140,6 +2368,7 @@ def fit_global_player_bt(
             set(game_ids.iloc[:split]),
             cfg,
             baseline_cache=baseline_cache,
+            workspace=workspace if workspace_used else None,
         )
         train_coefficients, train_side = _fit(train_x, train_y, cfg, anchor=train_anchor)
         model_loss = _log_loss(test_y, np.asarray(test_x @ train_coefficients).reshape(-1) + train_side)
