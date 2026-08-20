@@ -1615,6 +1615,19 @@ def _sequential_baseline_source_receipt(
 ) -> tuple[str, str, tuple[str, ...]]:
     if not isinstance(source_receipt, Mapping):
         raise SequentialPlayerEloBaselineError("verified source receipt is required")
+    required = (
+        "source_as_of",
+        "source_game_count",
+        "source_identity_sha256",
+        "accepted_game_ids",
+        "model_eligible_game_count",
+        "model_eligible_identity_sha256",
+        "model_eligible_game_ids",
+        "source_files",
+        "receipt_sha256",
+    )
+    if any(field not in source_receipt for field in required):
+        raise SequentialPlayerEloBaselineError("source receipt binding is incomplete")
     receipt_hash = str(source_receipt.get("receipt_sha256") or "")
     eligible_hash = str(source_receipt.get("model_eligible_identity_sha256") or "")
     raw_ids = source_receipt.get("model_eligible_game_ids")
@@ -1626,6 +1639,36 @@ def _sequential_baseline_source_receipt(
         or not isinstance(raw_ids, (list, tuple))
     ):
         raise SequentialPlayerEloBaselineError("source receipt binding is incomplete")
+    payload = dict(source_receipt)
+    payload.pop("receipt_sha256", None)
+    try:
+        canonical_payload = json.dumps(
+            payload,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise SequentialPlayerEloBaselineError(
+            "source receipt contains a non-canonical value"
+        ) from error
+    if hashlib.sha256(canonical_payload).hexdigest() != receipt_hash.lower():
+        raise SequentialPlayerEloBaselineError(
+            "source receipt hash does not match its payload"
+        )
+    raw_accepted_ids = source_receipt.get("accepted_game_ids")
+    if not isinstance(raw_accepted_ids, (list, tuple)):
+        raise SequentialPlayerEloBaselineError("source receipt accepted census is invalid")
+    accepted_ids = tuple(
+        sorted(
+            {
+                str(game_id)
+                for value in raw_accepted_ids
+                if (game_id := canonical_source_game_key(value))
+            }
+        )
+    )
     eligible_ids = tuple(
         sorted(
             {
@@ -1635,11 +1678,142 @@ def _sequential_baseline_source_receipt(
             }
         )
     )
-    if not eligible_ids or _sequential_baseline_identity(eligible_ids) != eligible_hash:
+    try:
+        source_game_count = int(source_receipt["source_game_count"])
+        eligible_game_count = int(source_receipt["model_eligible_game_count"])
+    except (TypeError, ValueError) as error:
         raise SequentialPlayerEloBaselineError(
-            "source receipt model-eligible identity is invalid"
+            "source receipt census count is invalid"
+        ) from error
+    if (
+        not accepted_ids
+        or len(accepted_ids) != len(raw_accepted_ids)
+        or list(accepted_ids) != list(raw_accepted_ids)
+        or source_game_count != len(accepted_ids)
+        or _sequential_baseline_identity(accepted_ids)
+        != str(source_receipt["source_identity_sha256"]).lower()
+        or not eligible_ids
+        or len(eligible_ids) != len(raw_ids)
+        or list(eligible_ids) != list(raw_ids)
+        or eligible_game_count != len(eligible_ids)
+        or _sequential_baseline_identity(eligible_ids) != eligible_hash.lower()
+    ):
+        raise SequentialPlayerEloBaselineError(
+            "source receipt census identity is invalid"
         )
+    try:
+        source_as_of = pd.Timestamp(source_receipt["source_as_of"])
+    except (TypeError, ValueError) as error:
+        raise SequentialPlayerEloBaselineError(
+            "source receipt source_as_of is invalid"
+        ) from error
+    if pd.isna(source_as_of) or source_as_of.tzinfo is None:
+        raise SequentialPlayerEloBaselineError(
+            "source receipt source_as_of must include a timezone"
+        )
+    source_files = source_receipt.get("source_files")
+    if not isinstance(source_files, Mapping) or not source_files:
+        raise SequentialPlayerEloBaselineError("source receipt file binding is invalid")
+    for label, record in source_files.items():
+        if not isinstance(record, Mapping) or not isinstance(record.get("bytes"), int):
+            raise SequentialPlayerEloBaselineError(
+                f"source receipt file binding is invalid: {label}"
+            )
+        digest = str(record.get("sha256") or "")
+        if len(digest) != 64 or any(
+            character not in "0123456789abcdefABCDEF" for character in digest
+        ):
+            raise SequentialPlayerEloBaselineError(
+                f"source receipt file binding is invalid: {label}"
+            )
     return receipt_hash.lower(), eligible_hash.lower(), eligible_ids
+
+
+def _validate_sequential_baseline_lineups(
+    maps: pd.DataFrame,
+    map_ids: pd.Series,
+    players: pd.DataFrame,
+    player_ids: pd.Series,
+    requested_ids: set[str],
+) -> None:
+    """Require one exact, identity-complete five-player lineup per side."""
+
+    blue_column = "blue_team" if "blue_team" in maps.columns else "blue_teamname"
+    red_column = "red_team" if "red_team" in maps.columns else "red_teamname"
+    if blue_column not in maps.columns or red_column not in maps.columns:
+        raise SequentialPlayerEloBaselineError("maps have incomplete team identity")
+    for index, game_id in map_ids.items():
+        if str(game_id) not in requested_ids:
+            continue
+        blue_value = maps.loc[index, blue_column]
+        red_value = maps.loc[index, red_column]
+        blue = "" if pd.isna(blue_value) else str(blue_value).strip()
+        red = "" if pd.isna(red_value) else str(red_value).strip()
+        if (
+            not blue
+            or blue.casefold() in {"nan", "none", "<na>"}
+            or not red
+            or red.casefold() in {"nan", "none", "<na>"}
+            or normalize_team(blue).casefold() == normalize_team(red).casefold()
+        ):
+            raise SequentialPlayerEloBaselineError(
+                f"maps have incomplete team identity: {game_id}"
+            )
+
+    required_columns = {"side", "position", "playername", "playerid", "teamid"}
+    missing_columns = sorted(required_columns - set(players.columns))
+    if missing_columns:
+        raise SequentialPlayerEloBaselineError(
+            "player lineup identity columns are missing: " + ", ".join(missing_columns)
+        )
+    work = players.copy()
+    work["_game_id"] = player_ids.astype(str).to_numpy()
+    work = work[work["_game_id"].isin(requested_ids)].copy()
+    work["_side"] = work["side"].astype("string").str.strip().str.title()
+    work["_position"] = work["position"].astype("string").str.strip()
+    work = work[work["_position"].str.casefold().ne("team")].copy()
+    work["_role"] = work["_position"].map(_norm_role)
+    expected_roles = {"top", "jng", "mid", "bot", "sup"}
+    for game_id in sorted(requested_ids):
+        game = work[work["_game_id"].eq(game_id)]
+        problems: list[str] = []
+        if len(game) != 10:
+            problems.append("player_row_count_not_10")
+        names = game["playername"].astype("string").str.strip()
+        player_identity = game["playerid"].astype("string").str.strip()
+        team_identity = game["teamid"].astype("string").str.strip()
+        if (
+            names.isna().any()
+            or names.eq("").any()
+            or names.str.casefold().isin({"nan", "none", "<na>"}).any()
+            or names.nunique() != 10
+        ):
+            problems.append("player_name_identity_invalid")
+        if (
+            player_identity.isna().any()
+            or not player_identity.str.startswith("oe:player:").all()
+            or player_identity.nunique() != 10
+        ):
+            problems.append("stable_player_identity_invalid")
+        if team_identity.isna().any() or not team_identity.str.startswith("oe:team:").all():
+            problems.append("stable_team_identity_invalid")
+        for side in ("Blue", "Red"):
+            side_rows = game[game["_side"].eq(side)]
+            if (
+                len(side_rows) != 5
+                or set(side_rows["_role"].astype(str)) != expected_roles
+                or side_rows["playername"].astype(str).nunique() != 5
+                or side_rows["playerid"].astype(str).nunique() != 5
+                or side_rows["teamid"].astype(str).nunique() != 1
+            ):
+                problems.append(f"{side.casefold()}_exact_five_closure_invalid")
+        if team_identity.nunique() != 2:
+            problems.append("team_identity_closure_invalid")
+        if problems:
+            raise SequentialPlayerEloBaselineError(
+                f"player lineup closure is invalid: {game_id}: "
+                + ", ".join(sorted(set(problems)))
+            )
 
 
 def _sequential_baseline_game_ids(frame: pd.DataFrame) -> pd.Series:
@@ -1665,6 +1839,8 @@ def _sequential_baseline_game_ids(frame: pd.DataFrame) -> pd.Series:
 def _sequential_baseline_implementation_digest() -> str:
     functions = (
         build_sequential_player_elo_baseline,
+        _sequential_baseline_source_receipt,
+        _validate_sequential_baseline_lineups,
         _run_player_elo,
         _lineups_by_game,
         _aggregate,
@@ -1808,10 +1984,19 @@ def build_sequential_player_elo_baseline(
     ]
     validation_row_mask = selected_maps["_research_game_id"].isin(validation_ids)
     for column in map_outcome_columns:
-        selected_maps.loc[validation_row_mask, column] = np.nan
+        values = selected_maps[column].astype(object)
+        values.loc[validation_row_mask] = np.nan
+        selected_maps[column] = values
     selected_maps = selected_maps.drop(columns=["_research_game_id"])
 
     player_ids = _sequential_baseline_game_ids(players)
+    _validate_sequential_baseline_lineups(
+        maps,
+        map_ids,
+        players,
+        player_ids,
+        requested_ids,
+    )
     selected_players = players.loc[player_ids.isin(requested_ids)].copy()
     selected_player_ids = player_ids.loc[player_ids.isin(requested_ids)]
     missing_player_ids = sorted(requested_ids - set(selected_player_ids.astype(str)))
@@ -1828,7 +2013,9 @@ def build_sequential_player_elo_baseline(
         and str(column) != "_research_game_id"
     ]
     for column in player_mask_columns:
-        selected_players.loc[validation_player_mask, column] = np.nan
+        values = selected_players[column].astype(object)
+        values.loc[validation_player_mask] = np.nan
+        selected_players[column] = values
     selected_players = selected_players.drop(columns=["_research_game_id"])
 
     replay_cfg = cfg or PlayerEloConfig()

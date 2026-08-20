@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 import pandas as pd
 import pytest
 
@@ -56,11 +59,30 @@ def _fixture() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, object]]:
                     }
                 )
     players = pd.DataFrame(player_rows)
-    receipt = {
-        "receipt_sha256": "a" * 64,
+    receipt: dict[str, object] = {
+        "source_as_of": "2026-01-05T00:00:00Z",
+        "source_game_count": len(game_ids),
+        "source_identity_sha256": _sequential_baseline_identity(game_ids),
+        "accepted_game_ids": game_ids,
+        "model_eligible_game_count": len(game_ids),
         "model_eligible_game_ids": game_ids,
         "model_eligible_identity_sha256": _sequential_baseline_identity(game_ids),
+        "source_files": {
+            "fixture": {
+                "bytes": 1,
+                "sha256": "b" * 64,
+            }
+        },
     }
+    receipt["receipt_sha256"] = hashlib.sha256(
+        json.dumps(
+            receipt,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
     return maps, players, receipt
 
 
@@ -164,3 +186,78 @@ def test_replay_rejects_overlap_missing_outcomes_and_non_strict_cutoff() -> None
             strict_cutoff="2025-12-31T00:00:00Z",
             source_receipt=receipt,
         )
+
+
+def test_replay_rejects_incomplete_or_duplicated_validation_lineup() -> None:
+    maps, players, receipt = _fixture()
+    incomplete = players.drop(
+        players[
+            players["game_uid"].eq("oe:game:2")
+            & players["side"].eq("Blue")
+            & players["position"].eq("top")
+        ].index
+    )
+    with pytest.raises(SequentialPlayerEloBaselineError, match="lineup closure"):
+        _build(maps, incomplete, receipt)
+
+    duplicated = players.copy()
+    duplicate_index = duplicated[
+        duplicated["game_uid"].eq("oe:game:3")
+        & duplicated["side"].eq("Red")
+        & duplicated["position"].eq("jng")
+    ].index[0]
+    duplicated.loc[duplicate_index, "position"] = "top"
+    with pytest.raises(SequentialPlayerEloBaselineError, match="exact_five"):
+        _build(maps, duplicated, receipt)
+
+    duplicate_player = players.copy()
+    top_index = duplicate_player[
+        duplicate_player["game_uid"].eq("oe:game:2")
+        & duplicate_player["side"].eq("Blue")
+        & duplicate_player["position"].eq("top")
+    ].index[0]
+    jungle_index = duplicate_player[
+        duplicate_player["game_uid"].eq("oe:game:2")
+        & duplicate_player["side"].eq("Blue")
+        & duplicate_player["position"].eq("jng")
+    ].index[0]
+    duplicate_player.loc[
+        top_index,
+        ["playername", "playerid"],
+    ] = duplicate_player.loc[jungle_index, ["playername", "playerid"]].to_numpy()
+    with pytest.raises(SequentialPlayerEloBaselineError, match="player.*identity"):
+        _build(maps, duplicate_player, receipt)
+
+    missing_team = maps.copy()
+    missing_team.loc[missing_team["game_uid"].eq("oe:game:3"), "blue_team"] = pd.NA
+    with pytest.raises(SequentialPlayerEloBaselineError, match="team identity"):
+        _build(missing_team, players, receipt)
+
+
+def test_replay_rejects_forged_or_semantically_invalid_source_receipt() -> None:
+    maps, players, receipt = _fixture()
+    forged = dict(receipt)
+    forged["source_as_of"] = "2027-01-01T00:00:00Z"
+    with pytest.raises(SequentialPlayerEloBaselineError, match="hash does not match"):
+        _build(maps, players, forged)
+
+    fake_digest = dict(receipt)
+    fake_digest["receipt_sha256"] = "f" * 64
+    with pytest.raises(SequentialPlayerEloBaselineError, match="hash does not match"):
+        _build(maps, players, fake_digest)
+
+    invalid = dict(receipt)
+    invalid["model_eligible_game_count"] = 3
+    invalid_payload = dict(invalid)
+    invalid_payload.pop("receipt_sha256", None)
+    invalid["receipt_sha256"] = hashlib.sha256(
+        json.dumps(
+            invalid_payload,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    with pytest.raises(SequentialPlayerEloBaselineError, match="census identity"):
+        _build(maps, players, invalid)
