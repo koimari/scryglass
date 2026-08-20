@@ -456,6 +456,7 @@ class PrefixBaselineCache:
                 try:
                     temporary.unlink()
                 except FileNotFoundError:
+                    # The atomic replace may have left no temporary file.
                     pass
 
     @staticmethod
@@ -684,17 +685,16 @@ class PrefixBaselineCache:
         ] | None = None,
     ) -> _PrefixBaselineEntry | None:
         if arrays is not None:
-            _keys, row_ids, groups, dates, numeric = arrays
+            _, row_ids, groups, dates, numeric = arrays
         elif prepared_query is not None:
             self._refresh_query_catalog(prepared_query, values, group, date, row_key)
-            _keys = prepared_query.keys
             row_ids = prepared_query.row_ids
             groups = prepared_query.groups
             dates = prepared_query.dates
             numeric = self._numeric(values) if numeric_values is None else numeric_values
         else:
             try:
-                _keys, row_ids, groups, dates, numeric = self._arrays(
+                _, row_ids, groups, dates, numeric = self._arrays(
                     values, group, date, row_key
                 )
             except PrefixBaselineCacheError:
@@ -942,7 +942,7 @@ class PrefixBaselineCache:
 
             new_mask = ~known
             if (
-                np.any(groups[new_mask] == None)  # noqa: E711
+                np.any(pd.isna(groups[new_mask]))
                 or np.any(dates[new_mask] == _PREFIX_CACHE_MISSING_DATE)
             ):
                 continue
@@ -1167,12 +1167,11 @@ class PrefixBaselineCache:
 
         try:
             if prepared_query is None:
-                _keys, row_ids, groups, dates, numeric = self._arrays(
+                _, row_ids, groups, dates, numeric = self._arrays(
                     values, group, date, row_key
                 )
             else:
                 self._refresh_query_catalog(prepared_query, values, group, date, row_key)
-                _keys = prepared_query.keys
                 row_ids = prepared_query.row_ids
                 groups = prepared_query.groups
                 dates = prepared_query.dates
@@ -1439,6 +1438,7 @@ class GlobalPlayerFitCache:
                 try:
                     temporary.unlink()
                 except FileNotFoundError:
+                    # The atomic replace may have left no temporary file.
                     pass
 
 # Minimum number of STRICTLY EARLIER observations a (role, competition tier)

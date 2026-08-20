@@ -1440,6 +1440,62 @@ def test_shared_prefix_cache_excludes_missing_dates_when_appending() -> None:
     assert cache.hits == 1
 
 
+def test_shared_prefix_cache_rejects_insertion_with_missing_group() -> None:
+    """An inserted row without a group must use the exact reference path."""
+
+    values = pd.Series([1.0, 2.0, 3.0])
+    group = pd.Series(["mid"] * 3)
+    date = pd.Series(
+        pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-03"])
+    )
+    row_key = pd.Series(
+        [("game", "Blue", f"player-{index}", "mid") for index in range(3)],
+        dtype=object,
+    )
+    cache = PrefixBaselineCache()
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=1,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+
+    target_values = pd.concat([values, pd.Series([99.0])], ignore_index=True)
+    target_group = pd.concat([group, pd.Series([None], dtype=object)], ignore_index=True)
+    target_date = pd.concat(
+        [date, pd.Series([pd.Timestamp("2026-01-01T12:00:00")])],
+        ignore_index=True,
+    )
+    target_keys = pd.concat(
+        [
+            row_key,
+            pd.Series([("game", "Blue", "inserted", "mid")], dtype=object),
+        ],
+        ignore_index=True,
+    )
+    cached, cached_prior = _prior_baseline_z(
+        target_values,
+        target_group,
+        target_date,
+        min_obs=1,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=target_keys,
+    )
+    reference, reference_prior = _prior_baseline_z(
+        target_values, target_group, target_date, min_obs=1
+    )
+
+    pd.testing.assert_series_equal(cached, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(
+        cached_prior, reference_prior, check_names=False, check_exact=True
+    )
+    assert cache.last_miss_reason == "source_drift_or_non_prefix"
+
+
 def test_shared_prefix_cache_reuses_exact_suffix_for_same_timestamp_insertion() -> None:
     """Rows inserted into a timestamp block cannot see that block as prior."""
 
