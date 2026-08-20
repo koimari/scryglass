@@ -51,11 +51,66 @@ from lol_kills.ratings.validation import audit_rating_inputs
 
 LOGIT_TO_ELO = 400.0 / math.log(10.0)
 HIERARCHICAL_CACHE_SCHEMA = "scryglass:hierarchical-bt-cache:v1"
+HIERARCHICAL_SNAPSHOT_SCHEMA = "scryglass:hierarchical-bt-snapshot:v1"
 HIERARCHICAL_CACHE_MANIFEST = "ratings_hierarchical_cache.json"
+HIERARCHICAL_IMPLEMENTATION_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 _CACHE_SLOTS = {
     "current": "ratings_hierarchical_snapshot.parquet",
     "previous": "ratings_hierarchical_previous_snapshot.parquet",
 }
+_HIERARCHICAL_SNAPSHOT_COLUMNS = (
+    "team",
+    "team_key",
+    "mu_total",
+    "mu_regional",
+    "mu_meta",
+    "sigma",
+    "rating_p10",
+    "n_series",
+    "n_maps",
+    "international_series",
+    "home_league",
+    "last_game_date",
+    "model",
+)
+_CACHE_CONTENT_COLUMNS = (
+    "date",
+    "blue_team",
+    "red_team",
+    "blue_teamname",
+    "red_teamname",
+    "y_blue_win",
+    "league",
+    "league_source",
+    "tournament",
+    "is_international",
+    "grid_series_id",
+    "game",
+    "game_uid",
+    "gameid",
+    "oe_gameid",
+)
+_OBSERVATION_INPUT_COLUMNS = frozenset(
+    {
+        "date",
+        "y_blue_win",
+        "league",
+        "league_source",
+        "tournament",
+        "is_international",
+        "game_uid",
+        "gameid",
+        "oe_gameid",
+        "blue_team",
+        "red_team",
+        "blue_teamname",
+        "red_teamname",
+        "teamname",
+        "team",
+        "grid_series_id",
+        "game",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -109,31 +164,23 @@ def _frame_source_identity(
     )
     if source_column is None:
         return None, None, None
-    game_ids = [canonical_source_game_key(value) for value in maps[source_column]]
+    game_ids = [canonical_source_game_key(value) for value in maps[source_column].tolist()]
     if not game_ids or any(not value for value in game_ids) or len(set(game_ids)) != len(game_ids):
         return None, None, None
     identity = hashlib.sha256(("\n".join(sorted(game_ids)) + "\n").encode("utf-8")).hexdigest()
+    content_columns: list[list[str]] = []
+    for column in _CACHE_CONTENT_COLUMNS:
+        if column not in maps.columns:
+            content_columns.append([""] * len(game_ids))
+            continue
+        values = maps[column].tolist()
+        if column == "date":
+            content_columns.append([_cache_date(value) for value in values])
+        else:
+            content_columns.append([_cache_text(value) for value in values])
     rows: list[list[str]] = []
-    for game_id, (_, row) in zip(game_ids, maps.iterrows()):
-        source_league = _cache_text(row.get("league")) or "UNKNOWN"
-        is_international = (
-            row.get("is_international")
-            if "is_international" in maps.columns
-            else source_league in INTERNATIONAL_LEAGUES
-        )
-        rows.append(
-            [
-                game_id,
-                _cache_date(row.get("date")),
-                _cache_text(row.get("blue_team")),
-                _cache_text(row.get("red_team")),
-                _cache_text(row.get("y_blue_win")),
-                source_league,
-                _cache_text(is_international),
-                _cache_text(row.get("grid_series_id")),
-                _cache_text(row.get("game")),
-            ]
-        )
+    for index, game_id in enumerate(game_ids):
+        rows.append([game_id, *(values[index] for values in content_columns)])
     rows.sort(key=lambda values: values[0])
     content = "\n".join("\x1f".join(values) for values in rows) + "\n"
     content_identity = hashlib.sha256(content.encode("utf-8")).hexdigest()
@@ -156,6 +203,7 @@ def _cache_key(
         return None
     return {
         "schema": HIERARCHICAL_CACHE_SCHEMA,
+        "implementation_sha256": HIERARCHICAL_IMPLEMENTATION_SHA256,
         "slot": cache_slot,
         "source_identity_sha256": source_identity,
         "frame_identity_sha256": frame_identity,
@@ -194,11 +242,29 @@ def _load_cached_fit(
     if not isinstance(entry, dict) or entry.get("key") != key:
         return None
     metadata = entry.get("metadata")
-    if not isinstance(metadata, dict) or not snapshot_path.is_file():
+    snapshot_info = entry.get("snapshot")
+    if not isinstance(metadata, dict) or not isinstance(snapshot_info, dict):
+        return None
+    if not snapshot_path.is_file():
+        return None
+    if snapshot_info.get("schema") != HIERARCHICAL_SNAPSHOT_SCHEMA:
+        return None
+    if snapshot_info.get("columns") != list(_HIERARCHICAL_SNAPSHOT_COLUMNS):
+        return None
+    expected_bytes = snapshot_info.get("byte_count")
+    expected_sha256 = snapshot_info.get("sha256")
+    if not isinstance(expected_bytes, int) or not isinstance(expected_sha256, str):
         return None
     try:
+        snapshot_bytes = snapshot_path.read_bytes()
+        if len(snapshot_bytes) != expected_bytes:
+            return None
+        if hashlib.sha256(snapshot_bytes).hexdigest() != expected_sha256:
+            return None
         snapshot = pd.read_parquet(snapshot_path)
     except (OSError, ValueError, ImportError):
+        return None
+    if list(snapshot.columns) != list(_HIERARCHICAL_SNAPSHOT_COLUMNS):
         return None
     return snapshot, metadata
 
@@ -217,9 +283,21 @@ def _write_cached_fit(
     manifest_tmp = manifest_path.with_name(f".{manifest_path.name}.{os.getpid()}.tmp")
     try:
         snapshot.to_parquet(snapshot_tmp, index=False)
+        snapshot_bytes = snapshot_tmp.read_bytes()
+        if list(snapshot.columns) != list(_HIERARCHICAL_SNAPSHOT_COLUMNS):
+            raise ValueError("hierarchical snapshot columns do not match cache schema")
         os.replace(snapshot_tmp, snapshot_path)
         manifest = _read_cache_manifest(manifest_path) or {}
-        manifest[cache_slot] = {"key": key, "metadata": metadata}
+        manifest[cache_slot] = {
+            "key": key,
+            "metadata": metadata,
+            "snapshot": {
+                "schema": HIERARCHICAL_SNAPSHOT_SCHEMA,
+                "columns": list(_HIERARCHICAL_SNAPSHOT_COLUMNS),
+                "byte_count": len(snapshot_bytes),
+                "sha256": hashlib.sha256(snapshot_bytes).hexdigest(),
+            },
+        }
         manifest_tmp.write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -336,7 +414,11 @@ def _observations(
     tied/incomplete feeds) so they stay inspectable.
     """
 
-    frame = canonicalize_competition_frame(maps)
+    if maps is None:
+        frame = canonicalize_competition_frame(maps)
+    else:
+        input_columns = [column for column in maps.columns if column in _OBSERVATION_INPUT_COLUMNS]
+        frame = canonicalize_competition_frame(maps.loc[:, input_columns])
     if frame is None or frame.empty:
         return pd.DataFrame(), {
             "n_unresolved_maps": 0,
@@ -736,6 +818,22 @@ def _recent_team_baseline_anchor(
     return anchor
 
 
+def _frame_through_cutoff(maps: pd.DataFrame, cutoff: pd.Timestamp) -> pd.DataFrame:
+    """Return the exact source rows visible to a cutoff fit."""
+
+    if maps is None or maps.empty or "date" not in maps.columns:
+        return maps.copy() if maps is not None else pd.DataFrame()
+    dates = pd.to_datetime(maps["date"], errors="coerce", utc=True)
+    cap = pd.Timestamp(cutoff)
+    if pd.isna(cap):
+        return maps.iloc[0:0].copy()
+    if cap.tzinfo is None:
+        cap = cap.tz_localize("UTC")
+    else:
+        cap = cap.tz_convert("UTC")
+    return maps.loc[dates.le(cap)].copy()
+
+
 def build_team_weekly_ranks(
     maps: pd.DataFrame,
     *,
@@ -764,12 +862,15 @@ def build_team_weekly_ranks(
     recent_anchor = _recent_team_baseline_anchor(previous_as_of, previous_start, cutoff)
     if current is None:
         current, _ = fit_hierarchical_bt(maps, as_of=cutoff, write=False)
+    previous_cutoff = recent_anchor - pd.Timedelta(microseconds=1)
+    previous_maps = _frame_through_cutoff(maps, previous_cutoff)
+    previous_source_identity, _, _ = _frame_source_identity(previous_maps)
     previous, _ = fit_hierarchical_bt(
-        maps,
-        as_of=recent_anchor - pd.Timedelta(microseconds=1),
+        previous_maps,
+        as_of=previous_cutoff,
         write=False,
         cache_dir=cache_dir,
-        source_identity_sha256=source_identity_sha256,
+        source_identity_sha256=previous_source_identity,
         cache_slot="previous",
     )
 

@@ -180,6 +180,13 @@ def test_hierarchical_cache_reuses_current_and_previous_source_bound_fits(
     )
     assert set(manifest) == {"current", "previous"}
     assert manifest["current"]["key"]["source_identity_sha256"] == source_identity
+    assert manifest["current"]["key"]["implementation_sha256"] == hierarchical_bt.HIERARCHICAL_IMPLEMENTATION_SHA256
+    assert manifest["current"]["snapshot"]["schema"] == hierarchical_bt.HIERARCHICAL_SNAPSHOT_SCHEMA
+    assert manifest["current"]["snapshot"]["columns"] == list(
+        hierarchical_bt._HIERARCHICAL_SNAPSHOT_COLUMNS
+    )
+    assert manifest["current"]["snapshot"]["byte_count"] > 0
+    assert len(manifest["current"]["snapshot"]["sha256"]) == 64
     assert manifest["previous"]["key"]["slot"] == "previous"
 
 
@@ -218,3 +225,133 @@ def test_hierarchical_cache_rejects_changed_source_rows_and_binding(
         source_identity_sha256="source-b",
     )
     assert len(optimizer_calls) == 3
+
+
+def test_previous_cache_reuses_the_cutoff_prefix_after_an_append(
+    tmp_path,
+    monkeypatch: Any,
+) -> None:
+    base_maps = _fixture()
+    appended_maps = pd.concat(
+        [base_maps, pd.DataFrame([_map(12, "Team A", "Team B", 1)])],
+        ignore_index=True,
+    )
+    cutoff = pd.Timestamp("2026-01-12")
+    base_current, _ = hierarchical_bt.fit_hierarchical_bt(base_maps, write=False)
+    appended_current, _ = hierarchical_bt.fit_hierarchical_bt(appended_maps, write=False)
+    real_minimize = hierarchical_bt.minimize
+    optimizer_calls: list[None] = []
+
+    def counted_minimize(*args: Any, **kwargs: Any) -> Any:
+        optimizer_calls.append(None)
+        return real_minimize(*args, **kwargs)
+
+    monkeypatch.setattr(hierarchical_bt, "minimize", counted_minimize)
+    hierarchical_bt.build_team_weekly_ranks(
+        base_maps,
+        as_of=cutoff,
+        min_series=1,
+        current=base_current,
+        cache_dir=tmp_path,
+        source_identity_sha256="source-base",
+    )
+    assert len(optimizer_calls) == 1
+    hierarchical_bt.build_team_weekly_ranks(
+        appended_maps,
+        as_of=cutoff,
+        min_series=1,
+        current=appended_current,
+        cache_dir=tmp_path,
+        source_identity_sha256="source-current",
+    )
+    assert len(optimizer_calls) == 1
+
+    previous_cutoff = pd.Timestamp("2026-01-03 23:59:59.999999")
+    uncached_previous, _ = hierarchical_bt.fit_hierarchical_bt(
+        appended_maps,
+        as_of=previous_cutoff,
+        write=False,
+    )
+    cached_previous = pd.read_parquet(
+        tmp_path / "ratings_hierarchical_previous_snapshot.parquet"
+    )
+    pd.testing.assert_frame_equal(uncached_previous, cached_previous, check_exact=True)
+    manifest = json.loads(
+        (tmp_path / hierarchical_bt.HIERARCHICAL_CACHE_MANIFEST).read_text(encoding="utf-8")
+    )
+    assert manifest["previous"]["key"]["source_identity_sha256"] != "source-current"
+    assert manifest["previous"]["key"]["source_game_count"] == 3
+
+
+def test_hierarchical_cache_rejects_tournament_and_league_source_corrections(
+    tmp_path,
+    monkeypatch: Any,
+) -> None:
+    maps = _fixture()
+    maps["tournament"] = "LEC 2026"
+    maps["league_source"] = "LEC"
+    real_minimize = hierarchical_bt.minimize
+    optimizer_calls: list[None] = []
+
+    def counted_minimize(*args: Any, **kwargs: Any) -> Any:
+        optimizer_calls.append(None)
+        return real_minimize(*args, **kwargs)
+
+    monkeypatch.setattr(hierarchical_bt, "minimize", counted_minimize)
+    hierarchical_bt.fit_hierarchical_bt(
+        maps,
+        write=True,
+        output_dir=tmp_path,
+        cache_dir=tmp_path,
+        source_identity_sha256="source-a",
+    )
+    changed_tournament = maps.copy()
+    changed_tournament.loc[0, "tournament"] = "MSI 2026"
+    hierarchical_bt.fit_hierarchical_bt(
+        changed_tournament,
+        write=False,
+        cache_dir=tmp_path,
+        source_identity_sha256="source-a",
+    )
+    changed_league_source = maps.copy()
+    changed_league_source.loc[0, "league_source"] = "UNKNOWN"
+    hierarchical_bt.fit_hierarchical_bt(
+        changed_league_source,
+        write=False,
+        cache_dir=tmp_path,
+        source_identity_sha256="source-a",
+    )
+    assert len(optimizer_calls) == 3
+
+
+def test_hierarchical_cache_rejects_a_readable_tampered_snapshot(
+    tmp_path,
+    monkeypatch: Any,
+) -> None:
+    maps = _fixture()
+    real_minimize = hierarchical_bt.minimize
+    optimizer_calls: list[None] = []
+
+    def counted_minimize(*args: Any, **kwargs: Any) -> Any:
+        optimizer_calls.append(None)
+        return real_minimize(*args, **kwargs)
+
+    monkeypatch.setattr(hierarchical_bt, "minimize", counted_minimize)
+    hierarchical_bt.fit_hierarchical_bt(
+        maps,
+        write=True,
+        output_dir=tmp_path,
+        cache_dir=tmp_path,
+        source_identity_sha256="source-a",
+    )
+    snapshot_path = tmp_path / "ratings_hierarchical_snapshot.parquet"
+    tampered = pd.read_parquet(snapshot_path)
+    tampered.loc[0, "mu_total"] = float(tampered.loc[0, "mu_total"]) + 1.0
+    tampered.to_parquet(snapshot_path, index=False)
+    hierarchical_bt.fit_hierarchical_bt(
+        maps,
+        write=False,
+        cache_dir=tmp_path,
+        source_identity_sha256="source-a",
+    )
+    assert len(optimizer_calls) == 2

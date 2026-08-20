@@ -310,16 +310,29 @@ def lineup_hashes_from_players(players: pd.DataFrame) -> dict[str, str]:
     name_col = "playername" if "playername" in players.columns else None
     gcol = "game_uid" if "game_uid" in players.columns else "gameid"
     tcol = "teamname" if "teamname" in players.columns else "team"
-    groups = players.groupby([gcol, tcol])
-    for (gid, team), g in groups:
-        team_n = normalize_team(str(team))
-        if name_col and g[name_col].notna().any():
-            parts = sorted(str(x) for x in g[name_col].dropna().unique())
-        elif key_col:
-            parts = sorted(str(x) for x in g[key_col].dropna().unique())
-        else:
-            continue
-        out[f"{gid}|{team_n}"] = "|".join(parts)
+    group_cols = [gcol, tcol]
+
+    def aggregate(column: str | None) -> pd.Series:
+        if column is None:
+            return pd.Series(dtype="string")
+        frame = players.loc[players[column].notna(), group_cols + [column]].copy()
+        if frame.empty:
+            return pd.Series(dtype="string")
+        frame["_lineup_part"] = frame[column].map(str)
+        frame = frame.drop_duplicates(group_cols + ["_lineup_part"])
+        frame = frame.sort_values(group_cols + ["_lineup_part"], kind="mergesort")
+        return frame.groupby(group_cols, sort=True, dropna=True, observed=False)["_lineup_part"].agg("|".join)
+
+    names = aggregate(name_col)
+    champions = aggregate(key_col)
+    if names.empty:
+        selected = champions
+    elif champions.empty:
+        selected = names
+    else:
+        selected = names.combine_first(champions)
+    for (gid, team), value in selected.items():
+        out[f"{gid}|{normalize_team(str(team))}"] = str(value)
     return out
 
 
