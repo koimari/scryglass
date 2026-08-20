@@ -912,11 +912,22 @@ def _research_fit_state(
         bounds=[(-8.0, 8.0)] * X.shape[1],
         options={"maxiter": cfg.max_iter, "ftol": 1e-10, "gtol": 1e-8},
     )
-    beta = np.clip(
-        np.nan_to_num(result.x, nan=0.0, posinf=8.0, neginf=-8.0),
-        -8.0,
-        8.0,
+    raw_beta = np.asarray(result.x, dtype=float)
+    raw_jacobian = np.asarray(result.jac, dtype=float)
+    objective_value = float(result.fun)
+    finite_fit_evidence = bool(
+        np.isfinite(raw_beta).all()
+        and np.isfinite(raw_jacobian).all()
+        and math.isfinite(objective_value)
     )
+    if not bool(result.success) or not finite_fit_evidence:
+        raise ValueError(
+            "hierarchical research optimizer did not converge with finite fit evidence: "
+            f"success={bool(result.success)} status={int(getattr(result, 'status', -1))} "
+            f"message={str(result.message)} finite={finite_fit_evidence}"
+        )
+    beta = np.clip(raw_beta, -8.0, 8.0)
+    gradient_inf_norm = float(np.max(np.abs(raw_jacobian)))
     return {
         "beta": beta,
         "teams": teams,
@@ -924,7 +935,12 @@ def _research_fit_state(
         "team_index": {team: index for index, team in enumerate(teams)},
         "league_index": {league: index for index, league in enumerate(leagues)},
         "optimizer_success": bool(result.success),
+        "optimizer_status": int(getattr(result, "status", -1)),
         "optimizer_message": str(result.message),
+        "objective_value": objective_value,
+        "gradient_inf_norm": gradient_inf_norm,
+        "finite_fit_evidence": finite_fit_evidence,
+        "converged": True,
         "n_iterations": int(getattr(result, "nit", 0) or 0),
         "n_observations": int(len(observations)),
         "n_maps": int(observations["n_maps"].sum()),
@@ -1273,7 +1289,12 @@ def fit_hierarchical_bt_research_prediction(
             "n_observations": fit_state["n_observations"],
             "n_maps": fit_state["n_maps"],
             "optimizer_success": fit_state["optimizer_success"],
+            "optimizer_status": fit_state["optimizer_status"],
             "optimizer_message": fit_state["optimizer_message"],
+            "objective_value": fit_state["objective_value"],
+            "gradient_inf_norm": fit_state["gradient_inf_norm"],
+            "finite_fit_evidence": fit_state["finite_fit_evidence"],
+            "converged": fit_state["converged"],
             "n_iterations": fit_state["n_iterations"],
             "series_identity": series_audit,
         },

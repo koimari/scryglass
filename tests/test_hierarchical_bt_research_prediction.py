@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 
 import pandas as pd
 import pytest
@@ -132,6 +133,18 @@ def test_research_prediction_has_exact_receipts_and_digests() -> None:
     assert set(report["terms"]["team_logit"]) == {"a", "b", "c", "d"}
     assert set(report["terms"]["league_logit"]) == {"LCK", "LEC"}
     assert isinstance(report["terms"]["side_logit"], float)
+    fit = report["fit"]
+    assert fit["optimizer_success"] is True
+    assert fit["converged"] is True
+    assert fit["finite_fit_evidence"] is True
+    assert isinstance(fit["optimizer_status"], int)
+    assert math.isfinite(float(fit["objective_value"]))
+    assert math.isfinite(float(fit["gradient_inf_norm"]))
+
+
+def test_optimizer_failure_fails_closed_before_validation_scoring() -> None:
+    with pytest.raises(ValueError, match="did not converge with finite fit evidence"):
+        _fit(cfg=HierarchicalBTConfig(max_iter=0))
 
 
 def test_research_prediction_uses_side_and_league_terms() -> None:
