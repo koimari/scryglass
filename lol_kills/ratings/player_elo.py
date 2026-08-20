@@ -28,6 +28,8 @@ causal contribution and does not authorize predictions or betting decisions.
 
 from __future__ import annotations
 
+import hashlib
+import inspect
 import json
 import math
 from collections import defaultdict
@@ -56,7 +58,18 @@ from lol_kills.ratings.momentum_config import (
 )
 from lol_kills.ratings.global_player_bt import (
     GlobalPlayerBTConfig,
+    GlobalPlayerFitCache,
+    GlobalPlayerFitWorkspace,
     GlobalPlayerRatingError,
+    PrefixBaselineCache,
+    _frame_digest as _global_frame_digest,
+    _player_baseline_group as _shared_player_baseline_group,
+    _kth_abs_distance as _shared_kth_abs_distance,
+    _linear_quantile_sorted as _shared_linear_quantile_sorted,
+    _prior_baseline_z as _shared_prior_baseline_z,
+    _role_normalized_composite as _shared_role_normalized_composite,
+    _robust_block_baseline as _shared_robust_block_baseline_reference,
+    _robust_block_baseline_fast as _shared_robust_block_baseline_fast,
     fit_global_player_bt,
 )
 
@@ -129,6 +142,108 @@ ATTRIBUTION_WEIGHTS_STATUS = "unfitted_development_default"
 # from strictly earlier maps before it may standardize anything.  Below the
 # floor the metric is unavailable and the player falls back to neutral.
 ATTRIBUTION_MIN_BASELINE_OBS = 20
+
+
+def _rating_source_identity(maps: pd.DataFrame | None) -> str:
+    """Hash the canonical map census used to bind the persistent cache."""
+
+    canonical: set[str] = set()
+    if maps is None or maps.empty:
+        pass
+    elif "game_uid" in maps.columns:
+        fallback = maps["gameid"] if "gameid" in maps.columns else None
+        for index, value in maps["game_uid"].items():
+            game_id = canonical_source_game_key(
+                value,
+                fallback.loc[index] if fallback is not None else None,
+            )
+            if game_id:
+                canonical.add(str(game_id))
+    elif "gameid" in maps.columns:
+        for value in maps["gameid"].tolist():
+            game_id = canonical_source_game_key(value)
+            if game_id:
+                canonical.add(str(game_id))
+    raw = ("\n".join(sorted(canonical)) + "\n").encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _replay_source_identity(maps: pd.DataFrame, players: pd.DataFrame) -> str:
+    """Hash the canonical rows that one sequential replay can read."""
+
+    map_frame = canonicalize_competition_frame(maps).copy()
+    map_frame["date"] = pd.to_datetime(
+        map_frame.get("date"), errors="coerce", utc=True
+    ).dt.tz_localize(None)
+    if "game_uid" in map_frame.columns:
+        fallback = map_frame["gameid"] if "gameid" in map_frame.columns else None
+        map_frame["game_uid"] = [
+            canonical_source_game_key(
+                value,
+                fallback.loc[index] if fallback is not None else None,
+            )
+            for index, value in map_frame["game_uid"].items()
+        ]
+    elif "gameid" in map_frame.columns:
+        map_frame["game_uid"] = map_frame["gameid"].map(canonical_source_game_key)
+    else:
+        map_frame["game_uid"] = ""
+    map_frame = map_frame[
+        map_frame["game_uid"].astype(str).str.strip().ne("")
+    ].sort_values(["date", "game_uid"], kind="mergesort").reset_index(drop=True)
+    map_ids = set(map_frame["game_uid"].astype(str))
+
+    player_frame = players.copy()
+    if "game_uid" in player_frame.columns:
+        fallback = player_frame["gameid"] if "gameid" in player_frame.columns else None
+        player_ids = pd.Series(
+            [
+                canonical_source_game_key(
+                    value,
+                    fallback.loc[index] if fallback is not None else None,
+                )
+                for index, value in player_frame["game_uid"].items()
+            ],
+            index=player_frame.index,
+        )
+    elif "gameid" in player_frame.columns:
+        player_ids = player_frame["gameid"].map(canonical_source_game_key)
+    else:
+        player_ids = pd.Series("", index=player_frame.index)
+    player_frame = player_frame.loc[
+        player_ids.astype(str).isin(map_ids)
+    ].reset_index(drop=True)
+    raw = (
+        _global_frame_digest(map_frame) + _global_frame_digest(player_frame)
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _rating_cache_schema(players: pd.DataFrame | None) -> str:
+    """Fingerprint input columns and the exact baseline implementation."""
+
+    columns = sorted(str(column) for column in (players.columns if players is not None else []))
+    implementation = (
+        _robust_block_baseline,
+        _robust_block_baseline_fast,
+        _shared_robust_block_baseline_reference,
+        _shared_robust_block_baseline_fast,
+        _shared_kth_abs_distance,
+        _shared_linear_quantile_sorted,
+        _shared_prior_baseline_z,
+        _shared_role_normalized_composite,
+        GlobalPlayerFitWorkspace,
+        PrefixBaselineCache,
+    )
+    source_parts: list[str] = []
+    for function in implementation:
+        try:
+            source = inspect.getsource(function)
+        except (OSError, TypeError):
+            source = repr(function)
+        source_parts.append(source)
+    raw = ("\n".join(columns) + "\n" + "\n".join(source_parts)).encode("utf-8")
+    return "rating-input:v2:" + hashlib.sha256(raw).hexdigest()
 
 # Consistency constants for the ROBUST baseline used by ``_prior_baseline_z``.
 # Mirrors ``lol_kills.ratings.global_player_bt._MAD_TO_SIGMA`` /
@@ -530,11 +645,26 @@ def _robust_block_baseline(
     return location, scale
 
 
+def _robust_block_baseline_fast(
+    pool: np.ndarray,
+    available: np.ndarray,
+    min_obs: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Use the shared exact sorted-prefix implementation."""
+
+    return _shared_robust_block_baseline_fast(pool, available, min_obs)
+
+
 def _prior_baseline_z(
     values: pd.Series,
     group: pd.Series,
     date: pd.Series,
     min_obs: int,
+    *,
+    baseline_cache: PrefixBaselineCache | None = None,
+    metric_key: str | None = None,
+    row_key: pd.Series | None = None,
+    prepared_query: object | None = None,
 ) -> pd.Series:
     """Robust z-score against a baseline built only from strictly earlier dates.
 
@@ -552,6 +682,20 @@ def _prior_baseline_z(
     A single malformed row cannot move a 50%-breakdown estimator, so it cannot
     poison the baseline that every LATER row in the pool is measured against.
     """
+
+    if baseline_cache is not None and metric_key is not None and row_key is not None:
+        cached = baseline_cache.lookup(
+            values,
+            group,
+            date,
+            min_obs,
+            metric_key=metric_key,
+            row_key=row_key,
+            block_baseline=_robust_block_baseline_fast,
+            prepared_query=prepared_query,
+        )
+        if cached is not None:
+            return cached[0]
 
     index = values.index
     x = values.to_numpy(dtype=float)
@@ -591,7 +735,7 @@ def _prior_baseline_z(
             np.flatnonzero(starts)
         ]
 
-        block_location, block_scale = _robust_block_baseline(
+        block_location, block_scale = _robust_block_baseline_fast(
             pool, available, min_obs
         )
         location[positions] = block_location[block_of_row]
@@ -607,12 +751,27 @@ def _prior_baseline_z(
             & (scale > 0.0)
         )
         z = np.where(usable, (x - location) / scale, np.nan)
-    return pd.Series(z, index=index, dtype=float)
+    output = pd.Series(z, index=index, dtype=float)
+    if baseline_cache is not None and metric_key is not None and row_key is not None:
+        baseline_cache.store(
+            values,
+            group,
+            date,
+            min_obs,
+            metric_key=metric_key,
+            row_key=row_key,
+            z=output,
+            prior_count=pd.Series(prior_count, index=index, dtype=float),
+            prepared_query=prepared_query,
+        )
+    return output
 
 
 def player_attribution_multipliers(
     metrics: pd.DataFrame,
     cfg: PlayerEloConfig,
+    *,
+    baseline_cache: PrefixBaselineCache | None = None,
 ) -> tuple[dict[tuple[str, str, str], float], dict[str, object]]:
     """Conservative per-player multipliers for the shared team update.
 
@@ -662,9 +821,7 @@ def player_attribution_multipliers(
     features = _attribution_features(metrics)
     # Role normalization happens here: the baseline is grouped by role so every
     # z-score is relative to same-role, same-tier prior maps.
-    group = (
-        metrics["_role"].astype("string") + "|" + metrics["_attr_tier"].astype("string")
-    )
+    group = _shared_player_baseline_group(metrics["_role"], metrics["_attr_tier"])
     date = metrics["_attr_date"]
 
     ordered = [name for name in weights if name in features.columns]
@@ -675,9 +832,32 @@ def player_attribution_multipliers(
         return {}, stats
 
     z_frame = pd.DataFrame(index=metrics.index)
+    row_key = pd.Series(
+        list(
+            zip(
+                metrics["_gid"].astype(str),
+                metrics["side"].astype(str),
+                metrics["_name"].astype(str),
+                metrics["_role"].astype(str),
+            )
+        ),
+        index=metrics.index,
+    )
+    prepared_query = (
+        baseline_cache.prepare_query(group, date, row_key)
+        if baseline_cache is not None
+        else None
+    )
     for name in ordered:
         z_frame[name] = _prior_baseline_z(
-            features[name], group, date, ATTRIBUTION_MIN_BASELINE_OBS
+            features[name],
+            group,
+            date,
+            ATTRIBUTION_MIN_BASELINE_OBS,
+            baseline_cache=baseline_cache,
+            metric_key=name,
+            row_key=row_key,
+            prepared_query=prepared_query,
         )
         stats["feature_available_rows"][name] = int(z_frame[name].notna().sum())
 
@@ -873,6 +1053,185 @@ def _apply_global_scale(
     return output
 
 
+@dataclass
+class PlayerBridgeContext:
+    """Canonical player rows and reusable bridge support counts.
+
+    The weekly ladder applies the same bridge rule at five cutoffs. Keep the
+    canonical competition frame and the filtered support rows in one
+    object-local context so each cutoff only performs its date filter and
+    groupby. The raw source digest prevents a context from crossing a refresh
+    with changed player rows.
+    """
+
+    canonical_players: pd.DataFrame
+    support_rows: pd.DataFrame
+    source_players_digest: str
+    counts_by_cutoff: dict[str, pd.Series] = field(default_factory=dict, repr=False)
+    bound_players_id: int | None = field(default=None, repr=False)
+
+    @classmethod
+    def build(cls, players: pd.DataFrame) -> "PlayerBridgeContext":
+        canonical_players = canonicalize_competition_frame(players).copy()
+        frame = canonical_players.copy()
+        date_source = (
+            frame["date"]
+            if "date" in frame.columns
+            else pd.Series(pd.NaT, index=frame.index)
+        )
+        frame["_date"] = pd.to_datetime(
+            date_source, utc=True, errors="coerce"
+        ).dt.tz_localize(None)
+        if "game_uid" in frame.columns:
+            fallback = frame["gameid"] if "gameid" in frame.columns else None
+            frame["_game_id"] = [
+                canonical_source_game_key(
+                    value,
+                    fallback.loc[index] if fallback is not None else None,
+                )
+                for index, value in frame["game_uid"].items()
+            ]
+        elif "gameid" in frame.columns:
+            frame["_game_id"] = frame["gameid"].map(canonical_source_game_key)
+        else:
+            frame["_game_id"] = ""
+        frame["_player"] = frame.get(
+            "playername", pd.Series("", index=frame.index)
+        ).astype("string").str.strip()
+        competition_tier = frame.get(
+            "competition_tier", pd.Series("", index=frame.index)
+        )
+        frame["_competition_tier"] = competition_tier
+        frame = frame[
+            frame["_player"].notna()
+            & frame["_player"].ne("")
+            & frame["_game_id"].astype(str).str.strip().ne("")
+            & frame["_competition_tier"].isin({"tier1", "tier2", "tier3"})
+        ][["_date", "_game_id", "_player", "_competition_tier"]]
+        return cls(
+            canonical_players=canonical_players,
+            support_rows=frame,
+            source_players_digest=_global_frame_digest(
+                players.reset_index(drop=True)
+            ),
+        )
+
+    def matches_players(self, players: pd.DataFrame) -> bool:
+        """Check source identity without canonicalizing the candidate again."""
+
+        return bool(
+            self.source_players_digest
+            == _global_frame_digest(players.reset_index(drop=True))
+        )
+
+    def bind_players(self, players: pd.DataFrame) -> None:
+        """Record the validated source object used by one rating pass."""
+
+        self.bound_players_id = id(players)
+
+    @staticmethod
+    def _cutoff_key(through: pd.Timestamp | None) -> tuple[str, pd.Timestamp | None]:
+        if through is None:
+            return "__all__", None
+        cutoff = pd.Timestamp(through)
+        if cutoff.tzinfo is not None:
+            cutoff = cutoff.tz_convert("UTC").tz_localize(None)
+        return cutoff.isoformat(), cutoff
+
+    def counts_for(self, through: pd.Timestamp | None) -> pd.Series:
+        """Return bridge support counts at an inclusive cutoff."""
+
+        key, cutoff = self._cutoff_key(through)
+        cached = self.counts_by_cutoff.get(key)
+        if cached is not None:
+            return cached
+        support = self.support_rows
+        if cutoff is not None:
+            support = support[support["_date"].le(cutoff)]
+        support = support.drop_duplicates(["_player", "_game_id"])
+        counts = support.groupby(
+            ["_player", "_competition_tier"], sort=False
+        ).size()
+        self.counts_by_cutoff[key] = counts
+        return counts
+
+
+def _current_tier_records(canonical_players: pd.DataFrame) -> dict[str, object]:
+    """Return only the current-tier field used by weekly rank ordering.
+
+    This follows ``build_player_records`` with no team record override. It
+    keeps rows with valid results, removes team summary rows, and selects the
+    latest team-affiliation league row per player. A stable sort keeps the
+    first source row when dates tie, matching ``_latest_row``.
+    """
+
+    if (
+        canonical_players is None
+        or canonical_players.empty
+        or "playername" not in canonical_players.columns
+        or "league" not in canonical_players.columns
+        or "competition_tier" not in canonical_players.columns
+    ):
+        return {}
+    from lol_kills.export.pack_records import INVALID_COMPETITION_LABELS
+    if not canonical_players.index.is_unique:
+        from lol_kills.export.pack_records import build_player_records
+
+        full_records = build_player_records(
+            canonical_players,
+            canonicalized=True,
+        )
+        return {
+            str(player): record.get("current_tier")
+            for player, record in full_records.items()
+        }
+
+    frame = canonical_players.copy()
+    frame = frame[frame["playername"].notna()]
+    if "position" in frame.columns:
+        frame = frame[frame["position"].astype(str).str.lower().ne("team")]
+    if frame.empty:
+        return {}
+    frame["_result"] = pd.to_numeric(frame.get("result"), errors="coerce")
+    frame = frame[frame["_result"].notna()].copy()
+    if frame.empty:
+        return {}
+    frame["_player"] = frame["playername"].astype(str)
+    valid_league = ~frame["league"].astype(str).str.upper().isin(
+        INVALID_COMPETITION_LABELS
+    )
+    affiliation = frame.loc[valid_league]
+    affiliation = affiliation[
+        affiliation["league"].map(is_team_affiliation_league)
+    ].copy()
+    records = {
+        player: None for player in frame["_player"].astype(str).unique()
+    }
+    if affiliation.empty or "date" not in affiliation.columns:
+        return records
+    affiliation["_date"] = pd.to_datetime(
+        affiliation["date"], errors="coerce", utc=True
+    )
+    affiliation = affiliation[affiliation["_date"].notna()]
+    if affiliation.empty:
+        return records
+    latest = (
+        affiliation.sort_values(
+            ["_player", "_date"],
+            ascending=[True, False],
+            kind="mergesort",
+        )
+        .drop_duplicates("_player", keep="first")
+    )
+    records.update(
+        {
+            str(row["_player"]): str(row["competition_tier"])
+            for _, row in latest.iterrows()
+        }
+    )
+    return records
+
+
 def _apply_bridge_uncertainty(
     rows: list[dict[str, object]],
     players: pd.DataFrame,
@@ -880,38 +1239,18 @@ def _apply_bridge_uncertainty(
     cfg: PlayerEloConfig,
     *,
     through: pd.Timestamp | None = None,
+    bridge_context: PlayerBridgeContext | None = None,
 ) -> list[dict[str, object]]:
     """Widen weak cross-tier anchors without moving the fitted mean."""
 
-    frame = canonicalize_competition_frame(players).copy()
-    date_source = frame["date"] if "date" in frame.columns else pd.Series(pd.NaT, index=frame.index)
-    frame["_date"] = pd.to_datetime(date_source, utc=True, errors="coerce").dt.tz_localize(None)
-    if through is not None:
-        cutoff = pd.Timestamp(through)
-        if cutoff.tzinfo is not None:
-            cutoff = cutoff.tz_convert("UTC").tz_localize(None)
-        frame = frame[frame["_date"].le(cutoff)]
-    if "game_uid" in frame.columns:
-        fallback = frame["gameid"] if "gameid" in frame.columns else None
-        frame["_game_id"] = [
-            canonical_source_game_key(
-                value,
-                fallback.loc[index] if fallback is not None else None,
-            )
-            for index, value in frame["game_uid"].items()
-        ]
-    elif "gameid" in frame.columns:
-        frame["_game_id"] = frame["gameid"].map(canonical_source_game_key)
-    else:
-        frame["_game_id"] = ""
-    frame["_player"] = frame.get("playername", pd.Series("", index=frame.index)).astype("string").str.strip()
-    frame = frame[
-        frame["_player"].notna()
-        & frame["_player"].ne("")
-        & frame["_game_id"].astype(str).str.strip().ne("")
-        & frame["competition_tier"].isin({"tier1", "tier2", "tier3"})
-    ].drop_duplicates(["_player", "_game_id"])
-    tier_counts = frame.groupby(["_player", "competition_tier"], sort=False).size()
+    context = bridge_context
+    if context is None:
+        context = PlayerBridgeContext.build(players)
+    elif context.bound_players_id != id(players):
+        if not context.matches_players(players):
+            context = PlayerBridgeContext.build(players)
+        context.bind_players(players)
+    tier_counts = context.counts_for(through)
 
     output = []
     for source in rows:
@@ -945,6 +1284,8 @@ def _run_player_elo(
     players: pd.DataFrame,
     cfg: PlayerEloConfig,
     checkpoint_dates: list[pd.Timestamp] | None = None,
+    *,
+    baseline_cache: PrefixBaselineCache | None = None,
 ) -> tuple[pd.DataFrame, dict[str, PlayerState], dict[pd.Timestamp, list[dict[str, object]]]]:
     """Run the sequential player model and optionally capture dated states."""
 
@@ -967,7 +1308,9 @@ def _run_player_elo(
     if cfg.attribution_enabled:
         lineups, attribution_metrics = _lineups_by_game(players, with_metrics=True)
         attribution, attribution_stats = player_attribution_multipliers(
-            attribution_metrics, cfg
+            attribution_metrics,
+            cfg,
+            baseline_cache=baseline_cache,
         )
     else:
         lineups = _lineups_by_game(players)
@@ -1189,18 +1532,53 @@ def build_player_ratings(
     cfg: PlayerEloConfig | None = None,
     output_dir: Path | None = None,
     player_records: Mapping[str, Mapping[str, object]] | None = None,
+    checkpoint_dates: list[pd.Timestamp] | None = None,
+    replay_out: dict[str, object] | None = None,
 ) -> pd.DataFrame:
     """Sequential player Elo; player ratings travel across org changes."""
 
     cfg = cfg or PlayerEloConfig()
-    out, states, _checkpoints, recent_mus = _run_player_elo(maps, players, cfg)
-    attribution_stats = dict(LAST_ATTRIBUTION_STATS)
     destination = Path(output_dir or FEATURES_DIR)
     destination.mkdir(parents=True, exist_ok=True)
+    baseline_cache_path = destination / "player_prefix_baseline_cache"
+    cache_source_identity = _rating_source_identity(maps)
+    cache_schema_fingerprint = _rating_cache_schema(players)
+    baseline_cache = PrefixBaselineCache(
+        storage_path=baseline_cache_path,
+        source_identity=cache_source_identity,
+        schema_fingerprint=cache_schema_fingerprint,
+    )
+    fit_cache = GlobalPlayerFitCache(
+        storage_path=destination / "player_global_fit_cache",
+    )
+    out, states, checkpoints, recent_mus = _run_player_elo(
+        maps,
+        players,
+        cfg,
+        checkpoint_dates=checkpoint_dates,
+        baseline_cache=baseline_cache,
+    )
+    attribution_stats = dict(LAST_ATTRIBUTION_STATS)
     path = destination / "player_ratings.parquet"
     out.to_parquet(path, index=False)
 
-    global_snapshot, global_meta = fit_global_player_bt(maps, players)
+    bridge_context = None
+    if replay_out is not None or player_records is not None:
+        bridge_context = PlayerBridgeContext.build(players)
+        bridge_context.bind_players(players)
+    global_workspace = GlobalPlayerFitWorkspace.build(
+        maps,
+        players,
+        baseline_cache=baseline_cache,
+    )
+    global_snapshot, global_meta = fit_global_player_bt(
+        maps,
+        players,
+        baseline_cache=baseline_cache,
+        fit_cache=fit_cache,
+        fit_cache_slot="current",
+        workspace=global_workspace,
+    )
     snap = _apply_global_scale(
         _snapshot_rows(states, recent_mus, cfg), global_snapshot, cfg
     )
@@ -1211,9 +1589,31 @@ def build_player_ratings(
                 continue
             row["last_team"] = record.get("current_team")
             row["home_league"] = record.get("current_league") or "UNKNOWN"
-        snap = _apply_bridge_uncertainty(snap, players, player_records, cfg)
+        snap = _apply_bridge_uncertainty(
+            snap,
+            players,
+            player_records,
+            cfg,
+            bridge_context=bridge_context,
+        )
     snap_df = pd.DataFrame(snap).sort_values("mu_effective", ascending=False)
     snap_df.to_parquet(destination / "player_ratings_snapshot.parquet", index=False)
+    if replay_out is not None:
+        replay_out.clear()
+        replay_out.update(
+            {
+                "source_identity": _replay_source_identity(maps, players),
+                "config": dict(cfg.__dict__),
+                "states": states,
+                "checkpoints": checkpoints,
+                "recent_mus": recent_mus,
+                "current_global": global_snapshot.copy(deep=True),
+                "current_global_meta": dict(global_meta),
+                "global_workspace": global_workspace,
+                "bridge_context": bridge_context,
+                "baseline_cache": baseline_cache,
+            }
+        )
     (destination / "player_ratings_meta.json").write_text(
         json.dumps(
             {
@@ -1255,6 +1655,8 @@ def build_player_ratings(
             indent=2,
         )
     )
+    baseline_cache.flush()
+    fit_cache.flush()
     print(f"[player_elo] wrote {path} n={len(out)} players={len(snap)}")
     return out
 
@@ -1293,15 +1695,37 @@ def _recent_baseline_anchor(
     return anchor
 
 
+def weekly_replay_checkpoint_dates(
+    as_of: pd.Timestamp | None,
+    previous_as_of: pd.Timestamp | None = None,
+) -> list[pd.Timestamp]:
+    """Return the exact replay checkpoints used by weekly movement ranks."""
+
+    week_start = _sunday_utc(as_of)
+    previous_start = week_start - pd.Timedelta(days=7)
+    cutoff = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp.now(tz="UTC")
+    if cutoff.tzinfo is not None:
+        cutoff = cutoff.tz_convert("UTC").tz_localize(None)
+    comparison_cutoffs = [
+        cutoff - pd.DateOffset(months=1),
+        cutoff - pd.DateOffset(months=3),
+        cutoff - pd.DateOffset(months=12),
+    ]
+    recent_anchor = _recent_baseline_anchor(previous_as_of, previous_start, cutoff)
+    return [recent_anchor, *comparison_cutoffs]
+
+
 def build_player_weekly_ranks(
     maps: pd.DataFrame,
     players: pd.DataFrame,
     cfg: PlayerEloConfig | None = None,
     *,
+    output_dir: Path | None = None,
     as_of: pd.Timestamp | None = None,
     min_games: int = 20,
     player_records: Mapping[str, Mapping[str, object]] | None = None,
     previous_as_of: pd.Timestamp | None = None,
+    replay: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Return current ranks with recent and calendar-month movement.
 
@@ -1314,6 +1738,14 @@ def build_player_weekly_ranks(
     """
 
     cfg = cfg or PlayerEloConfig()
+    destination = Path(output_dir or FEATURES_DIR)
+    destination.mkdir(parents=True, exist_ok=True)
+    baseline_cache_path = destination / "player_prefix_baseline_cache"
+    cache_source_identity = _rating_source_identity(maps)
+    cache_schema_fingerprint = _rating_cache_schema(players)
+    fit_cache = GlobalPlayerFitCache(
+        storage_path=destination / "player_global_fit_cache",
+    )
     week_start = _sunday_utc(as_of)
     previous_start = week_start - pd.Timedelta(days=7)
     frame = maps.copy()
@@ -1330,43 +1762,125 @@ def build_player_weekly_ranks(
         frame = frame[frame["date"].le(cutoff)]
 
     recent_anchor = _recent_baseline_anchor(previous_as_of, previous_start, cutoff)
-    _, states, checkpoints, _recent_mus = _run_player_elo(
-        frame,
-        players,
-        cfg,
-        checkpoint_dates=[recent_anchor, *comparison_cutoffs.values()],
+    required_checkpoints = [recent_anchor, *comparison_cutoffs.values()]
+    replay_hit = False
+    saved_workspace = None
+    saved_bridge_context = None
+    if replay is not None:
+        saved_source = replay.get("source_identity")
+        saved_config = replay.get("config")
+        saved_states = replay.get("states")
+        saved_checkpoints = replay.get("checkpoints")
+        saved_recent_mus = replay.get("recent_mus")
+        saved_global = replay.get("current_global")
+        saved_workspace = replay.get("global_workspace")
+        saved_bridge_context = replay.get("bridge_context")
+        checkpoint_keys = set(saved_checkpoints) if isinstance(saved_checkpoints, dict) else set()
+        replay_hit = bool(
+            saved_source == _replay_source_identity(frame, players)
+            and saved_config == dict(cfg.__dict__)
+            and isinstance(saved_states, dict)
+            and isinstance(saved_checkpoints, dict)
+            and set(required_checkpoints).issubset(checkpoint_keys)
+            and isinstance(saved_recent_mus, dict)
+            and isinstance(saved_global, pd.DataFrame)
+        )
+    saved_baseline_cache = (
+        replay.get("baseline_cache") if replay is not None else None
     )
-    current_global, _current_meta = fit_global_player_bt(
-        frame,
-        players,
-        GlobalPlayerBTConfig(minimum_maps=1),
-        through=cutoff,
-        validate=False,
-    )
-    # Current affiliation is the publication filter.  Historical matches in a
+    if (
+        replay_hit
+        and isinstance(saved_baseline_cache, PrefixBaselineCache)
+        and saved_baseline_cache.source_identity == cache_source_identity
+        and saved_baseline_cache.schema_fingerprint == cache_schema_fingerprint
+        and saved_baseline_cache.storage_path is not None
+        and saved_baseline_cache.storage_path.resolve() == baseline_cache_path.resolve()
+    ):
+        baseline_cache = saved_baseline_cache
+    else:
+        baseline_cache = PrefixBaselineCache(
+            storage_path=baseline_cache_path,
+            source_identity=cache_source_identity,
+            schema_fingerprint=cache_schema_fingerprint,
+        )
+    global_workspace = None
+    if isinstance(saved_workspace, GlobalPlayerFitWorkspace):
+        if saved_workspace.matches_source(frame, players):
+            global_workspace = saved_workspace
+    if global_workspace is None:
+        global_workspace = GlobalPlayerFitWorkspace.build(
+            frame,
+            players,
+            baseline_cache=baseline_cache,
+        )
+    bridge_context = None
+    if isinstance(saved_bridge_context, PlayerBridgeContext):
+        if saved_bridge_context.matches_players(players):
+            bridge_context = saved_bridge_context
+    if bridge_context is None:
+        bridge_context = PlayerBridgeContext.build(players)
+    bridge_context.bind_players(players)
+    if replay_hit:
+        states = saved_states
+        checkpoints = saved_checkpoints
+        current_global = saved_global.copy(deep=True)
+    else:
+        _, states, checkpoints, _ = _run_player_elo(
+            frame,
+            players,
+            cfg,
+            checkpoint_dates=required_checkpoints,
+            baseline_cache=baseline_cache,
+        )
+        current_global, _current_meta = fit_global_player_bt(
+            frame,
+            players,
+            GlobalPlayerBTConfig(minimum_maps=1),
+            through=cutoff,
+            validate=False,
+            baseline_cache=baseline_cache,
+            fit_cache=fit_cache,
+            fit_cache_slot="current",
+            workspace=global_workspace,
+        )
+    # Current affiliation is the publication filter. Historical matches in a
     # different circuit remain evidence for the rating but cannot place a
     # developmental player in the current Tier 1 board.
-    from lol_kills.export.pack_records import build_player_records
-
-    current_records = dict(player_records) if player_records is not None else build_player_records(players)
+    current_records = (
+        dict(player_records)
+        if player_records is not None
+        else {
+            player: {"current_tier": tier}
+            for player, tier in _current_tier_records(
+                bridge_context.canonical_players
+            ).items()
+        }
+    )
     current_rows = _apply_bridge_uncertainty(
         _apply_global_scale(_snapshot_rows(states, cfg=cfg), current_global, cfg),
         players,
         current_records,
         cfg,
         through=cutoff,
+        bridge_context=bridge_context,
     )
-    def historical_rows(anchor: pd.Timestamp) -> list[dict[str, object]]:
+    def historical_rows(anchor: pd.Timestamp, anchor_label: str) -> list[dict[str, object]]:
         snapshot = checkpoints.get(anchor, [])
         if not snapshot:
             return []
         try:
+            historical_cache = fit_cache if anchor_label == "recent" else None
+            historical_cache_slot = anchor_label if anchor_label == "recent" else None
             historical_global, _historical_meta = fit_global_player_bt(
                 frame,
                 players,
                 GlobalPlayerBTConfig(minimum_maps=1),
                 through=anchor,
                 validate=False,
+                baseline_cache=baseline_cache,
+                fit_cache=historical_cache,
+                fit_cache_slot=historical_cache_slot,
+                workspace=global_workspace,
             )
         except GlobalPlayerRatingError:
             return []
@@ -1376,11 +1890,12 @@ def build_player_weekly_ranks(
             current_records,
             cfg,
             through=anchor,
+            bridge_context=bridge_context,
         )
 
-    previous_rows = historical_rows(recent_anchor)
+    previous_rows = historical_rows(recent_anchor, "recent")
     comparison_rows = {
-        label: historical_rows(anchor)
+        label: historical_rows(anchor, label)
         for label, anchor in comparison_cutoffs.items()
     }
     current_tiers = {
@@ -1437,6 +1952,8 @@ def build_player_weekly_ranks(
             }
         by_player[player] = values
 
+    baseline_cache.flush()
+    fit_cache.flush()
     return {
         "as_of": f"{week_start.isoformat()}Z",
         "previous_as_of": f"{recent_anchor.isoformat()}Z",

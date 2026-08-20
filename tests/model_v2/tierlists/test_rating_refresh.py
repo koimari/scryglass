@@ -57,12 +57,31 @@ def test_refresh_writes_rating_artifacts_under_runtime_root(
         ).to_parquet(output_dir / "ratings_dual_snapshot.parquet", index=False)
         (output_dir / "ratings_meta.json").write_text("{}", encoding="utf-8")
 
-    def fake_player(_maps, _players, *, cfg, output_dir):
+    def fake_player(
+        _maps,
+        _players,
+        *,
+        cfg,
+        output_dir,
+        checkpoint_dates=None,
+        replay_out=None,
+    ):
         write_frame(output_dir / "player_ratings.parquet")
         write_frame(output_dir / "player_ratings_snapshot.parquet")
         (output_dir / "player_ratings_meta.json").write_text("{}", encoding="utf-8")
+        if replay_out is not None:
+            replay_out.update(
+                {
+                    "source_identity": "test",
+                    "config": cfg.__dict__.copy(),
+                    "states": {},
+                    "checkpoints": {},
+                    "recent_mus": {},
+                    "current_global": pd.DataFrame(),
+                }
+            )
 
-    def fake_hierarchical(_maps, *, write, output_dir):
+    def fake_hierarchical(_maps, *, write, output_dir, **_kwargs):
         write_frame(output_dir / "ratings_snapshot.parquet")
         return pd.DataFrame({"team": ["Blue"], "mu_total": [1500.0]}), {"model": "test"}
 
@@ -72,7 +91,13 @@ def test_refresh_writes_rating_artifacts_under_runtime_root(
     monkeypatch.setattr(rating_refresh, "build_player_ratings", fake_player)
     monkeypatch.setattr(rating_refresh, "fit_hierarchical_bt", fake_hierarchical)
     monkeypatch.setattr(rating_refresh, "build_team_weekly_ranks", lambda *args, **kwargs: {"by_team": {}})
-    monkeypatch.setattr(rating_refresh, "build_player_weekly_ranks", lambda *args, **kwargs: {"by_player": {}})
+    weekly_calls = []
+
+    def fake_player_weekly(*args, **kwargs):
+        weekly_calls.append(kwargs)
+        return {"by_player": {}}
+
+    monkeypatch.setattr(rating_refresh, "build_player_weekly_ranks", fake_player_weekly)
 
     maps_frame = pd.DataFrame([game])
     payload = rating_refresh.refresh_ratings(
@@ -90,6 +115,7 @@ def test_refresh_writes_rating_artifacts_under_runtime_root(
     assert not (worker_cwd / "data").exists()
     assert payload["source"]["source_game_count"] == 1
     assert payload["source"]["source_identity_sha256"] == source_identity_sha256(["g1"])
+    assert weekly_calls[0]["output_dir"] == runtime_root / rating_refresh.FEATURES_RELATIVE
     written_manifest = json.loads(expected.read_text(encoding="utf-8"))
     ratings_meta = json.loads(
         (runtime_root / rating_refresh.FEATURES_RELATIVE / "ratings_meta.json").read_text(

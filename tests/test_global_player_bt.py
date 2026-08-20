@@ -7,9 +7,15 @@ from lol_kills.ratings.global_player_bt import (
     GlobalPlayerBTConfig,
     GlobalPlayerRatingError,
     _contribution_metrics,
+    _complete_lineups,
+    _model_rows,
     fit_global_player_bt,
 )
-from lol_kills.ratings.player_elo import PlayerEloConfig, _apply_bridge_uncertainty
+from lol_kills.ratings.player_elo import (
+    PlayerBridgeContext,
+    PlayerEloConfig,
+    _apply_bridge_uncertainty,
+)
 
 
 ROLES = ("top", "jng", "mid", "bot", "sup")
@@ -99,6 +105,97 @@ def _config(**changes: object) -> GlobalPlayerBTConfig:
     }
     values.update(changes)
     return GlobalPlayerBTConfig(**values)
+
+
+def test_complete_lineups_keeps_source_order_for_duplicate_roles() -> None:
+    rows: list[dict[str, object]] = []
+
+    def add_side(game_id: str, side: str, names: dict[str, object]) -> None:
+        for position, player in names.items():
+            values = player if isinstance(player, list) else [player]
+            for value in values:
+                rows.append(
+                    {
+                        "game_uid": game_id,
+                        "side": side,
+                        "position": position,
+                        "playername": value,
+                    }
+                )
+
+    add_side(
+        "g1",
+        "blue",
+        {
+            "top lane": ["Zulu", "Alpha"],
+            "jungle": "J1",
+            "mid": "M1",
+            "adc": "B1",
+            "support": "S1",
+        },
+    )
+    add_side(
+        "g1",
+        "red",
+        {"top": "T2", "jng": "J2", "mid": "M2", "bot": "B2", "sup": "S2"},
+    )
+    add_side(
+        "g2",
+        "blue",
+        {"top": "Top", "jng": "J3", "mid": "Top", "bot": "B3", "sup": "S3"},
+    )
+    add_side(
+        "g2",
+        "red",
+        {"top": "T4", "jng": "J4", "mid": "M4", "bot": "B4", "sup": "S4"},
+    )
+    add_side(
+        "g3",
+        "blue",
+        {"top": ["T5", "T5"], "jng": "J5", "mid": "M5", "bot": "B5", "sup": "S5"},
+    )
+    add_side(
+        "g3",
+        "red",
+        {"top": "T6", "jng": "J6", "mid": "M6", "bot": "B6", "sup": "S6"},
+    )
+
+    assert _complete_lineups(pd.DataFrame(rows)) == {
+        "g1": {
+            "Blue": [("Zulu", "top"), ("J1", "jng"), ("M1", "mid"), ("B1", "bot"), ("S1", "sup")],
+            "Red": [("T2", "top"), ("J2", "jng"), ("M2", "mid"), ("B2", "bot"), ("S2", "sup")],
+        },
+        "g3": {
+            "Blue": [("T5", "top"), ("J5", "jng"), ("M5", "mid"), ("B5", "bot"), ("S5", "sup")],
+            "Red": [("T6", "top"), ("J6", "jng"), ("M6", "mid"), ("B6", "bot"), ("S6", "sup")],
+        },
+    }
+
+
+def test_model_rows_preserves_canonical_frame_order_and_cutoff() -> None:
+    maps = pd.DataFrame(
+        [
+            {"game_uid": "g1", "date": "2026-01-01T00:00:00Z", "y_blue_win": 1},
+            {"game_uid": "oe-api:g1", "date": "2026-01-02T00:00:00Z", "y_blue_win": 0},
+            {"game_uid": "g2", "date": "2026-01-03T00:00:00Z", "y_blue_win": 1},
+            {"game_uid": "g3", "date": "2026-01-04T00:00:00Z", "y_blue_win": "bad"},
+        ]
+    )
+    players = _fixture(
+        [("g1", "blue", "red", 0, "LCK"), ("g2", "blue2", "red2", 1, "LCK")]
+    )[1]
+
+    frame, lineups = _model_rows(
+        maps,
+        players,
+        through=pd.Timestamp("2026-01-03T12:00:00Z"),
+    )
+
+    assert frame[["game_id", "date", "result"]].to_dict("records") == [
+        {"game_id": "g1", "date": pd.Timestamp("2026-01-02"), "result": 0},
+        {"game_id": "g2", "date": pd.Timestamp("2026-01-03"), "result": 1},
+    ]
+    assert set(lineups) == {"g1", "g2"}
 
 
 def test_cross_pool_games_put_domestic_results_on_one_scale() -> None:
@@ -195,6 +292,25 @@ def test_stronger_tier_history_reduces_bridge_uncertainty_without_moving_mean() 
     assert local_row["global_bridge_sigma"] == 45.0
     assert bridged_row["global_bridge_sigma"] < local_row["global_bridge_sigma"]
     assert bridged_row["sigma"] < local_row["sigma"]
+
+    context = PlayerBridgeContext.build(bridged)
+    for cutoff in (pd.Timestamp("2025-12-31"), pd.Timestamp("2026-01-01"), None):
+        direct = _apply_bridge_uncertainty(
+            rows,
+            bridged,
+            records,
+            PlayerEloConfig(),
+            through=cutoff,
+        )
+        reused = _apply_bridge_uncertainty(
+            rows,
+            bridged,
+            records,
+            PlayerEloConfig(),
+            through=cutoff,
+            bridge_context=context,
+        )
+        assert reused == direct
 
 
 def test_holdout_evidence_is_chronological_and_beats_side_only_baseline() -> None:

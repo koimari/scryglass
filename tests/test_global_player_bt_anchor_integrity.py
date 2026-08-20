@@ -12,8 +12,12 @@ One test module per confirmed P1 finding on the anchor:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+import subprocess
+import sys
+import zipfile
 
 import numpy as np
 import pandas as pd
@@ -24,14 +28,24 @@ from lol_kills.export.public_pack import (
     PublicPlayerAnchorError,
     require_player_performance_anchor,
 )
+from lol_kills.ratings import global_player_bt as global_player_bt_module
 from lol_kills.ratings import player_elo
 from lol_kills.ratings.global_player_bt import (
     ANCHOR_METRIC_Z_CLIP,
     ANCHOR_MIN_BASELINE_OBS,
     GlobalPlayerRatingError,
+    GlobalPlayerFitCache,
+    GlobalPlayerFitWorkspace,
+    PrefixBaselineCache,
+    PrefixBaselineCacheError,
+    PERFORMANCE_ANCHOR_METRIC_WEIGHTS,
     PERFORMANCE_ANCHOR_SOURCE_COLUMNS,
     _contribution_metrics,
+    _baseline_group,
+    _player_baseline_group,
     _prior_baseline_z,
+    _robust_block_baseline,
+    _robust_block_baseline_fast,
     _role_normalized_composite,
     fit_global_player_bt,
 )
@@ -104,6 +118,70 @@ def test_disabled_anchor_is_not_caught_by_the_release_check() -> None:
     )
     assert meta["performance_anchor"]["enabled"] is False
     assert "global_performance_anchor_logit" not in snapshot.columns
+
+
+def test_global_fit_wraps_minimize_in_single_thread_limiter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The optimizer stays inside the deterministic BLAS thread limit."""
+
+    design = global_player_bt_module.csr_matrix(
+        np.asarray(
+            [
+                [1.0, -1.0],
+                [-1.0, 1.0],
+                [1.0, 1.0],
+                [-1.0, -1.0],
+            ]
+        )
+    )
+    outcome = np.asarray([1.0, 0.0, 1.0, 0.0])
+    cfg = _config(max_iterations=100)
+    reference = global_player_bt_module._fit(design, outcome, cfg)
+    events: list[object] = []
+    active = False
+    real_minimize = global_player_bt_module.minimize
+
+    class Limiter:
+        def __enter__(self):
+            nonlocal active
+            active = True
+            events.append("enter")
+            return self
+
+        def __exit__(self, *_args):
+            nonlocal active
+            events.append(("exit", active))
+            active = False
+
+    def fake_limits(*, limits: int):
+        events.append(("limits", limits))
+        return Limiter()
+
+    def wrapped_minimize(*args, **kwargs):
+        assert active is True
+        events.append("minimize")
+        return real_minimize(*args, **kwargs)
+
+    monkeypatch.setattr(global_player_bt_module, "threadpool_limits", fake_limits)
+    monkeypatch.setattr(global_player_bt_module, "minimize", wrapped_minimize)
+    actual = global_player_bt_module._fit(design, outcome, cfg)
+
+    assert np.array_equal(actual[0], reference[0])
+    assert actual[1] == reference[1]
+    assert events == [("limits", 1), "enter", "minimize", ("exit", True)]
+
+
+def test_global_fit_fails_explicitly_without_threadpoolctl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing limiter dependency cannot silently publish a fit."""
+
+    design = global_player_bt_module.csr_matrix(np.asarray([[1.0], [-1.0]]))
+    outcome = np.asarray([1.0, 0.0])
+    monkeypatch.setattr(global_player_bt_module, "threadpool_limits", None)
+    with pytest.raises(GlobalPlayerRatingError, match="threadpoolctl"):
+        global_player_bt_module._fit(design, outcome, _config(max_iterations=10))
 
 
 def _meta_file(tmp_path: Path, anchor: dict[str, object] | None) -> Path:
@@ -229,6 +307,961 @@ def test_expanding_median_is_bit_identical_to_numpy_median() -> None:
         assert (running == reference).all()
 
 
+def test_sorted_prefix_baseline_is_bit_identical_to_reference() -> None:
+    """The cold-path speedup preserves every robust prefix output."""
+
+    rng = np.random.default_rng(20260820)
+    samples = [
+        rng.normal(size=250),
+        np.round(rng.normal(size=250), 1),
+        rng.choice(np.asarray([-2.0, -0.0, 0.0, 1.0, 3.5]), size=250),
+        np.zeros(250),
+    ]
+    for sample in samples:
+        available = np.sort(rng.integers(0, len(sample) + 1, size=140))
+        min_obs = int(rng.integers(1, 30))
+        reference = _robust_block_baseline(sample, available, min_obs)
+        accelerated = _robust_block_baseline_fast(sample, available, min_obs)
+        for expected, actual in zip(reference, accelerated):
+            assert np.array_equal(expected, actual, equal_nan=True)
+
+
+def test_sorted_prefix_baseline_preserves_strict_prior_blocks() -> None:
+    """An accelerated baseline still receives only the supplied prior counts."""
+
+    values = np.asarray([1.0, 9.0, 2.0, 10.0, 3.0, 11.0])
+    available = np.asarray([0, 0, 2, 2, 4, 4])
+    reference = _robust_block_baseline(values, available, min_obs=2)
+    accelerated = _robust_block_baseline_fast(values, available, min_obs=2)
+    for expected, actual in zip(reference, accelerated):
+        assert np.array_equal(expected, actual, equal_nan=True)
+    assert accelerated[0][2] == accelerated[0][3]
+    assert accelerated[1][2] == accelerated[1][3]
+
+
+def test_sorted_prefix_baseline_keeps_exactness_when_append_starts_late() -> None:
+    """Append-only calls may provide only high-count new blocks."""
+
+    rng = np.random.default_rng(20260820)
+    values = rng.normal(size=2400)
+    available = np.asarray([1800, 1801, 1810, 2000, 2399])
+    reference = _robust_block_baseline(values, available, min_obs=20)
+    accelerated = _robust_block_baseline_fast(values, available, min_obs=20)
+    for expected, actual in zip(reference, accelerated):
+        assert np.array_equal(expected, actual, equal_nan=True)
+
+
+def test_global_missing_tier_keeps_an_explicit_bucket() -> None:
+    """The global path keeps its historical string bucket for missing tiers."""
+
+    roles = pd.Series(["top", "mid", pd.NA], dtype="string")
+    tiers = pd.Series([pd.NA, "tier1", pd.NA], dtype="string")
+    actual = _baseline_group(roles, tiers)
+    expected = pd.Series(["top\x1f<NA>", "mid\x1ftier1", "<NA>\x1f<NA>"], dtype=object)
+    pd.testing.assert_series_equal(actual, expected, check_names=False)
+
+
+@pytest.mark.parametrize("dtype", ["string", object])
+def test_global_missing_role_and_tier_buckets_are_stable(dtype: object) -> None:
+    """Nullable and object inputs use the same explicit missing bucket."""
+
+    roles = pd.Series(["top", pd.NA, np.nan, None], dtype=dtype)
+    tiers = pd.Series([pd.NA, "tier1", np.nan, None], dtype=dtype)
+    expected = pd.Series(
+        ["top\x1f<NA>", "<NA>\x1ftier1", "<NA>\x1f<NA>", "<NA>\x1f<NA>"],
+        dtype=object,
+    )
+    actual = _baseline_group(roles, tiers)
+    pd.testing.assert_series_equal(actual, expected, check_names=False)
+    pd.testing.assert_series_equal(
+        _baseline_group(roles),
+        pd.Series(["top", "<NA>", "<NA>", "<NA>"], dtype=object),
+        check_names=False,
+    )
+
+
+def test_player_missing_tier_stays_nullable_and_ungraded() -> None:
+    """The player path leaves a missing tier outside every baseline pool."""
+
+    roles = pd.Series(["top", "mid", pd.NA], dtype="string")
+    tiers = pd.Series([pd.NA, "tier1", pd.NA], dtype="string")
+    actual = _player_baseline_group(roles, tiers)
+    assert actual.isna().tolist() == [True, False, True]
+
+
+def test_rating_cache_schema_binds_baseline_implementation(monkeypatch) -> None:
+    """Changing a baseline callable creates a new persistent-cache schema."""
+
+    frame = pd.DataFrame(columns=["date", "cspm", "competition_tier"])
+    first = player_elo._rating_cache_schema(frame)
+    monkeypatch.setattr(
+        player_elo,
+        "_robust_block_baseline_fast",
+        lambda pool, available, min_obs: (available, available),
+    )
+    second = player_elo._rating_cache_schema(frame)
+    assert first != second
+
+
+def test_global_fit_cache_key_binds_model_constants(monkeypatch) -> None:
+    """Changing an anchor constant selects a new global-fit cache key."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=1))
+    frame, lineups = global_player_bt_module._model_rows(maps, players)
+    cfg = _config(minimum_maps=1)
+    baseline = global_player_bt_module._global_fit_cache_key(
+        frame, lineups, players, cfg
+    )
+    changed_weights = dict(PERFORMANCE_ANCHOR_METRIC_WEIGHTS)
+    changed_weights["cs_per_min"] += 0.25
+    changes = {
+        "PERFORMANCE_ANCHOR_METRIC_WEIGHTS": changed_weights,
+        "ANCHOR_MIN_PLAYER_MAPS": global_player_bt_module.ANCHOR_MIN_PLAYER_MAPS + 1,
+        "ANCHOR_METRIC_Z_CLIP": global_player_bt_module.ANCHOR_METRIC_Z_CLIP + 0.25,
+        "LOGIT_TO_ELO": global_player_bt_module.LOGIT_TO_ELO * 1.01,
+    }
+
+    for name, value in changes.items():
+        with monkeypatch.context() as patch:
+            patch.setattr(global_player_bt_module, name, value)
+            changed = global_player_bt_module._global_fit_cache_key(
+                frame, lineups, players, cfg
+            )
+        assert changed != baseline, name
+
+
+def test_global_fit_cache_round_trips_exact_snapshot_and_meta(tmp_path: Path) -> None:
+    """A private fit cache reuses the exact snapshot and evidence payload."""
+
+    maps, players = _fixture(_locked_roster_games())
+    cfg = _config(minimum_maps=1, performance_anchor_enabled=False)
+    path = tmp_path / "global_fit_cache"
+    first_cache = GlobalPlayerFitCache(storage_path=path)
+    first_snapshot, first_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        validate=False,
+        fit_cache=first_cache,
+    )
+    first_cache.flush()
+
+    second_cache = GlobalPlayerFitCache(storage_path=path)
+    second_snapshot, second_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        validate=False,
+        fit_cache=second_cache,
+    )
+    pd.testing.assert_frame_equal(first_snapshot, second_snapshot)
+    assert first_meta == second_meta
+    assert second_cache.hits == 1
+
+
+def test_global_fit_cache_discards_a_tampered_payload(tmp_path: Path) -> None:
+    """A checksum failure cannot return a stale fitted snapshot."""
+
+    maps, players = _fixture(_locked_roster_games())
+    cfg = _config(minimum_maps=1, performance_anchor_enabled=False)
+    path = tmp_path / "global_fit_cache"
+    cache = GlobalPlayerFitCache(storage_path=path)
+    fit_global_player_bt(maps, players, cfg, validate=False, fit_cache=cache)
+    cache.flush()
+    payload = next((tmp_path / "global_fit_cache.entries").glob("entry_*.parquet"))
+    payload.write_bytes(payload.read_bytes() + b"drift")
+    reloaded = GlobalPlayerFitCache(storage_path=path)
+    assert reloaded.invalidated
+    assert reloaded.lookup("unknown") is None
+
+
+def test_global_fit_cache_reuses_equivalent_cutoff_and_rejects_drift() -> None:
+    """Only the filtered census controls fit reuse, not its raw cutoff text."""
+
+    games = _locked_roster_games(rounds=2)
+    maps, players = _fixture(games)
+    cfg = _config(minimum_maps=1, performance_anchor_enabled=False)
+    cache = GlobalPlayerFitCache()
+    first_cutoff = pd.Timestamp("2026-01-01T19:30:00Z")
+    shifted_cutoff = pd.Timestamp("2026-01-02T00:00:00Z")
+    first_snapshot, first_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        through=first_cutoff,
+        validate=False,
+        fit_cache=cache,
+        fit_cache_slot="current",
+    )
+    shifted_snapshot, shifted_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        through=shifted_cutoff,
+        validate=False,
+        fit_cache=cache,
+        fit_cache_slot="current",
+    )
+    pd.testing.assert_frame_equal(first_snapshot, shifted_snapshot)
+    assert shifted_meta == first_meta
+    assert cache.hits == 1
+
+    extra_maps, extra_players = _fixture(
+        [*games, ("extra-game", "alpha", "beta", 1, "LCK")]
+    )
+    fit_global_player_bt(
+        extra_maps,
+        extra_players,
+        cfg,
+        through=pd.Timestamp("2026-01-02T00:00:00Z"),
+        validate=False,
+        fit_cache=cache,
+        fit_cache_slot="current",
+    )
+    assert cache.misses == 2
+
+    corrected_maps = maps.copy()
+    corrected_maps.loc[0, "y_blue_win"] = 1 - int(corrected_maps.loc[0, "y_blue_win"])
+    fit_global_player_bt(
+        corrected_maps,
+        players,
+        cfg,
+        through=first_cutoff,
+        validate=False,
+        fit_cache=cache,
+        fit_cache_slot="current",
+    )
+    assert cache.misses == 3
+
+
+def test_global_anchor_metric_keys_do_not_collide_with_player_attribution() -> None:
+    """Global entries coexist with player entries and retain subset hits."""
+
+    size = 40
+    dates = pd.Series(
+        pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D")
+    )
+    metrics = pd.DataFrame(
+        {
+            "_game_id": [f"g{index}" for index in range(size)],
+            "_date": dates,
+            "_side": ["Blue"] * size,
+            "_role": ["top"] * size,
+            "_player": [f"p{index}" for index in range(size)],
+            "_tier": ["tier1"] * size,
+        }
+    )
+    values = np.linspace(1.0, 80.0, size)
+    for index, metric in enumerate(PERFORMANCE_ANCHOR_METRIC_WEIGHTS):
+        metrics[metric] = values + index * 0.1
+    cache = PrefixBaselineCache()
+
+    _role_normalized_composite(metrics, baseline_cache=cache)
+    global_hits_before = cache.hits
+    player_group = player_elo._shared_player_baseline_group(
+        metrics["_role"], metrics["_tier"]
+    )
+    row_key = pd.Series(
+        list(
+            zip(
+                metrics["_game_id"],
+                metrics["_side"],
+                metrics["_player"],
+                metrics["_role"],
+            )
+        ),
+        index=metrics.index,
+    )
+    # Deliberately change the player source values. A bare global key would
+    # treat this as drift and clear every global entry.
+    player_elo._prior_baseline_z(
+        pd.Series(values + 100.0),
+        player_group,
+        dates,
+        20,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    assert not cache.invalidated
+
+    _role_normalized_composite(metrics.iloc[:30].copy(), baseline_cache=cache)
+    assert cache.hits >= global_hits_before + len(PERFORMANCE_ANCHOR_METRIC_WEIGHTS)
+
+
+def test_normalization_prepares_one_structural_query_per_cache_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Eight metrics share one validated row/group/date query."""
+
+    size = 40
+    dates = pd.Series(
+        pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D")
+    )
+    metrics = pd.DataFrame(
+        {
+            "_game_id": [f"g{index}" for index in range(size)],
+            "_date": dates,
+            "_side": ["Blue"] * size,
+            "_role": ["mid"] * size,
+            "_player": [f"p{index}" for index in range(size)],
+            "_tier": ["tier1"] * size,
+        }
+    )
+    values = np.linspace(1.0, 80.0, size)
+    for index, metric in enumerate(PERFORMANCE_ANCHOR_METRIC_WEIGHTS):
+        metrics[metric] = values + index * 0.1
+
+    reference = _role_normalized_composite(metrics.copy())
+    cache = PrefixBaselineCache()
+    prepare_calls = 0
+    array_calls = 0
+    real_prepare = cache.prepare_query
+    real_arrays = cache._arrays
+
+    def counted_prepare(*args, **kwargs):
+        nonlocal prepare_calls
+        prepare_calls += 1
+        return real_prepare(*args, **kwargs)
+
+    def counted_arrays(*args, **kwargs):
+        nonlocal array_calls
+        array_calls += 1
+        return real_arrays(*args, **kwargs)
+
+    monkeypatch.setattr(cache, "prepare_query", counted_prepare)
+    monkeypatch.setattr(cache, "_arrays", counted_arrays)
+    cached = _role_normalized_composite(metrics.copy(), baseline_cache=cache)
+
+    pd.testing.assert_series_equal(
+        cached[0], reference[0], check_names=False, check_exact=True
+    )
+    assert cached[1:] == reference[1:]
+    assert prepare_calls == 1
+    assert array_calls == 0
+
+
+def test_player_attribution_prepares_one_structural_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Player attribution keeps the same structural query for every feature."""
+
+    size = 40
+    metrics = pd.DataFrame(
+        {
+            "_gid": [f"g{index}" for index in range(size)],
+            "side": ["Blue"] * size,
+            "_name": [f"p{index}" for index in range(size)],
+            "_role": ["mid"] * size,
+            "_attr_date": pd.Timestamp("2026-01-01")
+            + pd.to_timedelta(np.arange(size), unit="D"),
+            "_attr_tier": ["tier1"] * size,
+            "gamelength": [1800.0] * size,
+            "totalgold": np.linspace(10000.0, 18000.0, size),
+            "cspm": np.linspace(5.0, 9.0, size),
+            "dpm": np.linspace(300.0, 700.0, size),
+            "damageshare": np.linspace(18.0, 32.0, size),
+            "kills": np.arange(size, dtype=float),
+            "deaths": np.ones(size),
+            "assists": np.arange(size, dtype=float),
+            "wpm": np.linspace(0.2, 0.8, size),
+            "wcpm": np.linspace(0.1, 0.7, size),
+        }
+    )
+    cfg = player_elo.PlayerEloConfig(attribution_enabled=True)
+    reference, reference_stats = player_elo.player_attribution_multipliers(
+        metrics.copy(), cfg
+    )
+    cache = PrefixBaselineCache()
+    prepare_calls = 0
+    array_calls = 0
+    real_prepare = cache.prepare_query
+    real_arrays = cache._arrays
+
+    def counted_prepare(*args, **kwargs):
+        nonlocal prepare_calls
+        prepare_calls += 1
+        return real_prepare(*args, **kwargs)
+
+    def counted_arrays(*args, **kwargs):
+        nonlocal array_calls
+        array_calls += 1
+        return real_arrays(*args, **kwargs)
+
+    monkeypatch.setattr(cache, "prepare_query", counted_prepare)
+    monkeypatch.setattr(cache, "_arrays", counted_arrays)
+    cached, cached_stats = player_elo.player_attribution_multipliers(
+        metrics.copy(), cfg, baseline_cache=cache
+    )
+    assert cached == reference
+    assert cached_stats == reference_stats
+    assert prepare_calls == 1
+    assert array_calls == 0
+
+
+def test_prepare_query_rejects_duplicate_keys_without_catalog_mutation() -> None:
+    """Duplicate row identities fail before they alter the shared catalog."""
+
+    cache = PrefixBaselineCache()
+    group = pd.Series(["mid", "mid"])
+    date = pd.Series(pd.date_range("2026-01-01", periods=2))
+    row_key = pd.Series([("g0", "Blue"), ("g0", "Blue")], dtype=object)
+    with pytest.raises(PrefixBaselineCacheError, match="row key is duplicated"):
+        cache.prepare_query(group, date, row_key)
+    assert cache._row_ids == {}
+
+
+def test_prefix_cache_level1_npz_round_trip_is_readable(tmp_path: Path) -> None:
+    """The faster archive keeps every array available to NumPy readers."""
+
+    values, group, date, row_key = _persistent_cache_fixture()
+    path = tmp_path / "prefix-baseline"
+    cache = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    cache.flush()
+    with zipfile.ZipFile(path.with_suffix(".npz")) as archive:
+        members = archive.infolist()
+        assert members
+        assert all(member.compress_type == zipfile.ZIP_DEFLATED for member in members)
+    with np.load(path.with_suffix(".npz"), allow_pickle=False) as payload:
+        assert "row_catalog" in payload
+        assert len(payload.files) == 7
+
+
+def test_global_fit_workspace_preserves_current_and_historical_outputs() -> None:
+    """One shared normalized workspace is exact at every cutoff."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=3))
+    players = _with_metrics(players, _roster_profiles())
+    cfg = _config(minimum_maps=1)
+    current_cache = PrefixBaselineCache()
+    workspace = GlobalPlayerFitWorkspace.build(
+        maps,
+        players,
+        baseline_cache=current_cache,
+    )
+    current_expected, current_expected_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        validate=False,
+        baseline_cache=PrefixBaselineCache(),
+    )
+    current_actual, current_actual_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        validate=False,
+        baseline_cache=current_cache,
+        workspace=workspace,
+    )
+    pd.testing.assert_frame_equal(current_expected, current_actual)
+    assert current_expected_meta == current_actual_meta
+
+    validated_expected, validated_expected_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        validate=True,
+        baseline_cache=PrefixBaselineCache(),
+    )
+    validated_actual, validated_actual_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        validate=True,
+        baseline_cache=current_cache,
+        workspace=workspace,
+    )
+    pd.testing.assert_frame_equal(validated_expected, validated_actual)
+    assert validated_expected_meta == validated_actual_meta
+
+    cutoff = pd.Timestamp("2026-01-01T19:30:00Z")
+    historical_expected, historical_expected_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        through=cutoff,
+        validate=False,
+        baseline_cache=PrefixBaselineCache(),
+    )
+    historical_actual, historical_actual_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        through=cutoff,
+        validate=False,
+        baseline_cache=current_cache,
+        workspace=workspace,
+    )
+    pd.testing.assert_frame_equal(historical_expected, historical_actual)
+    assert historical_expected_meta == historical_actual_meta
+
+
+def test_global_fit_workspace_uses_the_prefix_grouping_mode() -> None:
+    """A later tier label cannot change a historical role-only prefix."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=6))
+    frame = _with_metrics(players, _roster_profiles())
+    cutoff = pd.Timestamp("2026-01-01T19:30:00Z")
+    source_dates = pd.to_datetime(frame["date"], utc=True)
+    frame.loc[source_dates.le(cutoff), "competition_tier"] = pd.NA
+    assert frame.loc[source_dates.le(cutoff), "competition_tier"].isna().all()
+    assert frame.loc[source_dates.gt(cutoff), "competition_tier"].notna().any()
+
+    expected, expected_meta = fit_global_player_bt(
+        maps,
+        frame,
+        _config(),
+        through=cutoff,
+        validate=False,
+        baseline_cache=PrefixBaselineCache(),
+    )
+    cache = PrefixBaselineCache()
+    workspace = GlobalPlayerFitWorkspace.build(
+        maps,
+        frame,
+        baseline_cache=cache,
+    )
+    assert set(workspace.components_by_mode) == {"role+competition_tier"}
+    prefix_game_ids = set(
+        maps.loc[
+            pd.to_datetime(maps["date"], utc=True).le(cutoff),
+            "gameid",
+        ].astype(str)
+    )
+    assert workspace.anchor_inputs(
+        sorted(frame["playername"].astype(str).unique()),
+        prefix_game_ids,
+    ) is None
+    actual, actual_meta = fit_global_player_bt(
+        maps,
+        frame,
+        _config(),
+        through=cutoff,
+        validate=False,
+        baseline_cache=cache,
+        workspace=workspace,
+    )
+    pd.testing.assert_frame_equal(expected, actual)
+    assert expected_meta == actual_meta
+
+
+def test_weekly_builder_reuses_one_workspace_for_all_global_fits(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The integrated weekly path builds shared work once and passes it to each fit."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=2))
+    players = _with_metrics(players, _roster_profiles())
+    cfg = player_elo.PlayerEloConfig(attribution_enabled=False)
+    cutoff = pd.Timestamp("2026-02-01T12:00:00Z")
+    names = sorted(players["playername"].unique())
+    states = {
+        name: player_elo.PlayerState(n_maps=3, last_date=pd.Timestamp("2026-01-01"))
+        for name in names
+    }
+    checkpoint_dates = player_elo.weekly_replay_checkpoint_dates(cutoff)
+    checkpoint_rows = player_elo._snapshot_rows(states, cfg=cfg)
+    checkpoints = {pd.Timestamp(date): checkpoint_rows for date in checkpoint_dates}
+    global_snapshot = pd.DataFrame(
+        {
+            "player": names,
+            "global_rating": np.full(len(names), 1500.0),
+            "global_connected": np.ones(len(names), dtype=int),
+            "global_component_size": np.full(len(names), len(names), dtype=int),
+            "global_model_maps": np.full(len(names), 3, dtype=int),
+        }
+    )
+    calls = {"replay": 0, "fit": 0, "model_rows": 0, "metrics": 0}
+    workspace_ids: list[int] = []
+    cache_args: list[tuple[object, bool]] = []
+    real_model_rows = global_player_bt_module._model_rows
+    real_contribution_metrics = global_player_bt_module._contribution_metrics
+
+    def counted_model_rows(*args, **kwargs):
+        calls["model_rows"] += 1
+        return real_model_rows(*args, **kwargs)
+
+    def counted_contribution_metrics(*args, **kwargs):
+        calls["metrics"] += 1
+        return real_contribution_metrics(*args, **kwargs)
+
+    def fake_replay(*_args, **_kwargs):
+        calls["replay"] += 1
+        return pd.DataFrame(), states, checkpoints, {}
+
+    def fake_fit(*_args, **kwargs):
+        calls["fit"] += 1
+        workspace_ids.append(id(kwargs["workspace"]))
+        cache_args.append(
+            (kwargs.get("fit_cache_slot"), kwargs.get("fit_cache") is not None)
+        )
+        return global_snapshot.copy(deep=True), {}
+
+    monkeypatch.setattr(global_player_bt_module, "_model_rows", counted_model_rows)
+    monkeypatch.setattr(
+        global_player_bt_module,
+        "_contribution_metrics",
+        counted_contribution_metrics,
+    )
+    monkeypatch.setattr(player_elo, "_run_player_elo", fake_replay)
+    monkeypatch.setattr(player_elo, "fit_global_player_bt", fake_fit)
+    player_elo.build_player_weekly_ranks(
+        maps,
+        players,
+        cfg=cfg,
+        output_dir=tmp_path / "first",
+        as_of=cutoff,
+        min_games=1,
+        player_records={},
+    )
+    assert calls == {"replay": 1, "fit": 5, "model_rows": 1, "metrics": 1}
+    assert len(set(workspace_ids)) == 1
+    assert cache_args == [
+        ("current", True),
+        ("recent", True),
+        (None, False),
+        (None, False),
+        (None, False),
+    ]
+
+    replay_workspace = global_player_bt_module.GlobalPlayerFitWorkspace.build(
+        maps,
+        players,
+    )
+    replay = {
+        "source_identity": player_elo._replay_source_identity(maps, players),
+        "config": dict(cfg.__dict__),
+        "states": states,
+        "checkpoints": checkpoints,
+        "recent_mus": {},
+        "current_global": global_snapshot,
+        "global_workspace": replay_workspace,
+    }
+    calls.update({"replay": 0, "fit": 0, "model_rows": 0, "metrics": 0})
+    workspace_ids.clear()
+    cache_args.clear()
+
+    def fail_replay(*_args, **_kwargs):
+        raise AssertionError("weekly replay was not reused")
+
+    def reused_fit(*_args, **kwargs):
+        calls["fit"] += 1
+        workspace_ids.append(id(kwargs["workspace"]))
+        cache_args.append(
+            (kwargs.get("fit_cache_slot"), kwargs.get("fit_cache") is not None)
+        )
+        assert kwargs.get("fit_cache_slot") != "current"
+        return global_snapshot.copy(deep=True), {}
+
+    monkeypatch.setattr(player_elo, "_run_player_elo", fail_replay)
+    monkeypatch.setattr(player_elo, "fit_global_player_bt", reused_fit)
+    player_elo.build_player_weekly_ranks(
+        maps,
+        players,
+        cfg=cfg,
+        output_dir=tmp_path / "second",
+        as_of=cutoff,
+        min_games=1,
+        player_records={},
+        replay=replay,
+    )
+    assert calls == {"replay": 0, "fit": 4, "model_rows": 0, "metrics": 0}
+    assert workspace_ids == [id(replay_workspace)] * 4
+    assert cache_args == [("recent", True), (None, False), (None, False), (None, False)]
+
+
+def test_player_rating_builder_stores_workspace_in_object_local_replay(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The first builder hands its exact workspace to the weekly pass."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=2))
+    players = _with_metrics(players, _roster_profiles())
+    cfg = player_elo.PlayerEloConfig(attribution_enabled=False)
+    names = sorted(players["playername"].unique())
+    states = {
+        name: player_elo.PlayerState(n_maps=3, last_date=pd.Timestamp("2026-01-01"))
+        for name in names
+    }
+    checkpoint_dates = player_elo.weekly_replay_checkpoint_dates(
+        pd.Timestamp("2026-02-01T12:00:00Z")
+    )
+    checkpoint_rows = player_elo._snapshot_rows(states, cfg=cfg)
+    checkpoints = {pd.Timestamp(date): checkpoint_rows for date in checkpoint_dates}
+    global_snapshot = pd.DataFrame(
+        {
+            "player": names,
+            "global_rating": np.full(len(names), 1500.0),
+            "global_connected": np.ones(len(names), dtype=int),
+            "global_component_size": np.full(len(names), len(names), dtype=int),
+            "global_model_maps": np.full(len(names), 3, dtype=int),
+        }
+    )
+    fit_workspaces: list[GlobalPlayerFitWorkspace] = []
+
+    def fake_replay(*_args, **_kwargs):
+        return pd.DataFrame(), states, checkpoints, {}
+
+    def fake_fit(*_args, **kwargs):
+        fit_workspaces.append(kwargs["workspace"])
+        return global_snapshot.copy(deep=True), {"model": "test"}
+
+    monkeypatch.setattr(player_elo, "_run_player_elo", fake_replay)
+    monkeypatch.setattr(player_elo, "fit_global_player_bt", fake_fit)
+    replay: dict[str, object] = {}
+    player_elo.build_player_ratings(
+        maps,
+        players,
+        cfg=cfg,
+        output_dir=tmp_path,
+        player_records={},
+        checkpoint_dates=checkpoint_dates,
+        replay_out=replay,
+    )
+    saved = replay.get("global_workspace")
+    assert isinstance(saved, GlobalPlayerFitWorkspace)
+    assert fit_workspaces == [saved]
+    bridge_context = replay.get("bridge_context")
+    assert isinstance(bridge_context, player_elo.PlayerBridgeContext)
+    saved_cache = replay.get("baseline_cache")
+    assert isinstance(saved_cache, PrefixBaselineCache)
+    assert saved_cache.storage_path == tmp_path / "player_prefix_baseline_cache"
+
+
+def test_current_tier_projection_matches_full_player_records() -> None:
+    """The weekly fast path preserves build_player_records affiliation rules."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=2))
+    frame = _with_metrics(players, _roster_profiles())
+    frame["league"] = frame["gameid"].map(
+        maps.set_index("gameid")["league"]
+    )
+    frame["result"] = frame["gameid"].map(
+        maps.set_index("gameid")["y_blue_win"]
+    )
+    context = player_elo.PlayerBridgeContext.build(frame)
+    from lol_kills.export.pack_records import build_player_records
+
+    full_records = build_player_records(
+        context.canonical_players.copy(deep=True),
+        canonicalized=True,
+    )
+    expected = {
+        player: record.get("current_tier")
+        for player, record in full_records.items()
+    }
+    assert player_elo._current_tier_records(context.canonical_players) == expected
+
+
+def test_current_tier_projection_falls_back_for_duplicate_source_index() -> None:
+    """Duplicate canonical indices use the pack-record latest-row semantics."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=2))
+    frame = _with_metrics(players, _roster_profiles())
+    frame["league"] = frame["gameid"].map(maps.set_index("gameid")["league"])
+    frame["result"] = frame["gameid"].map(
+        maps.set_index("gameid")["y_blue_win"]
+    )
+    context = player_elo.PlayerBridgeContext.build(frame)
+    duplicated = context.canonical_players.copy(deep=True)
+    duplicated.index = pd.Index(np.zeros(len(duplicated), dtype=int))
+    from lol_kills.export.pack_records import build_player_records
+
+    expected = {
+        player: record.get("current_tier")
+        for player, record in build_player_records(
+            duplicated,
+            canonicalized=True,
+        ).items()
+    }
+    assert player_elo._current_tier_records(duplicated) == expected
+
+
+def test_weekly_replay_reuses_bridge_context_with_exact_output(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Prepared player rows remove repeated canonicalization at every cutoff."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=2))
+    players = _with_metrics(players, _roster_profiles())
+    cfg = player_elo.PlayerEloConfig(attribution_enabled=False)
+    cutoff = pd.Timestamp("2026-02-01T12:00:00Z")
+    names = sorted(players["playername"].unique())
+    states = {
+        name: player_elo.PlayerState(n_maps=3, last_date=pd.Timestamp("2026-01-01"))
+        for name in names
+    }
+    checkpoint_dates = player_elo.weekly_replay_checkpoint_dates(cutoff)
+    checkpoint_rows = player_elo._snapshot_rows(states, cfg=cfg)
+    checkpoints = {pd.Timestamp(date): checkpoint_rows for date in checkpoint_dates}
+    global_snapshot = pd.DataFrame(
+        {
+            "player": names,
+            "global_rating": np.full(len(names), 1500.0),
+            "global_connected": np.ones(len(names), dtype=int),
+            "global_component_size": np.full(len(names), len(names), dtype=int),
+            "global_model_maps": np.full(len(names), 3, dtype=int),
+        }
+    )
+    bridge_context = player_elo.PlayerBridgeContext.build(players)
+    workspace = GlobalPlayerFitWorkspace.build(maps, players)
+    fit_cache_ids: list[int] = []
+
+    def fake_replay(*_args, **_kwargs):
+        return pd.DataFrame(), states, checkpoints, {}
+
+    def fake_fit(*_args, **_kwargs):
+        fit_cache_ids.append(id(_kwargs["baseline_cache"]))
+        return global_snapshot.copy(deep=True), {}
+
+    monkeypatch.setattr(player_elo, "_run_player_elo", fake_replay)
+    monkeypatch.setattr(player_elo, "fit_global_player_bt", fake_fit)
+    expected = player_elo.build_player_weekly_ranks(
+        maps,
+        players,
+        cfg=cfg,
+        output_dir=tmp_path / "expected",
+        as_of=cutoff,
+        min_games=1,
+        replay=None,
+    )
+    replay = {
+        "source_identity": player_elo._replay_source_identity(maps, players),
+        "config": dict(cfg.__dict__),
+        "states": states,
+        "checkpoints": checkpoints,
+        "recent_mus": {},
+        "current_global": global_snapshot,
+        "global_workspace": workspace,
+        "bridge_context": bridge_context,
+        "baseline_cache": PrefixBaselineCache(
+            storage_path=tmp_path / "actual" / "player_prefix_baseline_cache",
+            source_identity=player_elo._rating_source_identity(maps),
+            schema_fingerprint=player_elo._rating_cache_schema(players),
+        ),
+    }
+    canonicalize_calls = 0
+    bridge_context_ids: list[int] = []
+    real_canonicalize = player_elo.canonicalize_competition_frame
+    real_bridge = player_elo._apply_bridge_uncertainty
+
+    def counted_canonicalize(frame):
+        nonlocal canonicalize_calls
+        canonicalize_calls += 1
+        return real_canonicalize(frame)
+
+    def counted_bridge(*args, **kwargs):
+        bridge_context_ids.append(id(kwargs["bridge_context"]))
+        return real_bridge(*args, **kwargs)
+
+    monkeypatch.setattr(player_elo, "canonicalize_competition_frame", counted_canonicalize)
+    monkeypatch.setattr(player_elo, "_apply_bridge_uncertainty", counted_bridge)
+    actual = player_elo.build_player_weekly_ranks(
+        maps,
+        players,
+        cfg=cfg,
+        output_dir=tmp_path / "actual",
+        as_of=cutoff,
+        min_games=1,
+        replay=replay,
+    )
+    assert actual == expected
+    # The replay source check canonicalizes the map frame once. Player rows
+    # come from the stored canonical context, and all five bridge calls share
+    # its prepared support rows.
+    assert canonicalize_calls == 1
+    assert bridge_context_ids == [id(bridge_context)] * 5
+    assert fit_cache_ids[-4:] == [id(replay["baseline_cache"])] * 4
+
+
+def test_weekly_replay_context_keeps_json_exact_and_skips_replay(monkeypatch, tmp_path: Path) -> None:
+    """An object-local replay pass reproduces weekly output byte-for-byte."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=2))
+    players["competition_tier"] = "tier1"
+    cfg = player_elo.PlayerEloConfig(attribution_enabled=False)
+    cutoff = pd.Timestamp("2026-02-01T12:00:00Z")
+    names = sorted(players["playername"].unique())
+    states = {
+        name: player_elo.PlayerState(n_maps=3, last_date=pd.Timestamp("2026-01-01"))
+        for name in names
+    }
+    checkpoint_dates = player_elo.weekly_replay_checkpoint_dates(cutoff)
+    checkpoint_rows = player_elo._snapshot_rows(states, cfg=cfg)
+    checkpoints = {pd.Timestamp(date): checkpoint_rows for date in checkpoint_dates}
+    global_snapshot = pd.DataFrame(
+        {
+            "player": names,
+            "global_rating": np.full(len(names), 1500.0),
+            "global_connected": np.ones(len(names), dtype=int),
+            "global_component_size": np.full(len(names), len(names), dtype=int),
+            "global_model_maps": np.full(len(names), 3, dtype=int),
+        }
+    )
+    calls = {"replay": 0, "fit": 0}
+
+    def fake_replay(*_args, **_kwargs):
+        calls["replay"] += 1
+        return pd.DataFrame(), states, checkpoints, {}
+
+    def fake_fit(*_args, **_kwargs):
+        calls["fit"] += 1
+        return global_snapshot.copy(deep=True), {}
+
+    monkeypatch.setattr(player_elo, "_run_player_elo", fake_replay)
+    monkeypatch.setattr(player_elo, "fit_global_player_bt", fake_fit)
+    expected = player_elo.build_player_weekly_ranks(
+        maps,
+        players,
+        cfg=cfg,
+        output_dir=tmp_path / "first",
+        as_of=cutoff,
+        min_games=1,
+        player_records={},
+    )
+    assert calls == {"replay": 1, "fit": 5}
+    replay = {
+        "source_identity": player_elo._replay_source_identity(maps, players),
+        "config": dict(cfg.__dict__),
+        "states": states,
+        "checkpoints": checkpoints,
+        "recent_mus": {},
+        "current_global": global_snapshot,
+    }
+
+    def fail_replay(*_args, **_kwargs):
+        raise AssertionError("weekly replay was not reused")
+
+    def fail_fit(*_args, **kwargs):
+        if kwargs.get("fit_cache_slot") == "current":
+            raise AssertionError("current fit was not reused")
+        return global_snapshot.copy(deep=True), {}
+
+    monkeypatch.setattr(player_elo, "_run_player_elo", fail_replay)
+    monkeypatch.setattr(player_elo, "fit_global_player_bt", fail_fit)
+    actual = player_elo.build_player_weekly_ranks(
+        maps,
+        players,
+        cfg=cfg,
+        output_dir=tmp_path / "second",
+        as_of=cutoff,
+        min_games=1,
+        player_records={},
+        replay=replay,
+    )
+    assert actual == expected
+
+
 def test_rows_sharing_a_timestamp_cannot_see_each_other() -> None:
     """Two maps on the same date form one block with a shared prior baseline."""
 
@@ -244,6 +1277,858 @@ def test_rows_sharing_a_timestamp_cannot_see_each_other() -> None:
         # Both rows in a block see the same prior count, which excludes the
         # block itself.
         assert prior_obs.iloc[position] == prior_obs.iloc[position + 1] == float(position)
+
+
+def test_shared_prefix_cache_is_exact_for_full_and_historical_prefixes() -> None:
+    """The cache reuses reference outputs for an immutable date prefix."""
+
+    size = 40
+    values = pd.Series(np.arange(1.0, size + 1))
+    group = pd.Series(["mid"] * size)
+    date = pd.Series(
+        pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D")
+    )
+    row_key = pd.Series(
+        [("game", "Blue", f"player-{index}", "mid") for index in range(size)],
+        dtype=object,
+    )
+    cache = PrefixBaselineCache(source_identity="fixture")
+
+    reference, reference_prior = _prior_baseline_z(values, group, date, min_obs=2)
+    first, first_prior = _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    second, second_prior = _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+
+    pd.testing.assert_series_equal(first, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(first_prior, reference_prior, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(second, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(second_prior, reference_prior, check_names=False, check_exact=True)
+    assert cache.stores == 1
+    assert cache.hits == 1
+
+    prefix = slice(0, 24)
+    prefix_values = values.iloc[prefix].reset_index(drop=True)
+    prefix_group = group.iloc[prefix].reset_index(drop=True)
+    prefix_date = date.iloc[prefix].reset_index(drop=True)
+    prefix_keys = row_key.iloc[prefix].reset_index(drop=True)
+    prefix_cached, prefix_prior = _prior_baseline_z(
+        prefix_values,
+        prefix_group,
+        prefix_date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=prefix_keys,
+    )
+    prefix_reference, prefix_reference_prior = _prior_baseline_z(
+        prefix_values, prefix_group, prefix_date, min_obs=2
+    )
+    pd.testing.assert_series_equal(
+        prefix_cached, prefix_reference, check_names=False, check_exact=True
+    )
+    pd.testing.assert_series_equal(
+        prefix_prior,
+        prefix_reference_prior,
+        check_names=False,
+        check_exact=True,
+    )
+    assert cache.hits == 2
+
+
+def test_shared_prefix_cache_reuses_exact_suffix_after_historical_insertion() -> None:
+    """A late census insertion only rebuilds affected strict-prior suffixes."""
+
+    size = 48
+    values = pd.Series(np.arange(1.0, size + 1))
+    group = pd.Series(["mid"] * size)
+    date = pd.Series(
+        pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D")
+    )
+    date.iloc[3] = pd.NaT
+    row_key = pd.Series(
+        [("game", "Blue", f"player-{index}", "mid") for index in range(size)],
+        dtype=object,
+    )
+    cache = PrefixBaselineCache()
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+
+    target_values = pd.concat(
+        [values, pd.Series([101.0, 102.0])], ignore_index=True
+    )
+    target_group = pd.concat(
+        [group, pd.Series(["mid", "mid"])], ignore_index=True
+    )
+    target_date = pd.concat(
+        [
+            date,
+            pd.Series(
+                [
+                    pd.Timestamp("2026-01-21T12:00:00"),
+                    pd.Timestamp("2026-02-05T12:00:00"),
+                ]
+            ),
+        ],
+        ignore_index=True,
+    )
+    target_keys = pd.concat(
+        [
+            row_key,
+            pd.Series(
+                [
+                    ("game", "Blue", "inserted-0", "mid"),
+                    ("game", "Blue", "inserted-1", "mid"),
+                ],
+                dtype=object,
+            ),
+        ],
+        ignore_index=True,
+    )
+    cached, cached_prior = _prior_baseline_z(
+        target_values,
+        target_group,
+        target_date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=target_keys,
+    )
+    reference, reference_prior = _prior_baseline_z(
+        target_values, target_group, target_date, min_obs=2
+    )
+
+    pd.testing.assert_series_equal(cached, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(
+        cached_prior, reference_prior, check_names=False, check_exact=True
+    )
+    assert cache.hits == 1
+    assert cache.stores == 2
+
+
+def test_shared_prefix_cache_excludes_missing_dates_when_appending() -> None:
+    """An undated old row cannot enter a later row's strict-prior pool."""
+
+    values = pd.Series([1.0, 2.0, 100.0])
+    group = pd.Series(["mid"] * 3)
+    date = pd.Series(
+        [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-02"), pd.NaT]
+    )
+    row_key = pd.Series(
+        [
+            ("game", "Blue", "player-0", "mid"),
+            ("game", "Blue", "player-1", "mid"),
+            ("game", "Blue", "player-2", "mid"),
+        ],
+        dtype=object,
+    )
+    cache = PrefixBaselineCache()
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+
+    target_values = pd.concat([values, pd.Series([3.0])], ignore_index=True)
+    target_group = pd.concat([group, pd.Series(["mid"])], ignore_index=True)
+    target_date = pd.concat(
+        [date, pd.Series([pd.Timestamp("2026-01-03")])], ignore_index=True
+    )
+    target_keys = pd.concat(
+        [
+            row_key,
+            pd.Series([("game", "Blue", "player-3", "mid")], dtype=object),
+        ],
+        ignore_index=True,
+    )
+    cached, cached_prior = _prior_baseline_z(
+        target_values,
+        target_group,
+        target_date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=target_keys,
+    )
+    reference, reference_prior = _prior_baseline_z(
+        target_values, target_group, target_date, min_obs=2
+    )
+
+    pd.testing.assert_series_equal(cached, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(
+        cached_prior, reference_prior, check_names=False, check_exact=True
+    )
+    assert cache.hits == 1
+
+
+def test_shared_prefix_cache_rejects_insertion_with_missing_group() -> None:
+    """An inserted row without a group must use the exact reference path."""
+
+    values = pd.Series([1.0, 2.0, 3.0])
+    group = pd.Series(["mid"] * 3)
+    date = pd.Series(
+        pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-03"])
+    )
+    row_key = pd.Series(
+        [("game", "Blue", f"player-{index}", "mid") for index in range(3)],
+        dtype=object,
+    )
+    cache = PrefixBaselineCache()
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=1,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+
+    target_values = pd.concat([values, pd.Series([99.0])], ignore_index=True)
+    target_group = pd.concat([group, pd.Series([None], dtype=object)], ignore_index=True)
+    target_date = pd.concat(
+        [date, pd.Series([pd.Timestamp("2026-01-01T12:00:00")])],
+        ignore_index=True,
+    )
+    target_keys = pd.concat(
+        [
+            row_key,
+            pd.Series([("game", "Blue", "inserted", "mid")], dtype=object),
+        ],
+        ignore_index=True,
+    )
+    cached, cached_prior = _prior_baseline_z(
+        target_values,
+        target_group,
+        target_date,
+        min_obs=1,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=target_keys,
+    )
+    reference, reference_prior = _prior_baseline_z(
+        target_values, target_group, target_date, min_obs=1
+    )
+
+    pd.testing.assert_series_equal(cached, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(
+        cached_prior, reference_prior, check_names=False, check_exact=True
+    )
+    assert cache.last_miss_reason == "source_drift_or_non_prefix"
+
+
+def test_shared_prefix_cache_reuses_exact_suffix_for_same_timestamp_insertion() -> None:
+    """Rows inserted into a timestamp block cannot see that block as prior."""
+
+    values = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0])
+    group = pd.Series(["mid"] * 5)
+    date = pd.Series(
+        pd.to_datetime(
+            [
+                "2026-01-01",
+                "2026-01-02",
+                "2026-01-02",
+                "2026-01-03",
+                "2026-01-04",
+            ]
+        )
+    )
+    row_key = pd.Series(
+        [("game", "Blue", f"player-{index}", "mid") for index in range(5)],
+        dtype=object,
+    )
+    cache = PrefixBaselineCache()
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+
+    target_values = pd.concat([values, pd.Series([99.0])], ignore_index=True)
+    target_group = pd.concat([group, pd.Series(["mid"])], ignore_index=True)
+    target_date = pd.concat(
+        [date, pd.Series([pd.Timestamp("2026-01-02")])], ignore_index=True
+    )
+    target_keys = pd.concat(
+        [
+            row_key,
+            pd.Series([("game", "Blue", "inserted", "mid")], dtype=object),
+        ],
+        ignore_index=True,
+    )
+    cached, cached_prior = _prior_baseline_z(
+        target_values,
+        target_group,
+        target_date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=target_keys,
+    )
+    reference, reference_prior = _prior_baseline_z(
+        target_values, target_group, target_date, min_obs=2
+    )
+
+    pd.testing.assert_series_equal(cached, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(
+        cached_prior, reference_prior, check_names=False, check_exact=True
+    )
+    assert cache.hits == 1
+
+
+def test_global_composite_cache_reuses_insertions_with_exact_components() -> None:
+    """Composite, z, prior-count, and diagnostics stay byte-equivalent."""
+
+    size = 48
+    metrics = pd.DataFrame(
+        {
+            "_game_id": [f"game-{index}" for index in range(size)],
+            "_date": pd.Timestamp("2026-01-01")
+            + pd.to_timedelta(np.arange(size), unit="D"),
+            "_side": ["Blue"] * size,
+            "_role": ["mid"] * size,
+            "_player": [f"player-{index}" for index in range(size)],
+            "_tier": ["tier1"] * size,
+        }
+    )
+    for offset, metric in enumerate(PERFORMANCE_ANCHOR_METRIC_WEIGHTS):
+        metrics[metric] = np.arange(1.0, size + 1.0) + offset * 0.25
+
+    cache = PrefixBaselineCache()
+    _role_normalized_composite(
+        metrics,
+        baseline_cache=cache,
+        _return_components=True,
+        _group_mode="role+competition_tier",
+    )
+    inserted = metrics.iloc[:0].copy()
+    inserted.loc[0, "_game_id"] = "inserted-game"
+    inserted.loc[0, "_date"] = pd.Timestamp("2026-01-21T12:00:00")
+    inserted.loc[0, "_side"] = "Blue"
+    inserted.loc[0, "_role"] = "mid"
+    inserted.loc[0, "_player"] = "inserted-player"
+    inserted.loc[0, "_tier"] = "tier1"
+    for offset, metric in enumerate(PERFORMANCE_ANCHOR_METRIC_WEIGHTS):
+        inserted.loc[0, metric] = 101.0 + offset * 0.25
+    target = pd.concat([metrics, inserted], ignore_index=True)
+
+    cached = _role_normalized_composite(
+        target,
+        baseline_cache=cache,
+        _return_components=True,
+        _group_mode="role+competition_tier",
+    )
+    reference = _role_normalized_composite(
+        target,
+        _return_components=True,
+        _group_mode="role+competition_tier",
+    )
+
+    pd.testing.assert_series_equal(cached[0], reference[0], check_names=False, check_exact=True)
+    assert cached[1] == reference[1]
+    assert cached[2] == reference[2]
+    pd.testing.assert_frame_equal(cached[3], reference[3], check_exact=True)
+    pd.testing.assert_frame_equal(cached[4], reference[4], check_exact=True)
+    assert cache.hits == len(PERFORMANCE_ANCHOR_METRIC_WEIGHTS)
+
+
+def test_shared_prefix_cache_keeps_same_timestamp_rows_and_rejects_drift() -> None:
+    """Partial final blocks are safe; gaps and changed source rows miss closed."""
+
+    size = 40
+    values = pd.Series(np.arange(1.0, size + 1))
+    group = pd.Series(["mid"] * size)
+    date = pd.Series(
+        pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size) // 2, unit="D")
+    )
+    row_key = pd.Series(
+        [("game", "Blue", f"player-{index}", "mid") for index in range(size)],
+        dtype=object,
+    )
+    cache = PrefixBaselineCache()
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+
+    partial = slice(0, 21)
+    partial_values = values.iloc[partial].reset_index(drop=True)
+    partial_group = group.iloc[partial].reset_index(drop=True)
+    partial_date = date.iloc[partial].reset_index(drop=True)
+    partial_keys = row_key.iloc[partial].reset_index(drop=True)
+    cached, cached_prior = _prior_baseline_z(
+        partial_values,
+        partial_group,
+        partial_date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=partial_keys,
+    )
+    reference, reference_prior = _prior_baseline_z(
+        partial_values, partial_group, partial_date, min_obs=2
+    )
+    pd.testing.assert_series_equal(cached, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(
+        cached_prior, reference_prior, check_names=False, check_exact=True
+    )
+    assert cache.hits == 1
+
+    # Omitting an earlier row while retaining a later date is outside the
+    # proven prefix contract. The caller computes the reference path again.
+    gap = [0, 2, 3, 4, 5, 6]
+    before_misses = cache.misses
+    gap_values = values.iloc[gap].reset_index(drop=True)
+    gap_group = group.iloc[gap].reset_index(drop=True)
+    gap_date = date.iloc[gap].reset_index(drop=True)
+    gap_keys = row_key.iloc[gap].reset_index(drop=True)
+    gap_result, gap_prior = _prior_baseline_z(
+        gap_values,
+        gap_group,
+        gap_date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=gap_keys,
+    )
+    gap_reference, gap_reference_prior = _prior_baseline_z(
+        gap_values, gap_group, gap_date, min_obs=2
+    )
+    pd.testing.assert_series_equal(
+        gap_result, gap_reference, check_names=False, check_exact=True
+    )
+    pd.testing.assert_series_equal(
+        gap_prior, gap_reference_prior, check_names=False, check_exact=True
+    )
+    assert cache.misses > before_misses
+    assert cache.last_miss_reason == "source_drift_or_non_prefix"
+
+    # A changed earlier value has the same safe result. The old entry never
+    # supplies stale output for the changed source.
+    changed = values.copy()
+    changed.iloc[3] = 900.0
+    changed_result, changed_prior = _prior_baseline_z(
+        changed,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    changed_reference, changed_reference_prior = _prior_baseline_z(
+        changed, group, date, min_obs=2
+    )
+    pd.testing.assert_series_equal(
+        changed_result, changed_reference, check_names=False, check_exact=True
+    )
+    pd.testing.assert_series_equal(
+        changed_prior,
+        changed_reference_prior,
+        check_names=False,
+        check_exact=True,
+    )
+
+
+def test_shared_prefix_cache_is_usable_by_both_baseline_implementations() -> None:
+    """The player and global wrappers consume one exact cached result."""
+
+    from lol_kills.ratings.player_elo import _prior_baseline_z as elo_prior_baseline_z
+
+    size = 40
+    values = pd.Series(np.arange(1.0, size + 1))
+    group = pd.Series(["mid"] * size)
+    date = pd.Series(
+        pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D")
+    )
+    row_key = pd.Series(
+        [("game", "Blue", f"player-{index}", "mid") for index in range(size)],
+        dtype=object,
+    )
+    cache = PrefixBaselineCache()
+    global_z, global_prior = _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    player_z = elo_prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+
+    pd.testing.assert_series_equal(global_z, player_z, check_names=False, check_exact=True)
+    assert global_prior.notna().all()
+    assert cache.stores == 1
+    assert cache.hits == 1
+
+
+def test_persistent_cache_round_trip_extends_only_new_timestamp_blocks(tmp_path: Path) -> None:
+    """A changed source watermark can extend an exact cached prefix."""
+
+    values, group, date, row_key = _persistent_cache_fixture()
+    path = tmp_path / "prefix-baseline"
+    first = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    old = slice(0, 20)
+    _prior_baseline_z(
+        values.iloc[old].reset_index(drop=True),
+        group.iloc[old].reset_index(drop=True),
+        date.iloc[old].reset_index(drop=True),
+        min_obs=2,
+        baseline_cache=first,
+        metric_key="cs_per_min",
+        row_key=row_key.iloc[old].reset_index(drop=True),
+    )
+    first.flush()
+
+    second = PrefixBaselineCache(storage_path=path, source_identity="source-v2")
+    cached, cached_prior = _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=second,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    reference, reference_prior = _prior_baseline_z(values, group, date, min_obs=2)
+    pd.testing.assert_series_equal(cached, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(
+        cached_prior, reference_prior, check_names=False, check_exact=True
+    )
+    assert second.source_identity_changed is True
+    assert second.hits == 1
+    assert second.stores == 1
+    assert second.invalidated is False
+    second.flush()
+
+    reloaded = PrefixBaselineCache(storage_path=path, source_identity="source-v2")
+    prefix, prefix_prior = _prior_baseline_z(
+        values.iloc[old].reset_index(drop=True),
+        group.iloc[old].reset_index(drop=True),
+        date.iloc[old].reset_index(drop=True),
+        min_obs=2,
+        baseline_cache=reloaded,
+        metric_key="cs_per_min",
+        row_key=row_key.iloc[old].reset_index(drop=True),
+    )
+    pd.testing.assert_series_equal(
+        prefix,
+        reference.iloc[old].reset_index(drop=True),
+        check_names=False,
+        check_exact=True,
+    )
+    pd.testing.assert_series_equal(
+        prefix_prior,
+        reference_prior.iloc[old].reset_index(drop=True),
+        check_names=False,
+        check_exact=True,
+    )
+    assert reloaded.hits == 1
+
+
+def test_persistent_cache_serialization_integrity_fails_closed(tmp_path: Path) -> None:
+    """A tampered payload is rejected before any cached value is served."""
+
+    values, group, date, row_key = _persistent_cache_fixture()
+    path = tmp_path / "prefix-baseline"
+    cache = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    cache.flush()
+    payload = path.with_suffix(".npz")
+    raw = payload.read_bytes()
+    payload.write_bytes(raw[:-1] + bytes([raw[-1] ^ 1]))
+
+    rejected = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    assert rejected.invalidated is True
+    assert rejected.invalidated_reason is not None
+    assert rejected._entries == {}
+    fresh, _prior = _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=rejected,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    reference, _reference_prior = _prior_baseline_z(values, group, date, min_obs=2)
+    pd.testing.assert_series_equal(fresh, reference, check_names=False, check_exact=True)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason"),
+    [
+        ("length", "persistent cache entry length drift"),
+        ("unsorted", "persistent cache row ID order drift"),
+        ("duplicate", "persistent cache row ID order drift"),
+        ("bounds", "persistent cache row ID order drift"),
+    ],
+)
+def test_persistent_cache_entry_shape_and_row_ids_fail_closed(
+    tmp_path: Path, mutation: str, reason: str
+) -> None:
+    """Malformed entry arrays never reach prefix lookup."""
+
+    values, group, date, row_key = _persistent_cache_fixture(size=4)
+    path = tmp_path / f"prefix-baseline-{mutation}"
+    seed = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=seed,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    seed.flush()
+
+    manifest_path = path.with_suffix(".json")
+    payload_path = path.with_suffix(".npz")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    with np.load(payload_path, allow_pickle=False) as payload:
+        arrays = {name: np.asarray(payload[name]) for name in payload.files}
+    row_ids = arrays["entry_0_row_ids"].copy()
+    if mutation == "length":
+        arrays["entry_0_groups"] = arrays["entry_0_groups"][:-1]
+    elif mutation == "unsorted":
+        arrays["entry_0_row_ids"] = row_ids[[1, 0, 2, 3]]
+    elif mutation == "duplicate":
+        arrays["entry_0_row_ids"] = row_ids.copy()
+        arrays["entry_0_row_ids"][1] = arrays["entry_0_row_ids"][0]
+    else:
+        arrays["entry_0_row_ids"] = row_ids.copy()
+        arrays["entry_0_row_ids"][0] = len(arrays["row_catalog"])
+
+    rewritten = payload_path.with_name(payload_path.name + ".rewrite")
+    global_player_bt_module._write_npz_level1(rewritten, arrays)
+    payload_bytes = rewritten.read_bytes()
+    rewritten.replace(payload_path)
+    manifest["payload_sha256"] = hashlib.sha256(payload_bytes).hexdigest()
+    for name, array in arrays.items():
+        manifest["arrays"][name] = PrefixBaselineCache._manifest_spec(array)
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    rejected = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    assert rejected.invalidated is True
+    assert rejected.invalidated_reason is not None
+    assert reason in rejected.invalidated_reason
+    assert rejected._entries == {}
+
+
+def test_persistent_cache_hit_does_not_rewrite_clean_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A load followed by an exact hit has no persistent write work."""
+
+    values, group, date, row_key = _persistent_cache_fixture()
+    path = tmp_path / "prefix-baseline"
+    seed = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=seed,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    seed.flush()
+
+    loaded = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=loaded,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    monkeypatch.setattr(
+        np,
+        "savez_compressed",
+        lambda *args, **kwargs: pytest.fail("clean cache must not rewrite payload"),
+    )
+    loaded.flush()
+    assert loaded._dirty is False
+
+
+def test_persistent_cache_invalidates_corrections_deletions_and_schema_drift(
+    tmp_path: Path,
+) -> None:
+    """Corrections, deletions, and schema changes clear the old source."""
+
+    values, group, date, row_key = _persistent_cache_fixture()
+    path = tmp_path / "prefix-baseline"
+    seed = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=seed,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    seed.flush()
+
+    corrected = values.copy()
+    corrected.iloc[3] = 900.0
+    corrected_cache = PrefixBaselineCache(storage_path=path, source_identity="source-v2")
+    _prior_baseline_z(
+        corrected,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=corrected_cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    assert corrected_cache.invalidated is True
+    assert corrected_cache.invalidated_reason == "source_drift_or_non_prefix"
+
+    seed.flush()
+    deleted_cache = PrefixBaselineCache(storage_path=path, source_identity="source-v3")
+    keep = [index for index in range(len(values)) if index != 3]
+    _prior_baseline_z(
+        values.iloc[keep].reset_index(drop=True),
+        group.iloc[keep].reset_index(drop=True),
+        date.iloc[keep].reset_index(drop=True),
+        min_obs=2,
+        baseline_cache=deleted_cache,
+        metric_key="cs_per_min",
+        row_key=row_key.iloc[keep].reset_index(drop=True),
+    )
+    assert deleted_cache.invalidated is True
+    assert deleted_cache.invalidated_reason == "source_drift_or_non_prefix"
+
+    schema_cache = PrefixBaselineCache(
+        storage_path=path,
+        source_identity="source-v1",
+        schema_fingerprint="future-schema",
+    )
+    assert schema_cache.invalidated is True
+    assert schema_cache._entries == {}
+
+
+def test_persistent_cache_is_reused_by_a_new_python_process(tmp_path: Path) -> None:
+    """The serialized prefix is usable by a separate interpreter process."""
+
+    values, group, date, row_key = _persistent_cache_fixture()
+    path = tmp_path / "prefix-baseline"
+    seed = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    old = slice(0, 20)
+    _prior_baseline_z(
+        values.iloc[old].reset_index(drop=True),
+        group.iloc[old].reset_index(drop=True),
+        date.iloc[old].reset_index(drop=True),
+        min_obs=2,
+        baseline_cache=seed,
+        metric_key="cs_per_min",
+        row_key=row_key.iloc[old].reset_index(drop=True),
+    )
+    seed.flush()
+
+    script = """
+import sys
+import numpy as np
+import pandas as pd
+from lol_kills.ratings.global_player_bt import PrefixBaselineCache, _prior_baseline_z
+
+path = sys.argv[1]
+size = 40
+values = pd.Series(np.arange(1.0, size + 1))
+group = pd.Series(["mid"] * size)
+date = pd.Series(pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D"))
+row_key = pd.Series([("game", "Blue", f"player-{index}", "mid") for index in range(size)], dtype=object)
+cache = PrefixBaselineCache(storage_path=path, source_identity="source-v2")
+z, prior = _prior_baseline_z(
+    values, group, date, min_obs=2, baseline_cache=cache,
+    metric_key="cs_per_min", row_key=row_key,
+)
+print(cache.hits, cache.stores, cache.misses, cache.invalidated, float(z.iloc[-1]), float(prior.iloc[-1]))
+cache.flush()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(path)],
+        cwd=Path.cwd(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip().split()[:4] == ["1", "1", "0", "False"]
+
+    reloaded = PrefixBaselineCache(storage_path=path, source_identity="source-v2")
+    reference, reference_prior = _prior_baseline_z(values, group, date, min_obs=2)
+    cached, cached_prior = _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=reloaded,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    pd.testing.assert_series_equal(cached, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(
+        cached_prior, reference_prior, check_names=False, check_exact=True
+    )
+    assert reloaded.hits == 1
 
 
 def test_a_later_map_cannot_change_an_earlier_maps_normalized_metric() -> None:
@@ -426,6 +2311,19 @@ def _daily(values: list[float]) -> tuple[pd.Series, pd.Series, pd.Series]:
         pd.Series(["mid"] * size),
         pd.Series(pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D")),
     )
+
+
+def _persistent_cache_fixture(size: int = 40) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
+    values = pd.Series(np.arange(1.0, size + 1))
+    group = pd.Series(["mid"] * size)
+    date = pd.Series(
+        pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D")
+    )
+    row_key = pd.Series(
+        [("game", "Blue", f"player-{index}", "mid") for index in range(size)],
+        dtype=object,
+    )
+    return values, group, date, row_key
 
 
 def test_a_malformed_row_cannot_poison_the_baseline_of_later_rows() -> None:

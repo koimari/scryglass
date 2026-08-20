@@ -24,8 +24,10 @@ it is not presented as a fully sampled Bayesian posterior.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -43,10 +45,74 @@ from lol_kills.etl.competition import (
     team_identity_key,
 )
 from lol_kills.etl.paths import FEATURES_DIR
+from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.validation import audit_rating_inputs
 
 
 LOGIT_TO_ELO = 400.0 / math.log(10.0)
+HIERARCHICAL_CACHE_SCHEMA = "scryglass:hierarchical-bt-cache:v1"
+HIERARCHICAL_SNAPSHOT_SCHEMA = "scryglass:hierarchical-bt-snapshot:v1"
+HIERARCHICAL_CACHE_MANIFEST = "ratings_hierarchical_cache.json"
+HIERARCHICAL_IMPLEMENTATION_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+_CACHE_SLOTS = {
+    "current": "ratings_hierarchical_snapshot.parquet",
+    "previous": "ratings_hierarchical_previous_snapshot.parquet",
+}
+_HIERARCHICAL_SNAPSHOT_COLUMNS = (
+    "team",
+    "team_key",
+    "mu_total",
+    "mu_regional",
+    "mu_meta",
+    "sigma",
+    "rating_p10",
+    "n_series",
+    "n_maps",
+    "international_series",
+    "home_league",
+    "last_game_date",
+    "model",
+)
+_CACHE_CONTENT_COLUMNS = (
+    "date",
+    "blue_team",
+    "red_team",
+    "blue_teamname",
+    "red_teamname",
+    "teamname",
+    "team",
+    "y_blue_win",
+    "league",
+    "league_source",
+    "tournament",
+    "is_international",
+    "grid_series_id",
+    "game",
+    "game_uid",
+    "gameid",
+    "oe_gameid",
+)
+_OBSERVATION_INPUT_COLUMNS = frozenset(
+    {
+        "date",
+        "y_blue_win",
+        "league",
+        "league_source",
+        "tournament",
+        "is_international",
+        "game_uid",
+        "gameid",
+        "oe_gameid",
+        "blue_team",
+        "red_team",
+        "blue_teamname",
+        "red_teamname",
+        "teamname",
+        "team",
+        "grid_series_id",
+        "game",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +127,187 @@ class HierarchicalBTConfig:
     bridge_target_series: int = 8
     conservative_z: float = 1.6448536269514722  # one-sided 90th percentile
     max_iter: int = 500
+
+
+def _cache_as_of(as_of: pd.Timestamp | None) -> str | None:
+    if as_of is None:
+        return None
+    stamp = pd.Timestamp(as_of)
+    if stamp.tzinfo is not None:
+        stamp = stamp.tz_convert("UTC").tz_localize(None)
+    return stamp.isoformat()
+
+
+def _cache_text(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def _cache_date(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    stamp = pd.Timestamp(value)
+    if stamp.tzinfo is not None:
+        stamp = stamp.tz_convert("UTC").tz_localize(None)
+    return stamp.isoformat()
+
+
+def _frame_source_identity(
+    maps: pd.DataFrame,
+) -> tuple[str | None, int | None, str | None]:
+    """Return stable identities for the exact map rows supplied to the fit."""
+
+    if maps is None or maps.empty:
+        return None, None, None
+    source_column = next(
+        (column for column in ("game_uid", "gameid", "oe_gameid") if column in maps.columns),
+        None,
+    )
+    if source_column is None:
+        return None, None, None
+    game_ids = [canonical_source_game_key(value) for value in maps[source_column].tolist()]
+    if not game_ids or any(not value for value in game_ids) or len(set(game_ids)) != len(game_ids):
+        return None, None, None
+    identity = hashlib.sha256(("\n".join(sorted(game_ids)) + "\n").encode("utf-8")).hexdigest()
+    content_columns: list[list[str]] = []
+    for column in _CACHE_CONTENT_COLUMNS:
+        if column not in maps.columns:
+            content_columns.append([""] * len(game_ids))
+            continue
+        values = maps[column].tolist()
+        if column == "date":
+            content_columns.append([_cache_date(value) for value in values])
+        else:
+            content_columns.append([_cache_text(value) for value in values])
+    rows: list[list[str]] = []
+    for index, game_id in enumerate(game_ids):
+        rows.append([game_id, *(values[index] for values in content_columns)])
+    rows.sort(key=lambda values: values[0])
+    content = "\n".join("\x1f".join(values) for values in rows) + "\n"
+    content_identity = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return identity, len(game_ids), content_identity
+
+
+def _cache_key(
+    maps: pd.DataFrame,
+    *,
+    as_of: pd.Timestamp | None,
+    cfg: HierarchicalBTConfig,
+    source_identity_sha256: str | None,
+    cache_slot: str,
+) -> dict[str, Any] | None:
+    frame_identity, frame_game_count, frame_content_identity = _frame_source_identity(maps)
+    if frame_identity is None or frame_game_count is None or frame_content_identity is None:
+        return None
+    source_identity = str(source_identity_sha256 or frame_identity).strip()
+    if not source_identity:
+        return None
+    return {
+        "schema": HIERARCHICAL_CACHE_SCHEMA,
+        "implementation_sha256": HIERARCHICAL_IMPLEMENTATION_SHA256,
+        "slot": cache_slot,
+        "source_identity_sha256": source_identity,
+        "frame_identity_sha256": frame_identity,
+        "frame_content_sha256": frame_content_identity,
+        "source_game_count": frame_game_count,
+        "as_of": _cache_as_of(as_of),
+        "config": dict(cfg.__dict__),
+    }
+
+
+def _cache_paths(cache_dir: Path, cache_slot: str) -> tuple[Path, Path]:
+    try:
+        snapshot_name = _CACHE_SLOTS[cache_slot]
+    except KeyError as error:
+        raise ValueError(f"unknown hierarchical cache slot: {cache_slot}") from error
+    return cache_dir / snapshot_name, cache_dir / HIERARCHICAL_CACHE_MANIFEST
+
+
+def _read_cache_manifest(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _load_cached_fit(
+    cache_dir: Path,
+    *,
+    cache_slot: str,
+    key: dict[str, Any],
+) -> tuple[pd.DataFrame, dict[str, Any]] | None:
+    snapshot_path, manifest_path = _cache_paths(cache_dir, cache_slot)
+    manifest = _read_cache_manifest(manifest_path)
+    entry = manifest.get(cache_slot) if manifest is not None else None
+    if not isinstance(entry, dict) or entry.get("key") != key:
+        return None
+    metadata = entry.get("metadata")
+    snapshot_info = entry.get("snapshot")
+    if not isinstance(metadata, dict) or not isinstance(snapshot_info, dict):
+        return None
+    if not snapshot_path.is_file():
+        return None
+    if snapshot_info.get("schema") != HIERARCHICAL_SNAPSHOT_SCHEMA:
+        return None
+    if snapshot_info.get("columns") != list(_HIERARCHICAL_SNAPSHOT_COLUMNS):
+        return None
+    expected_bytes = snapshot_info.get("byte_count")
+    expected_sha256 = snapshot_info.get("sha256")
+    if not isinstance(expected_bytes, int) or not isinstance(expected_sha256, str):
+        return None
+    try:
+        snapshot_bytes = snapshot_path.read_bytes()
+        if len(snapshot_bytes) != expected_bytes:
+            return None
+        if hashlib.sha256(snapshot_bytes).hexdigest() != expected_sha256:
+            return None
+        snapshot = pd.read_parquet(snapshot_path)
+    except (OSError, ValueError, ImportError):
+        return None
+    if list(snapshot.columns) != list(_HIERARCHICAL_SNAPSHOT_COLUMNS):
+        return None
+    return snapshot, metadata
+
+
+def _write_cached_fit(
+    cache_dir: Path,
+    *,
+    cache_slot: str,
+    key: dict[str, Any],
+    snapshot: pd.DataFrame,
+    metadata: dict[str, Any],
+) -> None:
+    snapshot_path, manifest_path = _cache_paths(cache_dir, cache_slot)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_tmp = snapshot_path.with_name(f".{snapshot_path.name}.{os.getpid()}.tmp")
+    manifest_tmp = manifest_path.with_name(f".{manifest_path.name}.{os.getpid()}.tmp")
+    try:
+        snapshot.to_parquet(snapshot_tmp, index=False)
+        snapshot_bytes = snapshot_tmp.read_bytes()
+        if list(snapshot.columns) != list(_HIERARCHICAL_SNAPSHOT_COLUMNS):
+            raise ValueError("hierarchical snapshot columns do not match cache schema")
+        os.replace(snapshot_tmp, snapshot_path)
+        manifest = _read_cache_manifest(manifest_path) or {}
+        manifest[cache_slot] = {
+            "key": key,
+            "metadata": metadata,
+            "snapshot": {
+                "schema": HIERARCHICAL_SNAPSHOT_SCHEMA,
+                "columns": list(_HIERARCHICAL_SNAPSHOT_COLUMNS),
+                "byte_count": len(snapshot_bytes),
+                "sha256": hashlib.sha256(snapshot_bytes).hexdigest(),
+            },
+        }
+        manifest_tmp.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(manifest_tmp, manifest_path)
+    finally:
+        snapshot_tmp.unlink(missing_ok=True)
+        manifest_tmp.unlink(missing_ok=True)
 
 
 def _is_missing(value: Any) -> bool:
@@ -169,7 +416,11 @@ def _observations(
     tied/incomplete feeds) so they stay inspectable.
     """
 
-    frame = canonicalize_competition_frame(maps)
+    if maps is None:
+        frame = canonicalize_competition_frame(maps)
+    else:
+        input_columns = [column for column in maps.columns if column in _OBSERVATION_INPUT_COLUMNS]
+        frame = canonicalize_competition_frame(maps.loc[:, input_columns])
     if frame is None or frame.empty:
         return pd.DataFrame(), {
             "n_unresolved_maps": 0,
@@ -202,15 +453,12 @@ def _observations(
     # match.  A first domestic row establishes the affiliation only after its
     # pre-match state is recorded; international rows never overwrite it.
     home_league: dict[str, str] = {}
-    display: dict[str, str] = {}
     records: list[dict[str, Any]] = []
-    for _, row in frame.iterrows():
+    for row in frame.to_dict("records"):
         blue_name = str(row.get("blue_team") or "")
         red_name = str(row.get("red_team") or "")
         blue = team_identity_key(blue_name)
         red = team_identity_key(red_name)
-        display.setdefault(blue, blue_name)
-        display.setdefault(red, red_name)
         source_league = str(row.get("league") or "UNKNOWN")
         blue_home = home_league.get(blue, source_league if source_league in REGIONAL_LEAGUES else "UNKNOWN")
         red_home = home_league.get(red, source_league if source_league in REGIONAL_LEAGUES else "UNKNOWN")
@@ -241,54 +489,89 @@ def _observations(
     frame_rows = pd.DataFrame(records)
     frame_rows, identity_audit = _series_identity(frame_rows)
 
-    collapsed: list[dict[str, Any]] = []
-    unresolved: list[dict[str, Any]] = []
-    for key, group in frame_rows.groupby("series_key", sort=False):
-        pairs = set(
-            group.apply(
-                lambda row: "|".join(sorted((str(row["blue"]), str(row["red"])))), axis=1
-            )
-        )
-        if len(pairs) != 1:
-            # Exact-duplicate fallback keys with different team pairs cannot
-            # be merged into one observation; keep them for audit only.
-            unresolved.extend(group.to_dict("records"))
-            continue
-        a, b = sorted((str(group["blue"].iloc[0]), str(group["red"].iloc[0])))
-        a_rows = group[group["blue"].eq(a)]
-        a_wins = float(a_rows["y_blue"].sum()) + float((group[group["red"].eq(a)]["y_blue"] == 0).sum())
-        n_maps = len(group)
-        if a_wins * 2 == n_maps:
-            # Tied/incomplete feed: the series outcome is not identified.
-            # Preserve the maps for audit; exclude from primary inference.
-            unresolved.extend(group.to_dict("records"))
-            continue
-        # A strict majority over ALL maps defines the series winner; the
-        # first map is never selected as an outcome shortcut.
-        y_a = 1.0 if a_wins > n_maps / 2 else 0.0
-        a_blue_share = float(a_rows["blue"].eq(a).sum()) / n_maps
-        first = group.iloc[0]
-        source_a = a_rows.iloc[0] if not a_rows.empty else first
-        b_rows = group[group["blue"].eq(b)]
-        source_b = b_rows.iloc[0] if not b_rows.empty else first
-        collapsed.append(
+    if frame_rows["series_key"].is_unique:
+        blue = frame_rows["blue"].astype(str)
+        red = frame_rows["red"].astype(str)
+        a_is_blue = blue.le(red)
+        y_blue = frame_rows["y_blue"].astype(float)
+        collapsed_frame = pd.DataFrame(
             {
-                "series_key": key,
-                "series_source": str(group["series_source"].iloc[0]),
-                "game_uid": ",".join(str(value) for value in group["game_uid"] if str(value)),
-                "date": first["date"],
-                "team_a": a,
-                "team_b": b,
-                "team_a_name": first["blue_name"] if first["blue"] == a else first["red_name"],
-                "team_b_name": first["red_name"] if first["blue"] == a else first["blue_name"],
-                "home_a": source_a["blue_home"] if source_a["blue"] == a else source_a["red_home"],
-                "home_b": source_b["blue_home"] if source_b["blue"] == b else source_b["red_home"],
-                "y_a": y_a,
-                "n_maps": n_maps,
-                "a_blue_share": a_blue_share,
-                "international": bool(group["is_international"].any()),
+                "series_key": frame_rows["series_key"].astype(str),
+                "series_source": frame_rows["series_source"].astype(str),
+                "game_uid": frame_rows["game_uid"].astype(str),
+                "date": frame_rows["date"],
+                "team_a": blue.where(a_is_blue, red),
+                "team_b": red.where(a_is_blue, blue),
+                "team_a_name": frame_rows["blue_name"].where(
+                    a_is_blue, frame_rows["red_name"]
+                ),
+                "team_b_name": frame_rows["red_name"].where(
+                    a_is_blue, frame_rows["blue_name"]
+                ),
+                "home_a": frame_rows["blue_home"].where(
+                    a_is_blue, frame_rows["red_home"]
+                ),
+                "home_b": frame_rows["red_home"].where(
+                    a_is_blue, frame_rows["blue_home"]
+                ),
+                "y_a": y_blue.where(a_is_blue, 1.0 - y_blue),
+                "n_maps": np.ones(len(frame_rows), dtype=int),
+                "a_blue_share": a_is_blue.astype(float),
+                "international": frame_rows["is_international"].astype(bool),
             }
         )
+        collapsed = collapsed_frame.to_dict("records")
+        unresolved: list[dict[str, Any]] = []
+    else:
+        collapsed = []
+        unresolved = []
+        for key, group in frame_rows.groupby("series_key", sort=False):
+            pairs = set(
+                group.apply(
+                    lambda row: "|".join(sorted((str(row["blue"]), str(row["red"])))), axis=1
+                )
+            )
+            if len(pairs) != 1:
+                # Exact-duplicate fallback keys with different team pairs cannot
+                # be merged into one observation; keep them for audit only.
+                unresolved.extend(group.to_dict("records"))
+                continue
+            a, b = sorted((str(group["blue"].iloc[0]), str(group["red"].iloc[0])))
+            a_rows = group[group["blue"].eq(a)]
+            a_wins = float(a_rows["y_blue"].sum()) + float((group[group["red"].eq(a)]["y_blue"] == 0).sum())
+            n_maps = len(group)
+            if a_wins * 2 == n_maps:
+                # Tied/incomplete feed: the series outcome is not identified.
+                # Preserve the maps for audit; exclude from primary inference.
+                unresolved.extend(group.to_dict("records"))
+                continue
+            # A strict majority over ALL maps defines the series winner; the
+            # first map is never selected as an outcome shortcut.
+            y_a = 1.0 if a_wins > n_maps / 2 else 0.0
+            a_blue_share = float(a_rows["blue"].eq(a).sum()) / n_maps
+            first = group.iloc[0]
+            source_a = a_rows.iloc[0] if not a_rows.empty else first
+            b_rows = group[group["blue"].eq(b)]
+            source_b = b_rows.iloc[0] if not b_rows.empty else first
+            collapsed.append(
+                {
+                    "series_key": key,
+                    "series_source": str(group["series_source"].iloc[0]),
+                    "game_uid": ",".join(str(value) for value in group["game_uid"] if str(value)),
+                    "date": first["date"],
+                    "team_a": a,
+                    "team_b": b,
+                    "team_a_name": first["blue_name"] if first["blue"] == a else first["red_name"],
+                    "team_b_name": first["red_name"] if first["blue"] == a else first["blue_name"],
+                    "home_a": source_a["blue_home"] if source_a["blue"] == a else source_a["red_home"],
+                    "home_b": source_b["blue_home"] if source_b["blue"] == b else source_b["red_home"],
+                    "y_a": y_a,
+                    "n_maps": n_maps,
+                    "a_blue_share": a_blue_share,
+                    "international": bool(group["is_international"].any()),
+                }
+            )
+
     out = pd.DataFrame(collapsed).sort_values("date").reset_index(drop=True)
     if not out.empty:
         cutoff = out["date"].max()
@@ -348,10 +631,42 @@ def fit_hierarchical_bt(
     as_of: pd.Timestamp | None = None,
     write: bool = True,
     output_dir: Path | None = None,
+    cache_dir: Path | None = None,
+    source_identity_sha256: str | None = None,
+    cache_slot: str = "current",
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Fit the current conservative ladder and optionally persist its snapshot."""
 
     cfg = cfg or HierarchicalBTConfig()
+    cache_key = _cache_key(
+        maps,
+        as_of=as_of,
+        cfg=cfg,
+        source_identity_sha256=source_identity_sha256,
+        cache_slot=cache_slot,
+    )
+    if cache_dir is not None and cache_key is not None:
+        cached = _load_cached_fit(
+            Path(cache_dir),
+            cache_slot=cache_slot,
+            key=cache_key,
+        )
+        if cached is not None:
+            snapshot, metadata = cached
+            if write and cache_slot == "current":
+                destination = Path(output_dir or FEATURES_DIR)
+                destination.mkdir(parents=True, exist_ok=True)
+                snapshot.to_parquet(destination / "ratings_hierarchical_snapshot.parquet", index=False)
+                snapshot.to_parquet(destination / "ratings_snapshot.parquet", index=False)
+                (destination / "ratings_meta.json").write_text(
+                    json.dumps(metadata, indent=2),
+                    encoding="utf-8",
+                )
+                (destination / "ratings_hierarchical_meta.json").write_text(
+                    json.dumps(metadata, indent=2),
+                    encoding="utf-8",
+                )
+            return snapshot, metadata
     input_audit = audit_rating_inputs(maps)
     obs, series_audit = _observations(maps, as_of, cfg.half_life_days)
     if obs.empty:
@@ -394,9 +709,9 @@ def fit_hierarchical_bt(
         return value, gradient
 
     result = minimize(
-        lambda beta: objective(beta)[0],
+        objective,
         np.zeros(X.shape[1], dtype=float),
-        jac=lambda beta: objective(beta)[1],
+        jac=True,
         method="L-BFGS-B",
         bounds=[(-8.0, 8.0)] * X.shape[1],
         options={"maxiter": cfg.max_iter, "ftol": 1e-10, "gtol": 1e-8},
@@ -483,6 +798,14 @@ def fit_hierarchical_bt(
         },
         "note": "Series-collapsed penalized MAP Bradley-Terry with explicit series identity (authoritative GRID series id when safe, stable game-level keys otherwise) and local Laplace uncertainty plus explicit uncertainty inflation for teams without international bridges; use rating_p10 for conservative rank.",
     }
+    if cache_dir is not None and cache_key is not None:
+        _write_cached_fit(
+            Path(cache_dir),
+            cache_slot=cache_slot,
+            key=cache_key,
+            snapshot=snapshot,
+            metadata=meta,
+        )
     if write:
         destination = Path(output_dir or FEATURES_DIR)
         destination.mkdir(parents=True, exist_ok=True)
@@ -529,6 +852,22 @@ def _recent_team_baseline_anchor(
     return anchor
 
 
+def _frame_through_cutoff(maps: pd.DataFrame, cutoff: pd.Timestamp) -> pd.DataFrame:
+    """Return the exact source rows visible to a cutoff fit."""
+
+    if maps is None or maps.empty or "date" not in maps.columns:
+        return maps.copy() if maps is not None else pd.DataFrame()
+    dates = pd.to_datetime(maps["date"], errors="coerce", utc=True)
+    cap = pd.Timestamp(cutoff)
+    if pd.isna(cap):
+        return maps.iloc[0:0].copy()
+    if cap.tzinfo is None:
+        cap = cap.tz_localize("UTC")
+    else:
+        cap = cap.tz_convert("UTC")
+    return maps.loc[dates.le(cap)].copy()
+
+
 def build_team_weekly_ranks(
     maps: pd.DataFrame,
     *,
@@ -536,6 +875,8 @@ def build_team_weekly_ranks(
     min_series: int = 5,
     previous_as_of: pd.Timestamp | None = None,
     current: pd.DataFrame | None = None,
+    cache_dir: Path | None = None,
+    source_identity_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Return team rank movement against the previous refresh's ladder.
 
@@ -555,7 +896,17 @@ def build_team_weekly_ranks(
     recent_anchor = _recent_team_baseline_anchor(previous_as_of, previous_start, cutoff)
     if current is None:
         current, _ = fit_hierarchical_bt(maps, as_of=cutoff, write=False)
-    previous, _ = fit_hierarchical_bt(maps, as_of=recent_anchor - pd.Timedelta(microseconds=1), write=False)
+    previous_cutoff = recent_anchor - pd.Timedelta(microseconds=1)
+    previous_maps = _frame_through_cutoff(maps, previous_cutoff)
+    previous_source_identity, _, _ = _frame_source_identity(previous_maps)
+    previous, _ = fit_hierarchical_bt(
+        previous_maps,
+        as_of=previous_cutoff,
+        write=False,
+        cache_dir=cache_dir,
+        source_identity_sha256=previous_source_identity,
+        cache_slot="previous",
+    )
 
     def order(snapshot: pd.DataFrame) -> tuple[dict[str, int], dict[str, float]]:
         if snapshot.empty:

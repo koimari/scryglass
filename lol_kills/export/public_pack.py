@@ -1523,6 +1523,7 @@ def export_public_pack(
     rating_game_ids = set(_normalized_game_uid(rating_input).dropna().astype(str))
     if not rating_game_ids:
         raise RuntimeError("public pack team rating source has no game identities")
+    rating_source_identity = source_identity_sha256(rating_game_ids)
     progress("checking source identity alignment")
     if (warehouse / "meta.json").exists():
         map_ids = set(_normalized_game_uid(maps_for_records).dropna().astype(str))
@@ -1695,6 +1696,8 @@ def export_public_pack(
         rating_input,
         write=True,
         output_dir=features_root,
+        cache_dir=features_root,
+        source_identity_sha256=rating_source_identity,
     )
     sequential_team_snapshot = pd.read_parquet(features_root / "ratings_dual_snapshot.parquet")
     public_ratings = apply_team_momentum_snapshot(
@@ -1733,6 +1736,8 @@ def export_public_pack(
         as_of=source_as_of,
         min_series=5,
         current=public_ratings,
+        cache_dir=features_root,
+        source_identity_sha256=rating_source_identity,
     )
     public_ratings = _attach_public_team_evidence(
         public_ratings,
@@ -1756,6 +1761,7 @@ def export_public_pack(
         player_maps_for_ratings,
         player_rating_input,
         cfg=player_rating_cfg,
+        output_dir=features_root,
         as_of=pd.to_datetime(maps_for_records["date"], utc=True, errors="coerce").max(),
         min_games=20,
         player_records=player_records_payload,
@@ -2656,6 +2662,9 @@ def export_public_pack(
         "pack_id": pack_id,
         "schema_version": spec.SCHEMA_VERSION,
         "created_utc": datetime.now(timezone.utc).isoformat(),
+        "source_as_of": source_as_of.isoformat().replace("+00:00", "Z"),
+        "source_game_count": len(source_game_ids),
+        "source_identity_sha256": composition_source_digest,
         "filters": {
             "years": list(years),
             "leagues": "all_in_year_window",

@@ -200,6 +200,8 @@ def _manifest(pack_dir: Path, game_ids: list[str]) -> dict:
         )
     return {
         "pack_id": pack_dir.name,
+        "source_game_count": len(game_ids),
+        "source_identity_sha256": source_identity_sha256(game_ids),
         "ratings": {"source_game_count": len(game_ids), "source_identity_sha256": source_identity_sha256(game_ids)},
         "files": files,
         "total_files": len(files),
@@ -802,6 +804,20 @@ def test_pack_validation_rejects_a_changed_file(tmp_path: Path) -> None:
     (pack_dir / pack_spec.PUBLIC_RATING_REQUIRED_FILES[0]).write_text("changed", encoding="utf-8")
     source = {"game_ids": ["game-2"], "game_count": 1, "identity_sha256": source_identity_sha256(["game-2"])}
     with pytest.raises(RefreshValidationError, match="wrong size"):
+        validate_pack(pack_dir, manifest, source)
+
+
+def test_pack_validation_rejects_a_missing_top_level_source_binding(tmp_path: Path) -> None:
+    pack_dir = tmp_path / "pack"
+    manifest = _manifest(pack_dir, ["game-2"])
+    manifest["source_game_count"] = None
+    source = {
+        "game_ids": ["game-2"],
+        "game_count": 1,
+        "identity_sha256": source_identity_sha256(["game-2"]),
+    }
+
+    with pytest.raises(RefreshValidationError, match="manifest source game count"):
         validate_pack(pack_dir, manifest, source)
 
 

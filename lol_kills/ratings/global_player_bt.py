@@ -18,13 +18,27 @@ group and cannot lift or lower a player's anchor on their own.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from bisect import bisect_right, insort
+import hashlib
+import io
+import inspect
+import json
 import math
-from typing import Any
+import os
+from pathlib import Path
+import sys
+from typing import Any, Callable
+import zipfile
 
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 from scipy.sparse import csr_matrix, hstack
+
+try:
+    from threadpoolctl import threadpool_limits
+except ImportError:  # pragma: no cover - exercised by dependency failure tests
+    threadpool_limits = None
 
 from lol_kills.etl.source_keys import canonical_source_game_key
 
@@ -75,6 +89,1364 @@ PERFORMANCE_ANCHOR_SOURCE_COLUMNS: tuple[str, ...] = (
     "wcpm",
 )
 _ANCHOR_ZERO_MEAN_TOLERANCE = 1e-9
+_PREFIX_CACHE_SCHEMA_VERSION = 1
+_PREFIX_CACHE_SCHEMA_FINGERPRINT = (
+    "robust-prefix-baseline:v1:median-mad-iqr:strict-prior-blocks:float64"
+)
+_PREFIX_CACHE_MISSING_DATE = np.iinfo(np.int64).min
+_BASELINE_GROUP_SEPARATOR = "\x1f"
+_GLOBAL_FIT_CACHE_SCHEMA_VERSION = 1
+_GLOBAL_FIT_CACHE_SCHEMA_FINGERPRINT = "global-player-fit:v2:parquet-json:source-bound"
+
+
+def _write_npz_level1(path: Path, arrays: dict[str, np.ndarray]) -> None:
+    """Write a deterministic NumPy archive with fast level-one deflate."""
+
+    with path.open("wb") as handle:
+        with zipfile.ZipFile(
+            handle,
+            mode="w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=1,
+            allowZip64=True,
+        ) as archive:
+            for name in sorted(arrays):
+                payload = io.BytesIO()
+                np.lib.format.write_array(
+                    payload,
+                    np.asarray(arrays[name]),
+                    allow_pickle=False,
+                )
+                info = zipfile.ZipInfo(
+                    filename=f"{name}.npy",
+                    date_time=(1980, 1, 1, 0, 0, 0),
+                )
+                info.create_system = 3
+                info.external_attr = 0o600 << 16
+                info.compress_type = zipfile.ZIP_DEFLATED
+                archive.writestr(info, payload.getvalue())
+
+
+class PrefixBaselineCacheError(RuntimeError):
+    """Raised when a cached baseline cannot prove source equivalence."""
+
+
+def _baseline_group(
+    role: pd.Series,
+    tier: pd.Series | None = None,
+) -> pd.Series:
+    """Build the global anchor's role/tier key.
+
+    The global path has always kept an explicit string bucket for a missing
+    tier. Preserve that bucket so an unlabelled row stays eligible for the
+    global anchor without joining a labelled tier.
+    """
+
+    # Use the nullable string dtype before filling. Pandas 3 keeps nullable
+    # semantics for ``astype(str)`` on a StringDtype series, so a later
+    # ``fillna`` can otherwise produce an empty tier suffix or a null role.
+    def explicit_bucket(values: pd.Series) -> pd.Series:
+        return values.astype("string").fillna("<NA>").astype(object)
+
+    role_key = explicit_bucket(role)
+    if tier is None:
+        return role_key
+    tier_key = explicit_bucket(tier)
+    return (role_key + _BASELINE_GROUP_SEPARATOR + tier_key).astype(object)
+
+
+def _player_baseline_group(role: pd.Series, tier: pd.Series) -> pd.Series:
+    """Build the player attribution key with nullable missing tiers.
+
+    Player attribution has always dropped rows whose tier is unavailable.
+    Nullable string concatenation preserves that fail-closed behavior.
+    """
+
+    return role.astype("string") + _BASELINE_GROUP_SEPARATOR + tier.astype("string")
+
+
+@dataclass
+class _PrefixBaselineEntry:
+    metric_key: str
+    min_obs: int
+    row_ids: np.ndarray
+    groups: np.ndarray
+    dates: np.ndarray
+    values: np.ndarray
+    z: np.ndarray
+    prior_count: np.ndarray
+
+
+@dataclass
+class _PrefixBaselineQuery:
+    """Validated structural arrays shared by one normalization pass."""
+
+    keys: tuple[tuple[str, ...], ...]
+    row_ids: np.ndarray
+    groups: np.ndarray
+    dates: np.ndarray
+    group_source_id: int
+    date_source_id: int
+    row_key_source_id: int
+    catalog_generation: int
+
+
+class PrefixBaselineCache:
+    """Reuse exact robust baselines for immutable chronological prefixes.
+
+    The cache stores outputs from the existing reference implementation. It
+    never approximates the median, MAD, IQR, or z-score. A later request may
+    reuse a complete prefix, or it may add rows before the cached latest date
+    when every old row is unchanged and only the affected strict-prior suffix
+    is rebuilt. Rows at a latest date may be partial because they cannot affect
+    their own strict-prior baseline. Any source correction, deletion, or other
+    unproven shape is a cache miss and is computed by the caller's reference
+    path.
+
+    When ``storage_path`` is set, the row catalog and every metric entry use a
+    checksummed JSON manifest plus a NumPy payload. A source with later
+    timestamp blocks extends the entry through the appended blocks. A source
+    correction, deletion, schema change, or non-prefix census clears the
+    loaded entries before the caller recomputes them.
+
+    The row key must identify one player-map seat. A key normally contains the
+    canonical game ID, side, player name, and normalized role. Values are
+    compared by their float64 bytes, so changed source values cannot silently
+    reuse an old baseline.
+    """
+
+    def __init__(
+        self,
+        *,
+        storage_path: Path | str | None = None,
+        source_identity: str | None = None,
+        schema_fingerprint: str = _PREFIX_CACHE_SCHEMA_FINGERPRINT,
+    ) -> None:
+        self.storage_path = Path(storage_path) if storage_path is not None else None
+        self.manifest_path = (
+            self.storage_path.with_suffix(".json")
+            if self.storage_path is not None
+            else None
+        )
+        self.payload_path = (
+            self.storage_path.with_suffix(".npz")
+            if self.storage_path is not None
+            else None
+        )
+        self.source_identity = source_identity
+        self.schema_fingerprint = str(schema_fingerprint)
+        self._entries: dict[tuple[str, int], list[_PrefixBaselineEntry]] = {}
+        self._row_ids: dict[tuple[str, ...], int] = {}
+        self._catalog_generation = 0
+        self._dirty = False
+        self.invalidated = False
+        self.invalidated_reason: str | None = None
+        self.source_identity_changed = False
+        self.hits = 0
+        self.misses = 0
+        self.stores = 0
+        self.last_miss_reason: str | None = None
+        if self.storage_path is not None:
+            self._load()
+
+    @property
+    def persistent(self) -> bool:
+        return self.storage_path is not None
+
+    def _clear(self, reason: str) -> None:
+        self._entries.clear()
+        self._row_ids.clear()
+        self._catalog_generation += 1
+        self._dirty = True
+        self.invalidated = True
+        self.invalidated_reason = str(reason)
+
+    @staticmethod
+    def _array_sha256(array: np.ndarray) -> str:
+        contiguous = np.ascontiguousarray(array)
+        return hashlib.sha256(contiguous.tobytes()).hexdigest()
+
+    @staticmethod
+    def _json_key(key: tuple[str, ...]) -> str:
+        return json.dumps(key, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def _unicode_array(values: list[str]) -> np.ndarray:
+        width = max([len(value) for value in values] + [1])
+        return np.asarray(values, dtype=f"<U{width}")
+
+    @staticmethod
+    def _manifest_spec(array: np.ndarray) -> dict[str, object]:
+        return {
+            "dtype": str(array.dtype),
+            "shape": list(array.shape),
+            "sha256": PrefixBaselineCache._array_sha256(array),
+        }
+
+    def _load(self) -> None:
+        """Load a validated cache payload, leaving a failed cache empty."""
+
+        assert self.manifest_path is not None
+        assert self.payload_path is not None
+        if not self.manifest_path.is_file() and not self.payload_path.is_file():
+            return
+        try:
+            manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("schema_version") != _PREFIX_CACHE_SCHEMA_VERSION:
+                raise PrefixBaselineCacheError("persistent cache schema version drift")
+            if manifest.get("schema_fingerprint") != self.schema_fingerprint:
+                raise PrefixBaselineCacheError("persistent cache schema fingerprint drift")
+            saved_identity = manifest.get("source_identity")
+            if (
+                self.source_identity is not None
+                and saved_identity is not None
+                and self.source_identity != saved_identity
+            ):
+                # A changed source census can be an append. Row-level checks
+                # below decide whether the change is append-only or a drift.
+                self.source_identity_changed = True
+                self._dirty = True
+            if self.source_identity is None and saved_identity is not None:
+                self.source_identity = str(saved_identity)
+            payload_bytes = self.payload_path.read_bytes()
+            expected_payload = manifest.get("payload_sha256")
+            if hashlib.sha256(payload_bytes).hexdigest() != expected_payload:
+                raise PrefixBaselineCacheError("persistent cache payload checksum drift")
+            with np.load(self.payload_path, allow_pickle=False) as payload:
+                specs = manifest.get("arrays")
+                if not isinstance(specs, dict):
+                    raise PrefixBaselineCacheError("persistent cache array manifest missing")
+                arrays: dict[str, np.ndarray] = {}
+                for name, spec in specs.items():
+                    if name not in payload or not isinstance(spec, dict):
+                        raise PrefixBaselineCacheError("persistent cache array missing")
+                    array = np.asarray(payload[name])
+                    if str(array.dtype) != spec.get("dtype") or list(array.shape) != spec.get("shape"):
+                        raise PrefixBaselineCacheError("persistent cache array schema drift")
+                    if self._array_sha256(array) != spec.get("sha256"):
+                        raise PrefixBaselineCacheError("persistent cache array checksum drift")
+                    arrays[str(name)] = array
+            catalog = arrays.pop("row_catalog")
+            if catalog.ndim != 1:
+                raise PrefixBaselineCacheError("persistent cache row catalog shape drift")
+            self._row_ids = {}
+            for row_id, encoded in enumerate(catalog.tolist()):
+                decoded = json.loads(str(encoded))
+                if not isinstance(decoded, list):
+                    raise PrefixBaselineCacheError("persistent cache row catalog drift")
+                key = self._key(decoded)
+                if key in self._row_ids:
+                    raise PrefixBaselineCacheError("persistent cache row catalog duplicate")
+                self._row_ids[key] = row_id
+            catalog_size = len(catalog)
+            entries = manifest.get("entries")
+            if not isinstance(entries, list):
+                raise PrefixBaselineCacheError("persistent cache entry manifest missing")
+            loaded: dict[tuple[str, int], list[_PrefixBaselineEntry]] = {}
+            for descriptor in entries:
+                if not isinstance(descriptor, dict):
+                    raise PrefixBaselineCacheError("persistent cache entry descriptor drift")
+                metric_key = str(descriptor["metric_key"])
+                min_obs = int(descriptor["min_obs"])
+                prefix = str(descriptor["prefix"])
+                entry_arrays = {
+                    name: arrays[f"{prefix}_{name}"]
+                    for name in ("row_ids", "groups", "dates", "values", "z", "prior")
+                }
+                if any(array.ndim != 1 for array in entry_arrays.values()):
+                    raise PrefixBaselineCacheError("persistent cache entry shape drift")
+                entry_length = len(entry_arrays["row_ids"])
+                if any(len(array) != entry_length for array in entry_arrays.values()):
+                    raise PrefixBaselineCacheError("persistent cache entry length drift")
+                raw_row_ids = entry_arrays["row_ids"]
+                if not np.issubdtype(raw_row_ids.dtype, np.integer):
+                    raise PrefixBaselineCacheError("persistent cache row ID dtype drift")
+                row_ids = raw_row_ids.astype(np.int64, copy=False)
+                if (
+                    (row_ids < 0).any()
+                    or (row_ids >= catalog_size).any()
+                    or (len(row_ids) > 1 and (np.diff(row_ids) <= 0).any())
+                ):
+                    raise PrefixBaselineCacheError("persistent cache row ID order drift")
+                entry = _PrefixBaselineEntry(
+                    metric_key=metric_key,
+                    min_obs=min_obs,
+                    row_ids=row_ids,
+                    groups=np.asarray(
+                        [
+                            None if value == "" else str(value)
+                            for value in entry_arrays["groups"].tolist()
+                        ],
+                        dtype=object,
+                    ),
+                    dates=entry_arrays["dates"].astype(np.int64, copy=False),
+                    values=entry_arrays["values"].astype(float, copy=False),
+                    z=entry_arrays["z"].astype(float, copy=False),
+                    prior_count=entry_arrays["prior"].astype(float, copy=False),
+                )
+                loaded.setdefault((metric_key, min_obs), []).append(entry)
+            self._entries = loaded
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            OverflowError,
+            IndexError,
+            zipfile.BadZipFile,
+            json.JSONDecodeError,
+            PrefixBaselineCacheError,
+        ) as exc:
+            self._clear(f"persistent cache load failed: {exc}")
+
+    def flush(self) -> None:
+        """Atomically serialize the validated cache for later processes."""
+
+        if self.storage_path is None or not self._dirty:
+            return
+        assert self.manifest_path is not None
+        assert self.payload_path is not None
+        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        arrays: dict[str, np.ndarray] = {}
+        catalog = [None] * len(self._row_ids)
+        for key, row_id in self._row_ids.items():
+            catalog[row_id] = self._json_key(key)
+        arrays["row_catalog"] = self._unicode_array([str(value) for value in catalog])
+        descriptors: list[dict[str, object]] = []
+        counter = 0
+        for entries in self._entries.values():
+            for entry in entries:
+                prefix = f"entry_{counter}"
+                counter += 1
+                arrays[f"{prefix}_row_ids"] = entry.row_ids.astype(np.int64, copy=False)
+                arrays[f"{prefix}_groups"] = self._unicode_array(
+                    ["" if value is None else str(value) for value in entry.groups.tolist()]
+                )
+                arrays[f"{prefix}_dates"] = entry.dates.astype(np.int64, copy=False)
+                arrays[f"{prefix}_values"] = entry.values.astype(float, copy=False)
+                arrays[f"{prefix}_z"] = entry.z.astype(float, copy=False)
+                arrays[f"{prefix}_prior"] = entry.prior_count.astype(float, copy=False)
+                descriptors.append(
+                    {
+                        "metric_key": entry.metric_key,
+                        "min_obs": entry.min_obs,
+                        "prefix": prefix,
+                    }
+                )
+        payload_tmp = self.payload_path.with_name(self.payload_path.name + ".tmp")
+        manifest_tmp = self.manifest_path.with_name(self.manifest_path.name + ".tmp")
+        try:
+            _write_npz_level1(payload_tmp, arrays)
+            payload_bytes = payload_tmp.read_bytes()
+            manifest = {
+                "schema_version": _PREFIX_CACHE_SCHEMA_VERSION,
+                "schema_fingerprint": self.schema_fingerprint,
+                "source_identity": self.source_identity,
+                "payload_sha256": hashlib.sha256(payload_bytes).hexdigest(),
+                "arrays": {
+                    name: self._manifest_spec(array) for name, array in arrays.items()
+                },
+                "entries": descriptors,
+            }
+            manifest_tmp.write_text(
+                json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            os.replace(payload_tmp, self.payload_path)
+            os.replace(manifest_tmp, self.manifest_path)
+            self.invalidated = False
+            self.invalidated_reason = None
+            self.source_identity_changed = False
+            self._dirty = False
+        finally:
+            for temporary in (payload_tmp, manifest_tmp):
+                try:
+                    temporary.unlink()
+                except FileNotFoundError:
+                    # The atomic replace may have left no temporary file.
+                    pass
+
+    @staticmethod
+    def _key(value: object) -> tuple[str, ...]:
+        if isinstance(value, tuple):
+            return tuple(sys.intern(str(part)) for part in value)
+        if isinstance(value, list):
+            return tuple(sys.intern(str(part)) for part in value)
+        return (sys.intern(str(value)),)
+
+    @staticmethod
+    def _group(value: object) -> str | None:
+        if value is None or pd.isna(value):
+            return None
+        return str(value)
+
+    @staticmethod
+    def _date(value: object) -> int | None:
+        if value is None or pd.isna(value):
+            return None
+        return int(pd.Timestamp(value).value)
+
+    @staticmethod
+    def _same_float(left: object, right: object) -> bool:
+        left_value = float(left)
+        right_value = float(right)
+        if np.isnan(left_value) and np.isnan(right_value):
+            return True
+        return np.float64(left_value).tobytes() == np.float64(right_value).tobytes()
+
+    @staticmethod
+    def _same_float_array(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+        """Compare float bytes while treating every NaN payload as equal."""
+
+        left_array = np.asarray(left, dtype=np.float64)
+        right_array = np.asarray(right, dtype=np.float64)
+        same = (
+            left_array.view(np.uint64) == right_array.view(np.uint64)
+        )
+        same |= np.isnan(left_array) & np.isnan(right_array)
+        return same
+
+    @staticmethod
+    def _numeric(values: pd.Series) -> np.ndarray:
+        """Convert one metric after its structural query is prepared."""
+
+        return pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
+
+    def prepare_query(
+        self,
+        group: pd.Series,
+        date: pd.Series,
+        row_key: pd.Series,
+    ) -> _PrefixBaselineQuery:
+        """Prepare and validate structural arrays once per normalization pass."""
+
+        if not (len(group) == len(date) == len(row_key)):
+            raise PrefixBaselineCacheError(
+                "baseline cache structural query length mismatch"
+            )
+        keys = tuple(
+            PrefixBaselineCache._key(value)
+            for value in row_key.to_numpy(dtype=object)
+        )
+        row_ids = np.empty(len(keys), dtype=np.int64)
+        seen: set[tuple[str, ...]] = set()
+        for key in keys:
+            if key in seen:
+                raise PrefixBaselineCacheError(
+                    "baseline cache row key is duplicated"
+                )
+            seen.add(key)
+        for position, key in enumerate(keys):
+            row_ids[position] = self._row_ids.setdefault(key, len(self._row_ids))
+        groups = np.asarray(
+            [
+                PrefixBaselineCache._group(value)
+                for value in group.to_numpy(dtype=object)
+            ],
+            dtype=object,
+        )
+        dates = np.asarray(
+            [
+                _PREFIX_CACHE_MISSING_DATE
+                if (value := PrefixBaselineCache._date(raw)) is None
+                else value
+                for raw in date.to_numpy(dtype=object)
+            ],
+            dtype=np.int64,
+        )
+        return _PrefixBaselineQuery(
+            keys=keys,
+            row_ids=row_ids,
+            groups=groups,
+            dates=dates,
+            group_source_id=id(group),
+            date_source_id=id(date),
+            row_key_source_id=id(row_key),
+            catalog_generation=self._catalog_generation,
+        )
+
+    def _refresh_query_catalog(
+        self,
+        prepared_query: _PrefixBaselineQuery,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        row_key: pd.Series,
+    ) -> None:
+        """Rebind a query after a fail-closed cache clear."""
+
+        self._validate_query(prepared_query, values, group, date, row_key)
+        if prepared_query.catalog_generation == self._catalog_generation:
+            return
+        refreshed = self.prepare_query(group, date, row_key)
+        prepared_query.keys = refreshed.keys
+        prepared_query.row_ids = refreshed.row_ids
+        prepared_query.groups = refreshed.groups
+        prepared_query.dates = refreshed.dates
+        prepared_query.catalog_generation = refreshed.catalog_generation
+
+    @staticmethod
+    def _validate_query(
+        prepared_query: _PrefixBaselineQuery,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        row_key: pd.Series,
+    ) -> None:
+        if not isinstance(prepared_query, _PrefixBaselineQuery):
+            raise PrefixBaselineCacheError("baseline cache prepared query type drift")
+        if (
+            len(prepared_query.row_ids) != len(values)
+            or prepared_query.group_source_id != id(group)
+            or prepared_query.date_source_id != id(date)
+            or prepared_query.row_key_source_id != id(row_key)
+        ):
+            raise PrefixBaselineCacheError("baseline cache prepared query source drift")
+
+    def _arrays(
+        self,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        row_key: pd.Series,
+    ) -> tuple[
+        tuple[tuple[str, ...], ...],
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+    ]:
+        prepared_query = self.prepare_query(group, date, row_key)
+        return (
+            prepared_query.keys,
+            prepared_query.row_ids,
+            prepared_query.groups,
+            prepared_query.dates,
+            self._numeric(values),
+        )
+
+    @staticmethod
+    def _is_prefix(
+        entry: _PrefixBaselineEntry,
+        target_positions: np.ndarray,
+        target_set: set[int],
+    ) -> bool:
+        if len(target_positions) == len(entry.row_ids):
+            return True
+        target_groups = entry.groups[target_positions]
+        target_dates = entry.dates[target_positions]
+        selected = np.zeros(len(entry.row_ids), dtype=bool)
+        selected[target_positions] = True
+        for current_group in set(target_groups.tolist()):
+            if current_group is None:
+                return False
+            target_group_mask = target_groups == current_group
+            group_target_dates = target_dates[target_group_mask]
+            if (
+                len(group_target_dates) == 0
+                or (group_target_dates == _PREFIX_CACHE_MISSING_DATE).any()
+            ):
+                return False
+            latest = int(group_target_dates.max())
+            group_mask = entry.groups == current_group
+            prior_mask = (
+                group_mask
+                & (entry.dates != _PREFIX_CACHE_MISSING_DATE)
+                & (entry.dates < latest)
+            )
+            if np.any(prior_mask & ~selected):
+                return False
+        return True
+
+    @staticmethod
+    def _matched_positions(
+        entry: _PrefixBaselineEntry,
+        row_ids: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        positions = np.searchsorted(entry.row_ids, row_ids)
+        known = positions < len(entry.row_ids)
+        if known.any():
+            known_indices = np.flatnonzero(known)
+            known[known_indices] = entry.row_ids[positions[known_indices]] == row_ids[known_indices]
+        return positions, known
+
+    def _make_entry(
+        self,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        min_obs: int,
+        *,
+        metric_key: str,
+        row_key: pd.Series,
+        z: pd.Series,
+        prior_count: pd.Series,
+        prepared_query: _PrefixBaselineQuery | None = None,
+        numeric_values: np.ndarray | None = None,
+        arrays: tuple[
+            tuple[tuple[str, ...], ...],
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+        ] | None = None,
+    ) -> _PrefixBaselineEntry | None:
+        if arrays is not None:
+            _, row_ids, groups, dates, numeric = arrays
+        elif prepared_query is not None:
+            self._refresh_query_catalog(prepared_query, values, group, date, row_key)
+            row_ids = prepared_query.row_ids
+            groups = prepared_query.groups
+            dates = prepared_query.dates
+            numeric = self._numeric(values) if numeric_values is None else numeric_values
+        else:
+            try:
+                _, row_ids, groups, dates, numeric = self._arrays(
+                    values, group, date, row_key
+                )
+            except PrefixBaselineCacheError:
+                return None
+        order = np.argsort(row_ids, kind="stable")
+        return _PrefixBaselineEntry(
+            metric_key=str(metric_key),
+            min_obs=int(min_obs),
+            row_ids=row_ids[order],
+            groups=groups[order],
+            dates=dates[order].astype(np.int64, copy=False),
+            values=numeric[order],
+            z=z.to_numpy(dtype=float)[order],
+            prior_count=prior_count.to_numpy(dtype=float)[order],
+        )
+
+    def _try_append(
+        self,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        min_obs: int,
+        *,
+        metric_key: str,
+        row_key: pd.Series,
+        block_baseline: Callable[
+            [np.ndarray, np.ndarray, int], tuple[np.ndarray, np.ndarray]
+        ],
+        prepared_query: _PrefixBaselineQuery | None = None,
+        numeric_values: np.ndarray | None = None,
+        arrays: tuple[
+            tuple[tuple[str, ...], ...],
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+        ] | None = None,
+    ) -> tuple[pd.Series, pd.Series] | None:
+        """Extend one entry when every new row is a later timestamp block."""
+
+        if arrays is not None:
+            _keys, row_ids, groups, dates, numeric = arrays
+        elif prepared_query is not None:
+            try:
+                self._refresh_query_catalog(prepared_query, values, group, date, row_key)
+            except PrefixBaselineCacheError as exc:
+                self.last_miss_reason = str(exc)
+                return None
+            _keys = prepared_query.keys
+            row_ids = prepared_query.row_ids
+            groups = prepared_query.groups
+            dates = prepared_query.dates
+            numeric = self._numeric(values) if numeric_values is None else numeric_values
+        else:
+            try:
+                _keys, row_ids, groups, dates, numeric = self._arrays(
+                    values, group, date, row_key
+                )
+            except PrefixBaselineCacheError as exc:
+                self.last_miss_reason = str(exc)
+                return None
+        entries = self._entries.get((str(metric_key), int(min_obs)), [])
+        for entry_index, entry in enumerate(entries):
+            cached_positions, known = self._matched_positions(entry, row_ids)
+            if int(known.sum()) != len(entry.row_ids):
+                continue
+            drift = False
+            cached_known = cached_positions[known]
+            drift = bool(
+                np.any(entry.groups[cached_known] != groups[known])
+                or np.any(entry.dates[cached_known] != dates[known])
+                or not self._same_float_array(
+                    entry.values[cached_known], numeric[known]
+                ).all()
+            )
+            if drift:
+                continue
+            if known.all():
+                continue
+            if not known.all():
+                old_dates = entry.dates[entry.dates != _PREFIX_CACHE_MISSING_DATE]
+                new_dates = dates[~known]
+                if len(old_dates) == 0 or (new_dates == _PREFIX_CACHE_MISSING_DATE).any():
+                    continue
+                latest_old = int(old_dates.max())
+                if (new_dates <= latest_old).any():
+                    continue
+
+            output_z = np.full(len(values), np.nan, dtype=float)
+            output_prior = np.zeros(len(values), dtype=float)
+            output_z[known] = entry.z[cached_positions[known]]
+            output_prior[known] = entry.prior_count[cached_positions[known]]
+
+            for current_group in set(groups.tolist()):
+                group_positions = np.flatnonzero(groups == current_group)
+                if current_group is None or len(group_positions) == 0:
+                    continue
+                group_dates = dates[group_positions]
+                if len(group_positions) > 1 and np.all(group_dates[1:] >= group_dates[:-1]):
+                    order = group_positions
+                else:
+                    order = group_positions[np.argsort(group_dates, kind="stable")]
+                # Match _prior_baseline_z: rows without a usable date do not
+                # enter a later row's strict-prior pool.
+                order = order[dates[order] != _PREFIX_CACHE_MISSING_DATE]
+                if len(order) == 0:
+                    continue
+                group_dates = dates[order]
+                starts = np.empty(len(order), dtype=bool)
+                starts[0] = True
+                starts[1:] = group_dates[1:] != group_dates[:-1]
+                block_starts = np.flatnonzero(starts)
+                present = np.isfinite(numeric[order])
+                pool = numeric[order][present]
+                available_all = np.concatenate(([0], np.cumsum(present)))[block_starts]
+                new_block_mask = np.asarray(
+                    [not known[position] for position in order[block_starts]],
+                    dtype=bool,
+                )
+                new_blocks = np.flatnonzero(new_block_mask)
+                if len(new_blocks) == 0:
+                    continue
+                available = available_all[new_blocks]
+                block_location, block_scale = block_baseline(
+                    pool, available, min_obs
+                )
+                block_lookup = {
+                    int(block_index): offset
+                    for offset, block_index in enumerate(new_blocks)
+                }
+                block_of_row = np.cumsum(starts) - 1
+                new_local_positions = np.flatnonzero(~known[order])
+                for local_position in new_local_positions:
+                    target_position = order[local_position]
+                    offset = block_lookup.get(int(block_of_row[local_position]))
+                    if offset is None:
+                        continue
+                    count = int(available[offset])
+                    output_prior[target_position] = float(count)
+                    centre = float(block_location[offset])
+                    spread = float(block_scale[offset])
+                    if (
+                        count < max(int(min_obs), 1)
+                        or not np.isfinite(centre)
+                        or not np.isfinite(spread)
+                        or spread <= 0.0
+                        or not np.isfinite(numeric[target_position])
+                    ):
+                        continue
+                    output_z[target_position] = (
+                        numeric[target_position] - centre
+                    ) / spread
+
+            replacement = self._make_entry(
+                values,
+                group,
+                date,
+                min_obs,
+                metric_key=metric_key,
+                row_key=row_key,
+                z=pd.Series(output_z, index=values.index, dtype=float),
+                prior_count=pd.Series(output_prior, index=values.index, dtype=float),
+                arrays=(_keys, row_ids, groups, dates, numeric),
+            )
+            if replacement is None:
+                return None
+            self._entries[(str(metric_key), int(min_obs))] = [
+                value for index, value in enumerate(entries) if index != entry_index
+            ] + [replacement]
+            self._dirty = True
+            self.stores += 1
+            return (
+                pd.Series(output_z, index=values.index, dtype=float),
+                pd.Series(output_prior, index=values.index, dtype=float),
+            )
+        return None
+
+    def _try_insert(
+        self,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        min_obs: int,
+        *,
+        metric_key: str,
+        row_key: pd.Series,
+        block_baseline: Callable[
+            [np.ndarray, np.ndarray, int], tuple[np.ndarray, np.ndarray]
+        ],
+        prepared_query: _PrefixBaselineQuery | None = None,
+        numeric_values: np.ndarray | None = None,
+        arrays: tuple[
+            tuple[tuple[str, ...], ...],
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+        ] | None = None,
+    ) -> tuple[pd.Series, pd.Series] | None:
+        """Reuse an entry when new rows insert before its latest date.
+
+        A source census can add an older map after a later map already exists.
+        Such a change is not an append-only prefix, but it only changes strict
+        prior baselines at the new map's date and later. Keep the proven rows
+        before that boundary and recompute the affected suffix exactly.
+        """
+
+        if arrays is not None:
+            _keys, row_ids, groups, dates, numeric = arrays
+        elif prepared_query is not None:
+            try:
+                self._refresh_query_catalog(prepared_query, values, group, date, row_key)
+            except PrefixBaselineCacheError as exc:
+                self.last_miss_reason = str(exc)
+                return None
+            _keys = prepared_query.keys
+            row_ids = prepared_query.row_ids
+            groups = prepared_query.groups
+            dates = prepared_query.dates
+            numeric = self._numeric(values) if numeric_values is None else numeric_values
+        else:
+            try:
+                _keys, row_ids, groups, dates, numeric = self._arrays(
+                    values, group, date, row_key
+                )
+            except PrefixBaselineCacheError as exc:
+                self.last_miss_reason = str(exc)
+                return None
+
+        entries = self._entries.get((str(metric_key), int(min_obs)), [])
+        for entry_index, entry in enumerate(entries):
+            cached_positions, known = self._matched_positions(entry, row_ids)
+            # An insertion may add rows. It cannot delete an old row.
+            if int(known.sum()) != len(entry.row_ids) or known.all():
+                continue
+            cached_known = cached_positions[known]
+            if bool(
+                np.any(entry.groups[cached_known] != groups[known])
+                or np.any(entry.dates[cached_known] != dates[known])
+                or not self._same_float_array(
+                    entry.values[cached_known], numeric[known]
+                ).all()
+            ):
+                continue
+
+            new_mask = ~known
+            if (
+                np.any(pd.isna(groups[new_mask]))
+                or np.any(dates[new_mask] == _PREFIX_CACHE_MISSING_DATE)
+            ):
+                continue
+
+            output_z = np.full(len(values), np.nan, dtype=float)
+            output_prior = np.zeros(len(values), dtype=float)
+            output_z[known] = entry.z[cached_positions[known]]
+            output_prior[known] = entry.prior_count[cached_positions[known]]
+
+            for current_group in set(groups.tolist()):
+                group_positions = np.flatnonzero(groups == current_group)
+                if current_group is None or len(group_positions) == 0:
+                    continue
+                if not new_mask[group_positions].any():
+                    continue
+                group_dates = dates[group_positions]
+                if len(group_positions) > 1 and np.all(
+                    group_dates[1:] >= group_dates[:-1]
+                ):
+                    order = group_positions
+                else:
+                    order = group_positions[np.argsort(group_dates, kind="stable")]
+                # Match _prior_baseline_z: rows without a usable date are
+                # excluded from the baseline pool and retain their cached
+                # neutral output.
+                order = order[dates[order] != _PREFIX_CACHE_MISSING_DATE]
+                if len(order) == 0:
+                    continue
+                ordered_dates = dates[order]
+                starts = np.empty(len(order), dtype=bool)
+                starts[0] = True
+                starts[1:] = ordered_dates[1:] != ordered_dates[:-1]
+                block_starts = np.flatnonzero(starts)
+                block_of_row = np.cumsum(starts) - 1
+                ordered_new = new_mask[order]
+                block_has_new = np.zeros(len(block_starts), dtype=bool)
+                for block_index, local_position in enumerate(block_starts):
+                    end = (
+                        block_starts[block_index + 1]
+                        if block_index + 1 < len(block_starts)
+                        else len(order)
+                    )
+                    block_has_new[block_index] = bool(
+                        ordered_new[local_position:end].any()
+                    )
+                first_affected = int(np.flatnonzero(block_has_new)[0])
+
+                present = np.isfinite(numeric[order])
+                pool = numeric[order][present]
+                available_all = np.concatenate(([0], np.cumsum(present)))[
+                    block_starts
+                ]
+                available = available_all[first_affected:]
+                block_location, block_scale = block_baseline(
+                    pool, available, min_obs
+                )
+                affected_rows = np.flatnonzero(
+                    block_of_row >= first_affected
+                )
+                for local_position in affected_rows:
+                    target_position = order[local_position]
+                    offset = int(block_of_row[local_position]) - first_affected
+                    count = int(available[offset])
+                    output_prior[target_position] = float(count)
+                    centre = float(block_location[offset])
+                    spread = float(block_scale[offset])
+                    if (
+                        count < max(int(min_obs), 1)
+                        or not np.isfinite(centre)
+                        or not np.isfinite(spread)
+                        or spread <= 0.0
+                        or not np.isfinite(numeric[target_position])
+                    ):
+                        continue
+                    output_z[target_position] = (
+                        numeric[target_position] - centre
+                    ) / spread
+
+            replacement = self._make_entry(
+                values,
+                group,
+                date,
+                min_obs,
+                metric_key=metric_key,
+                row_key=row_key,
+                z=pd.Series(output_z, index=values.index, dtype=float),
+                prior_count=pd.Series(output_prior, index=values.index, dtype=float),
+                arrays=(_keys, row_ids, groups, dates, numeric),
+            )
+            if replacement is None:
+                return None
+            self._entries[(str(metric_key), int(min_obs))] = [
+                value for index, value in enumerate(entries) if index != entry_index
+            ] + [replacement]
+            self._dirty = True
+            self.stores += 1
+            return (
+                pd.Series(output_z, index=values.index, dtype=float),
+                pd.Series(output_prior, index=values.index, dtype=float),
+            )
+        return None
+
+    def lookup(
+        self,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        min_obs: int,
+        *,
+        metric_key: str,
+        row_key: pd.Series,
+        block_baseline: Callable[
+            [np.ndarray, np.ndarray, int], tuple[np.ndarray, np.ndarray]
+        ] | None = None,
+        prepared_query: _PrefixBaselineQuery | None = None,
+    ) -> tuple[pd.Series, pd.Series] | None:
+        """Return cached z and prior counts when source equivalence is proven."""
+
+        self.last_miss_reason = None
+        try:
+            if prepared_query is None:
+                keys, row_ids, groups, dates, numeric = self._arrays(
+                    values, group, date, row_key
+                )
+                query_for_append = None
+            else:
+                self._refresh_query_catalog(prepared_query, values, group, date, row_key)
+                keys = prepared_query.keys
+                row_ids = prepared_query.row_ids
+                groups = prepared_query.groups
+                dates = prepared_query.dates
+                numeric = self._numeric(values)
+                query_for_append = prepared_query
+        except PrefixBaselineCacheError as exc:
+            self.misses += 1
+            self.last_miss_reason = str(exc)
+            return None
+        entries = self._entries.get((str(metric_key), int(min_obs)), [])
+        if not entries:
+            self.misses += 1
+            self.last_miss_reason = "no_entry"
+            return None
+        for entry in entries:
+            target_positions, known = self._matched_positions(entry, row_ids)
+            missing = not bool(known.all())
+            if missing:
+                continue
+            cached_targets = target_positions
+            drift = bool(
+                np.any(entry.groups[cached_targets] != groups)
+                or np.any(entry.dates[cached_targets] != dates)
+                or not self._same_float_array(
+                    entry.values[cached_targets], numeric
+                ).all()
+            )
+            if drift:
+                continue
+            target_array = np.asarray(target_positions, dtype=int)
+            if not self._is_prefix(entry, target_array, set(target_positions)):
+                continue
+            self.hits += 1
+            output_index = values.index
+            return (
+                pd.Series(entry.z[target_array], index=output_index, dtype=float),
+                pd.Series(entry.prior_count[target_array], index=output_index, dtype=float),
+            )
+        if entries and block_baseline is not None:
+            appended = self._try_append(
+                values,
+                group,
+                date,
+                min_obs,
+                metric_key=metric_key,
+                row_key=row_key,
+                block_baseline=block_baseline,
+                prepared_query=query_for_append,
+                numeric_values=numeric,
+                arrays=(keys, row_ids, groups, dates, numeric)
+                if query_for_append is None
+                else None,
+            )
+            if appended is not None:
+                self.hits += 1
+                return appended
+            inserted = self._try_insert(
+                values,
+                group,
+                date,
+                min_obs,
+                metric_key=metric_key,
+                row_key=row_key,
+                block_baseline=block_baseline,
+                prepared_query=query_for_append,
+                numeric_values=numeric,
+                arrays=(keys, row_ids, groups, dates, numeric)
+                if query_for_append is None
+                else None,
+            )
+            if inserted is not None:
+                self.hits += 1
+                return inserted
+        self.misses += 1
+        self.last_miss_reason = "source_drift_or_non_prefix"
+        if self.persistent:
+            self._clear(self.last_miss_reason)
+        return None
+
+    def store(
+        self,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        min_obs: int,
+        *,
+        metric_key: str,
+        row_key: pd.Series,
+        z: pd.Series,
+        prior_count: pd.Series,
+        prepared_query: _PrefixBaselineQuery | None = None,
+    ) -> None:
+        """Store reference results for a complete frame or safe prefix."""
+
+        try:
+            if prepared_query is None:
+                _, row_ids, groups, dates, numeric = self._arrays(
+                    values, group, date, row_key
+                )
+            else:
+                self._refresh_query_catalog(prepared_query, values, group, date, row_key)
+                row_ids = prepared_query.row_ids
+                groups = prepared_query.groups
+                dates = prepared_query.dates
+                numeric = self._numeric(values)
+        except PrefixBaselineCacheError:
+            return
+        order = np.argsort(row_ids, kind="stable")
+        entry = _PrefixBaselineEntry(
+            metric_key=str(metric_key),
+            min_obs=int(min_obs),
+            row_ids=row_ids[order],
+            groups=groups[order],
+            dates=dates[order].astype(np.int64, copy=False),
+            values=numeric[order],
+            z=z.to_numpy(dtype=float)[order],
+            prior_count=prior_count.to_numpy(dtype=float)[order],
+        )
+        self._entries.setdefault((str(metric_key), int(min_obs)), []).append(entry)
+        self._dirty = True
+        self.stores += 1
+
+
+class GlobalPlayerFitCache:
+    """Persist exact global-player fit outputs by a source-bound key.
+
+    The cache contains only private derived snapshots and fit metadata. The
+    caller supplies a key that includes the cutoff-filtered source content,
+    fit configuration, and implementation fingerprint. A changed source or
+    implementation therefore selects a new entry. Each snapshot is stored as
+    Parquet and each manifest records its schema, size, and checksum. A
+    damaged entry is discarded and rebuilt by the caller. The cache keeps at
+    most one entry per named slot, so shifting cutoffs cannot grow it without
+    bound.
+    """
+
+    def __init__(
+        self,
+        *,
+        storage_path: Path | str | None = None,
+        schema_fingerprint: str = _GLOBAL_FIT_CACHE_SCHEMA_FINGERPRINT,
+    ) -> None:
+        self.storage_path = Path(storage_path) if storage_path is not None else None
+        self.manifest_path = (
+            self.storage_path.with_suffix(".json")
+            if self.storage_path is not None
+            else None
+        )
+        self.entries_path = (
+            Path(str(self.storage_path) + ".entries")
+            if self.storage_path is not None
+            else None
+        )
+        self.schema_fingerprint = str(schema_fingerprint)
+        self._entries: dict[tuple[str, str], dict[str, object]] = {}
+        self._dirty = False
+        self.invalidated = False
+        self.invalidated_reason: str | None = None
+        self.hits = 0
+        self.misses = 0
+        self.stores = 0
+        if self.storage_path is not None:
+            self._load()
+
+    @property
+    def persistent(self) -> bool:
+        return self.storage_path is not None
+
+    def _clear(self, reason: str) -> None:
+        self._entries.clear()
+        self._dirty = True
+        self.invalidated = True
+        self.invalidated_reason = str(reason)
+
+    @staticmethod
+    def _metadata_copy(meta: dict[str, Any]) -> dict[str, Any]:
+        """Validate that fit metadata stays JSON-serializable."""
+
+        try:
+            return json.loads(json.dumps(meta, ensure_ascii=False, allow_nan=False))
+        except (TypeError, ValueError) as exc:
+            raise PrefixBaselineCacheError("global fit cache metadata is not JSON-safe") from exc
+
+    @staticmethod
+    def _file_sha256(path: Path) -> tuple[int, str]:
+        digest = hashlib.sha256()
+        size = 0
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                size += len(chunk)
+                digest.update(chunk)
+        return size, digest.hexdigest()
+
+    @staticmethod
+    def _safe_file_name(slot: str, key: str) -> str:
+        digest = hashlib.sha256(f"{slot}\x1f{key}".encode("utf-8")).hexdigest()
+        return f"entry_{digest}.parquet"
+
+    def _load(self) -> None:
+        assert self.manifest_path is not None
+        assert self.entries_path is not None
+        if not self.manifest_path.is_file() and not self.entries_path.exists():
+            return
+        try:
+            manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("schema_version") != _GLOBAL_FIT_CACHE_SCHEMA_VERSION:
+                raise PrefixBaselineCacheError("global fit cache schema version drift")
+            if manifest.get("schema_fingerprint") != self.schema_fingerprint:
+                raise PrefixBaselineCacheError("global fit cache schema fingerprint drift")
+            descriptors = manifest.get("entries")
+            if not isinstance(descriptors, list):
+                raise PrefixBaselineCacheError("global fit cache entry manifest missing")
+            loaded: dict[tuple[str, str], dict[str, object]] = {}
+            for descriptor in descriptors:
+                if not isinstance(descriptor, dict):
+                    raise PrefixBaselineCacheError("global fit cache entry descriptor drift")
+                slot = str(descriptor.get("slot") or "")
+                key = str(descriptor.get("key") or "")
+                file_name = str(descriptor.get("file") or "")
+                if not slot or not key or file_name != self._safe_file_name(slot, key):
+                    raise PrefixBaselineCacheError("global fit cache entry identity drift")
+                path = self.entries_path / file_name
+                if not path.is_file():
+                    raise PrefixBaselineCacheError("global fit cache entry file missing")
+                size, checksum = self._file_sha256(path)
+                if size != int(descriptor.get("bytes", -1)) or checksum != descriptor.get("sha256"):
+                    raise PrefixBaselineCacheError("global fit cache entry checksum drift")
+                snapshot = pd.read_parquet(path)
+                columns = descriptor.get("columns")
+                if columns != [str(column) for column in snapshot.columns]:
+                    raise PrefixBaselineCacheError("global fit cache entry columns drift")
+                dtypes = descriptor.get("dtypes")
+                if dtypes != [str(dtype) for dtype in snapshot.dtypes]:
+                    raise PrefixBaselineCacheError("global fit cache entry dtypes drift")
+                meta = descriptor.get("meta")
+                validated = descriptor.get("validated")
+                if not isinstance(meta, dict) or not isinstance(validated, bool):
+                    raise PrefixBaselineCacheError("global fit cache entry metadata drift")
+                loaded[(slot, key)] = {
+                    "snapshot": snapshot,
+                    "meta": self._metadata_copy(meta),
+                    "validated": validated,
+                    "file": file_name,
+                }
+            self._entries = loaded
+        except Exception as exc:
+            self._clear(f"global fit cache load failed: {exc}")
+
+    def lookup(
+        self,
+        key: str,
+        *,
+        require_validated: bool = False,
+        slot: str | None = None,
+    ) -> tuple[pd.DataFrame, dict[str, Any]] | None:
+        record = None
+        if slot is not None:
+            record = self._entries.get((str(slot), str(key)))
+        else:
+            for (_slot, saved_key), candidate in self._entries.items():
+                if saved_key == str(key):
+                    record = candidate
+                    break
+        if record is None:
+            self.misses += 1
+            return None
+        if require_validated and not bool(record.get("validated")):
+            self.misses += 1
+            return None
+        snapshot = record.get("snapshot")
+        meta = record.get("meta")
+        if not isinstance(snapshot, pd.DataFrame) or not isinstance(meta, dict):
+            self.misses += 1
+            self._clear("global fit cache entry type drift")
+            return None
+        self.hits += 1
+        return snapshot.copy(deep=True), self._metadata_copy(meta)
+
+    def store(
+        self,
+        key: str,
+        snapshot: pd.DataFrame,
+        meta: dict[str, Any],
+        *,
+        validated: bool,
+        slot: str | None = None,
+    ) -> None:
+        if not isinstance(snapshot, pd.DataFrame) or not isinstance(meta, dict):
+            return
+        saved_slot = str(slot or f"key-{str(key)[:16]}")
+        saved_meta = self._metadata_copy(meta)
+        self._entries[(saved_slot, str(key))] = {
+            "snapshot": snapshot.copy(deep=True),
+            "meta": saved_meta,
+            "validated": bool(validated),
+        }
+        # A slot represents one semantic cutoff. Replacing it prevents an
+        # append cycle from retaining an unbounded sequence of historical keys.
+        self._entries = {
+            identity: record
+            for identity, record in self._entries.items()
+            if identity[0] != saved_slot or identity[1] == str(key)
+        }
+        if len(self._entries) > 5:
+            for identity in sorted(self._entries)[:-5]:
+                self._entries.pop(identity, None)
+        self._dirty = True
+        self.stores += 1
+
+    def flush(self) -> None:
+        if self.storage_path is None or not self._dirty:
+            return
+        assert self.manifest_path is not None
+        assert self.entries_path is not None
+        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        self.entries_path.mkdir(parents=True, exist_ok=True)
+        manifest_tmp = self.manifest_path.with_name(self.manifest_path.name + ".tmp")
+        descriptors: list[dict[str, object]] = []
+        active_files: set[str] = set()
+        try:
+            for (slot, key), record in sorted(self._entries.items()):
+                snapshot = record["snapshot"]
+                meta = record["meta"]
+                if not isinstance(snapshot, pd.DataFrame) or not isinstance(meta, dict):
+                    raise PrefixBaselineCacheError("global fit cache entry type drift")
+                file_name = self._safe_file_name(slot, key)
+                path = self.entries_path / file_name
+                temporary = path.with_name(path.name + ".tmp.parquet")
+                snapshot.to_parquet(temporary, index=False)
+                os.replace(temporary, path)
+                size, checksum = self._file_sha256(path)
+                active_files.add(file_name)
+                descriptors.append(
+                    {
+                        "slot": slot,
+                        "key": key,
+                        "file": file_name,
+                        "bytes": size,
+                        "sha256": checksum,
+                        "columns": [str(column) for column in snapshot.columns],
+                        "dtypes": [str(dtype) for dtype in snapshot.dtypes],
+                        "validated": bool(record.get("validated")),
+                        "meta": self._metadata_copy(meta),
+                    }
+                )
+                record["file"] = file_name
+            manifest = {
+                "schema_version": _GLOBAL_FIT_CACHE_SCHEMA_VERSION,
+                "schema_fingerprint": self.schema_fingerprint,
+                "entries": descriptors,
+            }
+            manifest_tmp.write_text(
+                json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            os.replace(manifest_tmp, self.manifest_path)
+            for stale in self.entries_path.glob("entry_*.parquet"):
+                if stale.name not in active_files:
+                    stale.unlink()
+            self._dirty = False
+            self.invalidated = False
+            self.invalidated_reason = None
+        finally:
+            for temporary in (manifest_tmp,):
+                try:
+                    temporary.unlink()
+                except FileNotFoundError:
+                    # The atomic replace may have left no temporary file.
+                    pass
 
 # Minimum number of STRICTLY EARLIER observations a (role, competition tier)
 # baseline needs before it may normalize a metric.  Below the floor the metric
@@ -198,10 +1570,22 @@ def _complete_lineups(players: pd.DataFrame) -> dict[str, dict[str, list[tuple[s
     required = {"side", "position", "playername"}
     if players is None or players.empty or not required.issubset(players.columns):
         return {}
-    frame = players.copy()
+    identity_columns = [
+        column
+        for column in ("game_uid", "gameid", "side", "position", "playername")
+        if column in players.columns
+    ]
+    frame = players.loc[:, identity_columns].copy()
     frame["_game_id"] = _canonical_game_ids(frame)
     frame["_side"] = frame["side"].astype(str).str.title()
-    frame["_role"] = frame["position"].map(_role)
+    position = frame["position"].astype("string").str.strip().str.casefold()
+    frame["_role"] = position.map(ROLE_ALIAS)
+    unknown_role = frame["_role"].isna()
+    for prefix, role in ROLE_ALIAS.items():
+        frame["_role"] = frame["_role"].where(
+            ~unknown_role | ~position.str.startswith(prefix, na=False),
+            role,
+        )
     frame["_player"] = frame["playername"].astype("string").str.strip()
     frame = frame[
         frame["_game_id"].notna()
@@ -212,21 +1596,52 @@ def _complete_lineups(players: pd.DataFrame) -> dict[str, dict[str, list[tuple[s
         & frame["_player"].ne("")
         & frame["_player"].str.casefold().ne("nan")
     ]
+    if frame.empty:
+        return {}
     order = {"top": 0, "jng": 1, "mid": 2, "bot": 3, "sup": 4}
+    # Keep the first-seen group order while letting pandas perform the role
+    # ordering and duplicate selection in one pass. Source order decides which
+    # row wins when one role occurs more than once.
+    frame["_group_order"] = frame.groupby(
+        ["_game_id", "_side"], sort=False, observed=True
+    ).ngroup()
+    frame["_source_order"] = np.arange(len(frame), dtype=np.int64)
+    frame["_role_order"] = frame["_role"].map(order)
+    ordered = frame.sort_values(
+        [
+            "_group_order",
+            "_role_order",
+            "_source_order",
+        ],
+        kind="stable",
+    )
+    selected = ordered.drop_duplicates(
+        ["_game_id", "_side", "_role"], keep="first"
+    )
+    group_stats = selected.groupby(
+        ["_game_id", "_side"], sort=False, observed=True
+    ).agg(
+        role_count=("_role", "nunique"),
+        player_count=("_player", "nunique"),
+    )
+    valid_groups = group_stats.index[
+        group_stats["role_count"].eq(5) & group_stats["player_count"].eq(5)
+    ]
+    selected = selected.set_index(["_game_id", "_side"])
+    selected = selected.loc[selected.index.isin(valid_groups)].reset_index()
+    grouped = selected.groupby(
+        ["_game_id", "_side"], sort=False, observed=True
+    )[["_player", "_role"]].agg(list)
     output: dict[str, dict[str, list[tuple[str, str]]]] = {}
-    for (game_id, side), group in frame.groupby(["_game_id", "_side"], sort=False):
-        rows = sorted(
-            zip(group["_player"].astype(str), group["_role"].astype(str)),
-            key=lambda value: order.get(value[1], 9),
+    for (game_id, side), player_rows, role_rows in grouped.itertuples(
+        index=True, name=None
+    ):
+        output.setdefault(str(game_id), {})[str(side)] = list(
+            zip(
+                (str(player) for player in player_rows),
+                (str(role) for role in role_rows),
+            )
         )
-        by_role: dict[str, str] = {}
-        for player, role in rows:
-            by_role.setdefault(role, player)
-        if set(by_role) != set(order) or len(set(by_role.values())) != 5:
-            continue
-        output.setdefault(str(game_id), {})[str(side)] = [
-            (by_role[role], role) for role in order
-        ]
     return {
         game_id: sides
         for game_id, sides in output.items()
@@ -351,11 +1766,174 @@ def _robust_block_baseline(
     return location, scale
 
 
+def _kth_abs_distance(
+    sorted_values: list[np.float64],
+    centre: np.float64,
+    rank: int,
+) -> np.float64:
+    """Return one exact order statistic of distances from ``centre``.
+
+    Values below the centre produce one sorted distance stream when read from
+    right to left. Values at or above the centre produce the other stream when
+    read from left to right. A partition search selects the requested element
+    without materialising either stream.
+    """
+
+    split = bisect_right(sorted_values, centre)
+    left_count = split
+    right_count = len(sorted_values) - split
+    lower = max(0, rank - right_count)
+    upper = min(rank, left_count)
+    negative_infinity = -np.inf
+    positive_infinity = np.inf
+    while lower <= upper:
+        left_taken = (lower + upper) // 2
+        right_taken = rank - left_taken
+        left_previous = (
+            centre - sorted_values[split - left_taken]
+            if left_taken
+            else negative_infinity
+        )
+        right_previous = (
+            sorted_values[split + right_taken - 1] - centre
+            if right_taken
+            else negative_infinity
+        )
+        left_next = (
+            centre - sorted_values[split - left_taken - 1]
+            if left_taken < left_count
+            else positive_infinity
+        )
+        right_next = (
+            sorted_values[split + right_taken] - centre
+            if right_taken < right_count
+            else positive_infinity
+        )
+        if left_previous > right_next:
+            upper = left_taken - 1
+        elif right_previous > left_next:
+            lower = left_taken + 1
+        else:
+            return min(left_next, right_next)
+    raise RuntimeError("absolute-distance order statistic partition failed")
+
+
+def _linear_quantile_sorted(
+    sorted_values: list[np.float64],
+    quantile: float,
+) -> np.float64:
+    """Match NumPy's default linear quantile on an already sorted prefix."""
+
+    index = (len(sorted_values) - 1) * quantile
+    lower = int(np.floor(index))
+    upper = int(np.ceil(index))
+    if lower == upper:
+        return sorted_values[lower]
+    fraction = index - lower
+    return sorted_values[lower] + fraction * (
+        sorted_values[upper] - sorted_values[lower]
+    )
+
+
+def _robust_block_baseline_fast(
+    pool: np.ndarray,
+    available: np.ndarray,
+    min_obs: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Exact robust prefixes with one sorted append-only sample.
+
+    The reference implementation scans every prefix for each block. This
+    path inserts each present value once. Raw medians use the maintained order,
+    and MAD order statistics use two monotone distance streams. The IQR
+    fallback uses the same linear interpolation as ``np.quantile``.
+
+    Strictly prior blocks remain the caller's responsibility. ``available``
+    contains the count before each block, so the sorted sample is updated only
+    after a prior baseline has been selected for that block.
+    """
+
+    location = np.full(len(available), np.nan, dtype=float)
+    scale = np.full(len(available), np.nan, dtype=float)
+    if len(pool) == 0:
+        return location, scale
+    pool_array = np.asarray(pool, dtype=np.float64)
+    if not np.isfinite(pool_array).all():
+        return _robust_block_baseline(pool_array, available, min_obs)
+    try:
+        counts = np.asarray([int(value) for value in available], dtype=np.int64)
+    except (TypeError, ValueError, OverflowError):
+        return _robust_block_baseline(pool_array, available, min_obs)
+    if (
+        (counts < 0).any()
+        or (counts > len(pool_array)).any()
+        or (len(counts) > 1 and (np.diff(counts) < 0).any())
+    ):
+        return _robust_block_baseline(pool_array, available, min_obs)
+    if len(counts) <= 16 and int(counts[-1]) > 1024:
+        # Append-only lookups usually ask for a handful of new blocks after a
+        # large history. The reference path builds its expanding median once
+        # and scans only those few MAD prefixes. That is cheaper than sorting
+        # the entire history for each sparse request.
+        return _robust_block_baseline(pool_array, available, min_obs)
+
+    sorted_values: list[np.float64] = []
+    inserted = 0
+    previous = -1
+    floor = max(int(min_obs), 1)
+    for position, count_value in enumerate(counts):
+        count = int(count_value)
+        if count != inserted:
+            # Append-only lookups pass only the new blocks. Their first
+            # available count can be near the end of a large history, so
+            # initialise that prefix with one C-level sort. Cold builds still
+            # start at zero and retain the cheaper incremental inserts.
+            if inserted == 0 and count > 1024:
+                sorted_values = [
+                    np.float64(value)
+                    for value in np.sort(pool_array[:count], kind="stable")
+                ]
+            else:
+                for value in pool_array[inserted:count]:
+                    insort(sorted_values, np.float64(value))
+            inserted = count
+        if count < floor:
+            continue
+        if count == previous:
+            location[position] = location[position - 1]
+            scale[position] = scale[position - 1]
+            continue
+        previous = count
+        if count & 1:
+            centre = sorted_values[count // 2]
+        else:
+            centre = (sorted_values[count // 2 - 1] + sorted_values[count // 2]) / 2.0
+        lower_rank = (count - 1) // 2
+        mad = _kth_abs_distance(sorted_values, centre, lower_rank)
+        if not count & 1:
+            upper_rank = count // 2
+            mad = (mad + _kth_abs_distance(sorted_values, centre, upper_rank)) / 2.0
+        spread = _MAD_TO_SIGMA * float(mad)
+        if not np.isfinite(spread) or spread <= 0.0:
+            low = _linear_quantile_sorted(sorted_values, 0.25)
+            high = _linear_quantile_sorted(sorted_values, 0.75)
+            spread = float(high - low) / _IQR_TO_SIGMA
+        if not np.isfinite(spread) or spread <= 0.0:
+            continue
+        location[position] = float(centre)
+        scale[position] = spread
+    return location, scale
+
+
 def _prior_baseline_z(
     values: pd.Series,
     group: pd.Series,
     date: pd.Series,
     min_obs: int,
+    *,
+    baseline_cache: PrefixBaselineCache | None = None,
+    metric_key: str | None = None,
+    row_key: pd.Series | None = None,
+    prepared_query: object | None = None,
 ) -> tuple[pd.Series, pd.Series]:
     """Robust z-score against a baseline built only from strictly earlier dates.
 
@@ -375,6 +1953,20 @@ def _prior_baseline_z(
     A single malformed row cannot move a 50%-breakdown estimator, so it cannot
     poison the baseline that every LATER row in the pool is measured against.
     """
+
+    if baseline_cache is not None and metric_key is not None and row_key is not None:
+        cached = baseline_cache.lookup(
+            values,
+            group,
+            date,
+            min_obs,
+            metric_key=metric_key,
+            row_key=row_key,
+            block_baseline=_robust_block_baseline_fast,
+            prepared_query=prepared_query,
+        )
+        if cached is not None:
+            return cached
 
     index = values.index
     x = values.to_numpy(dtype=float)
@@ -414,7 +2006,7 @@ def _prior_baseline_z(
             np.flatnonzero(starts)
         ]
 
-        block_location, block_scale = _robust_block_baseline(
+        block_location, block_scale = _robust_block_baseline_fast(
             pool, available, min_obs
         )
         location[positions] = block_location[block_of_row]
@@ -430,10 +2022,21 @@ def _prior_baseline_z(
             & (scale > 0.0)
         )
         z = np.where(usable, (x - location) / scale, np.nan)
-    return (
-        pd.Series(z, index=index, dtype=float),
-        pd.Series(prior_count, index=index, dtype=float),
-    )
+    output_z = pd.Series(z, index=index, dtype=float)
+    output_prior = pd.Series(prior_count, index=index, dtype=float)
+    if baseline_cache is not None and metric_key is not None and row_key is not None:
+        baseline_cache.store(
+            values,
+            group,
+            date,
+            min_obs,
+            metric_key=metric_key,
+            row_key=row_key,
+            z=output_z,
+            prior_count=output_prior,
+            prepared_query=prepared_query,
+        )
+    return output_z, output_prior
 
 
 def _map_dates(frame: pd.DataFrame) -> pd.Series:
@@ -536,7 +2139,11 @@ def _contribution_metrics(
 
 def _role_normalized_composite(
     metrics: pd.DataFrame,
-) -> tuple[pd.Series, str, dict[str, Any]]:
+    *,
+    baseline_cache: PrefixBaselineCache | None = None,
+    _return_components: bool = False,
+    _group_mode: str | None = None,
+) -> tuple[Any, ...]:
     """Weighted mean of within-(role, tier) z-scores for each player-map row.
 
     Role normalization is what makes the anchor fair: a support's 0.87 cs/min
@@ -553,15 +2160,37 @@ def _role_normalized_composite(
 
     group_keys = ["_role"]
     normalization = "role"
-    if "_tier" in metrics.columns and metrics["_tier"].notna().any():
+    if _group_mode == "role+competition_tier":
+        group_keys = ["_role", "_tier"]
+        normalization = "role+competition_tier"
+    elif _group_mode == "role":
+        group_keys = ["_role"]
+    elif "_tier" in metrics.columns and metrics["_tier"].notna().any():
         group_keys = ["_role", "_tier"]
         normalization = "role+competition_tier"
     # Missing tier stays an explicit bucket instead of collapsing into another
     # pool or being silently discarded.
-    group = metrics[group_keys[0]].astype(str)
-    for key in group_keys[1:]:
-        group = group + "\x1f" + metrics[key].astype(str).fillna("")
+    group = _baseline_group(
+        metrics[group_keys[0]],
+        metrics[group_keys[1]] if len(group_keys) > 1 else None,
+    )
     date = metrics["_date"]
+    row_key = pd.Series(
+        list(
+            zip(
+                metrics["_game_id"].astype(str),
+                metrics["_side"].astype(str),
+                metrics["_player"].astype(str),
+                metrics["_role"].astype(str),
+            )
+        ),
+        index=metrics.index,
+    )
+    prepared_query = (
+        baseline_cache.prepare_query(group, date, row_key)
+        if baseline_cache is not None
+        else None
+    )
 
     diagnostics: dict[str, Any] = {
         "baseline_min_prior_observations": int(ANCHOR_MIN_BASELINE_OBS),
@@ -577,20 +2206,36 @@ def _role_normalized_composite(
 
     weighted_sum = pd.Series(0.0, index=metrics.index)
     weight_total = pd.Series(0.0, index=metrics.index)
+    normalized_z = pd.DataFrame(index=metrics.index)
+    prior_counts = pd.DataFrame(index=metrics.index)
     observed_low: float | None = None
     observed_high: float | None = None
     for metric, weight in PERFORMANCE_ANCHOR_METRIC_WEIGHTS.items():
         if weight <= 0.0 or metric not in metrics.columns:
             continue
         values = metrics[metric]
+        # The player Elo attribution path shares this cache object, but its
+        # nullable-tier grouping and source scope are different. A bare metric
+        # name would let one path inspect the other's entry and clear the
+        # whole cache on a legitimate source difference.
+        cache_metric_key = f"global:{normalization}:{metric}"
         raw_z, prior_obs = _prior_baseline_z(
-            values, group, date, ANCHOR_MIN_BASELINE_OBS
+            values,
+            group,
+            date,
+            ANCHOR_MIN_BASELINE_OBS,
+            baseline_cache=baseline_cache,
+            metric_key=cache_metric_key,
+            row_key=row_key,
+            prepared_query=prepared_query,
         )
         present = values.notna() & np.isfinite(values.astype(float))
         below_floor = present & prior_obs.lt(float(ANCHOR_MIN_BASELINE_OBS))
         withheld = present & raw_z.isna()
         z = raw_z.clip(lower=-ANCHOR_METRIC_Z_CLIP, upper=ANCHOR_METRIC_Z_CLIP)
         observed = z.notna()
+        normalized_z[metric] = raw_z
+        prior_counts[metric] = prior_obs
 
         diagnostics["metric_cells_present"] += int(present.sum())
         diagnostics["metric_cells_observed"] += int(observed.sum())
@@ -613,7 +2258,185 @@ def _role_normalized_composite(
     diagnostics["normalized_metric_min"] = observed_low
     diagnostics["normalized_metric_max"] = observed_high
     composite = weighted_sum / weight_total.where(weight_total > 0)
-    return composite.where(np.isfinite(composite)), normalization, diagnostics
+    composite = composite.where(np.isfinite(composite))
+    if _return_components:
+        return composite, normalization, diagnostics, normalized_z, prior_counts
+    return composite, normalization, diagnostics
+
+
+@dataclass
+class GlobalPlayerFitWorkspace:
+    """Shared immutable work for current and historical global fits.
+
+    The lineups, contribution metrics, and strict-prior normalized values are
+    independent of the fit cutoff. A cutoff only selects complete model rows
+    and the already computed rows before that cutoff. The source digests keep
+    the object fail-closed when a caller passes a different frame.
+    """
+
+    model_frame: pd.DataFrame
+    lineups: dict[str, dict[str, list[tuple[str, str]]]]
+    metrics: pd.DataFrame
+    composite: pd.Series
+    normalization: str
+    normalized_z: pd.DataFrame
+    prior_counts: pd.DataFrame
+    components_by_mode: dict[str, tuple[pd.Series, str, pd.DataFrame, pd.DataFrame]]
+    source_maps_digest: str
+    source_players_digest: str
+
+    @classmethod
+    def build(
+        cls,
+        maps: pd.DataFrame,
+        players: pd.DataFrame,
+        *,
+        baseline_cache: PrefixBaselineCache | None = None,
+    ) -> "GlobalPlayerFitWorkspace":
+        model_frame, lineups = _model_rows(maps, players)
+        if model_frame.empty:
+            metrics = pd.DataFrame()
+            composite = pd.Series(dtype=float)
+            normalization = "role"
+            normalized_z = pd.DataFrame()
+            prior_counts = pd.DataFrame()
+            components_by_mode: dict[str, tuple[pd.Series, str, pd.DataFrame, pd.DataFrame]] = {}
+        else:
+            metrics = _contribution_metrics(players, _map_dates(model_frame))
+            if metrics.empty:
+                composite = pd.Series(np.nan, index=metrics.index, dtype=float)
+                normalization = "role"
+                normalized_z = pd.DataFrame(index=metrics.index)
+                prior_counts = pd.DataFrame(index=metrics.index)
+                components_by_mode = {}
+            else:
+                full_mode = (
+                    "role+competition_tier"
+                    if "_tier" in metrics.columns and metrics["_tier"].notna().any()
+                    else "role"
+                )
+                (
+                    composite,
+                    normalization,
+                    _diagnostics,
+                    normalized_z,
+                    prior_counts,
+                ) = _role_normalized_composite(
+                    metrics,
+                    baseline_cache=baseline_cache,
+                    _return_components=True,
+                    _group_mode=full_mode,
+                )
+                components_by_mode = {
+                    full_mode: (
+                        composite,
+                        normalization,
+                        normalized_z,
+                        prior_counts,
+                    )
+                }
+        return cls(
+            model_frame=model_frame,
+            lineups=lineups,
+            metrics=metrics,
+            composite=composite,
+            normalization=normalization,
+            normalized_z=normalized_z,
+            prior_counts=prior_counts,
+            components_by_mode=components_by_mode,
+            source_maps_digest=_workspace_source_digest(maps),
+            source_players_digest=_workspace_source_digest(players),
+        )
+
+    def matches_source(self, maps: pd.DataFrame, players: pd.DataFrame) -> bool:
+        """Prove that this workspace belongs to the requested source frame."""
+
+        return bool(
+            self.source_maps_digest == _workspace_source_digest(maps)
+            and self.source_players_digest == _workspace_source_digest(players)
+        )
+
+    def frame_for(self, through: pd.Timestamp | None) -> pd.DataFrame:
+        """Select a cutoff without rebuilding canonical lineups."""
+
+        if through is None:
+            return self.model_frame
+        cutoff = pd.Timestamp(through)
+        if cutoff.tzinfo is not None:
+            cutoff = cutoff.tz_convert("UTC").tz_localize(None)
+        return self.model_frame[self.model_frame["date"].le(cutoff)].reset_index(drop=True)
+
+    def anchor_inputs(
+        self,
+        names: list[str],
+        game_ids: set[str],
+    ) -> tuple[pd.Series, str, dict[str, Any], pd.DataFrame] | None:
+        """Return exact cutoff-scoped composite values and diagnostics."""
+
+        anchor_mask = (
+            self.metrics["_game_id"].astype(str).isin(game_ids)
+            & self.metrics["_player"].astype(str).isin(set(names))
+        )
+        scoped = self.metrics.loc[anchor_mask]
+        mode = "role"
+        if "_tier" in scoped.columns and scoped["_tier"].notna().any():
+            mode = "role+competition_tier"
+        components = self.components_by_mode.get(mode)
+        if components is None:
+            # A full frame can contain tier labels that are absent from an
+            # earlier prefix. Reusing the full-frame mode would change the
+            # historical baseline groups. The caller must run the exact
+            # prefix-scoped path in that case.
+            return None
+        composite_source, normalization, normalized_z, prior_counts = components
+        diagnostics: dict[str, Any] = {
+            "baseline_min_prior_observations": int(ANCHOR_MIN_BASELINE_OBS),
+            "normalized_metric_clip": float(ANCHOR_METRIC_Z_CLIP),
+            "metric_cells_present": 0,
+            "metric_cells_observed": 0,
+            "metric_cells_withheld_below_baseline_floor": 0,
+            "metric_cells_withheld_degenerate_baseline": 0,
+            "metric_cells_clipped": 0,
+            "normalized_metric_min": None,
+            "normalized_metric_max": None,
+        }
+        if scoped.empty:
+            return (
+                pd.Series(np.nan, index=scoped.index, dtype=float),
+                self.normalization,
+                diagnostics,
+                scoped,
+            )
+        observed_low: float | None = None
+        observed_high: float | None = None
+        for metric, weight in PERFORMANCE_ANCHOR_METRIC_WEIGHTS.items():
+            if weight <= 0.0 or metric not in scoped.columns or metric not in self.normalized_z.columns:
+                continue
+            values = scoped[metric]
+            raw_z = normalized_z.loc[scoped.index, metric]
+            prior_obs = prior_counts.loc[scoped.index, metric]
+            present = values.notna() & np.isfinite(values.astype(float))
+            below_floor = present & prior_obs.lt(float(ANCHOR_MIN_BASELINE_OBS))
+            withheld = present & raw_z.isna()
+            z = raw_z.clip(lower=-ANCHOR_METRIC_Z_CLIP, upper=ANCHOR_METRIC_Z_CLIP)
+            observed = z.notna()
+            diagnostics["metric_cells_present"] += int(present.sum())
+            diagnostics["metric_cells_observed"] += int(observed.sum())
+            diagnostics["metric_cells_withheld_below_baseline_floor"] += int(below_floor.sum())
+            diagnostics["metric_cells_withheld_degenerate_baseline"] += int(
+                (withheld & ~below_floor).sum()
+            )
+            diagnostics["metric_cells_clipped"] += int(
+                (raw_z.abs() > ANCHOR_METRIC_Z_CLIP).sum()
+            )
+            if observed.any():
+                low = float(z[observed].min())
+                high = float(z[observed].max())
+                observed_low = low if observed_low is None else min(observed_low, low)
+                observed_high = high if observed_high is None else max(observed_high, high)
+        diagnostics["normalized_metric_min"] = observed_low
+        diagnostics["normalized_metric_max"] = observed_high
+        return composite_source.loc[scoped.index], normalization, diagnostics, scoped
 
 
 def _performance_anchor(
@@ -621,6 +2444,9 @@ def _performance_anchor(
     names: list[str],
     game_ids: set[str],
     cfg: GlobalPlayerBTConfig,
+    *,
+    baseline_cache: PrefixBaselineCache | None = None,
+    workspace: GlobalPlayerFitWorkspace | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Zero-mean ridge anchor in logit units, one entry per fitted player.
 
@@ -663,7 +2489,16 @@ def _performance_anchor(
     if scoped.empty:
         return anchor, anchored, evidence
 
-    composite, normalization, diagnostics = _role_normalized_composite(scoped)
+    workspace_inputs = (
+        workspace.anchor_inputs(names, game_ids) if workspace is not None else None
+    )
+    if workspace_inputs is not None:
+        composite, normalization, diagnostics, scoped = workspace_inputs
+    else:
+        composite, normalization, diagnostics = _role_normalized_composite(
+            scoped,
+            baseline_cache=baseline_cache,
+        )
     evidence["normalization"] = normalization
     evidence.update(diagnostics)
     evidence["player_map_rows_used"] = int(composite.notna().sum())
@@ -749,13 +2584,18 @@ def _fit(
         gradient = np.asarray(matrix.T @ residual).reshape(-1) + penalty * delta
         return loss, gradient
 
-    fitted = minimize(
-        objective,
-        np.zeros(matrix.shape[1], dtype=float),
-        method="L-BFGS-B",
-        jac=True,
-        options={"maxiter": cfg.max_iterations, "ftol": 1e-10, "gtol": 1e-6},
-    )
+    if threadpool_limits is None:
+        raise GlobalPlayerRatingError(
+            "deterministic global player fit requires the threadpoolctl dependency"
+        )
+    with threadpool_limits(limits=1):
+        fitted = minimize(
+            objective,
+            np.zeros(matrix.shape[1], dtype=float),
+            method="L-BFGS-B",
+            jac=True,
+            options={"maxiter": cfg.max_iterations, "ftol": 1e-10, "gtol": 1e-6},
+        )
     if not fitted.success:
         raise GlobalPlayerRatingError(f"global player fit failed: {fitted.message}")
     return fitted.x[:-1], float(fitted.x[-1])
@@ -763,6 +2603,154 @@ def _fit(
 
 def _log_loss(outcome: np.ndarray, logits: np.ndarray) -> float:
     return float(np.mean(np.logaddexp(0.0, logits) - outcome * logits))
+
+
+def _frame_digest(frame: pd.DataFrame) -> str:
+    """Hash frame values and schema without depending on row-index labels."""
+
+    digest = hashlib.sha256()
+    digest.update(str(frame.shape).encode("utf-8"))
+    digest.update(
+        json.dumps(
+            [(str(column), str(frame[column].dtype)) for column in frame.columns],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    for column in frame.columns:
+        try:
+            hashed = pd.util.hash_pandas_object(frame[column], index=False)
+            digest.update(np.asarray(hashed, dtype=np.uint64).tobytes())
+        except (TypeError, ValueError):
+            digest.update(
+                "\x1e".join(repr(value) for value in frame[column].tolist()).encode("utf-8")
+            )
+    return digest.hexdigest()
+
+
+def _workspace_source_digest(frame: pd.DataFrame | None) -> str:
+    """Hash the source columns after normalizing the common date view.
+
+    The weekly builder copies the map frame and converts ``date`` to a
+    timezone-naive datetime before applying its cutoff. The rating builder
+    receives the same rows with the source date column often still as strings.
+    Normalize that representation so an object-local workspace can move
+    between the two builders while still detecting row, value, and schema
+    drift.
+    """
+
+    if frame is None:
+        return _frame_digest(pd.DataFrame())
+    normalized = frame.reset_index(drop=True).copy()
+    if "date" in normalized.columns:
+        normalized["date"] = pd.to_datetime(
+            normalized["date"], errors="coerce", utc=True
+        ).dt.tz_localize(None)
+    return _frame_digest(normalized)
+
+
+def _global_fit_schema_fingerprint() -> str:
+    """Fingerprint code and constants that can change a fitted snapshot.
+
+    Keep the model contract explicit. A module-wide source digest would include
+    this function and make the cache contract difficult to audit. The listed
+    constants are serialized values, so changing a model floor, scale, alias,
+    metric weight, or robust-baseline setting selects a new cache entry.
+    """
+
+    implementation = {
+        name: function
+        for name, function in (
+            ("_canonical_game_ids", _canonical_game_ids),
+            ("_role", _role),
+            ("_complete_lineups", _complete_lineups),
+            ("_model_rows", _model_rows),
+            ("_design", _design),
+            ("_contribution_metrics", _contribution_metrics),
+            ("_baseline_group", _baseline_group),
+            ("_role_normalized_composite", _role_normalized_composite),
+            ("_prior_baseline_z", _prior_baseline_z),
+            ("_robust_block_baseline", _robust_block_baseline),
+            ("_robust_block_baseline_fast", _robust_block_baseline_fast),
+            ("GlobalPlayerFitWorkspace", GlobalPlayerFitWorkspace),
+            ("_performance_anchor", _performance_anchor),
+            ("_fit", _fit),
+            ("fit_global_player_bt", fit_global_player_bt),
+        )
+    }
+    source_parts: dict[str, str] = {}
+    for name, function in implementation.items():
+        try:
+            source = inspect.getsource(function)
+        except (OSError, TypeError):
+            source = repr(function)
+        source_parts[name] = source
+    model_constants = {
+        "LOGIT_TO_ELO": float(LOGIT_TO_ELO),
+        "ROLE_ALIAS": dict(ROLE_ALIAS),
+        "PERFORMANCE_ANCHOR_METRIC_WEIGHTS": dict(
+            PERFORMANCE_ANCHOR_METRIC_WEIGHTS
+        ),
+        "PERFORMANCE_ANCHOR_WEIGHTS_STATUS": PERFORMANCE_ANCHOR_WEIGHTS_STATUS,
+        "PERFORMANCE_ANCHOR_SOURCE_COLUMNS": list(PERFORMANCE_ANCHOR_SOURCE_COLUMNS),
+        "_ANCHOR_ZERO_MEAN_TOLERANCE": float(_ANCHOR_ZERO_MEAN_TOLERANCE),
+        "_PREFIX_CACHE_SCHEMA_VERSION": int(_PREFIX_CACHE_SCHEMA_VERSION),
+        "_PREFIX_CACHE_SCHEMA_FINGERPRINT": _PREFIX_CACHE_SCHEMA_FINGERPRINT,
+        "_PREFIX_CACHE_MISSING_DATE": int(_PREFIX_CACHE_MISSING_DATE),
+        "_BASELINE_GROUP_SEPARATOR": _BASELINE_GROUP_SEPARATOR,
+        "ANCHOR_MIN_BASELINE_OBS": int(ANCHOR_MIN_BASELINE_OBS),
+        "ANCHOR_MIN_PLAYER_MAPS": int(ANCHOR_MIN_PLAYER_MAPS),
+        "ANCHOR_METRIC_Z_CLIP": float(ANCHOR_METRIC_Z_CLIP),
+        "_MAD_TO_SIGMA": float(_MAD_TO_SIGMA),
+        "_IQR_TO_SIGMA": float(_IQR_TO_SIGMA),
+        "_GLOBAL_FIT_CACHE_SCHEMA_VERSION": int(_GLOBAL_FIT_CACHE_SCHEMA_VERSION),
+        "_GLOBAL_FIT_CACHE_SCHEMA_FINGERPRINT": _GLOBAL_FIT_CACHE_SCHEMA_FINGERPRINT,
+    }
+    contract = {"implementation": source_parts, "model_constants": model_constants}
+    return "global-player-fit:v3:" + hashlib.sha256(
+        json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _global_fit_cache_key(
+    frame: pd.DataFrame,
+    lineups: dict[str, dict[str, list[tuple[str, str]]]],
+    players: pd.DataFrame,
+    cfg: GlobalPlayerBTConfig,
+) -> str:
+    """Build a key from the exact cutoff census and fit contract.
+
+    The caller has already applied ``through`` in ``frame``. That filtered
+    frame, its lineups, and its scoped player rows are the complete fit input,
+    so the timestamp itself is redundant. This permits a later equivalent
+    cutoff between the same map blocks to reuse the exact fit.
+    """
+
+    player_ids = _canonical_game_ids(players)
+    frame_ids = set(frame["game_id"].astype(str))
+    if len(player_ids) == len(players):
+        scoped_players = players.loc[player_ids.astype(str).isin(frame_ids)].reset_index(drop=True)
+    else:
+        scoped_players = players.reset_index(drop=True)
+    lineup_rows: list[object] = []
+    for game_id in frame["game_id"].astype(str):
+        lineup_rows.append(
+            [
+                game_id,
+                [list(value) for value in lineups[game_id]["Blue"]],
+                [list(value) for value in lineups[game_id]["Red"]],
+            ]
+        )
+    contract = {
+        "schema": _global_fit_schema_fingerprint(),
+        "config": asdict(cfg),
+        "frame": _frame_digest(frame),
+        "players": _frame_digest(scoped_players),
+        "lineups": lineup_rows,
+    }
+    return hashlib.sha256(
+        json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def _component_summary(
@@ -791,15 +2779,37 @@ def fit_global_player_bt(
     *,
     through: pd.Timestamp | None = None,
     validate: bool = True,
+    baseline_cache: PrefixBaselineCache | None = None,
+    fit_cache: GlobalPlayerFitCache | None = None,
+    fit_cache_slot: str | None = None,
+    workspace: GlobalPlayerFitWorkspace | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Fit one player-results scale and return its release evidence."""
 
     cfg = cfg or GlobalPlayerBTConfig()
-    frame, lineups = _model_rows(maps, players, through=through)
+    workspace_used = bool(
+        workspace is not None and workspace.matches_source(maps, players)
+    )
+    if workspace_used:
+        assert workspace is not None
+        frame = workspace.frame_for(through)
+        lineups = workspace.lineups
+    else:
+        frame, lineups = _model_rows(maps, players, through=through)
     if len(frame) < cfg.minimum_maps:
         raise GlobalPlayerRatingError(
             f"global player fit has {len(frame)} complete maps; {cfg.minimum_maps} required"
         )
+    cache_key = None
+    if fit_cache is not None:
+        cache_key = _global_fit_cache_key(frame, lineups, players, cfg)
+        cached = fit_cache.lookup(
+            cache_key,
+            require_validated=validate,
+            slot=fit_cache_slot,
+        )
+        if cached is not None:
+            return cached
     names = sorted(
         {
             player
@@ -807,17 +2817,26 @@ def fit_global_player_bt(
             for side in ("Blue", "Red")
             for player, _ in lineups[game_id][side]
         },
-        key=str.casefold,
+        key=lambda value: (value.casefold(), value),
     )
     design = _design(frame, lineups, names)
     outcome = frame["result"].to_numpy(dtype=float)
     game_ids = frame["game_id"].astype(str)
     metrics = (
-        _contribution_metrics(players, _map_dates(frame))
+        workspace.metrics
+        if workspace_used and workspace is not None
+        else _contribution_metrics(players, _map_dates(frame))
         if cfg.performance_anchor_enabled
         else pd.DataFrame()
     )
-    anchor, anchored, anchor_evidence = _performance_anchor(metrics, names, set(game_ids), cfg)
+    anchor, anchored, anchor_evidence = _performance_anchor(
+        metrics,
+        names,
+        set(game_ids),
+        cfg,
+        baseline_cache=baseline_cache,
+        workspace=workspace if workspace_used else None,
+    )
     # FAIL CLOSED.  An anchor that reaches zero players is not a neutral
     # anchor, it is a silently inert one: the published ladder would go back to
     # handing byte-identical ratings to every player who never appears apart
@@ -856,7 +2875,12 @@ def fit_global_player_bt(
         # measured on the same maps as the outcome, so a full-census anchor
         # would leak test-window performance into the gate.
         train_anchor, _train_anchored, _train_evidence = _performance_anchor(
-            metrics, names, set(game_ids.iloc[:split]), cfg
+            metrics,
+            names,
+            set(game_ids.iloc[:split]),
+            cfg,
+            baseline_cache=baseline_cache,
+            workspace=workspace if workspace_used else None,
         )
         train_coefficients, train_side = _fit(train_x, train_y, cfg, anchor=train_anchor)
         model_loss = _log_loss(test_y, np.asarray(test_x @ train_coefficients).reshape(-1) + train_side)
@@ -918,4 +2942,13 @@ def fit_global_player_bt(
         "player_statistics_used": bool(anchor_evidence["players_anchored"] > 0),
         "performance_anchor": anchor_evidence,
     }
-    return snapshot.reset_index(drop=True), meta
+    snapshot = snapshot.reset_index(drop=True)
+    if fit_cache is not None and cache_key is not None:
+        fit_cache.store(
+            cache_key,
+            snapshot,
+            meta,
+            validated=validate,
+            slot=fit_cache_slot,
+        )
+    return snapshot, meta
