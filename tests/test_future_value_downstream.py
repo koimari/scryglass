@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -7,8 +8,11 @@ import pytest
 
 from lol_kills.research.future_value_downstream import (
     EVALUATION_SCHEMA_VERSION,
+    FutureValueDownstreamError,
     REQUIRED_EVALUATION_GATES,
     SCHEMA_VERSION,
+    SOURCE_RECEIPT_SCHEMA_VERSION,
+    SOURCE_RECEIPT_STATUS,
     downstream_impact_contract,
     evaluate_downstream_impact,
     required_artifact_specs,
@@ -16,18 +20,52 @@ from lol_kills.research.future_value_downstream import (
 )
 
 
-SOURCE = {
-    "source_as_of": "2026-08-20T11:31:37Z",
-    "source_game_count": 17756,
-    "source_identity_sha256": "a" * 64,
-}
+def _source_receipt(
+    *,
+    game_ids: list[str] | None = None,
+    source_as_of: str = "2026-08-20T11:31:37Z",
+) -> dict:
+    ids = sorted(game_ids or ["game-1", "game-2"])
+    identity = hashlib.sha256(("\n".join(ids) + "\n").encode()).hexdigest()
+    receipt = {
+        "schema_version": SOURCE_RECEIPT_SCHEMA_VERSION,
+        "status": SOURCE_RECEIPT_STATUS,
+        "source_as_of": source_as_of,
+        "source_game_count": len(ids),
+        "source_identity_sha256": identity,
+        "accepted_game_ids": ids,
+        "source_files": {
+            "fixture": {
+                "bytes": 1,
+                "locator": "fixture.bin",
+                "sha256": "0" * 64,
+            }
+        },
+        "authority": {
+            "research_only": True,
+            "public_player_rating": False,
+            "public_team_rating": False,
+            "public_probability": False,
+            "promotion": False,
+            "deployment": False,
+        },
+    }
+    receipt["receipt_sha256"] = hashlib.sha256(
+        json.dumps(receipt, allow_nan=False, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+    return receipt
 
 
-def _evaluation() -> dict:
+SOURCE = _source_receipt()
+
+
+def _evaluation(source: dict | None = None) -> dict:
+    binding = source or SOURCE
     return {
         "schema_version": EVALUATION_SCHEMA_VERSION,
         "status": "complete",
-        **SOURCE,
+        **{field: binding[field] for field in ("source_as_of", "source_game_count", "source_identity_sha256")},
+        "source_receipt": binding,
         "gates": {name: {"status": "passed"} for name in REQUIRED_EVALUATION_GATES},
         "authority": {
             "public_player_rating": False,
@@ -39,11 +77,16 @@ def _evaluation() -> dict:
 
 def _manifest(*, source: dict | None = None, pack_id: str = "v2026.08.20.194336") -> dict:
     binding = source or SOURCE
+    source_fields = {
+        field: binding[field]
+        for field in ("source_as_of", "source_game_count", "source_identity_sha256")
+    }
     return {
         "pack_id": pack_id,
-        **binding,
+        **source_fields,
+        "source_receipt": binding,
         "ratings": {
-            **binding,
+            **source_fields,
             "team_rating_rows": 2,
             "player_rating_rows": 2,
         },
@@ -92,6 +135,7 @@ def _write_root(root: Path, *, changed: bool = False, source: dict | None = None
         {"games": [{"game_uid": "game-1", "future_team_value": 0.2, "blue_result": 1}]},
     )
     _write_json(root, "manifest.json", _manifest(source=binding))
+    _write_json(root, "future-value-source-receipt.json", binding)
 
 
 def test_complete_impact_report_binds_source_and_reports_deltas(tmp_path: Path) -> None:
@@ -105,7 +149,8 @@ def test_complete_impact_report_binds_source_and_reports_deltas(tmp_path: Path) 
 
     assert report["schema_version"] == SCHEMA_VERSION
     assert report["status"] == "ready_research_only"
-    assert report["source"] == SOURCE
+    assert report["source"]["source_as_of"] == SOURCE["source_as_of"]
+    assert report["source"]["accepted_game_ids"] == SOURCE["accepted_game_ids"]
     assert report["artifacts"]["player_ratings"]["comparison"]["matched_rows"] == 2
     assert report["artifacts"]["player_ratings"]["comparison"]["deltas"]["mu_total"]["mean"] == pytest.approx(0.5)
     assert report["artifacts"]["team_ratings"]["comparison"]["deltas"]["mu_total"]["mean"] == pytest.approx(-1.0)
@@ -132,11 +177,9 @@ def test_source_identity_mismatch_blocks_even_with_complete_outputs(tmp_path: Pa
     old_root = tmp_path / "old"
     candidate_root = tmp_path / "candidate"
     _write_root(old_root)
-    changed_source = {**SOURCE, "source_identity_sha256": "b" * 64}
+    changed_source = _source_receipt(game_ids=["game-1", "game-3"])
     _write_root(candidate_root, source=changed_source)
-    evaluation = _evaluation()
-    evaluation["source_identity_sha256"] = changed_source["source_identity_sha256"]
-    _write_json(candidate_root, "future-value-evaluation-receipt.json", evaluation)
+    _write_json(candidate_root, "future-value-evaluation-receipt.json", _evaluation(changed_source))
 
     report = evaluate_downstream_impact(old_root, candidate_root, source_binding=SOURCE)
 
@@ -226,3 +269,106 @@ def test_report_writer_rejects_wrong_schema_and_writes_valid_report(tmp_path: Pa
     path = tmp_path / "report.json"
     write_downstream_report(path, {"schema_version": SCHEMA_VERSION, "status": "blocked"})
     assert json.loads(path.read_text(encoding="utf-8"))["status"] == "blocked"
+
+
+def test_source_binding_requires_a_complete_verified_receipt() -> None:
+    with pytest.raises(FutureValueDownstreamError, match="schema|incomplete"):
+        evaluate_downstream_impact(
+            Path("old"),
+            Path("candidate"),
+            source_binding={
+                "source_as_of": SOURCE["source_as_of"],
+                "source_game_count": SOURCE["source_game_count"],
+                "source_identity_sha256": SOURCE["source_identity_sha256"],
+            },
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("source_game_count", 99, "census identity"),
+        ("source_identity_sha256", "f" * 64, "census identity"),
+        ("source_as_of", "2026-08-21T11:31:37Z", "hash"),
+    ],
+)
+def test_source_receipt_rejects_forged_binding_fields(
+    field: str, value: object, message: str
+) -> None:
+    forged = {**SOURCE, field: value}
+    with pytest.raises(FutureValueDownstreamError, match=message):
+        evaluate_downstream_impact(
+            Path("old"),
+            Path("candidate"),
+            source_binding=forged,
+        )
+
+
+def test_source_receipt_rejects_forged_source_file_hash() -> None:
+    forged = json.loads(json.dumps(SOURCE))
+    forged["source_files"]["fixture"]["sha256"] = "f" * 64
+    with pytest.raises(FutureValueDownstreamError, match="receipt hash"):
+        evaluate_downstream_impact(
+            Path("old"),
+            Path("candidate"),
+            source_binding=forged,
+        )
+
+
+def test_source_receipt_path_checks_explicit_source_file_bytes(tmp_path: Path) -> None:
+    source_file = tmp_path / "fixture.bin"
+    source_file.write_bytes(b"x")
+    receipt = json.loads(json.dumps(SOURCE))
+    receipt["source_files"]["fixture"]["path"] = source_file.name
+    receipt["source_files"]["fixture"]["bytes"] = 1
+    receipt["source_files"]["fixture"]["sha256"] = hashlib.sha256(b"x").hexdigest()
+    receipt.pop("receipt_sha256")
+    receipt["receipt_sha256"] = hashlib.sha256(
+        json.dumps(receipt, allow_nan=False, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+    receipt_path = tmp_path / "receipt.json"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    evaluate_downstream_impact(
+        Path("old"),
+        Path("candidate"),
+        source_binding=receipt_path,
+    )
+    source_file.write_bytes(b"changed")
+    with pytest.raises(FutureValueDownstreamError, match="source file changed"):
+        evaluate_downstream_impact(
+            Path("old"),
+            Path("candidate"),
+            source_binding=receipt_path,
+        )
+
+
+def test_invalid_durable_source_receipt_blocks_report(tmp_path: Path) -> None:
+    old_root = tmp_path / "old"
+    candidate_root = tmp_path / "candidate"
+    _write_root(old_root)
+    _write_root(candidate_root)
+    _write_json(candidate_root, "future-value-evaluation-receipt.json", _evaluation())
+    forged = json.loads(json.dumps(SOURCE))
+    forged["accepted_game_ids"] = ["game-1", "game-3"]
+    _write_json(candidate_root, "future-value-source-receipt.json", forged)
+
+    report = evaluate_downstream_impact(old_root, candidate_root, source_binding=SOURCE)
+
+    assert report["status"] == "blocked"
+    assert "candidate_source_receipt_invalid" in report["blockers"]
+
+
+def test_embedded_source_payload_must_carry_exact_census(tmp_path: Path) -> None:
+    old_root = tmp_path / "old"
+    candidate_root = tmp_path / "candidate"
+    _write_root(old_root)
+    _write_root(candidate_root)
+    evaluation = _evaluation()
+    evaluation["accepted_game_ids"] = ["game-1", "game-3"]
+    _write_json(candidate_root, "future-value-evaluation-receipt.json", evaluation)
+
+    report = evaluate_downstream_impact(old_root, candidate_root, source_binding=SOURCE)
+
+    assert report["status"] == "blocked"
+    assert "evaluation_source_census_invalid" in report["blockers"]

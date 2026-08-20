@@ -20,12 +20,27 @@ import json
 import math
 import re
 
+from lol_kills.v2.tierlists.accepted_census import canonical_game_ids, identity_sha256
+
 
 SCHEMA_VERSION = "scryglass:future-value-downstream:v1"
 CONTRACT_SCHEMA_VERSION = "scryglass:future-value-downstream-contract:v1"
 EVALUATION_SCHEMA_VERSION = "scryglass:future-value-evaluation:v1"
+SOURCE_RECEIPT_SCHEMA_VERSION = "scryglass:future-value-rating-source:v1"
+SOURCE_RECEIPT_STATUS = "accepted_source_bound_development_only"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SOURCE_FIELDS = ("source_as_of", "source_game_count", "source_identity_sha256")
+SOURCE_RECEIPT_FIELDS = (
+    "schema_version",
+    "status",
+    "source_as_of",
+    "source_game_count",
+    "source_identity_sha256",
+    "accepted_game_ids",
+    "source_files",
+    "authority",
+    "receipt_sha256",
+)
 DEFAULT_EVALUATION_FILE = "future-value-evaluation-receipt.json"
 DEFAULT_SOURCE_FILES = (
     "future-value-source-receipt.json",
@@ -191,12 +206,224 @@ def _canonical_json_bytes(value: object) -> bytes:
         raise FutureValueDownstreamError("value is not canonical JSON") from error
 
 
+def _utc_timestamp(value: Any, field: str) -> datetime:
+    """Parse one timezone-aware timestamp and return it in UTC."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise FutureValueDownstreamError(f"{field} is missing or invalid")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise FutureValueDownstreamError(f"{field} is not a timestamp") from error
+    if parsed.tzinfo is None:
+        raise FutureValueDownstreamError(f"{field} must include a timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def _canonical_utc_text(value: Any, field: str) -> str:
+    stamp = _utc_timestamp(value, field)
+    return stamp.isoformat().replace("+00:00", "Z")
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _source_summary(receipt: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the source identity fields that the downstream report exposes."""
+
+    summary = {
+        "schema_version": receipt["schema_version"],
+        "status": receipt["status"],
+        "source_as_of": receipt["source_as_of"],
+        "source_game_count": receipt["source_game_count"],
+        "source_identity_sha256": receipt["source_identity_sha256"],
+        "accepted_game_ids": list(receipt["accepted_game_ids"]),
+        "receipt_sha256": receipt["receipt_sha256"],
+        "source_receipt_sha256": receipt["receipt_sha256"],
+    }
+    for field in (
+        "model_eligible_game_count",
+        "model_eligible_identity_sha256",
+        "model_eligible_game_ids",
+    ):
+        if field in receipt:
+            value = receipt[field]
+            summary[field] = list(value) if field.endswith("_ids") else value
+    return summary
+
+
+def _validate_source_file_records(
+    source_files: Any,
+    *,
+    receipt_path: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Validate source file metadata and check files when a safe path is present."""
+
+    if not isinstance(source_files, Mapping) or not source_files:
+        raise FutureValueDownstreamError("verified source receipt has no source file records")
+    normalized: dict[str, dict[str, Any]] = {}
+    for raw_label, raw_record in source_files.items():
+        label = str(raw_label).strip()
+        if not label or not isinstance(raw_record, Mapping):
+            raise FutureValueDownstreamError("verified source file record is invalid")
+        byte_count = raw_record.get("bytes")
+        digest = raw_record.get("sha256")
+        locator = raw_record.get("locator", raw_record.get("path"))
+        if (
+            isinstance(byte_count, bool)
+            or not isinstance(byte_count, int)
+            or byte_count < 0
+            or not isinstance(locator, str)
+            or not locator.strip()
+            or not isinstance(digest, str)
+            or SHA256_RE.fullmatch(digest) is None
+        ):
+            raise FutureValueDownstreamError(
+                f"verified source file record is invalid: {label}"
+            )
+        locator = locator.strip()
+        locator_path = Path(locator)
+        if ".." in locator_path.parts:
+            raise FutureValueDownstreamError(
+                f"verified source file locator escapes its root: {label}"
+            )
+
+        record = dict(raw_record)
+        record["bytes"] = byte_count
+        record["sha256"] = digest
+        record["locator"] = locator
+        # Source receipts from the accepted-source bridge use a locator because
+        # the source files can live outside the artifact checkout.  A receipt
+        # with an explicit path is checked when that path is available.
+        if "path" in raw_record:
+            path = Path(str(raw_record["path"]))
+            if not path.is_absolute() and receipt_path is not None:
+                path = receipt_path.parent / path
+            if not path.is_file() or path.is_symlink():
+                raise FutureValueDownstreamError(
+                    f"verified source file is missing or unsafe: {label}"
+                )
+            if path.stat().st_size != byte_count or _sha256(path) != digest:
+                raise FutureValueDownstreamError(
+                    f"verified source file changed: {label}"
+                )
+        normalized[label] = record
+    return normalized
+
+
+def _validate_source_receipt(
+    value: Mapping[str, Any],
+    *,
+    receipt_path: Path | None = None,
+) -> dict[str, Any]:
+    """Validate one complete, hash-bound future-value source receipt."""
+
+    if not isinstance(value, Mapping):
+        raise FutureValueDownstreamError("canonical verified source receipt is required")
+    receipt = dict(value)
+    if receipt.get("schema_version") != SOURCE_RECEIPT_SCHEMA_VERSION:
+        raise FutureValueDownstreamError("verified source receipt schema is invalid")
+    if receipt.get("status") != SOURCE_RECEIPT_STATUS:
+        raise FutureValueDownstreamError("verified source receipt status is invalid")
+    if any(field not in receipt for field in SOURCE_RECEIPT_FIELDS):
+        raise FutureValueDownstreamError("verified source receipt is incomplete")
+
+    source_as_of = receipt.get("source_as_of")
+    if _canonical_utc_text(source_as_of, "source_as_of") != source_as_of:
+        raise FutureValueDownstreamError("verified source receipt date is not canonical")
+
+    raw_ids = receipt.get("accepted_game_ids")
+    if not isinstance(raw_ids, list) or not raw_ids or not all(
+        isinstance(value, str) and value.strip() for value in raw_ids
+    ):
+        raise FutureValueDownstreamError("verified source receipt accepted IDs are invalid")
+    accepted_ids = canonical_game_ids(raw_ids)
+    if list(accepted_ids) != raw_ids:
+        raise FutureValueDownstreamError(
+            "verified source receipt accepted IDs are not canonical and unique"
+        )
+    source_count = receipt.get("source_game_count")
+    source_identity = receipt.get("source_identity_sha256")
+    if (
+        isinstance(source_count, bool)
+        or not isinstance(source_count, int)
+        or source_count != len(accepted_ids)
+        or not isinstance(source_identity, str)
+        or SHA256_RE.fullmatch(source_identity) is None
+        or source_identity != identity_sha256(accepted_ids)
+    ):
+        raise FutureValueDownstreamError("verified source receipt census identity is invalid")
+
+    optional_eligible = (
+        "model_eligible_game_count",
+        "model_eligible_identity_sha256",
+        "model_eligible_game_ids",
+    )
+    if any(field in receipt for field in optional_eligible):
+        if not all(field in receipt for field in optional_eligible):
+            raise FutureValueDownstreamError(
+                "verified source receipt eligible census is incomplete"
+            )
+        eligible_ids = receipt["model_eligible_game_ids"]
+        if not isinstance(eligible_ids, list) or not eligible_ids or not all(
+            isinstance(value, str) and value.strip() for value in eligible_ids
+        ):
+            raise FutureValueDownstreamError(
+                "verified source receipt eligible IDs are invalid"
+            )
+        canonical_eligible_ids = canonical_game_ids(eligible_ids)
+        if list(canonical_eligible_ids) != eligible_ids:
+            raise FutureValueDownstreamError(
+                "verified source receipt eligible IDs are not canonical and unique"
+            )
+        eligible_count = receipt["model_eligible_game_count"]
+        eligible_identity = receipt["model_eligible_identity_sha256"]
+        if (
+            isinstance(eligible_count, bool)
+            or not isinstance(eligible_count, int)
+            or eligible_count != len(canonical_eligible_ids)
+            or not isinstance(eligible_identity, str)
+            or SHA256_RE.fullmatch(eligible_identity) is None
+            or eligible_identity != identity_sha256(canonical_eligible_ids)
+            or not set(canonical_eligible_ids).issubset(set(accepted_ids))
+        ):
+            raise FutureValueDownstreamError(
+                "verified source receipt eligible census identity is invalid"
+            )
+
+    _validate_source_file_records(receipt.get("source_files"), receipt_path=receipt_path)
+    authority = receipt.get("authority")
+    if not isinstance(authority, Mapping) or authority.get("research_only") is not True:
+        raise FutureValueDownstreamError("verified source receipt authority is invalid")
+    if any(bool(flag) for name, flag in authority.items() if name != "research_only"):
+        raise FutureValueDownstreamError("verified source receipt grants authority")
+
+    receipt_hash = receipt.get("receipt_sha256")
+    if not isinstance(receipt_hash, str) or SHA256_RE.fullmatch(receipt_hash) is None:
+        raise FutureValueDownstreamError("verified source receipt hash is invalid")
+    payload = dict(receipt)
+    payload.pop("receipt_sha256", None)
+    expected_hash = hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+    if expected_hash != receipt_hash:
+        raise FutureValueDownstreamError("verified source receipt hash does not match payload")
+    return receipt
+
+
+def _load_source_receipt(value: Mapping[str, Any] | Path) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return _validate_source_receipt(value)
+    path = Path(value)
+    if not path.is_file() or path.is_symlink():
+        raise FutureValueDownstreamError("canonical source receipt is missing or unsafe")
+    raw = _read_json(path)
+    if not isinstance(raw, Mapping):
+        raise FutureValueDownstreamError("canonical source receipt is not an object")
+    return _validate_source_receipt(raw, receipt_path=path)
 
 
 def _safe_child(root: Path, relative: str) -> Path:
@@ -379,6 +606,87 @@ def _find_bindings(value: Any, *, depth: int = 0) -> list[dict[str, Any]]:
     return []
 
 
+def _find_source_receipts(value: Any, *, depth: int = 0) -> list[dict[str, Any]]:
+    """Find embedded full source receipts without trusting shallow bindings."""
+
+    if depth > 6:
+        return []
+    if isinstance(value, Mapping):
+        found: list[dict[str, Any]] = []
+        if value.get("schema_version") == SOURCE_RECEIPT_SCHEMA_VERSION:
+            try:
+                found.append(_validate_source_receipt(value))
+            except FutureValueDownstreamError:
+                # Keep an invalid marker so the caller can block the report.
+                found.append({"__invalid_source_receipt__": True})
+        for child in value.values():
+            if isinstance(child, (Mapping, list)):
+                found.extend(_find_source_receipts(child, depth=depth + 1))
+        return found
+    if isinstance(value, list):
+        found: list[dict[str, Any]] = []
+        for child in value[:100]:
+            found.extend(_find_source_receipts(child, depth=depth + 1))
+        return found
+    return []
+
+
+def _find_embedded_census_bindings(
+    value: Any,
+    *,
+    depth: int = 0,
+) -> list[dict[str, Any]]:
+    """Find source payloads that carry the accepted IDs without a full receipt."""
+
+    if depth > 6:
+        return []
+    if isinstance(value, Mapping):
+        found: list[dict[str, Any]] = []
+        if all(field in value for field in SOURCE_FIELDS) and "accepted_game_ids" in value:
+            try:
+                raw_ids = value.get("accepted_game_ids")
+                if not isinstance(raw_ids, list) or not all(
+                    isinstance(item, str) and item.strip() for item in raw_ids
+                ):
+                    raise FutureValueDownstreamError("embedded accepted IDs are invalid")
+                ids = canonical_game_ids(raw_ids)
+                if list(ids) != raw_ids:
+                    raise FutureValueDownstreamError(
+                        "embedded accepted IDs are not canonical and unique"
+                    )
+                if (
+                    value.get("source_game_count") != len(ids)
+                    or value.get("source_identity_sha256") != identity_sha256(ids)
+                ):
+                    raise FutureValueDownstreamError(
+                        "embedded census identity is invalid"
+                    )
+                source_as_of = value.get("source_as_of")
+                if _canonical_utc_text(source_as_of, "source_as_of") != source_as_of:
+                    raise FutureValueDownstreamError("embedded source date is invalid")
+                found.append(
+                    {
+                        "source_as_of": source_as_of,
+                        "source_game_count": len(ids),
+                        "source_identity_sha256": identity_sha256(ids),
+                        "accepted_game_ids": list(ids),
+                        "source_receipt_sha256": value.get("source_receipt_sha256"),
+                    }
+                )
+            except FutureValueDownstreamError:
+                found.append({"__invalid_embedded_census__": True})
+        for child in value.values():
+            if isinstance(child, (Mapping, list)):
+                found.extend(_find_embedded_census_bindings(child, depth=depth + 1))
+        return found
+    if isinstance(value, list):
+        found: list[dict[str, Any]] = []
+        for child in value[:100]:
+            found.extend(_find_embedded_census_bindings(child, depth=depth + 1))
+        return found
+    return []
+
+
 def _unique_bindings(bindings: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     unique: dict[str, dict[str, Any]] = {}
     for binding in bindings:
@@ -387,15 +695,24 @@ def _unique_bindings(bindings: Iterable[Mapping[str, Any]]) -> list[dict[str, An
     return list(unique.values())
 
 
+def _unique_receipts(receipts: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    unique: dict[str, dict[str, Any]] = {}
+    for receipt in receipts:
+        key = hashlib.sha256(_canonical_json_bytes(dict(receipt))).hexdigest()
+        unique[key] = dict(receipt)
+    return list(unique.values())
+
+
 def _same_binding(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
     return all(left.get(field) == right.get(field) for field in SOURCE_FIELDS)
 
 
-def _validate_expected_binding(source_binding: Mapping[str, Any]) -> dict[str, Any]:
-    binding = _binding_from_mapping(source_binding)
-    if binding is None:
-        raise FutureValueDownstreamError("expected source binding is incomplete or invalid")
-    return binding
+def _validate_expected_binding(
+    source_binding: Mapping[str, Any] | Path,
+) -> dict[str, Any]:
+    """Require the caller to provide the complete verified source receipt."""
+
+    return _load_source_receipt(source_binding)
 
 
 def _gate_passed(value: Any) -> bool:
@@ -584,6 +901,10 @@ def downstream_impact_contract() -> dict[str, Any]:
         "status": "development_only",
         "purpose": "Compare current and future-value candidate downstream artifacts before any integration decision.",
         "required_source_fields": list(SOURCE_FIELDS),
+        "required_source_receipt_fields": list(SOURCE_RECEIPT_FIELDS),
+        "source_receipt_schema_version": SOURCE_RECEIPT_SCHEMA_VERSION,
+        "source_receipt_status": SOURCE_RECEIPT_STATUS,
+        "canonical_source_receipt_file": DEFAULT_SOURCE_FILES[0],
         "required_artifacts": [spec.as_dict() for spec in _ARTIFACT_SPECS],
         "required_evaluation_gates": list(REQUIRED_EVALUATION_GATES),
         "evaluation_schema_version": EVALUATION_SCHEMA_VERSION,
@@ -614,7 +935,8 @@ def evaluate_downstream_impact(
     old_root: Path,
     candidate_root: Path,
     *,
-    source_binding: Mapping[str, Any],
+    source_binding: Mapping[str, Any] | Path | None = None,
+    source_receipt: Mapping[str, Any] | Path | None = None,
     evaluation_receipt: Mapping[str, Any] | Path | None = None,
 ) -> dict[str, Any]:
     """Compare old and candidate public-facing artifacts.
@@ -627,16 +949,51 @@ def evaluate_downstream_impact(
 
     old_root = Path(old_root)
     candidate_root = Path(candidate_root)
-    expected = _validate_expected_binding(source_binding)
+    if source_binding is not None and source_receipt is not None:
+        raise FutureValueDownstreamError(
+            "source_binding and source_receipt cannot both be supplied"
+        )
+    supplied_source = source_receipt if source_receipt is not None else source_binding
+    if supplied_source is None:
+        raise FutureValueDownstreamError("canonical verified source receipt is required")
+    expected_receipt = _validate_expected_binding(supplied_source)
+    expected = _source_summary(expected_receipt)
     blockers: list[str] = []
     loaded: dict[str, dict[str, dict[str, Any]]] = {"old": {}, "candidate": {}}
     bindings: dict[str, list[dict[str, Any]]] = {"old": [], "candidate": []}
+    embedded_receipts: dict[str, list[dict[str, Any]]] = {
+        "old": [],
+        "candidate": [],
+    }
+    embedded_census: dict[str, list[dict[str, Any]]] = {
+        "old": [],
+        "candidate": [],
+    }
     artifact_reports: dict[str, Any] = {}
 
     for label, root in (("old", old_root), ("candidate", candidate_root)):
         if not root.is_dir() or root.is_symlink():
             blockers.append(f"{label}_artifact_root_missing_or_unsafe")
             continue
+        # A durable source receipt is allowed beside the artifact set.  It is
+        # optional for older packs, but if present it must be valid and must
+        # agree with the caller-supplied canonical receipt.
+        try:
+            receipt_path = _safe_child(root, DEFAULT_SOURCE_FILES[0])
+        except FutureValueDownstreamError:
+            embedded_receipts[label].append({"__invalid_source_receipt__": True})
+        else:
+            if receipt_path.is_file():
+                try:
+                    root_receipt = _validate_source_receipt(
+                        _read_json(receipt_path), receipt_path=receipt_path
+                    )
+                except FutureValueDownstreamError:
+                    embedded_receipts[label].append({"__invalid_source_receipt__": True})
+                else:
+                    embedded_receipts[label].append(root_receipt)
+                    bindings[label].extend(_find_bindings(root_receipt))
+                    embedded_census[label].extend(_find_embedded_census_bindings(root_receipt))
         for spec in _ARTIFACT_SPECS:
             try:
                 item = _load_artifact(root, spec)
@@ -646,6 +1003,8 @@ def evaluate_downstream_impact(
             loaded[label][spec.name] = item
             for payload in item["payloads"]:
                 bindings[label].extend(_find_bindings(payload))
+                embedded_receipts[label].extend(_find_source_receipts(payload))
+                embedded_census[label].extend(_find_embedded_census_bindings(payload))
             if item["duplicate_ids"]:
                 blockers.append(f"{label}_{spec.name}_duplicate_identity_rows")
             if not item["rows"]:
@@ -659,8 +1018,39 @@ def evaluate_downstream_impact(
             blockers.append(f"{label}_source_binding_conflicting")
         else:
             actual = unique[0]
-            if not _same_binding(actual, expected):
+            if not _same_binding(actual, expected_receipt):
                 blockers.append(f"{label}_source_binding_mismatch")
+
+        receipts = embedded_receipts[label]
+        if any(item.get("__invalid_source_receipt__") for item in receipts):
+            blockers.append(f"{label}_source_receipt_invalid")
+        valid_receipts = [
+            item for item in receipts if not item.get("__invalid_source_receipt__")
+        ]
+        if valid_receipts:
+            unique_receipts = _unique_receipts(valid_receipts)
+            if len(unique_receipts) != 1 or unique_receipts[0] != expected_receipt:
+                blockers.append(f"{label}_source_receipt_mismatch")
+
+        census_bindings = embedded_census[label]
+        if any(item.get("__invalid_embedded_census__") for item in census_bindings):
+            blockers.append(f"{label}_source_census_invalid")
+        for item in census_bindings:
+            if item.get("__invalid_embedded_census__"):
+                continue
+            if (
+                item["source_as_of"] != expected_receipt["source_as_of"]
+                or item["source_game_count"] != expected_receipt["source_game_count"]
+                or item["source_identity_sha256"]
+                != expected_receipt["source_identity_sha256"]
+                or item["accepted_game_ids"] != expected_receipt["accepted_game_ids"]
+            ):
+                blockers.append(f"{label}_source_census_mismatch")
+            source_receipt_hash = item.get("source_receipt_sha256")
+            if source_receipt_hash is not None and source_receipt_hash != expected_receipt[
+                "receipt_sha256"
+            ]:
+                blockers.append(f"{label}_source_receipt_hash_mismatch")
 
     evaluation, evaluation_blockers = _load_evaluation_receipt(candidate_root, evaluation_receipt)
     blockers.extend(evaluation_blockers)
@@ -668,8 +1058,37 @@ def evaluate_downstream_impact(
         eval_binding = _unique_bindings(_find_bindings(evaluation))
         if not eval_binding:
             blockers.append("evaluation_source_binding_missing")
-        elif len(eval_binding) != 1 or not _same_binding(eval_binding[0], expected):
+        elif len(eval_binding) != 1 or not _same_binding(eval_binding[0], expected_receipt):
             blockers.append("evaluation_source_binding_mismatch")
+        eval_receipts = _find_source_receipts(evaluation)
+        if any(item.get("__invalid_source_receipt__") for item in eval_receipts):
+            blockers.append("evaluation_source_receipt_invalid")
+        valid_eval_receipts = [
+            item for item in eval_receipts if not item.get("__invalid_source_receipt__")
+        ]
+        if valid_eval_receipts:
+            unique_eval_receipts = _unique_receipts(valid_eval_receipts)
+            if len(unique_eval_receipts) != 1 or unique_eval_receipts[0] != expected_receipt:
+                blockers.append("evaluation_source_receipt_mismatch")
+        eval_census = _find_embedded_census_bindings(evaluation)
+        if any(item.get("__invalid_embedded_census__") for item in eval_census):
+            blockers.append("evaluation_source_census_invalid")
+        for item in eval_census:
+            if item.get("__invalid_embedded_census__"):
+                continue
+            if (
+                item["source_as_of"] != expected_receipt["source_as_of"]
+                or item["source_game_count"] != expected_receipt["source_game_count"]
+                or item["source_identity_sha256"]
+                != expected_receipt["source_identity_sha256"]
+                or item["accepted_game_ids"] != expected_receipt["accepted_game_ids"]
+            ):
+                blockers.append("evaluation_source_census_mismatch")
+            source_receipt_hash = item.get("source_receipt_sha256")
+            if source_receipt_hash is not None and source_receipt_hash != expected_receipt[
+                "receipt_sha256"
+            ]:
+                blockers.append("evaluation_source_receipt_hash_mismatch")
 
     for spec in _ARTIFACT_SPECS:
         old = loaded["old"].get(spec.name)
@@ -747,6 +1166,9 @@ __all__ = [
     "REQUIRED_EVALUATION_GATES",
     "SCHEMA_VERSION",
     "SOURCE_FIELDS",
+    "SOURCE_RECEIPT_FIELDS",
+    "SOURCE_RECEIPT_SCHEMA_VERSION",
+    "SOURCE_RECEIPT_STATUS",
     "downstream_impact_contract",
     "evaluate_downstream_impact",
     "required_artifact_specs",

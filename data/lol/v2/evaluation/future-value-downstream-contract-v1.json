@@ -7,6 +7,20 @@
     "source_game_count",
     "source_identity_sha256"
   ],
+  "required_source_receipt_fields": [
+    "schema_version",
+    "status",
+    "source_as_of",
+    "source_game_count",
+    "source_identity_sha256",
+    "accepted_game_ids",
+    "source_files",
+    "authority",
+    "receipt_sha256"
+  ],
+  "source_receipt_schema_version": "scryglass:future-value-rating-source:v1",
+  "source_receipt_status": "accepted_source_bound_development_only",
+  "canonical_source_receipt_file": "future-value-source-receipt.json",
   "required_artifacts": [
     {
       "name": "player_ratings",
