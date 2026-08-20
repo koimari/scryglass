@@ -35,6 +35,7 @@ from lol_kills.ratings.global_player_bt import (
     GlobalPlayerFitCache,
     GlobalPlayerFitWorkspace,
     PrefixBaselineCache,
+    PERFORMANCE_ANCHOR_METRIC_WEIGHTS,
     PERFORMANCE_ANCHOR_SOURCE_COLUMNS,
     _contribution_metrics,
     _baseline_group,
