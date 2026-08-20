@@ -20,9 +20,6 @@
     "chronological_whole_series": {
       "authority_status": "blocked",
       "blocker": "the first chronological block has no earlier training rows and is excluded",
-      "boundary_cluster_ids": [
-        "team-date:2026-02-24|HLL|<missing>|almo-players|zerolag-esports"
-      ],
       "boundary_excluded_clusters": 1314,
       "boundary_excluded_rows": 6344,
       "cluster_column": "series_id",
