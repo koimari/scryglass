@@ -664,6 +664,7 @@ def _prior_baseline_z(
     baseline_cache: PrefixBaselineCache | None = None,
     metric_key: str | None = None,
     row_key: pd.Series | None = None,
+    prepared_query: object | None = None,
 ) -> pd.Series:
     """Robust z-score against a baseline built only from strictly earlier dates.
 
@@ -691,6 +692,7 @@ def _prior_baseline_z(
             metric_key=metric_key,
             row_key=row_key,
             block_baseline=_robust_block_baseline_fast,
+            prepared_query=prepared_query,
         )
         if cached is not None:
             return cached[0]
@@ -760,6 +762,7 @@ def _prior_baseline_z(
             row_key=row_key,
             z=output,
             prior_count=pd.Series(prior_count, index=index, dtype=float),
+            prepared_query=prepared_query,
         )
     return output
 
@@ -840,6 +843,11 @@ def player_attribution_multipliers(
         ),
         index=metrics.index,
     )
+    prepared_query = (
+        baseline_cache.prepare_query(group, date, row_key)
+        if baseline_cache is not None
+        else None
+    )
     for name in ordered:
         z_frame[name] = _prior_baseline_z(
             features[name],
@@ -849,6 +857,7 @@ def player_attribution_multipliers(
             baseline_cache=baseline_cache,
             metric_key=name,
             row_key=row_key,
+            prepared_query=prepared_query,
         )
         stats["feature_available_rows"][name] = int(z_frame[name].notna().sum())
 
@@ -1165,6 +1174,17 @@ def _current_tier_records(canonical_players: pd.DataFrame) -> dict[str, object]:
     ):
         return {}
     from lol_kills.export.pack_records import INVALID_COMPETITION_LABELS
+    if not canonical_players.index.is_unique:
+        from lol_kills.export.pack_records import build_player_records
+
+        full_records = build_player_records(
+            canonical_players,
+            canonicalized=True,
+        )
+        return {
+            str(player): record.get("current_tier")
+            for player, record in full_records.items()
+        }
 
     frame = canonical_players.copy()
     frame = frame[frame["playername"].notna()]
@@ -1520,10 +1540,13 @@ def build_player_ratings(
     cfg = cfg or PlayerEloConfig()
     destination = Path(output_dir or FEATURES_DIR)
     destination.mkdir(parents=True, exist_ok=True)
+    baseline_cache_path = destination / "player_prefix_baseline_cache"
+    cache_source_identity = _rating_source_identity(maps)
+    cache_schema_fingerprint = _rating_cache_schema(players)
     baseline_cache = PrefixBaselineCache(
-        storage_path=destination / "player_prefix_baseline_cache",
-        source_identity=_rating_source_identity(maps),
-        schema_fingerprint=_rating_cache_schema(players),
+        storage_path=baseline_cache_path,
+        source_identity=cache_source_identity,
+        schema_fingerprint=cache_schema_fingerprint,
     )
     fit_cache = GlobalPlayerFitCache(
         storage_path=destination / "player_global_fit_cache",
@@ -1588,6 +1611,7 @@ def build_player_ratings(
                 "current_global_meta": dict(global_meta),
                 "global_workspace": global_workspace,
                 "bridge_context": bridge_context,
+                "baseline_cache": baseline_cache,
             }
         )
     (destination / "player_ratings_meta.json").write_text(
@@ -1716,11 +1740,9 @@ def build_player_weekly_ranks(
     cfg = cfg or PlayerEloConfig()
     destination = Path(output_dir or FEATURES_DIR)
     destination.mkdir(parents=True, exist_ok=True)
-    baseline_cache = PrefixBaselineCache(
-        storage_path=destination / "player_prefix_baseline_cache",
-        source_identity=_rating_source_identity(maps),
-        schema_fingerprint=_rating_cache_schema(players),
-    )
+    baseline_cache_path = destination / "player_prefix_baseline_cache"
+    cache_source_identity = _rating_source_identity(maps)
+    cache_schema_fingerprint = _rating_cache_schema(players)
     fit_cache = GlobalPlayerFitCache(
         storage_path=destination / "player_global_fit_cache",
     )
@@ -1762,6 +1784,24 @@ def build_player_weekly_ranks(
             and set(required_checkpoints).issubset(checkpoint_keys)
             and isinstance(saved_recent_mus, dict)
             and isinstance(saved_global, pd.DataFrame)
+        )
+    saved_baseline_cache = (
+        replay.get("baseline_cache") if replay is not None else None
+    )
+    if (
+        replay_hit
+        and isinstance(saved_baseline_cache, PrefixBaselineCache)
+        and saved_baseline_cache.source_identity == cache_source_identity
+        and saved_baseline_cache.schema_fingerprint == cache_schema_fingerprint
+        and saved_baseline_cache.storage_path is not None
+        and saved_baseline_cache.storage_path.resolve() == baseline_cache_path.resolve()
+    ):
+        baseline_cache = saved_baseline_cache
+    else:
+        baseline_cache = PrefixBaselineCache(
+            storage_path=baseline_cache_path,
+            source_identity=cache_source_identity,
+            schema_fingerprint=cache_schema_fingerprint,
         )
     global_workspace = None
     if isinstance(saved_workspace, GlobalPlayerFitWorkspace):

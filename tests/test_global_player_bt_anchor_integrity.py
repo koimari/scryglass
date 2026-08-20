@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import zipfile
 
 import numpy as np
 import pandas as pd
@@ -35,6 +36,7 @@ from lol_kills.ratings.global_player_bt import (
     GlobalPlayerFitCache,
     GlobalPlayerFitWorkspace,
     PrefixBaselineCache,
+    PrefixBaselineCacheError,
     PERFORMANCE_ANCHOR_METRIC_WEIGHTS,
     PERFORMANCE_ANCHOR_SOURCE_COLUMNS,
     _contribution_metrics,
@@ -476,6 +478,153 @@ def test_global_anchor_metric_keys_do_not_collide_with_player_attribution() -> N
     assert cache.hits >= global_hits_before + len(PERFORMANCE_ANCHOR_METRIC_WEIGHTS)
 
 
+def test_normalization_prepares_one_structural_query_per_cache_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Eight metrics share one validated row/group/date query."""
+
+    size = 40
+    dates = pd.Series(
+        pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D")
+    )
+    metrics = pd.DataFrame(
+        {
+            "_game_id": [f"g{index}" for index in range(size)],
+            "_date": dates,
+            "_side": ["Blue"] * size,
+            "_role": ["mid"] * size,
+            "_player": [f"p{index}" for index in range(size)],
+            "_tier": ["tier1"] * size,
+        }
+    )
+    values = np.linspace(1.0, 80.0, size)
+    for index, metric in enumerate(PERFORMANCE_ANCHOR_METRIC_WEIGHTS):
+        metrics[metric] = values + index * 0.1
+
+    reference = _role_normalized_composite(metrics.copy())
+    cache = PrefixBaselineCache()
+    prepare_calls = 0
+    array_calls = 0
+    real_prepare = cache.prepare_query
+    real_arrays = cache._arrays
+
+    def counted_prepare(*args, **kwargs):
+        nonlocal prepare_calls
+        prepare_calls += 1
+        return real_prepare(*args, **kwargs)
+
+    def counted_arrays(*args, **kwargs):
+        nonlocal array_calls
+        array_calls += 1
+        return real_arrays(*args, **kwargs)
+
+    monkeypatch.setattr(cache, "prepare_query", counted_prepare)
+    monkeypatch.setattr(cache, "_arrays", counted_arrays)
+    cached = _role_normalized_composite(metrics.copy(), baseline_cache=cache)
+
+    pd.testing.assert_series_equal(
+        cached[0], reference[0], check_names=False, check_exact=True
+    )
+    assert cached[1:] == reference[1:]
+    assert prepare_calls == 1
+    assert array_calls == 0
+
+
+def test_player_attribution_prepares_one_structural_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Player attribution keeps the same structural query for every feature."""
+
+    size = 40
+    metrics = pd.DataFrame(
+        {
+            "_gid": [f"g{index}" for index in range(size)],
+            "side": ["Blue"] * size,
+            "_name": [f"p{index}" for index in range(size)],
+            "_role": ["mid"] * size,
+            "_attr_date": pd.Timestamp("2026-01-01")
+            + pd.to_timedelta(np.arange(size), unit="D"),
+            "_attr_tier": ["tier1"] * size,
+            "gamelength": [1800.0] * size,
+            "totalgold": np.linspace(10000.0, 18000.0, size),
+            "cspm": np.linspace(5.0, 9.0, size),
+            "dpm": np.linspace(300.0, 700.0, size),
+            "damageshare": np.linspace(18.0, 32.0, size),
+            "kills": np.arange(size, dtype=float),
+            "deaths": np.ones(size),
+            "assists": np.arange(size, dtype=float),
+            "wpm": np.linspace(0.2, 0.8, size),
+            "wcpm": np.linspace(0.1, 0.7, size),
+        }
+    )
+    cfg = player_elo.PlayerEloConfig(attribution_enabled=True)
+    reference, reference_stats = player_elo.player_attribution_multipliers(
+        metrics.copy(), cfg
+    )
+    cache = PrefixBaselineCache()
+    prepare_calls = 0
+    array_calls = 0
+    real_prepare = cache.prepare_query
+    real_arrays = cache._arrays
+
+    def counted_prepare(*args, **kwargs):
+        nonlocal prepare_calls
+        prepare_calls += 1
+        return real_prepare(*args, **kwargs)
+
+    def counted_arrays(*args, **kwargs):
+        nonlocal array_calls
+        array_calls += 1
+        return real_arrays(*args, **kwargs)
+
+    monkeypatch.setattr(cache, "prepare_query", counted_prepare)
+    monkeypatch.setattr(cache, "_arrays", counted_arrays)
+    cached, cached_stats = player_elo.player_attribution_multipliers(
+        metrics.copy(), cfg, baseline_cache=cache
+    )
+    assert cached == reference
+    assert cached_stats == reference_stats
+    assert prepare_calls == 1
+    assert array_calls == 0
+
+
+def test_prepare_query_rejects_duplicate_keys_without_catalog_mutation() -> None:
+    """Duplicate row identities fail before they alter the shared catalog."""
+
+    cache = PrefixBaselineCache()
+    group = pd.Series(["mid", "mid"])
+    date = pd.Series(pd.date_range("2026-01-01", periods=2))
+    row_key = pd.Series([("g0", "Blue"), ("g0", "Blue")], dtype=object)
+    with pytest.raises(PrefixBaselineCacheError, match="row key is duplicated"):
+        cache.prepare_query(group, date, row_key)
+    assert cache._row_ids == {}
+
+
+def test_prefix_cache_level1_npz_round_trip_is_readable(tmp_path: Path) -> None:
+    """The faster archive keeps every array available to NumPy readers."""
+
+    values, group, date, row_key = _persistent_cache_fixture()
+    path = tmp_path / "prefix-baseline"
+    cache = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    cache.flush()
+    with zipfile.ZipFile(path.with_suffix(".npz")) as archive:
+        members = archive.infolist()
+        assert members
+        assert all(member.compress_type == zipfile.ZIP_DEFLATED for member in members)
+    with np.load(path.with_suffix(".npz"), allow_pickle=False) as payload:
+        assert "row_catalog" in payload
+        assert len(payload.files) == 7
+
+
 def test_global_fit_workspace_preserves_current_and_historical_outputs() -> None:
     """One shared normalized workspace is exact at every cutoff."""
 
@@ -773,6 +922,9 @@ def test_player_rating_builder_stores_workspace_in_object_local_replay(
     assert fit_workspaces == [saved]
     bridge_context = replay.get("bridge_context")
     assert isinstance(bridge_context, player_elo.PlayerBridgeContext)
+    saved_cache = replay.get("baseline_cache")
+    assert isinstance(saved_cache, PrefixBaselineCache)
+    assert saved_cache.storage_path == tmp_path / "player_prefix_baseline_cache"
 
 
 def test_current_tier_projection_matches_full_player_records() -> None:
@@ -798,6 +950,30 @@ def test_current_tier_projection_matches_full_player_records() -> None:
         for player, record in full_records.items()
     }
     assert player_elo._current_tier_records(context.canonical_players) == expected
+
+
+def test_current_tier_projection_falls_back_for_duplicate_source_index() -> None:
+    """Duplicate canonical indices use the pack-record latest-row semantics."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=2))
+    frame = _with_metrics(players, _roster_profiles())
+    frame["league"] = frame["gameid"].map(maps.set_index("gameid")["league"])
+    frame["result"] = frame["gameid"].map(
+        maps.set_index("gameid")["y_blue_win"]
+    )
+    context = player_elo.PlayerBridgeContext.build(frame)
+    duplicated = context.canonical_players.copy(deep=True)
+    duplicated.index = pd.Index(np.zeros(len(duplicated), dtype=int))
+    from lol_kills.export.pack_records import build_player_records
+
+    expected = {
+        player: record.get("current_tier")
+        for player, record in build_player_records(
+            duplicated,
+            canonicalized=True,
+        ).items()
+    }
+    assert player_elo._current_tier_records(duplicated) == expected
 
 
 def test_weekly_replay_reuses_bridge_context_with_exact_output(
@@ -828,11 +1004,13 @@ def test_weekly_replay_reuses_bridge_context_with_exact_output(
     )
     bridge_context = player_elo.PlayerBridgeContext.build(players)
     workspace = GlobalPlayerFitWorkspace.build(maps, players)
+    fit_cache_ids: list[int] = []
 
     def fake_replay(*_args, **_kwargs):
         return pd.DataFrame(), states, checkpoints, {}
 
     def fake_fit(*_args, **_kwargs):
+        fit_cache_ids.append(id(_kwargs["baseline_cache"]))
         return global_snapshot.copy(deep=True), {}
 
     monkeypatch.setattr(player_elo, "_run_player_elo", fake_replay)
@@ -855,6 +1033,11 @@ def test_weekly_replay_reuses_bridge_context_with_exact_output(
         "current_global": global_snapshot,
         "global_workspace": workspace,
         "bridge_context": bridge_context,
+        "baseline_cache": PrefixBaselineCache(
+            storage_path=tmp_path / "actual" / "player_prefix_baseline_cache",
+            source_identity=player_elo._rating_source_identity(maps),
+            schema_fingerprint=player_elo._rating_cache_schema(players),
+        ),
     }
     canonicalize_calls = 0
     bridge_context_ids: list[int] = []
@@ -887,6 +1070,7 @@ def test_weekly_replay_reuses_bridge_context_with_exact_output(
     # its prepared support rows.
     assert canonicalize_calls == 1
     assert bridge_context_ids == [id(bridge_context)] * 5
+    assert fit_cache_ids[-4:] == [id(replay["baseline_cache"])] * 4
 
 
 def test_weekly_replay_context_keeps_json_exact_and_skips_replay(monkeypatch, tmp_path: Path) -> None:

@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from bisect import bisect_right, insort
 import hashlib
+import io
 import inspect
 import json
 import math
@@ -27,6 +28,7 @@ import os
 from pathlib import Path
 import sys
 from typing import Any, Callable
+import zipfile
 
 import numpy as np
 import pandas as pd
@@ -92,6 +94,34 @@ _GLOBAL_FIT_CACHE_SCHEMA_VERSION = 1
 _GLOBAL_FIT_CACHE_SCHEMA_FINGERPRINT = "global-player-fit:v2:parquet-json:source-bound"
 
 
+def _write_npz_level1(path: Path, arrays: dict[str, np.ndarray]) -> None:
+    """Write a deterministic NumPy archive with fast level-one deflate."""
+
+    with path.open("wb") as handle:
+        with zipfile.ZipFile(
+            handle,
+            mode="w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=1,
+            allowZip64=True,
+        ) as archive:
+            for name in sorted(arrays):
+                payload = io.BytesIO()
+                np.lib.format.write_array(
+                    payload,
+                    np.asarray(arrays[name]),
+                    allow_pickle=False,
+                )
+                info = zipfile.ZipInfo(
+                    filename=f"{name}.npy",
+                    date_time=(1980, 1, 1, 0, 0, 0),
+                )
+                info.create_system = 3
+                info.external_attr = 0o600 << 16
+                info.compress_type = zipfile.ZIP_DEFLATED
+                archive.writestr(info, payload.getvalue())
+
+
 class PrefixBaselineCacheError(RuntimeError):
     """Raised when a cached baseline cannot prove source equivalence."""
 
@@ -133,6 +163,20 @@ class _PrefixBaselineEntry:
     values: np.ndarray
     z: np.ndarray
     prior_count: np.ndarray
+
+
+@dataclass
+class _PrefixBaselineQuery:
+    """Validated structural arrays shared by one normalization pass."""
+
+    keys: tuple[tuple[str, ...], ...]
+    row_ids: np.ndarray
+    groups: np.ndarray
+    dates: np.ndarray
+    group_source_id: int
+    date_source_id: int
+    row_key_source_id: int
+    catalog_generation: int
 
 
 class PrefixBaselineCache:
@@ -180,6 +224,7 @@ class PrefixBaselineCache:
         self.schema_fingerprint = str(schema_fingerprint)
         self._entries: dict[tuple[str, int], list[_PrefixBaselineEntry]] = {}
         self._row_ids: dict[tuple[str, ...], int] = {}
+        self._catalog_generation = 0
         self._dirty = False
         self.invalidated = False
         self.invalidated_reason: str | None = None
@@ -198,6 +243,7 @@ class PrefixBaselineCache:
     def _clear(self, reason: str) -> None:
         self._entries.clear()
         self._row_ids.clear()
+        self._catalog_generation += 1
         self._dirty = True
         self.invalidated = True
         self.invalidated_reason = str(reason)
@@ -339,8 +385,7 @@ class PrefixBaselineCache:
         payload_tmp = self.payload_path.with_name(self.payload_path.name + ".tmp")
         manifest_tmp = self.manifest_path.with_name(self.manifest_path.name + ".tmp")
         try:
-            with payload_tmp.open("wb") as handle:
-                np.savez_compressed(handle, **arrays)
+            _write_npz_level1(payload_tmp, arrays)
             payload_bytes = payload_tmp.read_bytes()
             manifest = {
                 "schema_version": _PREFIX_CACHE_SCHEMA_VERSION,
@@ -409,6 +454,103 @@ class PrefixBaselineCache:
         same |= np.isnan(left_array) & np.isnan(right_array)
         return same
 
+    @staticmethod
+    def _numeric(values: pd.Series) -> np.ndarray:
+        """Convert one metric after its structural query is prepared."""
+
+        return pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
+
+    def prepare_query(
+        self,
+        group: pd.Series,
+        date: pd.Series,
+        row_key: pd.Series,
+    ) -> _PrefixBaselineQuery:
+        """Prepare and validate structural arrays once per normalization pass."""
+
+        if not (len(group) == len(date) == len(row_key)):
+            raise PrefixBaselineCacheError(
+                "baseline cache structural query length mismatch"
+            )
+        keys = tuple(
+            PrefixBaselineCache._key(value)
+            for value in row_key.to_numpy(dtype=object)
+        )
+        row_ids = np.empty(len(keys), dtype=np.int64)
+        seen: set[tuple[str, ...]] = set()
+        for key in keys:
+            if key in seen:
+                raise PrefixBaselineCacheError(
+                    "baseline cache row key is duplicated"
+                )
+            seen.add(key)
+        for position, key in enumerate(keys):
+            row_ids[position] = self._row_ids.setdefault(key, len(self._row_ids))
+        groups = np.asarray(
+            [
+                PrefixBaselineCache._group(value)
+                for value in group.to_numpy(dtype=object)
+            ],
+            dtype=object,
+        )
+        dates = np.asarray(
+            [
+                _PREFIX_CACHE_MISSING_DATE
+                if (value := PrefixBaselineCache._date(raw)) is None
+                else value
+                for raw in date.to_numpy(dtype=object)
+            ],
+            dtype=np.int64,
+        )
+        return _PrefixBaselineQuery(
+            keys=keys,
+            row_ids=row_ids,
+            groups=groups,
+            dates=dates,
+            group_source_id=id(group),
+            date_source_id=id(date),
+            row_key_source_id=id(row_key),
+            catalog_generation=self._catalog_generation,
+        )
+
+    def _refresh_query_catalog(
+        self,
+        prepared_query: _PrefixBaselineQuery,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        row_key: pd.Series,
+    ) -> None:
+        """Rebind a query after a fail-closed cache clear."""
+
+        self._validate_query(prepared_query, values, group, date, row_key)
+        if prepared_query.catalog_generation == self._catalog_generation:
+            return
+        refreshed = self.prepare_query(group, date, row_key)
+        prepared_query.keys = refreshed.keys
+        prepared_query.row_ids = refreshed.row_ids
+        prepared_query.groups = refreshed.groups
+        prepared_query.dates = refreshed.dates
+        prepared_query.catalog_generation = refreshed.catalog_generation
+
+    @staticmethod
+    def _validate_query(
+        prepared_query: _PrefixBaselineQuery,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        row_key: pd.Series,
+    ) -> None:
+        if not isinstance(prepared_query, _PrefixBaselineQuery):
+            raise PrefixBaselineCacheError("baseline cache prepared query type drift")
+        if (
+            len(prepared_query.row_ids) != len(values)
+            or prepared_query.group_source_id != id(group)
+            or prepared_query.date_source_id != id(date)
+            or prepared_query.row_key_source_id != id(row_key)
+        ):
+            raise PrefixBaselineCacheError("baseline cache prepared query source drift")
+
     def _arrays(
         self,
         values: pd.Series,
@@ -422,31 +564,14 @@ class PrefixBaselineCache:
         np.ndarray,
         np.ndarray,
     ]:
-        keys = tuple(PrefixBaselineCache._key(value) for value in row_key.to_numpy(dtype=object))
-        row_ids = np.empty(len(keys), dtype=np.int64)
-        seen: set[tuple[str, ...]] = set()
-        for position, key in enumerate(keys):
-            if key in seen:
-                raise PrefixBaselineCacheError(
-                    "baseline cache row key is duplicated"
-                )
-            seen.add(key)
-            row_ids[position] = self._row_ids.setdefault(key, len(self._row_ids))
-        groups = np.asarray(
-            [PrefixBaselineCache._group(value) for value in group.to_numpy(dtype=object)],
-            dtype=object,
+        prepared_query = self.prepare_query(group, date, row_key)
+        return (
+            prepared_query.keys,
+            prepared_query.row_ids,
+            prepared_query.groups,
+            prepared_query.dates,
+            self._numeric(values),
         )
-        dates = np.asarray(
-            [
-                _PREFIX_CACHE_MISSING_DATE
-                if (value := PrefixBaselineCache._date(raw)) is None
-                else value
-                for raw in date.to_numpy(dtype=object)
-            ],
-            dtype=np.int64,
-        )
-        numeric = pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
-        return keys, row_ids, groups, dates, numeric
 
     @staticmethod
     def _is_prefix(
@@ -504,6 +629,8 @@ class PrefixBaselineCache:
         row_key: pd.Series,
         z: pd.Series,
         prior_count: pd.Series,
+        prepared_query: _PrefixBaselineQuery | None = None,
+        numeric_values: np.ndarray | None = None,
         arrays: tuple[
             tuple[tuple[str, ...], ...],
             np.ndarray,
@@ -512,15 +639,22 @@ class PrefixBaselineCache:
             np.ndarray,
         ] | None = None,
     ) -> _PrefixBaselineEntry | None:
-        if arrays is None:
+        if arrays is not None:
+            _keys, row_ids, groups, dates, numeric = arrays
+        elif prepared_query is not None:
+            self._refresh_query_catalog(prepared_query, values, group, date, row_key)
+            _keys = prepared_query.keys
+            row_ids = prepared_query.row_ids
+            groups = prepared_query.groups
+            dates = prepared_query.dates
+            numeric = self._numeric(values) if numeric_values is None else numeric_values
+        else:
             try:
                 _keys, row_ids, groups, dates, numeric = self._arrays(
                     values, group, date, row_key
                 )
             except PrefixBaselineCacheError:
                 return None
-        else:
-            _keys, row_ids, groups, dates, numeric = arrays
         order = np.argsort(row_ids, kind="stable")
         return _PrefixBaselineEntry(
             metric_key=str(metric_key),
@@ -545,6 +679,8 @@ class PrefixBaselineCache:
         block_baseline: Callable[
             [np.ndarray, np.ndarray, int], tuple[np.ndarray, np.ndarray]
         ],
+        prepared_query: _PrefixBaselineQuery | None = None,
+        numeric_values: np.ndarray | None = None,
         arrays: tuple[
             tuple[tuple[str, ...], ...],
             np.ndarray,
@@ -555,7 +691,20 @@ class PrefixBaselineCache:
     ) -> tuple[pd.Series, pd.Series] | None:
         """Extend one entry when every new row is a later timestamp block."""
 
-        if arrays is None:
+        if arrays is not None:
+            _keys, row_ids, groups, dates, numeric = arrays
+        elif prepared_query is not None:
+            try:
+                self._refresh_query_catalog(prepared_query, values, group, date, row_key)
+            except PrefixBaselineCacheError as exc:
+                self.last_miss_reason = str(exc)
+                return None
+            _keys = prepared_query.keys
+            row_ids = prepared_query.row_ids
+            groups = prepared_query.groups
+            dates = prepared_query.dates
+            numeric = self._numeric(values) if numeric_values is None else numeric_values
+        else:
             try:
                 _keys, row_ids, groups, dates, numeric = self._arrays(
                     values, group, date, row_key
@@ -563,8 +712,6 @@ class PrefixBaselineCache:
             except PrefixBaselineCacheError as exc:
                 self.last_miss_reason = str(exc)
                 return None
-        else:
-            _keys, row_ids, groups, dates, numeric = arrays
         entries = self._entries.get((str(metric_key), int(min_obs)), [])
         for entry_index, entry in enumerate(entries):
             cached_positions, known = self._matched_positions(entry, row_ids)
@@ -688,14 +835,25 @@ class PrefixBaselineCache:
         block_baseline: Callable[
             [np.ndarray, np.ndarray, int], tuple[np.ndarray, np.ndarray]
         ] | None = None,
+        prepared_query: _PrefixBaselineQuery | None = None,
     ) -> tuple[pd.Series, pd.Series] | None:
         """Return cached z and prior counts when source equivalence is proven."""
 
         self.last_miss_reason = None
         try:
-            keys, row_ids, groups, dates, numeric = self._arrays(
-                values, group, date, row_key
-            )
+            if prepared_query is None:
+                keys, row_ids, groups, dates, numeric = self._arrays(
+                    values, group, date, row_key
+                )
+                query_for_append = None
+            else:
+                self._refresh_query_catalog(prepared_query, values, group, date, row_key)
+                keys = prepared_query.keys
+                row_ids = prepared_query.row_ids
+                groups = prepared_query.groups
+                dates = prepared_query.dates
+                numeric = self._numeric(values)
+                query_for_append = prepared_query
         except PrefixBaselineCacheError as exc:
             self.misses += 1
             self.last_miss_reason = str(exc)
@@ -738,7 +896,11 @@ class PrefixBaselineCache:
                 metric_key=metric_key,
                 row_key=row_key,
                 block_baseline=block_baseline,
-                arrays=(keys, row_ids, groups, dates, numeric),
+                prepared_query=query_for_append,
+                numeric_values=numeric,
+                arrays=(keys, row_ids, groups, dates, numeric)
+                if query_for_append is None
+                else None,
             )
             if appended is not None:
                 self.hits += 1
@@ -760,13 +922,22 @@ class PrefixBaselineCache:
         row_key: pd.Series,
         z: pd.Series,
         prior_count: pd.Series,
+        prepared_query: _PrefixBaselineQuery | None = None,
     ) -> None:
         """Store reference results for a complete frame or safe prefix."""
 
         try:
-            _keys, row_ids, groups, dates, numeric = self._arrays(
-                values, group, date, row_key
-            )
+            if prepared_query is None:
+                _keys, row_ids, groups, dates, numeric = self._arrays(
+                    values, group, date, row_key
+                )
+            else:
+                self._refresh_query_catalog(prepared_query, values, group, date, row_key)
+                _keys = prepared_query.keys
+                row_ids = prepared_query.row_ids
+                groups = prepared_query.groups
+                dates = prepared_query.dates
+                numeric = self._numeric(values)
         except PrefixBaselineCacheError:
             return
         order = np.argsort(row_ids, kind="stable")
@@ -1473,6 +1644,7 @@ def _prior_baseline_z(
     baseline_cache: PrefixBaselineCache | None = None,
     metric_key: str | None = None,
     row_key: pd.Series | None = None,
+    prepared_query: object | None = None,
 ) -> tuple[pd.Series, pd.Series]:
     """Robust z-score against a baseline built only from strictly earlier dates.
 
@@ -1502,6 +1674,7 @@ def _prior_baseline_z(
             metric_key=metric_key,
             row_key=row_key,
             block_baseline=_robust_block_baseline_fast,
+            prepared_query=prepared_query,
         )
         if cached is not None:
             return cached
@@ -1572,6 +1745,7 @@ def _prior_baseline_z(
             row_key=row_key,
             z=output_z,
             prior_count=output_prior,
+            prepared_query=prepared_query,
         )
     return output_z, output_prior
 
@@ -1723,6 +1897,11 @@ def _role_normalized_composite(
         ),
         index=metrics.index,
     )
+    prepared_query = (
+        baseline_cache.prepare_query(group, date, row_key)
+        if baseline_cache is not None
+        else None
+    )
 
     diagnostics: dict[str, Any] = {
         "baseline_min_prior_observations": int(ANCHOR_MIN_BASELINE_OBS),
@@ -1759,6 +1938,7 @@ def _role_normalized_composite(
             baseline_cache=baseline_cache,
             metric_key=cache_metric_key,
             row_key=row_key,
+            prepared_query=prepared_query,
         )
         present = values.notna() & np.isfinite(values.astype(float))
         below_floor = present & prior_obs.lt(float(ANCHOR_MIN_BASELINE_OBS))
