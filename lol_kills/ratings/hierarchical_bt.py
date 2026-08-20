@@ -712,21 +712,60 @@ def _research_verified_source_receipt(
     }
 
 
-def _research_series_ids(frame: pd.DataFrame, label: str) -> tuple[str, ...]:
-    """Require authoritative series IDs for leakage-safe fold boundaries."""
+def _research_series_spec(
+    frame: pd.DataFrame,
+    label: str,
+) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+    """Return the explicit cluster column, values, and source types.
 
-    if "grid_series_id" not in frame.columns:
-        raise ValueError(f"{label} frame has no safe grid_series_id")
-    values = tuple(_cache_text(value) for value in frame["grid_series_id"].tolist())
+    ``series_id`` is the source-neutral evaluator contract.  ``grid_series_id``
+    remains supported for older GRID-backed callers.  A non-GRID column is a
+    conservative proxy, so the returned research receipt keeps authority
+    unavailable even when every value is present.
+    """
+
+    column = next(
+        (name for name in ("series_id", "grid_series_id") if name in frame.columns),
+        None,
+    )
+    if column is None:
+        raise ValueError(f"{label} frame has no safe grid_series_id or series_id")
+    values = tuple(_cache_text(value) for value in frame[column].tolist())
     if any(not value for value in values):
-        raise ValueError(f"{label} frame has missing safe grid_series_id")
+        raise ValueError(f"{label} frame has missing safe {column}")
+    source_column = "series_id_source" if "series_id_source" in frame.columns else None
+    if source_column is None:
+        source_types = (
+            "grid_authoritative" if column == "grid_series_id" else "explicit_series_id",
+        )
+    else:
+        source_types = tuple(
+            sorted(
+                {
+                    _cache_text(value)
+                    for value in frame[source_column].tolist()
+                    if _cache_text(value)
+                }
+            )
+        )
+        if not source_types:
+            source_types = (
+                "grid_authoritative" if column == "grid_series_id" else "explicit_series_id",
+            )
+    return column, values, source_types
+
+
+def _research_series_ids(frame: pd.DataFrame, label: str) -> tuple[str, ...]:
+    """Require non-empty explicit series IDs for fold boundaries."""
+
+    _column, values, _source_types = _research_series_spec(frame, label)
     return values
 
 
 def _research_series_pairs(frame: pd.DataFrame, label: str) -> dict[str, str]:
     """Bind each source series ID to one unordered team pair."""
 
-    _research_series_ids(frame, label)
+    column, series_ids, _source_types = _research_series_spec(frame, label)
     blue_column = next(
         (column for column in ("blue_team", "blue_teamname") if column in frame.columns),
         None,
@@ -738,9 +777,7 @@ def _research_series_pairs(frame: pd.DataFrame, label: str) -> dict[str, str]:
     if blue_column is None or red_column is None:
         raise ValueError(f"{label} frame has no safe team pair columns")
     pairs: dict[str, str] = {}
-    for series_id, blue_value, red_value in zip(
-        frame["grid_series_id"], frame[blue_column], frame[red_column]
-    ):
+    for series_id, blue_value, red_value in zip(series_ids, frame[blue_column], frame[red_column]):
         blue = team_identity_key(blue_value)
         red = team_identity_key(red_value)
         if blue == "unknown-team" or red == "unknown-team":
@@ -749,7 +786,7 @@ def _research_series_pairs(frame: pd.DataFrame, label: str) -> dict[str, str]:
         key = _cache_text(series_id)
         previous = pairs.get(key)
         if previous is not None and previous != pair:
-            raise ValueError(f"{label} grid_series_id maps to multiple team pairs: {key}")
+            raise ValueError(f"{label} {column} maps to multiple team pairs: {key}")
         pairs[key] = pair
     return pairs
 
@@ -1023,12 +1060,28 @@ def fit_hierarchical_bt_research_prediction(
     _validation_ordered_ids, validation_ids = _research_game_ids(
         validation_maps, "validation"
     )
+    train_series_column, train_series_ids, train_series_sources = _research_series_spec(
+        train_maps, "training"
+    )
+    validation_series_column, validation_series_ids, validation_series_sources = _research_series_spec(
+        validation_maps, "validation"
+    )
+    if train_series_column != validation_series_column:
+        raise ValueError(
+            "training and validation series identity columns differ: "
+            f"{train_series_column} vs {validation_series_column}"
+        )
+    if train_series_sources != validation_series_sources:
+        raise ValueError(
+            "training and validation series identity source types differ: "
+            f"{train_series_sources} vs {validation_series_sources}"
+        )
     train_series_pairs = _research_series_pairs(train_maps, "training")
     validation_series_pairs = _research_series_pairs(validation_maps, "validation")
     shared_series_ids = sorted(set(train_series_pairs) & set(validation_series_pairs))
     if shared_series_ids:
         raise ValueError(
-            "training and validation share grid_series_id: "
+            f"training and validation share {train_series_column}: "
             + ", ".join(shared_series_ids)
         )
     if set(train_ids) & set(validation_ids):
@@ -1080,8 +1133,11 @@ def fit_hierarchical_bt_research_prediction(
     )
     ordered_train_maps = _research_order_frame(train_maps, "training")
 
+    observation_maps = ordered_train_maps.copy()
+    if train_series_column != "grid_series_id":
+        observation_maps["grid_series_id"] = observation_maps[train_series_column]
     observations, series_audit = _observations(
-        ordered_train_maps,
+        observation_maps,
         cutoff_value,
         cfg.half_life_days,
     )
@@ -1099,6 +1155,17 @@ def fit_hierarchical_bt_research_prediction(
     output_sha256 = _research_sha256(prediction_rows)
     config_payload = dict(cfg.__dict__)
     config_sha256 = _research_sha256(config_payload)
+    series_receipt = {
+        "column": train_series_column,
+        "source_types": list(train_series_sources),
+        "authoritative": train_series_column == "grid_series_id",
+        "train_cluster_count": len(set(train_series_ids)),
+        "validation_cluster_count": len(set(validation_series_ids)),
+        "train_cluster_identity_sha256": _research_sha256(sorted(set(train_series_ids))),
+        "validation_cluster_identity_sha256": _research_sha256(
+            sorted(set(validation_series_ids))
+        ),
+    }
     terms = {
         "team_logit": {
             team: float(fit_state["beta"][index])
@@ -1117,6 +1184,7 @@ def fit_hierarchical_bt_research_prediction(
         "source_identity_sha256": train_identity,
         "ordered_input_ids": list(train_ids),
         "input_game_ids": list(train_ids),
+        "series_identity": series_receipt,
     }
     validation_receipt = {
         "game_ids": list(validation_ids),
@@ -1127,6 +1195,7 @@ def fit_hierarchical_bt_research_prediction(
         "input_game_ids": list(validation_ids),
         "scored_game_ids": [row["game_id"] for row in prediction_rows],
         "missing_game_ids": missing_ids,
+        "series_identity": series_receipt,
     }
     return {
         "schema_version": RESEARCH_PREDICTION_SCHEMA,
@@ -1146,6 +1215,7 @@ def fit_hierarchical_bt_research_prediction(
             "model_eligible_identity_sha256": verified_source[
                 "model_eligible_identity_sha256"
             ],
+            "series_identity": series_receipt,
         },
         "scope_game_identity_sha256": _research_id_identity(
             sorted(requested_ids)
@@ -1175,6 +1245,7 @@ def fit_hierarchical_bt_research_prediction(
         "config": config_payload,
         "config_sha256": config_sha256,
         "implementation_sha256": HIERARCHICAL_IMPLEMENTATION_SHA256,
+        "series_identity": series_receipt,
         "fit": {
             "n_observations": fit_state["n_observations"],
             "n_maps": fit_state["n_maps"],

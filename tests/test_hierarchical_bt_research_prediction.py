@@ -237,6 +237,27 @@ def test_reordering_train_and_validation_rows_keeps_predictions_and_receipts() -
     assert baseline["validation_receipt"] == reordered["validation_receipt"]
 
 
+def test_explicit_non_grid_series_column_is_bound_as_conservative_proxy() -> None:
+    train = _training().drop(columns=["grid_series_id"]).assign(
+        series_id=lambda frame: frame["game_uid"].map(lambda value: f"proxy-{value}")
+    )
+    validation = _validation().drop(columns=["grid_series_id"]).assign(
+        series_id=lambda frame: frame["game_uid"].map(lambda value: f"proxy-{value}")
+    )
+    report = _run(train, validation)
+    series_identity = report["series_identity"]
+    assert series_identity["column"] == "series_id"
+    assert series_identity["source_types"] == ["explicit_series_id"]
+    assert series_identity["authoritative"] is False
+    assert report["source"]["series_identity"] == series_identity
+    assert report["train_receipt"]["series_identity"] == series_identity
+    assert report["validation_receipt"]["series_identity"] == series_identity
+
+    reordered = _run(train.iloc[::-1].reset_index(drop=True), validation.iloc[::-1].reset_index(drop=True))
+    assert report["predictions"] == reordered["predictions"]
+    assert report["output_sha256"] == reordered["output_sha256"]
+
+
 def test_source_receipt_and_caller_identity_mutations_fail_closed() -> None:
     train = _training()
     validation = _validation()
