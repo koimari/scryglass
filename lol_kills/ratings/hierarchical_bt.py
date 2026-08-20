@@ -394,9 +394,9 @@ def fit_hierarchical_bt(
         return value, gradient
 
     result = minimize(
-        lambda beta: objective(beta)[0],
+        objective,
         np.zeros(X.shape[1], dtype=float),
-        jac=lambda beta: objective(beta)[1],
+        jac=True,
         method="L-BFGS-B",
         bounds=[(-8.0, 8.0)] * X.shape[1],
         options={"maxiter": cfg.max_iter, "ftol": 1e-10, "gtol": 1e-8},
