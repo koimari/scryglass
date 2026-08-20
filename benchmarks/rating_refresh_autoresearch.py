@@ -435,10 +435,14 @@ def _validate_output_manifest(path: Path, expected_binding: Mapping[str, Any]) -
     semantic = payload.get("semantic", {})
     if not isinstance(semantic, Mapping):
         raise HarnessError(f"output semantic section is invalid: {path}")
+    run_metadata = payload.get("run", {})
+    if not isinstance(run_metadata, Mapping):
+        raise HarnessError(f"output run section is invalid: {path}")
     return {
         "binding": dict(expected_binding),
         "outputs": _output_view(outputs),
         "semantic": dict(semantic),
+        "run": dict(run_metadata),
     }
 
 
@@ -550,6 +554,7 @@ def _run_adapter(
     result["status"] = "ok"
     result["output_digest"] = _sha256_bytes(_canonical_json_bytes(validated["outputs"]))
     result["semantic_digest"] = _sha256_bytes(_canonical_json_bytes(validated["semantic"]))
+    result["run_metadata"] = validated["run"]
     result["artifact_names"] = sorted(validated["outputs"])
     result["_validated_output"] = validated
     return result

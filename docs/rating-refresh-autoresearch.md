@@ -81,6 +81,13 @@ The adapter writes one JSON output manifest to the path in
     "census_sha256": "...",
     "input_manifest_sha256": "..."
   },
+  "run": {
+    "phase": "cold",
+    "variant": "candidate",
+    "entrypoint": "lol_kills.v2.tierlists.rating_refresh.refresh_ratings",
+    "runtime_isolated": true,
+    "accepted_census_bound": true
+  },
   "outputs": {
     "player_ratings": {
       "path": "/path/to/player-ratings.json",
@@ -103,7 +110,9 @@ The source binding must match the frozen fixture. The runner checks an
 artifact path when one is provided. It hashes the output descriptors without
 the path, so baseline and candidate paths may differ. It compares every
 descriptor field and every semantic field exactly. A different rating value,
-row count, digest, or source binding rejects the candidate.
+row count, digest, or source binding rejects the candidate. The optional run
+section appears in the phase report and records the entrypoint and isolation
+state.
 
 The adapter writes call counts as either a mapping or an object with a
 `counts` mapping:
@@ -127,6 +136,11 @@ but a release decision should require the counts needed for the experiment.
 Use an adapter for each implementation. The command receives the fixture
 through the environment. The shell is not used.
 
+The repository adapter calls
+`lol_kills.v2.tierlists.rating_refresh.refresh_ratings`. It stages the frozen
+files under a private runtime directory and copies the production rating
+manifest and four rating artifacts into the harness output contract.
+
 ```sh
 python3 benchmarks/rating_refresh_autoresearch.py \
   --base-root /path/to/base-source \
@@ -137,8 +151,8 @@ python3 benchmarks/rating_refresh_autoresearch.py \
   --input-relative data/lol/warehouse/parquet/oe_live/oe_player_games.parquet \
   --input-relative data/lol/warehouse/parquet/oe_live/oe_team_games.parquet \
   --output-root /private/tmp/rating-refresh-autoresearch \
-  --baseline-command-json '["python3", "path/to/rating_adapter.py"]' \
-  --candidate-command-json '["python3", "path/to/rating_adapter.py"]' \
+  --baseline-command-json '["python3", "benchmarks/rating_refresh_adapter.py", "--min-games", "1", "--min-series", "1"]' \
+  --candidate-command-json '["python3", "benchmarks/rating_refresh_adapter.py", "--min-games", "1", "--min-series", "1"]' \
   --budget-seconds 60 \
   --timeout-seconds 1800 \
   --report /private/tmp/rating-refresh-autoresearch/report.json
