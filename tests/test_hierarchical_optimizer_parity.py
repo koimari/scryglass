@@ -124,6 +124,10 @@ def test_hierarchical_cache_reuses_current_and_previous_source_bound_fits(
 ) -> None:
     maps = _fixture()
     source_identity = "source-a"
+    uncached_current, uncached_meta = hierarchical_bt.fit_hierarchical_bt(
+        maps,
+        write=False,
+    )
     real_minimize = hierarchical_bt.minimize
     optimizer_calls: list[None] = []
 
@@ -132,7 +136,7 @@ def test_hierarchical_cache_reuses_current_and_previous_source_bound_fits(
         return real_minimize(*args, **kwargs)
 
     monkeypatch.setattr(hierarchical_bt, "minimize", counted_minimize)
-    current, _ = hierarchical_bt.fit_hierarchical_bt(
+    current, cold_meta = hierarchical_bt.fit_hierarchical_bt(
         maps,
         write=True,
         output_dir=tmp_path,
@@ -149,7 +153,7 @@ def test_hierarchical_cache_reuses_current_and_previous_source_bound_fits(
     )
     assert len(optimizer_calls) == 2
 
-    cached_current, _ = hierarchical_bt.fit_hierarchical_bt(
+    cached_current, cached_meta = hierarchical_bt.fit_hierarchical_bt(
         maps,
         write=True,
         output_dir=tmp_path,
@@ -165,7 +169,10 @@ def test_hierarchical_cache_reuses_current_and_previous_source_bound_fits(
         source_identity_sha256=source_identity,
     )
     assert len(optimizer_calls) == 2
+    pd.testing.assert_frame_equal(uncached_current, current, check_exact=True)
     pd.testing.assert_frame_equal(current, cached_current, check_exact=True)
+    assert cold_meta == uncached_meta
+    assert cached_meta == uncached_meta
     assert first_weekly == cached_weekly
 
     manifest = json.loads(

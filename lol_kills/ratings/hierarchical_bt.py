@@ -682,8 +682,6 @@ def fit_hierarchical_bt(
         },
         "note": "Series-collapsed penalized MAP Bradley-Terry with explicit series identity (authoritative GRID series id when safe, stable game-level keys otherwise) and local Laplace uncertainty plus explicit uncertainty inflation for teams without international bridges; use rating_p10 for conservative rank.",
     }
-    if cache_key is not None:
-        meta["cache_binding"] = cache_key
     if cache_dir is not None and cache_key is not None:
         _write_cached_fit(
             Path(cache_dir),
