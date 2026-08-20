@@ -59,6 +59,7 @@ from lol_kills.ratings.global_player_bt import (
     GlobalPlayerBTConfig,
     GlobalPlayerRatingError,
     PrefixBaselineCache,
+    _robust_block_baseline_fast as _shared_robust_block_baseline_fast,
     fit_global_player_bt,
 )
 
@@ -564,6 +565,16 @@ def _robust_block_baseline(
     return location, scale
 
 
+def _robust_block_baseline_fast(
+    pool: np.ndarray,
+    available: np.ndarray,
+    min_obs: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Use the shared exact sorted-prefix implementation."""
+
+    return _shared_robust_block_baseline_fast(pool, available, min_obs)
+
+
 def _prior_baseline_z(
     values: pd.Series,
     group: pd.Series,
@@ -599,7 +610,7 @@ def _prior_baseline_z(
             min_obs,
             metric_key=metric_key,
             row_key=row_key,
-            block_baseline=_robust_block_baseline,
+            block_baseline=_robust_block_baseline_fast,
         )
         if cached is not None:
             return cached[0]
@@ -642,7 +653,7 @@ def _prior_baseline_z(
             np.flatnonzero(starts)
         ]
 
-        block_location, block_scale = _robust_block_baseline(
+        block_location, block_scale = _robust_block_baseline_fast(
             pool, available, min_obs
         )
         location[positions] = block_location[block_of_row]
@@ -1401,6 +1412,7 @@ def build_player_weekly_ranks(
     players: pd.DataFrame,
     cfg: PlayerEloConfig | None = None,
     *,
+    output_dir: Path | None = None,
     as_of: pd.Timestamp | None = None,
     min_games: int = 20,
     player_records: Mapping[str, Mapping[str, object]] | None = None,
@@ -1417,8 +1429,10 @@ def build_player_weekly_ranks(
     """
 
     cfg = cfg or PlayerEloConfig()
+    destination = Path(output_dir or FEATURES_DIR)
+    destination.mkdir(parents=True, exist_ok=True)
     baseline_cache = PrefixBaselineCache(
-        storage_path=FEATURES_DIR / "player_prefix_baseline_cache",
+        storage_path=destination / "player_prefix_baseline_cache",
         source_identity=_rating_source_identity(maps),
         schema_fingerprint=_rating_cache_schema(players),
     )

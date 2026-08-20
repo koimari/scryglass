@@ -18,6 +18,7 @@ group and cannot lift or lower a player's anchor on their own.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from bisect import bisect_right, insort
 import hashlib
 import json
 import math
@@ -148,6 +149,7 @@ class PrefixBaselineCache:
         self.schema_fingerprint = str(schema_fingerprint)
         self._entries: dict[tuple[str, int], list[_PrefixBaselineEntry]] = {}
         self._row_ids: dict[tuple[str, ...], int] = {}
+        self._dirty = False
         self.invalidated = False
         self.invalidated_reason: str | None = None
         self.source_identity_changed = False
@@ -165,6 +167,7 @@ class PrefixBaselineCache:
     def _clear(self, reason: str) -> None:
         self._entries.clear()
         self._row_ids.clear()
+        self._dirty = True
         self.invalidated = True
         self.invalidated_reason = str(reason)
 
@@ -212,6 +215,7 @@ class PrefixBaselineCache:
                 # A changed source census can be an append. Row-level checks
                 # below decide whether the change is append-only or a drift.
                 self.source_identity_changed = True
+                self._dirty = True
             if self.source_identity is None and saved_identity is not None:
                 self.source_identity = str(saved_identity)
             payload_bytes = self.payload_path.read_bytes()
@@ -257,10 +261,7 @@ class PrefixBaselineCache:
                         [None if value == "" else str(value) for value in arrays[f"{prefix}_groups"].tolist()],
                         dtype=object,
                     ),
-                    dates=np.asarray(
-                        [None if int(value) == _PREFIX_CACHE_MISSING_DATE else int(value) for value in arrays[f"{prefix}_dates"].tolist()],
-                        dtype=object,
-                    ),
+                    dates=arrays[f"{prefix}_dates"].astype(np.int64, copy=False),
                     values=arrays[f"{prefix}_values"].astype(float, copy=False),
                     z=arrays[f"{prefix}_z"].astype(float, copy=False),
                     prior_count=arrays[f"{prefix}_prior"].astype(float, copy=False),
@@ -273,7 +274,7 @@ class PrefixBaselineCache:
     def flush(self) -> None:
         """Atomically serialize the validated cache for later processes."""
 
-        if self.storage_path is None:
+        if self.storage_path is None or not self._dirty:
             return
         assert self.manifest_path is not None
         assert self.payload_path is not None
@@ -293,13 +294,7 @@ class PrefixBaselineCache:
                 arrays[f"{prefix}_groups"] = self._unicode_array(
                     ["" if value is None else str(value) for value in entry.groups.tolist()]
                 )
-                arrays[f"{prefix}_dates"] = np.asarray(
-                    [
-                        _PREFIX_CACHE_MISSING_DATE if value is None else int(value)
-                        for value in entry.dates.tolist()
-                    ],
-                    dtype=np.int64,
-                )
+                arrays[f"{prefix}_dates"] = entry.dates.astype(np.int64, copy=False)
                 arrays[f"{prefix}_values"] = entry.values.astype(float, copy=False)
                 arrays[f"{prefix}_z"] = entry.z.astype(float, copy=False)
                 arrays[f"{prefix}_prior"] = entry.prior_count.astype(float, copy=False)
@@ -335,6 +330,7 @@ class PrefixBaselineCache:
             self.invalidated = False
             self.invalidated_reason = None
             self.source_identity_changed = False
+            self._dirty = False
         finally:
             for temporary in (payload_tmp, manifest_tmp):
                 try:
@@ -414,25 +410,27 @@ class PrefixBaselineCache:
             return True
         target_groups = entry.groups[target_positions]
         target_dates = entry.dates[target_positions]
+        selected = np.zeros(len(entry.row_ids), dtype=bool)
+        selected[target_positions] = True
         for current_group in set(target_groups.tolist()):
             if current_group is None:
                 return False
-            group_mask = entry.groups == current_group
-            group_target_dates = target_dates[target_groups == current_group]
-            valid_dates = [value for value in group_target_dates.tolist() if value is not None]
-            if not valid_dates:
-                return False
-            latest = max(valid_dates)
-            for position, (entry_group, entry_date) in enumerate(
-                zip(entry.groups.tolist(), entry.dates.tolist())
+            target_group_mask = target_groups == current_group
+            group_target_dates = target_dates[target_group_mask]
+            if (
+                len(group_target_dates) == 0
+                or (group_target_dates == _PREFIX_CACHE_MISSING_DATE).any()
             ):
-                if (
-                    entry_group == current_group
-                    and entry_date is not None
-                    and entry_date < latest
-                    and position not in target_set
-                ):
-                    return False
+                return False
+            latest = int(group_target_dates.max())
+            group_mask = entry.groups == current_group
+            prior_mask = (
+                group_mask
+                & (entry.dates != _PREFIX_CACHE_MISSING_DATE)
+                & (entry.dates < latest)
+            )
+            if np.any(prior_mask & ~selected):
+                return False
         return True
 
     @staticmethod
@@ -471,7 +469,13 @@ class PrefixBaselineCache:
             min_obs=int(min_obs),
             row_ids=row_ids[order],
             groups=groups[order],
-            dates=dates[order],
+            dates=np.asarray(
+                [
+                    _PREFIX_CACHE_MISSING_DATE if value is None else int(value)
+                    for value in dates[order].tolist()
+                ],
+                dtype=np.int64,
+            ),
             values=numeric[order],
             z=z.to_numpy(dtype=float)[order],
             prior_count=prior_count.to_numpy(dtype=float)[order],
@@ -507,9 +511,14 @@ class PrefixBaselineCache:
             drift = False
             for target_position in np.flatnonzero(known):
                 cached_position = cached_positions[target_position]
+                target_date = (
+                    _PREFIX_CACHE_MISSING_DATE
+                    if dates[target_position] is None
+                    else int(dates[target_position])
+                )
                 if (
                     entry.groups[cached_position] != groups[target_position]
-                    or entry.dates[cached_position] != dates[target_position]
+                    or entry.dates[cached_position] != target_date
                     or not self._same_float(
                         entry.values[cached_position], numeric[target_position]
                     )
@@ -521,7 +530,11 @@ class PrefixBaselineCache:
             if known.all():
                 continue
             if not known.all():
-                old_dates = [value for value in entry.dates.tolist() if value is not None]
+                old_dates = [
+                    int(value)
+                    for value in entry.dates.tolist()
+                    if int(value) != _PREFIX_CACHE_MISSING_DATE
+                ]
                 new_dates = [dates[index] for index in np.flatnonzero(~known)]
                 if not old_dates or any(value is None for value in new_dates):
                     continue
@@ -613,6 +626,7 @@ class PrefixBaselineCache:
             self._entries[(str(metric_key), int(min_obs))] = [
                 value for index, value in enumerate(entries) if index != entry_index
             ] + [replacement]
+            self._dirty = True
             self.stores += 1
             return (
                 pd.Series(output_z, index=values.index, dtype=float),
@@ -656,9 +670,14 @@ class PrefixBaselineCache:
                 continue
             drift = False
             for target_position, cached_position in enumerate(target_positions):
+                target_date = (
+                    _PREFIX_CACHE_MISSING_DATE
+                    if dates[target_position] is None
+                    else int(dates[target_position])
+                )
                 if (
                     entry.groups[cached_position] != groups[target_position]
-                    or entry.dates[cached_position] != dates[target_position]
+                    or entry.dates[cached_position] != target_date
                     or not self._same_float(
                         entry.values[cached_position], numeric[target_position]
                     )
@@ -721,12 +740,19 @@ class PrefixBaselineCache:
             min_obs=int(min_obs),
             row_ids=row_ids[order],
             groups=groups[order],
-            dates=dates[order],
+            dates=np.asarray(
+                [
+                    _PREFIX_CACHE_MISSING_DATE if value is None else int(value)
+                    for value in dates[order].tolist()
+                ],
+                dtype=np.int64,
+            ),
             values=numeric[order],
             z=z.to_numpy(dtype=float)[order],
             prior_count=prior_count.to_numpy(dtype=float)[order],
         )
         self._entries.setdefault((str(metric_key), int(min_obs)), []).append(entry)
+        self._dirty = True
         self.stores += 1
 
 # Minimum number of STRICTLY EARLIER observations a (role, competition tier)
@@ -1004,6 +1030,148 @@ def _robust_block_baseline(
     return location, scale
 
 
+def _kth_abs_distance(
+    sorted_values: list[np.float64],
+    centre: np.float64,
+    rank: int,
+) -> np.float64:
+    """Return one exact order statistic of distances from ``centre``.
+
+    Values below the centre produce one sorted distance stream when read from
+    right to left. Values at or above the centre produce the other stream when
+    read from left to right. A partition search selects the requested element
+    without materialising either stream.
+    """
+
+    split = bisect_right(sorted_values, centre)
+    left_count = split
+    right_count = len(sorted_values) - split
+    lower = max(0, rank - right_count)
+    upper = min(rank, left_count)
+    negative_infinity = -np.inf
+    positive_infinity = np.inf
+    while lower <= upper:
+        left_taken = (lower + upper) // 2
+        right_taken = rank - left_taken
+        left_previous = (
+            centre - sorted_values[split - left_taken]
+            if left_taken
+            else negative_infinity
+        )
+        right_previous = (
+            sorted_values[split + right_taken - 1] - centre
+            if right_taken
+            else negative_infinity
+        )
+        left_next = (
+            centre - sorted_values[split - left_taken - 1]
+            if left_taken < left_count
+            else positive_infinity
+        )
+        right_next = (
+            sorted_values[split + right_taken] - centre
+            if right_taken < right_count
+            else positive_infinity
+        )
+        if left_previous > right_next:
+            upper = left_taken - 1
+        elif right_previous > left_next:
+            lower = left_taken + 1
+        else:
+            return min(left_next, right_next)
+    raise RuntimeError("absolute-distance order statistic partition failed")
+
+
+def _linear_quantile_sorted(
+    sorted_values: list[np.float64],
+    quantile: float,
+) -> np.float64:
+    """Match NumPy's default linear quantile on an already sorted prefix."""
+
+    index = (len(sorted_values) - 1) * quantile
+    lower = int(np.floor(index))
+    upper = int(np.ceil(index))
+    if lower == upper:
+        return sorted_values[lower]
+    fraction = index - lower
+    return sorted_values[lower] + fraction * (
+        sorted_values[upper] - sorted_values[lower]
+    )
+
+
+def _robust_block_baseline_fast(
+    pool: np.ndarray,
+    available: np.ndarray,
+    min_obs: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Exact robust prefixes with one sorted append-only sample.
+
+    The reference implementation scans every prefix for each block. This
+    path inserts each present value once. Raw medians use the maintained order,
+    and MAD order statistics use two monotone distance streams. The IQR
+    fallback uses the same linear interpolation as ``np.quantile``.
+
+    Strictly prior blocks remain the caller's responsibility. ``available``
+    contains the count before each block, so the sorted sample is updated only
+    after a prior baseline has been selected for that block.
+    """
+
+    location = np.full(len(available), np.nan, dtype=float)
+    scale = np.full(len(available), np.nan, dtype=float)
+    if len(pool) == 0:
+        return location, scale
+    pool_array = np.asarray(pool, dtype=np.float64)
+    if not np.isfinite(pool_array).all():
+        return _robust_block_baseline(pool_array, available, min_obs)
+    try:
+        counts = np.asarray([int(value) for value in available], dtype=np.int64)
+    except (TypeError, ValueError, OverflowError):
+        return _robust_block_baseline(pool_array, available, min_obs)
+    if (
+        (counts < 0).any()
+        or (counts > len(pool_array)).any()
+        or (len(counts) > 1 and (np.diff(counts) < 0).any())
+    ):
+        return _robust_block_baseline(pool_array, available, min_obs)
+
+    sorted_values: list[np.float64] = []
+    inserted = 0
+    previous = -1
+    floor = max(int(min_obs), 1)
+    for position, count_value in enumerate(counts):
+        count = int(count_value)
+        if count != inserted:
+            for value in pool_array[inserted:count]:
+                insort(sorted_values, np.float64(value))
+            inserted = count
+        if count < floor:
+            continue
+        if count == previous:
+            location[position] = location[position - 1]
+            scale[position] = scale[position - 1]
+            continue
+        previous = count
+        if count & 1:
+            centre = sorted_values[count // 2]
+        else:
+            centre = (sorted_values[count // 2 - 1] + sorted_values[count // 2]) / 2.0
+        lower_rank = (count - 1) // 2
+        mad = _kth_abs_distance(sorted_values, centre, lower_rank)
+        if not count & 1:
+            upper_rank = count // 2
+            mad = (mad + _kth_abs_distance(sorted_values, centre, upper_rank)) / 2.0
+        spread = _MAD_TO_SIGMA * float(mad)
+        if not np.isfinite(spread) or spread <= 0.0:
+            low = _linear_quantile_sorted(sorted_values, 0.25)
+            high = _linear_quantile_sorted(sorted_values, 0.75)
+            spread = float(high - low) / _IQR_TO_SIGMA
+        if not np.isfinite(spread) or spread <= 0.0:
+            continue
+        location[position] = float(centre)
+        scale[position] = spread
+    return location, scale
+
+
 def _prior_baseline_z(
     values: pd.Series,
     group: pd.Series,
@@ -1041,7 +1209,7 @@ def _prior_baseline_z(
             min_obs,
             metric_key=metric_key,
             row_key=row_key,
-            block_baseline=_robust_block_baseline,
+            block_baseline=_robust_block_baseline_fast,
         )
         if cached is not None:
             return cached
@@ -1084,7 +1252,7 @@ def _prior_baseline_z(
             np.flatnonzero(starts)
         ]
 
-        block_location, block_scale = _robust_block_baseline(
+        block_location, block_scale = _robust_block_baseline_fast(
             pool, available, min_obs
         )
         location[positions] = block_location[block_of_row]

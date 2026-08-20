@@ -35,6 +35,8 @@ from lol_kills.ratings.global_player_bt import (
     PERFORMANCE_ANCHOR_SOURCE_COLUMNS,
     _contribution_metrics,
     _prior_baseline_z,
+    _robust_block_baseline,
+    _robust_block_baseline_fast,
     _role_normalized_composite,
     fit_global_player_bt,
 )
@@ -230,6 +232,38 @@ def test_expanding_median_is_bit_identical_to_numpy_median() -> None:
         running = pd.Series(sample).expanding().median().to_numpy()
         reference = np.array([np.median(sample[: n + 1]) for n in range(len(sample))])
         assert (running == reference).all()
+
+
+def test_sorted_prefix_baseline_is_bit_identical_to_reference() -> None:
+    """The cold-path speedup preserves every robust prefix output."""
+
+    rng = np.random.default_rng(20260820)
+    samples = [
+        rng.normal(size=250),
+        np.round(rng.normal(size=250), 1),
+        rng.choice(np.asarray([-2.0, -0.0, 0.0, 1.0, 3.5]), size=250),
+        np.zeros(250),
+    ]
+    for sample in samples:
+        available = np.sort(rng.integers(0, len(sample) + 1, size=140))
+        min_obs = int(rng.integers(1, 30))
+        reference = _robust_block_baseline(sample, available, min_obs)
+        accelerated = _robust_block_baseline_fast(sample, available, min_obs)
+        for expected, actual in zip(reference, accelerated):
+            assert np.array_equal(expected, actual, equal_nan=True)
+
+
+def test_sorted_prefix_baseline_preserves_strict_prior_blocks() -> None:
+    """An accelerated baseline still receives only the supplied prior counts."""
+
+    values = np.asarray([1.0, 9.0, 2.0, 10.0, 3.0, 11.0])
+    available = np.asarray([0, 0, 2, 2, 4, 4])
+    reference = _robust_block_baseline(values, available, min_obs=2)
+    accelerated = _robust_block_baseline_fast(values, available, min_obs=2)
+    for expected, actual in zip(reference, accelerated):
+        assert np.array_equal(expected, actual, equal_nan=True)
+    assert accelerated[0][2] == accelerated[0][3]
+    assert accelerated[1][2] == accelerated[1][3]
 
 
 def test_rows_sharing_a_timestamp_cannot_see_each_other() -> None:
@@ -563,6 +597,44 @@ def test_persistent_cache_serialization_integrity_fails_closed(tmp_path: Path) -
     )
     reference, _reference_prior = _prior_baseline_z(values, group, date, min_obs=2)
     pd.testing.assert_series_equal(fresh, reference, check_names=False, check_exact=True)
+
+
+def test_persistent_cache_hit_does_not_rewrite_clean_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A load followed by an exact hit has no persistent write work."""
+
+    values, group, date, row_key = _persistent_cache_fixture()
+    path = tmp_path / "prefix-baseline"
+    seed = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=seed,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    seed.flush()
+
+    loaded = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=loaded,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    monkeypatch.setattr(
+        np,
+        "savez_compressed",
+        lambda *args, **kwargs: pytest.fail("clean cache must not rewrite payload"),
+    )
+    loaded.flush()
+    assert loaded._dirty is False
 
 
 def test_persistent_cache_invalidates_corrections_deletions_and_schema_drift(

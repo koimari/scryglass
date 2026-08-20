@@ -263,6 +263,7 @@ def refresh_ratings(
         player_maps,
         players,
         cfg=player_rating_cfg,
+        output_dir=features_dir,
         as_of=cutoff,
         min_games=min_games,
         previous_as_of=previous_as_of,
