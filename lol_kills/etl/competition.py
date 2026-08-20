@@ -268,19 +268,57 @@ def canonicalize_competition_frame(frame: pd.DataFrame) -> pd.DataFrame:
     if "league" in out.columns:
         if "league_source" not in out.columns:
             out["league_source"] = out["league"]
-        labels = []
-        for _, row in out.iterrows():
-            source = source_league(row.get("league_source"))
-            fallback = source_league(row.get("league"))
-            value = fallback if source in TRANSPORT_LEAGUE_LABELS and fallback not in TRANSPORT_LEAGUE_LABELS else source or fallback
-            labels.append(classify_competition(value, row.get("tournament")))
-        out["league_source"] = [label.source for label in labels]
-        out["league"] = [label.league for label in labels]
-        out["competition_scope"] = [label.scope for label in labels]
-        out["event_kind"] = [label.event_kind for label in labels]
-        out["is_international"] = [label.is_international for label in labels]
-        out["is_interregional"] = [label.is_interregional for label in labels]
-        out["competition_tier"] = [label.tier for label in labels]
+        source_values = out["league_source"].map(source_league)
+        fallback_values = out["league"].map(source_league)
+        source_array = source_values.to_numpy(dtype=object)
+        fallback_array = fallback_values.to_numpy(dtype=object)
+        transport_fallback = source_values.isin(TRANSPORT_LEAGUE_LABELS).to_numpy() & (
+            ~fallback_values.isin(TRANSPORT_LEAGUE_LABELS).to_numpy()
+        )
+        use_fallback = (source_values.eq("").to_numpy() | transport_fallback)
+        values = source_array.copy()
+        values[use_fallback] = fallback_array[use_fallback]
+
+        # ``classify_competition`` normalizes tournament text before it reads
+        # event tokens.  Use that normalized text in the pair key so the same
+        # classification is computed once for repeated source rows.  The
+        # mapping below keeps the original row order, including duplicate
+        # indexes and nullable source values.
+        if "tournament" in out.columns:
+            tournament_values = out["tournament"].map(source_league)
+        else:
+            tournament_values = pd.Series("", index=out.index, dtype=object)
+        pair_keys = list(
+            zip(values.tolist(), tournament_values.to_numpy(dtype=object).tolist())
+        )
+        unique_keys = dict.fromkeys(pair_keys)
+        labels_by_key = {
+            key: classify_competition(key[0], key[1])
+            for key in unique_keys
+        }
+        labels = [labels_by_key[key] for key in pair_keys]
+        label_values = zip(
+            (label.source for label in labels),
+            (label.league for label in labels),
+            (label.scope for label in labels),
+            (label.event_kind for label in labels),
+            (label.is_international for label in labels),
+            (label.is_interregional for label in labels),
+            (label.tier for label in labels),
+        )
+        for column, values_for_column in zip(
+            (
+                "league_source",
+                "league",
+                "competition_scope",
+                "event_kind",
+                "is_international",
+                "is_interregional",
+                "competition_tier",
+            ),
+            zip(*label_values),
+        ):
+            out[column] = list(values_for_column)
 
     team_columns = ("teamname", "blue_team", "red_team", "blue_teamname", "red_teamname")
     for column in team_columns:
