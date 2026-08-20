@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -9,6 +10,7 @@ import pytest
 from benchmarks.rating_refresh_autoresearch import (
     CENSUS_SCHEMA,
     HarnessError,
+    MAX_LOG_BYTES,
     freeze_inputs,
     run_benchmark,
     source_identity_sha256,
@@ -85,6 +87,14 @@ Path(os.environ['SCRYGLASS_RATING_AUTORESEARCH_CALL_COUNTS_PATH']).write_text(js
     ).replace(
         "OUTPUT_HASH", repr(output_hash)
     ).replace("COUNT_DELTA", str(count_delta))
+    return [sys.executable, "-c", code]
+
+
+def _failing_command(*, output_size: int = 0) -> list[str]:
+    code = "import sys; sys.stderr.write('rating refresh failed: connected component 8.4%\\n'); "
+    if output_size:
+        code += f"sys.stderr.write('x' * {output_size}); "
+    code += "raise SystemExit(7)"
     return [sys.executable, "-c", code]
 
 
@@ -169,6 +179,43 @@ def test_benchmark_reports_cold_and_append_timings_calls_and_exact_outputs(tmp_p
         assert phase["candidate"]["call_counts"] == {"status": "file", "counts": {"baseline": 1, "fit": 1}}
         assert phase["comparison"]["correct"] is True
         assert phase["comparison"]["candidate_within_budget"] is True
+
+
+def test_benchmark_persists_bounded_phase_variant_diagnostic_logs(tmp_path: Path) -> None:
+    base_root, base_census, append_root, append_census = _fixture_inputs(tmp_path)
+    output_root = tmp_path / "benchmark"
+    manifest = freeze_inputs(
+        base_root=base_root,
+        base_census=base_census,
+        append_root=append_root,
+        append_census=append_census,
+        output_root=output_root,
+        input_relative_paths=["maps.jsonl"],
+    )
+    report = run_benchmark(
+        freeze_manifest=manifest,
+        output_root=output_root,
+        baseline_command=_failing_command(output_size=MAX_LOG_BYTES * 2),
+        candidate_command=_failing_command(output_size=MAX_LOG_BYTES * 2),
+        command_cwd=Path.cwd(),
+        budget_seconds=60.0,
+        timeout_seconds=10.0,
+    )
+
+    assert report["accepted"] is False
+    for phase_name in ("cold", "append_only"):
+        for variant in ("baseline", "candidate"):
+            result = report["phases"][phase_name][variant]
+            log = result["stderr_log"]
+            log_path = Path(log["path"])
+            stored = log_path.read_bytes()
+            assert log_path.parent == output_root / "runs" / phase_name
+            assert log_path.name == f"{variant}.stderr.log"
+            assert log["sha256"] == hashlib.sha256(stored).hexdigest()
+            assert log["bytes"] == len(stored) <= MAX_LOG_BYTES
+            assert log["original_bytes"] > MAX_LOG_BYTES
+            assert log["truncated"] is True
+            assert b"output truncated" in stored
 
 
 def test_subprocess_imports_etl_paths_from_each_variant_runtime(tmp_path: Path) -> None:

@@ -164,6 +164,10 @@ python3 benchmarks/rating_refresh_autoresearch.py \
 
 The report records both phases, both timings, return codes, timeout state,
 stdout and stderr digests, call counts, output digests, and comparison reasons.
+Each phase and variant also has bounded stdout and stderr log files under
+`<output-root>/runs/<phase>/`. The report records each log path, stored-byte
+digest, original byte count, and truncation flag. These logs keep adapter
+failures inspectable without allowing unbounded process output into a report.
 It records an invocation budget of four adapter calls. The process exits zero
 only when both candidate phases satisfy the correctness gate and the 60-second
 target. Add `--require-speedup` when an experiment must also be at least as

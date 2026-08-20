@@ -32,6 +32,7 @@ REPORT_SCHEMA = "scryglass:rating-autoresearch-report:v1"
 CENSUS_SCHEMA = "scryglass:accepted-game-census:v1"
 DEFAULT_BUDGET_SECONDS = 60.0
 DEFAULT_TIMEOUT_SECONDS = 1_800.0
+MAX_LOG_BYTES = 256 * 1024
 CALL_MARKER = re.compile(r"^\[rating-autoresearch\] call name=([A-Za-z0-9_.:-]+)$", re.MULTILINE)
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
@@ -335,6 +336,44 @@ def _write_json(path: Path, value: object) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _write_log(path: Path, value: str | bytes, *, max_bytes: int = MAX_LOG_BYTES) -> dict[str, Any]:
+    """Persist bounded subprocess output and describe the stored bytes."""
+
+    if max_bytes <= 0:
+        raise ValueError("log byte limit must be positive")
+    if isinstance(value, bytes):
+        raw = value
+    else:
+        raw = value.encode("utf-8", errors="replace")
+    original_bytes = len(raw)
+    truncated = original_bytes > max_bytes
+    if truncated:
+        marker = f"\n...[output truncated; original_bytes={original_bytes}]...\n".encode("utf-8")
+        if len(marker) >= max_bytes:
+            payload = marker[:max_bytes]
+        else:
+            available = max_bytes - len(marker)
+            head_bytes = available // 2
+            tail_bytes = available - head_bytes
+            payload = raw[:head_bytes] + marker + raw[-tail_bytes:]
+    else:
+        payload = raw
+    if path.is_symlink():
+        raise HarnessError(f"log destination must not be a symlink: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.write_bytes(payload)
+    except OSError as error:
+        raise HarnessError(f"cannot write subprocess log: {path}") from error
+    return {
+        "path": str(path),
+        "sha256": _sha256_bytes(payload),
+        "bytes": len(payload),
+        "original_bytes": original_bytes,
+        "truncated": truncated,
+    }
+
+
 def _parse_command(raw: str, label: str) -> list[str]:
     try:
         command = json.loads(raw)
@@ -517,6 +556,14 @@ def _run_adapter(
     except OSError as os_error:
         error = str(os_error)
     elapsed_seconds = time.perf_counter() - started
+    log_error: str | None = None
+    stdout_log: dict[str, Any] | None = None
+    stderr_log: dict[str, Any] | None = None
+    try:
+        stdout_log = _write_log(run_root / f"{variant}.stdout.log", stdout)
+        stderr_log = _write_log(run_root / f"{variant}.stderr.log", stderr)
+    except HarnessError as logging_error:
+        log_error = str(logging_error)
     result: dict[str, Any] = {
         "variant": variant,
         "phase": phase,
@@ -529,10 +576,16 @@ def _run_adapter(
         "stderr_sha256": _sha256_bytes(stderr.encode("utf-8", errors="replace")),
         "stdout_bytes": len(stdout.encode("utf-8", errors="replace")),
         "stderr_bytes": len(stderr.encode("utf-8", errors="replace")),
+        "stdout_log": stdout_log,
+        "stderr_log": stderr_log,
         "fixture_integrity": "unknown",
         "call_counts": {"status": "unavailable", "counts": {}},
         "status": "failed",
     }
+    if log_error:
+        result["log_error"] = log_error
+        if error is None:
+            error = log_error
     if error:
         result["error"] = error
         return result
