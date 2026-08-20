@@ -27,11 +27,30 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from lol_kills.v2.tierlists.accepted_census import load_census
-from lol_kills.v2.tierlists.rating_refresh import OUTPUT, refresh_ratings
+from lol_kills.v2.tierlists.rating_refresh import FEATURES_RELATIVE, OUTPUT, refresh_ratings
 
 
 OUTPUT_SCHEMA = "scryglass:rating-autoresearch-output:v1"
 FREEZE_SCHEMA = "scryglass:rating-autoresearch-freeze:v1"
+
+# These are the stable files produced by ``refresh_ratings`` that the pack
+# builder or rating consumers can read.  The sequential rows and metadata are
+# part of the parity contract even though the production manifest currently
+# advertises only the public snapshots and weekly JSON.  The hierarchical
+# cache snapshot, previous snapshot, cache manifest, and player prefix cache
+# are private cache state and stay out of this inventory.
+REFRESH_NON_CACHE_ARTIFACTS: dict[str, Path] = {
+    "team_sequential": FEATURES_RELATIVE / "ratings.parquet",
+    "team_dual_snapshot": FEATURES_RELATIVE / "ratings_dual_snapshot.parquet",
+    "team_snapshot": FEATURES_RELATIVE / "ratings_snapshot.parquet",
+    "team_meta": FEATURES_RELATIVE / "ratings_meta.json",
+    "team_hierarchical_meta": FEATURES_RELATIVE / "ratings_hierarchical_meta.json",
+    "player_sequential": FEATURES_RELATIVE / "player_ratings.parquet",
+    "player_snapshot": FEATURES_RELATIVE / "player_ratings_snapshot.parquet",
+    "player_meta": FEATURES_RELATIVE / "player_ratings_meta.json",
+    "team_weekly": FEATURES_RELATIVE / "team_weekly_ranks.json",
+    "player_weekly": FEATURES_RELATIVE / "player_weekly_ranks.json",
+}
 
 
 class AdapterError(ValueError):
@@ -227,8 +246,11 @@ def _artifact_descriptor(
     locator: str,
     metadata: Mapping[str, Any],
 ) -> dict[str, Any]:
-    path, digest = _copy_artifact(runtime_root, artifact_root, locator, str(metadata.get("sha256")))
-    if digest != metadata.get("sha256"):
+    expected_sha256 = metadata.get("sha256")
+    if expected_sha256 is not None and not isinstance(expected_sha256, str):
+        raise AdapterError(f"production artifact digest metadata is invalid: {locator}")
+    path, digest = _copy_artifact(runtime_root, artifact_root, locator, expected_sha256)
+    if expected_sha256 is not None and digest != expected_sha256:
         raise AdapterError(f"production artifact digest changed: {locator}")
     if "bytes" in metadata and int(metadata["bytes"]) != path.stat().st_size:
         raise AdapterError(f"production artifact byte count changed: {locator}")
@@ -324,14 +346,36 @@ def run_from_environment(
     raw_artifacts = payload.get("artifacts")
     if not isinstance(raw_artifacts, Mapping) or not raw_artifacts:
         raise AdapterError("rating refresh artifact metadata is missing")
+    raw_metadata: dict[str, Mapping[str, Any]] = {}
     for name, metadata in raw_artifacts.items():
         if not isinstance(metadata, Mapping) or not isinstance(metadata.get("locator"), str):
             raise AdapterError(f"rating refresh artifact metadata is invalid: {name}")
-        artifacts[str(name)] = _artifact_descriptor(
+        artifact_name = str(name)
+        raw_metadata[artifact_name] = metadata
+        artifacts[artifact_name] = _artifact_descriptor(
             runtime_root,
             artifact_root,
             metadata["locator"],
             metadata,
+        )
+
+    # The production manifest is intentionally a short public index.  Copy
+    # and hash the full stable output inventory here so an implementation can
+    # change a sequential file or metadata while leaving that index unchanged.
+    for name, relative in REFRESH_NON_CACHE_ARTIFACTS.items():
+        locator = relative.as_posix()
+        metadata = raw_metadata.get(name)
+        if metadata is not None:
+            if metadata.get("locator") != locator:
+                raise AdapterError(
+                    f"rating refresh artifact locator does not match inventory: {name}"
+                )
+            continue
+        artifacts[name] = _artifact_descriptor(
+            runtime_root,
+            artifact_root,
+            locator,
+            {},
         )
     artifact_copy_hash_seconds = time.perf_counter() - artifact_started
     team = payload.get("team", {})

@@ -148,11 +148,31 @@ through the environment. The shell is not used.
 The repository adapter calls
 `lol_kills.v2.tierlists.rating_refresh.refresh_ratings`. It stages the frozen
 files under a private runtime directory and copies the production rating
-manifest and four rating artifacts into the harness output contract. The
-harness gives baseline and candidate separate owner-marked runtime roots. Each
-variant keeps its runtime from cold through append_only. The active source
-files and accepted census are restaged for every phase. Output artifacts go to
-a phase-specific directory.
+manifest plus the complete stable refresh output inventory into the harness
+output contract. The inventory is:
+
+| Descriptor | Runtime file | Role |
+| --- | --- | --- |
+| `team_sequential` | `data/lol/features/ratings.parquet` | Sequential team rows |
+| `team_dual_snapshot` | `data/lol/features/ratings_dual_snapshot.parquet` | Sequential team snapshot consumed by pack export |
+| `team_snapshot` | `data/lol/features/ratings_snapshot.parquet` | Public team snapshot |
+| `team_meta` | `data/lol/features/ratings_meta.json` | Team model metadata |
+| `team_hierarchical_meta` | `data/lol/features/ratings_hierarchical_meta.json` | Hierarchical model metadata |
+| `player_sequential` | `data/lol/features/player_ratings.parquet` | Sequential player rows |
+| `player_snapshot` | `data/lol/features/player_ratings_snapshot.parquet` | Public player snapshot |
+| `player_meta` | `data/lol/features/player_ratings_meta.json` | Player model metadata |
+| `team_weekly` | `data/lol/features/team_weekly_ranks.json` | Team movement output |
+| `player_weekly` | `data/lol/features/player_weekly_ranks.json` | Player movement output |
+
+The adapter also records `rating_manifest` for
+`data/lol/v2/tierlists/rating-refresh/rating-refresh-v1.json`. It fails when a
+listed file is missing. It records the copied file size and SHA-256 digest.
+The hierarchical cache snapshot, previous snapshot, cache manifest, and
+player prefix cache remain private cache state. They are not output
+descriptors. The harness gives baseline and candidate separate owner-marked
+runtime roots. Each variant keeps its runtime from cold through append_only.
+The active source files and accepted census are restaged for every phase.
+Output artifacts go to a phase-specific directory.
 
 ```sh
 python3 benchmarks/rating_refresh_autoresearch.py \

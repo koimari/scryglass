@@ -78,6 +78,7 @@ def _fake_refresh(root: Path, **kwargs) -> dict:
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             "rows": 1,
         }
+    _write_all_refresh_outputs(root)
     manifest_path = root / "data/lol/v2/tierlists/rating-refresh/rating-refresh-v1.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -93,6 +94,15 @@ def _fake_refresh(root: Path, **kwargs) -> dict:
     }
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
     return payload
+
+
+def _write_all_refresh_outputs(root: Path) -> None:
+    for name, relative in adapter.REFRESH_NON_CACHE_ARTIFACTS.items():
+        path = root / relative
+        if path.exists():
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{name}\n", encoding="utf-8")
 
 
 def _set_adapter_environment(
@@ -149,6 +159,12 @@ def test_adapter_stages_fixture_invokes_refresh_and_emits_contract(tmp_path: Pat
     assert result["run"]["timings"]["refresh_seconds"] >= 0
     assert result["run"]["timings"]["artifact_copy_hash_seconds"] >= 0
     assert json.loads(output_path.read_text(encoding="utf-8"))["outputs"]["rating_manifest"]["sha256"]
+    assert set(adapter.REFRESH_NON_CACHE_ARTIFACTS).issubset(result["outputs"])
+    for descriptor in result["outputs"].values():
+        artifact_path = Path(descriptor["path"])
+        assert artifact_path.is_file()
+        assert descriptor["bytes"] == artifact_path.stat().st_size
+        assert descriptor["sha256"] == hashlib.sha256(artifact_path.read_bytes()).hexdigest()
     assert json.loads(calls_path.read_text(encoding="utf-8"))["counts"] == {
         "load_census": 1,
         "refresh_ratings": 1,
@@ -203,4 +219,18 @@ def test_adapter_rejects_refresh_identity_mismatch(tmp_path: Path, monkeypatch) 
 
     monkeypatch.setattr(adapter, "refresh_ratings", wrong_refresh)
     with pytest.raises(adapter.AdapterError, match="identity differs"):
+        adapter.run_from_environment(min_games=1, min_series=1)
+
+
+def test_adapter_requires_every_non_cache_refresh_output(tmp_path: Path, monkeypatch) -> None:
+    freeze, output_root = _freeze_runtime_fixture(tmp_path)
+    _set_adapter_environment(monkeypatch, output_root, freeze)
+
+    def incomplete_refresh(root: Path, **kwargs):
+        payload = _fake_refresh(root, **kwargs)
+        (root / adapter.REFRESH_NON_CACHE_ARTIFACTS["team_sequential"]).unlink()
+        return payload
+
+    monkeypatch.setattr(adapter, "refresh_ratings", incomplete_refresh)
+    with pytest.raises(adapter.AdapterError, match="production artifact is missing"):
         adapter.run_from_environment(min_games=1, min_series=1)
