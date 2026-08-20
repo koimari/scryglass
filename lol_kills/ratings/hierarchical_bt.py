@@ -47,6 +47,7 @@ from lol_kills.etl.competition import (
 from lol_kills.etl.paths import FEATURES_DIR
 from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.ratings.validation import audit_rating_inputs
+from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 
 LOGIT_TO_ELO = 400.0 / math.log(10.0)
@@ -623,6 +624,374 @@ def _design(observations: pd.DataFrame) -> tuple[np.ndarray, list[str], list[str
         # every map's side information instead of the first map only.
         X[i, -1] = 2.0 * float(row["a_blue_share"]) - 1.0
     return X, teams, leagues
+
+
+RESEARCH_PREDICTION_SCHEMA = "scryglass:hierarchical-bt-map-prediction:v1"
+
+
+def _research_json_bytes(value: object) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise ValueError("research prediction value is not canonical JSON") from error
+
+
+def _research_sha256(value: object) -> str:
+    return hashlib.sha256(_research_json_bytes(value)).hexdigest()
+
+
+def _research_id_identity(game_ids: tuple[str, ...] | list[str]) -> str:
+    return identity_sha256(game_ids)
+
+
+def _research_game_ids(frame: pd.DataFrame, label: str) -> tuple[list[str], tuple[str, ...]]:
+    if frame is None or frame.empty:
+        raise ValueError(f"{label} frame is empty")
+    source_column = next(
+        (column for column in ("game_uid", "gameid", "oe_gameid") if column in frame.columns),
+        None,
+    )
+    if source_column is None:
+        raise ValueError(f"{label} frame has no game identity column")
+    ordered = [canonical_source_game_key(value) for value in frame[source_column].tolist()]
+    if any(not value for value in ordered):
+        raise ValueError(f"{label} frame has an empty game identity")
+    if len(set(ordered)) != len(ordered):
+        raise ValueError(f"{label} frame has duplicate game identities")
+    return ordered, tuple(sorted(ordered))
+
+
+def _research_identity(
+    value: str | None,
+    fallback: str,
+    label: str,
+) -> str:
+    identity = fallback if value is None else str(value).strip().lower()
+    if len(identity) != 64 or any(character not in "0123456789abcdef" for character in identity):
+        raise ValueError(f"{label} source identity must be a SHA-256 hex digest")
+    return identity
+
+
+def _research_dates(frame: pd.DataFrame, label: str) -> pd.Series:
+    date_column = next(
+        (column for column in ("date", "played_at", "game_date", "start_time") if column in frame.columns),
+        None,
+    )
+    if date_column is None:
+        raise ValueError(f"{label} frame has no date column")
+    dates = pd.to_datetime(frame[date_column], errors="coerce", utc=True)
+    if dates.isna().any():
+        raise ValueError(f"{label} frame has missing or invalid dates")
+    return dates
+
+
+def _research_cutoff(value: pd.Timestamp) -> pd.Timestamp:
+    cutoff = pd.Timestamp(value)
+    if pd.isna(cutoff) or cutoff.tzinfo is None:
+        raise ValueError("research prediction cutoff must be timezone-aware")
+    return cutoff.tz_convert("UTC")
+
+
+def _research_train_outcomes(train_maps: pd.DataFrame) -> None:
+    if "y_blue_win" not in train_maps.columns:
+        raise ValueError("training frame must contain y_blue_win")
+    outcomes = pd.to_numeric(train_maps["y_blue_win"], errors="coerce")
+    if outcomes.isna().any() or not outcomes.isin([0.0, 1.0]).all():
+        raise ValueError("training frame contains an invalid y_blue_win outcome")
+
+
+def _research_fit_state(
+    observations: pd.DataFrame,
+    cfg: HierarchicalBTConfig,
+) -> dict[str, Any]:
+    """Fit parameters for the in-memory validation scorer."""
+
+    X, teams, leagues = _design(observations)
+    y = observations["y_a"].to_numpy(float)
+    weight = observations["weight"].to_numpy(float)
+    n_team = len(teams)
+    n_league = len(leagues)
+    penalty = np.array(
+        [cfg.team_l2] * n_team + [cfg.league_l2] * n_league + [cfg.side_l2],
+        dtype=float,
+    )
+
+    def objective(beta: np.ndarray) -> tuple[float, np.ndarray]:
+        safe_beta = np.clip(
+            np.nan_to_num(beta, nan=0.0, posinf=8.0, neginf=-8.0),
+            -8.0,
+            8.0,
+        )
+        eta = np.einsum("ij,j->i", X, safe_beta, optimize=True)
+        probability = expit(eta)
+        value = float(
+            np.sum(weight * (np.logaddexp(0.0, eta) - y * eta))
+            + 0.5 * np.sum(penalty * safe_beta * safe_beta)
+        )
+        gradient = (
+            np.einsum("i,ij->j", weight * (probability - y), X, optimize=True)
+            + penalty * safe_beta
+        )
+        return value, gradient
+
+    result = minimize(
+        objective,
+        np.zeros(X.shape[1], dtype=float),
+        jac=True,
+        method="L-BFGS-B",
+        bounds=[(-8.0, 8.0)] * X.shape[1],
+        options={"maxiter": cfg.max_iter, "ftol": 1e-10, "gtol": 1e-8},
+    )
+    beta = np.clip(
+        np.nan_to_num(result.x, nan=0.0, posinf=8.0, neginf=-8.0),
+        -8.0,
+        8.0,
+    )
+    return {
+        "beta": beta,
+        "teams": teams,
+        "leagues": leagues,
+        "team_index": {team: index for index, team in enumerate(teams)},
+        "league_index": {league: index for index, league in enumerate(leagues)},
+        "optimizer_success": bool(result.success),
+        "optimizer_message": str(result.message),
+        "n_iterations": int(getattr(result, "nit", 0) or 0),
+        "n_observations": int(len(observations)),
+        "n_maps": int(observations["n_maps"].sum()),
+    }
+
+
+def _research_home_state(observations: pd.DataFrame) -> dict[str, str]:
+    home: dict[str, str] = {}
+    for row in observations.sort_values("date").itertuples(index=False):
+        for team, league in ((row.team_a, row.home_a), (row.team_b, row.home_b)):
+            if str(league) != "UNKNOWN":
+                home[str(team)] = str(league)
+    return home
+
+
+def _research_validation_rows(
+    validation_maps: pd.DataFrame,
+    *,
+    fit_state: dict[str, Any],
+    training_observations: pd.DataFrame,
+) -> tuple[list[dict[str, Any]], list[str], list[str], list[str]]:
+    """Score validation metadata without reading any validation outcome field."""
+
+    input_columns = [column for column in validation_maps.columns if column in _OBSERVATION_INPUT_COLUMNS]
+    value = canonicalize_competition_frame(validation_maps.loc[:, input_columns])
+    ordered_ids, _ = _research_game_ids(validation_maps, "validation")
+    dates = _research_dates(validation_maps, "validation")
+    home = _research_home_state(training_observations)
+    team_index = fit_state["team_index"]
+    league_index = fit_state["league_index"]
+    beta = fit_state["beta"]
+    n_team = len(fit_state["teams"])
+    rows: list[dict[str, Any]] = []
+    missing_ids: list[str] = []
+    unseen_teams: set[str] = set()
+    unseen_game_ids: set[str] = set()
+    indexed = value.reset_index(drop=True)
+    for position, row in indexed.iterrows():
+        game_id = ordered_ids[position]
+        blue_name = row.get("blue_team")
+        red_name = row.get("red_team")
+        blue_text = "" if blue_name is None or pd.isna(blue_name) else str(blue_name).strip()
+        red_text = "" if red_name is None or pd.isna(red_name) else str(red_name).strip()
+        blue = team_identity_key(blue_text)
+        red = team_identity_key(red_text)
+        if not blue_text or not red_text or blue == "unknown-team" or red == "unknown-team":
+            missing_ids.append(game_id)
+            continue
+        league = _cache_text(row.get("league")) or "UNKNOWN"
+        blue_home = home.get(blue, league if league in REGIONAL_LEAGUES else "UNKNOWN")
+        red_home = home.get(red, league if league in REGIONAL_LEAGUES else "UNKNOWN")
+        a_is_blue = blue <= red
+        team_a = blue if a_is_blue else red
+        team_b = red if a_is_blue else blue
+        if team_a not in team_index:
+            unseen_teams.add(team_a)
+        if team_b not in team_index:
+            unseen_teams.add(team_b)
+        if team_a not in team_index or team_b not in team_index:
+            unseen_game_ids.add(game_id)
+        vector = np.zeros(len(beta), dtype=float)
+        if team_a in team_index:
+            vector[team_index[team_a]] += 1.0
+        if team_b in team_index:
+            vector[team_index[team_b]] -= 1.0
+        if blue_home in league_index:
+            vector[n_team + league_index[blue_home]] += 1.0 if a_is_blue else -1.0
+        if red_home in league_index:
+            vector[n_team + league_index[red_home]] += -1.0 if a_is_blue else 1.0
+        side = 1.0 if a_is_blue else -1.0
+        vector[-1] = side
+        orientation = 1.0 if a_is_blue else -1.0
+        team_logit = float(np.dot(vector[:n_team], beta[:n_team]))
+        league_logit = float(np.dot(vector[n_team:-1], beta[n_team:-1]))
+        side_logit = float(vector[-1] * beta[-1])
+        logit = orientation * (team_logit + league_logit + side_logit)
+        rows.append(
+            {
+                "game_id": game_id,
+                "date": pd.Timestamp(dates.iloc[position]).isoformat(),
+                "blue_team": blue_text,
+                "red_team": red_text,
+                "blue_team_key": blue,
+                "red_team_key": red,
+                "league": league,
+                "blue_home_league": blue_home,
+                "red_home_league": red_home,
+                "side_term": side,
+                "team_a_known": bool(team_a in team_index),
+                "team_b_known": bool(team_b in team_index),
+                "league_a_known": bool((blue_home if a_is_blue else red_home) in league_index),
+                "league_b_known": bool((red_home if a_is_blue else blue_home) in league_index),
+                "team_logit": orientation * team_logit,
+                "league_logit": orientation * league_logit,
+                "side_logit": orientation * side_logit,
+                "predicted_logit": logit,
+                "predicted_blue_win": float(expit(logit)),
+            }
+        )
+        if league in REGIONAL_LEAGUES:
+            home[blue] = league
+            home[red] = league
+    return rows, sorted(set(missing_ids)), sorted(unseen_teams), sorted(unseen_game_ids)
+
+
+def fit_hierarchical_bt_research_prediction(
+    train_maps: pd.DataFrame,
+    validation_maps: pd.DataFrame,
+    *,
+    cutoff: pd.Timestamp,
+    cfg: HierarchicalBTConfig | None = None,
+    source_identity_sha256: str | None = None,
+    train_source_identity_sha256: str | None = None,
+    validation_source_identity_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Fit on train maps and score later maps without reading validation outcomes.
+
+    This helper is for paired research evaluation.  The cutoff is strict:
+    training rows must be at or before it, and validation rows must be after
+    it.  The returned rows contain metadata and predictions only.  No files,
+    caches, or public rating artifacts are written.
+    """
+
+    cfg = cfg or HierarchicalBTConfig()
+    cutoff_value = _research_cutoff(cutoff)
+    train_ordered_ids, train_ids = _research_game_ids(train_maps, "training")
+    validation_ordered_ids, validation_ids = _research_game_ids(validation_maps, "validation")
+    if set(train_ids) & set(validation_ids):
+        raise ValueError("training and validation game identities overlap")
+    train_dates = _research_dates(train_maps, "training")
+    validation_dates = _research_dates(validation_maps, "validation")
+    if (train_dates > cutoff_value).any():
+        raise ValueError("training frame contains rows after the strict cutoff")
+    if (validation_dates <= cutoff_value).any():
+        raise ValueError("validation frame contains rows at or before the strict cutoff")
+    _research_train_outcomes(train_maps)
+    train_identity = _research_identity(
+        train_source_identity_sha256,
+        _research_id_identity(train_ids),
+        "training",
+    )
+    validation_identity = _research_identity(
+        validation_source_identity_sha256,
+        _research_id_identity(validation_ids),
+        "validation",
+    )
+    combined_identity = _research_id_identity(sorted(set(train_ids) | set(validation_ids)))
+    source_identity = _research_identity(source_identity_sha256, combined_identity, "source")
+
+    observations, series_audit = _observations(
+        train_maps,
+        cutoff_value,
+        cfg.half_life_days,
+    )
+    if observations.empty:
+        raise ValueError("training frame has no resolvable observations")
+    fit_state = _research_fit_state(observations, cfg)
+    prediction_rows, missing_ids, unseen_teams, unseen_game_ids = _research_validation_rows(
+        validation_maps,
+        fit_state=fit_state,
+        training_observations=observations,
+    )
+    prediction_rows = sorted(prediction_rows, key=lambda row: row["game_id"])
+    output_sha256 = _research_sha256(prediction_rows)
+    config_payload = dict(cfg.__dict__)
+    config_sha256 = _research_sha256(config_payload)
+    terms = {
+        "team_logit": {
+            team: float(fit_state["beta"][index])
+            for team, index in fit_state["team_index"].items()
+        },
+        "league_logit": {
+            league: float(fit_state["beta"][len(fit_state["teams"]) + index])
+            for league, index in fit_state["league_index"].items()
+        },
+        "side_logit": float(fit_state["beta"][-1]),
+    }
+    train_receipt = {
+        "game_ids": list(train_ids),
+        "game_count": len(train_ids),
+        "identity_sha256": _research_id_identity(train_ids),
+        "source_identity_sha256": train_identity,
+        "ordered_input_ids": train_ordered_ids,
+    }
+    validation_receipt = {
+        "game_ids": list(validation_ids),
+        "game_count": len(validation_ids),
+        "identity_sha256": _research_id_identity(validation_ids),
+        "source_identity_sha256": validation_identity,
+        "ordered_input_ids": validation_ordered_ids,
+        "scored_game_ids": [row["game_id"] for row in prediction_rows],
+        "missing_game_ids": missing_ids,
+    }
+    return {
+        "schema_version": RESEARCH_PREDICTION_SCHEMA,
+        "authority": "research_only",
+        "writes_artifacts": False,
+        "strict_cutoff": True,
+        "cutoff": cutoff_value.isoformat(),
+        "source_identity_sha256": source_identity,
+        "source": {
+            "source_identity_sha256": source_identity,
+            "train_source_identity_sha256": train_identity,
+            "validation_source_identity_sha256": validation_identity,
+        },
+        "train_game_ids": list(train_ids),
+        "validation_game_ids": list(validation_ids),
+        "train_receipt": train_receipt,
+        "validation_receipt": validation_receipt,
+        "missing_ids": missing_ids,
+        "missing": {
+            "validation_game_ids": missing_ids,
+            "unseen_team_keys": unseen_teams,
+            "unseen_model_game_ids": unseen_game_ids,
+        },
+        "config": config_payload,
+        "config_sha256": config_sha256,
+        "implementation_sha256": HIERARCHICAL_IMPLEMENTATION_SHA256,
+        "fit": {
+            "n_observations": fit_state["n_observations"],
+            "n_maps": fit_state["n_maps"],
+            "optimizer_success": fit_state["optimizer_success"],
+            "optimizer_message": fit_state["optimizer_message"],
+            "n_iterations": fit_state["n_iterations"],
+            "series_identity": series_audit,
+        },
+        "terms": terms,
+        "predictions": prediction_rows,
+        "output_row_count": len(prediction_rows),
+        "output_sha256": output_sha256,
+    }
 
 
 def fit_hierarchical_bt(
