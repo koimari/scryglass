@@ -1330,7 +1330,7 @@ def test_supabase_cli_is_pinned_and_local_seed_is_disabled() -> None:
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     config = (ROOT / "supabase/config.toml").read_text(encoding="utf-8")
 
-    assert package["devDependencies"]["supabase"] == "2.113.0"
+    assert package["devDependencies"]["supabase"] == "2.114.0"
     assert package["scripts"]["supabase:migrations"] == "supabase migration list"
     seed_section = config.split("[db.seed]", 1)[1].split("\n[", 1)[0]
     assert "enabled = false" in seed_section
