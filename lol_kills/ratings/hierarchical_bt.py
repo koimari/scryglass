@@ -451,15 +451,12 @@ def _observations(
     # match.  A first domestic row establishes the affiliation only after its
     # pre-match state is recorded; international rows never overwrite it.
     home_league: dict[str, str] = {}
-    display: dict[str, str] = {}
     records: list[dict[str, Any]] = []
-    for _, row in frame.iterrows():
+    for row in frame.to_dict("records"):
         blue_name = str(row.get("blue_team") or "")
         red_name = str(row.get("red_team") or "")
         blue = team_identity_key(blue_name)
         red = team_identity_key(red_name)
-        display.setdefault(blue, blue_name)
-        display.setdefault(red, red_name)
         source_league = str(row.get("league") or "UNKNOWN")
         blue_home = home_league.get(blue, source_league if source_league in REGIONAL_LEAGUES else "UNKNOWN")
         red_home = home_league.get(red, source_league if source_league in REGIONAL_LEAGUES else "UNKNOWN")
