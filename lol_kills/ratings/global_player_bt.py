@@ -1329,10 +1329,22 @@ def _complete_lineups(players: pd.DataFrame) -> dict[str, dict[str, list[tuple[s
     required = {"side", "position", "playername"}
     if players is None or players.empty or not required.issubset(players.columns):
         return {}
-    frame = players.copy()
+    identity_columns = [
+        column
+        for column in ("game_uid", "gameid", "side", "position", "playername")
+        if column in players.columns
+    ]
+    frame = players.loc[:, identity_columns].copy()
     frame["_game_id"] = _canonical_game_ids(frame)
     frame["_side"] = frame["side"].astype(str).str.title()
-    frame["_role"] = frame["position"].map(_role)
+    position = frame["position"].astype("string").str.strip().str.casefold()
+    frame["_role"] = position.map(ROLE_ALIAS)
+    unknown_role = frame["_role"].isna()
+    for prefix, role in ROLE_ALIAS.items():
+        frame["_role"] = frame["_role"].where(
+            ~unknown_role | ~position.str.startswith(prefix, na=False),
+            role,
+        )
     frame["_player"] = frame["playername"].astype("string").str.strip()
     frame = frame[
         frame["_game_id"].notna()
@@ -1343,25 +1355,55 @@ def _complete_lineups(players: pd.DataFrame) -> dict[str, dict[str, list[tuple[s
         & frame["_player"].ne("")
         & frame["_player"].str.casefold().ne("nan")
     ]
+    if frame.empty:
+        return {}
     order = {"top": 0, "jng": 1, "mid": 2, "bot": 3, "sup": 4}
+    # Keep the first-seen group order while letting pandas perform the row
+    # ordering and duplicate selection in one pass. This matches the old
+    # per-group sort and ``setdefault`` behavior, including repeated identical
+    # rows and ambiguous player aliases.
+    frame["_group_order"] = frame.groupby(
+        ["_game_id", "_side"], sort=False, observed=True
+    ).ngroup()
+    frame["_role_order"] = frame["_role"].map(order)
+    frame["_player_text"] = frame["_player"].astype(str)
+    frame["_player_casefold"] = frame["_player"].str.casefold()
+    ordered = frame.sort_values(
+        [
+            "_group_order",
+            "_role_order",
+            "_player_casefold",
+            "_player_text",
+        ],
+        kind="stable",
+    )
+    selected = ordered.drop_duplicates(
+        ["_game_id", "_side", "_role"], keep="first"
+    )
+    group_stats = selected.groupby(
+        ["_game_id", "_side"], sort=False, observed=True
+    ).agg(
+        role_count=("_role", "nunique"),
+        player_count=("_player", "nunique"),
+    )
+    valid_groups = group_stats.index[
+        group_stats["role_count"].eq(5) & group_stats["player_count"].eq(5)
+    ]
+    selected = selected.set_index(["_game_id", "_side"])
+    selected = selected.loc[selected.index.isin(valid_groups)].reset_index()
+    grouped = selected.groupby(
+        ["_game_id", "_side"], sort=False, observed=True
+    )[["_player", "_role"]].agg(list)
     output: dict[str, dict[str, list[tuple[str, str]]]] = {}
-    for (game_id, side), group in frame.groupby(["_game_id", "_side"], sort=False):
-        rows = sorted(
-            zip(group["_player"].astype(str), group["_role"].astype(str)),
-            key=lambda value: (
-                order.get(value[1], 9),
-                value[0].casefold(),
-                value[0],
-            ),
+    for (game_id, side), player_rows, role_rows in grouped.itertuples(
+        index=True, name=None
+    ):
+        output.setdefault(str(game_id), {})[str(side)] = list(
+            zip(
+                (str(player) for player in player_rows),
+                (str(role) for role in role_rows),
+            )
         )
-        by_role: dict[str, str] = {}
-        for player, role in rows:
-            by_role.setdefault(role, player)
-        if set(by_role) != set(order) or len(set(by_role.values())) != 5:
-            continue
-        output.setdefault(str(game_id), {})[str(side)] = [
-            (by_role[role], role) for role in order
-        ]
     return {
         game_id: sides
         for game_id, sides in output.items()
