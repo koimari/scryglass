@@ -297,7 +297,11 @@ def test_frozen_census_excludes_named_source_rows() -> None:
             "excluded_game_ids": ["oe-api:3"],
             "source_game_count": expected["game_count"],
             "source_identity_sha256": expected["source_identity_sha256"],
-        }
+        },
+        "unfiltered_source_game_count": 3,
+        "unfiltered_source_identity_sha256": census_payload(
+            ["oe-api:1", "oe-api:2", "oe-api:3"]
+        )["source_identity_sha256"],
     }
     assert frozen_census(maps, freeze) == expected
 

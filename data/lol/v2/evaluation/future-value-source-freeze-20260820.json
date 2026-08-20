@@ -23,9 +23,26 @@
     "research_only": true
   },
   "model_eligible_census": {
-    "game_count": 16554,
-    "source_identity_sha256": "80893e701dbc5a7bf401b5930253ad205f53d310c749bf553af17b2276993726"
+    "game_count": 16545,
+    "source_identity_sha256": "d5b4434a8f234f8b88e206d26b8e65333fb16f92e2fb139b8e7505eb7d4edadc"
   },
+  "oe_bridge_sources": [
+    {
+      "bytes": 121186,
+      "name": "oe_api_player_games.parquet",
+      "raw_sha256": "ad6fef51a11e1a214f76bd610c5553a34c8ddf48d27fede68f18308a7213059a"
+    },
+    {
+      "bytes": 90042,
+      "name": "oe_api_team_games.parquet",
+      "raw_sha256": "3bb4481fa0d1b7b63b197080273be04cd3f4b17b2887cdd0b0989b4425e11de1"
+    },
+    {
+      "bytes": 1341,
+      "name": "oe_api_meta.json",
+      "raw_sha256": "6b8bfa5c70e435ffd34092b80f56ef6d3b6abe7884633d25d21fa816ec095336"
+    }
+  ],
   "oe_annual_sources": [
     {
       "bytes": 79169638,
@@ -45,7 +62,8 @@
   "schema_version": "scryglass:future-value-source-freeze:v1",
   "source_as_of": "2026-08-20T11:31:37Z",
   "source_mode": "oe_only",
-  "source_transport": "official_public_oracles_elixir_annual_exports",
-  "reference_source_receipt_sha256": "4422bfc887da6bf93daa2ac8cc0f0379287008dba73e36479f9bdeae46f3cd6a",
-  "unfiltered_source_game_count": 17762
+  "source_transport": "official_public_oracles_elixir_annual_exports_plus_oe_api_bridge",
+  "reference_source_receipt_sha256": "a5daa976e7562c17503055840f9dfee5e9bf637880684e5596a30715efd5662c",
+  "unfiltered_source_game_count": 17762,
+  "unfiltered_source_identity_sha256": "9bd725811ef06afee9799a573f848cae411010552d62876513b3626bf44d3813"
 }

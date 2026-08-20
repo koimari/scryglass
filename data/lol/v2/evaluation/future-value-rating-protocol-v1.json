@@ -13,22 +13,31 @@
   },
   "evaluation": [
     "chronological whole-series folds",
-    "paired identical-row comparison with current ratings",
-    "calibration and proper scores",
-    "regional and patch transfer",
-    "roster-change and tournament-boundary slices",
-    "missingness, censoring, sparse support, and side-swap checks"
+    "intercept baseline and proper scores",
+    "proxy series clusters with an authoritative-series blocker",
+    "complete-case missingness with an explicit blocker"
   ],
   "estimands": {
-    "future_player_value": "Expected marginal map-win logit contribution for one player at the next map boundary, conditional on role, champion atom profile, opponent, patch, competition, and strictly prior form.",
-    "future_team_value": "Expected exact-roster map-win logit before the next map. It is the roster sum plus team continuity, regional bridge, composition, and phase-curve terms."
+    "future_player_value": "Development-only marginal map-win logit contribution for one player in the next eligible map, using strictly prior form, role, champion-role atoms, and explicit support diagnostics.",
+    "future_team_value": "Development-only exact-five roster map-win logit difference before the next eligible map. It uses roster player-form aggregates, prior team win state, and roster continuity."
   },
   "fit_contract": {
     "metric_weights": "fit inside development folds; no hand-assigned performance weights",
-    "player_state": "dynamic hierarchical latent value with shrinkage and explicit variance",
+    "player_state": "strictly prior time-decayed form with fold-local rank-3 atoms and support diagnostics",
     "representation": "atom-derived rank-3 champion embedding refit inside each chronological fold",
-    "team_state": "exact roster aggregation plus separately regularized team residual"
+    "team_state": "exact-five roster aggregation plus strictly prior team win state and roster continuity"
   },
+  "future_scope_blockers": [
+    "current_player_team_rating_comparison",
+    "regional_transfer",
+    "patch_transfer",
+    "roster_change_slice",
+    "tournament_boundary_slice",
+    "composition_specific_phase_curve",
+    "calibrated_uncertainty",
+    "missingness_robust_fit",
+    "authoritative_series_identity"
+  ],
   "information_boundary": {
     "current_checkpoint_targets": "target only; forbidden from the same map pregame vector",
     "current_final_metrics": "update future history only after the map",
@@ -62,20 +71,18 @@
     "comeback_resilience"
   ],
   "player_components": [
-    "global_dynamic_skill",
-    "role_effect",
-    "rank_3_player_atom_loading",
-    "strictly_prior_performance_form",
-    "uncertainty_and_support"
+    "strictly_prior_time_decayed_performance_form",
+    "fitted_metric_weights",
+    "fold_local_rank_3_player_atom",
+    "fold_local_rank_3_champion_role_atom",
+    "support_and_missingness_diagnostics"
   ],
   "schema_version": "scryglass:future-value-rating-contract:v1",
   "status": "development_only",
   "team_components": [
     "exact_roster_player_sum",
-    "roster_continuity_and_synergy_residual",
-    "competition_and_regional_bridge",
-    "neutral_draft_value",
-    "composition_specific_phase_curve",
-    "uncertainty_and_source_coverage"
+    "strictly_prior_team_win_state",
+    "roster_continuity",
+    "support_and_missingness_diagnostics"
   ]
 }
