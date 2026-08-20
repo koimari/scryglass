@@ -82,6 +82,7 @@ if INCLUDE_ARTIFACT_PATH:
 payload = {
     'schema_version': OUTPUT_SCHEMA,
     'source': binding,
+    'run': {'timings': {'refresh_seconds': 0.001, 'artifact_copy_hash_seconds': 0.002}},
     'outputs': {'player_ratings': descriptor},
     'semantic': {'source_game_count': census['game_count']},
 }
@@ -192,6 +193,10 @@ def test_benchmark_reports_cold_and_append_timings_calls_and_exact_outputs(tmp_p
         assert phase["candidate"]["call_counts"] == {"status": "file", "counts": {"baseline": 1, "fit": 1}}
         assert phase["comparison"]["correct"] is True
         assert phase["comparison"]["candidate_within_budget"] is True
+        assert phase["candidate"]["timings"] == {
+            "refresh_seconds": 0.001,
+            "artifact_copy_hash_seconds": 0.002,
+        }
 
 
 def test_benchmark_persists_bounded_phase_variant_diagnostic_logs(tmp_path: Path) -> None:
