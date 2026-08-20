@@ -1147,6 +1147,71 @@ class PlayerBridgeContext:
         return counts
 
 
+def _current_tier_records(canonical_players: pd.DataFrame) -> dict[str, object]:
+    """Return only the current-tier field used by weekly rank ordering.
+
+    This follows ``build_player_records`` with no team record override. It
+    keeps rows with valid results, removes team summary rows, and selects the
+    latest team-affiliation league row per player. A stable sort keeps the
+    first source row when dates tie, matching ``_latest_row``.
+    """
+
+    if (
+        canonical_players is None
+        or canonical_players.empty
+        or "playername" not in canonical_players.columns
+        or "league" not in canonical_players.columns
+        or "competition_tier" not in canonical_players.columns
+    ):
+        return {}
+    from lol_kills.export.pack_records import INVALID_COMPETITION_LABELS
+
+    frame = canonical_players.copy()
+    frame = frame[frame["playername"].notna()]
+    if "position" in frame.columns:
+        frame = frame[frame["position"].astype(str).str.lower().ne("team")]
+    if frame.empty:
+        return {}
+    frame["_result"] = pd.to_numeric(frame.get("result"), errors="coerce")
+    frame = frame[frame["_result"].notna()].copy()
+    if frame.empty:
+        return {}
+    frame["_player"] = frame["playername"].astype(str)
+    valid_league = ~frame["league"].astype(str).str.upper().isin(
+        INVALID_COMPETITION_LABELS
+    )
+    affiliation = frame.loc[valid_league]
+    affiliation = affiliation[
+        affiliation["league"].map(is_team_affiliation_league)
+    ].copy()
+    records = {
+        player: None for player in frame["_player"].astype(str).unique()
+    }
+    if affiliation.empty or "date" not in affiliation.columns:
+        return records
+    affiliation["_date"] = pd.to_datetime(
+        affiliation["date"], errors="coerce", utc=True
+    )
+    affiliation = affiliation[affiliation["_date"].notna()]
+    if affiliation.empty:
+        return records
+    latest = (
+        affiliation.sort_values(
+            ["_player", "_date"],
+            ascending=[True, False],
+            kind="mergesort",
+        )
+        .drop_duplicates("_player", keep="first")
+    )
+    records.update(
+        {
+            str(row["_player"]): str(row["competition_tier"])
+            for _, row in latest.iterrows()
+        }
+    )
+    return records
+
+
 def _apply_bridge_uncertainty(
     rows: list[dict[str, object]],
     players: pd.DataFrame,
@@ -1739,18 +1804,18 @@ def build_player_weekly_ranks(
             fit_cache_slot="current",
             workspace=global_workspace,
         )
-    # Current affiliation is the publication filter.  Historical matches in a
+    # Current affiliation is the publication filter. Historical matches in a
     # different circuit remain evidence for the rating but cannot place a
     # developmental player in the current Tier 1 board.
-    from lol_kills.export.pack_records import build_player_records
-
     current_records = (
         dict(player_records)
         if player_records is not None
-        else build_player_records(
-            bridge_context.canonical_players.copy(deep=True),
-            canonicalized=True,
-        )
+        else {
+            player: {"current_tier": tier}
+            for player, tier in _current_tier_records(
+                bridge_context.canonical_players
+            ).items()
+        }
     )
     current_rows = _apply_bridge_uncertainty(
         _apply_global_scale(_snapshot_rows(states, cfg=cfg), current_global, cfg),
@@ -1765,6 +1830,8 @@ def build_player_weekly_ranks(
         if not snapshot:
             return []
         try:
+            historical_cache = fit_cache if anchor_label == "recent" else None
+            historical_cache_slot = anchor_label if anchor_label == "recent" else None
             historical_global, _historical_meta = fit_global_player_bt(
                 frame,
                 players,
@@ -1772,8 +1839,8 @@ def build_player_weekly_ranks(
                 through=anchor,
                 validate=False,
                 baseline_cache=baseline_cache,
-                fit_cache=fit_cache,
-                fit_cache_slot=anchor_label,
+                fit_cache=historical_cache,
+                fit_cache_slot=historical_cache_slot,
                 workspace=global_workspace,
             )
         except GlobalPlayerRatingError:

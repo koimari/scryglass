@@ -623,6 +623,7 @@ def test_weekly_builder_reuses_one_workspace_for_all_global_fits(
     )
     calls = {"replay": 0, "fit": 0, "model_rows": 0, "metrics": 0}
     workspace_ids: list[int] = []
+    cache_args: list[tuple[object, bool]] = []
     real_model_rows = global_player_bt_module._model_rows
     real_contribution_metrics = global_player_bt_module._contribution_metrics
 
@@ -641,6 +642,9 @@ def test_weekly_builder_reuses_one_workspace_for_all_global_fits(
     def fake_fit(*_args, **kwargs):
         calls["fit"] += 1
         workspace_ids.append(id(kwargs["workspace"]))
+        cache_args.append(
+            (kwargs.get("fit_cache_slot"), kwargs.get("fit_cache") is not None)
+        )
         return global_snapshot.copy(deep=True), {}
 
     monkeypatch.setattr(global_player_bt_module, "_model_rows", counted_model_rows)
@@ -662,6 +666,13 @@ def test_weekly_builder_reuses_one_workspace_for_all_global_fits(
     )
     assert calls == {"replay": 1, "fit": 5, "model_rows": 1, "metrics": 1}
     assert len(set(workspace_ids)) == 1
+    assert cache_args == [
+        ("current", True),
+        ("recent", True),
+        (None, False),
+        (None, False),
+        (None, False),
+    ]
 
     replay_workspace = global_player_bt_module.GlobalPlayerFitWorkspace.build(
         maps,
@@ -678,6 +689,7 @@ def test_weekly_builder_reuses_one_workspace_for_all_global_fits(
     }
     calls.update({"replay": 0, "fit": 0, "model_rows": 0, "metrics": 0})
     workspace_ids.clear()
+    cache_args.clear()
 
     def fail_replay(*_args, **_kwargs):
         raise AssertionError("weekly replay was not reused")
@@ -685,6 +697,9 @@ def test_weekly_builder_reuses_one_workspace_for_all_global_fits(
     def reused_fit(*_args, **kwargs):
         calls["fit"] += 1
         workspace_ids.append(id(kwargs["workspace"]))
+        cache_args.append(
+            (kwargs.get("fit_cache_slot"), kwargs.get("fit_cache") is not None)
+        )
         assert kwargs.get("fit_cache_slot") != "current"
         return global_snapshot.copy(deep=True), {}
 
@@ -702,6 +717,7 @@ def test_weekly_builder_reuses_one_workspace_for_all_global_fits(
     )
     assert calls == {"replay": 0, "fit": 4, "model_rows": 0, "metrics": 0}
     assert workspace_ids == [id(replay_workspace)] * 4
+    assert cache_args == [("recent", True), (None, False), (None, False), (None, False)]
 
 
 def test_player_rating_builder_stores_workspace_in_object_local_replay(
@@ -757,6 +773,31 @@ def test_player_rating_builder_stores_workspace_in_object_local_replay(
     assert fit_workspaces == [saved]
     bridge_context = replay.get("bridge_context")
     assert isinstance(bridge_context, player_elo.PlayerBridgeContext)
+
+
+def test_current_tier_projection_matches_full_player_records() -> None:
+    """The weekly fast path preserves build_player_records affiliation rules."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=2))
+    frame = _with_metrics(players, _roster_profiles())
+    frame["league"] = frame["gameid"].map(
+        maps.set_index("gameid")["league"]
+    )
+    frame["result"] = frame["gameid"].map(
+        maps.set_index("gameid")["y_blue_win"]
+    )
+    context = player_elo.PlayerBridgeContext.build(frame)
+    from lol_kills.export.pack_records import build_player_records
+
+    full_records = build_player_records(
+        context.canonical_players.copy(deep=True),
+        canonicalized=True,
+    )
+    expected = {
+        player: record.get("current_tier")
+        for player, record in full_records.items()
+    }
+    assert player_elo._current_tier_records(context.canonical_players) == expected
 
 
 def test_weekly_replay_reuses_bridge_context_with_exact_output(
