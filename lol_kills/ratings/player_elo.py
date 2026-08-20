@@ -1823,10 +1823,9 @@ def build_player_weekly_ranks(
     if replay_hit:
         states = saved_states
         checkpoints = saved_checkpoints
-        _recent_mus = saved_recent_mus
         current_global = saved_global.copy(deep=True)
     else:
-        _, states, checkpoints, _recent_mus = _run_player_elo(
+        _, states, checkpoints, _ = _run_player_elo(
             frame,
             players,
             cfg,
