@@ -2661,6 +2661,9 @@ def export_public_pack(
         "pack_id": pack_id,
         "schema_version": spec.SCHEMA_VERSION,
         "created_utc": datetime.now(timezone.utc).isoformat(),
+        "source_as_of": source_as_of.isoformat().replace("+00:00", "Z"),
+        "source_game_count": len(source_game_ids),
+        "source_identity_sha256": composition_source_digest,
         "filters": {
             "years": list(years),
             "leagues": "all_in_year_window",

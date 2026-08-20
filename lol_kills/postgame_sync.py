@@ -833,6 +833,10 @@ def validate_pack(pack_dir: Path, manifest: dict[str, Any], source: dict[str, An
                 raise RefreshValidationError(f"transport label appears as a public league: {relative}")
         total_bytes += path.stat().st_size
     ratings = manifest.get("ratings") or {}
+    if manifest.get("source_game_count") != source["game_count"]:
+        raise RefreshValidationError("manifest source game count does not match the live source")
+    if manifest.get("source_identity_sha256") != source["identity_sha256"]:
+        raise RefreshValidationError("manifest source identity digest does not match the live source")
     if ratings.get("source_game_count") != source["game_count"]:
         raise RefreshValidationError("pack source game count does not match the live source")
     if ratings.get("source_identity_sha256") != source["identity_sha256"]:
