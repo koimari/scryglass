@@ -1208,6 +1208,14 @@ def build_future_value_design(
         .sub(team_wide["roster_continuity"].get("red", pd.Series(dtype=float)))
         .reindex(design.index)
     )
+    design["blue_roster_continuity"] = (
+        team_wide["roster_continuity"].get("blue", pd.Series(dtype=float))
+        .reindex(design.index)
+    )
+    design["red_roster_continuity"] = (
+        team_wide["roster_continuity"].get("red", pd.Series(dtype=float))
+        .reindex(design.index)
+    )
     design["player_form_missing_rate"] = side_missing.reindex(design.index)
     support_mean = support_summary.groupby(level=0, sort=False)[support_columns].mean().mean(axis=1)
     effective_support_mean = support_summary.groupby(level=0, sort=False)[
@@ -1228,6 +1236,26 @@ def build_future_value_design(
     design["model_features_complete"] = np.isfinite(
         design[list(MODEL_FEATURES)].to_numpy(dtype=float)
     ).all(axis=1)
+    for metadata_name in (
+        "league",
+        "competition_scope",
+        "patch",
+        "oe_patch_token",
+        "tournament",
+    ):
+        if metadata_name in map_frame.columns:
+            design[metadata_name] = (
+                map_frame.set_index("game_id")[metadata_name].reindex(design.index)
+            )
+    if "tournament" in map_frame.columns:
+        tournament = design["tournament"].astype("string").str.strip()
+        tournament_key = tournament.fillna("")
+        ordered = design.assign(_tournament_key=tournament_key).sort_values(
+            "date", kind="stable"
+        )
+        boundary = ordered["_tournament_key"].ne(ordered["_tournament_key"].shift(1))
+        boundary &= ordered["_tournament_key"].ne("")
+        design["tournament_boundary"] = boundary.reindex(design.index).fillna(False).astype(bool)
     design = design.reset_index(drop=True)
     assert_pregame_feature_names(MODEL_FEATURES)
     design.attrs["feature_names"] = MODEL_FEATURES
@@ -1528,6 +1556,210 @@ def _classification_metrics(target: pd.Series, probability: pd.Series) -> dict[s
     }
 
 
+def _calibration_metrics(
+    target: pd.Series,
+    probability: pd.Series,
+    *,
+    bins: int = 10,
+) -> dict[str, Any]:
+    """Report validation-only reliability bins and expected calibration error."""
+
+    valid = target.notna() & probability.notna()
+    if not valid.any():
+        return {"status": "unavailable", "rows": 0, "blockers": ["calibration_rows_missing"]}
+    y = target.loc[valid].astype(int).to_numpy()
+    p = np.clip(probability.loc[valid].to_numpy(dtype=float), 1e-8, 1.0 - 1e-8)
+    bin_index = np.minimum(np.floor(p * bins).astype(int), bins - 1)
+    rows: list[dict[str, Any]] = []
+    weighted_error = 0.0
+    max_error = 0.0
+    for bin_number in range(bins):
+        selected = bin_index == bin_number
+        count = int(selected.sum())
+        if count == 0:
+            continue
+        mean_probability = float(p[selected].mean())
+        observed_rate = float(y[selected].mean())
+        absolute_error = abs(mean_probability - observed_rate)
+        weighted_error += count / len(y) * absolute_error
+        max_error = max(max_error, absolute_error)
+        rows.append(
+            {
+                "bin": bin_number,
+                "rows": count,
+                "mean_probability": mean_probability,
+                "observed_rate": observed_rate,
+                "absolute_error": absolute_error,
+            }
+        )
+    return {
+        "status": "available",
+        "rows": int(len(y)),
+        "bins": rows,
+        "expected_calibration_error": float(weighted_error),
+        "max_absolute_error": float(max_error),
+        "blockers": [],
+    }
+
+
+def _slice_labels(frame: pd.DataFrame, field: str) -> pd.Series | None:
+    if field not in frame.columns:
+        return None
+    values = frame[field].astype("string").str.strip()
+    return values.where(values.notna() & values.ne(""), "<missing>")
+
+
+def _group_slice_metrics(
+    target: pd.Series,
+    probability: pd.Series,
+    validation_labels: pd.Series | None,
+    training_labels: pd.Series | None,
+    *,
+    slice_name: str,
+    minimum_rows: int = 20,
+) -> dict[str, Any]:
+    """Score validation groups and bind each group to its training support."""
+
+    if validation_labels is None:
+        return {
+            "status": "unavailable",
+            "groups": {},
+            "blockers": [f"{slice_name}_field_missing"],
+        }
+    labels = validation_labels.reindex(target.index)
+    if labels.isna().all():
+        return {
+            "status": "unavailable",
+            "groups": {},
+            "blockers": [f"{slice_name}_labels_missing"],
+        }
+    train = training_labels if training_labels is not None else pd.Series(dtype="string")
+    train = train.astype("string")
+    blockers: list[str] = []
+    groups: dict[str, Any] = {}
+    for raw_group in sorted(str(value) for value in labels.dropna().unique()):
+        selected = labels.astype(str).eq(raw_group)
+        group_target = target.loc[selected]
+        group_probability = probability.loc[selected]
+        metrics = _classification_metrics(group_target, group_probability)
+        train_rows = int(train.eq(raw_group).sum())
+        if metrics["rows"] < minimum_rows:
+            blockers.append(f"{slice_name}_sparse_validation_support")
+        if train_rows == 0:
+            blockers.append(f"{slice_name}_unseen_training_group")
+        groups[raw_group] = {
+            "training_rows": train_rows,
+            "validation_rows": int(len(group_target)),
+            "metrics": metrics,
+        }
+    if "<missing>" in groups:
+        blockers.append(f"{slice_name}_labels_missing")
+    return {
+        "status": "available",
+        "groups": groups,
+        "blockers": sorted(set(blockers)),
+    }
+
+
+def _missingness_metrics(
+    validation: pd.DataFrame,
+    target: pd.Series,
+    probability: pd.Series,
+) -> dict[str, Any]:
+    """Report complete-case coverage without hiding withheld rows."""
+
+    if "model_features_complete" not in validation.columns:
+        return {"status": "unavailable", "blockers": ["missingness_indicator_missing"]}
+    complete = validation["model_features_complete"].astype(bool)
+    paired = target.notna() & probability.notna()
+    return {
+        "status": "available",
+        "total_rows": int(len(validation)),
+        "complete_case_rows": int(complete.sum()),
+        "incomplete_case_rows": int((~complete).sum()),
+        "predicted_rows": int(paired.sum()),
+        "withheld_rows": int((~paired).sum()),
+        "complete_case_metrics": _classification_metrics(
+            target.loc[paired & complete], probability.loc[paired & complete]
+        ),
+        "blockers": ["complete_case_missingness_only"] if (~complete).any() else [],
+    }
+
+
+def _side_swap_metrics(
+    model: FutureValueFoldModel,
+    validation: pd.DataFrame,
+    target: pd.Series,
+    probability: pd.Series,
+) -> dict[str, Any]:
+    """Check the antisymmetry of the same validation rows after a side swap."""
+
+    paired = target.notna() & probability.notna()
+    if not paired.any():
+        return {"status": "unavailable", "rows": 0, "blockers": ["side_swap_rows_missing"]}
+    swapped = validation.copy()
+    scalar_features = {
+        "player_form_missing_rate",
+        "rank_3_atom_missing",
+        "rank_3_champion_role_atom_missing",
+    }
+    for feature in MODEL_FEATURES:
+        if feature not in scalar_features:
+            swapped[feature] = -pd.to_numeric(swapped[feature], errors="coerce")
+    swapped_probability = model.predict_probability(swapped).loc[paired]
+    swapped_target = 1.0 - target.loc[paired]
+    original_probability = probability.loc[paired]
+    symmetry_error = np.abs(
+        swapped_probability.to_numpy(dtype=float)
+        - (1.0 - original_probability.to_numpy(dtype=float))
+    )
+    return {
+        "status": "available",
+        "rows": int(len(swapped_probability)),
+        "metrics": _classification_metrics(swapped_target, swapped_probability),
+        "mean_probability_complement_error": float(np.nanmean(symmetry_error)),
+        "max_probability_complement_error": float(np.nanmax(symmetry_error)),
+        "blockers": [],
+    }
+
+
+def _roster_change_labels(frame: pd.DataFrame) -> pd.Series | None:
+    required = {"blue_roster_continuity", "red_roster_continuity"}
+    if not required.issubset(frame.columns):
+        return None
+    blue = pd.to_numeric(frame["blue_roster_continuity"], errors="coerce")
+    red = pd.to_numeric(frame["red_roster_continuity"], errors="coerce")
+    labels = pd.Series("<missing>", index=frame.index, dtype="string")
+    stable = blue.ge(1.0) & red.ge(1.0)
+    changed = blue.lt(1.0) | red.lt(1.0)
+    labels.loc[stable] = "stable_roster"
+    labels.loc[changed] = "roster_change"
+    return labels
+
+
+def _support_labels(frame: pd.DataFrame, threshold: float = 5.0) -> pd.Series | None:
+    field = "player_form_effective_support_mean"
+    if field not in frame.columns:
+        return None
+    support = pd.to_numeric(frame[field], errors="coerce")
+    labels = pd.Series("<missing>", index=frame.index, dtype="string")
+    labels.loc[support.ge(float(threshold))] = "adequate_support"
+    labels.loc[support.lt(float(threshold)) & support.notna()] = "sparse_support"
+    return labels
+
+
+def _tournament_boundary_labels(frame: pd.DataFrame) -> pd.Series | None:
+    if "tournament" not in frame.columns or "tournament_boundary" not in frame.columns:
+        return None
+    tournament = _slice_labels(frame, "tournament")
+    if tournament is None or tournament.eq("<missing>").all():
+        return None
+    labels = pd.Series("tournament_interior", index=frame.index, dtype="string")
+    labels.loc[frame["tournament_boundary"].astype(bool)] = "tournament_boundary"
+    labels.loc[tournament.eq("<missing>")] = "<missing>"
+    return labels
+
+
 def evaluate_future_value(
     maps: pd.DataFrame,
     players: pd.DataFrame,
@@ -1551,6 +1783,7 @@ def evaluate_future_value(
     pooled_targets: list[pd.Series] = []
     pooled_predictions: list[pd.Series] = []
     pooled_baselines: list[pd.Series] = []
+    pooled_slice_blockers: list[str] = []
     for fold in folds:
         model, design = fit_future_value_model(
             map_frame,
@@ -1576,6 +1809,62 @@ def evaluate_future_value(
             and paired_target.index.equals(paired_baseline.index)
         ):
             raise FutureValueSourceError("candidate and baseline rows are not paired")
+        train_design = design[design["game_id"].isin(fold["train_game_ids"])].copy()
+        calibration = _calibration_metrics(paired_target, paired_prediction)
+        baseline_calibration = _calibration_metrics(paired_target, paired_baseline)
+        region_slice = _group_slice_metrics(
+            paired_target,
+            paired_prediction,
+            _slice_labels(validation, "league"),
+            _slice_labels(train_design, "league"),
+            slice_name="regional_transfer",
+        )
+        patch_field = (
+            "patch"
+            if "patch" in validation.columns
+            else "oe_patch_token"
+            if "oe_patch_token" in validation.columns
+            else "patch"
+        )
+        patch_slice = _group_slice_metrics(
+            paired_target,
+            paired_prediction,
+            _slice_labels(validation, patch_field),
+            _slice_labels(train_design, patch_field),
+            slice_name="patch_transfer",
+        )
+        roster_slice = _group_slice_metrics(
+            paired_target,
+            paired_prediction,
+            _roster_change_labels(validation),
+            _roster_change_labels(train_design),
+            slice_name="roster_change",
+        )
+        tournament_slice = _group_slice_metrics(
+            paired_target,
+            paired_prediction,
+            _tournament_boundary_labels(validation),
+            _tournament_boundary_labels(train_design),
+            slice_name="tournament_boundary",
+        )
+        support_slice = _group_slice_metrics(
+            paired_target,
+            paired_prediction,
+            _support_labels(validation),
+            _support_labels(train_design),
+            slice_name="sparse_support",
+        )
+        missingness = _missingness_metrics(validation, target, prediction)
+        side_swap = _side_swap_metrics(model, validation, target, prediction)
+        slice_reports = {
+            "regional_transfer": region_slice,
+            "patch_transfer": patch_slice,
+            "roster_change": roster_slice,
+            "tournament_boundary": tournament_slice,
+            "sparse_support": support_slice,
+        }
+        for report in (*slice_reports.values(), missingness, side_swap):
+            pooled_slice_blockers.extend(str(value) for value in report.get("blockers", []))
         paired_game_ids = tuple(
             sorted(validation.loc[paired_mask, "game_id"].astype(str))
         )
@@ -1605,18 +1894,21 @@ def evaluate_future_value(
                 "prediction_coverage": float(prediction.notna().mean()),
                 "withheld_rows": int(prediction.isna().sum()),
                 "metric_weights": model.metric_weights,
+                "calibration": calibration,
+                "baseline_calibration": baseline_calibration,
+                "regional_transfer": region_slice,
+                "patch_transfer": patch_slice,
+                "roster_change": roster_slice,
+                "tournament_boundary": tournament_slice,
+                "sparse_support": support_slice,
+                "missingness": missingness,
+                "side_swap": side_swap,
             }
         )
     cluster_source = map_frame.attrs.get("series_cluster_source")
     blockers = [
         "current_player_team_rating_comparison_missing",
-        "regional_transfer_slice_missing",
-        "patch_transfer_slice_missing",
-        "roster_change_slice_missing",
-        "tournament_boundary_slice_missing",
-        "complete_case_missingness_only",
         "support_uncertainty_proxy_not_calibrated",
-        "calibration_evidence_missing",
     ]
     if int(n_folds) < 3 or len(fold_reports) < int(n_folds):
         blockers.append("complete_chronological_evaluation_missing")
@@ -1625,6 +1917,24 @@ def evaluate_future_value(
     pooled_target = pd.concat(pooled_targets, ignore_index=True)
     pooled_prediction = pd.concat(pooled_predictions, ignore_index=True)
     pooled_baseline = pd.concat(pooled_baselines, ignore_index=True)
+    pooled_calibration_report = _calibration_metrics(pooled_target, pooled_prediction)
+    pooled_baseline_calibration_report = _calibration_metrics(pooled_target, pooled_baseline)
+    blockers.extend(pooled_slice_blockers)
+    for slice_name in (
+        "regional_transfer",
+        "patch_transfer",
+        "roster_change",
+        "tournament_boundary",
+        "sparse_support",
+    ):
+        if any(
+            report[slice_name].get("status") != "available"
+            for report in fold_reports
+        ):
+            blockers.append(f"{slice_name}_slice_missing")
+    if pooled_calibration_report["status"] != "available":
+        blockers.append("calibration_evidence_missing")
+    blockers = sorted(set(blockers))
     if not str(cluster_source).startswith("authoritative:"):
         blockers.append("authoritative_series_id_missing_proxy_cluster_used")
     return {
@@ -1654,6 +1964,8 @@ def evaluate_future_value(
             "pooled_intercept_baseline": _classification_metrics(
                 pooled_target, pooled_baseline
             ),
+            "pooled_calibration": pooled_calibration_report,
+            "pooled_baseline_calibration": pooled_baseline_calibration_report,
         },
         "folds": fold_reports,
         "blockers": blockers,
@@ -1726,18 +2038,20 @@ def future_value_model_contract() -> dict[str, Any]:
             "chronological whole-series folds",
             "intercept baseline and proper scores",
             "proxy series clusters with an authoritative-series blocker",
-            "complete-case missingness with an explicit blocker",
+            "validation calibration bins and pooled proper scores",
+            "regional and patch transfer slices with training-support checks",
+            "roster-change and tournament-boundary slices",
+            "complete-case and withheld-row missingness counts",
+            "sparse-support slice and support-uncertainty diagnostics",
+            "side-swap invariance diagnostic",
         ],
         "future_scope_blockers": [
             "current_player_team_rating_comparison",
-            "regional_transfer",
-            "patch_transfer",
-            "roster_change_slice",
-            "tournament_boundary_slice",
             "composition_specific_phase_curve",
             "calibrated_uncertainty",
             "missingness_robust_fit",
             "authoritative_series_identity",
+            "authoritative_series_cluster_evaluation",
         ],
         "authority": {
             "public_player_rating": False,

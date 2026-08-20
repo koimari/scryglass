@@ -255,6 +255,17 @@ def test_evaluation_pairs_candidate_and_baseline_on_identical_game_ids() -> None
     assert fold["candidate"]["rows"] == fold["intercept_baseline"]["rows"]
     assert fold["candidate"]["rows"] == fold["paired_rows"]
     assert fold["paired_rows"] == fold["paired_game_id_count"]
+    assert fold["calibration"]["status"] == "available"
+    assert fold["calibration"]["rows"] == fold["paired_rows"]
+    assert fold["missingness"]["status"] == "available"
+    assert fold["side_swap"]["status"] == "available"
+    assert fold["regional_transfer"]["status"] == "unavailable"
+    assert fold["patch_transfer"]["status"] == "unavailable"
+    assert fold["tournament_boundary"]["status"] == "unavailable"
+    assert "regional_transfer_slice_missing" in result["blockers"]
+    assert "patch_transfer_slice_missing" in result["blockers"]
+    assert "tournament_boundary_slice_missing" in result["blockers"]
+    assert result["evaluation"]["pooled_calibration"]["rows"] == fold["paired_rows"]
 
 
 def test_chronological_folds_keep_series_whole_and_dates_strict() -> None:

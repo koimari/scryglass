@@ -63,7 +63,7 @@
   "source_as_of": "2026-08-20T11:31:37Z",
   "source_mode": "oe_only",
   "source_transport": "official_public_oracles_elixir_annual_exports_plus_oe_api_bridge",
-  "reference_source_receipt_sha256": "a5daa976e7562c17503055840f9dfee5e9bf637880684e5596a30715efd5662c",
+  "reference_source_receipt_sha256": "96c14aaef77261256e7d1c991187c8e90e64ef0e85020f3f45583c4eadc965f8",
   "unfiltered_source_game_count": 17762,
   "unfiltered_source_identity_sha256": "9bd725811ef06afee9799a573f848cae411010552d62876513b3626bf44d3813"
 }

@@ -15,7 +15,12 @@
     "chronological whole-series folds",
     "intercept baseline and proper scores",
     "proxy series clusters with an authoritative-series blocker",
-    "complete-case missingness with an explicit blocker"
+    "validation calibration bins and pooled proper scores",
+    "regional and patch transfer slices with training-support checks",
+    "roster-change and tournament-boundary slices",
+    "complete-case and withheld-row missingness counts",
+    "sparse-support slice and support-uncertainty diagnostics",
+    "side-swap invariance diagnostic"
   ],
   "estimands": {
     "future_player_value": "Development-only marginal map-win logit contribution for one player in the next eligible map, using strictly prior form, role, champion-role atoms, and explicit support diagnostics.",
@@ -29,14 +34,11 @@
   },
   "future_scope_blockers": [
     "current_player_team_rating_comparison",
-    "regional_transfer",
-    "patch_transfer",
-    "roster_change_slice",
-    "tournament_boundary_slice",
     "composition_specific_phase_curve",
     "calibrated_uncertainty",
     "missingness_robust_fit",
-    "authoritative_series_identity"
+    "authoritative_series_identity",
+    "authoritative_series_cluster_evaluation"
   ],
   "information_boundary": {
     "current_checkpoint_targets": "target only; forbidden from the same map pregame vector",
