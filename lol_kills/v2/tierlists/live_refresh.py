@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -50,7 +51,7 @@ def _step_timeout_seconds() -> float:
     if raw is None or not raw.strip():
         return float(DEFAULT_STEP_TIMEOUT_SECONDS)
     value = float(raw)  # let ValueError propagate: a mis-set override must not silently fall back
-    if value <= 0:
+    if not math.isfinite(value) or value <= 0:
         raise ValueError("SCRYGLASS_TIER_STEP_TIMEOUT_SECONDS must be positive")
     return value
 

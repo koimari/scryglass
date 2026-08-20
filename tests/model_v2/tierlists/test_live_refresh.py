@@ -276,7 +276,9 @@ def test_tier_step_timeout_is_recorded(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert result["returncode"] == 124
 
 
-def test_step_timeout_default_is_2700_seconds() -> None:
+def test_step_timeout_default_is_2700_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SCRYGLASS_TIER_STEP_TIMEOUT_SECONDS", raising=False)
+
     assert live_refresh._step_timeout_seconds() == 2700.0
 
 
@@ -314,6 +316,20 @@ def test_step_timeout_zero_env_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_step_timeout_negative_env_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SCRYGLASS_TIER_STEP_TIMEOUT_SECONDS", "-1")
+
+    with pytest.raises(ValueError, match="must be positive"):
+        live_refresh._step_timeout_seconds()
+
+
+def test_step_timeout_nan_env_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SCRYGLASS_TIER_STEP_TIMEOUT_SECONDS", "nan")
+
+    with pytest.raises(ValueError, match="must be positive"):
+        live_refresh._step_timeout_seconds()
+
+
+def test_step_timeout_inf_env_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SCRYGLASS_TIER_STEP_TIMEOUT_SECONDS", "inf")
 
     with pytest.raises(ValueError, match="must be positive"):
         live_refresh._step_timeout_seconds()
