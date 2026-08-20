@@ -119,6 +119,70 @@ def test_disabled_anchor_is_not_caught_by_the_release_check() -> None:
     assert "global_performance_anchor_logit" not in snapshot.columns
 
 
+def test_global_fit_wraps_minimize_in_single_thread_limiter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The optimizer stays inside the deterministic BLAS thread limit."""
+
+    design = global_player_bt_module.csr_matrix(
+        np.asarray(
+            [
+                [1.0, -1.0],
+                [-1.0, 1.0],
+                [1.0, 1.0],
+                [-1.0, -1.0],
+            ]
+        )
+    )
+    outcome = np.asarray([1.0, 0.0, 1.0, 0.0])
+    cfg = _config(max_iterations=100)
+    reference = global_player_bt_module._fit(design, outcome, cfg)
+    events: list[object] = []
+    active = False
+    real_minimize = global_player_bt_module.minimize
+
+    class Limiter:
+        def __enter__(self):
+            nonlocal active
+            active = True
+            events.append("enter")
+            return self
+
+        def __exit__(self, *_args):
+            nonlocal active
+            events.append(("exit", active))
+            active = False
+
+    def fake_limits(*, limits: int):
+        events.append(("limits", limits))
+        return Limiter()
+
+    def wrapped_minimize(*args, **kwargs):
+        assert active is True
+        events.append("minimize")
+        return real_minimize(*args, **kwargs)
+
+    monkeypatch.setattr(global_player_bt_module, "threadpool_limits", fake_limits)
+    monkeypatch.setattr(global_player_bt_module, "minimize", wrapped_minimize)
+    actual = global_player_bt_module._fit(design, outcome, cfg)
+
+    assert np.array_equal(actual[0], reference[0])
+    assert actual[1] == reference[1]
+    assert events == [("limits", 1), "enter", "minimize", ("exit", True)]
+
+
+def test_global_fit_fails_explicitly_without_threadpoolctl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing limiter dependency cannot silently publish a fit."""
+
+    design = global_player_bt_module.csr_matrix(np.asarray([[1.0], [-1.0]]))
+    outcome = np.asarray([1.0, 0.0])
+    monkeypatch.setattr(global_player_bt_module, "threadpool_limits", None)
+    with pytest.raises(GlobalPlayerRatingError, match="threadpoolctl"):
+        global_player_bt_module._fit(design, outcome, _config(max_iterations=10))
+
+
 def _meta_file(tmp_path: Path, anchor: dict[str, object] | None) -> Path:
     path = tmp_path / "player_ratings_meta.json"
     payload: dict[str, object] = {"global_rating": {}}

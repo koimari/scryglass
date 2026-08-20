@@ -35,6 +35,11 @@ import pandas as pd
 from scipy.optimize import minimize
 from scipy.sparse import csr_matrix, hstack
 
+try:
+    from threadpoolctl import threadpool_limits
+except ImportError:  # pragma: no cover - exercised by dependency failure tests
+    threadpool_limits = None
+
 from lol_kills.etl.source_keys import canonical_source_game_key
 
 
@@ -1343,7 +1348,11 @@ def _complete_lineups(players: pd.DataFrame) -> dict[str, dict[str, list[tuple[s
     for (game_id, side), group in frame.groupby(["_game_id", "_side"], sort=False):
         rows = sorted(
             zip(group["_player"].astype(str), group["_role"].astype(str)),
-            key=lambda value: order.get(value[1], 9),
+            key=lambda value: (
+                order.get(value[1], 9),
+                value[0].casefold(),
+                value[0],
+            ),
         )
         by_role: dict[str, str] = {}
         for player, role in rows:
@@ -2295,13 +2304,18 @@ def _fit(
         gradient = np.asarray(matrix.T @ residual).reshape(-1) + penalty * delta
         return loss, gradient
 
-    fitted = minimize(
-        objective,
-        np.zeros(matrix.shape[1], dtype=float),
-        method="L-BFGS-B",
-        jac=True,
-        options={"maxiter": cfg.max_iterations, "ftol": 1e-10, "gtol": 1e-6},
-    )
+    if threadpool_limits is None:
+        raise GlobalPlayerRatingError(
+            "deterministic global player fit requires the threadpoolctl dependency"
+        )
+    with threadpool_limits(limits=1):
+        fitted = minimize(
+            objective,
+            np.zeros(matrix.shape[1], dtype=float),
+            method="L-BFGS-B",
+            jac=True,
+            options={"maxiter": cfg.max_iterations, "ftol": 1e-10, "gtol": 1e-6},
+        )
     if not fitted.success:
         raise GlobalPlayerRatingError(f"global player fit failed: {fitted.message}")
     return fitted.x[:-1], float(fitted.x[-1])
@@ -2485,7 +2499,7 @@ def fit_global_player_bt(
             for side in ("Blue", "Red")
             for player, _ in lineups[game_id][side]
         },
-        key=str.casefold,
+        key=lambda value: (value.casefold(), value),
     )
     design = _design(frame, lineups, names)
     outcome = frame["result"].to_numpy(dtype=float)
