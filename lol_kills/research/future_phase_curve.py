@@ -40,6 +40,18 @@ MODEL_VERSION = "future-phase-curve-v1"
 SOURCE = "oracle_elixir_only"
 PHASE_FEATURE_FAMILY = "checkpoint_forecasts"
 PHASE_FEATURE_DECLARATION = tuple(ATOM_GROUP_COLUMNS[PHASE_FEATURE_FAMILY])
+SOURCE_RECEIPT_SCHEMA = "scryglass:future-value-rating-source:v1"
+SOURCE_TRANSPORT = (
+    "official_public_oracles_elixir_annual_exports_plus_oe_api_bridge"
+)
+_REQUIRED_ANNUAL_SOURCE_FILES = frozenset({"annual_2025", "annual_2026"})
+_REQUIRED_BRIDGE_SOURCE_FILES = frozenset(
+    {
+        "bridge_oe_api_meta.json",
+        "bridge_oe_api_player_games.parquet",
+        "bridge_oe_api_team_games.parquet",
+    }
+)
 
 # These are final map metrics.  The function accepts aliases that occur in
 # OE exports, but checkpoint columns never enter this list.
@@ -131,6 +143,248 @@ def _canonical_json_bytes(value: object) -> bytes:
 
 def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def _receipt_file_reference(
+    path_value: Path | str,
+    *,
+    expected_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Read and bind a durable source-receipt file."""
+
+    path = Path(path_value)
+    if path.is_symlink() or not path.is_file():
+        raise FuturePhaseCurveError("source receipt file is missing or unsafe")
+    try:
+        raw = path.read_bytes()
+    except OSError as error:
+        raise FuturePhaseCurveError("source receipt file cannot be read") from error
+    actual_sha256 = _sha256_bytes(raw)
+    if expected_sha256 is not None and actual_sha256 != str(expected_sha256).lower():
+        raise FuturePhaseCurveError("source receipt file hash does not match")
+    return {
+        "locator": str(path),
+        "bytes": len(raw),
+        "sha256": actual_sha256,
+    }
+
+
+def _source_lineage(source_receipt: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the verified annual-export and OE bridge lineage."""
+
+    source_files = source_receipt.get("source_files")
+    if not isinstance(source_files, Mapping):
+        raise FuturePhaseCurveError("source receipt source_files are missing")
+    labels = {str(label) for label in source_files}
+    missing_annual = sorted(_REQUIRED_ANNUAL_SOURCE_FILES - labels)
+    missing_bridge = sorted(_REQUIRED_BRIDGE_SOURCE_FILES - labels)
+    if missing_annual or missing_bridge:
+        missing = [*missing_annual, *missing_bridge]
+        raise FuturePhaseCurveError(
+            "source receipt source_files do not prove the required OE transport: "
+            + ", ".join(missing)
+        )
+    annual = sorted(label for label in labels if label in _REQUIRED_ANNUAL_SOURCE_FILES)
+    bridge = sorted(label for label in labels if label in _REQUIRED_BRIDGE_SOURCE_FILES)
+    return {
+        "transport": SOURCE_TRANSPORT,
+        "annual_exports": annual,
+        "oe_api_bridge": bridge,
+        "bridge_lineage": {
+            "source": "oracle_elixir_api_bridge",
+            "file_labels": bridge,
+            "identity_binding": "accepted_game_ids and source-file hashes",
+            "research_only": True,
+        },
+    }
+
+
+def _validate_source_receipt(
+    source_receipt: Mapping[str, Any],
+    *,
+    source_receipt_path: Path | str | None = None,
+    source_receipt_file_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Verify the canonical source receipt before phase fitting."""
+
+    if not isinstance(source_receipt, Mapping):
+        raise FuturePhaseCurveError("verified source receipt is required")
+    required = (
+        "schema_version",
+        "source_as_of",
+        "source_game_count",
+        "source_identity_sha256",
+        "accepted_game_ids",
+        "source_files",
+        "receipt_sha256",
+    )
+    missing = [field for field in required if field not in source_receipt]
+    if missing:
+        raise FuturePhaseCurveError(
+            "verified source receipt is incomplete: " + ", ".join(missing)
+        )
+    if source_receipt.get("schema_version") != SOURCE_RECEIPT_SCHEMA:
+        raise FuturePhaseCurveError("verified source receipt schema is invalid")
+    receipt_hash = str(source_receipt.get("receipt_sha256") or "").lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", receipt_hash):
+        raise FuturePhaseCurveError("verified source receipt hash is invalid")
+    payload = dict(source_receipt)
+    payload.pop("receipt_sha256", None)
+    if _sha256_bytes(_canonical_json_bytes(payload)) != receipt_hash:
+        raise FuturePhaseCurveError("verified source receipt hash does not match payload")
+    raw_ids = source_receipt.get("accepted_game_ids")
+    if not isinstance(raw_ids, list) or not all(isinstance(value, str) for value in raw_ids):
+        raise FuturePhaseCurveError("verified source receipt accepted IDs are invalid")
+    accepted = tuple(raw_ids)
+    if not accepted or accepted != canonical_game_ids(accepted):
+        raise FuturePhaseCurveError(
+            "verified source receipt accepted IDs are not canonical and unique"
+        )
+    try:
+        source_game_count = int(source_receipt["source_game_count"])
+    except (TypeError, ValueError) as error:
+        raise FuturePhaseCurveError("verified source receipt game count is invalid") from error
+    if isinstance(source_receipt["source_game_count"], bool) or source_game_count != len(accepted):
+        raise FuturePhaseCurveError("verified source receipt game count is invalid")
+    expected_identity = identity_sha256(accepted)
+    if str(source_receipt["source_identity_sha256"]).lower() != expected_identity:
+        raise FuturePhaseCurveError("verified source receipt census identity is invalid")
+    _as_timestamp(source_receipt["source_as_of"], "source_as_of")
+    authority = source_receipt.get("authority")
+    if not isinstance(authority, Mapping) or authority.get("research_only") is not True:
+        raise FuturePhaseCurveError("verified source receipt authority is invalid")
+    if any(
+        bool(authority.get(name))
+        for name in (
+            "deployment",
+            "merge",
+            "promotion",
+            "public_player_rating",
+            "public_team_rating",
+            "public_probability",
+        )
+    ):
+        raise FuturePhaseCurveError("verified source receipt grants public authority")
+    source_files = source_receipt.get("source_files")
+    if not isinstance(source_files, Mapping) or not source_files:
+        raise FuturePhaseCurveError("verified source receipt has no source file hashes")
+    for label, record in source_files.items():
+        if not isinstance(label, str) or not label.strip():
+            raise FuturePhaseCurveError("verified source file label is invalid")
+        if not isinstance(record, Mapping):
+            raise FuturePhaseCurveError(f"verified source file record is invalid: {label}")
+        locator = record.get("locator")
+        if not isinstance(locator, str) or not locator.strip():
+            raise FuturePhaseCurveError(f"verified source file locator is invalid: {label}")
+        locator_path = Path(locator)
+        if locator_path.is_absolute() or ".." in locator_path.parts:
+            raise FuturePhaseCurveError(f"verified source file locator is unsafe: {label}")
+        bytes_value = record.get("bytes")
+        if isinstance(bytes_value, bool) or not isinstance(bytes_value, int) or bytes_value < 0:
+            raise FuturePhaseCurveError(f"verified source file byte count is invalid: {label}")
+        if re.fullmatch(r"[0-9a-f]{64}", str(record.get("sha256") or ""), re.I) is None:
+            raise FuturePhaseCurveError(f"verified source file hash is invalid: {label}")
+    _source_lineage(source_receipt)
+    if (source_receipt_path is None) != (source_receipt_file_sha256 is None):
+        raise FuturePhaseCurveError(
+            "source receipt path and file hash must be provided together"
+        )
+    if source_receipt_path is not None:
+        reference = _receipt_file_reference(
+            source_receipt_path,
+            expected_sha256=source_receipt_file_sha256,
+        )
+        try:
+            on_disk = json.loads(Path(source_receipt_path).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise FuturePhaseCurveError("source receipt file is not valid JSON") from error
+        if not isinstance(on_disk, Mapping) or dict(on_disk) != dict(source_receipt):
+            raise FuturePhaseCurveError("source receipt file payload does not match")
+        if reference["sha256"] != str(source_receipt_file_sha256).lower():
+            raise FuturePhaseCurveError("source receipt file hash does not match")
+    return dict(source_receipt)
+
+
+def verify_source_receipt_artifact(
+    reference: Mapping[str, Any],
+    *,
+    runtime_root: Path | str = Path("."),
+    expected_source_game_count: int | None = None,
+    expected_source_identity_sha256: str | None = None,
+    expected_source_as_of: str | None = None,
+) -> dict[str, Any]:
+    """Verify a durable source receipt referenced by a phase artifact."""
+
+    locator = str(reference.get("locator") or "").strip()
+    if not locator:
+        raise FuturePhaseCurveError("source receipt artifact has no locator")
+    path = Path(locator)
+    if not path.is_absolute():
+        path = Path(runtime_root) / path
+    expected_bytes = reference.get("bytes")
+    expected_sha256 = str(reference.get("sha256") or "").lower()
+    expected_receipt_sha256 = str(
+        reference.get("source_receipt_sha256") or ""
+    ).lower()
+    if isinstance(expected_bytes, bool) or not isinstance(expected_bytes, int):
+        raise FuturePhaseCurveError("source receipt artifact byte count is invalid")
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+        raise FuturePhaseCurveError("source receipt artifact hash is invalid")
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_receipt_sha256):
+        raise FuturePhaseCurveError("source receipt artifact payload hash is invalid")
+    try:
+        raw = path.read_bytes()
+    except OSError as error:
+        raise FuturePhaseCurveError("source receipt artifact is unavailable") from error
+    if len(raw) != expected_bytes or _sha256_bytes(raw) != expected_sha256:
+        raise FuturePhaseCurveError("source receipt artifact bytes or hash do not match")
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FuturePhaseCurveError("source receipt artifact is not valid JSON") from error
+    if not isinstance(payload, Mapping):
+        raise FuturePhaseCurveError("source receipt artifact is not an object")
+    verified = _validate_source_receipt(
+        payload,
+        source_receipt_path=path,
+        source_receipt_file_sha256=expected_sha256,
+    )
+    if str(verified["receipt_sha256"]).lower() != expected_receipt_sha256:
+        raise FuturePhaseCurveError(
+            "source receipt artifact payload hash does not match"
+        )
+    if expected_source_game_count is not None and int(verified["source_game_count"]) != int(
+        expected_source_game_count
+    ):
+        raise FuturePhaseCurveError("source receipt artifact count differs from source contract")
+    if (
+        expected_source_identity_sha256 is not None
+        and str(verified["source_identity_sha256"]).lower()
+        != str(expected_source_identity_sha256).lower()
+    ):
+        raise FuturePhaseCurveError(
+            "source receipt artifact identity differs from source contract"
+        )
+    if expected_source_as_of is not None:
+        if _as_timestamp(verified["source_as_of"], "source_as_of") != _as_timestamp(
+            expected_source_as_of, "expected_source_as_of"
+        ):
+            raise FuturePhaseCurveError(
+                "source receipt artifact source_as_of differs from source contract"
+            )
+    lineage = _source_lineage(verified)
+    return {
+        "status": "verified",
+        "locator": locator,
+        "bytes": expected_bytes,
+        "sha256": expected_sha256,
+        "source_receipt_sha256": str(verified["receipt_sha256"]),
+        "source_game_count": int(verified["source_game_count"]),
+        "source_identity_sha256": str(verified["source_identity_sha256"]),
+        "source_as_of": str(verified["source_as_of"]),
+        "transport": lineage["transport"],
+        "lineage": lineage,
+    }
 
 
 def _as_timestamp(value: Any, field: str) -> pd.Timestamp:
@@ -738,23 +992,19 @@ def bind_phase_source(
     source_receipt: Mapping[str, Any],
     *,
     allow_subset: bool = False,
+    source_receipt_path: Path | str | None = None,
+    source_receipt_file_sha256: str | None = None,
 ) -> BoundPhaseSource:
     """Bind one phase frame to the accepted census and source cutoff."""
 
-    required = ("source_as_of", "source_game_count", "source_identity_sha256", "accepted_game_ids")
-    missing = [name for name in required if name not in source_receipt]
-    if missing:
-        raise FuturePhaseCurveError("source receipt is missing: " + ", ".join(missing))
-    accepted = tuple(str(value) for value in source_receipt["accepted_game_ids"])
-    canonical = canonical_game_ids(accepted)
-    if tuple(accepted) != canonical:
-        raise FuturePhaseCurveError("source receipt accepted game IDs are not canonical")
-    if int(source_receipt["source_game_count"]) != len(accepted):
-        raise FuturePhaseCurveError("source receipt game count does not match accepted IDs")
-    expected_hash = identity_sha256(accepted)
-    if str(source_receipt["source_identity_sha256"]).lower() != expected_hash:
-        raise FuturePhaseCurveError("source receipt identity hash does not match accepted IDs")
-    cutoff = _as_timestamp(source_receipt["source_as_of"], "source_as_of")
+    verified_receipt = _validate_source_receipt(
+        source_receipt,
+        source_receipt_path=source_receipt_path,
+        source_receipt_file_sha256=source_receipt_file_sha256,
+    )
+    accepted = tuple(verified_receipt["accepted_game_ids"])
+    expected_hash = str(verified_receipt["source_identity_sha256"]).lower()
+    cutoff = _as_timestamp(verified_receipt["source_as_of"], "source_as_of")
     value = frame.copy()
     value["_game_id"] = _game_series(value, "phase frame")
     value["_date"] = _date_series(value, "phase frame")
@@ -777,7 +1027,7 @@ def bind_phase_source(
     if selected["_date"].gt(cutoff).any():
         raise FuturePhaseCurveError("phase frame contains rows after source_as_of")
     selected = selected.drop(columns=["_game_id", "_date"])
-    receipt = dict(source_receipt)
+    receipt = dict(verified_receipt)
     receipt["source_identity_sha256"] = expected_hash
     receipt["source_game_count"] = len(accepted)
     return BoundPhaseSource(frame=selected, receipt=receipt)
@@ -1038,6 +1288,8 @@ def fit_phase_curve(
     frame: pd.DataFrame,
     *,
     source_receipt: Mapping[str, Any],
+    source_receipt_path: Path | str | None = None,
+    source_receipt_file_sha256: str | None = None,
     feature_columns: Sequence[str] | None = None,
     alpha: float = 10.0,
     model_version: str = MODEL_VERSION,
@@ -1049,7 +1301,13 @@ def fit_phase_curve(
     training rows only.
     """
 
-    bound = bind_phase_source(frame, source_receipt, allow_subset=True)
+    bound = bind_phase_source(
+        frame,
+        source_receipt,
+        allow_subset=True,
+        source_receipt_path=source_receipt_path,
+        source_receipt_file_sha256=source_receipt_file_sha256,
+    )
     value = bound.frame.copy()
     selected_features = tuple(feature_columns or _default_feature_columns(value))
     assert_pregame_feature_names(selected_features)
@@ -1075,7 +1333,8 @@ def fit_phase_curve(
         for phase in PHASES
     ]
     observed_measures = phase_curve_measures(observed_gold, observed_xp)
-    return {
+    lineage = _source_lineage(bound.receipt)
+    output: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "model_version": model_version,
         "authority": "development_only",
@@ -1084,7 +1343,9 @@ def fit_phase_curve(
         "source_game_count": int(bound.receipt["source_game_count"]),
         "source_identity_sha256": str(bound.receipt["source_identity_sha256"]),
         "accepted_game_ids": list(bound.receipt["accepted_game_ids"]),
-        "source_receipt_sha256": _sha256_bytes(_canonical_json_bytes(bound.receipt)),
+        "source_receipt_sha256": str(bound.receipt["receipt_sha256"]),
+        "source_transport": lineage["transport"],
+        "source_lineage": lineage,
         "evaluation_game_count": int(len(value)),
         "evaluation_identity_sha256": identity_sha256(_game_series(value, "phase frame")),
         "series_identity": series_identity,
@@ -1134,6 +1395,12 @@ def fit_phase_curve(
             "promotion": False,
         },
     }
+    if source_receipt_path is not None:
+        output["source_receipt_artifact"] = _receipt_file_reference(
+            source_receipt_path,
+            expected_sha256=source_receipt_file_sha256,
+        )
+    return output
 
 
 def _predict_one(model: Mapping[str, Any] | None, vector: np.ndarray) -> tuple[float | None, float | None]:
@@ -1417,6 +1684,8 @@ def _evaluate_transfer_slices(
     frame: pd.DataFrame,
     *,
     source_receipt: Mapping[str, Any],
+    source_receipt_path: Path | str | None = None,
+    source_receipt_file_sha256: str | None = None,
     feature_columns: Sequence[str],
     columns: Sequence[str],
     alpha: float,
@@ -1455,6 +1724,8 @@ def _evaluate_transfer_slices(
             artifact = fit_phase_curve(
                 train,
                 source_receipt=source_receipt,
+                source_receipt_path=source_receipt_path,
+                source_receipt_file_sha256=source_receipt_file_sha256,
                 feature_columns=feature_columns,
                 alpha=alpha,
             )
@@ -1493,6 +1764,8 @@ def evaluate_phase_curve(
     frame: pd.DataFrame,
     *,
     source_receipt: Mapping[str, Any],
+    source_receipt_path: Path | str | None = None,
+    source_receipt_file_sha256: str | None = None,
     feature_columns: Sequence[str],
     n_splits: int = 3,
     cluster_column: str | None = None,
@@ -1502,7 +1775,13 @@ def evaluate_phase_curve(
 ) -> dict[str, Any]:
     """Evaluate each phase on future rows with fold-internal fitting."""
 
-    bound = bind_phase_source(frame, source_receipt, allow_subset=True)
+    bound = bind_phase_source(
+        frame,
+        source_receipt,
+        allow_subset=True,
+        source_receipt_path=source_receipt_path,
+        source_receipt_file_sha256=source_receipt_file_sha256,
+    )
     value = bound.frame.copy()
 
     folds = chronological_folds(
@@ -1532,6 +1811,8 @@ def evaluate_phase_curve(
         artifact = fit_phase_curve(
             train,
             source_receipt=source_receipt,
+            source_receipt_path=source_receipt_path,
+            source_receipt_file_sha256=source_receipt_file_sha256,
             feature_columns=feature_columns,
             alpha=alpha,
         )
@@ -1595,6 +1876,8 @@ def evaluate_phase_curve(
     transfer = _evaluate_transfer_slices(
         value,
         source_receipt=bound.receipt,
+        source_receipt_path=source_receipt_path,
+        source_receipt_file_sha256=source_receipt_file_sha256,
         feature_columns=feature_columns,
         columns=transfer_columns,
         alpha=alpha,
@@ -1612,7 +1895,8 @@ def evaluate_phase_curve(
     )
     series_identity = _series_identity_report(value)
     evaluation_dates = _date_series(value, "bound phase frame")
-    return {
+    lineage = _source_lineage(bound.receipt)
+    output: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "method": "chronological_fold_internal_ridge",
         "source": SOURCE,
@@ -1620,7 +1904,9 @@ def evaluate_phase_curve(
         "source_game_count": int(bound.receipt["source_game_count"]),
         "source_identity_sha256": str(bound.receipt["source_identity_sha256"]),
         "accepted_game_ids": list(bound.receipt["accepted_game_ids"]),
-        "source_receipt_sha256": _sha256_bytes(_canonical_json_bytes(bound.receipt)),
+        "source_receipt_sha256": str(bound.receipt["receipt_sha256"]),
+        "source_transport": lineage["transport"],
+        "source_lineage": lineage,
         "evaluation_game_count": int(len(value)),
         "evaluation_identity_sha256": identity_sha256(_game_series(value, "phase frame")),
         "evaluation_window": {
@@ -1664,6 +1950,12 @@ def evaluate_phase_curve(
         "side_swap_invariance": side_swap,
         "authority": "development_only",
     }
+    if source_receipt_path is not None:
+        output["source_receipt_artifact"] = _receipt_file_reference(
+            source_receipt_path,
+            expected_sha256=source_receipt_file_sha256,
+        )
+    return output
 
 
 def side_swap_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -1705,4 +1997,5 @@ __all__ = [
     "side_swap_frame",
     "strict_prior_final_history",
     "verify_accepted_census_artifact",
+    "verify_source_receipt_artifact",
 ]

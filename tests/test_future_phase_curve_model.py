@@ -9,6 +9,7 @@ import pytest
 
 from lol_kills.research.future_phase_curve import (
     FuturePhaseCurveError,
+    bind_phase_source,
     chronological_folds,
     evaluate_phase_curve,
     fit_phase_curve,
@@ -19,18 +20,61 @@ from lol_kills.research.future_phase_curve import (
     side_swap_invariance_report,
     strict_prior_final_history,
     verify_accepted_census_artifact,
+    verify_source_receipt_artifact,
 )
 from lol_kills.v2.tierlists.accepted_census import canonical_game_ids, identity_sha256
 
 
 def _receipt(ids: list[str]) -> dict[str, object]:
     ids = list(canonical_game_ids(ids))
-    return {
+    payload: dict[str, object] = {
+        "schema_version": "scryglass:future-value-rating-source:v1",
         "source_as_of": "2026-08-20T23:59:59Z",
         "source_game_count": len(ids),
         "source_identity_sha256": identity_sha256(ids),
         "accepted_game_ids": ids,
+        "authority": {
+            "research_only": True,
+            "deployment": False,
+            "merge": False,
+            "promotion": False,
+            "public_player_rating": False,
+            "public_team_rating": False,
+            "public_probability": False,
+        },
+        "source_files": {
+            "annual_2025": {"locator": "2025.csv", "bytes": 1, "sha256": "a" * 64, "year": 2025},
+            "annual_2026": {"locator": "2026.csv", "bytes": 1, "sha256": "b" * 64, "year": 2026},
+            "bridge_oe_api_meta.json": {
+                "locator": "oe_api_meta.json",
+                "bytes": 1,
+                "sha256": "c" * 64,
+            },
+            "bridge_oe_api_player_games.parquet": {
+                "locator": "oe_api_player_games.parquet",
+                "bytes": 1,
+                "sha256": "d" * 64,
+            },
+            "bridge_oe_api_team_games.parquet": {
+                "locator": "oe_api_team_games.parquet",
+                "bytes": 1,
+                "sha256": "e" * 64,
+            },
+            "maps": {"locator": "maps.parquet", "bytes": 1, "sha256": "f" * 64},
+            "players": {"locator": "players.parquet", "bytes": 1, "sha256": "0" * 64},
+            "teams": {"locator": "teams.parquet", "bytes": 1, "sha256": "1" * 64},
+        },
     }
+    payload["receipt_sha256"] = hashlib.sha256(
+        json.dumps(
+            payload,
+            allow_nan=False,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return payload
 
 
 def _phase_frame(rows: int = 12) -> pd.DataFrame:
@@ -262,6 +306,75 @@ def test_phase_source_rejects_rows_outside_the_accepted_census() -> None:
         )
 
 
+def test_phase_source_rejects_forged_receipts_and_source_file_records() -> None:
+    frame = _phase_frame(4)
+    receipt = _receipt(frame["game_uid"].tolist())
+    forged_hash = dict(receipt)
+    forged_hash["source_identity_sha256"] = "0" * 64
+    with pytest.raises(FuturePhaseCurveError, match="receipt hash"):
+        bind_phase_source(frame, forged_hash, allow_subset=True)
+
+    forged_file = dict(receipt)
+    forged_file["source_files"] = {
+        key: dict(value) for key, value in receipt["source_files"].items()
+    }
+    forged_file["source_files"]["annual_2025"]["sha256"] = "not-a-hash"
+    forged_file["receipt_sha256"] = hashlib.sha256(
+        json.dumps(
+            {key: value for key, value in forged_file.items() if key != "receipt_sha256"},
+            allow_nan=False,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    with pytest.raises(FuturePhaseCurveError, match="source file hash"):
+        bind_phase_source(frame, forged_file, allow_subset=True)
+
+    missing_bridge = dict(receipt)
+    missing_bridge["source_files"] = {
+        key: value
+        for key, value in receipt["source_files"].items()
+        if key != "bridge_oe_api_team_games.parquet"
+    }
+    missing_bridge["receipt_sha256"] = hashlib.sha256(
+        json.dumps(
+            {key: value for key, value in missing_bridge.items() if key != "receipt_sha256"},
+            allow_nan=False,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    with pytest.raises(FuturePhaseCurveError, match="required OE transport"):
+        bind_phase_source(frame, missing_bridge, allow_subset=True)
+
+
+def test_durable_source_receipt_artifact_is_verified(tmp_path: Path) -> None:
+    receipt = _receipt(["oe-api:1"])
+    path = tmp_path / "source-receipt.json"
+    raw = json.dumps(receipt, indent=2, sort_keys=True).encode("utf-8")
+    path.write_bytes(raw)
+    reference = {
+        "locator": path.name,
+        "bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "source_receipt_sha256": receipt["receipt_sha256"],
+    }
+    verified = verify_source_receipt_artifact(
+        reference,
+        runtime_root=tmp_path,
+        expected_source_game_count=1,
+        expected_source_identity_sha256=receipt["source_identity_sha256"],
+        expected_source_as_of=receipt["source_as_of"],
+    )
+    assert verified["status"] == "verified"
+    assert verified["source_receipt_sha256"] == receipt["receipt_sha256"]
+    assert verified["transport"] == (
+        "official_public_oracles_elixir_annual_exports_plus_oe_api_bridge"
+    )
+
+
 def test_strict_prior_history_excludes_same_timestamp_rows() -> None:
     frame = pd.DataFrame(
         [
@@ -421,9 +534,16 @@ def test_static_phase_artifacts_bind_the_accepted_census_reference() -> None:
     )
     source = candidate["source"]
     reference = source["accepted_game_ids_artifact"]
+    receipt_reference = candidate["source_receipt_artifact"]
     assert source["source_as_of"] == evaluation["source_as_of"]
     assert source["source_game_count"] == evaluation["source_game_count"] == 17756
     assert source["source_identity_sha256"] == evaluation["source_identity_sha256"]
+    assert candidate["source_receipt_sha256"] == evaluation["source_receipt_sha256"]
+    assert candidate["source_receipt_sha256"] == receipt_reference["source_receipt_sha256"]
+    assert source["transport"] == (
+        "official_public_oracles_elixir_annual_exports_plus_oe_api_bridge"
+    )
+    assert evaluation["source_transport"] == source["transport"]
     assert candidate["evaluation_scope"]["date_end"] == source["source_as_of"]
     assert evaluation["evaluation_window"]["date_end"] == evaluation["source_as_of"]
     assert evaluation["cluster_safe"] is False
@@ -445,3 +565,14 @@ def test_static_phase_artifacts_bind_the_accepted_census_reference() -> None:
     assert verified["status"] == "verified"
     assert verified["game_count"] == evaluation["source_game_count"]
     assert verified["source_identity_sha256"] == evaluation["source_identity_sha256"]
+    receipt_path = root / receipt_reference["locator"]
+    verified_receipt = verify_source_receipt_artifact(
+        receipt_reference,
+        runtime_root=root,
+        expected_source_game_count=evaluation["source_game_count"],
+        expected_source_identity_sha256=evaluation["source_identity_sha256"],
+        expected_source_as_of=evaluation["source_as_of"],
+    )
+    assert receipt_path.is_file()
+    assert verified_receipt["source_receipt_sha256"] == candidate["source_receipt_sha256"]
+    assert verified_receipt["transport"] == source["transport"]

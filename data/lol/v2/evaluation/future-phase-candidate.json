@@ -1,5 +1,13 @@
 {
   "authority": "development_only",
+  "source_receipt_sha256": "71379924eaf4731a88de463d4abf26607bd465a8dd13b2d42789d6d1eb354134",
+  "source_receipt_artifact": {
+    "bytes": 1020795,
+    "locator": "data/lol/v2/evaluation/future-value-source-receipt-20260820.json",
+    "sha256": "549c6143e78c0a218b47d05b6de4eb62925427abc11d13df7b5bae3b784eaf8f",
+    "source_receipt_sha256": "71379924eaf4731a88de463d4abf26607bd465a8dd13b2d42789d6d1eb354134",
+    "verification": "read the durable receipt, verify its file hash, recompute receipt_sha256, and verify source-file hashes"
+  },
   "blockers": [
     "fold-internal fitted weights have no independent promotion receipt",
     "808 accepted maps have incomplete stable team identity and retain explicit missing pregame team-form features",
@@ -396,6 +404,17 @@
     "source_as_of": "2026-08-20T11:31:37Z",
     "source_game_count": 17756,
     "source_identity_sha256": "b83e45561932469b4b7ff3b88d383b473ff17e0a10f612d3fb97f83e30e2e8b1",
-    "transport": "official_public_oracles_elixir_annual_exports"
+    "source_receipt_sha256": "71379924eaf4731a88de463d4abf26607bd465a8dd13b2d42789d6d1eb354134",
+    "transport": "official_public_oracles_elixir_annual_exports_plus_oe_api_bridge",
+    "lineage": {
+      "annual_exports": ["annual_2025", "annual_2026"],
+      "oe_api_bridge": [
+        "bridge_oe_api_meta.json",
+        "bridge_oe_api_player_games.parquet",
+        "bridge_oe_api_team_games.parquet"
+      ],
+      "identity_binding": "accepted_game_ids and source-file hashes",
+      "research_only": true
+    }
   }
 }
