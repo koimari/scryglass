@@ -11,7 +11,7 @@ on:
       - lol_kills/research/future_phase_curve.py
       - lol_kills/research/future_value_rating.py
       - lol_kills/research/future_value_training.py
-      - tests/test_future_value_rating.py
+      - tests/test_future_value*.py
 
 permissions:
   contents: read
@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   frozen-source:
-    name: Frozen OE source verification
+    name: Future value research checks
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -57,6 +57,7 @@ jobs:
           mkdir -p "${raw_root}" "${output_root}"
 
       - name: Download the frozen Oracle's Elixir annual exports
+        if: github.event_name == 'workflow_dispatch'
         run: |
           set -euo pipefail
           python -m lol_kills.etl.oe_fetch \
@@ -67,6 +68,7 @@ jobs:
             --destination "${SCRYGLASS_OE_RAW_DIR}/2026_LoL_esports_match_data_from_OraclesElixir.csv"
 
       - name: Reject changed annual source bytes
+        if: github.event_name == 'workflow_dispatch'
         run: |
           python -m lol_kills.research.future_value_training \
             --annual-root "${SCRYGLASS_OE_RAW_DIR}" \
@@ -75,6 +77,7 @@ jobs:
             --annual-only
 
       - name: Build the isolated OE warehouse
+        if: github.event_name == 'workflow_dispatch'
         run: |
           python -m lol_kills.refresh_warehouse \
             --oe-years 2025 2026 \
@@ -82,6 +85,7 @@ jobs:
             --skip-grid
 
       - name: Verify the exact census and research receipt
+        if: github.event_name == 'workflow_dispatch'
         run: |
           python -m lol_kills.research.future_value_training \
             --annual-root "${SCRYGLASS_OE_RAW_DIR}" \
@@ -90,7 +94,7 @@ jobs:
             --output-root "${FUTURE_VALUE_OUTPUT_ROOT}"
 
       - name: Run focused contract tests
-        run: python -m pytest -q tests/test_future_value_rating.py
+        run: python -m pytest -q tests/test_future_value*.py
 
       - name: Write the research summary
         if: always()
@@ -104,7 +108,8 @@ jobs:
           with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as stream:
               stream.write("## Future value research\n\n")
               if not path.is_file():
-                  stream.write("The frozen-source receipt was not produced.\n")
+                  stream.write("The pull-request checks passed without downloading the frozen OE files.\n")
+                  stream.write("Run the manual workflow for the full frozen-source receipt.\n")
               else:
                   value = json.loads(path.read_text(encoding="utf-8"))
                   stream.write(f"- Status: `{value['status']}`\n")
@@ -115,7 +120,7 @@ jobs:
           PY
 
       - name: Upload research receipts
-        if: always()
+        if: always() && github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: future-value-research-${{ github.run_id }}
