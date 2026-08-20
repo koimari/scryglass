@@ -1989,9 +1989,14 @@ def _global_fit_cache_key(
     lineups: dict[str, dict[str, list[tuple[str, str]]]],
     players: pd.DataFrame,
     cfg: GlobalPlayerBTConfig,
-    through: pd.Timestamp | None,
 ) -> str:
-    """Build a key from the exact cutoff census and fit contract."""
+    """Build a key from the exact cutoff census and fit contract.
+
+    The caller has already applied ``through`` in ``frame``. That filtered
+    frame, its lineups, and its scoped player rows are the complete fit input,
+    so the timestamp itself is redundant. This permits a later equivalent
+    cutoff between the same map blocks to reuse the exact fit.
+    """
 
     player_ids = _canonical_game_ids(players)
     frame_ids = set(frame["game_id"].astype(str))
@@ -2008,15 +2013,8 @@ def _global_fit_cache_key(
                 [list(value) for value in lineups[game_id]["Red"]],
             ]
         )
-    cutoff = None
-    if through is not None:
-        stamp = pd.Timestamp(through)
-        if stamp.tzinfo is not None:
-            stamp = stamp.tz_convert("UTC").tz_localize(None)
-        cutoff = stamp.isoformat()
     contract = {
         "schema": _global_fit_schema_fingerprint(),
-        "through": cutoff,
         "config": asdict(cfg),
         "frame": _frame_digest(frame),
         "players": _frame_digest(scoped_players),
@@ -2067,7 +2065,7 @@ def fit_global_player_bt(
         )
     cache_key = None
     if fit_cache is not None:
-        cache_key = _global_fit_cache_key(frame, lineups, players, cfg, through)
+        cache_key = _global_fit_cache_key(frame, lineups, players, cfg)
         cached = fit_cache.lookup(
             cache_key,
             require_validated=validate,

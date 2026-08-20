@@ -359,6 +359,65 @@ def test_global_fit_cache_discards_a_tampered_payload(tmp_path: Path) -> None:
     assert reloaded.lookup("unknown") is None
 
 
+def test_global_fit_cache_reuses_equivalent_cutoff_and_rejects_drift() -> None:
+    """Only the filtered census controls fit reuse, not its raw cutoff text."""
+
+    games = _locked_roster_games(rounds=2)
+    maps, players = _fixture(games)
+    cfg = _config(minimum_maps=1, performance_anchor_enabled=False)
+    cache = GlobalPlayerFitCache()
+    first_cutoff = pd.Timestamp("2026-01-01T19:30:00Z")
+    shifted_cutoff = pd.Timestamp("2026-01-02T00:00:00Z")
+    first_snapshot, first_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        through=first_cutoff,
+        validate=False,
+        fit_cache=cache,
+        fit_cache_slot="current",
+    )
+    shifted_snapshot, shifted_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        through=shifted_cutoff,
+        validate=False,
+        fit_cache=cache,
+        fit_cache_slot="current",
+    )
+    pd.testing.assert_frame_equal(first_snapshot, shifted_snapshot)
+    assert shifted_meta == first_meta
+    assert cache.hits == 1
+
+    extra_maps, extra_players = _fixture(
+        [*games, ("extra-game", "alpha", "beta", 1, "LCK")]
+    )
+    fit_global_player_bt(
+        extra_maps,
+        extra_players,
+        cfg,
+        through=pd.Timestamp("2026-01-02T00:00:00Z"),
+        validate=False,
+        fit_cache=cache,
+        fit_cache_slot="current",
+    )
+    assert cache.misses == 2
+
+    corrected_maps = maps.copy()
+    corrected_maps.loc[0, "y_blue_win"] = 1 - int(corrected_maps.loc[0, "y_blue_win"])
+    fit_global_player_bt(
+        corrected_maps,
+        players,
+        cfg,
+        through=first_cutoff,
+        validate=False,
+        fit_cache=cache,
+        fit_cache_slot="current",
+    )
+    assert cache.misses == 3
+
+
 def test_weekly_replay_context_keeps_json_exact_and_skips_replay(monkeypatch, tmp_path: Path) -> None:
     """An object-local replay pass reproduces weekly output byte-for-byte."""
 
