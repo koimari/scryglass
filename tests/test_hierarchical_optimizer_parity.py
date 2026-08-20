@@ -355,3 +355,45 @@ def test_hierarchical_cache_rejects_a_readable_tampered_snapshot(
         source_identity_sha256="source-a",
     )
     assert len(optimizer_calls) == 2
+
+
+def test_hierarchical_cache_rejects_changed_implementation_or_schema(
+    tmp_path,
+    monkeypatch: Any,
+) -> None:
+    maps = _fixture()
+    real_minimize = hierarchical_bt.minimize
+    optimizer_calls: list[None] = []
+
+    def counted_minimize(*args: Any, **kwargs: Any) -> Any:
+        optimizer_calls.append(None)
+        return real_minimize(*args, **kwargs)
+
+    monkeypatch.setattr(hierarchical_bt, "minimize", counted_minimize)
+    hierarchical_bt.fit_hierarchical_bt(
+        maps,
+        write=True,
+        output_dir=tmp_path,
+        cache_dir=tmp_path,
+        source_identity_sha256="source-a",
+    )
+    monkeypatch.setattr(hierarchical_bt, "HIERARCHICAL_IMPLEMENTATION_SHA256", "changed")
+    hierarchical_bt.fit_hierarchical_bt(
+        maps,
+        write=False,
+        cache_dir=tmp_path,
+        source_identity_sha256="source-a",
+    )
+    assert len(optimizer_calls) == 2
+
+    manifest_path = tmp_path / hierarchical_bt.HIERARCHICAL_CACHE_MANIFEST
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["current"]["snapshot"]["columns"] = ["tampered"]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    hierarchical_bt.fit_hierarchical_bt(
+        maps,
+        write=False,
+        cache_dir=tmp_path,
+        source_identity_sha256="source-a",
+    )
+    assert len(optimizer_calls) == 3
