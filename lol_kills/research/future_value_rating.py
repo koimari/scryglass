@@ -44,6 +44,8 @@ MODEL_CONTRACT_VERSION = "scryglass:future-value-rating-contract:v1"
 MODEL_FIT_SCHEMA_VERSION = "scryglass:future-value-model-fit:v1"
 TIME_DECAY_HALF_LIFE_DAYS = 120.0
 RANK_3 = 3
+SIDE_SWAP_MEAN_TOLERANCE = 0.01
+SIDE_SWAP_MAX_TOLERANCE = 0.02
 FORM_METRICS = (
     "cs_per_min",
     "gold_per_min",
@@ -763,6 +765,34 @@ class Rank3AtomModel:
     fit_game_ids: tuple[str, ...]
     fit_window_end: str
 
+    def parameter_receipt(self) -> dict[str, Any]:
+        """Return every fitted atom parameter and one canonical digest."""
+
+        parameters: dict[str, Any] = {
+            "metric_names": list(self.metric_names),
+            "rank": int(self.rank),
+            "center": [float(value) for value in self.center],
+            "scale": [float(value) for value in self.scale],
+            "components": [
+                [float(value) for value in row] for row in self.components
+            ],
+            "champion_role_coordinates": {
+                str(key): [float(value) for value in self.champion_role_coordinates[key]]
+                for key in sorted(self.champion_role_coordinates)
+            },
+            "champion_role_support": {
+                str(key): int(self.champion_role_support[key])
+                for key in sorted(self.champion_role_support)
+            },
+            "fit_game_ids": list(self.fit_game_ids),
+            "fit_game_identity_sha256": identity_sha256(self.fit_game_ids),
+            "fit_window_end": self.fit_window_end,
+        }
+        parameters["parameter_sha256"] = hashlib.sha256(
+            _canonical_json_bytes(parameters)
+        ).hexdigest()
+        return parameters
+
     def transform(self, form: pd.DataFrame) -> pd.DataFrame:
         required = {"champion", "role", "player_id", *self.metric_names}
         missing = sorted(required - set(form.columns))
@@ -939,10 +969,7 @@ def _map_model_frame(maps: pd.DataFrame) -> pd.DataFrame:
         raise FutureValueSourceError("model maps do not have one dated row per game")
     if not frame["target"].isin({0, 1}).all():
         raise FutureValueSourceError("model maps contain an invalid result target")
-    series_column = next(
-        (name for name in ("series_id", "seriesid", "match_id", "matchid") if name in frame.columns),
-        None,
-    )
+    series_column = "grid_series_id" if "grid_series_id" in frame.columns else None
     valid_authoritative_series = False
     if series_column is not None:
         series = frame[series_column].astype("string").str.strip()
@@ -964,8 +991,8 @@ def _map_model_frame(maps: pd.DataFrame) -> pd.DataFrame:
             (
                 (blue_name, red_name)
                 for blue_name, red_name in (
-                    ("blue_team_key", "red_team_key"),
                     ("blue_teamid", "red_teamid"),
+                    ("blue_team_key", "red_team_key"),
                     ("blue_team", "red_team"),
                 )
                 if blue_name in frame.columns and red_name in frame.columns
@@ -1012,6 +1039,8 @@ def _map_model_frame(maps: pd.DataFrame) -> pd.DataFrame:
                     ),
                     "max_cluster_size": int(cluster_sizes.max()),
                     "key_fields": ["league", "tournament", "unordered_team_pair"],
+                    "team_identity_columns": [blue_team, red_team],
+                    "stable_team_ids": team_columns == ("blue_teamid", "red_teamid"),
                 }
             else:
                 frame["series_id"] = frame["game_id"]
@@ -1340,6 +1369,28 @@ class FutureValueFoldModel:
             for feature, value in zip(self.feature_names, self.coefficients)
         }
 
+    def parameter_receipt(self) -> dict[str, Any]:
+        """Return the fitted fold parameters needed to reproduce predictions."""
+
+        parameters: dict[str, Any] = {
+            "feature_names": list(self.feature_names),
+            "feature_means": {
+                feature: float(value)
+                for feature, value in zip(self.feature_names, self.means)
+            },
+            "feature_scales": {
+                feature: float(value)
+                for feature, value in zip(self.feature_names, self.scales)
+            },
+            "coefficients": self.coefficient_map,
+            "intercept": float(self.intercept),
+            "rank_3": self.atom_model.parameter_receipt(),
+        }
+        parameters["parameter_sha256"] = hashlib.sha256(
+            _canonical_json_bytes(parameters)
+        ).hexdigest()
+        return parameters
+
     def predict_logit(self, design: pd.DataFrame) -> pd.Series:
         missing = sorted(set(self.feature_names) - set(design.columns))
         if missing:
@@ -1406,6 +1457,7 @@ class FutureValueFoldModel:
         return output
 
     def receipt(self) -> dict[str, Any]:
+        parameters = self.parameter_receipt()
         return {
             "schema_version": MODEL_FIT_SCHEMA_VERSION,
             "fit_game_count": len(self.fit_game_ids),
@@ -1415,14 +1467,10 @@ class FutureValueFoldModel:
             "metric_weights": self.metric_weights,
             "coefficients": self.coefficient_map,
             "intercept": float(self.intercept),
-            "rank_3": {
-                "rank": int(self.atom_model.rank),
-                "fit_window_end": self.atom_model.fit_window_end,
-                "champion_role_cells": len(self.atom_model.champion_role_coordinates),
-                "fit_game_count": len(self.atom_model.fit_game_ids),
-                "fit_game_ids": list(self.atom_model.fit_game_ids),
-                "fit_game_identity_sha256": identity_sha256(self.atom_model.fit_game_ids),
-            },
+            "feature_means": parameters["feature_means"],
+            "feature_scales": parameters["feature_scales"],
+            "parameter_sha256": parameters["parameter_sha256"],
+            "rank_3": parameters["rank_3"],
             "train_rows": int(self.train_rows),
             "withheld_rows": int(self.withheld_rows),
             "source_binding": {
@@ -1758,13 +1806,28 @@ def _side_swap_metrics(
         swapped_probability.to_numpy(dtype=float)
         - (1.0 - original_probability.to_numpy(dtype=float))
     )
+    mean_error = float(np.nanmean(symmetry_error))
+    max_error = float(np.nanmax(symmetry_error))
+    within_tolerance = bool(
+        np.isfinite(mean_error)
+        and np.isfinite(max_error)
+        and mean_error <= SIDE_SWAP_MEAN_TOLERANCE
+        and max_error <= SIDE_SWAP_MAX_TOLERANCE
+    )
     return {
-        "status": "available",
+        "status": "available" if within_tolerance else "blocked",
         "rows": int(len(swapped_probability)),
         "metrics": _classification_metrics(swapped_target, swapped_probability),
-        "mean_probability_complement_error": float(np.nanmean(symmetry_error)),
-        "max_probability_complement_error": float(np.nanmax(symmetry_error)),
-        "blockers": [],
+        "mean_probability_complement_error": mean_error,
+        "max_probability_complement_error": max_error,
+        "mean_probability_complement_tolerance": SIDE_SWAP_MEAN_TOLERANCE,
+        "max_probability_complement_tolerance": SIDE_SWAP_MAX_TOLERANCE,
+        "within_tolerance": within_tolerance,
+        "blockers": (
+            []
+            if within_tolerance
+            else ["side_swap_probability_complement_tolerance_exceeded"]
+        ),
     }
 
 
@@ -1888,6 +1951,8 @@ def _baseline_source_binding(
     train_game_ids: Sequence[str],
     validation_game_ids: Sequence[str],
     strict_cutoff: str,
+    expected_implementation_sha256: str,
+    expected_config_sha256: str,
     expected_series_source: str | None = None,
     expected_series_authoritative: bool | None = None,
 ) -> dict[str, Any]:
@@ -1968,8 +2033,12 @@ def _baseline_source_binding(
             blockers.append(f"{method}_strict_cutoff_mismatch")
     if not isinstance(implementation_hash, str) or len(implementation_hash) != 64:
         blockers.append(f"{method}_implementation_hash_missing")
+    elif implementation_hash.lower() != expected_implementation_sha256.lower():
+        blockers.append(f"{method}_implementation_hash_mismatch")
     if not isinstance(config_hash, str) or len(config_hash) != 64:
         blockers.append(f"{method}_config_hash_missing")
+    elif config_hash.lower() != expected_config_sha256.lower():
+        blockers.append(f"{method}_config_hash_mismatch")
     if method == "hierarchical_bt":
         if not isinstance(series_identity, Mapping):
             blockers.append(f"{method}_series_identity_missing")
@@ -1989,6 +2058,39 @@ def _baseline_source_binding(
                 != bool(expected_series_authoritative)
             ):
                 blockers.append(f"{method}_series_authority_mismatch")
+        fit = baseline_receipt.get("fit")
+        fit = fit if isinstance(fit, Mapping) else {}
+        if fit.get("optimizer_success") is not True:
+            blockers.append(f"{method}_optimizer_not_converged")
+        if fit.get("converged") is not True or fit.get("optimizer_status") != 0:
+            blockers.append(f"{method}_optimizer_status_invalid")
+        if fit.get("finite_fit_evidence") is not True:
+            blockers.append(f"{method}_finite_fit_evidence_missing")
+        for evidence_name in ("objective_value", "gradient_inf_norm"):
+            evidence = fit.get(evidence_name)
+            if (
+                not isinstance(evidence, (int, float, np.integer, np.floating))
+                or not np.isfinite(float(evidence))
+            ):
+                blockers.append(f"{method}_{evidence_name}_nonfinite")
+        if not isinstance(fit.get("optimizer_message"), str) or not str(
+            fit.get("optimizer_message")
+        ).strip():
+            blockers.append(f"{method}_optimizer_evidence_missing")
+        terms = baseline_receipt.get("terms")
+        term_values: list[Any] = []
+        if isinstance(terms, Mapping):
+            for value in terms.values():
+                if isinstance(value, Mapping):
+                    term_values.extend(value.values())
+                else:
+                    term_values.append(value)
+        if not term_values or any(
+            not isinstance(value, (int, float, np.integer, np.floating))
+            or not np.isfinite(float(value))
+            for value in term_values
+        ):
+            blockers.append(f"{method}_fit_terms_nonfinite")
     report.update(
         {
             "status": "available" if not blockers else "blocked",
@@ -2044,6 +2146,13 @@ def _run_current_rating_baselines(
     validation_ids = validation["game_id"].astype(str)
     reports: dict[str, Any] = {}
     errors: dict[str, str] = {}
+    sequential_implementation_sha256 = _sequential_baseline_implementation_digest()
+    sequential_config_sha256 = hashlib.sha256(
+        _canonical_json_bytes(dict(PlayerEloConfig().__dict__))
+    ).hexdigest()
+    hierarchical_config_sha256 = hashlib.sha256(
+        _canonical_json_bytes(dict(HierarchicalBTConfig().__dict__))
+    ).hexdigest()
     sequential_output: pd.DataFrame | None = None
     sequential_receipt: Mapping[str, Any] | None = None
     try:
@@ -2064,12 +2173,12 @@ def _run_current_rating_baselines(
         train_game_ids=train_game_ids,
         validation_game_ids=validation_game_ids,
         strict_cutoff=strict_cutoff,
+        expected_implementation_sha256=sequential_implementation_sha256,
+        expected_config_sha256=sequential_config_sha256,
     )
     if sequential_receipt is None:
-        seq_binding["implementation_sha256"] = _sequential_baseline_implementation_digest()
-        seq_binding["config_sha256"] = hashlib.sha256(
-            _canonical_json_bytes(dict(PlayerEloConfig().__dict__))
-        ).hexdigest()
+        seq_binding["implementation_sha256"] = sequential_implementation_sha256
+        seq_binding["config_sha256"] = sequential_config_sha256
     seq_probability, seq_alignment = _baseline_output_alignment(
         validation,
         sequential_output,
@@ -2121,14 +2230,14 @@ def _run_current_rating_baselines(
         train_game_ids=train_game_ids,
         validation_game_ids=validation_game_ids,
         strict_cutoff=hierarchical_cutoff.isoformat(),
+        expected_implementation_sha256=HIERARCHICAL_IMPLEMENTATION_SHA256,
+        expected_config_sha256=hierarchical_config_sha256,
         expected_series_source=str(series_cluster.get("source") or ""),
         expected_series_authoritative=bool(series_cluster.get("authoritative")),
     )
     if hierarchical_receipt is None:
         hierarchical_binding["implementation_sha256"] = HIERARCHICAL_IMPLEMENTATION_SHA256
-        hierarchical_binding["config_sha256"] = hashlib.sha256(
-            _canonical_json_bytes(dict(HierarchicalBTConfig().__dict__))
-        ).hexdigest()
+        hierarchical_binding["config_sha256"] = hierarchical_config_sha256
     excluded_hierarchical: Iterable[str] = ()
     if isinstance(hierarchical_receipt, Mapping):
         missing = hierarchical_receipt.get("missing")
@@ -2170,6 +2279,16 @@ def _run_current_rating_baselines(
     return seq_probability, hierarchical_probability, reports
 
 
+def _ledger_value(value: Any) -> float | None:
+    """Return one finite JSON-safe ledger value."""
+
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if np.isfinite(numeric) else None
+
+
 def evaluate_future_value(
     maps: pd.DataFrame,
     players: pd.DataFrame,
@@ -2178,6 +2297,9 @@ def evaluate_future_value(
     half_life_days: float = TIME_DECAY_HALF_LIFE_DAYS,
     min_cell_support: int = 1,
     source_receipt: Mapping[str, Any] | None = None,
+    source_receipt_path: str | None = None,
+    source_receipt_file_sha256: str | None = None,
+    runtime_receipt_path: str | None = None,
 ) -> dict[str, Any]:
     """Run a development-only chronological whole-series evaluation."""
 
@@ -2187,6 +2309,23 @@ def evaluate_future_value(
         map_frame,
         require_full_eligible_set=True,
     )
+    if (source_receipt_path is None) != (source_receipt_file_sha256 is None):
+        raise FutureValueSourceError("source receipt path and file hash must be paired")
+    if source_receipt_path is not None:
+        durable_receipt = Path(source_receipt_path)
+        if not durable_receipt.is_file() or durable_receipt.is_symlink():
+            raise FutureValueSourceError("durable source receipt is missing or unsafe")
+        actual_receipt_file_sha256 = _sha256_path(durable_receipt)
+        if actual_receipt_file_sha256 != str(source_receipt_file_sha256).lower():
+            raise FutureValueSourceError("durable source receipt file hash changed")
+        try:
+            durable_payload = json.loads(durable_receipt.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise FutureValueSourceError("durable source receipt cannot be read") from error
+        if not isinstance(durable_payload, Mapping) or durable_payload.get(
+            "receipt_sha256"
+        ) != source_receipt.get("receipt_sha256"):
+            raise FutureValueSourceError("durable source receipt payload changed")
     form = build_time_decayed_prior_player_form(map_frame, players, half_life_days=half_life_days)
     folds = chronological_whole_series_folds(map_frame, n_folds=n_folds)
     fold_reports: list[dict[str, Any]] = []
@@ -2214,6 +2353,7 @@ def evaluate_future_value(
         "hierarchical_bt": [],
     }
     current_fold_reports: list[dict[str, Any]] = []
+    prediction_ledger_rows: list[dict[str, Any]] = []
     for fold in folds:
         model, design = fit_future_value_model(
             map_frame,
@@ -2362,6 +2502,22 @@ def evaluate_future_value(
             ),
             "blockers": sorted(set(current_blockers)),
         }
+        for row_index, game_id in zip(validation.index, validation["game_id"]):
+            prediction_ledger_rows.append(
+                {
+                    "fold": int(fold["fold"]),
+                    "game_id": str(game_id),
+                    "target": _ledger_value(target.loc[row_index]),
+                    "candidate": _ledger_value(prediction.loc[row_index]),
+                    "intercept": _ledger_value(baseline_probability.loc[row_index]),
+                    "sequential_player_elo": _ledger_value(
+                        sequential_probability.loc[row_index]
+                    ),
+                    "hierarchical_bt": _ledger_value(
+                        hierarchical_probability.loc[row_index]
+                    ),
+                }
+            )
         current_fold_reports.append(current_comparison)
         if len(current_ids):
             pooled_current_targets.append(common_target)
@@ -2429,6 +2585,7 @@ def evaluate_future_value(
         pooled_targets.append(paired_target)
         pooled_predictions.append(paired_prediction)
         pooled_baselines.append(paired_baseline)
+        model_parameters = model.parameter_receipt()
         fold_reports.append(
             {
                 "fold": fold["fold"],
@@ -2447,8 +2604,12 @@ def evaluate_future_value(
                 "validation_game_identity_sha256": identity_sha256(
                     fold["validation_game_ids"]
                 ),
-                "coefficients": model.coefficient_map,
-                "rank_3": model.receipt()["rank_3"],
+                "model_intercept": float(model.intercept),
+                "feature_means": model_parameters["feature_means"],
+                "feature_scales": model_parameters["feature_scales"],
+                "coefficients": model_parameters["coefficients"],
+                "model_parameter_sha256": model_parameters["parameter_sha256"],
+                "rank_3": model_parameters["rank_3"],
                 "prediction_coverage": float(prediction.notna().mean()),
                 "withheld_rows": int(prediction.isna().sum()),
                 "metric_weights": model.metric_weights,
@@ -2498,6 +2659,8 @@ def evaluate_future_value(
     blockers = sorted(set(blockers))
     if not str(cluster_source).startswith("authoritative:"):
         blockers.append("authoritative_series_id_missing_proxy_cluster_used")
+        blockers.append("phase_model_series_partition_non_comparable")
+    blockers = sorted(set(blockers))
     pooled_candidate_paired_methods: dict[str, Any] = {}
     for method_name, targets in pooled_candidate_paired_targets.items():
         predictions = pooled_candidate_paired_predictions[method_name]
@@ -2560,25 +2723,54 @@ def evaluate_future_value(
             "candidate_paired_methods": pooled_candidate_paired_methods,
             "blockers": ["current_rating_no_common_finite_rows"],
         }
-    return {
+    prediction_ledger_rows = sorted(
+        prediction_ledger_rows,
+        key=lambda row: (int(row["fold"]), str(row["game_id"])),
+    )
+    prediction_ledger = {
+        "schema_version": "scryglass:future-value-prediction-ledger:v1",
+        "columns": [
+            "fold",
+            "game_id",
+            "target",
+            "candidate",
+            "intercept",
+            "sequential_player_elo",
+            "hierarchical_bt",
+        ],
+        "row_count": len(prediction_ledger_rows),
+        "game_identity_sha256": identity_sha256(
+            row["game_id"] for row in prediction_ledger_rows
+        ),
+        "rows": prediction_ledger_rows,
+    }
+    prediction_ledger["sha256"] = hashlib.sha256(
+        _canonical_json_bytes(prediction_ledger_rows)
+    ).hexdigest()
+    source_payload = {
+        "game_count": int(len(map_frame)),
+        "source_game_count": int(source_receipt["source_game_count"]),
+        "source_identity_sha256": str(source_receipt["source_identity_sha256"]),
+        "accepted_game_ids": list(source_receipt["accepted_game_ids"]),
+        "model_eligible_game_count": int(len(verified_eligible_ids)),
+        "model_eligible_identity_sha256": identity_sha256(verified_eligible_ids),
+        "model_eligible_game_ids": list(verified_eligible_ids),
+        "series_cluster_source": cluster_source,
+        "series_cluster_audit": cluster_audit,
+        "cross_model_series_partition": "non_comparable",
+        "half_life_days": float(half_life_days),
+        "source_as_of": _utc_text(source_receipt["source_as_of"]),
+        "source_files": source_receipt["source_files"],
+        "source_receipt_sha256": str(source_receipt["receipt_sha256"]),
+        "source_latest": _utc_text(map_frame["date"].max()),
+    }
+    if source_receipt_path is not None:
+        source_payload["source_receipt_path"] = source_receipt_path
+        source_payload["source_receipt_file_sha256"] = source_receipt_file_sha256
+    result = {
         "schema_version": MODEL_FIT_SCHEMA_VERSION,
         "status": "development_evaluated",
-        "source": {
-            "game_count": int(len(map_frame)),
-            "source_game_count": int(source_receipt["source_game_count"]),
-            "source_identity_sha256": str(source_receipt["source_identity_sha256"]),
-            "accepted_game_ids": list(source_receipt["accepted_game_ids"]),
-            "model_eligible_game_count": int(len(verified_eligible_ids)),
-            "model_eligible_identity_sha256": identity_sha256(verified_eligible_ids),
-            "model_eligible_game_ids": list(verified_eligible_ids),
-            "series_cluster_source": cluster_source,
-            "series_cluster_audit": cluster_audit,
-            "half_life_days": float(half_life_days),
-            "source_as_of": _utc_text(source_receipt["source_as_of"]),
-            "source_files": source_receipt["source_files"],
-            "source_receipt_sha256": str(source_receipt["receipt_sha256"]),
-            "source_latest": _utc_text(map_frame["date"].max()),
-        },
+        "source": source_payload,
         "evaluation": {
             "requested_folds": int(n_folds),
             "valid_folds": len(fold_reports),
@@ -2593,6 +2785,7 @@ def evaluate_future_value(
             "pooled_current_rating_comparison": pooled_current_comparison,
         },
         "folds": fold_reports,
+        "prediction_ledger": prediction_ledger,
         "blockers": blockers,
         "authority": {
             "research_only": True,
@@ -2607,6 +2800,9 @@ def evaluate_future_value(
             "deployment": False,
         },
     }
+    if runtime_receipt_path is not None:
+        result["runtime_receipt_path"] = runtime_receipt_path
+    return result
 
 
 def future_value_model_contract() -> dict[str, Any]:
@@ -2668,7 +2864,7 @@ def future_value_model_contract() -> dict[str, Any]:
             "roster-change and tournament-boundary slices",
             "complete-case and withheld-row missingness counts",
             "sparse-support slice and support-uncertainty diagnostics",
-            "side-swap invariance diagnostic",
+            "side-swap probability-complement tolerance gate",
         ],
         "future_scope_blockers": [
             "current_player_team_rating_comparison",
@@ -2677,6 +2873,7 @@ def future_value_model_contract() -> dict[str, Any]:
             "missingness_robust_fit",
             "authoritative_series_identity",
             "authoritative_series_cluster_evaluation",
+            "phase_model_series_partition_comparability",
         ],
         "authority": {
             "public_player_rating": False,

@@ -21,8 +21,10 @@ from lol_kills.research.future_value_rating import (
 )
 from lol_kills.research.future_value_training import (
     FutureValueTrainingError,
+    run_model_evaluation,
     verify_bridge_sources,
 )
+from lol_kills.research import future_value_training as training_module
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 
@@ -204,6 +206,13 @@ def test_future_value_fit_returns_fitted_metric_weights_and_prediction() -> None
     assert model.receipt()["source_binding"]["accepted_game_ids"] == sorted(
         str(index) for index in range(1, 25)
     )
+    parameters = model.parameter_receipt()
+    assert parameters["intercept"] == pytest.approx(model.intercept)
+    assert set(parameters["feature_means"]) == set(model.feature_names)
+    assert set(parameters["feature_scales"]) == set(model.feature_names)
+    assert len(parameters["parameter_sha256"]) == 64
+    assert len(parameters["rank_3"]["parameter_sha256"]) == 64
+    assert parameters["rank_3"]["champion_role_coordinates"]
 
 
 def test_fit_requires_a_verified_source_receipt() -> None:
@@ -266,6 +275,59 @@ def test_proxy_series_keeps_repeated_team_tournament_rows_together() -> None:
     assert audit["collision_extra_map_count"] == 2
 
 
+def test_bare_source_neutral_series_id_does_not_claim_authority() -> None:
+    maps = pd.DataFrame(
+        [
+            {
+                "game_uid": f"g{index}",
+                "date": f"2026-01-0{index}T00:00:00Z",
+                "y_blue_win": index % 2,
+                "series_id": "unverified-series",
+                "league": "LEC",
+                "blue_teamid": "oe:team:a",
+                "red_teamid": "oe:team:b",
+            }
+            for index in range(1, 3)
+        ]
+    )
+    frame = _map_model_frame(maps)
+    assert frame.attrs["series_cluster_source"] == "conservative_series_superset"
+    assert frame.attrs["series_cluster_audit"]["authoritative"] is False
+    assert frame["series_id"].str.startswith("proxy:").all()
+
+
+def test_proxy_series_prefers_stable_team_ids_over_alias_keys() -> None:
+    maps = pd.DataFrame(
+        [
+            {
+                "game_uid": "g1",
+                "date": "2026-01-01T00:00:00Z",
+                "y_blue_win": 1,
+                "league": "LEC",
+                "blue_teamid": "oe:team:a",
+                "red_teamid": "oe:team:b",
+                "blue_team_key": "old-alias-a",
+                "red_team_key": "old-alias-b",
+            },
+            {
+                "game_uid": "g2",
+                "date": "2026-01-02T00:00:00Z",
+                "y_blue_win": 0,
+                "league": "LEC",
+                "blue_teamid": "oe:team:a",
+                "red_teamid": "oe:team:b",
+                "blue_team_key": "new-alias-a",
+                "red_team_key": "new-alias-b",
+            },
+        ]
+    )
+    frame = _map_model_frame(maps)
+    assert frame["series_id"].nunique() == 1
+    audit = frame.attrs["series_cluster_audit"]
+    assert audit["stable_team_ids"] is True
+    assert audit["team_identity_columns"] == ["blue_teamid", "red_teamid"]
+
+
 def test_evaluation_pairs_candidate_and_baseline_on_identical_game_ids() -> None:
     maps, players = _raw_source(60)
     game_ids = list(_frame_game_ids(maps, "maps"))
@@ -283,7 +345,11 @@ def test_evaluation_pairs_candidate_and_baseline_on_identical_game_ids() -> None
     assert fold["calibration"]["status"] == "available"
     assert fold["calibration"]["rows"] == fold["paired_rows"]
     assert fold["missingness"]["status"] == "available"
-    assert fold["side_swap"]["status"] == "available"
+    assert fold["side_swap"]["status"] == "blocked"
+    assert fold["side_swap"]["within_tolerance"] is False
+    assert fold["side_swap"]["blockers"] == [
+        "side_swap_probability_complement_tolerance_exceeded"
+    ]
     assert fold["regional_transfer"]["status"] == "unavailable"
     assert fold["patch_transfer"]["status"] == "unavailable"
     assert fold["tournament_boundary"]["status"] == "unavailable"
@@ -291,6 +357,26 @@ def test_evaluation_pairs_candidate_and_baseline_on_identical_game_ids() -> None
     assert "patch_transfer_slice_missing" in result["blockers"]
     assert "tournament_boundary_slice_missing" in result["blockers"]
     assert result["evaluation"]["pooled_calibration"]["rows"] == fold["paired_rows"]
+    ledger = result["prediction_ledger"]
+    assert ledger["row_count"] == fold["validation_game_id_count"]
+    assert ledger["columns"] == [
+        "fold",
+        "game_id",
+        "target",
+        "candidate",
+        "intercept",
+        "sequential_player_elo",
+        "hierarchical_bt",
+    ]
+    assert ledger["sha256"] == hashlib.sha256(
+        json.dumps(
+            ledger["rows"],
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
 
 
 def test_baseline_output_alignment_reports_missing_and_extra_ids() -> None:
@@ -337,6 +423,16 @@ def test_hierarchical_binding_requires_the_declared_proxy_series_receipt() -> No
             "source_types": ["conservative_series_superset"],
             "authoritative": False,
         },
+        "fit": {
+            "optimizer_success": True,
+            "optimizer_status": 0,
+            "optimizer_message": "CONVERGENCE",
+            "objective_value": 1.0,
+            "gradient_inf_norm": 0.01,
+            "finite_fit_evidence": True,
+            "converged": True,
+        },
+        "terms": {"side_logit": 0.1, "team_logit": {"a": 0.2}},
     }
     bound = _baseline_source_binding(
         "hierarchical_bt",
@@ -345,6 +441,8 @@ def test_hierarchical_binding_requires_the_declared_proxy_series_receipt() -> No
         train_game_ids=train_ids,
         validation_game_ids=validation_ids,
         strict_cutoff="2026-01-02T00:00:00+00:00",
+        expected_implementation_sha256="a" * 64,
+        expected_config_sha256="b" * 64,
         expected_series_source="conservative_series_superset",
         expected_series_authoritative=False,
     )
@@ -357,12 +455,98 @@ def test_hierarchical_binding_requires_the_declared_proxy_series_receipt() -> No
         train_game_ids=train_ids,
         validation_game_ids=validation_ids,
         strict_cutoff="2026-01-02T00:00:00+00:00",
+        expected_implementation_sha256="a" * 64,
+        expected_config_sha256="b" * 64,
         expected_series_source="conservative_series_superset",
         expected_series_authoritative=False,
     )
     assert mismatched["status"] == "blocked"
     assert "hierarchical_bt_series_source_mismatch" in mismatched["blockers"]
     assert "hierarchical_bt_series_authority_mismatch" in mismatched["blockers"]
+    forged = _baseline_source_binding(
+        "hierarchical_bt",
+        {**baseline, "implementation_sha256": "c" * 64, "config_sha256": "d" * 64},
+        source,
+        train_game_ids=train_ids,
+        validation_game_ids=validation_ids,
+        strict_cutoff="2026-01-02T00:00:00+00:00",
+        expected_implementation_sha256="a" * 64,
+        expected_config_sha256="b" * 64,
+        expected_series_source="conservative_series_superset",
+        expected_series_authoritative=False,
+    )
+    assert "hierarchical_bt_implementation_hash_mismatch" in forged["blockers"]
+    assert "hierarchical_bt_config_hash_mismatch" in forged["blockers"]
+    failed_fit = _baseline_source_binding(
+        "hierarchical_bt",
+        {
+            **baseline,
+            "fit": {
+                **baseline["fit"],
+                "converged": False,
+                "optimizer_status": 2,
+                "objective_value": float("nan"),
+            },
+        },
+        source,
+        train_game_ids=train_ids,
+        validation_game_ids=validation_ids,
+        strict_cutoff="2026-01-02T00:00:00+00:00",
+        expected_implementation_sha256="a" * 64,
+        expected_config_sha256="b" * 64,
+        expected_series_source="conservative_series_superset",
+        expected_series_authoritative=False,
+    )
+    assert "hierarchical_bt_optimizer_status_invalid" in failed_fit["blockers"]
+    assert "hierarchical_bt_objective_value_nonfinite" in failed_fit["blockers"]
+
+
+def test_sequential_binding_rejects_forged_implementation_and_config_hashes() -> None:
+    source = _source_receipt(["g1", "g2", "g3", "g4"])
+    train_ids = ["g1", "g2"]
+    validation_ids = ["g3", "g4"]
+    config = {"scale": 1.0}
+    config_hash = hashlib.sha256(
+        json.dumps(config, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
+    baseline = {
+        "source_receipt_sha256": source["receipt_sha256"],
+        "model_eligible_identity_sha256": source["model_eligible_identity_sha256"],
+        "train_game_identity_sha256": identity_sha256(train_ids),
+        "validation_game_identity_sha256": identity_sha256(validation_ids),
+        "strict_cutoff": "2026-01-02T00:00:00Z",
+        "implementation_digest": "a" * 64,
+        "rating_config": config,
+    }
+    valid = _baseline_source_binding(
+        "sequential_player_elo",
+        baseline,
+        source,
+        train_game_ids=train_ids,
+        validation_game_ids=validation_ids,
+        strict_cutoff="2026-01-02T00:00:00Z",
+        expected_implementation_sha256="a" * 64,
+        expected_config_sha256=config_hash,
+    )
+    assert valid["status"] == "available"
+    forged = _baseline_source_binding(
+        "sequential_player_elo",
+        {
+            **baseline,
+            "implementation_digest": "c" * 64,
+            "rating_config": {"scale": 2.0},
+        },
+        source,
+        train_game_ids=train_ids,
+        validation_game_ids=validation_ids,
+        strict_cutoff="2026-01-02T00:00:00Z",
+        expected_implementation_sha256="a" * 64,
+        expected_config_sha256=config_hash,
+    )
+    assert "sequential_player_elo_implementation_hash_mismatch" in forged[
+        "blockers"
+    ]
+    assert "sequential_player_elo_config_hash_mismatch" in forged["blockers"]
 
 
 def test_chronological_folds_keep_series_whole_and_dates_strict() -> None:
@@ -393,3 +577,77 @@ def test_bridge_receipt_binds_bytes_and_rejects_mutation(tmp_path) -> None:
     path.write_bytes(payload + b"changed")
     with pytest.raises(FutureValueTrainingError, match="bridge source changed"):
         verify_bridge_sources(tmp_path, freeze)
+
+
+def test_model_runtime_receipt_binds_code_source_environment_and_output(
+    tmp_path, monkeypatch
+) -> None:
+    game_ids = ["g1", "g2"]
+    source = _source_receipt(game_ids, source_as_of="2026-01-02T00:00:00Z")
+    source_path = tmp_path / "source.json"
+    source_path.write_text(json.dumps(source, sort_keys=True), encoding="utf-8")
+    source_file_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    oe_root = tmp_path / "oe"
+    oe_root.mkdir()
+    pd.DataFrame({"game_uid": game_ids}).to_parquet(oe_root / "maps.parquet")
+    pd.DataFrame({"game_uid": ["g1"] * 10 + ["g2"] * 10}).to_parquet(
+        oe_root / "oe_player_games.parquet"
+    )
+    pd.DataFrame({"game_uid": ["g1", "g1", "g2", "g2"]}).to_parquet(
+        oe_root / "oe_team_games.parquet"
+    )
+    normalized = {}
+    for label, name in (
+        ("maps", "maps.parquet"),
+        ("players", "oe_player_games.parquet"),
+        ("teams", "oe_team_games.parquet"),
+    ):
+        path = oe_root / name
+        normalized[label] = {
+            "bytes": path.stat().st_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "locator": f"warehouse/parquet/oe_live/{name}",
+        }
+    freeze = {
+        "reference_source_receipt_sha256": source["receipt_sha256"],
+        "source_receipt_file_sha256": source_file_hash,
+        "source_receipt_path": str(source_path),
+        "normalized_source_files": normalized,
+    }
+    monkeypatch.setattr(training_module, "_load_freeze", lambda _path: freeze)
+    monkeypatch.setattr(
+        training_module,
+        "_git_output",
+        lambda _root, *args: "" if args[0] == "status" else "f" * 40,
+    )
+
+    def fake_evaluation(*_args, **kwargs):
+        assert kwargs["source_receipt_path"] == str(source_path)
+        assert kwargs["source_receipt_file_sha256"] == source_file_hash
+        return {
+            "source": {},
+            "prediction_ledger": {"sha256": "a" * 64, "row_count": 2},
+            "authority": {"research_only": True, "deployment": False},
+        }
+
+    monkeypatch.setattr(training_module, "evaluate_future_value", fake_evaluation)
+    output_path = tmp_path / "model.json"
+    runtime_path = tmp_path / "runtime.json"
+    receipt = run_model_evaluation(
+        oe_root=oe_root,
+        freeze_path=tmp_path / "freeze.json",
+        source_receipt_path=source_path,
+        model_output_path=output_path,
+        runtime_receipt_path=runtime_path,
+        command=["python3", "-m", "future_value_training", "--fit-model"],
+    )
+    assert receipt["code_commit"] == "f" * 40
+    assert receipt["output"]["sha256"] == hashlib.sha256(
+        output_path.read_bytes()
+    ).hexdigest()
+    assert receipt["source"]["source_receipt_file_sha256"] == source_file_hash
+    assert receipt["environment"]["logical_cpu_count"]
+    assert receipt["authority"]["deployment"] is False
+    assert json.loads(runtime_path.read_text())["receipt_sha256"] == receipt[
+        "receipt_sha256"
+    ]

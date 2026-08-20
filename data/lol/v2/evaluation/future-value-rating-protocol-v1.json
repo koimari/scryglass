@@ -20,7 +20,7 @@
     "roster-change and tournament-boundary slices",
     "complete-case and withheld-row missingness counts",
     "sparse-support slice and support-uncertainty diagnostics",
-    "side-swap invariance diagnostic"
+    "side-swap probability-complement tolerance gate"
   ],
   "estimands": {
     "future_player_value": "Development-only marginal map-win logit contribution for one player in the next eligible map, using strictly prior form, role, champion-role atoms, and explicit support diagnostics.",
@@ -38,7 +38,8 @@
     "calibrated_uncertainty",
     "missingness_robust_fit",
     "authoritative_series_identity",
-    "authoritative_series_cluster_evaluation"
+    "authoritative_series_cluster_evaluation",
+    "phase_model_series_partition_comparability"
   ],
   "information_boundary": {
     "current_checkpoint_targets": "target only; forbidden from the same map pregame vector",
@@ -56,13 +57,13 @@
       "raw_sha256": "39000bb5f76900c8f05a899b44c6de4284de297a2aad6655a33776fd8a7f5c2e",
       "relationship": "The future-value model extends the deferred atom direction. It does not replace or amend the descriptive v6 rating."
     },
-    "dynamic_player_baseline": {
-      "locator": "lol_kills/v2/ratings/player/multileague_runner.py",
-      "raw_sha256": "d7d52b5f30fe7cd69a9b18fe88bf2fc54f74969c49a2f37fb418b6c114e2956b"
+    "future_value_model_builder": {
+      "locator": "lol_kills/research/future_value_rating.py",
+      "raw_sha256": "b0a269c9faa8066b460a2a90c39a1e0e928720d9e350b8c42df9655015de4426"
     },
     "phase_curve_builder": {
-      "locator": "lol_kills/research/draft_phase_curve.py",
-      "raw_sha256": "e4f4c1c748e8dfcfbc3a21938d92196d0c45e5a8fb3a50498c4fec9ec2604c6c"
+      "locator": "lol_kills/research/future_phase_curve.py",
+      "raw_sha256": "e0649465eb08a298fd6cee26df0b2614424b919c4ea0708363fe9fd5ffb009d5"
     }
   },
   "phase_outputs": [

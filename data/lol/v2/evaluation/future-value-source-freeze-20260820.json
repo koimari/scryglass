@@ -64,6 +64,25 @@
   "source_mode": "oe_only",
   "source_transport": "official_public_oracles_elixir_annual_exports_plus_oe_api_bridge",
   "reference_source_receipt_sha256": "71379924eaf4731a88de463d4abf26607bd465a8dd13b2d42789d6d1eb354134",
+  "normalized_source_files": {
+    "maps": {
+      "bytes": 907353,
+      "locator": "warehouse/parquet/oe_live/maps.parquet",
+      "sha256": "a5be8b97baa788eb89e66d09314397ba7736a9ddde73fa8f677e09071e828c82"
+    },
+    "players": {
+      "bytes": 31534539,
+      "locator": "warehouse/parquet/oe_live/oe_player_games.parquet",
+      "sha256": "ad5e30f41cf5d42d2f2c85e20528d80e0c5c4cc1aae72d147affbb766bde500a"
+    },
+    "teams": {
+      "bytes": 9327654,
+      "locator": "warehouse/parquet/oe_live/oe_team_games.parquet",
+      "sha256": "261049caca21207545ecc4b89bb9666ebb6ca53430e0ed8ae09d55ac515beba2"
+    }
+  },
+  "source_receipt_file_sha256": "549c6143e78c0a218b47d05b6de4eb62925427abc11d13df7b5bae3b784eaf8f",
+  "source_receipt_path": "data/lol/v2/evaluation/future-value-source-receipt-20260820.json",
   "unfiltered_source_game_count": 17762,
   "unfiltered_source_identity_sha256": "9bd725811ef06afee9799a573f848cae411010552d62876513b3626bf44d3813"
 }

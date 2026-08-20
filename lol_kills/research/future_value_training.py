@@ -8,9 +8,15 @@ verified source receipt and satisfy the frozen evaluation protocol.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
+import os
+import platform
 import re
+import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -20,6 +26,7 @@ from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.research.future_value_rating import (
     FutureValueSourceError,
     bind_accepted_future_value_source,
+    evaluate_future_value,
     write_source_receipt,
 )
 from lol_kills.v2.tierlists.accepted_census import (
@@ -29,6 +36,7 @@ from lol_kills.v2.tierlists.accepted_census import (
 
 
 SCHEMA_VERSION = "scryglass:future-value-research-run:v1"
+MODEL_RUNTIME_SCHEMA_VERSION = "scryglass:future-value-model-runtime:v1"
 FREEZE_SCHEMA_VERSION = "scryglass:future-value-source-freeze:v1"
 DEFAULT_FREEZE = Path(
     "data/lol/v2/evaluation/future-value-source-freeze-20260820.json"
@@ -102,6 +110,15 @@ def _load_freeze(path: Path) -> dict[str, Any]:
         r"[0-9a-f]{64}", reference_receipt, re.I
     ) is None:
         raise FutureValueTrainingError("future-value source freeze receipt reference is invalid")
+    receipt_path = value.get("source_receipt_path")
+    receipt_file_hash = value.get("source_receipt_file_sha256")
+    if (
+        not isinstance(receipt_path, str)
+        or not receipt_path.strip()
+        or not isinstance(receipt_file_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", receipt_file_hash, re.I) is None
+    ):
+        raise FutureValueTrainingError("future-value durable source receipt binding is invalid")
     return value
 
 
@@ -383,22 +400,254 @@ def verify_annual_only(
     return receipt
 
 
+def _load_json_mapping(path: Path, label: str) -> dict[str, Any]:
+    if not path.is_file() or path.is_symlink():
+        raise FutureValueTrainingError(f"{label} is missing or unsafe")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FutureValueTrainingError(f"{label} cannot be read") from error
+    if not isinstance(value, dict):
+        raise FutureValueTrainingError(f"{label} is not a JSON object")
+    return value
+
+
+def _row_game_ids(frame: pd.DataFrame, label: str) -> pd.Series:
+    if "game_uid" in frame.columns:
+        fallback = frame["gameid"] if "gameid" in frame.columns else None
+        values = [
+            canonical_source_game_key(
+                value,
+                fallback.loc[index] if fallback is not None else None,
+            )
+            for index, value in frame["game_uid"].items()
+        ]
+    elif "gameid" in frame.columns:
+        values = [canonical_source_game_key(value) for value in frame["gameid"]]
+    else:
+        raise FutureValueTrainingError(f"{label} has no game identity")
+    ids = pd.Series(values, index=frame.index, dtype="string")
+    if ids.isna().any() or ids.str.strip().eq("").any():
+        raise FutureValueTrainingError(f"{label} has an empty game identity")
+    return ids
+
+
+def _git_output(repo_root: Path, *arguments: str) -> str:
+    result = subprocess.run(
+        ["git", *arguments],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise FutureValueTrainingError("model runtime cannot bind the git source state")
+    return result.stdout.strip()
+
+
+def run_model_evaluation(
+    *,
+    oe_root: Path,
+    freeze_path: Path,
+    source_receipt_path: Path,
+    model_output_path: Path,
+    runtime_receipt_path: Path,
+    n_folds: int = 3,
+    command: list[str] | None = None,
+) -> dict[str, Any]:
+    """Run the frozen research model and emit a gate-grade runtime receipt."""
+
+    freeze = _load_freeze(freeze_path)
+    source_receipt = _load_json_mapping(source_receipt_path, "source receipt")
+    expected_receipt_hash = str(freeze["reference_source_receipt_sha256"])
+    expected_receipt_file_hash = str(freeze.get("source_receipt_file_sha256") or "")
+    expected_receipt_path = str(freeze.get("source_receipt_path") or "")
+    if source_receipt.get("receipt_sha256") != expected_receipt_hash:
+        raise FutureValueTrainingError("source receipt identity changed")
+    if not expected_receipt_path or Path(expected_receipt_path) != source_receipt_path:
+        raise FutureValueTrainingError("source receipt path does not match the freeze")
+    receipt_file_hash = _sha256(source_receipt_path)
+    if receipt_file_hash != expected_receipt_file_hash:
+        raise FutureValueTrainingError("source receipt file hash changed")
+
+    paths = {
+        "maps": oe_root / "maps.parquet",
+        "players": oe_root / "oe_player_games.parquet",
+        "teams": oe_root / "oe_team_games.parquet",
+    }
+    normalized_contract = freeze.get("normalized_source_files")
+    if not isinstance(normalized_contract, Mapping):
+        raise FutureValueTrainingError("normalized source file contract is missing")
+    frames: dict[str, pd.DataFrame] = {}
+    eligible_ids = set(str(value) for value in source_receipt["model_eligible_game_ids"])
+    for label, path in paths.items():
+        if not path.is_file() or path.is_symlink():
+            raise FutureValueTrainingError(f"model source is missing or unsafe: {label}")
+        contract = normalized_contract.get(label)
+        if (
+            not isinstance(contract, Mapping)
+            or contract.get("bytes") != path.stat().st_size
+            or contract.get("sha256") != _sha256(path)
+        ):
+            raise FutureValueTrainingError(f"normalized model source changed: {label}")
+        frame = pd.read_parquet(path)
+        ids = _row_game_ids(frame, label)
+        selected = frame.loc[ids.isin(eligible_ids)].copy()
+        selected["game_uid"] = ids.loc[selected.index].to_numpy()
+        frames[label] = selected.reset_index(drop=True)
+    if frames["maps"]["game_uid"].nunique() != len(eligible_ids):
+        raise FutureValueTrainingError("model map frame does not match the eligible census")
+
+    repo_root = Path(__file__).resolve().parents[2]
+    code_paths = [
+        "lol_kills/research/future_value_rating.py",
+        "lol_kills/research/future_value_training.py",
+        "lol_kills/ratings/player_elo.py",
+        "lol_kills/ratings/hierarchical_bt.py",
+    ]
+    dirty_code = _git_output(repo_root, "status", "--porcelain", "--", *code_paths)
+    if dirty_code:
+        raise FutureValueTrainingError("model code has uncommitted changes")
+    code_commit = _git_output(repo_root, "rev-parse", "HEAD")
+    started_at = datetime.now(timezone.utc)
+    started = time.perf_counter()
+    try:
+        from threadpoolctl import threadpool_info
+
+        threadpools = threadpool_info()
+    except (ImportError, RuntimeError):
+        threadpools = []
+    try:
+        result = evaluate_future_value(
+            frames["maps"],
+            frames["players"],
+            n_folds=int(n_folds),
+            source_receipt=source_receipt,
+            source_receipt_path=str(source_receipt_path),
+            source_receipt_file_sha256=receipt_file_hash,
+            runtime_receipt_path=str(runtime_receipt_path),
+        )
+    except FutureValueSourceError as error:
+        raise FutureValueTrainingError(str(error)) from error
+    result["source"]["normalized_source_files"] = {
+        str(label): dict(record)
+        for label, record in sorted(normalized_contract.items())
+    }
+    elapsed = time.perf_counter() - started
+    completed_at = datetime.now(timezone.utc)
+    _write_json(model_output_path, result)
+    output_hash = _sha256(model_output_path)
+    runtime: dict[str, Any] = {
+        "schema_version": MODEL_RUNTIME_SCHEMA_VERSION,
+        "status": "research_evaluation_complete",
+        "entrypoint": "lol_kills.research.future_value_training.run_model_evaluation",
+        "command": list(command or []),
+        "code_commit": code_commit,
+        "started_at": started_at.isoformat().replace("+00:00", "Z"),
+        "completed_at": completed_at.isoformat().replace("+00:00", "Z"),
+        "elapsed_seconds": float(elapsed),
+        "environment": {
+            "python_version": platform.python_version(),
+            "python_implementation": platform.python_implementation(),
+            "platform": platform.platform(),
+            "machine": platform.machine(),
+            "processor": platform.processor(),
+            "logical_cpu_count": os.cpu_count(),
+            "pid": os.getpid(),
+            "thread_environment": {
+                name: os.environ.get(name)
+                for name in (
+                    "OMP_NUM_THREADS",
+                    "OPENBLAS_NUM_THREADS",
+                    "MKL_NUM_THREADS",
+                    "NUMEXPR_NUM_THREADS",
+                    "VECLIB_MAXIMUM_THREADS",
+                )
+            },
+            "threadpools": threadpools,
+        },
+        "source": {
+            "source_as_of": source_receipt["source_as_of"],
+            "source_game_count": source_receipt["source_game_count"],
+            "source_identity_sha256": source_receipt["source_identity_sha256"],
+            "model_eligible_game_count": source_receipt["model_eligible_game_count"],
+            "model_eligible_identity_sha256": source_receipt[
+                "model_eligible_identity_sha256"
+            ],
+            "source_receipt_path": str(source_receipt_path),
+            "source_receipt_sha256": source_receipt["receipt_sha256"],
+            "source_receipt_file_sha256": receipt_file_hash,
+        },
+        "input_rows": {
+            "maps": int(len(frames["maps"])),
+            "players": int(len(frames["players"])),
+            "teams": int(len(frames["teams"])),
+        },
+        "output": {
+            "path": str(model_output_path),
+            "bytes": model_output_path.stat().st_size,
+            "sha256": output_hash,
+            "prediction_ledger_sha256": result["prediction_ledger"]["sha256"],
+            "prediction_ledger_rows": result["prediction_ledger"]["row_count"],
+        },
+        "authority": {
+            "research_only": True,
+            "public_player_rating": False,
+            "public_team_rating": False,
+            "public_probability": False,
+            "promotion": False,
+            "deployment": False,
+        },
+    }
+    runtime["receipt_sha256"] = hashlib.sha256(_canonical_bytes(runtime)).hexdigest()
+    _write_json(runtime_receipt_path, runtime)
+    return runtime
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--annual-root", type=Path, required=True)
+    parser.add_argument("--annual-root", type=Path)
     parser.add_argument("--oe-root", type=Path)
     parser.add_argument("--freeze", type=Path, default=DEFAULT_FREEZE)
-    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--output-root", type=Path)
     parser.add_argument("--annual-only", action="store_true")
+    parser.add_argument("--fit-model", action="store_true")
+    parser.add_argument("--source-receipt", type=Path)
+    parser.add_argument("--model-output", type=Path)
+    parser.add_argument("--runtime-receipt", type=Path)
+    parser.add_argument("--n-folds", type=int, default=3)
     args = parser.parse_args(argv)
     try:
-        if args.annual_only:
+        if args.fit_model:
+            required = {
+                "--oe-root": args.oe_root,
+                "--source-receipt": args.source_receipt,
+                "--model-output": args.model_output,
+                "--runtime-receipt": args.runtime_receipt,
+            }
+            missing = [name for name, value in required.items() if value is None]
+            if missing:
+                parser.error("model fit requires " + ", ".join(missing))
+            result = run_model_evaluation(
+                oe_root=args.oe_root,
+                freeze_path=args.freeze,
+                source_receipt_path=args.source_receipt,
+                model_output_path=args.model_output,
+                runtime_receipt_path=args.runtime_receipt,
+                n_folds=args.n_folds,
+                command=[sys.executable, "-m", __name__, *(argv or sys.argv[1:])],
+            )
+        elif args.annual_only:
+            if args.annual_root is None or args.output_root is None:
+                parser.error("--annual-root and --output-root are required")
             result = verify_annual_only(
                 annual_root=args.annual_root,
                 freeze_path=args.freeze,
                 output_root=args.output_root,
             )
         else:
+            if args.annual_root is None or args.output_root is None:
+                parser.error("--annual-root and --output-root are required")
             if args.oe_root is None:
                 parser.error("--oe-root is required unless --annual-only is set")
             result = verify_research_source(
@@ -425,4 +674,5 @@ __all__ = [
     "verify_annual_sources",
     "verify_bridge_sources",
     "verify_research_source",
+    "run_model_evaluation",
 ]
