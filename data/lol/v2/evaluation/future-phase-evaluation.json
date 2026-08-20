@@ -1,8 +1,11 @@
 {
   "authority": "development_only",
   "evaluation_rows": 17756,
-  "cluster_safe": true,
+  "cluster_safe": false,
+  "authoritative_series_identity": false,
   "cluster_column": "series_id",
+  "evaluation_game_count": 17756,
+  "evaluation_identity_sha256": "b83e45561932469b4b7ff3b88d383b473ff17e0a10f612d3fb97f83e30e2e8b1",
   "fold_count": 2,
   "folds": [
     {"fold": 0, "train_rows": 5424, "test_rows": 6159, "boundary_excluded_rows": 0, "boundary_excluded_clusters": 0},
@@ -10,7 +13,7 @@
   ],
   "evaluation_window": {
     "date_start": "2025-01-11T11:11:24Z",
-    "date_end": "2026-08-20T14:51:29Z",
+    "date_end": "2026-08-20T11:31:37Z",
     "regions": 50,
     "patches": 40,
     "accepted_phase_rows": 17756,
@@ -25,13 +28,27 @@
       "oe_bridge_team_date_proxy_rows": 524
     }
   },
+  "series_identity": {
+    "status": "blocked",
+    "authoritative": false,
+    "source_counts": {
+      "exact_id_proxy": 1349,
+      "team_date_proxy": 16407,
+      "game_fallback": 0
+    },
+    "blockers": [
+      "team_date_proxy identities can split one series across dates and collide on same-day events"
+    ]
+  },
   "checks": {
     "chronological_whole_series": {
       "cluster_column": "series_id",
       "requested_fold_count": 3,
       "valid_fold_count": 2,
       "status": "checked",
+      "authority_status": "blocked",
       "blocker": "the first chronological block has no earlier training rows and is excluded",
+      "series_identity_blocker": "team_date_proxy identities can split one series across dates and collide on same-day events",
       "fallback_cluster_rows": 0,
       "boundary_excluded_rows": 2,
       "boundary_excluded_clusters": 1,
@@ -71,7 +88,7 @@
       "max_abs_prediction_sum": 0.0,
       "missing_feature_rows_excluded": true
     },
-    "strict_pregame_leakage": {
+      "strict_pregame_leakage": {
       "status": "checked",
       "current_checkpoint_targets": "target_only",
       "final_metrics": "strict_prior_timestamp_blocks_only"
@@ -140,7 +157,14 @@
     "bytes": 441354,
     "schema_version": "scryglass:accepted-game-census:v1",
     "game_ids_field": "game_ids",
-    "verification": "read game_ids, canonicalize them, then compare source_game_count and source_identity_sha256"
+    "verification": "read game_ids, canonicalize them, then compare source_game_count and source_identity_sha256",
+    "verified": {
+      "status": "verified",
+      "bytes": 441354,
+      "sha256": "aa38b8a4eb9eee71406c834536bbdd200ca0fd2e6402acf0121defc0fb076227",
+      "game_count": 17756,
+      "source_identity_sha256": "b83e45561932469b4b7ff3b88d383b473ff17e0a10f612d3fb97f83e30e2e8b1"
+    }
   },
   "status": "research_candidate_only"
 }

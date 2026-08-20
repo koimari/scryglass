@@ -17,6 +17,7 @@ from lol_kills.research.future_phase_curve import (
     side_swap_frame,
     side_swap_invariance_report,
     strict_prior_final_history,
+    verify_accepted_census_artifact,
 )
 from lol_kills.v2.tierlists.accepted_census import canonical_game_ids, identity_sha256
 
@@ -42,6 +43,7 @@ def _phase_frame(rows: int = 12) -> pd.DataFrame:
             "region": "LCK" if index % 2 else "LEC",
             "patch": "16.1" if index < rows // 2 else "16.2",
             "series_id": f"series-{index // 2}",
+            "series_id_source": "exact_id_proxy",
             "prior_form_gold_diff": float(index - 5),
             "prior_form_gold_diff_missing": index == 3,
         }
@@ -140,6 +142,20 @@ def test_phase_pregame_feature_gate_rejects_bare_final_metrics() -> None:
         fit_phase_curve(frame, source_receipt=receipt, feature_columns=["earnedgold"])
     with pytest.raises(FuturePhaseCurveError, match="pregame phase features"):
         fit_phase_curve(frame, source_receipt=receipt, feature_columns=["goldat15"])
+
+
+def test_phase_source_rejects_rows_outside_the_accepted_census() -> None:
+    frame = _phase_frame(4)
+    extra = frame.iloc[[0]].copy()
+    extra["game_uid"] = "oe-api:outside-census"
+    frame = pd.concat([frame, extra], ignore_index=True)
+    receipt = _receipt(frame.loc[frame["game_uid"] != "oe-api:outside-census", "game_uid"].tolist())
+    with pytest.raises(FuturePhaseCurveError, match="outside the accepted census"):
+        fit_phase_curve(
+            frame,
+            source_receipt=receipt,
+            feature_columns=["prior_form_gold_diff"],
+        )
 
 
 def test_strict_prior_history_excludes_same_timestamp_rows() -> None:
@@ -271,6 +287,24 @@ def test_evaluation_has_transfer_and_missingness_sections() -> None:
                     assert group["metrics"][kind][phase]["baseline_rows_match"]
 
 
+def test_evaluation_blocks_non_authoritative_team_date_series_proxies() -> None:
+    frame = _phase_frame(16)
+    frame["series_id_source"] = "team_date_proxy"
+    receipt = _receipt(frame["game_uid"].tolist())
+    report = evaluate_phase_curve(
+        frame,
+        source_receipt=receipt,
+        feature_columns=["prior_form_gold_diff"],
+        n_splits=3,
+        cluster_column="series_id",
+    )
+    assert report["cluster_safe"] is False
+    assert report["series_identity"]["authoritative"] is False
+    assert report["series_identity"]["status"] == "blocked"
+    assert report["series_identity"]["source_counts"]["team_date_proxy"] == len(frame)
+    assert report["series_identity"]["blockers"]
+
+
 def test_static_phase_artifacts_bind_the_accepted_census_reference() -> None:
     root = Path(__file__).parents[1]
     candidate = json.loads(
@@ -284,6 +318,19 @@ def test_static_phase_artifacts_bind_the_accepted_census_reference() -> None:
     assert source["source_as_of"] == evaluation["source_as_of"]
     assert source["source_game_count"] == evaluation["source_game_count"] == 17756
     assert source["source_identity_sha256"] == evaluation["source_identity_sha256"]
+    assert candidate["evaluation_scope"]["date_end"] == source["source_as_of"]
+    assert evaluation["evaluation_window"]["date_end"] == evaluation["source_as_of"]
+    assert evaluation["cluster_safe"] is False
+    assert evaluation["authoritative_series_identity"] is False
     assert reference == evaluation["accepted_game_ids_artifact"]
     assert len(reference["sha256"]) == 64
     assert reference["game_ids_field"] == "game_ids"
+    verified = verify_accepted_census_artifact(
+        reference,
+        runtime_root=Path("/Users/river/Library/Application Support/Scryglass Worker"),
+        expected_source_game_count=evaluation["source_game_count"],
+        expected_source_identity_sha256=evaluation["source_identity_sha256"],
+    )
+    assert verified["status"] == "verified"
+    assert verified["game_count"] == evaluation["source_game_count"]
+    assert verified["source_identity_sha256"] == evaluation["source_identity_sha256"]

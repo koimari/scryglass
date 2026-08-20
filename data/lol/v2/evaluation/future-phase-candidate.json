@@ -5,13 +5,17 @@
     "808 accepted maps have incomplete stable team identity and retain explicit missing pregame team-form features",
     "the requested three chronological folds produce two valid folds because the first block has no earlier training rows",
     "regional transfer has one unavailable group, LFL2, and patch transfer has one unavailable group, 15.01",
+    "authoritative whole-series identity is unavailable for 16,407 team_date_proxy rows",
     "current output is not wired into public ratings or public phase forecasts"
   ],
   "evaluation_scope": {
     "population": "all accepted phase rows",
     "accepted_phase_rows": 17756,
     "date_start": "2025-01-11T11:11:24Z",
-    "date_end": "2026-08-20T14:51:29Z",
+    "date_end": "2026-08-20T11:31:37Z",
+    "cluster_safe": false,
+    "authoritative_series_identity": false,
+    "series_identity_blocker": "16,407 rows use team_date_proxy series identities; same-series continuation across dates and same-day collisions remain possible",
     "regions": 50,
     "patches": 40,
     "series_cluster_column": "series_id",
@@ -88,7 +92,14 @@
       "bytes": 441354,
       "schema_version": "scryglass:accepted-game-census:v1",
       "game_ids_field": "game_ids",
-      "verification": "read game_ids, canonicalize them, then compare source_game_count and source_identity_sha256"
+      "verification": "read game_ids, canonicalize them, then compare source_game_count and source_identity_sha256",
+      "verified": {
+        "status": "verified",
+        "bytes": 441354,
+        "sha256": "aa38b8a4eb9eee71406c834536bbdd200ca0fd2e6402acf0121defc0fb076227",
+        "game_count": 17756,
+        "source_identity_sha256": "b83e45561932469b4b7ff3b88d383b473ff17e0a10f612d3fb97f83e30e2e8b1"
+      }
     }
   }
 }

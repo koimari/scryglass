@@ -13,10 +13,12 @@ expected value, recommendations, or betting data.  A fitted artifact remains
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -222,6 +224,44 @@ def _series_cluster_labels(metadata: pd.DataFrame) -> tuple[pd.Series, pd.Series
         pd.Series(labels, index=metadata.index, dtype="string"),
         pd.Series(sources, index=metadata.index, dtype="string"),
     )
+
+
+def _series_identity_report(frame: pd.DataFrame) -> dict[str, Any]:
+    """Report whether the frame has authoritative whole-series identity."""
+
+    if "series_id_source" not in frame.columns:
+        return {
+            "status": "blocked",
+            "authoritative": False,
+            "source_counts": {},
+            "blockers": ["series identity provenance is unavailable"],
+        }
+    values = frame["series_id_source"].astype("string")
+    counts = {
+        str(key): int(value)
+        for key, value in values.value_counts(dropna=False).items()
+    }
+    blockers: list[str] = []
+    if counts.get("team_date_proxy", 0):
+        blockers.append(
+            "team_date_proxy identities can split one series across dates and collide on same-day events"
+        )
+    if counts.get("game_fallback", 0):
+        blockers.append("game-level fallback identities cannot prove whole-series membership")
+    unknown = sorted(
+        key
+        for key in counts
+        if key not in {"exact_id_proxy", "team_date_proxy", "game_fallback"}
+    )
+    if unknown:
+        blockers.append("unknown series identity provenance: " + ", ".join(unknown))
+    authoritative = not blockers and bool(counts)
+    return {
+        "status": "verified" if authoritative else "blocked",
+        "authoritative": authoritative,
+        "source_counts": counts,
+        "blockers": blockers,
+    }
 
 
 def _normalised_name(value: Any) -> str:
@@ -656,6 +696,12 @@ def bind_phase_source(
     value["_date"] = _date_series(value, "phase frame")
     accepted_set = set(accepted)
     available = set(value["_game_id"])
+    extra_ids = sorted(available - accepted_set)
+    if extra_ids:
+        raise FuturePhaseCurveError(
+            "phase frame contains game IDs outside the accepted census; "
+            f"extra_games={len(extra_ids)} sample={extra_ids[:5]}"
+        )
     missing_ids = sorted(accepted_set - available)
     if missing_ids and not allow_subset:
         raise FuturePhaseCurveError(f"phase frame is missing {len(missing_ids)} accepted games")
@@ -671,6 +717,74 @@ def bind_phase_source(
     receipt["source_identity_sha256"] = expected_hash
     receipt["source_game_count"] = len(accepted)
     return BoundPhaseSource(frame=selected, receipt=receipt)
+
+
+def verify_accepted_census_artifact(
+    reference: Mapping[str, Any],
+    *,
+    runtime_root: Path | str = Path("."),
+    expected_source_game_count: int | None = None,
+    expected_source_identity_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Verify a hash-bound accepted-game census referenced by an artifact."""
+
+    locator = str(reference.get("locator") or "").strip()
+    if not locator:
+        raise FuturePhaseCurveError("accepted census artifact has no locator")
+    path = Path(locator)
+    if not path.is_absolute():
+        path = Path(runtime_root) / path
+    try:
+        raw = path.read_bytes()
+    except OSError as error:
+        raise FuturePhaseCurveError("accepted census artifact is unavailable") from error
+    try:
+        expected_bytes = int(reference["bytes"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise FuturePhaseCurveError("accepted census artifact byte count is invalid") from error
+    expected_sha = str(reference.get("sha256") or "").lower()
+    if len(expected_sha) != 64 or any(value not in "0123456789abcdef" for value in expected_sha):
+        raise FuturePhaseCurveError("accepted census artifact hash is invalid")
+    if len(raw) != expected_bytes or _sha256_bytes(raw) != expected_sha:
+        raise FuturePhaseCurveError("accepted census artifact bytes or hash do not match")
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise FuturePhaseCurveError("accepted census artifact is not valid JSON") from error
+    if not isinstance(payload, Mapping):
+        raise FuturePhaseCurveError("accepted census artifact is not an object")
+    schema_version = str(reference.get("schema_version") or "")
+    if schema_version and payload.get("schema_version") != schema_version:
+        raise FuturePhaseCurveError("accepted census artifact schema does not match")
+    raw_ids = payload.get(str(reference.get("game_ids_field") or "game_ids"))
+    if not isinstance(raw_ids, list):
+        raise FuturePhaseCurveError("accepted census artifact has no game ID list")
+    accepted = tuple(str(value) for value in raw_ids)
+    canonical = canonical_game_ids(accepted)
+    if tuple(accepted) != canonical:
+        raise FuturePhaseCurveError("accepted census artifact game IDs are not canonical")
+    game_count = len(accepted)
+    identity = identity_sha256(accepted)
+    if payload.get("game_count") != game_count:
+        raise FuturePhaseCurveError("accepted census artifact game count is invalid")
+    if str(payload.get("source_identity_sha256") or "").lower() != identity:
+        raise FuturePhaseCurveError("accepted census artifact identity hash is invalid")
+    if expected_source_game_count is not None and game_count != int(expected_source_game_count):
+        raise FuturePhaseCurveError("accepted census artifact count differs from source contract")
+    if (
+        expected_source_identity_sha256 is not None
+        and identity != str(expected_source_identity_sha256).lower()
+    ):
+        raise FuturePhaseCurveError("accepted census artifact identity differs from source contract")
+    return {
+        "status": "verified",
+        "locator": locator,
+        "bytes": expected_bytes,
+        "sha256": expected_sha,
+        "schema_version": schema_version or payload.get("schema_version"),
+        "game_count": game_count,
+        "source_identity_sha256": identity,
+    }
 
 
 def _default_feature_columns(frame: pd.DataFrame) -> tuple[str, ...]:
@@ -876,6 +990,7 @@ def fit_phase_curve(
     selected_features = tuple(feature_columns or _default_feature_columns(value))
     assert_pregame_feature_names(selected_features)
     matrix, design_names = _design(value, selected_features)
+    series_identity = _series_identity_report(value)
     models: dict[str, dict[str, dict[str, Any] | None]] = {"gold": {}, "xp": {}}
     coverage: dict[str, dict[str, Any]] = {"gold": {}, "xp": {}}
     for kind in ("gold", "xp"):
@@ -906,6 +1021,9 @@ def fit_phase_curve(
         "source_identity_sha256": str(bound.receipt["source_identity_sha256"]),
         "accepted_game_ids": list(bound.receipt["accepted_game_ids"]),
         "source_receipt_sha256": _sha256_bytes(_canonical_json_bytes(bound.receipt)),
+        "evaluation_game_count": int(len(value)),
+        "evaluation_identity_sha256": identity_sha256(_game_series(value, "phase frame")),
+        "series_identity": series_identity,
         "feature_columns": list(selected_features),
         "design_columns": list(design_names),
         "feature_family": PHASE_FEATURE_FAMILY,
@@ -1428,6 +1546,7 @@ def evaluate_phase_curve(
         if "series_id_source" in value.columns
         else 0
     )
+    series_identity = _series_identity_report(value)
     return {
         "schema_version": SCHEMA_VERSION,
         "method": "chronological_fold_internal_ridge",
@@ -1437,12 +1556,15 @@ def evaluate_phase_curve(
         "source_identity_sha256": str(bound.receipt["source_identity_sha256"]),
         "accepted_game_ids": list(bound.receipt["accepted_game_ids"]),
         "source_receipt_sha256": _sha256_bytes(_canonical_json_bytes(bound.receipt)),
+        "evaluation_game_count": int(len(value)),
+        "evaluation_identity_sha256": identity_sha256(_game_series(value, "phase frame")),
         "folds": fold_rows,
         "metrics": metrics,
         "fold_count": len(fold_rows),
-        "cluster_safe": fallback_rows == 0,
+        "cluster_safe": bool(series_identity["authoritative"]),
         "cluster_column": cluster_column or "game_uid",
         "cluster_fallback_rows": fallback_rows,
+        "series_identity": series_identity,
         "cluster_boundary_exclusions": {
             "rows": int(
                 sum(
@@ -1512,4 +1634,5 @@ __all__ = [
     "side_swap_invariance_report",
     "side_swap_frame",
     "strict_prior_final_history",
+    "verify_accepted_census_artifact",
 ]
