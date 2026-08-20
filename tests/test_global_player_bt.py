@@ -9,7 +9,11 @@ from lol_kills.ratings.global_player_bt import (
     _contribution_metrics,
     fit_global_player_bt,
 )
-from lol_kills.ratings.player_elo import PlayerEloConfig, _apply_bridge_uncertainty
+from lol_kills.ratings.player_elo import (
+    PlayerBridgeContext,
+    PlayerEloConfig,
+    _apply_bridge_uncertainty,
+)
 
 
 ROLES = ("top", "jng", "mid", "bot", "sup")
@@ -195,6 +199,25 @@ def test_stronger_tier_history_reduces_bridge_uncertainty_without_moving_mean() 
     assert local_row["global_bridge_sigma"] == 45.0
     assert bridged_row["global_bridge_sigma"] < local_row["global_bridge_sigma"]
     assert bridged_row["sigma"] < local_row["sigma"]
+
+    context = PlayerBridgeContext.build(bridged)
+    for cutoff in (pd.Timestamp("2025-12-31"), pd.Timestamp("2026-01-01"), None):
+        direct = _apply_bridge_uncertainty(
+            rows,
+            bridged,
+            records,
+            PlayerEloConfig(),
+            through=cutoff,
+        )
+        reused = _apply_bridge_uncertainty(
+            rows,
+            bridged,
+            records,
+            PlayerEloConfig(),
+            through=cutoff,
+            bridge_context=context,
+        )
+        assert reused == direct
 
 
 def test_holdout_evidence_is_chronological_and_beats_side_only_baseline() -> None:

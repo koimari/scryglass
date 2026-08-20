@@ -755,6 +755,97 @@ def test_player_rating_builder_stores_workspace_in_object_local_replay(
     saved = replay.get("global_workspace")
     assert isinstance(saved, GlobalPlayerFitWorkspace)
     assert fit_workspaces == [saved]
+    bridge_context = replay.get("bridge_context")
+    assert isinstance(bridge_context, player_elo.PlayerBridgeContext)
+
+
+def test_weekly_replay_reuses_bridge_context_with_exact_output(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Prepared player rows remove repeated canonicalization at every cutoff."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=2))
+    players = _with_metrics(players, _roster_profiles())
+    cfg = player_elo.PlayerEloConfig(attribution_enabled=False)
+    cutoff = pd.Timestamp("2026-02-01T12:00:00Z")
+    names = sorted(players["playername"].unique())
+    states = {
+        name: player_elo.PlayerState(n_maps=3, last_date=pd.Timestamp("2026-01-01"))
+        for name in names
+    }
+    checkpoint_dates = player_elo.weekly_replay_checkpoint_dates(cutoff)
+    checkpoint_rows = player_elo._snapshot_rows(states, cfg=cfg)
+    checkpoints = {pd.Timestamp(date): checkpoint_rows for date in checkpoint_dates}
+    global_snapshot = pd.DataFrame(
+        {
+            "player": names,
+            "global_rating": np.full(len(names), 1500.0),
+            "global_connected": np.ones(len(names), dtype=int),
+            "global_component_size": np.full(len(names), len(names), dtype=int),
+            "global_model_maps": np.full(len(names), 3, dtype=int),
+        }
+    )
+    bridge_context = player_elo.PlayerBridgeContext.build(players)
+    workspace = GlobalPlayerFitWorkspace.build(maps, players)
+
+    def fake_replay(*_args, **_kwargs):
+        return pd.DataFrame(), states, checkpoints, {}
+
+    def fake_fit(*_args, **_kwargs):
+        return global_snapshot.copy(deep=True), {}
+
+    monkeypatch.setattr(player_elo, "_run_player_elo", fake_replay)
+    monkeypatch.setattr(player_elo, "fit_global_player_bt", fake_fit)
+    expected = player_elo.build_player_weekly_ranks(
+        maps,
+        players,
+        cfg=cfg,
+        output_dir=tmp_path / "expected",
+        as_of=cutoff,
+        min_games=1,
+        replay=None,
+    )
+    replay = {
+        "source_identity": player_elo._replay_source_identity(maps, players),
+        "config": dict(cfg.__dict__),
+        "states": states,
+        "checkpoints": checkpoints,
+        "recent_mus": {},
+        "current_global": global_snapshot,
+        "global_workspace": workspace,
+        "bridge_context": bridge_context,
+    }
+    canonicalize_calls = 0
+    bridge_context_ids: list[int] = []
+    real_canonicalize = player_elo.canonicalize_competition_frame
+    real_bridge = player_elo._apply_bridge_uncertainty
+
+    def counted_canonicalize(frame):
+        nonlocal canonicalize_calls
+        canonicalize_calls += 1
+        return real_canonicalize(frame)
+
+    def counted_bridge(*args, **kwargs):
+        bridge_context_ids.append(id(kwargs["bridge_context"]))
+        return real_bridge(*args, **kwargs)
+
+    monkeypatch.setattr(player_elo, "canonicalize_competition_frame", counted_canonicalize)
+    monkeypatch.setattr(player_elo, "_apply_bridge_uncertainty", counted_bridge)
+    actual = player_elo.build_player_weekly_ranks(
+        maps,
+        players,
+        cfg=cfg,
+        output_dir=tmp_path / "actual",
+        as_of=cutoff,
+        min_games=1,
+        replay=replay,
+    )
+    assert actual == expected
+    # The replay source check canonicalizes the map frame once. Player rows
+    # come from the stored canonical context, and all five bridge calls share
+    # its prepared support rows.
+    assert canonicalize_calls == 1
+    assert bridge_context_ids == [id(bridge_context)] * 5
 
 
 def test_weekly_replay_context_keeps_json_exact_and_skips_replay(monkeypatch, tmp_path: Path) -> None:

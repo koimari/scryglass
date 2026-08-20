@@ -1044,6 +1044,109 @@ def _apply_global_scale(
     return output
 
 
+@dataclass
+class PlayerBridgeContext:
+    """Canonical player rows and reusable bridge support counts.
+
+    The weekly ladder applies the same bridge rule at five cutoffs. Keep the
+    canonical competition frame and the filtered support rows in one
+    object-local context so each cutoff only performs its date filter and
+    groupby. The raw source digest prevents a context from crossing a refresh
+    with changed player rows.
+    """
+
+    canonical_players: pd.DataFrame
+    support_rows: pd.DataFrame
+    source_players_digest: str
+    counts_by_cutoff: dict[str, pd.Series] = field(default_factory=dict, repr=False)
+    bound_players_id: int | None = field(default=None, repr=False)
+
+    @classmethod
+    def build(cls, players: pd.DataFrame) -> "PlayerBridgeContext":
+        canonical_players = canonicalize_competition_frame(players).copy()
+        frame = canonical_players.copy()
+        date_source = (
+            frame["date"]
+            if "date" in frame.columns
+            else pd.Series(pd.NaT, index=frame.index)
+        )
+        frame["_date"] = pd.to_datetime(
+            date_source, utc=True, errors="coerce"
+        ).dt.tz_localize(None)
+        if "game_uid" in frame.columns:
+            fallback = frame["gameid"] if "gameid" in frame.columns else None
+            frame["_game_id"] = [
+                canonical_source_game_key(
+                    value,
+                    fallback.loc[index] if fallback is not None else None,
+                )
+                for index, value in frame["game_uid"].items()
+            ]
+        elif "gameid" in frame.columns:
+            frame["_game_id"] = frame["gameid"].map(canonical_source_game_key)
+        else:
+            frame["_game_id"] = ""
+        frame["_player"] = frame.get(
+            "playername", pd.Series("", index=frame.index)
+        ).astype("string").str.strip()
+        competition_tier = frame.get(
+            "competition_tier", pd.Series("", index=frame.index)
+        )
+        frame["_competition_tier"] = competition_tier
+        frame = frame[
+            frame["_player"].notna()
+            & frame["_player"].ne("")
+            & frame["_game_id"].astype(str).str.strip().ne("")
+            & frame["_competition_tier"].isin({"tier1", "tier2", "tier3"})
+        ][["_date", "_game_id", "_player", "_competition_tier"]]
+        return cls(
+            canonical_players=canonical_players,
+            support_rows=frame,
+            source_players_digest=_global_frame_digest(
+                players.reset_index(drop=True)
+            ),
+        )
+
+    def matches_players(self, players: pd.DataFrame) -> bool:
+        """Check source identity without canonicalizing the candidate again."""
+
+        return bool(
+            self.source_players_digest
+            == _global_frame_digest(players.reset_index(drop=True))
+        )
+
+    def bind_players(self, players: pd.DataFrame) -> None:
+        """Record the validated source object used by one rating pass."""
+
+        self.bound_players_id = id(players)
+
+    @staticmethod
+    def _cutoff_key(through: pd.Timestamp | None) -> tuple[str, pd.Timestamp | None]:
+        if through is None:
+            return "__all__", None
+        cutoff = pd.Timestamp(through)
+        if cutoff.tzinfo is not None:
+            cutoff = cutoff.tz_convert("UTC").tz_localize(None)
+        return cutoff.isoformat(), cutoff
+
+    def counts_for(self, through: pd.Timestamp | None) -> pd.Series:
+        """Return bridge support counts at an inclusive cutoff."""
+
+        key, cutoff = self._cutoff_key(through)
+        cached = self.counts_by_cutoff.get(key)
+        if cached is not None:
+            return cached
+        support = self.support_rows
+        if cutoff is not None:
+            support = support[support["_date"].le(cutoff)]
+        support = support.drop_duplicates(["_player", "_game_id"])
+        counts = support.groupby(
+            ["_player", "_competition_tier"], sort=False
+        ).size()
+        self.counts_by_cutoff[key] = counts
+        return counts
+
+
 def _apply_bridge_uncertainty(
     rows: list[dict[str, object]],
     players: pd.DataFrame,
@@ -1051,38 +1154,18 @@ def _apply_bridge_uncertainty(
     cfg: PlayerEloConfig,
     *,
     through: pd.Timestamp | None = None,
+    bridge_context: PlayerBridgeContext | None = None,
 ) -> list[dict[str, object]]:
     """Widen weak cross-tier anchors without moving the fitted mean."""
 
-    frame = canonicalize_competition_frame(players).copy()
-    date_source = frame["date"] if "date" in frame.columns else pd.Series(pd.NaT, index=frame.index)
-    frame["_date"] = pd.to_datetime(date_source, utc=True, errors="coerce").dt.tz_localize(None)
-    if through is not None:
-        cutoff = pd.Timestamp(through)
-        if cutoff.tzinfo is not None:
-            cutoff = cutoff.tz_convert("UTC").tz_localize(None)
-        frame = frame[frame["_date"].le(cutoff)]
-    if "game_uid" in frame.columns:
-        fallback = frame["gameid"] if "gameid" in frame.columns else None
-        frame["_game_id"] = [
-            canonical_source_game_key(
-                value,
-                fallback.loc[index] if fallback is not None else None,
-            )
-            for index, value in frame["game_uid"].items()
-        ]
-    elif "gameid" in frame.columns:
-        frame["_game_id"] = frame["gameid"].map(canonical_source_game_key)
-    else:
-        frame["_game_id"] = ""
-    frame["_player"] = frame.get("playername", pd.Series("", index=frame.index)).astype("string").str.strip()
-    frame = frame[
-        frame["_player"].notna()
-        & frame["_player"].ne("")
-        & frame["_game_id"].astype(str).str.strip().ne("")
-        & frame["competition_tier"].isin({"tier1", "tier2", "tier3"})
-    ].drop_duplicates(["_player", "_game_id"])
-    tier_counts = frame.groupby(["_player", "competition_tier"], sort=False).size()
+    context = bridge_context
+    if context is None:
+        context = PlayerBridgeContext.build(players)
+    elif context.bound_players_id != id(players):
+        if not context.matches_players(players):
+            context = PlayerBridgeContext.build(players)
+        context.bind_players(players)
+    tier_counts = context.counts_for(through)
 
     output = []
     for source in rows:
@@ -1391,6 +1474,10 @@ def build_player_ratings(
     path = destination / "player_ratings.parquet"
     out.to_parquet(path, index=False)
 
+    bridge_context = None
+    if replay_out is not None or player_records is not None:
+        bridge_context = PlayerBridgeContext.build(players)
+        bridge_context.bind_players(players)
     global_workspace = GlobalPlayerFitWorkspace.build(
         maps,
         players,
@@ -1414,7 +1501,13 @@ def build_player_ratings(
                 continue
             row["last_team"] = record.get("current_team")
             row["home_league"] = record.get("current_league") or "UNKNOWN"
-        snap = _apply_bridge_uncertainty(snap, players, player_records, cfg)
+        snap = _apply_bridge_uncertainty(
+            snap,
+            players,
+            player_records,
+            cfg,
+            bridge_context=bridge_context,
+        )
     snap_df = pd.DataFrame(snap).sort_values("mu_effective", ascending=False)
     snap_df.to_parquet(destination / "player_ratings_snapshot.parquet", index=False)
     if replay_out is not None:
@@ -1429,6 +1522,7 @@ def build_player_ratings(
                 "current_global": global_snapshot.copy(deep=True),
                 "current_global_meta": dict(global_meta),
                 "global_workspace": global_workspace,
+                "bridge_context": bridge_context,
             }
         )
     (destination / "player_ratings_meta.json").write_text(
@@ -1584,6 +1678,7 @@ def build_player_weekly_ranks(
     required_checkpoints = [recent_anchor, *comparison_cutoffs.values()]
     replay_hit = False
     saved_workspace = None
+    saved_bridge_context = None
     if replay is not None:
         saved_source = replay.get("source_identity")
         saved_config = replay.get("config")
@@ -1592,6 +1687,7 @@ def build_player_weekly_ranks(
         saved_recent_mus = replay.get("recent_mus")
         saved_global = replay.get("current_global")
         saved_workspace = replay.get("global_workspace")
+        saved_bridge_context = replay.get("bridge_context")
         checkpoint_keys = set(saved_checkpoints) if isinstance(saved_checkpoints, dict) else set()
         replay_hit = bool(
             saved_source == _replay_source_identity(frame, players)
@@ -1612,6 +1708,13 @@ def build_player_weekly_ranks(
             players,
             baseline_cache=baseline_cache,
         )
+    bridge_context = None
+    if isinstance(saved_bridge_context, PlayerBridgeContext):
+        if saved_bridge_context.matches_players(players):
+            bridge_context = saved_bridge_context
+    if bridge_context is None:
+        bridge_context = PlayerBridgeContext.build(players)
+    bridge_context.bind_players(players)
     if replay_hit:
         states = saved_states
         checkpoints = saved_checkpoints
@@ -1641,13 +1744,21 @@ def build_player_weekly_ranks(
     # developmental player in the current Tier 1 board.
     from lol_kills.export.pack_records import build_player_records
 
-    current_records = dict(player_records) if player_records is not None else build_player_records(players)
+    current_records = (
+        dict(player_records)
+        if player_records is not None
+        else build_player_records(
+            bridge_context.canonical_players.copy(deep=True),
+            canonicalized=True,
+        )
+    )
     current_rows = _apply_bridge_uncertainty(
         _apply_global_scale(_snapshot_rows(states, cfg=cfg), current_global, cfg),
         players,
         current_records,
         cfg,
         through=cutoff,
+        bridge_context=bridge_context,
     )
     def historical_rows(anchor: pd.Timestamp, anchor_label: str) -> list[dict[str, object]]:
         snapshot = checkpoints.get(anchor, [])
@@ -1673,6 +1784,7 @@ def build_player_weekly_ranks(
             current_records,
             cfg,
             through=anchor,
+            bridge_context=bridge_context,
         )
 
     previous_rows = historical_rows(recent_anchor, "recent")
