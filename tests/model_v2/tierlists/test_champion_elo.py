@@ -17,6 +17,7 @@ from lol_kills.v2.tierlists.champion_elo import (
     _fit_joint_scope,
     build_candidate,
 )
+from lol_kills.export.public_pack import source_identity_sha256
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -152,6 +153,20 @@ def test_replay_does_not_require_player_grade_statistics(tmp_path: Path) -> None
     candidate = build_candidate(tmp_path)
 
     assert candidate["source"]["maps_replayed"] == 3
+
+
+def test_replay_uses_the_exact_accepted_release_census(tmp_path: Path) -> None:
+    _write_identity_sources(tmp_path)
+    source_path = tmp_path / "data/lol/warehouse/parquet/oe_player_games.parquet"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    _source_rows().to_parquet(source_path, index=False)
+
+    candidate = build_candidate(tmp_path, allowed_game_ids={"g1", "g3"})
+
+    assert candidate["source"]["maps_replayed"] == 2
+    assert candidate["source"]["source_identity_sha256"] == source_identity_sha256(
+        ["g1", "g3"]
+    )
 
 
 def test_matchup_shape_assigns_distinct_blind_and_counter_tiers() -> None:

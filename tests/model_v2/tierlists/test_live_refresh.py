@@ -12,6 +12,7 @@ import pytest
 
 from lol_kills.v2.tierlists import live_refresh
 from lol_kills.etl.oe_live_source import _complete_player_game_ids, _merge
+from lol_kills.v2.tierlists.accepted_census import write_census
 from lol_kills.v2.tierlists.forward_evaluation import _map_keys, _source_columns
 from lol_kills.v2.tierlists.independent_authority import (
     _map_keys as _authority_map_keys,
@@ -68,6 +69,32 @@ def test_rating_source_rejects_an_incomplete_roster(tmp_path: Path) -> None:
     )
 
     assert live_refresh._oe_rating_source_complete(tmp_path) is False
+
+
+def test_rating_step_fails_closed_on_a_different_accepted_census(tmp_path: Path) -> None:
+    path = tmp_path / live_refresh.RATING_REFRESH_OUTPUT
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {
+                "source": {
+                    "source_game_count": 2,
+                    "source_identity_sha256": "b" * 64,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = live_refresh._bind_rating_step_to_census(
+        tmp_path,
+        {"completed": True, "returncode": 0},
+        {"game_count": 1, "source_identity_sha256": "a" * 64},
+    )
+
+    assert result["completed"] is False
+    assert result["returncode"] == 2
+    assert result["reason"] == "rating refresh used a different accepted game census"
 
 
 def test_regional_refresh_receipt_records_view_coverage() -> None:
@@ -448,6 +475,58 @@ def test_release_tier_refresh_does_not_rebuild_the_accepted_oe_source(tmp_path: 
     assert all(call.kwargs["source"] != "oe_live_source" for call in run_step.call_args_list)
     assert receipt["source_steps"][2]["completed"] is True
     assert receipt["source_steps"][2]["reason"] == "accepted_oe_live_verified"
+
+
+def test_release_uses_the_accepted_census_watermark_for_candidate_completeness(
+    tmp_path: Path,
+) -> None:
+    accepted_path = tmp_path / "data/lol/runtime/tier-censuses/accepted.json"
+    write_census(accepted_path, ["accepted-game"])
+    meta_path = tmp_path / "data/lol/warehouse/parquet/oe_live/meta.json"
+    meta_path.parent.mkdir(parents=True)
+    meta_path.write_text(
+        json.dumps(
+            {
+                "source_latest": "2026-08-20T12:00:00+00:00",
+                "source_game_count": 2,
+                "identity_complete_game_count": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    steps = [
+        {"returncode": 0, "completed": True, "stdout_bytes": 0, "stderr_bytes": 0}
+        for _ in range(2)
+    ]
+    with patch.object(live_refresh, "_run_step", side_effect=steps), patch.object(
+        live_refresh,
+        "_accepted_source_latest",
+        return_value="2026-08-19T12:00:00Z",
+    ), patch.object(
+        live_refresh,
+        "_bind_rating_step_to_census",
+        side_effect=lambda _root, step, _accepted: step,
+    ), patch.object(
+        live_refresh,
+        "build_candidate",
+        return_value=_candidate(source_mode="oe_only"),
+    ) as build, patch.object(live_refresh, "write_candidate", return_value="b" * 64):
+        receipt = live_refresh.refresh_candidate(
+            tmp_path,
+            expected_live_as_of="2026-08-20T12:00:00Z",
+            output_path=tmp_path / "candidate.json",
+            receipt_path=tmp_path / "receipt.json",
+            source_mode="oe_only",
+            skip_annual_oe=True,
+            skip_live_source=True,
+            accepted_census_path=accepted_path,
+        )
+
+    assert build.call_args_list[-1].kwargs["expected_live_as_of"] == pd.Timestamp(
+        "2026-08-19T12:00:00Z"
+    )
+    assert receipt["candidate_expected_live_as_of"] == "2026-08-19T12:00:00Z"
+    assert receipt["accepted_census"]["source_observed_through"] == "2026-08-19T12:00:00Z"
 
 
 def test_ratings_step_receives_previous_refresh_as_of(tmp_path: Path) -> None:

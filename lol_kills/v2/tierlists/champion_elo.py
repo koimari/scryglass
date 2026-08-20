@@ -19,7 +19,7 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Collection, Mapping
 
 import numpy as np
 import pandas as pd
@@ -27,6 +27,7 @@ from scipy.optimize import minimize
 from scipy.special import expit, ndtr
 
 from lol_kills.etl.oe_live_source import _game_keys, _identity_complete_player_game_ids
+from lol_kills.v2.tierlists.accepted_census import canonical_game_ids
 from lol_kills.v2.champions.atoms.consume import AtomBridge
 
 SCHEMA_VERSION = "scryglass:champion-role-elo-candidate:v1"
@@ -227,6 +228,7 @@ def _load_source(
     root: Path,
     *,
     as_of: pd.Timestamp | None = None,
+    allowed_game_ids: Collection[str] | None = None,
 ) -> tuple[pd.DataFrame, str, str]:
     source_paths = [root / SOURCE_LOCATOR, root / ANNUAL_SOURCE_LOCATOR]
     primary_path = next(
@@ -282,13 +284,6 @@ def _load_source(
         & frame["result_num"].isin((0, 1))
         & frame["league_norm"].ne("")
     ].copy()
-    if as_of is not None:
-        cutoff = pd.Timestamp(as_of)
-        if cutoff.tzinfo is None:
-            cutoff = cutoff.tz_localize("UTC")
-        else:
-            cutoff = cutoff.tz_convert("UTC")
-        frame = frame[frame["date"].le(cutoff)].copy()
     if frame.empty:
         raise ChampionEloError("source has no completed maps in the requested window")
     frame["game_id"] = _game_keys(frame)
@@ -296,6 +291,23 @@ def _load_source(
         frame.assign(game_uid=frame["game_id"])
     )
     frame = frame[frame["game_id"].isin(complete_game_ids)].copy()
+    if allowed_game_ids is not None:
+        allowed = set(canonical_game_ids(allowed_game_ids))
+        available = set(frame["game_id"].astype(str))
+        missing = sorted(allowed.difference(available))
+        if missing:
+            raise ChampionEloError(
+                "accepted release census is missing from the identity-complete tier source; "
+                f"missing_games={len(missing)} sample={missing[:5]}"
+            )
+        frame = frame[frame["game_id"].isin(allowed)].copy()
+    if as_of is not None:
+        cutoff = pd.Timestamp(as_of)
+        if cutoff.tzinfo is None:
+            cutoff = cutoff.tz_localize("UTC")
+        else:
+            cutoff = cutoff.tz_convert("UTC")
+        frame = frame[frame["date"].le(cutoff)].copy()
     if frame.empty:
         raise ChampionEloError("source has no identity-complete five-role maps")
     return (
@@ -955,6 +967,7 @@ def build_candidate(
     previous: Mapping[str, Any] | None = None,
     min_appearances: int = DEFAULT_MIN_APPEARANCES,
     source_mode: str = DEFAULT_SOURCE_MODE,
+    allowed_game_ids: Collection[str] | None = None,
 ) -> dict[str, Any]:
     if min_appearances < 1:
         raise ChampionEloError("min_appearances must be at least 1")
@@ -971,6 +984,7 @@ def build_candidate(
         previous=previous,
         min_appearances=min_appearances,
         source_mode=source_mode,
+        allowed_game_ids=allowed_game_ids,
     )
 
 

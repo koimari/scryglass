@@ -10,7 +10,7 @@ authority.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 import hashlib
 import json
 import math
@@ -46,6 +46,7 @@ from lol_kills.v2.tierlists.patch_mapping import (
     resolve_oe_patch,
 )
 from lol_kills.v2.patch_identity import CURRENT_PUBLIC_PATCH
+from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 from .champion_elo import (
     ATOM_BRIDGE_LOCATORS,
@@ -1149,10 +1150,15 @@ def build_pooled_candidate(
     previous: Mapping[str, Any] | None = None,
     min_appearances: int = DEFAULT_MIN_APPEARANCES,
     source_mode: str = "oe_only",
+    allowed_game_ids: Collection[str] | None = None,
 ) -> dict[str, Any]:
     if source_mode not in SOURCE_MODES:
         raise PooledCandidateError(f"source_mode must be one of {', '.join(SOURCE_MODES)}")
-    frame, source_sha256, source_locator = _load_source(root, as_of=as_of)
+    frame, source_sha256, source_locator = _load_source(
+        root,
+        as_of=as_of,
+        allowed_game_ids=allowed_game_ids,
+    )
     raw_maps, rejected_maps = _build_maps(frame)
     if not raw_maps:
         raise PooledCandidateError("no complete five-role maps remain after identity checks")
@@ -1456,6 +1462,9 @@ def build_pooled_candidate(
             "raw_sha256": source_sha256,
             "source_files": [source_locator],
             "maps_replayed": len(raw_maps),
+            "source_identity_sha256": identity_sha256(
+                str(game["game_id"]) for game in raw_maps
+            ),
             "maps_used_in_joint_likelihood": len(observations),
             "maps_rejected_incomplete_roles": rejected_maps,
             "maps_rejected_identity": len(raw_maps) - len(prepared),

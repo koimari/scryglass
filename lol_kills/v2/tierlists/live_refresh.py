@@ -27,9 +27,12 @@ from lol_kills.v2.patch_identity import CURRENT_PUBLIC_PATCH, PatchIdentityError
 from .champion_elo import (
     DEFAULT_OUTPUT,
     DEFAULT_SOURCE_MODE,
+    _load_source,
     build_candidate,
     write_candidate,
 )
+from .accepted_census import load_census
+from .rating_refresh import OUTPUT as RATING_REFRESH_OUTPUT
 
 HISTORY_START = "2025-01-01T00:00:00Z"
 LIVE_WINDOW_START = "2026-07-18T00:00:00Z"
@@ -338,6 +341,53 @@ def _verify_prebuilt_oe_live(root: Path, expected_live_as_of: str) -> dict[str, 
     }
 
 
+def _bind_rating_step_to_census(
+    root: Path,
+    step: dict[str, Any],
+    accepted: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if accepted is None or step.get("completed") is not True:
+        return step
+    path = root / RATING_REFRESH_OUTPUT
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        source = payload["source"]
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError):
+        return {
+            **step,
+            "completed": False,
+            "returncode": 2,
+            "reason": "rating refresh census receipt is unavailable",
+        }
+    if (
+        source.get("source_game_count") != accepted["game_count"]
+        or source.get("source_identity_sha256") != accepted["source_identity_sha256"]
+    ):
+        return {
+            **step,
+            "completed": False,
+            "returncode": 2,
+            "reason": "rating refresh used a different accepted game census",
+        }
+    return {
+        **step,
+        "accepted_source_game_count": accepted["game_count"],
+        "accepted_source_identity_sha256": accepted["source_identity_sha256"],
+    }
+
+
+def _accepted_source_latest(root: Path, game_ids: list[str]) -> str:
+    frame, _, _ = _load_source(root, allowed_game_ids=game_ids)
+    latest = pd.Timestamp(frame["date"].max())
+    if pd.isna(latest):
+        raise RuntimeError("accepted tier census has no source watermark")
+    if latest.tzinfo is None:
+        latest = latest.tz_localize("UTC")
+    else:
+        latest = latest.tz_convert("UTC")
+    return latest.isoformat().replace("+00:00", "Z")
+
+
 def _previous_week_start(value: str) -> pd.Timestamp:
     stamp = pd.Timestamp(value)
     if stamp.tzinfo is None:
@@ -361,6 +411,7 @@ def refresh_candidate(
     skip_live_source: bool = False,
     skip_atom_bridge: bool = False,
     prepared_source: dict[str, Any] | None = None,
+    accepted_census_path: Path | None = None,
     step_timeout_seconds: float | None = None,
     publish: bool = True,
 ) -> dict[str, Any]:
@@ -370,6 +421,18 @@ def refresh_candidate(
         step_timeout_seconds = _step_timeout_seconds()
     if step_timeout_seconds <= 0:
         raise ValueError("step timeout must be positive")
+    if accepted_census_path is not None:
+        accepted_census_path = (
+            accepted_census_path
+            if accepted_census_path.is_absolute()
+            else root / accepted_census_path
+        ).resolve()
+        try:
+            accepted_census_path.relative_to(root.resolve())
+        except ValueError as error:
+            raise ValueError("accepted census path escaped the runtime root") from error
+    accepted = load_census(accepted_census_path) if accepted_census_path is not None else None
+    allowed_game_ids = accepted["game_ids"] if accepted is not None else None
 
     def run_step(args: list[str], *, source: str) -> dict[str, Any]:
         return _run_step(
@@ -456,6 +519,11 @@ def refresh_candidate(
         )
         observed_as_of = _oe_source_latest(root) if live_source_step["completed"] else None
         candidate_expected_live_as_of = observed_as_of or expected_live_as_of
+        if accepted is not None and live_source_step["completed"]:
+            candidate_expected_live_as_of = _accepted_source_latest(
+                root,
+                accepted["game_ids"],
+            )
         rating_step = (
             run_step(
                 [
@@ -469,12 +537,18 @@ def refresh_candidate(
                         if previous_live_as_of
                         else []
                     ),
+                    *(
+                        ["--accepted-census", str(accepted_census_path)]
+                        if accepted_census_path is not None
+                        else []
+                    ),
                 ],
                 source="ratings",
             )
             if live_source_step["completed"] and _oe_rating_source_complete(root)
             else _skipped_step("ratings", "oe_player_identity_incomplete")
         )
+        rating_step = _bind_rating_step_to_census(root, rating_step, accepted)
         grid_step = _skipped_step("grid", "public_refresh_oe_only")
 
     if prepared_source is None:
@@ -484,6 +558,11 @@ def refresh_candidate(
         raise RuntimeError(
             "tier refresh source preparation failed: "
             + _source_step_failure(source_steps)
+        )
+    if accepted is not None and prepared_source is not None:
+        candidate_expected_live_as_of = _accepted_source_latest(
+            root,
+            accepted["game_ids"],
         )
 
     previous = None
@@ -505,6 +584,7 @@ def refresh_candidate(
             as_of=baseline_as_of,
             previous=None,
             source_mode=source_mode,
+            allowed_game_ids=allowed_game_ids,
         )
         movement_baseline = {
             "kind": "previous_sunday_utc",
@@ -516,6 +596,7 @@ def refresh_candidate(
         expected_live_as_of=pd.Timestamp(candidate_expected_live_as_of),
         previous=previous,
         source_mode=source_mode,
+        allowed_game_ids=allowed_game_ids,
     )
     output = output_path if output_path.is_absolute() else root / output_path
     raw_sha256 = write_candidate(output, candidate)
@@ -546,6 +627,11 @@ def refresh_candidate(
                 str(root),
                 "--output",
                 "data/lol/v2/tierlists/prospective-evaluation-v1.json",
+                *(
+                    ["--accepted-census", str(accepted_census_path)]
+                    if accepted_census_path is not None
+                    else []
+                ),
             ],
             source="forward_evaluation",
         )
@@ -558,6 +644,11 @@ def refresh_candidate(
                     str(root),
                     "--output",
                     "data/lol/v2/tierlists/independent-l2-authority-v1.json",
+                    *(
+                        ["--accepted-census", str(accepted_census_path)]
+                        if accepted_census_path is not None
+                        else []
+                    ),
                 ],
                 source="independent_authority",
             )
@@ -649,6 +740,7 @@ def refresh_candidate(
             "artifact_sha256": candidate["artifact_sha256"],
             "as_of": candidate["as_of"],
             "maps_replayed": candidate["source"]["maps_replayed"],
+            "source_identity_sha256": candidate["source"].get("source_identity_sha256"),
             "maps_in_live_window": candidate["source"]["maps_in_live_window"],
             "source_complete_through_expected_live_as_of": candidate[
                 "source_complete_through_expected_live_as_of"
@@ -656,6 +748,15 @@ def refresh_candidate(
             "source_mode": candidate["source_mode"],
             "rating_refresh_completed": rating_step["completed"],
         },
+        "accepted_census": (
+            {
+                "game_count": accepted["game_count"],
+                "source_identity_sha256": accepted["source_identity_sha256"],
+                "source_observed_through": candidate_expected_live_as_of,
+            }
+            if accepted is not None
+            else None
+        ),
         "regional_refresh": _regional_refresh_summary(candidate),
         "patch_refresh": _patch_refresh_summary(candidate),
         "authority": {

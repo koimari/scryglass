@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from lol_kills.v2.tierlists import rating_refresh
+from lol_kills.export.public_pack import source_identity_sha256
 
 
 def test_refresh_writes_rating_artifacts_under_runtime_root(
@@ -74,7 +75,11 @@ def test_refresh_writes_rating_artifacts_under_runtime_root(
     monkeypatch.setattr(rating_refresh, "build_player_weekly_ranks", lambda *args, **kwargs: {"by_player": {}})
 
     maps_frame = pd.DataFrame([game])
-    payload = rating_refresh.refresh_ratings(runtime_root, as_of=pd.Timestamp("2026-08-01T00:00:00Z"))
+    payload = rating_refresh.refresh_ratings(
+        runtime_root,
+        as_of=pd.Timestamp("2026-08-01T00:00:00Z"),
+        allowed_game_ids={"g1"},
+    )
 
     expected = runtime_root / "data/lol/v2/tierlists/rating-refresh/rating-refresh-v1.json"
     assert expected.is_file()
@@ -83,6 +88,8 @@ def test_refresh_writes_rating_artifacts_under_runtime_root(
         for item in payload["artifacts"].values()
     )
     assert not (worker_cwd / "data").exists()
+    assert payload["source"]["source_game_count"] == 1
+    assert payload["source"]["source_identity_sha256"] == source_identity_sha256(["g1"])
     written_manifest = json.loads(expected.read_text(encoding="utf-8"))
     ratings_meta = json.loads(
         (runtime_root / rating_refresh.FEATURES_RELATIVE / "ratings_meta.json").read_text(

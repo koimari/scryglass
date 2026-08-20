@@ -13,12 +13,17 @@ import hashlib
 import json
 from pathlib import Path
 import re
-from typing import Any, Mapping
+from typing import Any, Collection, Mapping
 
 import pandas as pd
 import pyarrow.parquet as pq
 
 from lol_kills.etl.source_keys import canonical_source_game_key
+from lol_kills.v2.tierlists.accepted_census import (
+    canonical_game_ids,
+    identity_sha256,
+    load_census,
+)
 
 
 SCHEMA_VERSION = "scryglass:tierlist-independent-l2-authority:v1"
@@ -171,7 +176,13 @@ def _verify_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _verify_source(root: Path, candidate: Mapping[str, Any], evaluation: Mapping[str, Any]) -> dict[str, Any]:
+def _verify_source(
+    root: Path,
+    candidate: Mapping[str, Any],
+    evaluation: Mapping[str, Any],
+    *,
+    allowed_game_ids: Collection[str] | None = None,
+) -> dict[str, Any]:
     source = root / SOURCE_LOCATOR
     meta = root / SOURCE_META_LOCATOR
     if not source.is_file() or source.is_symlink() or not meta.is_file() or meta.is_symlink():
@@ -186,8 +197,19 @@ def _verify_source(root: Path, candidate: Mapping[str, Any], evaluation: Mapping
     frame["date"] = pd.to_datetime(frame["date"], errors="coerce", utc=True)
     frame = frame[frame["date"].notna() & frame["date"].ge("2025-01-01T00:00:00Z")].copy()
     frame["map_key"] = _map_keys(frame)
+    if allowed_game_ids is not None:
+        allowed = set(canonical_game_ids(allowed_game_ids))
+        available = set(frame["map_key"].astype(str))
+        missing = sorted(allowed.difference(available))
+        if missing:
+            raise IndependentAuthorityError(
+                "accepted release census is missing from the authority source; "
+                f"missing_games={len(missing)} sample={missing[:5]}"
+            )
+        frame = frame[frame["map_key"].isin(allowed)].copy()
     group_sizes = frame.groupby("map_key", sort=False).size()
     complete_maps = int((group_sizes == 10).sum())
+    complete_game_ids = set(group_sizes[group_sizes.eq(10)].index.astype(str))
     candidate_maps = int(candidate["source"]["maps_replayed"])
     evaluation_maps = int(evaluation["source"]["maps_loaded"])
     receipt_maps = meta_payload.get("maps")
@@ -195,8 +217,14 @@ def _verify_source(root: Path, candidate: Mapping[str, Any], evaluation: Mapping
         raise IndependentAuthorityError("evaluation source map count exceeds live receipt")
     if complete_maps != evaluation_maps:
         raise IndependentAuthorityError("evaluation source map count differs from the 2025 source window")
-    if candidate_maps <= 0 or candidate_maps > evaluation_maps:
-        raise IndependentAuthorityError("candidate map count is outside the live source")
+    source_identity = identity_sha256(complete_game_ids)
+    if candidate_maps <= 0 or candidate_maps != evaluation_maps:
+        raise IndependentAuthorityError("candidate map count differs from the evaluated source")
+    if (
+        candidate["source"].get("source_identity_sha256") != source_identity
+        or evaluation["source"].get("source_identity_sha256") != source_identity
+    ):
+        raise IndependentAuthorityError("candidate and evaluation source identities differ")
     return {
         "availability_status": "verified_preevent",
         "participant_cluster_status": "team_or_series_available",
@@ -210,6 +238,8 @@ def _verify_source(root: Path, candidate: Mapping[str, Any], evaluation: Mapping
         "complete_maps_from_2025": complete_maps,
         "candidate_maps_from_2025": candidate_maps,
         "evaluation_maps": evaluation_maps,
+        "source_game_count": complete_maps,
+        "source_identity_sha256": source_identity,
     }
 
 
@@ -217,6 +247,7 @@ def review(
     root: Path | str = Path("."),
     *,
     output: Path = Path("data/lol/v2/tierlists/independent-l2-authority-v1.json"),
+    allowed_game_ids: Collection[str] | None = None,
 ) -> dict[str, Any]:
     """Create an approved descriptive authority record after independent checks."""
 
@@ -224,7 +255,12 @@ def review(
     candidate_raw, candidate = _read(repo_root, CANDIDATE_LOCATOR)
     evaluation_raw, evaluation = _read(repo_root, EVALUATION_LOCATOR)
     candidate_summary = _verify_candidate(candidate)
-    source_summary = _verify_source(repo_root, candidate, evaluation)
+    source_summary = _verify_source(
+        repo_root,
+        candidate,
+        evaluation,
+        allowed_game_ids=allowed_game_ids,
+    )
     if evaluation.get("artifact_sha256") != _canonical_sha256(evaluation):
         raise IndependentAuthorityError("evaluation digest does not match its canonical bytes")
     if evaluation.get("candidate", {}).get("raw_sha256") != _sha256_bytes(candidate_raw):
@@ -305,8 +341,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--output", type=Path, default=Path("data/lol/v2/tierlists/independent-l2-authority-v1.json"))
+    parser.add_argument("--accepted-census", type=Path, default=None)
     args = parser.parse_args()
-    record = review(args.root, output=args.output)
+    accepted = load_census(args.accepted_census) if args.accepted_census else None
+    record = review(
+        args.root,
+        output=args.output,
+        allowed_game_ids=accepted["game_ids"] if accepted else None,
+    )
     print(json.dumps({
         "output": str(args.output),
         "authority_record_id": record["authority_record_id"],

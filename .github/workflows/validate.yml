@@ -465,6 +465,8 @@ jobs:
             tests/model_v2/champions/test_atom_bridge.py \
             tests/model_v2/champions/test_depth2_aggregate.py \
             tests/model_v2/champions/test_atom_seed_v1.py \
+            tests/model_v2/tierlists/test_accepted_census.py \
+            tests/model_v2/tierlists/test_champion_elo.py \
             tests/model_v2/tierlists/test_live_refresh.py \
             tests/model_v2/tierlists/test_production_bundle.py \
             tests/model_v2/tierlists/test_filters.py \
@@ -473,6 +475,7 @@ jobs:
             tests/model_v2/tierlists/test_pooled_candidate.py \
             tests/model_v2/tierlists/test_production_readiness.py \
             tests/model_v2/tierlists/test_prospective_evaluation.py \
+            tests/model_v2/tierlists/test_rating_refresh.py \
             tests/test_public_asset_allowlist_contract.py \
             tests/test_public_pack_spec.py \
             tests/test_public_query_projection.py \
@@ -498,6 +501,8 @@ jobs:
             tests/model_v2/champions/test_atom_bridge.py \
             tests/model_v2/champions/test_depth2_aggregate.py \
             tests/model_v2/champions/test_atom_seed_v1.py \
+            tests/model_v2/tierlists/test_accepted_census.py \
+            tests/model_v2/tierlists/test_champion_elo.py \
             tests/model_v2/tierlists/test_live_refresh.py \
             tests/model_v2/tierlists/test_production_bundle.py \
             tests/model_v2/tierlists/test_filters.py \
@@ -506,6 +511,7 @@ jobs:
             tests/model_v2/tierlists/test_pooled_candidate.py \
             tests/model_v2/tierlists/test_production_readiness.py \
             tests/model_v2/tierlists/test_prospective_evaluation.py \
+            tests/model_v2/tierlists/test_rating_refresh.py \
             tests/test_public_asset_allowlist_contract.py \
             tests/test_public_pack_spec.py \
             tests/test_public_query_projection.py \

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,11 @@ from lol_kills.ratings.momentum_config import (
     DEFAULT_MOMENTUM_WINDOW_GAMES,
     momentum_manifest_metadata,
     require_public_momentum_disabled,
+)
+from lol_kills.v2.tierlists.accepted_census import (
+    canonical_game_ids,
+    identity_sha256,
+    load_census,
 )
 
 RATING_WINDOW_START = pd.Timestamp("2025-01-01T00:00:00Z")
@@ -126,6 +132,7 @@ def refresh_ratings(
     previous_as_of: pd.Timestamp | None = None,
     momentum_window_games: int = DEFAULT_MOMENTUM_WINDOW_GAMES,
     momentum_scale: float = DEFAULT_MOMENTUM_SCALE,
+    allowed_game_ids: Collection[str] | None = None,
 ) -> dict[str, Any]:
     require_public_momentum_disabled(
         window_games=momentum_window_games,
@@ -159,6 +166,18 @@ def refresh_ratings(
     maps["game_uid"] = _normalized_game_uid(maps)
     if maps["game_uid"].isna().any() or maps["game_uid"].duplicated().any():
         raise ValueError("OE live map input is not a deduplicated one-row-per-game source")
+    if allowed_game_ids is not None:
+        allowed = set(canonical_game_ids(allowed_game_ids))
+        available = set(maps["game_uid"].astype(str))
+        missing = sorted(allowed.difference(available))
+        if missing:
+            raise ValueError(
+                "accepted release census is missing from the rating map source; "
+                f"missing_games={len(missing)} sample={missing[:5]}"
+            )
+        maps = maps[maps["game_uid"].isin(allowed)].copy()
+        if maps.empty:
+            raise ValueError("accepted release census leaves the rating source empty")
     map_ids = set(maps["game_uid"].astype(str))
     team_games = _bind_game_ids(
         _window_frame(team_games, cutoff=cutoff, label="team"),
@@ -278,6 +297,8 @@ def refresh_ratings(
             "maps_raw_sha256": _sha256(maps_path),
             "as_of": source_as_of,
             "maps": int(len(maps)),
+            "source_game_count": int(len(map_ids)),
+            "source_identity_sha256": identity_sha256(map_ids),
             "maps_by_year": maps_by_year,
             "team_rows": int(len(team_games)),
             "player_rows": int(len(players)),
@@ -339,6 +360,7 @@ def main() -> int:
     parser.add_argument("--min-games", type=int, default=20)
     parser.add_argument("--min-series", type=int, default=5)
     parser.add_argument("--previous-as-of", default=None)
+    parser.add_argument("--accepted-census", type=Path, default=None)
     parser.add_argument(
         "--momentum-window-games",
         type=int,
@@ -352,6 +374,7 @@ def main() -> int:
         help="Explicit research momentum scale in rating points; default is zero",
     )
     args = parser.parse_args()
+    accepted = load_census(args.accepted_census) if args.accepted_census else None
     payload = refresh_ratings(
         args.root,
         as_of=pd.Timestamp(args.as_of) if args.as_of else None,
@@ -360,6 +383,7 @@ def main() -> int:
         previous_as_of=pd.Timestamp(args.previous_as_of) if args.previous_as_of else None,
         momentum_window_games=args.momentum_window_games,
         momentum_scale=args.momentum_scale,
+        allowed_game_ids=accepted["game_ids"] if accepted else None,
     )
     print(json.dumps({
         "source_as_of": payload["source"]["as_of"],

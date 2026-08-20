@@ -73,25 +73,38 @@ def test_tier_publication_binds_runtime_payload_to_accepted_source(tmp_path: Pat
         ),
         encoding="utf-8",
     )
-    source_identity = "c" * 64
+    source_game_ids = [f"game-{index}" for index in range(22)]
+    source_identity = source_identity_sha256(source_game_ids)
     receipt = {
         "status": "production_built",
         "source_observed_through": "2026-08-09T17:00:00Z",
         "candidate_expected_live_as_of": "2026-08-09T17:00:00Z",
         "receipt_canonical_sha256": "d" * 64,
-        "candidate": {"artifact_sha256": "e" * 64, "maps_replayed": 22},
+        "candidate": {
+            "artifact_sha256": "e" * 64,
+            "maps_replayed": 22,
+            "source_identity_sha256": source_identity,
+        },
     }
 
     with patch.object(
         public_refresh,
         "validate_live_source",
-        return_value={"game_count": 22, "identity_sha256": source_identity},
+        return_value={
+            "game_count": 23,
+            "identity_sha256": source_identity_sha256([*source_game_ids, "pending-game"]),
+            "game_ids": [*source_game_ids, "pending-game"],
+        },
     ):
         binding = public_refresh._tier_publication_for_source(
             config,
             receipt,
             source_observed_through="2026-08-09T17:00:00Z",
-            source={"identity_sha256": source_identity, "game_count": 22},
+            source={
+                "identity_sha256": source_identity,
+                "game_count": 22,
+                "game_ids": source_game_ids,
+            },
         )
 
     assert binding["status"] == "available"
@@ -99,6 +112,24 @@ def test_tier_publication_binds_runtime_payload_to_accepted_source(tmp_path: Pat
     assert binding["source_identity_sha256"] == source_identity
     assert binding["scope_count"] == 1
     assert len(binding["payload_sha256"]) == 64
+
+
+def test_tier_refresh_rejects_a_non_unique_accepted_census(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    identity = source_identity_sha256(["game-1"])
+
+    with patch.object(public_refresh.live_refresh, "refresh_candidate") as refresh, pytest.raises(
+        public_refresh.PublicRefreshError,
+        match="does not match",
+    ):
+        public_refresh._run_tier_refresh(
+            config,
+            "2026-08-09T17:00:00Z",
+            accepted_game_ids=["game-1", "game-1"],
+            accepted_identity_sha256=identity,
+        )
+
+    refresh.assert_not_called()
 
 
 def test_tier_publication_rejects_incomplete_role_scope(tmp_path: Path) -> None:
@@ -180,11 +211,15 @@ def test_environment_defaults_to_supabase_publication(tmp_path: Path) -> None:
 def test_tier_failure_keeps_a_smoke_verified_ratings_release(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config.sync.state_path.parent.mkdir(parents=True, exist_ok=True)
-    config.sync.state_path.write_text(json.dumps({"pack_id": "old"}), encoding="utf-8")
+    config.sync.state_path.write_text(
+        json.dumps({"pack_id": "old", "published_game_ids": ["game-1"]}),
+        encoding="utf-8",
+    )
     ratings = {
         "status": "published",
         "pack_id": "new",
         "publication": {"runtime": "local_staging", "pack_id": "new"},
+        "source_identity_sha256": source_identity_sha256(["game-1"]),
     }
 
     with patch.object(public_refresh, "_preflight"), patch.object(
@@ -1026,7 +1061,13 @@ def test_supabase_tier_failure_stops_before_publication_and_cache(tmp_path: Path
         "status": "published",
         "pack_id": "new",
         "source_observed_through": "2026-08-11T10:50:41Z",
+        "source_identity_sha256": source_identity_sha256(["game-1"]),
     }
+    config.sync.state_path.parent.mkdir(parents=True, exist_ok=True)
+    config.sync.state_path.write_text(
+        json.dumps({"pack_id": "old", "published_game_ids": ["game-1"]}),
+        encoding="utf-8",
+    )
 
     with patch.object(public_refresh, "_preflight"), patch.object(
         public_refresh,
@@ -1300,6 +1341,7 @@ def test_health_alignment_failure_restores_previous_supabase_release(
         "status": "published",
         "pack_id": release_id,
         "source_observed_through": "2026-08-11T18:00:00Z",
+        "source_identity_sha256": source_identity_sha256(["game-1"]),
     }
     accepted = {
         "source_observed_through": "2026-08-11T18:00:00Z",
@@ -1322,6 +1364,10 @@ def test_health_alignment_failure_restores_previous_supabase_release(
         public_refresh, "_run_with_source_retries", return_value=ratings
     ), patch.object(
         public_refresh, "_run_tier_refresh", return_value={"status": "production_promoted"}
+    ), patch.object(
+        public_refresh,
+        "_tier_publication_for_source",
+        return_value={"status": "available"},
     ), patch.object(
         public_refresh.supabase_publication,
         "publish_release",
