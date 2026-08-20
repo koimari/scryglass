@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from benchmarks import rating_refresh_adapter as adapter
@@ -29,15 +30,29 @@ def _write_census(path: Path, game_ids: list[str]) -> None:
 def _freeze_runtime_fixture(tmp_path: Path) -> tuple[dict, Path]:
     base_source = tmp_path / "base-source"
     append_source = tmp_path / "append-source"
+    map_relative = "data/lol/warehouse/parquet/oe_live/maps.parquet"
+    map_bytes: bytes | None = None
     for root in (base_source, append_source):
         for relative in (
-            "data/lol/warehouse/parquet/oe_live/maps.parquet",
+            map_relative,
             "data/lol/warehouse/parquet/oe_live/oe_team_games.parquet",
             "data/lol/warehouse/parquet/oe_live/oe_player_games.parquet",
         ):
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(relative.encode("utf-8"))
+            if relative == map_relative:
+                if map_bytes is None:
+                    pd.DataFrame(
+                        {
+                            "game_uid": ["game-a", "game-b"],
+                            "date": ["2026-08-01T00:00:00Z", "2026-08-02T00:00:00Z"],
+                        }
+                    ).to_parquet(path, index=False)
+                    map_bytes = path.read_bytes()
+                else:
+                    path.write_bytes(map_bytes)
+            else:
+                path.write_bytes(relative.encode("utf-8"))
     base_census = tmp_path / "base-census.json"
     append_census = tmp_path / "append-census.json"
     _write_census(base_census, ["game-a"])
@@ -206,6 +221,59 @@ def test_variant_runtime_cache_reuses_own_cold_state_for_append(tmp_path: Path, 
     assert candidate_map.is_file()
     assert (output_root / "runs" / "cold" / "candidate.output.artifacts").is_dir()
     assert (output_root / "runs" / "append_only" / "candidate.output.artifacts").is_dir()
+
+
+def test_adapter_uses_accepted_census_cutoff_with_identical_input_bytes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    freeze, output_root = _freeze_runtime_fixture(tmp_path)
+    observed: list[pd.Timestamp] = []
+
+    def capture_refresh(root: Path, **kwargs):
+        observed.append(pd.Timestamp(kwargs["as_of"]))
+        return _fake_refresh(root, **kwargs)
+
+    monkeypatch.setattr(adapter, "refresh_ratings", capture_refresh)
+    _set_adapter_environment(monkeypatch, output_root, freeze, phase="cold", variant="candidate")
+    adapter.run_from_environment(min_games=1, min_series=1)
+    _set_adapter_environment(monkeypatch, output_root, freeze, phase="append_only", variant="candidate")
+    result = adapter.run_from_environment(min_games=1, min_series=1)
+
+    assert observed == [
+        pd.Timestamp("2026-08-01T00:00:00Z"),
+        pd.Timestamp("2026-08-02T00:00:00Z"),
+    ]
+    assert result["run"]["refresh_as_of"] == "2026-08-02T00:00:00+00:00"
+    base_files = freeze["base"]["files"]
+    append_files = freeze["append_only"]["files"]
+    assert {
+        item["path"]: (item["bytes"], item["sha256"])
+        for item in base_files
+    } == {
+        item["path"]: (item["bytes"], item["sha256"])
+        for item in append_files
+    }
+
+
+@pytest.mark.parametrize("map_ids", [["game-a", "game-a"], ["game-b"]])
+def test_adapter_requires_each_accepted_id_to_map_once(tmp_path: Path, map_ids: list[str]) -> None:
+    runtime_root = tmp_path / "runtime"
+    map_path = runtime_root / adapter.LIVE_MAP_OUTPUT
+    map_path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "game_uid": map_ids,
+            "date": ["2026-08-01T00:00:00Z"] * len(map_ids),
+        }
+    ).to_parquet(map_path, index=False)
+    manifest = {
+        "files": [{"path": f"inputs/{adapter.LIVE_MAP_OUTPUT.as_posix()}"}],
+    }
+    accepted = {"game_ids": ["game-a"]}
+
+    with pytest.raises(adapter.AdapterError, match="exactly one map row"):
+        adapter._accepted_map_cutoff(runtime_root, manifest, accepted)
 
 
 def test_adapter_rejects_refresh_identity_mismatch(tmp_path: Path, monkeypatch) -> None:

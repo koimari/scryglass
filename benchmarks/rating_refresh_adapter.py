@@ -26,8 +26,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from lol_kills.etl.source_keys import canonical_source_game_key
 from lol_kills.v2.tierlists.accepted_census import load_census
-from lol_kills.v2.tierlists.rating_refresh import FEATURES_RELATIVE, OUTPUT, refresh_ratings
+from lol_kills.v2.tierlists.rating_refresh import (
+    FEATURES_RELATIVE,
+    LIVE_MAP_OUTPUT,
+    OUTPUT,
+    refresh_ratings,
+)
 
 
 OUTPUT_SCHEMA = "scryglass:rating-autoresearch-output:v1"
@@ -123,6 +129,80 @@ def _safe_runtime_relative(value: object, label: str) -> Path:
     if relative.is_absolute() or not relative.parts or ".." in relative.parts:
         raise AdapterError(f"{label} path is invalid: {relative}")
     return relative
+
+
+def _accepted_map_cutoff(
+    runtime_root: Path,
+    manifest: Mapping[str, Any],
+    accepted: Mapping[str, Any],
+) -> pd.Timestamp:
+    """Return the latest map date covered by the accepted game census.
+
+    The frozen Parquet contains the future append rows as well as the base
+    rows.  The production refresh must receive the accepted census cutoff so
+    those future rows cannot affect a cold phase.  Validate the map identity
+    at the same time.  Every accepted ID must occur exactly once.
+    """
+
+    expected_path = Path("inputs") / LIVE_MAP_OUTPUT
+    map_records = [
+        raw_record
+        for raw_record in manifest.get("files", [])
+        if isinstance(raw_record, Mapping) and raw_record.get("path") == expected_path.as_posix()
+    ]
+    if len(map_records) != 1:
+        raise AdapterError(
+            "fixture manifest must contain exactly one accepted rating map input: "
+            + expected_path.as_posix()
+        )
+    fixture_relative = _safe_runtime_relative(map_records[0]["path"], "fixture map input")
+    if fixture_relative.parts[0] != "inputs":
+        raise AdapterError(f"fixture map input path is invalid: {fixture_relative}")
+    map_path = runtime_root / Path(*fixture_relative.parts[1:])
+    if map_path.is_symlink() or not map_path.is_file():
+        raise AdapterError(f"fixture map input is missing: {map_path}")
+    try:
+        import pyarrow.parquet as parquet
+
+        available_columns = set(parquet.ParquetFile(map_path).schema.names)
+        if "date" not in available_columns:
+            raise AdapterError(f"fixture map input has no date column: {map_path}")
+        if "game_uid" not in available_columns and "gameid" not in available_columns:
+            raise AdapterError(f"fixture map input has no game identity column: {map_path}")
+        identity_column = "game_uid" if "game_uid" in available_columns else "gameid"
+        columns = ["date", identity_column]
+        maps = pd.read_parquet(map_path, columns=columns)
+    except (OSError, ValueError, ImportError) as error:
+        raise AdapterError(f"fixture map input cannot be read: {map_path}") from error
+    if "date" not in maps.columns:
+        raise AdapterError(f"fixture map input has no date column: {map_path}")
+    if "game_uid" not in maps.columns and "gameid" not in maps.columns:
+        raise AdapterError(f"fixture map input has no game identity column: {map_path}")
+
+    game_uid = maps["game_uid"] if "game_uid" in maps.columns else pd.Series("", index=maps.index)
+    fallback = maps["gameid"] if "gameid" in maps.columns else pd.Series("", index=maps.index)
+    map_ids = [
+        canonical_source_game_key(value, fallback_value)
+        for value, fallback_value in zip(game_uid.tolist(), fallback.tolist())
+    ]
+    accepted_ids = tuple(str(value) for value in accepted.get("game_ids", []))
+    accepted_set = set(accepted_ids)
+    counts: dict[str, int] = {}
+    for map_id in map_ids:
+        if map_id in accepted_set:
+            counts[map_id] = counts.get(map_id, 0) + 1
+    missing = sorted(accepted_set.difference(counts))
+    duplicates = sorted(game_id for game_id, count in counts.items() if count != 1)
+    if missing or duplicates:
+        raise AdapterError(
+            "accepted census does not map to exactly one map row: "
+            f"missing={missing[:5]} duplicates={duplicates[:5]}"
+        )
+    accepted_mask = pd.Series([map_id in accepted_set for map_id in map_ids], index=maps.index)
+    accepted_dates = pd.to_datetime(maps.loc[accepted_mask, "date"], errors="coerce", utc=True)
+    if accepted_dates.isna().any() or accepted_dates.empty:
+        raise AdapterError("accepted census map rows have unusable dates")
+    return pd.Timestamp(accepted_dates.max())
 
 
 def _stage_runtime(
@@ -296,6 +376,7 @@ def run_from_environment(
         variant=variant,
         runtime_owner=runtime_owner,
     )
+    accepted_cutoff = _accepted_map_cutoff(runtime_root, manifest, accepted)
     refresh_kwargs: dict[str, Any] = {
         "root": runtime_root,
         "min_games": min_games,
@@ -303,9 +384,8 @@ def run_from_environment(
         "momentum_window_games": momentum_window_games,
         "momentum_scale": momentum_scale,
         "allowed_game_ids": accepted["game_ids"],
+        "as_of": pd.Timestamp(as_of) if as_of is not None else accepted_cutoff,
     }
-    if as_of:
-        refresh_kwargs["as_of"] = pd.Timestamp(as_of)
     if previous_as_of:
         refresh_kwargs["previous_as_of"] = pd.Timestamp(previous_as_of)
     # The accepted census stays in the runtime for inspection. The production
@@ -400,6 +480,7 @@ def run_from_environment(
             "runtime_owner": runtime_owner,
             "phase_input_manifest_sha256": str(manifest["manifest_sha256"]),
             "accepted_census_bound": True,
+            "refresh_as_of": pd.Timestamp(refresh_kwargs["as_of"]).isoformat(),
             "timings": {
                 "refresh_seconds": round(refresh_seconds, 6),
                 "artifact_copy_hash_seconds": round(artifact_copy_hash_seconds, 6),
@@ -409,6 +490,7 @@ def run_from_environment(
         "semantic": {
             "production_schema_version": payload.get("schema_version"),
             "source_as_of": source.get("as_of"),
+            "refresh_as_of": pd.Timestamp(refresh_kwargs["as_of"]).isoformat(),
             "team_snapshot_rows": team.get("snapshot_rows"),
             "player_snapshot_rows": player.get("snapshot_rows"),
             "team_weekly_rows": team.get("weekly_rows"),
