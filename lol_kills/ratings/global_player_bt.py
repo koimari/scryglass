@@ -142,10 +142,17 @@ def _baseline_group(
     global anchor without joining a labelled tier.
     """
 
-    role_key = role.astype(str)
+    # Use the nullable string dtype before filling. Pandas 3 keeps nullable
+    # semantics for ``astype(str)`` on a StringDtype series, so a later
+    # ``fillna`` can otherwise produce an empty tier suffix or a null role.
+    def explicit_bucket(values: pd.Series) -> pd.Series:
+        return values.astype("string").fillna("<NA>").astype(object)
+
+    role_key = explicit_bucket(role)
     if tier is None:
         return role_key
-    return role_key + _BASELINE_GROUP_SEPARATOR + tier.astype(str).fillna("")
+    tier_key = explicit_bucket(tier)
+    return (role_key + _BASELINE_GROUP_SEPARATOR + tier_key).astype(object)
 
 
 def _player_baseline_group(role: pd.Series, tier: pd.Series) -> pd.Series:

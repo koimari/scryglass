@@ -361,6 +361,25 @@ def test_global_missing_tier_keeps_an_explicit_bucket() -> None:
     pd.testing.assert_series_equal(actual, expected, check_names=False)
 
 
+@pytest.mark.parametrize("dtype", ["string", object])
+def test_global_missing_role_and_tier_buckets_are_stable(dtype: object) -> None:
+    """Nullable and object inputs use the same explicit missing bucket."""
+
+    roles = pd.Series(["top", pd.NA, np.nan, None], dtype=dtype)
+    tiers = pd.Series([pd.NA, "tier1", np.nan, None], dtype=dtype)
+    expected = pd.Series(
+        ["top\x1f<NA>", "<NA>\x1ftier1", "<NA>\x1f<NA>", "<NA>\x1f<NA>"],
+        dtype=object,
+    )
+    actual = _baseline_group(roles, tiers)
+    pd.testing.assert_series_equal(actual, expected, check_names=False)
+    pd.testing.assert_series_equal(
+        _baseline_group(roles),
+        pd.Series(["top", "<NA>", "<NA>", "<NA>"], dtype=object),
+        check_names=False,
+    )
+
+
 def test_player_missing_tier_stays_nullable_and_ungraded() -> None:
     """The player path leaves a missing tier outside every baseline pool."""
 
