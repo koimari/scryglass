@@ -82,38 +82,6 @@ FINAL_METRIC_ALIASES = (
     "totalgold",
 )
 
-_ID_COLUMNS = {
-    "game_uid",
-    "gameid",
-    "game_id",
-    "date",
-    "played_at",
-    "game_date",
-    "start_time",
-    "series_id",
-    "seriesid",
-    "match_id",
-    "matchid",
-    "league",
-    "region",
-    "patch",
-    "oe_patch_token",
-    "client_patch",
-    "public_patch",
-    "side",
-    "teamcolor",
-    "team_color",
-    "teamid",
-    "team_id",
-    "playerid",
-    "player_id",
-    "position",
-    "role",
-    "champion",
-    "tournament",
-}
-
-
 class FuturePhaseCurveError(ValueError):
     """Raised when phase inputs violate the source or time contract."""
 
@@ -128,8 +96,6 @@ class BoundPhaseSource:
 
 def _canonical_json_bytes(value: object) -> bytes:
     try:
-        import json
-
         return json.dumps(
             value,
             allow_nan=False,
@@ -888,7 +854,6 @@ def strict_prior_final_history(
     if work[entity_column].isna().any() or work[date_column].isna().any():
         raise FuturePhaseCurveError("prior history identity or date is missing")
     key_frame = work[[entity_column, date_column]].copy()
-    blocks = key_frame.drop_duplicates().sort_values([entity_column, date_column], kind="stable")
     output = key_frame.copy()
     for metric in metrics:
         values = pd.to_numeric(work[metric], errors="coerce")

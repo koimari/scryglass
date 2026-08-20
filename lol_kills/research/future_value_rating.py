@@ -59,28 +59,6 @@ FORM_METRICS = (
 CHECKPOINTS = (10, 15, 20, 25)
 ROLES = ("top", "jungle", "mid", "bot", "support")
 SIDES = ("blue", "red")
-PLAYER_FINAL_METRICS = (
-    "cspm",
-    "earned gpm",
-    "earnedgoldshare",
-    "dpm",
-    "damageshare",
-    "kills",
-    "deaths",
-    "assists",
-    "wpm",
-    "wcpm",
-)
-PLAYER_CHECKPOINT_METRICS = tuple(
-    f"{stem}at{checkpoint}"
-    for checkpoint in CHECKPOINTS
-    for stem in ("gold", "xp", "cs", "kills", "assists", "deaths")
-)
-TEAM_CHECKPOINT_METRICS = tuple(
-    f"{stem}at{checkpoint}"
-    for checkpoint in CHECKPOINTS
-    for stem in ("gold", "xp", "cs", "kills", "assists", "deaths")
-)
 FORBIDDEN_PREGAME_PATTERNS = (
     re.compile(r"^(?:target|observed|current)_", re.IGNORECASE),
     re.compile(r"(?:^|_)(?:gold|xp|cs|kills|assists|deaths)at(?:10|15|20|25)$", re.IGNORECASE),
@@ -447,7 +425,6 @@ def _strict_prior_block_mean(
     if work[entity_column].isna().any() or work[date_column].isna().any():
         raise FutureValueSourceError("strict-prior form identity or date is missing")
     keys = [entity_column, date_column]
-    unique_keys = work[keys].drop_duplicates().sort_values(keys, kind="stable")
     output = work[keys].copy()
     for metric in metric_columns:
         numeric = pd.to_numeric(work[metric], errors="coerce").astype(float)
