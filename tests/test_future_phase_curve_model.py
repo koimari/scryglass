@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -244,6 +247,12 @@ def test_evaluation_has_transfer_and_missingness_sections() -> None:
         cluster_column="series_id",
     )
     assert report["authority"] == "development_only"
+    assert report["source"] == "oracle_elixir_only"
+    assert report["source_as_of"] == receipt["source_as_of"]
+    assert report["source_game_count"] == receipt["source_game_count"]
+    assert report["source_identity_sha256"] == receipt["source_identity_sha256"]
+    assert report["accepted_game_ids"] == receipt["accepted_game_ids"]
+    assert len(report["source_receipt_sha256"]) == 64
     assert report["cluster_safe"]
     assert "groups" in report["regional_transfer"]
     assert "groups" in report["patch_transfer"]
@@ -260,3 +269,21 @@ def test_evaluation_has_transfer_and_missingness_sections() -> None:
             for kind in ("gold", "xp"):
                 for phase in ("10", "15", "20", "25"):
                     assert group["metrics"][kind][phase]["baseline_rows_match"]
+
+
+def test_static_phase_artifacts_bind_the_accepted_census_reference() -> None:
+    root = Path(__file__).parents[1]
+    candidate = json.loads(
+        (root / "data/lol/v2/evaluation/future-phase-candidate.json").read_text()
+    )
+    evaluation = json.loads(
+        (root / "data/lol/v2/evaluation/future-phase-evaluation.json").read_text()
+    )
+    source = candidate["source"]
+    reference = source["accepted_game_ids_artifact"]
+    assert source["source_as_of"] == evaluation["source_as_of"]
+    assert source["source_game_count"] == evaluation["source_game_count"] == 17756
+    assert source["source_identity_sha256"] == evaluation["source_identity_sha256"]
+    assert reference == evaluation["accepted_game_ids_artifact"]
+    assert len(reference["sha256"]) == 64
+    assert reference["game_ids_field"] == "game_ids"

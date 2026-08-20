@@ -1320,8 +1320,11 @@ def evaluate_phase_curve(
 ) -> dict[str, Any]:
     """Evaluate each phase on future rows with fold-internal fitting."""
 
+    bound = bind_phase_source(frame, source_receipt, allow_subset=True)
+    value = bound.frame.copy()
+
     folds = chronological_folds(
-        frame,
+        value,
         n_splits=n_splits,
         min_train_rows=max(1, len(feature_columns) + 1),
         cluster_column=cluster_column,
@@ -1342,8 +1345,8 @@ def evaluate_phase_curve(
     fold_rows: list[dict[str, Any]] = []
     side_swap_checks: list[dict[str, Any]] = []
     for fold_number, (train_indices, test_indices) in enumerate(folds):
-        train = frame.iloc[train_indices].copy()
-        test = frame.iloc[test_indices].copy()
+        train = value.iloc[train_indices].copy()
+        test = value.iloc[test_indices].copy()
         artifact = fit_phase_curve(
             train,
             source_receipt=source_receipt,
@@ -1352,7 +1355,7 @@ def evaluate_phase_curve(
         )
         prediction_errors, missing_count = _prediction_errors(artifact, test, feature_columns)
         side_swap_checks.append(side_swap_invariance_report(artifact, test, feature_columns))
-        boundary = _cluster_boundary_diagnostics(frame, test_indices, cluster_column)
+        boundary = _cluster_boundary_diagnostics(value, test_indices, cluster_column)
         row: dict[str, Any] = {
             "fold": fold_number,
             "train_rows": len(train),
@@ -1408,8 +1411,8 @@ def evaluate_phase_curve(
                 for key, value in missingness_errors[kind][str(phase)].items()
             }
     transfer = _evaluate_transfer_slices(
-        frame,
-        source_receipt=source_receipt,
+        value,
+        source_receipt=bound.receipt,
         feature_columns=feature_columns,
         columns=transfer_columns,
         alpha=alpha,
@@ -1421,13 +1424,19 @@ def evaluate_phase_curve(
         "definition": "predicted blue-minus-red curve plus swapped red-minus-blue curve",
     }
     fallback_rows = int(
-        frame["series_id_source"].astype("string").eq("game_fallback").sum()
-        if "series_id_source" in frame.columns
+        value["series_id_source"].astype("string").eq("game_fallback").sum()
+        if "series_id_source" in value.columns
         else 0
     )
     return {
         "schema_version": SCHEMA_VERSION,
         "method": "chronological_fold_internal_ridge",
+        "source": SOURCE,
+        "source_as_of": bound.receipt["source_as_of"],
+        "source_game_count": int(bound.receipt["source_game_count"]),
+        "source_identity_sha256": str(bound.receipt["source_identity_sha256"]),
+        "accepted_game_ids": list(bound.receipt["accepted_game_ids"]),
+        "source_receipt_sha256": _sha256_bytes(_canonical_json_bytes(bound.receipt)),
         "folds": fold_rows,
         "metrics": metrics,
         "fold_count": len(fold_rows),
