@@ -635,7 +635,12 @@ def main(argv: list[str] | None = None) -> int:
                 model_output_path=args.model_output,
                 runtime_receipt_path=args.runtime_receipt,
                 n_folds=args.n_folds,
-                command=[sys.executable, "-m", __name__, *(argv or sys.argv[1:])],
+                command=[
+                    sys.executable,
+                    "-m",
+                    "lol_kills.research.future_value_training",
+                    *(argv or sys.argv[1:]),
+                ],
             )
         elif args.annual_only:
             if args.annual_root is None or args.output_root is None:

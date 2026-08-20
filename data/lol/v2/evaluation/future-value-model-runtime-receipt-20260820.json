@@ -1,0 +1,94 @@
+{
+  "authority": {
+    "deployment": false,
+    "promotion": false,
+    "public_player_rating": false,
+    "public_probability": false,
+    "public_team_rating": false,
+    "research_only": true
+  },
+  "code_commit": "68983fdfbd1ef13f36e42f22a6b17712ec424700",
+  "command": [
+    "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+    "-m",
+    "lol_kills.research.future_value_training",
+    "--fit-model",
+    "--oe-root",
+    "/private/tmp/scryglass-future-value-frozen.n5DEtI/runtime/data/lol/warehouse/parquet/oe_live",
+    "--freeze",
+    "data/lol/v2/evaluation/future-value-source-freeze-20260820.json",
+    "--source-receipt",
+    "data/lol/v2/evaluation/future-value-source-receipt-20260820.json",
+    "--model-output",
+    "data/lol/v2/evaluation/future-value-model-fit-local-20260820.json",
+    "--runtime-receipt",
+    "data/lol/v2/evaluation/future-value-model-runtime-receipt-20260820.json",
+    "--n-folds",
+    "3"
+  ],
+  "completed_at": "2026-08-20T23:27:11.687525Z",
+  "elapsed_seconds": 76.556294334,
+  "entrypoint": "lol_kills.research.future_value_training.run_model_evaluation",
+  "environment": {
+    "logical_cpu_count": 10,
+    "machine": "arm64",
+    "pid": 30620,
+    "platform": "macOS-26.6.1-arm64-arm-64bit",
+    "processor": "arm",
+    "python_implementation": "CPython",
+    "python_version": "3.9.6",
+    "thread_environment": {
+      "MKL_NUM_THREADS": null,
+      "NUMEXPR_NUM_THREADS": null,
+      "OMP_NUM_THREADS": null,
+      "OPENBLAS_NUM_THREADS": null,
+      "VECLIB_MAXIMUM_THREADS": null
+    },
+    "threadpools": [
+      {
+        "architecture": "neoversen1",
+        "filepath": "/Users/river/Library/Python/3.9/lib/python/site-packages/scipy/.dylibs/libopenblas.0.dylib",
+        "internal_api": "openblas",
+        "num_threads": 10,
+        "prefix": "libopenblas",
+        "threading_layer": "pthreads",
+        "user_api": "blas",
+        "version": "0.3.27"
+      },
+      {
+        "filepath": "/Users/river/Library/Python/3.9/lib/python/site-packages/sklearn/.dylibs/libomp.dylib",
+        "internal_api": "openmp",
+        "num_threads": 10,
+        "prefix": "libomp",
+        "user_api": "openmp",
+        "version": null
+      }
+    ]
+  },
+  "input_rows": {
+    "maps": 16545,
+    "players": 165450,
+    "teams": 33090
+  },
+  "output": {
+    "bytes": 17064150,
+    "path": "data/lol/v2/evaluation/future-value-model-fit-local-20260820.json",
+    "prediction_ledger_rows": 9815,
+    "prediction_ledger_sha256": "1f8ca50c33b3481f0dd078b955c5f4a2884b09cf5734b4b7da5b04be3a6186e0",
+    "sha256": "26000015b3aabdd4790cf7683d84d64b59a118f668740d14ac3f5d13bd43896b"
+  },
+  "receipt_sha256": "6404f2e4fc0d59c4a9956d15dfa35be7771ce4431011630100b4c72543ca417f",
+  "schema_version": "scryglass:future-value-model-runtime:v1",
+  "source": {
+    "model_eligible_game_count": 16545,
+    "model_eligible_identity_sha256": "d5b4434a8f234f8b88e206d26b8e65333fb16f92e2fb139b8e7505eb7d4edadc",
+    "source_as_of": "2026-08-20T11:31:37Z",
+    "source_game_count": 17756,
+    "source_identity_sha256": "b83e45561932469b4b7ff3b88d383b473ff17e0a10f612d3fb97f83e30e2e8b1",
+    "source_receipt_file_sha256": "549c6143e78c0a218b47d05b6de4eb62925427abc11d13df7b5bae3b784eaf8f",
+    "source_receipt_path": "data/lol/v2/evaluation/future-value-source-receipt-20260820.json",
+    "source_receipt_sha256": "71379924eaf4731a88de463d4abf26607bd465a8dd13b2d42789d6d1eb354134"
+  },
+  "started_at": "2026-08-20T23:25:55.132710Z",
+  "status": "research_evaluation_complete"
+}
