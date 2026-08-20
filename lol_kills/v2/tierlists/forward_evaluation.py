@@ -16,13 +16,18 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Collection, Mapping
 
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
 from lol_kills.etl.source_keys import canonical_source_game_key
+from lol_kills.v2.tierlists.accepted_census import (
+    canonical_game_ids,
+    identity_sha256,
+    load_census,
+)
 
 
 SCHEMA_VERSION = "scryglass:tierlist-forward-evaluation:v1"
@@ -175,7 +180,11 @@ def _map_keys(frame: pd.DataFrame) -> pd.Series:
     )
 
 
-def _load_maps(root: Path) -> tuple[list[MapRecord], dict[str, Any]]:
+def _load_maps(
+    root: Path,
+    *,
+    allowed_game_ids: Collection[str] | None = None,
+) -> tuple[list[MapRecord], dict[str, Any]]:
     source = root / SOURCE_LOCATOR
     meta = root / SOURCE_META_LOCATOR
     if not source.is_file() or source.is_symlink():
@@ -201,6 +210,16 @@ def _load_maps(root: Path) -> tuple[list[MapRecord], dict[str, Any]]:
         & frame["side_norm"].isin(("blue", "red"))
         & frame["result_num"].isin((0, 1))
     ].copy()
+    if allowed_game_ids is not None:
+        allowed = set(canonical_game_ids(allowed_game_ids))
+        available = set(frame["map_key"].astype(str))
+        missing = sorted(allowed.difference(available))
+        if missing:
+            raise ForwardEvaluationError(
+                "accepted release census is missing from the forward source; "
+                f"missing_games={len(missing)} sample={missing[:5]}"
+            )
+        frame = frame[frame["map_key"].isin(allowed)].copy()
 
     maps: list[MapRecord] = []
     excluded: defaultdict[str, int] = defaultdict(int)
@@ -286,6 +305,8 @@ def _load_maps(root: Path) -> tuple[list[MapRecord], dict[str, Any]]:
         "meta_raw_sha256": _sha256_path(meta),
         "meta_source_latest": meta_payload.get("source_latest"),
         "maps_loaded": len(maps),
+        "source_game_count": len(maps),
+        "source_identity_sha256": identity_sha256(item.map_id for item in maps),
         "excluded_maps": dict(sorted(excluded.items())),
     }
 
@@ -325,6 +346,7 @@ def evaluate(
     root: Path | str = Path("."),
     *,
     cutoff: str | pd.Timestamp = DEFAULT_CUTOFF,
+    allowed_game_ids: Collection[str] | None = None,
 ) -> dict[str, Any]:
     """Build a complete descriptive forward diagnostic."""
 
@@ -335,9 +357,18 @@ def evaluate(
     else:
         cutoff_stamp = cutoff_stamp.tz_convert("UTC")
     candidate_raw, candidate = _read_candidate(repo_root)
-    maps, source = _load_maps(repo_root)
+    maps, source = _load_maps(repo_root, allowed_game_ids=allowed_game_ids)
     if not maps:
         raise ForwardEvaluationError("no valid maps remain after source checks")
+    candidate_source = candidate.get("source")
+    if not isinstance(candidate_source, Mapping):
+        raise ForwardEvaluationError("candidate has no source census")
+    if (
+        candidate_source.get("maps_replayed") != source["source_game_count"]
+        or candidate_source.get("source_identity_sha256")
+        != source["source_identity_sha256"]
+    ):
+        raise ForwardEvaluationError("candidate and forward evaluation use different game censuses")
 
     team_ratings: dict[str, float] = {}
     champion_ratings: dict[tuple[str, str, str], float] = {}
@@ -529,8 +560,14 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--cutoff", default=DEFAULT_CUTOFF.isoformat().replace("+00:00", "Z"))
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--accepted-census", type=Path, default=None)
     args = parser.parse_args()
-    report = evaluate(args.root, cutoff=args.cutoff)
+    accepted = load_census(args.accepted_census) if args.accepted_census else None
+    report = evaluate(
+        args.root,
+        cutoff=args.cutoff,
+        allowed_game_ids=accepted["game_ids"] if accepted else None,
+    )
     raw = (_canonical(report) + b"\n")
     output = args.output if args.output.is_absolute() else args.root / args.output
     output.parent.mkdir(parents=True, exist_ok=True)

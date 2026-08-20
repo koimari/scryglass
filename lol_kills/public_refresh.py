@@ -37,6 +37,7 @@ from lol_kills.postgame_sync import (
     validate_live_source,
 )
 from lol_kills.v2.tierlists import live_refresh
+from lol_kills.v2.tierlists.accepted_census import write_census
 from lol_kills.refresh_ledger import (
     RefreshRunLedger,
     requirements_lock_sha256,
@@ -628,7 +629,13 @@ def _run_with_source_retries(
     raise PublicRefreshError("ratings refresh stopped without a result") from last_error
 
 
-def _run_tier_refresh(config: RefreshConfig, expected_live_as_of: str) -> dict[str, Any]:
+def _run_tier_refresh(
+    config: RefreshConfig,
+    expected_live_as_of: str,
+    *,
+    accepted_game_ids: Sequence[str],
+    accepted_identity_sha256: str,
+) -> dict[str, Any]:
     previous = live_refresh.DEFAULT_OUTPUT
     previous_path = (
         config.runtime_root / previous
@@ -637,6 +644,17 @@ def _run_tier_refresh(config: RefreshConfig, expected_live_as_of: str) -> dict[s
         if (config.root / previous).is_file()
         else None
     )
+    census_path = (
+        config.runtime_root
+        / "data/lol/runtime/tier-censuses"
+        / f"{accepted_identity_sha256}.json"
+    )
+    census = write_census(census_path, accepted_game_ids)
+    if (
+        census["game_count"] != len(accepted_game_ids)
+        or census["source_identity_sha256"] != accepted_identity_sha256
+    ):
+        raise PublicRefreshError("accepted tier census does not match the release identity")
     receipt = live_refresh.refresh_candidate(
         config.runtime_root,
         expected_live_as_of=expected_live_as_of,
@@ -646,6 +664,7 @@ def _run_tier_refresh(config: RefreshConfig, expected_live_as_of: str) -> dict[s
         skip_annual_oe=True,
         skip_live_source=True,
         skip_atom_bridge=True,
+        accepted_census_path=census_path,
         step_timeout_seconds=config.step_timeout_seconds,
         publish=config.publication_backend == "blob",
     )
@@ -736,10 +755,17 @@ def _tier_publication_for_source(
     live_census = validate_live_source(config.runtime_root, [], years=config.sync.years)
     expected_count = int(source.get("game_count", -1))
     candidate_count = int(candidate.get("maps_replayed", -1))
+    candidate_identity = str(candidate.get("source_identity_sha256") or "")
+    source_game_ids = source.get("game_ids")
+    live_game_ids = live_census.get("game_ids")
     if (
-        live_census.get("game_count") != expected_count
-        or live_census.get("identity_sha256") != source_identity
+        not isinstance(source_game_ids, list)
+        or not isinstance(live_game_ids, list)
+        or len(source_game_ids) != expected_count
+        or source_identity_sha256(source_game_ids) != source_identity
+        or not set(source_game_ids).issubset(set(live_game_ids))
         or candidate_count != expected_count
+        or candidate_identity != source_identity
     ):
         raise PublicRefreshError("tier-list game census does not match the accepted release")
 
@@ -773,6 +799,7 @@ def _tier_publication_for_source(
         "source_observed_through": source_observed_through,
         "as_of": as_of,
         "source_identity_sha256": source_identity,
+        "source_game_count": expected_count,
         "patches": sorted(roles_by_patch),
         "scope_count": len(roles_by_patch),
     }
@@ -1541,7 +1568,16 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             nonlocal failure_stage, tier, tier_publication
             failure_stage = "tier"
             expected = str(source_observed_through or _iso(checked_at))
-            tier = _run_tier_refresh(config, expected)
+            source_game_ids = source.get("game_ids")
+            source_identity = str(source.get("identity_sha256") or "")
+            if not isinstance(source_game_ids, list):
+                raise PublicRefreshError("accepted release has no game ID census")
+            tier = _run_tier_refresh(
+                config,
+                expected,
+                accepted_game_ids=source_game_ids,
+                accepted_identity_sha256=source_identity,
+            )
             tier_publication = _tier_publication_for_source(
                 config,
                 tier,
@@ -1590,17 +1626,42 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
             failure_stage = "tier"
             expected = str(ratings.get("source_observed_through") or _iso(checked_at))
             try:
-                tier = _run_tier_refresh(config, expected)
-                source_identity = str(ratings.get("source_identity_sha256") or "")
-                if source_identity:
-                    tier_publication = _tier_publication_for_source(
-                        config,
-                        tier,
-                        source_observed_through=ratings.get("source_observed_through"),
-                        source={"identity_sha256": source_identity},
+                manifest_ratings = active_manifest.get("ratings")
+                source_identity = str(
+                    ratings.get("source_identity_sha256")
+                    or (
+                        manifest_ratings.get("source_identity_sha256")
+                        if isinstance(manifest_ratings, Mapping)
+                        else ""
                     )
-                else:
-                    tier_publication = _tier_publication(tier)
+                    or ""
+                )
+                state = _load_json(config.sync.state_path)
+                source_game_ids = state.get("published_game_ids")
+                if (
+                    not source_identity
+                    or not isinstance(source_game_ids, list)
+                    or source_identity_sha256(source_game_ids) != source_identity
+                ):
+                    raise PublicRefreshError(
+                        "tier fallback has no exact accepted release census"
+                    )
+                tier = _run_tier_refresh(
+                    config,
+                    expected,
+                    accepted_game_ids=source_game_ids,
+                    accepted_identity_sha256=source_identity,
+                )
+                tier_publication = _tier_publication_for_source(
+                    config,
+                    tier,
+                    source_observed_through=ratings.get("source_observed_through"),
+                    source={
+                        "identity_sha256": source_identity,
+                        "game_count": len(source_game_ids),
+                        "game_ids": source_game_ids,
+                    },
+                )
             except Exception as error:  # noqa: BLE001
                 tier_error = f"{type(error).__name__}: {str(error)[:500]}"
         if tier_error and config.publication_backend == "supabase":
@@ -1767,7 +1828,7 @@ def run_once(config: RefreshConfig, *, now: datetime | None = None, force: bool 
                     rollback_errors.append(
                         f"ratings: {type(rollback_error).__name__}: {rollback_error}"
                     )
-            if tier_publication is not None:
+            if tier_publication is not None and config.publication_backend != "supabase":
                 try:
                     rollback["tier"] = live_refresh.restore_production_bundle(tier_publication)
                 except Exception as rollback_error:  # noqa: BLE001

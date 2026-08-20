@@ -70,6 +70,32 @@ def test_rating_source_rejects_an_incomplete_roster(tmp_path: Path) -> None:
     assert live_refresh._oe_rating_source_complete(tmp_path) is False
 
 
+def test_rating_step_fails_closed_on_a_different_accepted_census(tmp_path: Path) -> None:
+    path = tmp_path / live_refresh.RATING_REFRESH_OUTPUT
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {
+                "source": {
+                    "source_game_count": 2,
+                    "source_identity_sha256": "b" * 64,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = live_refresh._bind_rating_step_to_census(
+        tmp_path,
+        {"completed": True, "returncode": 0},
+        {"game_count": 1, "source_identity_sha256": "a" * 64},
+    )
+
+    assert result["completed"] is False
+    assert result["returncode"] == 2
+    assert result["reason"] == "rating refresh used a different accepted game census"
+
+
 def test_regional_refresh_receipt_records_view_coverage() -> None:
     summary = live_refresh._regional_refresh_summary(
         {
