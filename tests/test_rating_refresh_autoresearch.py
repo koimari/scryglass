@@ -47,12 +47,18 @@ def _fixture_inputs(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     return base_root, base_census, append_root, append_census
 
 
-def _adapter_command(*, output_hash: str = "a", count_delta: int = 0) -> list[str]:
+def _adapter_command(
+    *,
+    output_hash: str = "a",
+    count_delta: int = 0,
+    probe_runtime: bool = False,
+) -> list[str]:
     code = """
 import hashlib, json, os
 from pathlib import Path
 census_path = Path(os.environ['SCRYGLASS_RATING_AUTORESEARCH_CENSUS_PATH'])
 census = json.loads(census_path.read_text())
+RUNTIME_PROBE
 binding = {
     'phase': os.environ['SCRYGLASS_RATING_AUTORESEARCH_PHASE'],
     'source_game_count': census['game_count'] + COUNT_DELTA,
@@ -68,7 +74,15 @@ payload = {
 }
 Path(os.environ['SCRYGLASS_RATING_AUTORESEARCH_OUTPUT_MANIFEST']).write_text(json.dumps(payload))
 Path(os.environ['SCRYGLASS_RATING_AUTORESEARCH_CALL_COUNTS_PATH']).write_text(json.dumps({'counts': {'fit': 1, 'baseline': 1}}))
-""".replace("OUTPUT_SCHEMA", repr("scryglass:rating-autoresearch-output:v1")).replace(
+""".replace("RUNTIME_PROBE", """if PROBE_RUNTIME:
+    from lol_kills.etl import paths
+    runtime_root = Path(os.environ['SCRYGLASS_RUNTIME_ROOT']).resolve()
+    assert paths.ROOT == runtime_root
+    assert paths.FEATURES_DIR == runtime_root / 'data/lol/features'
+    assert paths.PARQUET_DIR == runtime_root / 'data/lol/warehouse/parquet'
+""".replace("PROBE_RUNTIME", repr(probe_runtime))).replace(
+        "OUTPUT_SCHEMA", repr("scryglass:rating-autoresearch-output:v1")
+    ).replace(
         "OUTPUT_HASH", repr(output_hash)
     ).replace("COUNT_DELTA", str(count_delta))
     return [sys.executable, "-c", code]
@@ -155,6 +169,35 @@ def test_benchmark_reports_cold_and_append_timings_calls_and_exact_outputs(tmp_p
         assert phase["candidate"]["call_counts"] == {"status": "file", "counts": {"baseline": 1, "fit": 1}}
         assert phase["comparison"]["correct"] is True
         assert phase["comparison"]["candidate_within_budget"] is True
+
+
+def test_subprocess_imports_etl_paths_from_each_variant_runtime(tmp_path: Path) -> None:
+    base_root, base_census, append_root, append_census = _fixture_inputs(tmp_path)
+    output_root = tmp_path / "benchmark"
+    manifest = freeze_inputs(
+        base_root=base_root,
+        base_census=base_census,
+        append_root=append_root,
+        append_census=append_census,
+        output_root=output_root,
+        input_relative_paths=["maps.jsonl"],
+    )
+    command = _adapter_command(probe_runtime=True)
+    report = run_benchmark(
+        freeze_manifest=manifest,
+        output_root=output_root,
+        baseline_command=command,
+        candidate_command=command,
+        command_cwd=Path.cwd(),
+        budget_seconds=60.0,
+        timeout_seconds=10.0,
+    )
+
+    assert report["accepted"] is True
+    assert report["runtime_roots"]["baseline"] != report["runtime_roots"]["candidate"]
+    for phase_name in ("cold", "append_only"):
+        assert report["phases"][phase_name]["baseline"]["status"] == "ok"
+        assert report["phases"][phase_name]["candidate"]["status"] == "ok"
 
 
 def test_benchmark_rejects_output_difference(tmp_path: Path) -> None:

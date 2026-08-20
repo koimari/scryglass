@@ -485,6 +485,7 @@ def _run_adapter(
             "SCRYGLASS_RATING_AUTORESEARCH_CALL_COUNTS_PATH": str(calls_path),
             "SCRYGLASS_RATING_AUTORESEARCH_RUNTIME_ROOT": str(runtime_root),
             "SCRYGLASS_RATING_AUTORESEARCH_RUNTIME_OWNER": runtime_owner,
+            "SCRYGLASS_RUNTIME_ROOT": str(runtime_root),
             "SCRYGLASS_RATING_AUTORESEARCH_PHASE": phase,
             "SCRYGLASS_RATING_AUTORESEARCH_VARIANT": variant,
         }
