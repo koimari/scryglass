@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import math
+import sys
 from typing import Any
 
 import numpy as np
@@ -75,6 +76,235 @@ PERFORMANCE_ANCHOR_SOURCE_COLUMNS: tuple[str, ...] = (
     "wcpm",
 )
 _ANCHOR_ZERO_MEAN_TOLERANCE = 1e-9
+
+
+class PrefixBaselineCacheError(RuntimeError):
+    """Raised when a cached baseline cannot prove source equivalence."""
+
+
+@dataclass
+class _PrefixBaselineEntry:
+    metric_key: str
+    min_obs: int
+    row_ids: np.ndarray
+    groups: np.ndarray
+    dates: np.ndarray
+    values: np.ndarray
+    z: np.ndarray
+    prior_count: np.ndarray
+
+
+class PrefixBaselineCache:
+    """Reuse exact robust baselines for immutable chronological prefixes.
+
+    The cache stores outputs from the existing reference implementation. It
+    never approximates the median, MAD, IQR, or z-score. A later request may
+    reuse an entry only when every requested row matches its source row and
+    each group contains a complete prefix through the latest requested date.
+    Rows at that latest date may be partial because they cannot affect their
+    own strict-prior baseline. Any other shape is a cache miss and is computed
+    by the caller's reference path.
+
+    The row key must identify one player-map seat. A key normally contains the
+    canonical game ID, side, player name, and normalized role. Values are
+    compared by their float64 bytes, so changed source values cannot silently
+    reuse an old baseline.
+    """
+
+    def __init__(self, *, source_identity: str | None = None) -> None:
+        self.source_identity = source_identity
+        self._entries: dict[tuple[str, int], list[_PrefixBaselineEntry]] = {}
+        self._row_ids: dict[tuple[str, ...], int] = {}
+        self.hits = 0
+        self.misses = 0
+        self.stores = 0
+        self.last_miss_reason: str | None = None
+
+    @staticmethod
+    def _key(value: object) -> tuple[str, ...]:
+        if isinstance(value, tuple):
+            return tuple(sys.intern(str(part)) for part in value)
+        if isinstance(value, list):
+            return tuple(sys.intern(str(part)) for part in value)
+        return (sys.intern(str(value)),)
+
+    @staticmethod
+    def _group(value: object) -> str | None:
+        if value is None or pd.isna(value):
+            return None
+        return str(value)
+
+    @staticmethod
+    def _date(value: object) -> int | None:
+        if value is None or pd.isna(value):
+            return None
+        return int(pd.Timestamp(value).value)
+
+    @staticmethod
+    def _same_float(left: object, right: object) -> bool:
+        left_value = float(left)
+        right_value = float(right)
+        if np.isnan(left_value) and np.isnan(right_value):
+            return True
+        return np.float64(left_value).tobytes() == np.float64(right_value).tobytes()
+
+    def _arrays(
+        self,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        row_key: pd.Series,
+    ) -> tuple[
+        tuple[tuple[str, ...], ...],
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+        np.ndarray,
+    ]:
+        keys = tuple(PrefixBaselineCache._key(value) for value in row_key.to_numpy(dtype=object))
+        row_ids = np.empty(len(keys), dtype=np.int64)
+        seen: set[tuple[str, ...]] = set()
+        for position, key in enumerate(keys):
+            if key in seen:
+                raise PrefixBaselineCacheError(
+                    "baseline cache row key is duplicated"
+                )
+            seen.add(key)
+            row_ids[position] = self._row_ids.setdefault(key, len(self._row_ids))
+        groups = np.asarray(
+            [PrefixBaselineCache._group(value) for value in group.to_numpy(dtype=object)],
+            dtype=object,
+        )
+        dates = np.asarray(
+            [PrefixBaselineCache._date(value) for value in date.to_numpy(dtype=object)],
+            dtype=object,
+        )
+        numeric = pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
+        return keys, row_ids, groups, dates, numeric
+
+    @staticmethod
+    def _is_prefix(
+        entry: _PrefixBaselineEntry,
+        target_positions: np.ndarray,
+        target_set: set[int],
+    ) -> bool:
+        if len(target_positions) == len(entry.row_ids):
+            return True
+        target_groups = entry.groups[target_positions]
+        target_dates = entry.dates[target_positions]
+        for current_group in set(target_groups.tolist()):
+            if current_group is None:
+                return False
+            group_mask = entry.groups == current_group
+            group_target_dates = target_dates[target_groups == current_group]
+            valid_dates = [value for value in group_target_dates.tolist() if value is not None]
+            if not valid_dates:
+                return False
+            latest = max(valid_dates)
+            for position, (entry_group, entry_date) in enumerate(
+                zip(entry.groups.tolist(), entry.dates.tolist())
+            ):
+                if (
+                    entry_group == current_group
+                    and entry_date is not None
+                    and entry_date < latest
+                    and position not in target_set
+                ):
+                    return False
+        return True
+
+    def lookup(
+        self,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        min_obs: int,
+        *,
+        metric_key: str,
+        row_key: pd.Series,
+    ) -> tuple[pd.Series, pd.Series] | None:
+        """Return cached z and prior counts when source equivalence is proven."""
+
+        self.last_miss_reason = None
+        try:
+            keys, row_ids, groups, dates, numeric = self._arrays(
+                values, group, date, row_key
+            )
+        except PrefixBaselineCacheError as exc:
+            self.misses += 1
+            self.last_miss_reason = str(exc)
+            return None
+        entries = self._entries.get((str(metric_key), int(min_obs)), [])
+        if not entries:
+            self.misses += 1
+            self.last_miss_reason = "no_entry"
+            return None
+        for entry in entries:
+            target_positions = np.searchsorted(entry.row_ids, row_ids)
+            missing = bool(np.any(target_positions >= len(entry.row_ids)))
+            if not missing:
+                missing = bool(np.any(entry.row_ids[target_positions] != row_ids))
+            if missing:
+                continue
+            drift = False
+            for target_position, cached_position in enumerate(target_positions):
+                if (
+                    entry.groups[cached_position] != groups[target_position]
+                    or entry.dates[cached_position] != dates[target_position]
+                    or not self._same_float(
+                        entry.values[cached_position], numeric[target_position]
+                    )
+                ):
+                    drift = True
+                    break
+            if drift:
+                continue
+            target_array = np.asarray(target_positions, dtype=int)
+            if not self._is_prefix(entry, target_array, set(target_positions)):
+                continue
+            self.hits += 1
+            output_index = values.index
+            return (
+                pd.Series(entry.z[target_array], index=output_index, dtype=float),
+                pd.Series(entry.prior_count[target_array], index=output_index, dtype=float),
+            )
+        self.misses += 1
+        self.last_miss_reason = "source_drift_or_non_prefix"
+        return None
+
+    def store(
+        self,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        min_obs: int,
+        *,
+        metric_key: str,
+        row_key: pd.Series,
+        z: pd.Series,
+        prior_count: pd.Series,
+    ) -> None:
+        """Store reference results for a complete frame or safe prefix."""
+
+        try:
+            _keys, row_ids, groups, dates, numeric = self._arrays(
+                values, group, date, row_key
+            )
+        except PrefixBaselineCacheError:
+            return
+        order = np.argsort(row_ids, kind="stable")
+        entry = _PrefixBaselineEntry(
+            metric_key=str(metric_key),
+            min_obs=int(min_obs),
+            row_ids=row_ids[order],
+            groups=groups[order],
+            dates=dates[order],
+            values=numeric[order],
+            z=z.to_numpy(dtype=float)[order],
+            prior_count=prior_count.to_numpy(dtype=float)[order],
+        )
+        self._entries.setdefault((str(metric_key), int(min_obs)), []).append(entry)
+        self.stores += 1
 
 # Minimum number of STRICTLY EARLIER observations a (role, competition tier)
 # baseline needs before it may normalize a metric.  Below the floor the metric
@@ -356,6 +586,10 @@ def _prior_baseline_z(
     group: pd.Series,
     date: pd.Series,
     min_obs: int,
+    *,
+    baseline_cache: PrefixBaselineCache | None = None,
+    metric_key: str | None = None,
+    row_key: pd.Series | None = None,
 ) -> tuple[pd.Series, pd.Series]:
     """Robust z-score against a baseline built only from strictly earlier dates.
 
@@ -375,6 +609,18 @@ def _prior_baseline_z(
     A single malformed row cannot move a 50%-breakdown estimator, so it cannot
     poison the baseline that every LATER row in the pool is measured against.
     """
+
+    if baseline_cache is not None and metric_key is not None and row_key is not None:
+        cached = baseline_cache.lookup(
+            values,
+            group,
+            date,
+            min_obs,
+            metric_key=metric_key,
+            row_key=row_key,
+        )
+        if cached is not None:
+            return cached
 
     index = values.index
     x = values.to_numpy(dtype=float)
@@ -430,10 +676,20 @@ def _prior_baseline_z(
             & (scale > 0.0)
         )
         z = np.where(usable, (x - location) / scale, np.nan)
-    return (
-        pd.Series(z, index=index, dtype=float),
-        pd.Series(prior_count, index=index, dtype=float),
-    )
+    output_z = pd.Series(z, index=index, dtype=float)
+    output_prior = pd.Series(prior_count, index=index, dtype=float)
+    if baseline_cache is not None and metric_key is not None and row_key is not None:
+        baseline_cache.store(
+            values,
+            group,
+            date,
+            min_obs,
+            metric_key=metric_key,
+            row_key=row_key,
+            z=output_z,
+            prior_count=output_prior,
+        )
+    return output_z, output_prior
 
 
 def _map_dates(frame: pd.DataFrame) -> pd.Series:
@@ -536,6 +792,8 @@ def _contribution_metrics(
 
 def _role_normalized_composite(
     metrics: pd.DataFrame,
+    *,
+    baseline_cache: PrefixBaselineCache | None = None,
 ) -> tuple[pd.Series, str, dict[str, Any]]:
     """Weighted mean of within-(role, tier) z-scores for each player-map row.
 
@@ -562,6 +820,17 @@ def _role_normalized_composite(
     for key in group_keys[1:]:
         group = group + "\x1f" + metrics[key].astype(str).fillna("")
     date = metrics["_date"]
+    row_key = pd.Series(
+        list(
+            zip(
+                metrics["_game_id"].astype(str),
+                metrics["_side"].astype(str),
+                metrics["_player"].astype(str),
+                metrics["_role"].astype(str),
+            )
+        ),
+        index=metrics.index,
+    )
 
     diagnostics: dict[str, Any] = {
         "baseline_min_prior_observations": int(ANCHOR_MIN_BASELINE_OBS),
@@ -583,8 +852,22 @@ def _role_normalized_composite(
         if weight <= 0.0 or metric not in metrics.columns:
             continue
         values = metrics[metric]
+        cache_metric_key = (
+            "global:gold_share_pct"
+            if metric == "gold_share_pct"
+            else {
+                "wards_per_min": "wpm",
+                "wards_cleared_per_min": "wcpm",
+            }.get(metric, metric)
+        )
         raw_z, prior_obs = _prior_baseline_z(
-            values, group, date, ANCHOR_MIN_BASELINE_OBS
+            values,
+            group,
+            date,
+            ANCHOR_MIN_BASELINE_OBS,
+            baseline_cache=baseline_cache,
+            metric_key=cache_metric_key,
+            row_key=row_key,
         )
         present = values.notna() & np.isfinite(values.astype(float))
         below_floor = present & prior_obs.lt(float(ANCHOR_MIN_BASELINE_OBS))
@@ -621,6 +904,8 @@ def _performance_anchor(
     names: list[str],
     game_ids: set[str],
     cfg: GlobalPlayerBTConfig,
+    *,
+    baseline_cache: PrefixBaselineCache | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Zero-mean ridge anchor in logit units, one entry per fitted player.
 
@@ -663,7 +948,10 @@ def _performance_anchor(
     if scoped.empty:
         return anchor, anchored, evidence
 
-    composite, normalization, diagnostics = _role_normalized_composite(scoped)
+    composite, normalization, diagnostics = _role_normalized_composite(
+        scoped,
+        baseline_cache=baseline_cache,
+    )
     evidence["normalization"] = normalization
     evidence.update(diagnostics)
     evidence["player_map_rows_used"] = int(composite.notna().sum())
@@ -791,6 +1079,7 @@ def fit_global_player_bt(
     *,
     through: pd.Timestamp | None = None,
     validate: bool = True,
+    baseline_cache: PrefixBaselineCache | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Fit one player-results scale and return its release evidence."""
 
@@ -817,7 +1106,13 @@ def fit_global_player_bt(
         if cfg.performance_anchor_enabled
         else pd.DataFrame()
     )
-    anchor, anchored, anchor_evidence = _performance_anchor(metrics, names, set(game_ids), cfg)
+    anchor, anchored, anchor_evidence = _performance_anchor(
+        metrics,
+        names,
+        set(game_ids),
+        cfg,
+        baseline_cache=baseline_cache,
+    )
     # FAIL CLOSED.  An anchor that reaches zero players is not a neutral
     # anchor, it is a silently inert one: the published ladder would go back to
     # handing byte-identical ratings to every player who never appears apart
@@ -856,7 +1151,11 @@ def fit_global_player_bt(
         # measured on the same maps as the outcome, so a full-census anchor
         # would leak test-window performance into the gate.
         train_anchor, _train_anchored, _train_evidence = _performance_anchor(
-            metrics, names, set(game_ids.iloc[:split]), cfg
+            metrics,
+            names,
+            set(game_ids.iloc[:split]),
+            cfg,
+            baseline_cache=baseline_cache,
         )
         train_coefficients, train_side = _fit(train_x, train_y, cfg, anchor=train_anchor)
         model_loss = _log_loss(test_y, np.asarray(test_x @ train_coefficients).reshape(-1) + train_side)

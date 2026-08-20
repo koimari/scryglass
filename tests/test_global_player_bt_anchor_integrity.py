@@ -29,6 +29,7 @@ from lol_kills.ratings.global_player_bt import (
     ANCHOR_METRIC_Z_CLIP,
     ANCHOR_MIN_BASELINE_OBS,
     GlobalPlayerRatingError,
+    PrefixBaselineCache,
     PERFORMANCE_ANCHOR_SOURCE_COLUMNS,
     _contribution_metrics,
     _prior_baseline_z,
@@ -244,6 +245,221 @@ def test_rows_sharing_a_timestamp_cannot_see_each_other() -> None:
         # Both rows in a block see the same prior count, which excludes the
         # block itself.
         assert prior_obs.iloc[position] == prior_obs.iloc[position + 1] == float(position)
+
+
+def test_shared_prefix_cache_is_exact_for_full_and_historical_prefixes() -> None:
+    """The cache reuses reference outputs for an immutable date prefix."""
+
+    size = 40
+    values = pd.Series(np.arange(1.0, size + 1))
+    group = pd.Series(["mid"] * size)
+    date = pd.Series(
+        pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D")
+    )
+    row_key = pd.Series(
+        [("game", "Blue", f"player-{index}", "mid") for index in range(size)],
+        dtype=object,
+    )
+    cache = PrefixBaselineCache(source_identity="fixture")
+
+    reference, reference_prior = _prior_baseline_z(values, group, date, min_obs=2)
+    first, first_prior = _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    second, second_prior = _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+
+    pd.testing.assert_series_equal(first, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(first_prior, reference_prior, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(second, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(second_prior, reference_prior, check_names=False, check_exact=True)
+    assert cache.stores == 1
+    assert cache.hits == 1
+
+    prefix = slice(0, 24)
+    prefix_values = values.iloc[prefix].reset_index(drop=True)
+    prefix_group = group.iloc[prefix].reset_index(drop=True)
+    prefix_date = date.iloc[prefix].reset_index(drop=True)
+    prefix_keys = row_key.iloc[prefix].reset_index(drop=True)
+    prefix_cached, prefix_prior = _prior_baseline_z(
+        prefix_values,
+        prefix_group,
+        prefix_date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=prefix_keys,
+    )
+    prefix_reference, prefix_reference_prior = _prior_baseline_z(
+        prefix_values, prefix_group, prefix_date, min_obs=2
+    )
+    pd.testing.assert_series_equal(
+        prefix_cached, prefix_reference, check_names=False, check_exact=True
+    )
+    pd.testing.assert_series_equal(
+        prefix_prior,
+        prefix_reference_prior,
+        check_names=False,
+        check_exact=True,
+    )
+    assert cache.hits == 2
+
+
+def test_shared_prefix_cache_keeps_same_timestamp_rows_and_rejects_drift() -> None:
+    """Partial final blocks are safe; gaps and changed source rows miss closed."""
+
+    size = 40
+    values = pd.Series(np.arange(1.0, size + 1))
+    group = pd.Series(["mid"] * size)
+    date = pd.Series(
+        pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size) // 2, unit="D")
+    )
+    row_key = pd.Series(
+        [("game", "Blue", f"player-{index}", "mid") for index in range(size)],
+        dtype=object,
+    )
+    cache = PrefixBaselineCache()
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+
+    partial = slice(0, 21)
+    partial_values = values.iloc[partial].reset_index(drop=True)
+    partial_group = group.iloc[partial].reset_index(drop=True)
+    partial_date = date.iloc[partial].reset_index(drop=True)
+    partial_keys = row_key.iloc[partial].reset_index(drop=True)
+    cached, cached_prior = _prior_baseline_z(
+        partial_values,
+        partial_group,
+        partial_date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=partial_keys,
+    )
+    reference, reference_prior = _prior_baseline_z(
+        partial_values, partial_group, partial_date, min_obs=2
+    )
+    pd.testing.assert_series_equal(cached, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(
+        cached_prior, reference_prior, check_names=False, check_exact=True
+    )
+    assert cache.hits == 1
+
+    # Omitting an earlier row while retaining a later date is outside the
+    # proven prefix contract. The caller computes the reference path again.
+    gap = [0, 2, 3, 4, 5, 6]
+    before_misses = cache.misses
+    gap_values = values.iloc[gap].reset_index(drop=True)
+    gap_group = group.iloc[gap].reset_index(drop=True)
+    gap_date = date.iloc[gap].reset_index(drop=True)
+    gap_keys = row_key.iloc[gap].reset_index(drop=True)
+    gap_result, gap_prior = _prior_baseline_z(
+        gap_values,
+        gap_group,
+        gap_date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=gap_keys,
+    )
+    gap_reference, gap_reference_prior = _prior_baseline_z(
+        gap_values, gap_group, gap_date, min_obs=2
+    )
+    pd.testing.assert_series_equal(
+        gap_result, gap_reference, check_names=False, check_exact=True
+    )
+    pd.testing.assert_series_equal(
+        gap_prior, gap_reference_prior, check_names=False, check_exact=True
+    )
+    assert cache.misses > before_misses
+    assert cache.last_miss_reason == "source_drift_or_non_prefix"
+
+    # A changed earlier value has the same safe result. The old entry never
+    # supplies stale output for the changed source.
+    changed = values.copy()
+    changed.iloc[3] = 900.0
+    changed_result, changed_prior = _prior_baseline_z(
+        changed,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    changed_reference, changed_reference_prior = _prior_baseline_z(
+        changed, group, date, min_obs=2
+    )
+    pd.testing.assert_series_equal(
+        changed_result, changed_reference, check_names=False, check_exact=True
+    )
+    pd.testing.assert_series_equal(
+        changed_prior,
+        changed_reference_prior,
+        check_names=False,
+        check_exact=True,
+    )
+
+
+def test_shared_prefix_cache_is_usable_by_both_baseline_implementations() -> None:
+    """The player and global wrappers consume one exact cached result."""
+
+    from lol_kills.ratings.player_elo import _prior_baseline_z as elo_prior_baseline_z
+
+    size = 40
+    values = pd.Series(np.arange(1.0, size + 1))
+    group = pd.Series(["mid"] * size)
+    date = pd.Series(
+        pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D")
+    )
+    row_key = pd.Series(
+        [("game", "Blue", f"player-{index}", "mid") for index in range(size)],
+        dtype=object,
+    )
+    cache = PrefixBaselineCache()
+    global_z, global_prior = _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    player_z = elo_prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+
+    pd.testing.assert_series_equal(global_z, player_z, check_names=False, check_exact=True)
+    assert global_prior.notna().all()
+    assert cache.stores == 1
+    assert cache.hits == 1
 
 
 def test_a_later_map_cannot_change_an_earlier_maps_normalized_metric() -> None:

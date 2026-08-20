@@ -57,6 +57,7 @@ from lol_kills.ratings.momentum_config import (
 from lol_kills.ratings.global_player_bt import (
     GlobalPlayerBTConfig,
     GlobalPlayerRatingError,
+    PrefixBaselineCache,
     fit_global_player_bt,
 )
 
@@ -535,6 +536,10 @@ def _prior_baseline_z(
     group: pd.Series,
     date: pd.Series,
     min_obs: int,
+    *,
+    baseline_cache: PrefixBaselineCache | None = None,
+    metric_key: str | None = None,
+    row_key: pd.Series | None = None,
 ) -> pd.Series:
     """Robust z-score against a baseline built only from strictly earlier dates.
 
@@ -552,6 +557,18 @@ def _prior_baseline_z(
     A single malformed row cannot move a 50%-breakdown estimator, so it cannot
     poison the baseline that every LATER row in the pool is measured against.
     """
+
+    if baseline_cache is not None and metric_key is not None and row_key is not None:
+        cached = baseline_cache.lookup(
+            values,
+            group,
+            date,
+            min_obs,
+            metric_key=metric_key,
+            row_key=row_key,
+        )
+        if cached is not None:
+            return cached[0]
 
     index = values.index
     x = values.to_numpy(dtype=float)
@@ -607,12 +624,26 @@ def _prior_baseline_z(
             & (scale > 0.0)
         )
         z = np.where(usable, (x - location) / scale, np.nan)
-    return pd.Series(z, index=index, dtype=float)
+    output = pd.Series(z, index=index, dtype=float)
+    if baseline_cache is not None and metric_key is not None and row_key is not None:
+        baseline_cache.store(
+            values,
+            group,
+            date,
+            min_obs,
+            metric_key=metric_key,
+            row_key=row_key,
+            z=output,
+            prior_count=pd.Series(prior_count, index=index, dtype=float),
+        )
+    return output
 
 
 def player_attribution_multipliers(
     metrics: pd.DataFrame,
     cfg: PlayerEloConfig,
+    *,
+    baseline_cache: PrefixBaselineCache | None = None,
 ) -> tuple[dict[tuple[str, str, str], float], dict[str, object]]:
     """Conservative per-player multipliers for the shared team update.
 
@@ -663,7 +694,9 @@ def player_attribution_multipliers(
     # Role normalization happens here: the baseline is grouped by role so every
     # z-score is relative to same-role, same-tier prior maps.
     group = (
-        metrics["_role"].astype("string") + "|" + metrics["_attr_tier"].astype("string")
+        metrics["_role"].astype("string")
+        + "\x1f"
+        + metrics["_attr_tier"].astype("string")
     )
     date = metrics["_attr_date"]
 
@@ -675,9 +708,26 @@ def player_attribution_multipliers(
         return {}, stats
 
     z_frame = pd.DataFrame(index=metrics.index)
+    row_key = pd.Series(
+        list(
+            zip(
+                metrics["_gid"].astype(str),
+                metrics["side"].astype(str),
+                metrics["_name"].astype(str),
+                metrics["_role"].astype(str),
+            )
+        ),
+        index=metrics.index,
+    )
     for name in ordered:
         z_frame[name] = _prior_baseline_z(
-            features[name], group, date, ATTRIBUTION_MIN_BASELINE_OBS
+            features[name],
+            group,
+            date,
+            ATTRIBUTION_MIN_BASELINE_OBS,
+            baseline_cache=baseline_cache,
+            metric_key=name,
+            row_key=row_key,
         )
         stats["feature_available_rows"][name] = int(z_frame[name].notna().sum())
 
@@ -945,6 +995,8 @@ def _run_player_elo(
     players: pd.DataFrame,
     cfg: PlayerEloConfig,
     checkpoint_dates: list[pd.Timestamp] | None = None,
+    *,
+    baseline_cache: PrefixBaselineCache | None = None,
 ) -> tuple[pd.DataFrame, dict[str, PlayerState], dict[pd.Timestamp, list[dict[str, object]]]]:
     """Run the sequential player model and optionally capture dated states."""
 
@@ -967,7 +1019,9 @@ def _run_player_elo(
     if cfg.attribution_enabled:
         lineups, attribution_metrics = _lineups_by_game(players, with_metrics=True)
         attribution, attribution_stats = player_attribution_multipliers(
-            attribution_metrics, cfg
+            attribution_metrics,
+            cfg,
+            baseline_cache=baseline_cache,
         )
     else:
         lineups = _lineups_by_game(players)
@@ -1193,14 +1247,24 @@ def build_player_ratings(
     """Sequential player Elo; player ratings travel across org changes."""
 
     cfg = cfg or PlayerEloConfig()
-    out, states, _checkpoints, recent_mus = _run_player_elo(maps, players, cfg)
+    baseline_cache = PrefixBaselineCache()
+    out, states, _checkpoints, recent_mus = _run_player_elo(
+        maps,
+        players,
+        cfg,
+        baseline_cache=baseline_cache,
+    )
     attribution_stats = dict(LAST_ATTRIBUTION_STATS)
     destination = Path(output_dir or FEATURES_DIR)
     destination.mkdir(parents=True, exist_ok=True)
     path = destination / "player_ratings.parquet"
     out.to_parquet(path, index=False)
 
-    global_snapshot, global_meta = fit_global_player_bt(maps, players)
+    global_snapshot, global_meta = fit_global_player_bt(
+        maps,
+        players,
+        baseline_cache=baseline_cache,
+    )
     snap = _apply_global_scale(
         _snapshot_rows(states, recent_mus, cfg), global_snapshot, cfg
     )
@@ -1314,6 +1378,7 @@ def build_player_weekly_ranks(
     """
 
     cfg = cfg or PlayerEloConfig()
+    baseline_cache = PrefixBaselineCache()
     week_start = _sunday_utc(as_of)
     previous_start = week_start - pd.Timedelta(days=7)
     frame = maps.copy()
@@ -1335,6 +1400,7 @@ def build_player_weekly_ranks(
         players,
         cfg,
         checkpoint_dates=[recent_anchor, *comparison_cutoffs.values()],
+        baseline_cache=baseline_cache,
     )
     current_global, _current_meta = fit_global_player_bt(
         frame,
@@ -1342,6 +1408,7 @@ def build_player_weekly_ranks(
         GlobalPlayerBTConfig(minimum_maps=1),
         through=cutoff,
         validate=False,
+        baseline_cache=baseline_cache,
     )
     # Current affiliation is the publication filter.  Historical matches in a
     # different circuit remain evidence for the rating but cannot place a
@@ -1367,6 +1434,7 @@ def build_player_weekly_ranks(
                 GlobalPlayerBTConfig(minimum_maps=1),
                 through=anchor,
                 validate=False,
+                baseline_cache=baseline_cache,
             )
         except GlobalPlayerRatingError:
             return []
