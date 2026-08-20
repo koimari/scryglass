@@ -453,31 +453,48 @@ if [[ "${resume_cycle}" -eq 0 ]]; then
     fi
   elif (( oe_fetch_status == 75 )); then
     # A Drive quota block leaves the previous download in place, and that file
-    # is real data - only its age is in question. Reuse it while it is inside
-    # the same limit the ingest applies to a stale source, so a quota block
-    # costs a few hours of freshness instead of reintroducing the GUI
-    # dependency. The importer dedupes unchanged bytes, so re-presenting the
-    # same file is cheap and records "unchanged" rather than a false refresh.
-    oe_max_age_days="$(
-      "${python}" -c \
-        'from lol_kills.etl.oe_ingest import OE_SOURCE_MAX_AGE_DAYS; print(int(OE_SOURCE_MAX_AGE_DAYS))' \
+    # is real data - only its age is in question. The reuse window must match
+    # what the pipeline downstream will ACCEPT: the tier promotion gate wants
+    # the source complete through the current cycle, and a three-day window
+    # here produced a silent deadlock, half-hour rebuilds refused with
+    # blocked_source_incomplete every cycle until a human downloaded by hand.
+    #
+    # Two review corrections shape the check. The witness is the newest
+    # accepted-source RECEIPT's retrieval time, not the CSV mtime: a fetch
+    # that returns unchanged bytes installs nothing and leaves the mtime at
+    # the last content change, so mtime calls a source stale that was fetched
+    # and validated this very cycle. And the cycle boundary is the LOCAL
+    # six-hour floor, the same clock cycle_id and StartCalendarInterval use;
+    # flooring raw epoch seconds would draw UTC boundaries that disagree with
+    # the schedule on any non-UTC-aligned worker.
+    oe_cycle_start="$(
+      "${python}" -c 'from datetime import datetime
+now = datetime.now()
+print(int(now.replace(hour=now.hour // 6 * 6, minute=0, second=0, microsecond=0).timestamp()))' \
         2>/dev/null || true
     )"
-    if [[ ! "${oe_max_age_days}" =~ '^[1-9][0-9]*$' ]]; then
-      # Import failed; do not invent a longer grace period than the code's.
-      oe_max_age_days=3
-    fi
-    oe_fresh_after=$(( $(/bin/date +%s) - oe_max_age_days * 86400 ))
-    oe_existing_mtime=0
-    if [[ -f "${oe_csv}" ]]; then
-      oe_existing_mtime="$(/usr/bin/stat -f %m "${oe_csv}" 2>/dev/null || print -r -- 0)"
-    fi
-    if (( oe_existing_mtime > oe_fresh_after )); then
-      print -r -- "public-refresh: headless blocked by quota; existing CSV is fresh enough (${oe_csv}, within ${oe_max_age_days} days) - proceeding without Brave"
+    oe_last_validated="$(
+      "${python}" -c 'import json, pathlib
+from datetime import datetime
+from lol_kills.etl.paths import OE_RECEIPT_DIR
+newest = 0
+for path in pathlib.Path(OE_RECEIPT_DIR).glob("*.json"):
+    try:
+        receipt = json.loads(path.read_text())
+        moment = datetime.fromisoformat(str(receipt["retrieved_at_utc"]).replace("Z", "+00:00"))
+        newest = max(newest, int(moment.timestamp()))
+    except Exception:
+        continue
+print(newest)' \
+        2>/dev/null || true
+    )"
+    if [[ "${oe_cycle_start}" =~ '^[0-9]+$' && "${oe_last_validated}" =~ '^[0-9]+$' ]] \
+      && (( oe_last_validated >= oe_cycle_start )) && [[ -f "${oe_csv}" ]]; then
+      print -r -- "public-refresh: headless blocked by quota; the source was fetched and validated this cycle - proceeding without Brave"
       oe_install_source="${oe_csv}"
       export SCRYGLASS_OE_TRANSPORT="cached_inbox_reuse"
     else
-      print -u2 "public-refresh: headless blocked by quota and ${oe_csv} is missing or older than ${oe_max_age_days} days; falling back to the Brave download."
+      print -u2 "public-refresh: headless blocked by quota and no accepted-source receipt from the current cycle exists; falling back to the Brave download."
       need_browser_download=1
     fi
   else
