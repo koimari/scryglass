@@ -18,9 +18,13 @@ group and cannot lift or lower a player's anchor on their own.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
+import json
 import math
+import os
+from pathlib import Path
 import sys
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import pandas as pd
@@ -76,6 +80,11 @@ PERFORMANCE_ANCHOR_SOURCE_COLUMNS: tuple[str, ...] = (
     "wcpm",
 )
 _ANCHOR_ZERO_MEAN_TOLERANCE = 1e-9
+_PREFIX_CACHE_SCHEMA_VERSION = 1
+_PREFIX_CACHE_SCHEMA_FINGERPRINT = (
+    "robust-prefix-baseline:v1:median-mad-iqr:strict-prior-blocks:float64"
+)
+_PREFIX_CACHE_MISSING_DATE = np.iinfo(np.int64).min
 
 
 class PrefixBaselineCacheError(RuntimeError):
@@ -105,20 +114,233 @@ class PrefixBaselineCache:
     own strict-prior baseline. Any other shape is a cache miss and is computed
     by the caller's reference path.
 
+    When ``storage_path`` is set, the row catalog and every metric entry use a
+    checksummed JSON manifest plus a NumPy payload. A source with later
+    timestamp blocks extends the entry through the appended blocks. A source
+    correction, deletion, schema change, or non-prefix census clears the
+    loaded entries before the caller recomputes them.
+
     The row key must identify one player-map seat. A key normally contains the
     canonical game ID, side, player name, and normalized role. Values are
     compared by their float64 bytes, so changed source values cannot silently
     reuse an old baseline.
     """
 
-    def __init__(self, *, source_identity: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        storage_path: Path | str | None = None,
+        source_identity: str | None = None,
+        schema_fingerprint: str = _PREFIX_CACHE_SCHEMA_FINGERPRINT,
+    ) -> None:
+        self.storage_path = Path(storage_path) if storage_path is not None else None
+        self.manifest_path = (
+            self.storage_path.with_suffix(".json")
+            if self.storage_path is not None
+            else None
+        )
+        self.payload_path = (
+            self.storage_path.with_suffix(".npz")
+            if self.storage_path is not None
+            else None
+        )
         self.source_identity = source_identity
+        self.schema_fingerprint = str(schema_fingerprint)
         self._entries: dict[tuple[str, int], list[_PrefixBaselineEntry]] = {}
         self._row_ids: dict[tuple[str, ...], int] = {}
+        self.invalidated = False
+        self.invalidated_reason: str | None = None
+        self.source_identity_changed = False
         self.hits = 0
         self.misses = 0
         self.stores = 0
         self.last_miss_reason: str | None = None
+        if self.storage_path is not None:
+            self._load()
+
+    @property
+    def persistent(self) -> bool:
+        return self.storage_path is not None
+
+    def _clear(self, reason: str) -> None:
+        self._entries.clear()
+        self._row_ids.clear()
+        self.invalidated = True
+        self.invalidated_reason = str(reason)
+
+    @staticmethod
+    def _array_sha256(array: np.ndarray) -> str:
+        contiguous = np.ascontiguousarray(array)
+        return hashlib.sha256(contiguous.tobytes()).hexdigest()
+
+    @staticmethod
+    def _json_key(key: tuple[str, ...]) -> str:
+        return json.dumps(key, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def _unicode_array(values: list[str]) -> np.ndarray:
+        width = max([len(value) for value in values] + [1])
+        return np.asarray(values, dtype=f"<U{width}")
+
+    @staticmethod
+    def _manifest_spec(array: np.ndarray) -> dict[str, object]:
+        return {
+            "dtype": str(array.dtype),
+            "shape": list(array.shape),
+            "sha256": PrefixBaselineCache._array_sha256(array),
+        }
+
+    def _load(self) -> None:
+        """Load a validated cache payload, leaving a failed cache empty."""
+
+        assert self.manifest_path is not None
+        assert self.payload_path is not None
+        if not self.manifest_path.is_file() and not self.payload_path.is_file():
+            return
+        try:
+            manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("schema_version") != _PREFIX_CACHE_SCHEMA_VERSION:
+                raise PrefixBaselineCacheError("persistent cache schema version drift")
+            if manifest.get("schema_fingerprint") != self.schema_fingerprint:
+                raise PrefixBaselineCacheError("persistent cache schema fingerprint drift")
+            saved_identity = manifest.get("source_identity")
+            if (
+                self.source_identity is not None
+                and saved_identity is not None
+                and self.source_identity != saved_identity
+            ):
+                # A changed source census can be an append. Row-level checks
+                # below decide whether the change is append-only or a drift.
+                self.source_identity_changed = True
+            if self.source_identity is None and saved_identity is not None:
+                self.source_identity = str(saved_identity)
+            payload_bytes = self.payload_path.read_bytes()
+            expected_payload = manifest.get("payload_sha256")
+            if hashlib.sha256(payload_bytes).hexdigest() != expected_payload:
+                raise PrefixBaselineCacheError("persistent cache payload checksum drift")
+            with np.load(self.payload_path, allow_pickle=False) as payload:
+                specs = manifest.get("arrays")
+                if not isinstance(specs, dict):
+                    raise PrefixBaselineCacheError("persistent cache array manifest missing")
+                arrays: dict[str, np.ndarray] = {}
+                for name, spec in specs.items():
+                    if name not in payload or not isinstance(spec, dict):
+                        raise PrefixBaselineCacheError("persistent cache array missing")
+                    array = np.asarray(payload[name])
+                    if str(array.dtype) != spec.get("dtype") or list(array.shape) != spec.get("shape"):
+                        raise PrefixBaselineCacheError("persistent cache array schema drift")
+                    if self._array_sha256(array) != spec.get("sha256"):
+                        raise PrefixBaselineCacheError("persistent cache array checksum drift")
+                    arrays[str(name)] = array
+            catalog = arrays.pop("row_catalog")
+            self._row_ids = {}
+            for row_id, encoded in enumerate(catalog.tolist()):
+                decoded = json.loads(str(encoded))
+                if not isinstance(decoded, list):
+                    raise PrefixBaselineCacheError("persistent cache row catalog drift")
+                self._row_ids[self._key(decoded)] = row_id
+            entries = manifest.get("entries")
+            if not isinstance(entries, list):
+                raise PrefixBaselineCacheError("persistent cache entry manifest missing")
+            loaded: dict[tuple[str, int], list[_PrefixBaselineEntry]] = {}
+            for descriptor in entries:
+                if not isinstance(descriptor, dict):
+                    raise PrefixBaselineCacheError("persistent cache entry descriptor drift")
+                metric_key = str(descriptor["metric_key"])
+                min_obs = int(descriptor["min_obs"])
+                prefix = str(descriptor["prefix"])
+                entry = _PrefixBaselineEntry(
+                    metric_key=metric_key,
+                    min_obs=min_obs,
+                    row_ids=arrays[f"{prefix}_row_ids"].astype(np.int64, copy=False),
+                    groups=np.asarray(
+                        [None if value == "" else str(value) for value in arrays[f"{prefix}_groups"].tolist()],
+                        dtype=object,
+                    ),
+                    dates=np.asarray(
+                        [None if int(value) == _PREFIX_CACHE_MISSING_DATE else int(value) for value in arrays[f"{prefix}_dates"].tolist()],
+                        dtype=object,
+                    ),
+                    values=arrays[f"{prefix}_values"].astype(float, copy=False),
+                    z=arrays[f"{prefix}_z"].astype(float, copy=False),
+                    prior_count=arrays[f"{prefix}_prior"].astype(float, copy=False),
+                )
+                loaded.setdefault((metric_key, min_obs), []).append(entry)
+            self._entries = loaded
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, PrefixBaselineCacheError) as exc:
+            self._clear(f"persistent cache load failed: {exc}")
+
+    def flush(self) -> None:
+        """Atomically serialize the validated cache for later processes."""
+
+        if self.storage_path is None:
+            return
+        assert self.manifest_path is not None
+        assert self.payload_path is not None
+        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        arrays: dict[str, np.ndarray] = {}
+        catalog = [None] * len(self._row_ids)
+        for key, row_id in self._row_ids.items():
+            catalog[row_id] = self._json_key(key)
+        arrays["row_catalog"] = self._unicode_array([str(value) for value in catalog])
+        descriptors: list[dict[str, object]] = []
+        counter = 0
+        for entries in self._entries.values():
+            for entry in entries:
+                prefix = f"entry_{counter}"
+                counter += 1
+                arrays[f"{prefix}_row_ids"] = entry.row_ids.astype(np.int64, copy=False)
+                arrays[f"{prefix}_groups"] = self._unicode_array(
+                    ["" if value is None else str(value) for value in entry.groups.tolist()]
+                )
+                arrays[f"{prefix}_dates"] = np.asarray(
+                    [
+                        _PREFIX_CACHE_MISSING_DATE if value is None else int(value)
+                        for value in entry.dates.tolist()
+                    ],
+                    dtype=np.int64,
+                )
+                arrays[f"{prefix}_values"] = entry.values.astype(float, copy=False)
+                arrays[f"{prefix}_z"] = entry.z.astype(float, copy=False)
+                arrays[f"{prefix}_prior"] = entry.prior_count.astype(float, copy=False)
+                descriptors.append(
+                    {
+                        "metric_key": entry.metric_key,
+                        "min_obs": entry.min_obs,
+                        "prefix": prefix,
+                    }
+                )
+        payload_tmp = self.payload_path.with_name(self.payload_path.name + ".tmp")
+        manifest_tmp = self.manifest_path.with_name(self.manifest_path.name + ".tmp")
+        try:
+            with payload_tmp.open("wb") as handle:
+                np.savez_compressed(handle, **arrays)
+            payload_bytes = payload_tmp.read_bytes()
+            manifest = {
+                "schema_version": _PREFIX_CACHE_SCHEMA_VERSION,
+                "schema_fingerprint": self.schema_fingerprint,
+                "source_identity": self.source_identity,
+                "payload_sha256": hashlib.sha256(payload_bytes).hexdigest(),
+                "arrays": {
+                    name: self._manifest_spec(array) for name, array in arrays.items()
+                },
+                "entries": descriptors,
+            }
+            manifest_tmp.write_text(
+                json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            os.replace(payload_tmp, self.payload_path)
+            os.replace(manifest_tmp, self.manifest_path)
+            self.invalidated = False
+            self.invalidated_reason = None
+            self.source_identity_changed = False
+        finally:
+            for temporary in (payload_tmp, manifest_tmp):
+                try:
+                    temporary.unlink()
+                except FileNotFoundError:
+                    pass
 
     @staticmethod
     def _key(value: object) -> tuple[str, ...]:
@@ -213,6 +435,191 @@ class PrefixBaselineCache:
                     return False
         return True
 
+    @staticmethod
+    def _matched_positions(
+        entry: _PrefixBaselineEntry,
+        row_ids: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        positions = np.searchsorted(entry.row_ids, row_ids)
+        known = positions < len(entry.row_ids)
+        if known.any():
+            known_indices = np.flatnonzero(known)
+            known[known_indices] = entry.row_ids[positions[known_indices]] == row_ids[known_indices]
+        return positions, known
+
+    def _make_entry(
+        self,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        min_obs: int,
+        *,
+        metric_key: str,
+        row_key: pd.Series,
+        z: pd.Series,
+        prior_count: pd.Series,
+    ) -> _PrefixBaselineEntry | None:
+        try:
+            _keys, row_ids, groups, dates, numeric = self._arrays(
+                values, group, date, row_key
+            )
+        except PrefixBaselineCacheError:
+            return None
+        order = np.argsort(row_ids, kind="stable")
+        return _PrefixBaselineEntry(
+            metric_key=str(metric_key),
+            min_obs=int(min_obs),
+            row_ids=row_ids[order],
+            groups=groups[order],
+            dates=dates[order],
+            values=numeric[order],
+            z=z.to_numpy(dtype=float)[order],
+            prior_count=prior_count.to_numpy(dtype=float)[order],
+        )
+
+    def _try_append(
+        self,
+        values: pd.Series,
+        group: pd.Series,
+        date: pd.Series,
+        min_obs: int,
+        *,
+        metric_key: str,
+        row_key: pd.Series,
+        block_baseline: Callable[
+            [np.ndarray, np.ndarray, int], tuple[np.ndarray, np.ndarray]
+        ],
+    ) -> tuple[pd.Series, pd.Series] | None:
+        """Extend one entry when every new row is a later timestamp block."""
+
+        try:
+            _keys, row_ids, groups, dates, numeric = self._arrays(
+                values, group, date, row_key
+            )
+        except PrefixBaselineCacheError as exc:
+            self.last_miss_reason = str(exc)
+            return None
+        entries = self._entries.get((str(metric_key), int(min_obs)), [])
+        for entry_index, entry in enumerate(entries):
+            cached_positions, known = self._matched_positions(entry, row_ids)
+            if int(known.sum()) != len(entry.row_ids):
+                continue
+            drift = False
+            for target_position in np.flatnonzero(known):
+                cached_position = cached_positions[target_position]
+                if (
+                    entry.groups[cached_position] != groups[target_position]
+                    or entry.dates[cached_position] != dates[target_position]
+                    or not self._same_float(
+                        entry.values[cached_position], numeric[target_position]
+                    )
+                ):
+                    drift = True
+                    break
+            if drift:
+                continue
+            if known.all():
+                continue
+            if not known.all():
+                old_dates = [value for value in entry.dates.tolist() if value is not None]
+                new_dates = [dates[index] for index in np.flatnonzero(~known)]
+                if not old_dates or any(value is None for value in new_dates):
+                    continue
+                latest_old = max(old_dates)
+                if any(int(value) <= latest_old for value in new_dates):
+                    continue
+
+            output_z = np.full(len(values), np.nan, dtype=float)
+            output_prior = np.zeros(len(values), dtype=float)
+            output_z[known] = entry.z[cached_positions[known]]
+            output_prior[known] = entry.prior_count[cached_positions[known]]
+
+            for current_group in set(groups.tolist()):
+                group_positions = np.flatnonzero(groups == current_group)
+                if current_group is None or len(group_positions) == 0:
+                    continue
+                order = group_positions[
+                    np.argsort(
+                        np.asarray(
+                            [
+                                _PREFIX_CACHE_MISSING_DATE
+                                if dates[position] is None
+                                else int(dates[position])
+                                for position in group_positions
+                            ],
+                            dtype=np.int64,
+                        ),
+                        kind="stable",
+                    )
+                ]
+                group_dates = dates[order]
+                starts = np.empty(len(order), dtype=bool)
+                starts[0] = True
+                starts[1:] = group_dates[1:] != group_dates[:-1]
+                block_starts = np.flatnonzero(starts)
+                present = np.isfinite(numeric[order])
+                pool = numeric[order][present]
+                available_all = np.concatenate(([0], np.cumsum(present)))[block_starts]
+                new_block_mask = np.asarray(
+                    [not known[position] for position in order[block_starts]],
+                    dtype=bool,
+                )
+                new_blocks = np.flatnonzero(new_block_mask)
+                if len(new_blocks) == 0:
+                    continue
+                available = available_all[new_blocks]
+                block_location, block_scale = block_baseline(
+                    pool, available, min_obs
+                )
+                block_lookup = {
+                    int(block_index): offset
+                    for offset, block_index in enumerate(new_blocks)
+                }
+                block_of_row = np.cumsum(starts) - 1
+                for local_position, target_position in enumerate(order):
+                    if known[target_position]:
+                        continue
+                    offset = block_lookup.get(int(block_of_row[local_position]))
+                    if offset is None:
+                        continue
+                    count = int(available[offset])
+                    output_prior[target_position] = float(count)
+                    centre = float(block_location[offset])
+                    spread = float(block_scale[offset])
+                    if (
+                        count < max(int(min_obs), 1)
+                        or not np.isfinite(centre)
+                        or not np.isfinite(spread)
+                        or spread <= 0.0
+                        or not np.isfinite(numeric[target_position])
+                    ):
+                        continue
+                    output_z[target_position] = (
+                        numeric[target_position] - centre
+                    ) / spread
+
+            replacement = self._make_entry(
+                values,
+                group,
+                date,
+                min_obs,
+                metric_key=metric_key,
+                row_key=row_key,
+                z=pd.Series(output_z, index=values.index, dtype=float),
+                prior_count=pd.Series(output_prior, index=values.index, dtype=float),
+            )
+            if replacement is None:
+                return None
+            self._entries[(str(metric_key), int(min_obs))] = [
+                value for index, value in enumerate(entries) if index != entry_index
+            ] + [replacement]
+            self.stores += 1
+            return (
+                pd.Series(output_z, index=values.index, dtype=float),
+                pd.Series(output_prior, index=values.index, dtype=float),
+            )
+        return None
+
     def lookup(
         self,
         values: pd.Series,
@@ -222,6 +629,9 @@ class PrefixBaselineCache:
         *,
         metric_key: str,
         row_key: pd.Series,
+        block_baseline: Callable[
+            [np.ndarray, np.ndarray, int], tuple[np.ndarray, np.ndarray]
+        ] | None = None,
     ) -> tuple[pd.Series, pd.Series] | None:
         """Return cached z and prior counts when source equivalence is proven."""
 
@@ -240,10 +650,8 @@ class PrefixBaselineCache:
             self.last_miss_reason = "no_entry"
             return None
         for entry in entries:
-            target_positions = np.searchsorted(entry.row_ids, row_ids)
-            missing = bool(np.any(target_positions >= len(entry.row_ids)))
-            if not missing:
-                missing = bool(np.any(entry.row_ids[target_positions] != row_ids))
+            target_positions, known = self._matched_positions(entry, row_ids)
+            missing = not bool(known.all())
             if missing:
                 continue
             drift = False
@@ -268,8 +676,23 @@ class PrefixBaselineCache:
                 pd.Series(entry.z[target_array], index=output_index, dtype=float),
                 pd.Series(entry.prior_count[target_array], index=output_index, dtype=float),
             )
+        if entries and block_baseline is not None:
+            appended = self._try_append(
+                values,
+                group,
+                date,
+                min_obs,
+                metric_key=metric_key,
+                row_key=row_key,
+                block_baseline=block_baseline,
+            )
+            if appended is not None:
+                self.hits += 1
+                return appended
         self.misses += 1
         self.last_miss_reason = "source_drift_or_non_prefix"
+        if self.persistent:
+            self._clear(self.last_miss_reason)
         return None
 
     def store(
@@ -618,6 +1041,7 @@ def _prior_baseline_z(
             min_obs,
             metric_key=metric_key,
             row_key=row_key,
+            block_baseline=_robust_block_baseline,
         )
         if cached is not None:
             return cached

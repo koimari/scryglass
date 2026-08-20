@@ -28,6 +28,7 @@ causal contribution and does not authorize predictions or betting decisions.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from collections import defaultdict
@@ -130,6 +131,38 @@ ATTRIBUTION_WEIGHTS_STATUS = "unfitted_development_default"
 # from strictly earlier maps before it may standardize anything.  Below the
 # floor the metric is unavailable and the player falls back to neutral.
 ATTRIBUTION_MIN_BASELINE_OBS = 20
+
+
+def _rating_source_identity(maps: pd.DataFrame | None) -> str:
+    """Hash the canonical map census used to bind the persistent cache."""
+
+    canonical: set[str] = set()
+    if maps is None or maps.empty:
+        pass
+    elif "game_uid" in maps.columns:
+        fallback = maps["gameid"] if "gameid" in maps.columns else None
+        for index, value in maps["game_uid"].items():
+            game_id = canonical_source_game_key(
+                value,
+                fallback.loc[index] if fallback is not None else None,
+            )
+            if game_id:
+                canonical.add(str(game_id))
+    elif "gameid" in maps.columns:
+        for value in maps["gameid"].tolist():
+            game_id = canonical_source_game_key(value)
+            if game_id:
+                canonical.add(str(game_id))
+    raw = ("\n".join(sorted(canonical)) + "\n").encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _rating_cache_schema(players: pd.DataFrame | None) -> str:
+    """Fingerprint the player input schema used by both baseline paths."""
+
+    columns = sorted(str(column) for column in (players.columns if players is not None else []))
+    raw = ("\n".join(columns) + "\n").encode("utf-8")
+    return "rating-input:" + hashlib.sha256(raw).hexdigest()
 
 # Consistency constants for the ROBUST baseline used by ``_prior_baseline_z``.
 # Mirrors ``lol_kills.ratings.global_player_bt._MAD_TO_SIGMA`` /
@@ -566,6 +599,7 @@ def _prior_baseline_z(
             min_obs,
             metric_key=metric_key,
             row_key=row_key,
+            block_baseline=_robust_block_baseline,
         )
         if cached is not None:
             return cached[0]
@@ -1247,7 +1281,13 @@ def build_player_ratings(
     """Sequential player Elo; player ratings travel across org changes."""
 
     cfg = cfg or PlayerEloConfig()
-    baseline_cache = PrefixBaselineCache()
+    destination = Path(output_dir or FEATURES_DIR)
+    destination.mkdir(parents=True, exist_ok=True)
+    baseline_cache = PrefixBaselineCache(
+        storage_path=destination / "player_prefix_baseline_cache",
+        source_identity=_rating_source_identity(maps),
+        schema_fingerprint=_rating_cache_schema(players),
+    )
     out, states, _checkpoints, recent_mus = _run_player_elo(
         maps,
         players,
@@ -1255,8 +1295,6 @@ def build_player_ratings(
         baseline_cache=baseline_cache,
     )
     attribution_stats = dict(LAST_ATTRIBUTION_STATS)
-    destination = Path(output_dir or FEATURES_DIR)
-    destination.mkdir(parents=True, exist_ok=True)
     path = destination / "player_ratings.parquet"
     out.to_parquet(path, index=False)
 
@@ -1319,6 +1357,7 @@ def build_player_ratings(
             indent=2,
         )
     )
+    baseline_cache.flush()
     print(f"[player_elo] wrote {path} n={len(out)} players={len(snap)}")
     return out
 
@@ -1378,7 +1417,11 @@ def build_player_weekly_ranks(
     """
 
     cfg = cfg or PlayerEloConfig()
-    baseline_cache = PrefixBaselineCache()
+    baseline_cache = PrefixBaselineCache(
+        storage_path=FEATURES_DIR / "player_prefix_baseline_cache",
+        source_identity=_rating_source_identity(maps),
+        schema_fingerprint=_rating_cache_schema(players),
+    )
     week_start = _sunday_utc(as_of)
     previous_start = week_start - pd.Timedelta(days=7)
     frame = maps.copy()
@@ -1505,6 +1548,7 @@ def build_player_weekly_ranks(
             }
         by_player[player] = values
 
+    baseline_cache.flush()
     return {
         "as_of": f"{week_start.isoformat()}Z",
         "previous_as_of": f"{recent_anchor.isoformat()}Z",

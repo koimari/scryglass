@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 import pandas as pd
@@ -462,6 +464,230 @@ def test_shared_prefix_cache_is_usable_by_both_baseline_implementations() -> Non
     assert cache.hits == 1
 
 
+def test_persistent_cache_round_trip_extends_only_new_timestamp_blocks(tmp_path: Path) -> None:
+    """A changed source watermark can extend an exact cached prefix."""
+
+    values, group, date, row_key = _persistent_cache_fixture()
+    path = tmp_path / "prefix-baseline"
+    first = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    old = slice(0, 20)
+    _prior_baseline_z(
+        values.iloc[old].reset_index(drop=True),
+        group.iloc[old].reset_index(drop=True),
+        date.iloc[old].reset_index(drop=True),
+        min_obs=2,
+        baseline_cache=first,
+        metric_key="cs_per_min",
+        row_key=row_key.iloc[old].reset_index(drop=True),
+    )
+    first.flush()
+
+    second = PrefixBaselineCache(storage_path=path, source_identity="source-v2")
+    cached, cached_prior = _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=second,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    reference, reference_prior = _prior_baseline_z(values, group, date, min_obs=2)
+    pd.testing.assert_series_equal(cached, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(
+        cached_prior, reference_prior, check_names=False, check_exact=True
+    )
+    assert second.source_identity_changed is True
+    assert second.hits == 1
+    assert second.stores == 1
+    assert second.invalidated is False
+    second.flush()
+
+    reloaded = PrefixBaselineCache(storage_path=path, source_identity="source-v2")
+    prefix, prefix_prior = _prior_baseline_z(
+        values.iloc[old].reset_index(drop=True),
+        group.iloc[old].reset_index(drop=True),
+        date.iloc[old].reset_index(drop=True),
+        min_obs=2,
+        baseline_cache=reloaded,
+        metric_key="cs_per_min",
+        row_key=row_key.iloc[old].reset_index(drop=True),
+    )
+    pd.testing.assert_series_equal(
+        prefix,
+        reference.iloc[old].reset_index(drop=True),
+        check_names=False,
+        check_exact=True,
+    )
+    pd.testing.assert_series_equal(
+        prefix_prior,
+        reference_prior.iloc[old].reset_index(drop=True),
+        check_names=False,
+        check_exact=True,
+    )
+    assert reloaded.hits == 1
+
+
+def test_persistent_cache_serialization_integrity_fails_closed(tmp_path: Path) -> None:
+    """A tampered payload is rejected before any cached value is served."""
+
+    values, group, date, row_key = _persistent_cache_fixture()
+    path = tmp_path / "prefix-baseline"
+    cache = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    cache.flush()
+    payload = path.with_suffix(".npz")
+    raw = payload.read_bytes()
+    payload.write_bytes(raw[:-1] + bytes([raw[-1] ^ 1]))
+
+    rejected = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    assert rejected.invalidated is True
+    assert rejected.invalidated_reason is not None
+    assert rejected._entries == {}
+    fresh, _prior = _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=rejected,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    reference, _reference_prior = _prior_baseline_z(values, group, date, min_obs=2)
+    pd.testing.assert_series_equal(fresh, reference, check_names=False, check_exact=True)
+
+
+def test_persistent_cache_invalidates_corrections_deletions_and_schema_drift(
+    tmp_path: Path,
+) -> None:
+    """Corrections, deletions, and schema changes clear the old source."""
+
+    values, group, date, row_key = _persistent_cache_fixture()
+    path = tmp_path / "prefix-baseline"
+    seed = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=seed,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    seed.flush()
+
+    corrected = values.copy()
+    corrected.iloc[3] = 900.0
+    corrected_cache = PrefixBaselineCache(storage_path=path, source_identity="source-v2")
+    _prior_baseline_z(
+        corrected,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=corrected_cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    assert corrected_cache.invalidated is True
+    assert corrected_cache.invalidated_reason == "source_drift_or_non_prefix"
+
+    seed.flush()
+    deleted_cache = PrefixBaselineCache(storage_path=path, source_identity="source-v3")
+    keep = [index for index in range(len(values)) if index != 3]
+    _prior_baseline_z(
+        values.iloc[keep].reset_index(drop=True),
+        group.iloc[keep].reset_index(drop=True),
+        date.iloc[keep].reset_index(drop=True),
+        min_obs=2,
+        baseline_cache=deleted_cache,
+        metric_key="cs_per_min",
+        row_key=row_key.iloc[keep].reset_index(drop=True),
+    )
+    assert deleted_cache.invalidated is True
+    assert deleted_cache.invalidated_reason == "source_drift_or_non_prefix"
+
+    schema_cache = PrefixBaselineCache(
+        storage_path=path,
+        source_identity="source-v1",
+        schema_fingerprint="future-schema",
+    )
+    assert schema_cache.invalidated is True
+    assert schema_cache._entries == {}
+
+
+def test_persistent_cache_is_reused_by_a_new_python_process(tmp_path: Path) -> None:
+    """The serialized prefix is usable by a separate interpreter process."""
+
+    values, group, date, row_key = _persistent_cache_fixture()
+    path = tmp_path / "prefix-baseline"
+    seed = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    old = slice(0, 20)
+    _prior_baseline_z(
+        values.iloc[old].reset_index(drop=True),
+        group.iloc[old].reset_index(drop=True),
+        date.iloc[old].reset_index(drop=True),
+        min_obs=2,
+        baseline_cache=seed,
+        metric_key="cs_per_min",
+        row_key=row_key.iloc[old].reset_index(drop=True),
+    )
+    seed.flush()
+
+    script = """
+import sys
+import numpy as np
+import pandas as pd
+from lol_kills.ratings.global_player_bt import PrefixBaselineCache, _prior_baseline_z
+
+path = sys.argv[1]
+size = 40
+values = pd.Series(np.arange(1.0, size + 1))
+group = pd.Series(["mid"] * size)
+date = pd.Series(pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D"))
+row_key = pd.Series([("game", "Blue", f"player-{index}", "mid") for index in range(size)], dtype=object)
+cache = PrefixBaselineCache(storage_path=path, source_identity="source-v2")
+z, prior = _prior_baseline_z(
+    values, group, date, min_obs=2, baseline_cache=cache,
+    metric_key="cs_per_min", row_key=row_key,
+)
+print(cache.hits, cache.stores, cache.misses, cache.invalidated, float(z.iloc[-1]), float(prior.iloc[-1]))
+cache.flush()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(path)],
+        cwd=Path.cwd(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip().split()[:4] == ["1", "1", "0", "False"]
+
+    reloaded = PrefixBaselineCache(storage_path=path, source_identity="source-v2")
+    reference, reference_prior = _prior_baseline_z(values, group, date, min_obs=2)
+    cached, cached_prior = _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=reloaded,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    pd.testing.assert_series_equal(cached, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(
+        cached_prior, reference_prior, check_names=False, check_exact=True
+    )
+    assert reloaded.hits == 1
+
+
 def test_a_later_map_cannot_change_an_earlier_maps_normalized_metric() -> None:
     """No future leakage: mutating the last map leaves earlier rows identical."""
 
@@ -642,6 +868,19 @@ def _daily(values: list[float]) -> tuple[pd.Series, pd.Series, pd.Series]:
         pd.Series(["mid"] * size),
         pd.Series(pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D")),
     )
+
+
+def _persistent_cache_fixture(size: int = 40) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
+    values = pd.Series(np.arange(1.0, size + 1))
+    group = pd.Series(["mid"] * size)
+    date = pd.Series(
+        pd.Timestamp("2026-01-01") + pd.to_timedelta(np.arange(size), unit="D")
+    )
+    row_key = pd.Series(
+        [("game", "Blue", f"player-{index}", "mid") for index in range(size)],
+        dtype=object,
+    )
+    return values, group, date, row_key
 
 
 def test_a_malformed_row_cannot_poison_the_baseline_of_later_rows() -> None:
