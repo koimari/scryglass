@@ -31,6 +31,7 @@ from lol_kills.ratings.global_player_bt import (
     ANCHOR_METRIC_Z_CLIP,
     ANCHOR_MIN_BASELINE_OBS,
     GlobalPlayerRatingError,
+    GlobalPlayerFitCache,
     PrefixBaselineCache,
     PERFORMANCE_ANCHOR_SOURCE_COLUMNS,
     _contribution_metrics,
@@ -311,6 +312,51 @@ def test_rating_cache_schema_binds_baseline_implementation(monkeypatch) -> None:
     )
     second = player_elo._rating_cache_schema(frame)
     assert first != second
+
+
+def test_global_fit_cache_round_trips_exact_snapshot_and_meta(tmp_path: Path) -> None:
+    """A private fit cache reuses the exact snapshot and evidence payload."""
+
+    maps, players = _fixture(_locked_roster_games())
+    cfg = _config(minimum_maps=1, performance_anchor_enabled=False)
+    path = tmp_path / "global_fit_cache"
+    first_cache = GlobalPlayerFitCache(storage_path=path)
+    first_snapshot, first_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        validate=False,
+        fit_cache=first_cache,
+    )
+    first_cache.flush()
+
+    second_cache = GlobalPlayerFitCache(storage_path=path)
+    second_snapshot, second_meta = fit_global_player_bt(
+        maps,
+        players,
+        cfg,
+        validate=False,
+        fit_cache=second_cache,
+    )
+    pd.testing.assert_frame_equal(first_snapshot, second_snapshot)
+    assert first_meta == second_meta
+    assert second_cache.hits == 1
+
+
+def test_global_fit_cache_discards_a_tampered_payload(tmp_path: Path) -> None:
+    """A checksum failure cannot return a stale fitted snapshot."""
+
+    maps, players = _fixture(_locked_roster_games())
+    cfg = _config(minimum_maps=1, performance_anchor_enabled=False)
+    path = tmp_path / "global_fit_cache"
+    cache = GlobalPlayerFitCache(storage_path=path)
+    fit_global_player_bt(maps, players, cfg, validate=False, fit_cache=cache)
+    cache.flush()
+    payload = path.with_suffix(".pkl")
+    payload.write_bytes(payload.read_bytes() + b"drift")
+    reloaded = GlobalPlayerFitCache(storage_path=path)
+    assert reloaded.invalidated
+    assert reloaded.lookup("unknown") is None
 
 
 def test_rows_sharing_a_timestamp_cannot_see_each_other() -> None:

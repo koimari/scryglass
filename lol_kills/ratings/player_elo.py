@@ -58,6 +58,7 @@ from lol_kills.ratings.momentum_config import (
 )
 from lol_kills.ratings.global_player_bt import (
     GlobalPlayerBTConfig,
+    GlobalPlayerFitCache,
     GlobalPlayerRatingError,
     PrefixBaselineCache,
     _player_baseline_group as _shared_player_baseline_group,
@@ -1318,6 +1319,9 @@ def build_player_ratings(
         source_identity=_rating_source_identity(maps),
         schema_fingerprint=_rating_cache_schema(players),
     )
+    fit_cache = GlobalPlayerFitCache(
+        storage_path=destination / "player_global_fit_cache",
+    )
     out, states, _checkpoints, recent_mus = _run_player_elo(
         maps,
         players,
@@ -1332,6 +1336,7 @@ def build_player_ratings(
         maps,
         players,
         baseline_cache=baseline_cache,
+        fit_cache=fit_cache,
     )
     snap = _apply_global_scale(
         _snapshot_rows(states, recent_mus, cfg), global_snapshot, cfg
@@ -1388,6 +1393,7 @@ def build_player_ratings(
         )
     )
     baseline_cache.flush()
+    fit_cache.flush()
     print(f"[player_elo] wrote {path} n={len(out)} players={len(snap)}")
     return out
 
@@ -1455,6 +1461,9 @@ def build_player_weekly_ranks(
         source_identity=_rating_source_identity(maps),
         schema_fingerprint=_rating_cache_schema(players),
     )
+    fit_cache = GlobalPlayerFitCache(
+        storage_path=destination / "player_global_fit_cache",
+    )
     week_start = _sunday_utc(as_of)
     previous_start = week_start - pd.Timedelta(days=7)
     frame = maps.copy()
@@ -1485,6 +1494,7 @@ def build_player_weekly_ranks(
         through=cutoff,
         validate=False,
         baseline_cache=baseline_cache,
+        fit_cache=fit_cache,
     )
     # Current affiliation is the publication filter.  Historical matches in a
     # different circuit remain evidence for the rating but cannot place a
@@ -1511,6 +1521,7 @@ def build_player_weekly_ranks(
                 through=anchor,
                 validate=False,
                 baseline_cache=baseline_cache,
+                fit_cache=fit_cache,
             )
         except GlobalPlayerRatingError:
             return []
@@ -1582,6 +1593,7 @@ def build_player_weekly_ranks(
         by_player[player] = values
 
     baseline_cache.flush()
+    fit_cache.flush()
     return {
         "as_of": f"{week_start.isoformat()}Z",
         "previous_as_of": f"{recent_anchor.isoformat()}Z",
