@@ -1295,6 +1295,18 @@ def build_future_value_design(
         "rank_3_atom_support_uncertainty_proxy",
         1.0 / np.sqrt(1.0 + rank_support),
     )
+    design["player_form_support_mean"] = support_mean.mean(axis=1).reindex(
+        design.index
+    )
+    design["player_form_effective_support_mean"] = effective_support_mean.mean(
+        axis=1
+    ).reindex(design.index)
+    design["player_form_support_uncertainty_proxy"] = (
+        1.0 / np.sqrt(1.0 + design["player_form_effective_support_mean"])
+    )
+    design["rank_3_atom_support_uncertainty_proxy"] = (
+        1.0 / np.sqrt(1.0 + rank_support.mean(axis=1).reindex(design.index))
+    )
     raw_side_columns = [
         _side_level_column(side, source_name)
         for source_name in SIDE_LEVEL_TO_MODEL_FEATURE
@@ -1923,6 +1935,8 @@ def _missingness_metrics(
     blockers = []
     if int(incomplete_predicted.sum()) != int(incomplete_target.sum()):
         blockers.append("incomplete_feature_prediction_missing")
+    if not bool((paired & complete).any()):
+        blockers.append("complete_case_validation_rows_missing")
     return {
         "status": "available",
         "total_rows": int(len(validation)),
@@ -2003,7 +2017,7 @@ def _roster_change_labels(frame: pd.DataFrame) -> pd.Series | None:
         return None
     blue = pd.to_numeric(frame["blue_roster_continuity"], errors="coerce")
     red = pd.to_numeric(frame["red_roster_continuity"], errors="coerce")
-    labels = pd.Series("<missing>", index=frame.index, dtype="string")
+    labels = pd.Series("continuity_unavailable", index=frame.index, dtype="string")
     stable = blue.ge(1.0) & red.ge(1.0)
     changed = blue.lt(1.0) | red.lt(1.0)
     labels.loc[stable] = "stable_roster"

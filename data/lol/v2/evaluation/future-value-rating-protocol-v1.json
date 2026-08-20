@@ -62,7 +62,7 @@
     },
     "future_value_model_builder": {
       "locator": "lol_kills/research/future_value_rating.py",
-      "raw_sha256": "86ca06fd072831aae49957055ce8e27b8f9c6a50224ab0d46f7be4fd3f65acde"
+      "raw_sha256": "2670cf73d03eb17d0c04e85a33c06b4f3e6a618faebb3188fd9cc454fbc6d253"
     },
     "phase_curve_builder": {
       "locator": "lol_kills/research/future_phase_curve.py",
