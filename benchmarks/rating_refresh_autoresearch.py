@@ -229,7 +229,7 @@ def freeze_phase(
 
 
 def append_only_contract(base: Mapping[str, Any], append: Mapping[str, Any]) -> dict[str, Any]:
-    """Check the census and file-set conditions for an append-only phase."""
+    """Check the census and unchanged-input conditions for an append phase."""
 
     base_ids = set(base["census"]["game_ids"]) if "game_ids" in base["census"] else set()
     append_ids = set(append["census"]["game_ids"]) if "game_ids" in append["census"] else set()
@@ -239,11 +239,31 @@ def append_only_contract(base: Mapping[str, Any], append: Mapping[str, Any]) -> 
     append_ids = set(append.get("_game_ids", append_ids))
     base_files = {str(item["path"]) for item in base.get("files", [])}
     append_files = {str(item["path"]) for item in append.get("files", [])}
+    base_records = {
+        str(item.get("path")): item
+        for item in base.get("files", [])
+        if isinstance(item, Mapping)
+    }
+    append_records = {
+        str(item.get("path")): item
+        for item in append.get("files", [])
+        if isinstance(item, Mapping)
+    }
+    changed_input_files = sorted(
+        path
+        for path in base_files & append_files
+        if (
+            base_records.get(path, {}).get("bytes") != append_records.get(path, {}).get("bytes")
+            or base_records.get(path, {}).get("sha256") != append_records.get(path, {}).get("sha256")
+        )
+    )
     added_ids = sorted(append_ids - base_ids)
     removed_ids = sorted(base_ids - append_ids)
     checks = {
         "base_ids_subset_append_ids": not removed_ids,
         "same_input_file_set": base_files == append_files,
+        "same_input_file_bytes": not changed_input_files and base_files == append_files,
+        "changed_input_files": changed_input_files,
         "append_census_count_not_smaller": len(append_ids) >= len(base_ids),
         "new_game_count": len(added_ids),
         "removed_game_count": len(removed_ids),
@@ -252,6 +272,7 @@ def append_only_contract(base: Mapping[str, Any], append: Mapping[str, Any]) -> 
     checks["valid"] = bool(
         checks["base_ids_subset_append_ids"]
         and checks["same_input_file_set"]
+        and checks["same_input_file_bytes"]
         and checks["append_census_count_not_smaller"]
     )
     return checks
@@ -455,22 +476,25 @@ def _validate_output_manifest(path: Path, expected_binding: Mapping[str, Any]) -
         if not isinstance(digest, str) or not SHA256_PATTERN.fullmatch(digest):
             raise HarnessError(f"output sha256 is invalid: {name}")
         artifact_path = descriptor.get("path")
-        if artifact_path is not None:
-            if not isinstance(artifact_path, str) or not artifact_path:
-                raise HarnessError(f"output path is invalid: {name}")
-            resolved = Path(artifact_path)
-            if not resolved.is_absolute():
-                resolved = path.parent / resolved
-            _require_regular_file(resolved, f"output artifact {name}")
-            if sha256_file(resolved) != digest:
-                raise HarnessError(f"output artifact hash does not match descriptor: {name}")
-        for key in ("bytes", "rows"):
-            if key in descriptor and (
-                isinstance(descriptor[key], bool)
-                or not isinstance(descriptor[key], int)
-                or descriptor[key] < 0
-            ):
-                raise HarnessError(f"output {key} is invalid: {name}")
+        if not isinstance(artifact_path, str) or not artifact_path:
+            raise HarnessError(f"output path is required: {name}")
+        resolved = Path(artifact_path)
+        if not resolved.is_absolute():
+            resolved = path.parent / resolved
+        _require_regular_file(resolved, f"output artifact {name}")
+        byte_count = descriptor.get("bytes")
+        if isinstance(byte_count, bool) or not isinstance(byte_count, int) or byte_count < 0:
+            raise HarnessError(f"output bytes are required: {name}")
+        if resolved.stat().st_size != byte_count:
+            raise HarnessError(f"output artifact byte count does not match descriptor: {name}")
+        if sha256_file(resolved) != digest:
+            raise HarnessError(f"output artifact hash does not match descriptor: {name}")
+        if "rows" in descriptor and (
+            isinstance(descriptor["rows"], bool)
+            or not isinstance(descriptor["rows"], int)
+            or descriptor["rows"] < 0
+        ):
+            raise HarnessError(f"output rows are invalid: {name}")
     semantic = payload.get("semantic", {})
     if not isinstance(semantic, Mapping):
         raise HarnessError(f"output semantic section is invalid: {path}")
@@ -613,6 +637,9 @@ def _run_adapter(
     result["output_digest"] = _sha256_bytes(_canonical_json_bytes(validated["outputs"]))
     result["semantic_digest"] = _sha256_bytes(_canonical_json_bytes(validated["semantic"]))
     result["run_metadata"] = validated["run"]
+    run_timings = validated["run"].get("timings")
+    if isinstance(run_timings, Mapping):
+        result["timings"] = dict(run_timings)
     result["artifact_names"] = sorted(validated["outputs"])
     result["_validated_output"] = validated
     return result

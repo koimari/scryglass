@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import sys
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -287,7 +288,9 @@ def run_from_environment(
         refresh_kwargs["previous_as_of"] = pd.Timestamp(previous_as_of)
     # The accepted census stays in the runtime for inspection. The production
     # function receives its canonical IDs through its public allow-list arg.
+    refresh_started = time.perf_counter()
     payload = refresh_ratings(**refresh_kwargs)
+    refresh_seconds = time.perf_counter() - refresh_started
     if not isinstance(payload, Mapping):
         raise AdapterError("rating refresh returned a non-object payload")
     source = payload.get("source")
@@ -305,6 +308,7 @@ def run_from_environment(
         if artifact_root.is_symlink() or not artifact_root.is_dir() or any(artifact_root.iterdir()):
             raise AdapterError(f"artifact destination must be a new empty directory: {artifact_root}")
     artifact_root.mkdir(parents=True, exist_ok=True)
+    artifact_started = time.perf_counter()
     copied_manifest, manifest_digest = _copy_artifact(
         runtime_root,
         artifact_root,
@@ -329,6 +333,7 @@ def run_from_environment(
             metadata["locator"],
             metadata,
         )
+    artifact_copy_hash_seconds = time.perf_counter() - artifact_started
     team = payload.get("team", {})
     player = payload.get("player", {})
     if not isinstance(team, Mapping) or not isinstance(player, Mapping):
@@ -351,6 +356,10 @@ def run_from_environment(
             "runtime_owner": runtime_owner,
             "phase_input_manifest_sha256": str(manifest["manifest_sha256"]),
             "accepted_census_bound": True,
+            "timings": {
+                "refresh_seconds": round(refresh_seconds, 6),
+                "artifact_copy_hash_seconds": round(artifact_copy_hash_seconds, 6),
+            },
         },
         "outputs": artifacts,
         "semantic": {

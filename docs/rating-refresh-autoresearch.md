@@ -34,7 +34,10 @@ python3 benchmarks/rating_refresh_autoresearch.py \
 The freeze copies every input and both census files. The freeze manifest stores
 file byte counts and SHA-256 digests. It stores the census game count and
 source identity digest. The append census must contain every base game ID. The
-append input must expose the same file set. A removed game or a changed file
+append input must expose the same file set, with the same byte counts and
+SHA-256 values for every file. This is the fail-closed proof available to the
+generic harness. A changed full Parquet file needs a richer row-level proof
+before it can be used as an append-only phase. A removed game or a changed file
 set blocks the benchmark.
 
 The harness creates these paths:
@@ -86,7 +89,11 @@ The adapter writes one JSON output manifest to the path in
     "variant": "candidate",
     "entrypoint": "lol_kills.v2.tierlists.rating_refresh.refresh_ratings",
     "runtime_isolated": true,
-    "accepted_census_bound": true
+    "accepted_census_bound": true,
+    "timings": {
+      "refresh_seconds": 12.345,
+      "artifact_copy_hash_seconds": 0.456
+    }
   },
   "outputs": {
     "player_ratings": {
@@ -106,13 +113,13 @@ The adapter writes one JSON output manifest to the path in
 }
 ```
 
-The source binding must match the frozen fixture. The runner checks an
-artifact path when one is provided. It hashes the output descriptors without
-the path, so baseline and candidate paths may differ. It compares every
-descriptor field and every semantic field exactly. A different rating value,
-row count, digest, or source binding rejects the candidate. The optional run
-section appears in the phase report and records the entrypoint and isolation
-state.
+The source binding must match the frozen fixture. Every output descriptor must
+contain a real artifact path and a matching byte count. The runner hashes the
+output descriptors without the path, so baseline and candidate paths may
+differ. It compares every descriptor field and every semantic field exactly. A
+different rating value, row count, digest, or source binding rejects the
+candidate. The optional run section appears in the phase report and records the
+entrypoint, isolation state, and adapter timings.
 
 The adapter writes call counts as either a mapping or an object with a
 `counts` mapping:
@@ -173,22 +180,31 @@ only when both candidate phases satisfy the correctness gate and the 60-second
 target. Add `--require-speedup` when an experiment must also be at least as
 fast as its baseline in both phases.
 
+The hard budget uses end-to-end adapter wall time. This includes subprocess
+startup, input staging, the production refresh, artifact copying and hashing,
+and adapter output writes. The repository adapter also reports the time spent
+inside `refresh_ratings` and the time spent copying and hashing artifacts.
+These sub-timings explain a wall-time result. They do not replace the budget
+gate.
+
 ## Correctness gates
 
 The comparison is accepted only when these conditions hold:
 
 - the append census is a superset of the base census;
+- every append input file has the same bytes and SHA-256 value as its base file;
 - both adapters return successfully in each phase;
 - each adapter binds to the phase count, identity digest, census digest, and
   frozen input-manifest digest;
 - baseline and candidate output descriptors match exactly in each phase;
 - baseline and candidate semantic outputs match exactly in each phase;
+- every output descriptor has a real file path and matching byte count;
 - the candidate phase stays at or below the 60-second budget.
 
-The census check cannot identify an in-place correction inside a large parquet
-file. Build a new cold fixture when an existing source game changes. Keep the
-append fixture for rows added after the accepted census. Preserve the source
-receipt and the output manifests with the report.
+The generic harness does not prove row-level append order inside a large
+Parquet file. Use a new cold fixture when an existing source game changes. Keep
+the append fixture for rows added after the accepted census only when the input
+file bytes remain unchanged or a richer row-level proof is added.
 
 ## Local tests
 

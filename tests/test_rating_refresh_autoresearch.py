@@ -38,10 +38,9 @@ def _fixture_inputs(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     append_root = tmp_path / "append-source"
     base_root.mkdir()
     append_root.mkdir()
-    (base_root / "maps.jsonl").write_text('{"game_id":"game-a"}\n', encoding="utf-8")
-    (append_root / "maps.jsonl").write_text(
-        '{"game_id":"game-a"}\n{"game_id":"game-b"}\n', encoding="utf-8"
-    )
+    full_snapshot = '{"game_id":"game-a"}\n{"game_id":"game-b"}\n'
+    (base_root / "maps.jsonl").write_text(full_snapshot, encoding="utf-8")
+    (append_root / "maps.jsonl").write_text(full_snapshot, encoding="utf-8")
     base_census = tmp_path / "base-census.json"
     append_census = tmp_path / "append-census.json"
     _write_census(base_census, ["game-a"])
@@ -54,6 +53,8 @@ def _adapter_command(
     output_hash: str = "a",
     count_delta: int = 0,
     probe_runtime: bool = False,
+    include_artifact_path: bool = True,
+    reported_bytes_delta: int = 0,
 ) -> list[str]:
     code = """
 import hashlib, json, os
@@ -68,10 +69,20 @@ binding = {
     'census_sha256': hashlib.sha256(census_path.read_bytes()).hexdigest(),
     'input_manifest_sha256': os.environ['SCRYGLASS_RATING_AUTORESEARCH_FIXTURE_MANIFEST_SHA256'],
 }
+artifact_path = Path(os.environ['SCRYGLASS_RATING_AUTORESEARCH_OUTPUT_MANIFEST']).with_suffix('.artifact')
+artifact_bytes = OUTPUT_HASH.encode()
+artifact_path.write_bytes(artifact_bytes)
+descriptor = {
+    'sha256': hashlib.sha256(artifact_bytes).hexdigest(),
+    'bytes': len(artifact_bytes) + BYTE_DELTA,
+    'rows': census['game_count'],
+}
+if INCLUDE_ARTIFACT_PATH:
+    descriptor['path'] = str(artifact_path)
 payload = {
     'schema_version': OUTPUT_SCHEMA,
     'source': binding,
-    'outputs': {'player_ratings': {'sha256': OUTPUT_HASH * 64, 'rows': census['game_count']}},
+    'outputs': {'player_ratings': descriptor},
     'semantic': {'source_game_count': census['game_count']},
 }
 Path(os.environ['SCRYGLASS_RATING_AUTORESEARCH_OUTPUT_MANIFEST']).write_text(json.dumps(payload))
@@ -86,7 +97,9 @@ Path(os.environ['SCRYGLASS_RATING_AUTORESEARCH_CALL_COUNTS_PATH']).write_text(js
         "OUTPUT_SCHEMA", repr("scryglass:rating-autoresearch-output:v1")
     ).replace(
         "OUTPUT_HASH", repr(output_hash)
-    ).replace("COUNT_DELTA", str(count_delta))
+    ).replace("COUNT_DELTA", str(count_delta)).replace(
+        "INCLUDE_ARTIFACT_PATH", repr(include_artifact_path)
+    ).replace("BYTE_DELTA", str(reported_bytes_delta))
     return [sys.executable, "-c", code]
 
 
@@ -111,7 +124,7 @@ def test_freeze_copies_input_and_binds_append_census(tmp_path: Path) -> None:
     )
 
     frozen = output_root / "frozen" / "cold" / "inputs" / "maps.jsonl"
-    assert frozen.read_text(encoding="utf-8") == '{"game_id":"game-a"}\n'
+    assert frozen.read_text(encoding="utf-8") == '{"game_id":"game-a"}\n{"game_id":"game-b"}\n'
     assert manifest["append_only_checks"]["valid"] is True
     assert manifest["append_only_checks"]["new_game_count"] == 1
     assert manifest["append_only_checks"]["removed_game_count"] == 0
@@ -119,7 +132,7 @@ def test_freeze_copies_input_and_binds_append_census(tmp_path: Path) -> None:
     assert len(manifest["base"]["manifest_sha256"]) == 64
 
     (base_root / "maps.jsonl").write_text("changed\n", encoding="utf-8")
-    assert frozen.read_text(encoding="utf-8") == '{"game_id":"game-a"}\n'
+    assert frozen.read_text(encoding="utf-8") == '{"game_id":"game-a"}\n{"game_id":"game-b"}\n'
 
 
 def test_freeze_marks_removed_game_as_invalid_append(tmp_path: Path) -> None:
@@ -271,6 +284,84 @@ def test_benchmark_rejects_output_difference(tmp_path: Path) -> None:
     assert report["accepted"] is False
     assert report["phases"]["cold"]["comparison"]["correct"] is False
     assert "baseline and candidate output descriptors differ" in report["phases"]["cold"]["comparison"]["reasons"]
+
+
+def test_benchmark_rejects_append_input_rewrite_without_row_proof(tmp_path: Path) -> None:
+    base_root, base_census, append_root, append_census = _fixture_inputs(tmp_path)
+    append_root.joinpath("maps.jsonl").write_text(
+        '{"game_id":"game-a","changed":true}\n', encoding="utf-8"
+    )
+    manifest = freeze_inputs(
+        base_root=base_root,
+        base_census=base_census,
+        append_root=append_root,
+        append_census=append_census,
+        output_root=tmp_path / "benchmark",
+        input_relative_paths=["maps.jsonl"],
+    )
+
+    checks = manifest["append_only_checks"]
+    assert checks["valid"] is False
+    assert checks["same_input_file_bytes"] is False
+    assert checks["changed_input_files"] == ["inputs/maps.jsonl"]
+    with pytest.raises(HarnessError, match="append-only fixture contract"):
+        run_benchmark(
+            freeze_manifest=manifest,
+            output_root=tmp_path / "benchmark",
+            baseline_command=_adapter_command(),
+            candidate_command=_adapter_command(),
+            command_cwd=Path.cwd(),
+        )
+
+
+def test_benchmark_rejects_unverifiable_output_descriptor(tmp_path: Path) -> None:
+    base_root, base_census, append_root, append_census = _fixture_inputs(tmp_path)
+    output_root = tmp_path / "benchmark"
+    manifest = freeze_inputs(
+        base_root=base_root,
+        base_census=base_census,
+        append_root=append_root,
+        append_census=append_census,
+        output_root=output_root,
+        input_relative_paths=["maps.jsonl"],
+    )
+    report = run_benchmark(
+        freeze_manifest=manifest,
+        output_root=output_root,
+        baseline_command=_adapter_command(include_artifact_path=False),
+        candidate_command=_adapter_command(include_artifact_path=False),
+        command_cwd=Path.cwd(),
+        budget_seconds=60.0,
+        timeout_seconds=10.0,
+    )
+
+    assert report["accepted"] is False
+    assert "output path is required" in report["phases"]["cold"]["baseline"]["error"]
+
+
+def test_benchmark_rejects_output_byte_count_mismatch(tmp_path: Path) -> None:
+    base_root, base_census, append_root, append_census = _fixture_inputs(tmp_path)
+    output_root = tmp_path / "benchmark"
+    manifest = freeze_inputs(
+        base_root=base_root,
+        base_census=base_census,
+        append_root=append_root,
+        append_census=append_census,
+        output_root=output_root,
+        input_relative_paths=["maps.jsonl"],
+    )
+    report = run_benchmark(
+        freeze_manifest=manifest,
+        output_root=output_root,
+        baseline_command=_adapter_command(reported_bytes_delta=1),
+        candidate_command=_adapter_command(reported_bytes_delta=1),
+        command_cwd=Path.cwd(),
+        budget_seconds=60.0,
+        timeout_seconds=10.0,
+    )
+
+    assert report["accepted"] is False
+    assert "byte count" in report["phases"]["cold"]["baseline"]["error"]
 
 
 def test_benchmark_rejects_binding_difference(tmp_path: Path) -> None:

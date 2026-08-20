@@ -37,8 +37,7 @@ def _freeze_runtime_fixture(tmp_path: Path) -> tuple[dict, Path]:
         ):
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            suffix = "-append" if root == append_source else ""
-            path.write_bytes((relative + suffix).encode("utf-8"))
+            path.write_bytes(relative.encode("utf-8"))
     base_census = tmp_path / "base-census.json"
     append_census = tmp_path / "append-census.json"
     _write_census(base_census, ["game-a"])
@@ -147,6 +146,8 @@ def test_adapter_stages_fixture_invokes_refresh_and_emits_contract(tmp_path: Pat
     assert result["run"]["entrypoint"].endswith("rating_refresh.refresh_ratings")
     assert result["run"]["runtime_isolated"] is True
     assert result["run"]["runtime_persistent"] is True
+    assert result["run"]["timings"]["refresh_seconds"] >= 0
+    assert result["run"]["timings"]["artifact_copy_hash_seconds"] >= 0
     assert json.loads(output_path.read_text(encoding="utf-8"))["outputs"]["rating_manifest"]["sha256"]
     assert json.loads(calls_path.read_text(encoding="utf-8"))["counts"] == {
         "load_census": 1,
@@ -175,6 +176,8 @@ def test_variant_runtime_cache_reuses_own_cold_state_for_append(tmp_path: Path, 
     adapter.run_from_environment(min_games=1, min_series=1)
     _set_adapter_environment(monkeypatch, output_root, freeze, phase="cold", variant="candidate")
     adapter.run_from_environment(min_games=1, min_series=1)
+    candidate_map = output_root / "runtimes" / "candidate" / "data/lol/warehouse/parquet/oe_live/maps.parquet"
+    candidate_map.unlink()
     _set_adapter_environment(monkeypatch, output_root, freeze, phase="append_only", variant="candidate")
     adapter.run_from_environment(min_games=1, min_series=1)
 
@@ -184,9 +187,7 @@ def test_variant_runtime_cache_reuses_own_cold_state_for_append(tmp_path: Path, 
     assert seen[2][1] == output_root / "runtimes" / "candidate"
     assert (output_root / "runtimes" / "baseline" / "cache-marker.txt").read_text() == "baseline"
     assert (output_root / "runtimes" / "candidate" / "cache-marker.txt").read_text() == "candidate"
-    assert (
-        output_root / "runtimes" / "candidate" / "data/lol/warehouse/parquet/oe_live/maps.parquet"
-    ).read_bytes().endswith(b"-append")
+    assert candidate_map.is_file()
     assert (output_root / "runs" / "cold" / "candidate.output.artifacts").is_dir()
     assert (output_root / "runs" / "append_only" / "candidate.output.artifacts").is_dir()
 
