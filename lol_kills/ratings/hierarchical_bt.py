@@ -1134,8 +1134,17 @@ def fit_hierarchical_bt_research_prediction(
     ordered_train_maps = _research_order_frame(train_maps, "training")
 
     observation_maps = ordered_train_maps.copy()
+    # A non-authoritative series column is a conservative fold cluster only.
+    # It can merge separate series, so it must never become the grouping key
+    # used by the Bradley--Terry observations.  Removing an incidental GRID
+    # column also prevents a frame carrying both columns from collapsing by
+    # the wrong identity.  Without an authoritative GRID identity,
+    # ``_observations`` falls back to one observation per game map.
     if train_series_column != "grid_series_id":
-        observation_maps["grid_series_id"] = observation_maps[train_series_column]
+        observation_maps = observation_maps.drop(
+            columns=["grid_series_id"],
+            errors="ignore",
+        )
     observations, series_audit = _observations(
         observation_maps,
         cutoff_value,
@@ -1155,10 +1164,24 @@ def fit_hierarchical_bt_research_prediction(
     output_sha256 = _research_sha256(prediction_rows)
     config_payload = dict(cfg.__dict__)
     config_sha256 = _research_sha256(config_payload)
+    authoritative_series = train_series_column == "grid_series_id"
     series_receipt = {
         "column": train_series_column,
         "source_types": list(train_series_sources),
-        "authoritative": train_series_column == "grid_series_id",
+        "authoritative": authoritative_series,
+        "fold_cluster_role": (
+            "series_observation_and_fold_disjointness"
+            if authoritative_series
+            else "fold_disjointness_only"
+        ),
+        "observation_granularity": "series" if authoritative_series else "map",
+        "observation_clustered_by_series": authoritative_series,
+        "fold_cluster_contract": {
+            "column": train_series_column,
+            "source_types": list(train_series_sources),
+            "train_validation_disjoint": True,
+            "authoritative": authoritative_series,
+        },
         "train_cluster_count": len(set(train_series_ids)),
         "validation_cluster_count": len(set(validation_series_ids)),
         "train_cluster_identity_sha256": _research_sha256(sorted(set(train_series_ids))),

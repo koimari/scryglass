@@ -258,6 +258,43 @@ def test_explicit_non_grid_series_column_is_bound_as_conservative_proxy() -> Non
     assert report["output_sha256"] == reordered["output_sha256"]
 
 
+def test_conservative_cluster_collision_keeps_tied_maps_as_map_observations() -> None:
+    train = _training().drop(columns=["grid_series_id"]).assign(
+        series_id=lambda frame: frame["game_uid"].map(
+            {
+                "g1": "proxy-g1",
+                "g2": "proxy-g2",
+                "g3": "proxy-g3",
+                "g4": "proxy-g4",
+                # These two maps can be separate source series.  The
+                # conservative proxy cannot distinguish them, and their
+                # outcomes tie inside the merged cluster.
+                "g5": "proxy-collision",
+                "g6": "proxy-collision",
+                "g7": "proxy-g7",
+                "g8": "proxy-g8",
+            }
+        )
+    )
+    validation = _validation().drop(columns=["grid_series_id"]).assign(
+        series_id=lambda frame: frame["game_uid"].map(
+            {"g9": "proxy-g9", "g10": "proxy-g10"}
+        )
+    )
+
+    report = _run(train, validation)
+
+    series_identity = report["series_identity"]
+    assert series_identity["authoritative"] is False
+    assert series_identity["fold_cluster_role"] == "fold_disjointness_only"
+    assert series_identity["observation_granularity"] == "map"
+    assert series_identity["observation_clustered_by_series"] is False
+    assert series_identity["fold_cluster_contract"]["train_validation_disjoint"] is True
+    assert report["fit"]["n_observations"] == len(train)
+    assert report["fit"]["n_maps"] == len(train)
+    assert report["fit"]["series_identity"]["n_unresolved_maps"] == 0
+
+
 def test_source_receipt_and_caller_identity_mutations_fail_closed() -> None:
     train = _training()
     validation = _validation()
