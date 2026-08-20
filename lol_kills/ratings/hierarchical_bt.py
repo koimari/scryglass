@@ -490,54 +490,89 @@ def _observations(
     frame_rows = pd.DataFrame(records)
     frame_rows, identity_audit = _series_identity(frame_rows)
 
-    collapsed: list[dict[str, Any]] = []
-    unresolved: list[dict[str, Any]] = []
-    for key, group in frame_rows.groupby("series_key", sort=False):
-        pairs = set(
-            group.apply(
-                lambda row: "|".join(sorted((str(row["blue"]), str(row["red"])))), axis=1
-            )
-        )
-        if len(pairs) != 1:
-            # Exact-duplicate fallback keys with different team pairs cannot
-            # be merged into one observation; keep them for audit only.
-            unresolved.extend(group.to_dict("records"))
-            continue
-        a, b = sorted((str(group["blue"].iloc[0]), str(group["red"].iloc[0])))
-        a_rows = group[group["blue"].eq(a)]
-        a_wins = float(a_rows["y_blue"].sum()) + float((group[group["red"].eq(a)]["y_blue"] == 0).sum())
-        n_maps = len(group)
-        if a_wins * 2 == n_maps:
-            # Tied/incomplete feed: the series outcome is not identified.
-            # Preserve the maps for audit; exclude from primary inference.
-            unresolved.extend(group.to_dict("records"))
-            continue
-        # A strict majority over ALL maps defines the series winner; the
-        # first map is never selected as an outcome shortcut.
-        y_a = 1.0 if a_wins > n_maps / 2 else 0.0
-        a_blue_share = float(a_rows["blue"].eq(a).sum()) / n_maps
-        first = group.iloc[0]
-        source_a = a_rows.iloc[0] if not a_rows.empty else first
-        b_rows = group[group["blue"].eq(b)]
-        source_b = b_rows.iloc[0] if not b_rows.empty else first
-        collapsed.append(
+    if frame_rows["series_key"].is_unique:
+        blue = frame_rows["blue"].astype(str)
+        red = frame_rows["red"].astype(str)
+        a_is_blue = blue.le(red)
+        y_blue = frame_rows["y_blue"].astype(float)
+        collapsed_frame = pd.DataFrame(
             {
-                "series_key": key,
-                "series_source": str(group["series_source"].iloc[0]),
-                "game_uid": ",".join(str(value) for value in group["game_uid"] if str(value)),
-                "date": first["date"],
-                "team_a": a,
-                "team_b": b,
-                "team_a_name": first["blue_name"] if first["blue"] == a else first["red_name"],
-                "team_b_name": first["red_name"] if first["blue"] == a else first["blue_name"],
-                "home_a": source_a["blue_home"] if source_a["blue"] == a else source_a["red_home"],
-                "home_b": source_b["blue_home"] if source_b["blue"] == b else source_b["red_home"],
-                "y_a": y_a,
-                "n_maps": n_maps,
-                "a_blue_share": a_blue_share,
-                "international": bool(group["is_international"].any()),
+                "series_key": frame_rows["series_key"].astype(str),
+                "series_source": frame_rows["series_source"].astype(str),
+                "game_uid": frame_rows["game_uid"].astype(str),
+                "date": frame_rows["date"],
+                "team_a": blue.where(a_is_blue, red),
+                "team_b": red.where(a_is_blue, blue),
+                "team_a_name": frame_rows["blue_name"].where(
+                    a_is_blue, frame_rows["red_name"]
+                ),
+                "team_b_name": frame_rows["red_name"].where(
+                    a_is_blue, frame_rows["blue_name"]
+                ),
+                "home_a": frame_rows["blue_home"].where(
+                    a_is_blue, frame_rows["red_home"]
+                ),
+                "home_b": frame_rows["red_home"].where(
+                    a_is_blue, frame_rows["blue_home"]
+                ),
+                "y_a": y_blue.where(a_is_blue, 1.0 - y_blue),
+                "n_maps": np.ones(len(frame_rows), dtype=int),
+                "a_blue_share": a_is_blue.astype(float),
+                "international": frame_rows["is_international"].astype(bool),
             }
         )
+        collapsed = collapsed_frame.to_dict("records")
+        unresolved: list[dict[str, Any]] = []
+    else:
+        collapsed = []
+        unresolved = []
+        for key, group in frame_rows.groupby("series_key", sort=False):
+            pairs = set(
+                group.apply(
+                    lambda row: "|".join(sorted((str(row["blue"]), str(row["red"])))), axis=1
+                )
+            )
+            if len(pairs) != 1:
+                # Exact-duplicate fallback keys with different team pairs cannot
+                # be merged into one observation; keep them for audit only.
+                unresolved.extend(group.to_dict("records"))
+                continue
+            a, b = sorted((str(group["blue"].iloc[0]), str(group["red"].iloc[0])))
+            a_rows = group[group["blue"].eq(a)]
+            a_wins = float(a_rows["y_blue"].sum()) + float((group[group["red"].eq(a)]["y_blue"] == 0).sum())
+            n_maps = len(group)
+            if a_wins * 2 == n_maps:
+                # Tied/incomplete feed: the series outcome is not identified.
+                # Preserve the maps for audit; exclude from primary inference.
+                unresolved.extend(group.to_dict("records"))
+                continue
+            # A strict majority over ALL maps defines the series winner; the
+            # first map is never selected as an outcome shortcut.
+            y_a = 1.0 if a_wins > n_maps / 2 else 0.0
+            a_blue_share = float(a_rows["blue"].eq(a).sum()) / n_maps
+            first = group.iloc[0]
+            source_a = a_rows.iloc[0] if not a_rows.empty else first
+            b_rows = group[group["blue"].eq(b)]
+            source_b = b_rows.iloc[0] if not b_rows.empty else first
+            collapsed.append(
+                {
+                    "series_key": key,
+                    "series_source": str(group["series_source"].iloc[0]),
+                    "game_uid": ",".join(str(value) for value in group["game_uid"] if str(value)),
+                    "date": first["date"],
+                    "team_a": a,
+                    "team_b": b,
+                    "team_a_name": first["blue_name"] if first["blue"] == a else first["red_name"],
+                    "team_b_name": first["red_name"] if first["blue"] == a else first["blue_name"],
+                    "home_a": source_a["blue_home"] if source_a["blue"] == a else source_a["red_home"],
+                    "home_b": source_b["blue_home"] if source_b["blue"] == b else source_b["red_home"],
+                    "y_a": y_a,
+                    "n_maps": n_maps,
+                    "a_blue_share": a_blue_share,
+                    "international": bool(group["is_international"].any()),
+                }
+            )
+
     out = pd.DataFrame(collapsed).sort_values("date").reset_index(drop=True)
     if not out.empty:
         cutoff = out["date"].max()
