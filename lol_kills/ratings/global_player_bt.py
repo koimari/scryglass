@@ -320,12 +320,18 @@ class PrefixBaselineCache:
                         raise PrefixBaselineCacheError("persistent cache array checksum drift")
                     arrays[str(name)] = array
             catalog = arrays.pop("row_catalog")
+            if catalog.ndim != 1:
+                raise PrefixBaselineCacheError("persistent cache row catalog shape drift")
             self._row_ids = {}
             for row_id, encoded in enumerate(catalog.tolist()):
                 decoded = json.loads(str(encoded))
                 if not isinstance(decoded, list):
                     raise PrefixBaselineCacheError("persistent cache row catalog drift")
-                self._row_ids[self._key(decoded)] = row_id
+                key = self._key(decoded)
+                if key in self._row_ids:
+                    raise PrefixBaselineCacheError("persistent cache row catalog duplicate")
+                self._row_ids[key] = row_id
+            catalog_size = len(catalog)
             entries = manifest.get("entries")
             if not isinstance(entries, list):
                 raise PrefixBaselineCacheError("persistent cache entry manifest missing")
@@ -336,22 +342,54 @@ class PrefixBaselineCache:
                 metric_key = str(descriptor["metric_key"])
                 min_obs = int(descriptor["min_obs"])
                 prefix = str(descriptor["prefix"])
+                entry_arrays = {
+                    name: arrays[f"{prefix}_{name}"]
+                    for name in ("row_ids", "groups", "dates", "values", "z", "prior")
+                }
+                if any(array.ndim != 1 for array in entry_arrays.values()):
+                    raise PrefixBaselineCacheError("persistent cache entry shape drift")
+                entry_length = len(entry_arrays["row_ids"])
+                if any(len(array) != entry_length for array in entry_arrays.values()):
+                    raise PrefixBaselineCacheError("persistent cache entry length drift")
+                raw_row_ids = entry_arrays["row_ids"]
+                if not np.issubdtype(raw_row_ids.dtype, np.integer):
+                    raise PrefixBaselineCacheError("persistent cache row ID dtype drift")
+                row_ids = raw_row_ids.astype(np.int64, copy=False)
+                if (
+                    (row_ids < 0).any()
+                    or (row_ids >= catalog_size).any()
+                    or (len(row_ids) > 1 and (np.diff(row_ids) <= 0).any())
+                ):
+                    raise PrefixBaselineCacheError("persistent cache row ID order drift")
                 entry = _PrefixBaselineEntry(
                     metric_key=metric_key,
                     min_obs=min_obs,
-                    row_ids=arrays[f"{prefix}_row_ids"].astype(np.int64, copy=False),
+                    row_ids=row_ids,
                     groups=np.asarray(
-                        [None if value == "" else str(value) for value in arrays[f"{prefix}_groups"].tolist()],
+                        [
+                            None if value == "" else str(value)
+                            for value in entry_arrays["groups"].tolist()
+                        ],
                         dtype=object,
                     ),
-                    dates=arrays[f"{prefix}_dates"].astype(np.int64, copy=False),
-                    values=arrays[f"{prefix}_values"].astype(float, copy=False),
-                    z=arrays[f"{prefix}_z"].astype(float, copy=False),
-                    prior_count=arrays[f"{prefix}_prior"].astype(float, copy=False),
+                    dates=entry_arrays["dates"].astype(np.int64, copy=False),
+                    values=entry_arrays["values"].astype(float, copy=False),
+                    z=entry_arrays["z"].astype(float, copy=False),
+                    prior_count=entry_arrays["prior"].astype(float, copy=False),
                 )
                 loaded.setdefault((metric_key, min_obs), []).append(entry)
             self._entries = loaded
-        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, PrefixBaselineCacheError) as exc:
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            OverflowError,
+            IndexError,
+            zipfile.BadZipFile,
+            json.JSONDecodeError,
+            PrefixBaselineCacheError,
+        ) as exc:
             self._clear(f"persistent cache load failed: {exc}")
 
     def flush(self) -> None:
@@ -759,6 +797,11 @@ class PrefixBaselineCache:
                     order = group_positions
                 else:
                     order = group_positions[np.argsort(group_dates, kind="stable")]
+                # Match _prior_baseline_z: rows without a usable date do not
+                # enter a later row's strict-prior pool.
+                order = order[dates[order] != _PREFIX_CACHE_MISSING_DATE]
+                if len(order) == 0:
+                    continue
                 group_dates = dates[order]
                 starts = np.empty(len(order), dtype=bool)
                 starts[0] = True

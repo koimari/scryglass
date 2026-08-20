@@ -12,6 +12,7 @@ One test module per confirmed P1 finding on the anchor:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -1380,6 +1381,128 @@ def test_shared_prefix_cache_reuses_exact_suffix_after_historical_insertion() ->
     assert cache.stores == 2
 
 
+def test_shared_prefix_cache_excludes_missing_dates_when_appending() -> None:
+    """An undated old row cannot enter a later row's strict-prior pool."""
+
+    values = pd.Series([1.0, 2.0, 100.0])
+    group = pd.Series(["mid"] * 3)
+    date = pd.Series(
+        [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-02"), pd.NaT]
+    )
+    row_key = pd.Series(
+        [
+            ("game", "Blue", "player-0", "mid"),
+            ("game", "Blue", "player-1", "mid"),
+            ("game", "Blue", "player-2", "mid"),
+        ],
+        dtype=object,
+    )
+    cache = PrefixBaselineCache()
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+
+    target_values = pd.concat([values, pd.Series([3.0])], ignore_index=True)
+    target_group = pd.concat([group, pd.Series(["mid"])], ignore_index=True)
+    target_date = pd.concat(
+        [date, pd.Series([pd.Timestamp("2026-01-03")])], ignore_index=True
+    )
+    target_keys = pd.concat(
+        [
+            row_key,
+            pd.Series([("game", "Blue", "player-3", "mid")], dtype=object),
+        ],
+        ignore_index=True,
+    )
+    cached, cached_prior = _prior_baseline_z(
+        target_values,
+        target_group,
+        target_date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=target_keys,
+    )
+    reference, reference_prior = _prior_baseline_z(
+        target_values, target_group, target_date, min_obs=2
+    )
+
+    pd.testing.assert_series_equal(cached, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(
+        cached_prior, reference_prior, check_names=False, check_exact=True
+    )
+    assert cache.hits == 1
+
+
+def test_shared_prefix_cache_reuses_exact_suffix_for_same_timestamp_insertion() -> None:
+    """Rows inserted into a timestamp block cannot see that block as prior."""
+
+    values = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0])
+    group = pd.Series(["mid"] * 5)
+    date = pd.Series(
+        pd.to_datetime(
+            [
+                "2026-01-01",
+                "2026-01-02",
+                "2026-01-02",
+                "2026-01-03",
+                "2026-01-04",
+            ]
+        )
+    )
+    row_key = pd.Series(
+        [("game", "Blue", f"player-{index}", "mid") for index in range(5)],
+        dtype=object,
+    )
+    cache = PrefixBaselineCache()
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+
+    target_values = pd.concat([values, pd.Series([99.0])], ignore_index=True)
+    target_group = pd.concat([group, pd.Series(["mid"])], ignore_index=True)
+    target_date = pd.concat(
+        [date, pd.Series([pd.Timestamp("2026-01-02")])], ignore_index=True
+    )
+    target_keys = pd.concat(
+        [
+            row_key,
+            pd.Series([("game", "Blue", "inserted", "mid")], dtype=object),
+        ],
+        ignore_index=True,
+    )
+    cached, cached_prior = _prior_baseline_z(
+        target_values,
+        target_group,
+        target_date,
+        min_obs=2,
+        baseline_cache=cache,
+        metric_key="cs_per_min",
+        row_key=target_keys,
+    )
+    reference, reference_prior = _prior_baseline_z(
+        target_values, target_group, target_date, min_obs=2
+    )
+
+    pd.testing.assert_series_equal(cached, reference, check_names=False, check_exact=True)
+    pd.testing.assert_series_equal(
+        cached_prior, reference_prior, check_names=False, check_exact=True
+    )
+    assert cache.hits == 1
+
+
 def test_global_composite_cache_reuses_insertions_with_exact_components() -> None:
     """Composite, z, prior-count, and diagnostics stay byte-equivalent."""
 
@@ -1679,6 +1802,70 @@ def test_persistent_cache_serialization_integrity_fails_closed(tmp_path: Path) -
     )
     reference, _reference_prior = _prior_baseline_z(values, group, date, min_obs=2)
     pd.testing.assert_series_equal(fresh, reference, check_names=False, check_exact=True)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason"),
+    [
+        ("length", "persistent cache entry length drift"),
+        ("unsorted", "persistent cache row ID order drift"),
+        ("duplicate", "persistent cache row ID order drift"),
+        ("bounds", "persistent cache row ID order drift"),
+    ],
+)
+def test_persistent_cache_entry_shape_and_row_ids_fail_closed(
+    tmp_path: Path, mutation: str, reason: str
+) -> None:
+    """Malformed entry arrays never reach prefix lookup."""
+
+    values, group, date, row_key = _persistent_cache_fixture(size=4)
+    path = tmp_path / f"prefix-baseline-{mutation}"
+    seed = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    _prior_baseline_z(
+        values,
+        group,
+        date,
+        min_obs=2,
+        baseline_cache=seed,
+        metric_key="cs_per_min",
+        row_key=row_key,
+    )
+    seed.flush()
+
+    manifest_path = path.with_suffix(".json")
+    payload_path = path.with_suffix(".npz")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    with np.load(payload_path, allow_pickle=False) as payload:
+        arrays = {name: np.asarray(payload[name]) for name in payload.files}
+    row_ids = arrays["entry_0_row_ids"].copy()
+    if mutation == "length":
+        arrays["entry_0_groups"] = arrays["entry_0_groups"][:-1]
+    elif mutation == "unsorted":
+        arrays["entry_0_row_ids"] = row_ids[[1, 0, 2, 3]]
+    elif mutation == "duplicate":
+        arrays["entry_0_row_ids"] = row_ids.copy()
+        arrays["entry_0_row_ids"][1] = arrays["entry_0_row_ids"][0]
+    else:
+        arrays["entry_0_row_ids"] = row_ids.copy()
+        arrays["entry_0_row_ids"][0] = len(arrays["row_catalog"])
+
+    rewritten = payload_path.with_name(payload_path.name + ".rewrite")
+    global_player_bt_module._write_npz_level1(rewritten, arrays)
+    payload_bytes = rewritten.read_bytes()
+    rewritten.replace(payload_path)
+    manifest["payload_sha256"] = hashlib.sha256(payload_bytes).hexdigest()
+    for name, array in arrays.items():
+        manifest["arrays"][name] = PrefixBaselineCache._manifest_spec(array)
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    rejected = PrefixBaselineCache(storage_path=path, source_identity="source-v1")
+    assert rejected.invalidated is True
+    assert rejected.invalidated_reason is not None
+    assert reason in rejected.invalidated_reason
+    assert rejected._entries == {}
 
 
 def test_persistent_cache_hit_does_not_rewrite_clean_payload(
