@@ -57,10 +57,29 @@ def test_refresh_writes_rating_artifacts_under_runtime_root(
         ).to_parquet(output_dir / "ratings_dual_snapshot.parquet", index=False)
         (output_dir / "ratings_meta.json").write_text("{}", encoding="utf-8")
 
-    def fake_player(_maps, _players, *, cfg, output_dir):
+    def fake_player(
+        _maps,
+        _players,
+        *,
+        cfg,
+        output_dir,
+        checkpoint_dates=None,
+        replay_out=None,
+    ):
         write_frame(output_dir / "player_ratings.parquet")
         write_frame(output_dir / "player_ratings_snapshot.parquet")
         (output_dir / "player_ratings_meta.json").write_text("{}", encoding="utf-8")
+        if replay_out is not None:
+            replay_out.update(
+                {
+                    "source_identity": "test",
+                    "config": cfg.__dict__.copy(),
+                    "states": {},
+                    "checkpoints": {},
+                    "recent_mus": {},
+                    "current_global": pd.DataFrame(),
+                }
+            )
 
     def fake_hierarchical(_maps, *, write, output_dir, **_kwargs):
         write_frame(output_dir / "ratings_snapshot.parquet")

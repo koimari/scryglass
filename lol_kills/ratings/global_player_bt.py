@@ -17,7 +17,6 @@ group and cannot lift or lower a player's anchor on their own.
 
 from __future__ import annotations
 
-import copy
 from dataclasses import asdict, dataclass
 from bisect import bisect_right, insort
 import hashlib
@@ -25,7 +24,6 @@ import inspect
 import json
 import math
 import os
-import pickle
 from pathlib import Path
 import sys
 from typing import Any, Callable
@@ -91,7 +89,7 @@ _PREFIX_CACHE_SCHEMA_FINGERPRINT = (
 _PREFIX_CACHE_MISSING_DATE = np.iinfo(np.int64).min
 _BASELINE_GROUP_SEPARATOR = "\x1f"
 _GLOBAL_FIT_CACHE_SCHEMA_VERSION = 1
-_GLOBAL_FIT_CACHE_SCHEMA_FINGERPRINT = "global-player-fit:v1:pickle:source-bound"
+_GLOBAL_FIT_CACHE_SCHEMA_FINGERPRINT = "global-player-fit:v2:parquet-json:source-bound"
 
 
 class PrefixBaselineCacheError(RuntimeError):
@@ -793,9 +791,11 @@ class GlobalPlayerFitCache:
     The cache contains only private derived snapshots and fit metadata. The
     caller supplies a key that includes the cutoff-filtered source content,
     fit configuration, and implementation fingerprint. A changed source or
-    implementation therefore selects a new entry and leaves old entries
-    harmlessly unreachable. The payload and manifest have independent
-    checksums. A damaged payload is discarded and rebuilt by the caller.
+    implementation therefore selects a new entry. Each snapshot is stored as
+    Parquet and each manifest records its schema, size, and checksum. A
+    damaged entry is discarded and rebuilt by the caller. The cache keeps at
+    most one entry per named slot, so shifting cutoffs cannot grow it without
+    bound.
     """
 
     def __init__(
@@ -810,13 +810,13 @@ class GlobalPlayerFitCache:
             if self.storage_path is not None
             else None
         )
-        self.payload_path = (
-            self.storage_path.with_suffix(".pkl")
+        self.entries_path = (
+            Path(str(self.storage_path) + ".entries")
             if self.storage_path is not None
             else None
         )
         self.schema_fingerprint = str(schema_fingerprint)
-        self._entries: dict[str, dict[str, object]] = {}
+        self._entries: dict[tuple[str, str], dict[str, object]] = {}
         self._dirty = False
         self.invalidated = False
         self.invalidated_reason: str | None = None
@@ -830,20 +830,40 @@ class GlobalPlayerFitCache:
     def persistent(self) -> bool:
         return self.storage_path is not None
 
-    @staticmethod
-    def _payload_sha256(payload: bytes) -> str:
-        return hashlib.sha256(payload).hexdigest()
-
     def _clear(self, reason: str) -> None:
         self._entries.clear()
         self._dirty = True
         self.invalidated = True
         self.invalidated_reason = str(reason)
 
+    @staticmethod
+    def _metadata_copy(meta: dict[str, Any]) -> dict[str, Any]:
+        """Validate that fit metadata stays JSON-serializable."""
+
+        try:
+            return json.loads(json.dumps(meta, ensure_ascii=False, allow_nan=False))
+        except (TypeError, ValueError) as exc:
+            raise PrefixBaselineCacheError("global fit cache metadata is not JSON-safe") from exc
+
+    @staticmethod
+    def _file_sha256(path: Path) -> tuple[int, str]:
+        digest = hashlib.sha256()
+        size = 0
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                size += len(chunk)
+                digest.update(chunk)
+        return size, digest.hexdigest()
+
+    @staticmethod
+    def _safe_file_name(slot: str, key: str) -> str:
+        digest = hashlib.sha256(f"{slot}\x1f{key}".encode("utf-8")).hexdigest()
+        return f"entry_{digest}.parquet"
+
     def _load(self) -> None:
         assert self.manifest_path is not None
-        assert self.payload_path is not None
-        if not self.manifest_path.is_file() and not self.payload_path.is_file():
+        assert self.entries_path is not None
+        if not self.manifest_path.is_file() and not self.entries_path.exists():
             return
         try:
             manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
@@ -851,52 +871,43 @@ class GlobalPlayerFitCache:
                 raise PrefixBaselineCacheError("global fit cache schema version drift")
             if manifest.get("schema_fingerprint") != self.schema_fingerprint:
                 raise PrefixBaselineCacheError("global fit cache schema fingerprint drift")
-            payload_bytes = self.payload_path.read_bytes()
-            if self._payload_sha256(payload_bytes) != manifest.get("payload_sha256"):
-                raise PrefixBaselineCacheError("global fit cache payload checksum drift")
-            payload = pickle.loads(payload_bytes)
-            if not isinstance(payload, dict):
-                raise PrefixBaselineCacheError("global fit cache payload type drift")
-            entries = payload.get("entries")
-            if not isinstance(entries, dict):
-                raise PrefixBaselineCacheError("global fit cache entries missing")
             descriptors = manifest.get("entries")
             if not isinstance(descriptors, list):
                 raise PrefixBaselineCacheError("global fit cache entry manifest missing")
-            expected_keys = {str(item.get("key")) for item in descriptors if isinstance(item, dict)}
-            if set(str(key) for key in entries) != expected_keys:
-                raise PrefixBaselineCacheError("global fit cache entry manifest drift")
-            loaded: dict[str, dict[str, object]] = {}
-            for raw_key, record in entries.items():
-                key = str(raw_key)
-                if not isinstance(record, dict):
-                    raise PrefixBaselineCacheError("global fit cache entry type drift")
-                snapshot = record.get("snapshot")
-                meta = record.get("meta")
-                validated = record.get("validated")
-                if not isinstance(snapshot, pd.DataFrame) or not isinstance(meta, dict):
-                    raise PrefixBaselineCacheError("global fit cache entry payload drift")
-                if not isinstance(validated, bool):
-                    raise PrefixBaselineCacheError("global fit cache validation flag drift")
-                loaded[key] = {
+            loaded: dict[tuple[str, str], dict[str, object]] = {}
+            for descriptor in descriptors:
+                if not isinstance(descriptor, dict):
+                    raise PrefixBaselineCacheError("global fit cache entry descriptor drift")
+                slot = str(descriptor.get("slot") or "")
+                key = str(descriptor.get("key") or "")
+                file_name = str(descriptor.get("file") or "")
+                if not slot or not key or file_name != self._safe_file_name(slot, key):
+                    raise PrefixBaselineCacheError("global fit cache entry identity drift")
+                path = self.entries_path / file_name
+                if not path.is_file():
+                    raise PrefixBaselineCacheError("global fit cache entry file missing")
+                size, checksum = self._file_sha256(path)
+                if size != int(descriptor.get("bytes", -1)) or checksum != descriptor.get("sha256"):
+                    raise PrefixBaselineCacheError("global fit cache entry checksum drift")
+                snapshot = pd.read_parquet(path)
+                columns = descriptor.get("columns")
+                if columns != [str(column) for column in snapshot.columns]:
+                    raise PrefixBaselineCacheError("global fit cache entry columns drift")
+                dtypes = descriptor.get("dtypes")
+                if dtypes != [str(dtype) for dtype in snapshot.dtypes]:
+                    raise PrefixBaselineCacheError("global fit cache entry dtypes drift")
+                meta = descriptor.get("meta")
+                validated = descriptor.get("validated")
+                if not isinstance(meta, dict) or not isinstance(validated, bool):
+                    raise PrefixBaselineCacheError("global fit cache entry metadata drift")
+                loaded[(slot, key)] = {
                     "snapshot": snapshot,
-                    "meta": meta,
+                    "meta": self._metadata_copy(meta),
                     "validated": validated,
+                    "file": file_name,
                 }
             self._entries = loaded
-        except (
-            OSError,
-            EOFError,
-            AttributeError,
-            ImportError,
-            IndexError,
-            KeyError,
-            TypeError,
-            ValueError,
-            pickle.PickleError,
-            json.JSONDecodeError,
-            PrefixBaselineCacheError,
-        ) as exc:
+        except Exception as exc:
             self._clear(f"global fit cache load failed: {exc}")
 
     def lookup(
@@ -904,8 +915,16 @@ class GlobalPlayerFitCache:
         key: str,
         *,
         require_validated: bool = False,
+        slot: str | None = None,
     ) -> tuple[pd.DataFrame, dict[str, Any]] | None:
-        record = self._entries.get(str(key))
+        record = None
+        if slot is not None:
+            record = self._entries.get((str(slot), str(key)))
+        else:
+            for (_slot, saved_key), candidate in self._entries.items():
+                if saved_key == str(key):
+                    record = candidate
+                    break
         if record is None:
             self.misses += 1
             return None
@@ -919,7 +938,7 @@ class GlobalPlayerFitCache:
             self._clear("global fit cache entry type drift")
             return None
         self.hits += 1
-        return snapshot.copy(deep=True), copy.deepcopy(meta)
+        return snapshot.copy(deep=True), self._metadata_copy(meta)
 
     def store(
         self,
@@ -928,14 +947,27 @@ class GlobalPlayerFitCache:
         meta: dict[str, Any],
         *,
         validated: bool,
+        slot: str | None = None,
     ) -> None:
         if not isinstance(snapshot, pd.DataFrame) or not isinstance(meta, dict):
             return
-        self._entries[str(key)] = {
+        saved_slot = str(slot or f"key-{str(key)[:16]}")
+        saved_meta = self._metadata_copy(meta)
+        self._entries[(saved_slot, str(key))] = {
             "snapshot": snapshot.copy(deep=True),
-            "meta": copy.deepcopy(meta),
+            "meta": saved_meta,
             "validated": bool(validated),
         }
+        # A slot represents one semantic cutoff. Replacing it prevents an
+        # append cycle from retaining an unbounded sequence of historical keys.
+        self._entries = {
+            identity: record
+            for identity, record in self._entries.items()
+            if identity[0] != saved_slot or identity[1] == str(key)
+        }
+        if len(self._entries) > 5:
+            for identity in sorted(self._entries)[:-5]:
+                self._entries.pop(identity, None)
         self._dirty = True
         self.stores += 1
 
@@ -943,35 +975,57 @@ class GlobalPlayerFitCache:
         if self.storage_path is None or not self._dirty:
             return
         assert self.manifest_path is not None
-        assert self.payload_path is not None
+        assert self.entries_path is not None
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"entries": self._entries}
-        payload_tmp = self.payload_path.with_name(self.payload_path.name + ".tmp")
+        self.entries_path.mkdir(parents=True, exist_ok=True)
         manifest_tmp = self.manifest_path.with_name(self.manifest_path.name + ".tmp")
+        descriptors: list[dict[str, object]] = []
+        active_files: set[str] = set()
         try:
-            with payload_tmp.open("wb") as handle:
-                pickle.dump(payload, handle, protocol=5)
-            payload_bytes = payload_tmp.read_bytes()
+            for (slot, key), record in sorted(self._entries.items()):
+                snapshot = record["snapshot"]
+                meta = record["meta"]
+                if not isinstance(snapshot, pd.DataFrame) or not isinstance(meta, dict):
+                    raise PrefixBaselineCacheError("global fit cache entry type drift")
+                file_name = self._safe_file_name(slot, key)
+                path = self.entries_path / file_name
+                temporary = path.with_name(path.name + ".tmp.parquet")
+                snapshot.to_parquet(temporary, index=False)
+                os.replace(temporary, path)
+                size, checksum = self._file_sha256(path)
+                active_files.add(file_name)
+                descriptors.append(
+                    {
+                        "slot": slot,
+                        "key": key,
+                        "file": file_name,
+                        "bytes": size,
+                        "sha256": checksum,
+                        "columns": [str(column) for column in snapshot.columns],
+                        "dtypes": [str(dtype) for dtype in snapshot.dtypes],
+                        "validated": bool(record.get("validated")),
+                        "meta": self._metadata_copy(meta),
+                    }
+                )
+                record["file"] = file_name
             manifest = {
                 "schema_version": _GLOBAL_FIT_CACHE_SCHEMA_VERSION,
                 "schema_fingerprint": self.schema_fingerprint,
-                "payload_sha256": self._payload_sha256(payload_bytes),
-                "entries": [
-                    {"key": key, "validated": bool(record.get("validated"))}
-                    for key, record in sorted(self._entries.items())
-                ],
+                "entries": descriptors,
             }
             manifest_tmp.write_text(
                 json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
                 encoding="utf-8",
             )
-            os.replace(payload_tmp, self.payload_path)
             os.replace(manifest_tmp, self.manifest_path)
+            for stale in self.entries_path.glob("entry_*.parquet"):
+                if stale.name not in active_files:
+                    stale.unlink()
             self._dirty = False
             self.invalidated = False
             self.invalidated_reason = None
         finally:
-            for temporary in (payload_tmp, manifest_tmp):
+            for temporary in (manifest_tmp,):
                 try:
                     temporary.unlink()
                 except FileNotFoundError:
@@ -2001,6 +2055,7 @@ def fit_global_player_bt(
     validate: bool = True,
     baseline_cache: PrefixBaselineCache | None = None,
     fit_cache: GlobalPlayerFitCache | None = None,
+    fit_cache_slot: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Fit one player-results scale and return its release evidence."""
 
@@ -2013,7 +2068,11 @@ def fit_global_player_bt(
     cache_key = None
     if fit_cache is not None:
         cache_key = _global_fit_cache_key(frame, lineups, players, cfg, through)
-        cached = fit_cache.lookup(cache_key, require_validated=validate)
+        cached = fit_cache.lookup(
+            cache_key,
+            require_validated=validate,
+            slot=fit_cache_slot,
+        )
         if cached is not None:
             return cached
     names = sorted(
@@ -2146,5 +2205,11 @@ def fit_global_player_bt(
     }
     snapshot = snapshot.reset_index(drop=True)
     if fit_cache is not None and cache_key is not None:
-        fit_cache.store(cache_key, snapshot, meta, validated=validate)
+        fit_cache.store(
+            cache_key,
+            snapshot,
+            meta,
+            validated=validate,
+            slot=fit_cache_slot,
+        )
     return snapshot, meta

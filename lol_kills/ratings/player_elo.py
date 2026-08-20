@@ -61,6 +61,7 @@ from lol_kills.ratings.global_player_bt import (
     GlobalPlayerFitCache,
     GlobalPlayerRatingError,
     PrefixBaselineCache,
+    _frame_digest as _global_frame_digest,
     _player_baseline_group as _shared_player_baseline_group,
     _kth_abs_distance as _shared_kth_abs_distance,
     _linear_quantile_sorted as _shared_linear_quantile_sorted,
@@ -162,6 +163,57 @@ def _rating_source_identity(maps: pd.DataFrame | None) -> str:
             if game_id:
                 canonical.add(str(game_id))
     raw = ("\n".join(sorted(canonical)) + "\n").encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _replay_source_identity(maps: pd.DataFrame, players: pd.DataFrame) -> str:
+    """Hash the canonical rows that one sequential replay can read."""
+
+    map_frame = canonicalize_competition_frame(maps).copy()
+    map_frame["date"] = pd.to_datetime(
+        map_frame.get("date"), errors="coerce", utc=True
+    ).dt.tz_localize(None)
+    if "game_uid" in map_frame.columns:
+        fallback = map_frame["gameid"] if "gameid" in map_frame.columns else None
+        map_frame["game_uid"] = [
+            canonical_source_game_key(
+                value,
+                fallback.loc[index] if fallback is not None else None,
+            )
+            for index, value in map_frame["game_uid"].items()
+        ]
+    elif "gameid" in map_frame.columns:
+        map_frame["game_uid"] = map_frame["gameid"].map(canonical_source_game_key)
+    else:
+        map_frame["game_uid"] = ""
+    map_frame = map_frame[
+        map_frame["game_uid"].astype(str).str.strip().ne("")
+    ].sort_values(["date", "game_uid"], kind="mergesort").reset_index(drop=True)
+    map_ids = set(map_frame["game_uid"].astype(str))
+
+    player_frame = players.copy()
+    if "game_uid" in player_frame.columns:
+        fallback = player_frame["gameid"] if "gameid" in player_frame.columns else None
+        player_ids = pd.Series(
+            [
+                canonical_source_game_key(
+                    value,
+                    fallback.loc[index] if fallback is not None else None,
+                )
+                for index, value in player_frame["game_uid"].items()
+            ],
+            index=player_frame.index,
+        )
+    elif "gameid" in player_frame.columns:
+        player_ids = player_frame["gameid"].map(canonical_source_game_key)
+    else:
+        player_ids = pd.Series("", index=player_frame.index)
+    player_frame = player_frame.loc[
+        player_ids.astype(str).isin(map_ids)
+    ].reset_index(drop=True)
+    raw = (
+        _global_frame_digest(map_frame) + _global_frame_digest(player_frame)
+    ).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 
 
@@ -1308,6 +1360,8 @@ def build_player_ratings(
     cfg: PlayerEloConfig | None = None,
     output_dir: Path | None = None,
     player_records: Mapping[str, Mapping[str, object]] | None = None,
+    checkpoint_dates: list[pd.Timestamp] | None = None,
+    replay_out: dict[str, object] | None = None,
 ) -> pd.DataFrame:
     """Sequential player Elo; player ratings travel across org changes."""
 
@@ -1322,10 +1376,11 @@ def build_player_ratings(
     fit_cache = GlobalPlayerFitCache(
         storage_path=destination / "player_global_fit_cache",
     )
-    out, states, _checkpoints, recent_mus = _run_player_elo(
+    out, states, checkpoints, recent_mus = _run_player_elo(
         maps,
         players,
         cfg,
+        checkpoint_dates=checkpoint_dates,
         baseline_cache=baseline_cache,
     )
     attribution_stats = dict(LAST_ATTRIBUTION_STATS)
@@ -1337,6 +1392,7 @@ def build_player_ratings(
         players,
         baseline_cache=baseline_cache,
         fit_cache=fit_cache,
+        fit_cache_slot="current",
     )
     snap = _apply_global_scale(
         _snapshot_rows(states, recent_mus, cfg), global_snapshot, cfg
@@ -1351,6 +1407,19 @@ def build_player_ratings(
         snap = _apply_bridge_uncertainty(snap, players, player_records, cfg)
     snap_df = pd.DataFrame(snap).sort_values("mu_effective", ascending=False)
     snap_df.to_parquet(destination / "player_ratings_snapshot.parquet", index=False)
+    if replay_out is not None:
+        replay_out.clear()
+        replay_out.update(
+            {
+                "source_identity": _replay_source_identity(maps, players),
+                "config": dict(cfg.__dict__),
+                "states": states,
+                "checkpoints": checkpoints,
+                "recent_mus": recent_mus,
+                "current_global": global_snapshot.copy(deep=True),
+                "current_global_meta": dict(global_meta),
+            }
+        )
     (destination / "player_ratings_meta.json").write_text(
         json.dumps(
             {
@@ -1432,6 +1501,26 @@ def _recent_baseline_anchor(
     return anchor
 
 
+def weekly_replay_checkpoint_dates(
+    as_of: pd.Timestamp | None,
+    previous_as_of: pd.Timestamp | None = None,
+) -> list[pd.Timestamp]:
+    """Return the exact replay checkpoints used by weekly movement ranks."""
+
+    week_start = _sunday_utc(as_of)
+    previous_start = week_start - pd.Timedelta(days=7)
+    cutoff = pd.Timestamp(as_of) if as_of is not None else pd.Timestamp.now(tz="UTC")
+    if cutoff.tzinfo is not None:
+        cutoff = cutoff.tz_convert("UTC").tz_localize(None)
+    comparison_cutoffs = [
+        cutoff - pd.DateOffset(months=1),
+        cutoff - pd.DateOffset(months=3),
+        cutoff - pd.DateOffset(months=12),
+    ]
+    recent_anchor = _recent_baseline_anchor(previous_as_of, previous_start, cutoff)
+    return [recent_anchor, *comparison_cutoffs]
+
+
 def build_player_weekly_ranks(
     maps: pd.DataFrame,
     players: pd.DataFrame,
@@ -1442,6 +1531,7 @@ def build_player_weekly_ranks(
     min_games: int = 20,
     player_records: Mapping[str, Mapping[str, object]] | None = None,
     previous_as_of: pd.Timestamp | None = None,
+    replay: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Return current ranks with recent and calendar-month movement.
 
@@ -1480,22 +1570,48 @@ def build_player_weekly_ranks(
         frame = frame[frame["date"].le(cutoff)]
 
     recent_anchor = _recent_baseline_anchor(previous_as_of, previous_start, cutoff)
-    _, states, checkpoints, _recent_mus = _run_player_elo(
-        frame,
-        players,
-        cfg,
-        checkpoint_dates=[recent_anchor, *comparison_cutoffs.values()],
-        baseline_cache=baseline_cache,
-    )
-    current_global, _current_meta = fit_global_player_bt(
-        frame,
-        players,
-        GlobalPlayerBTConfig(minimum_maps=1),
-        through=cutoff,
-        validate=False,
-        baseline_cache=baseline_cache,
-        fit_cache=fit_cache,
-    )
+    required_checkpoints = [recent_anchor, *comparison_cutoffs.values()]
+    replay_hit = False
+    if replay is not None:
+        saved_source = replay.get("source_identity")
+        saved_config = replay.get("config")
+        saved_states = replay.get("states")
+        saved_checkpoints = replay.get("checkpoints")
+        saved_recent_mus = replay.get("recent_mus")
+        saved_global = replay.get("current_global")
+        checkpoint_keys = set(saved_checkpoints) if isinstance(saved_checkpoints, dict) else set()
+        replay_hit = bool(
+            saved_source == _replay_source_identity(frame, players)
+            and saved_config == dict(cfg.__dict__)
+            and isinstance(saved_states, dict)
+            and isinstance(saved_checkpoints, dict)
+            and set(required_checkpoints).issubset(checkpoint_keys)
+            and isinstance(saved_recent_mus, dict)
+            and isinstance(saved_global, pd.DataFrame)
+        )
+    if replay_hit:
+        states = saved_states
+        checkpoints = saved_checkpoints
+        _recent_mus = saved_recent_mus
+        current_global = saved_global.copy(deep=True)
+    else:
+        _, states, checkpoints, _recent_mus = _run_player_elo(
+            frame,
+            players,
+            cfg,
+            checkpoint_dates=required_checkpoints,
+            baseline_cache=baseline_cache,
+        )
+        current_global, _current_meta = fit_global_player_bt(
+            frame,
+            players,
+            GlobalPlayerBTConfig(minimum_maps=1),
+            through=cutoff,
+            validate=False,
+            baseline_cache=baseline_cache,
+            fit_cache=fit_cache,
+            fit_cache_slot="current",
+        )
     # Current affiliation is the publication filter.  Historical matches in a
     # different circuit remain evidence for the rating but cannot place a
     # developmental player in the current Tier 1 board.
@@ -1509,7 +1625,7 @@ def build_player_weekly_ranks(
         cfg,
         through=cutoff,
     )
-    def historical_rows(anchor: pd.Timestamp) -> list[dict[str, object]]:
+    def historical_rows(anchor: pd.Timestamp, anchor_label: str) -> list[dict[str, object]]:
         snapshot = checkpoints.get(anchor, [])
         if not snapshot:
             return []
@@ -1522,6 +1638,7 @@ def build_player_weekly_ranks(
                 validate=False,
                 baseline_cache=baseline_cache,
                 fit_cache=fit_cache,
+                fit_cache_slot=anchor_label,
             )
         except GlobalPlayerRatingError:
             return []
@@ -1533,9 +1650,9 @@ def build_player_weekly_ranks(
             through=anchor,
         )
 
-    previous_rows = historical_rows(recent_anchor)
+    previous_rows = historical_rows(recent_anchor, "recent")
     comparison_rows = {
-        label: historical_rows(anchor)
+        label: historical_rows(anchor, label)
         for label, anchor in comparison_cutoffs.items()
     }
     current_tiers = {

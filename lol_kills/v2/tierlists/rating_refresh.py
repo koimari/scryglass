@@ -24,6 +24,7 @@ from lol_kills.ratings.player_elo import (
     build_maps_frame_from_players,
     build_player_ratings,
     build_player_weekly_ranks,
+    weekly_replay_checkpoint_dates,
 )
 from lol_kills.ratings.momentum_config import (
     DEFAULT_MOMENTUM_SCALE,
@@ -222,11 +223,14 @@ def refresh_ratings(
         lineup_by_game=lineup_hashes,
         output_dir=features_dir,
     )
+    player_replay: dict[str, object] = {}
     build_player_ratings(
         player_maps,
         players,
         cfg=player_rating_cfg,
         output_dir=features_dir,
+        checkpoint_dates=weekly_replay_checkpoint_dates(cutoff, previous_as_of),
+        replay_out=player_replay,
     )
     team_snapshot, team_meta = fit_hierarchical_bt(
         maps,
@@ -267,6 +271,7 @@ def refresh_ratings(
         as_of=cutoff,
         min_games=min_games,
         previous_as_of=previous_as_of,
+        replay=player_replay,
     )
     (features_dir / "team_weekly_ranks.json").write_text(
         json.dumps(team_weekly, indent=2) + "\n",

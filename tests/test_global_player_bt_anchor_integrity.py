@@ -352,11 +352,89 @@ def test_global_fit_cache_discards_a_tampered_payload(tmp_path: Path) -> None:
     cache = GlobalPlayerFitCache(storage_path=path)
     fit_global_player_bt(maps, players, cfg, validate=False, fit_cache=cache)
     cache.flush()
-    payload = path.with_suffix(".pkl")
+    payload = next((tmp_path / "global_fit_cache.entries").glob("entry_*.parquet"))
     payload.write_bytes(payload.read_bytes() + b"drift")
     reloaded = GlobalPlayerFitCache(storage_path=path)
     assert reloaded.invalidated
     assert reloaded.lookup("unknown") is None
+
+
+def test_weekly_replay_context_keeps_json_exact_and_skips_replay(monkeypatch, tmp_path: Path) -> None:
+    """An object-local replay pass reproduces weekly output byte-for-byte."""
+
+    maps, players = _fixture(_locked_roster_games(rounds=2))
+    players["competition_tier"] = "tier1"
+    cfg = player_elo.PlayerEloConfig(attribution_enabled=False)
+    cutoff = pd.Timestamp("2026-02-01T12:00:00Z")
+    names = sorted(players["playername"].unique())
+    states = {
+        name: player_elo.PlayerState(n_maps=3, last_date=pd.Timestamp("2026-01-01"))
+        for name in names
+    }
+    checkpoint_dates = player_elo.weekly_replay_checkpoint_dates(cutoff)
+    checkpoint_rows = player_elo._snapshot_rows(states, cfg=cfg)
+    checkpoints = {pd.Timestamp(date): checkpoint_rows for date in checkpoint_dates}
+    global_snapshot = pd.DataFrame(
+        {
+            "player": names,
+            "global_rating": np.full(len(names), 1500.0),
+            "global_connected": np.ones(len(names), dtype=int),
+            "global_component_size": np.full(len(names), len(names), dtype=int),
+            "global_model_maps": np.full(len(names), 3, dtype=int),
+        }
+    )
+    calls = {"replay": 0, "fit": 0}
+
+    def fake_replay(*_args, **_kwargs):
+        calls["replay"] += 1
+        return pd.DataFrame(), states, checkpoints, {}
+
+    def fake_fit(*_args, **_kwargs):
+        calls["fit"] += 1
+        return global_snapshot.copy(deep=True), {}
+
+    monkeypatch.setattr(player_elo, "_run_player_elo", fake_replay)
+    monkeypatch.setattr(player_elo, "fit_global_player_bt", fake_fit)
+    expected = player_elo.build_player_weekly_ranks(
+        maps,
+        players,
+        cfg=cfg,
+        output_dir=tmp_path / "first",
+        as_of=cutoff,
+        min_games=1,
+        player_records={},
+    )
+    assert calls == {"replay": 1, "fit": 5}
+    replay = {
+        "source_identity": player_elo._replay_source_identity(maps, players),
+        "config": dict(cfg.__dict__),
+        "states": states,
+        "checkpoints": checkpoints,
+        "recent_mus": {},
+        "current_global": global_snapshot,
+    }
+
+    def fail_replay(*_args, **_kwargs):
+        raise AssertionError("weekly replay was not reused")
+
+    def fail_fit(*_args, **kwargs):
+        if kwargs.get("fit_cache_slot") == "current":
+            raise AssertionError("current fit was not reused")
+        return global_snapshot.copy(deep=True), {}
+
+    monkeypatch.setattr(player_elo, "_run_player_elo", fail_replay)
+    monkeypatch.setattr(player_elo, "fit_global_player_bt", fail_fit)
+    actual = player_elo.build_player_weekly_ranks(
+        maps,
+        players,
+        cfg=cfg,
+        output_dir=tmp_path / "second",
+        as_of=cutoff,
+        min_games=1,
+        player_records={},
+        replay=replay,
+    )
+    assert actual == expected
 
 
 def test_rows_sharing_a_timestamp_cannot_see_each_other() -> None:
