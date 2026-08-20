@@ -10,6 +10,8 @@ from lol_kills.research.future_value_rating import (
     FutureValueSourceError,
     _map_model_frame,
     _frame_game_ids,
+    _baseline_output_alignment,
+    _baseline_source_binding,
     build_future_value_design,
     build_time_decayed_prior_player_form,
     chronological_whole_series_folds,
@@ -237,8 +239,31 @@ def test_partial_authoritative_series_ids_use_a_proxy_cluster() -> None:
         ]
     )
     frame = _map_model_frame(maps)
-    assert frame.attrs["series_cluster_source"] == "unordered_team_pair_day_proxy"
+    assert frame.attrs["series_cluster_source"] == "conservative_series_superset"
     assert frame["series_id"].str.startswith("proxy:").all()
+
+
+def test_proxy_series_keeps_repeated_team_tournament_rows_together() -> None:
+    maps = pd.DataFrame(
+        [
+            {
+                "game_uid": f"g{index}",
+                "date": f"2026-01-{index:02d}T00:00:00Z",
+                "y_blue_win": index % 2,
+                "league": "LEC",
+                "tournament": "Spring",
+                "blue_team_key": "team-a",
+                "red_team_key": "team-b",
+            }
+            for index in range(1, 4)
+        ]
+    )
+    frame = _map_model_frame(maps)
+    assert frame["series_id"].nunique() == 1
+    audit = frame.attrs["series_cluster_audit"]
+    assert audit["source"] == "conservative_series_superset"
+    assert audit["colliding_cluster_count"] == 1
+    assert audit["collision_extra_map_count"] == 2
 
 
 def test_evaluation_pairs_candidate_and_baseline_on_identical_game_ids() -> None:
@@ -266,6 +291,78 @@ def test_evaluation_pairs_candidate_and_baseline_on_identical_game_ids() -> None
     assert "patch_transfer_slice_missing" in result["blockers"]
     assert "tournament_boundary_slice_missing" in result["blockers"]
     assert result["evaluation"]["pooled_calibration"]["rows"] == fold["paired_rows"]
+
+
+def test_baseline_output_alignment_reports_missing_and_extra_ids() -> None:
+    validation = pd.DataFrame({"game_id": ["g1", "g2", "g3"]})
+    output = pd.DataFrame(
+        {
+            "game_uid": ["g1", "g3", "g-extra"],
+            "probability": [0.2, 0.8, 0.5],
+        }
+    )
+    aligned, report = _baseline_output_alignment(
+        validation,
+        output,
+        game_id_column="game_uid",
+        probability_column="probability",
+        method="research_baseline",
+    )
+    assert aligned.iloc[0] == pytest.approx(0.2)
+    assert pd.isna(aligned.iloc[1])
+    assert aligned.iloc[2] == pytest.approx(0.8)
+    assert report["status"] == "partial"
+    assert report["missing_game_ids"] == ["g2"]
+    assert report["extra_game_ids"] == ["g-extra"]
+    assert report["blockers"] == [
+        "research_baseline_coverage_incomplete",
+        "research_baseline_extra_prediction_ids",
+    ]
+
+
+def test_hierarchical_binding_requires_the_declared_proxy_series_receipt() -> None:
+    source = _source_receipt(["g1", "g2", "g3", "g4"])
+    train_ids = ["g1", "g2"]
+    validation_ids = ["g3", "g4"]
+    baseline = {
+        "source": {
+            "receipt_sha256": source["receipt_sha256"],
+            "model_eligible_identity_sha256": source["model_eligible_identity_sha256"],
+        },
+        "train_receipt": {"identity_sha256": identity_sha256(train_ids)},
+        "validation_receipt": {"identity_sha256": identity_sha256(validation_ids)},
+        "implementation_sha256": "a" * 64,
+        "config_sha256": "b" * 64,
+        "series_identity": {
+            "source_types": ["conservative_series_superset"],
+            "authoritative": False,
+        },
+    }
+    bound = _baseline_source_binding(
+        "hierarchical_bt",
+        baseline,
+        source,
+        train_game_ids=train_ids,
+        validation_game_ids=validation_ids,
+        strict_cutoff="2026-01-02T00:00:00+00:00",
+        expected_series_source="conservative_series_superset",
+        expected_series_authoritative=False,
+    )
+    assert bound["status"] == "available"
+    assert bound["series_identity"]["authoritative"] is False
+    mismatched = _baseline_source_binding(
+        "hierarchical_bt",
+        {**baseline, "series_identity": {"source_types": ["grid"], "authoritative": True}},
+        source,
+        train_game_ids=train_ids,
+        validation_game_ids=validation_ids,
+        strict_cutoff="2026-01-02T00:00:00+00:00",
+        expected_series_source="conservative_series_superset",
+        expected_series_authoritative=False,
+    )
+    assert mismatched["status"] == "blocked"
+    assert "hierarchical_bt_series_source_mismatch" in mismatched["blockers"]
+    assert "hierarchical_bt_series_authority_mismatch" in mismatched["blockers"]
 
 
 def test_chronological_folds_keep_series_whole_and_dates_strict() -> None:

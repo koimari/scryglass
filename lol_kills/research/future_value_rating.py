@@ -950,6 +950,15 @@ def _map_model_frame(maps: pd.DataFrame) -> pd.DataFrame:
         if valid_authoritative_series:
             frame["series_id"] = series
             frame.attrs["series_cluster_source"] = f"authoritative:{series_column}"
+            frame.attrs["series_cluster_audit"] = {
+                "source": f"authoritative:{series_column}",
+                "authoritative": True,
+                "cluster_count": int(series.nunique()),
+                "map_count": int(len(frame)),
+                "colliding_cluster_count": 0,
+                "collision_extra_map_count": 0,
+                "max_cluster_size": 1,
+            }
     if not valid_authoritative_series:
         team_columns = next(
             (
@@ -972,27 +981,62 @@ def _map_model_frame(maps: pd.DataFrame) -> pd.DataFrame:
             valid = blue.notna() & red.notna() & blue.ne("") & red.ne("")
             if bool(valid.all()):
                 pair = ["|".join(sorted((left, right))) for left, right in zip(blue, red)]
+                league_key = league.fillna("<missing>").astype(str).str.strip().str.casefold()
+                tournament_key = (
+                    tournament.fillna("<missing>").astype(str).str.strip().str.casefold()
+                )
                 frame["series_id"] = [
                     "proxy:"
                     + "|".join(
                         (
-                            str(league_value).strip().casefold(),
-                            str(tournament_value).strip().casefold(),
-                            str(day.date()),
+                            str(league_value),
+                            str(tournament_value),
                             team_pair,
                         )
                     )
-                    for league_value, tournament_value, day, team_pair in zip(
-                        league, tournament, frame["date"], pair
+                    for league_value, tournament_value, team_pair in zip(
+                        league_key, tournament_key, pair
                     )
                 ]
-                frame.attrs["series_cluster_source"] = "unordered_team_pair_day_proxy"
+                cluster_sizes = frame["series_id"].value_counts(sort=False)
+                colliding = cluster_sizes.gt(1)
+                frame.attrs["series_cluster_source"] = "conservative_series_superset"
+                frame.attrs["series_cluster_audit"] = {
+                    "source": "conservative_series_superset",
+                    "authoritative": False,
+                    "cluster_count": int(len(cluster_sizes)),
+                    "map_count": int(len(frame)),
+                    "colliding_cluster_count": int(colliding.sum()),
+                    "collision_extra_map_count": int(
+                        cluster_sizes.loc[colliding].sub(1).sum()
+                    ),
+                    "max_cluster_size": int(cluster_sizes.max()),
+                    "key_fields": ["league", "tournament", "unordered_team_pair"],
+                }
             else:
                 frame["series_id"] = frame["game_id"]
                 frame.attrs["series_cluster_source"] = "game_id_fallback"
+                frame.attrs["series_cluster_audit"] = {
+                    "source": "game_id_fallback",
+                    "authoritative": False,
+                    "cluster_count": int(len(frame)),
+                    "map_count": int(len(frame)),
+                    "colliding_cluster_count": 0,
+                    "collision_extra_map_count": 0,
+                    "max_cluster_size": 1,
+                }
         else:
             frame["series_id"] = frame["game_id"]
             frame.attrs["series_cluster_source"] = "game_id_fallback"
+            frame.attrs["series_cluster_audit"] = {
+                "source": "game_id_fallback",
+                "authoritative": False,
+                "cluster_count": int(len(frame)),
+                "map_count": int(len(frame)),
+                "colliding_cluster_count": 0,
+                "collision_extra_map_count": 0,
+                "max_cluster_size": 1,
+            }
     return frame
 
 
@@ -1260,6 +1304,7 @@ def build_future_value_design(
     assert_pregame_feature_names(MODEL_FEATURES)
     design.attrs["feature_names"] = MODEL_FEATURES
     design.attrs["series_cluster_source"] = map_frame.attrs.get("series_cluster_source")
+    design.attrs["series_cluster_audit"] = map_frame.attrs.get("series_cluster_audit")
     return design
 
 
@@ -1760,6 +1805,371 @@ def _tournament_boundary_labels(frame: pd.DataFrame) -> pd.Series | None:
     return labels
 
 
+def _baseline_output_alignment(
+    validation: pd.DataFrame,
+    output: pd.DataFrame | None,
+    *,
+    game_id_column: str,
+    probability_column: str,
+    method: str,
+    excluded_game_ids: Iterable[str] = (),
+) -> tuple[pd.Series, dict[str, Any]]:
+    """Align one research baseline to validation rows and record exclusions."""
+
+    requested_ids = tuple(validation["game_id"].astype(str))
+    requested_set = set(requested_ids)
+    empty = pd.Series(np.nan, index=validation.index, dtype=float)
+    report: dict[str, Any] = {
+        "method": method,
+        "status": "unavailable",
+        "requested_rows": int(len(requested_ids)),
+        "requested_game_ids": list(requested_ids),
+        "scored_rows": 0,
+        "scored_game_ids": [],
+        "missing_game_ids": list(requested_ids),
+        "extra_game_ids": [],
+        "excluded_game_ids": sorted({str(value) for value in excluded_game_ids}),
+        "blockers": [f"{method}_prediction_missing"],
+    }
+    if output is None:
+        return empty, report
+    required = {game_id_column, probability_column}
+    if not required.issubset(output.columns):
+        report["blockers"] = [f"{method}_prediction_columns_missing"]
+        return empty, report
+    output_ids = output[game_id_column].astype(str)
+    if output_ids.duplicated().any():
+        report["blockers"] = [f"{method}_duplicate_prediction_ids"]
+        return empty, report
+    output_values = pd.to_numeric(output[probability_column], errors="coerce")
+    finite = np.isfinite(output_values.to_numpy(dtype=float))
+    valid_probability = finite & output_values.ge(0.0).to_numpy() & output_values.le(1.0).to_numpy()
+    invalid_ids = output_ids.loc[~valid_probability].astype(str).tolist()
+    output_set = set(output_ids)
+    extra_ids = sorted(output_set - requested_set)
+    excluded_set = {str(value) for value in excluded_game_ids}
+    usable = valid_probability & ~output_ids.isin(excluded_set).to_numpy()
+    lookup = pd.Series(
+        output_values.loc[usable].to_numpy(dtype=float),
+        index=output_ids.loc[usable].astype(str).to_numpy(),
+        dtype=float,
+    )
+    aligned = validation["game_id"].astype(str).map(lookup).astype(float)
+    scored_ids = sorted(
+        set(validation.loc[aligned.notna(), "game_id"].astype(str))
+    )
+    missing_ids = sorted(requested_set - set(scored_ids))
+    blockers: list[str] = []
+    if missing_ids:
+        blockers.append(f"{method}_coverage_incomplete")
+    if invalid_ids:
+        blockers.append(f"{method}_invalid_probability")
+    if extra_ids:
+        blockers.append(f"{method}_extra_prediction_ids")
+    report.update(
+        {
+            "status": "available" if not blockers else "partial",
+            "scored_rows": int(aligned.notna().sum()),
+            "scored_game_ids": scored_ids,
+            "missing_game_ids": missing_ids,
+            "extra_game_ids": extra_ids,
+            "invalid_probability_game_ids": sorted(set(invalid_ids)),
+            "blockers": sorted(set(blockers)),
+        }
+    )
+    return aligned, report
+
+
+def _baseline_source_binding(
+    method: str,
+    baseline_receipt: Mapping[str, Any] | None,
+    source_receipt: Mapping[str, Any],
+    *,
+    train_game_ids: Sequence[str],
+    validation_game_ids: Sequence[str],
+    strict_cutoff: str,
+    expected_series_source: str | None = None,
+    expected_series_authoritative: bool | None = None,
+) -> dict[str, Any]:
+    """Check source, fold, cutoff, and implementation bindings in a baseline receipt."""
+
+    expected_train_identity = identity_sha256(train_game_ids)
+    expected_validation_identity = identity_sha256(validation_game_ids)
+    report: dict[str, Any] = {
+        "status": "unavailable",
+        "source_receipt_sha256": str(source_receipt["receipt_sha256"]),
+        "source_as_of": str(source_receipt["source_as_of"]),
+        "source_game_count": int(source_receipt["source_game_count"]),
+        "source_identity_sha256": str(source_receipt["source_identity_sha256"]),
+        "model_eligible_game_count": int(source_receipt["model_eligible_game_count"]),
+        "model_eligible_identity_sha256": str(
+            source_receipt["model_eligible_identity_sha256"]
+        ),
+        "accepted_game_id_count": int(len(source_receipt["accepted_game_ids"])),
+        "model_eligible_game_id_count": int(
+            len(source_receipt["model_eligible_game_ids"])
+        ),
+        "train_game_identity_sha256": expected_train_identity,
+        "validation_game_identity_sha256": expected_validation_identity,
+        "strict_cutoff": strict_cutoff,
+        "blockers": [],
+    }
+    if not isinstance(baseline_receipt, Mapping):
+        report["blockers"] = [f"{method}_receipt_missing"]
+        return report
+    blockers: list[str] = []
+    if method == "sequential_player_elo":
+        source_hash = baseline_receipt.get("source_receipt_sha256")
+        eligible_hash = baseline_receipt.get("model_eligible_identity_sha256")
+        train_identity = baseline_receipt.get("train_game_identity_sha256")
+        validation_identity = baseline_receipt.get("validation_game_identity_sha256")
+        actual_cutoff = baseline_receipt.get("strict_cutoff")
+        implementation_hash = baseline_receipt.get("implementation_digest")
+        config = baseline_receipt.get("rating_config")
+        if isinstance(config, Mapping):
+            config_hash = hashlib.sha256(_canonical_json_bytes(dict(config))).hexdigest()
+        else:
+            config_hash = None
+    else:
+        source = baseline_receipt.get("source")
+        source = source if isinstance(source, Mapping) else {}
+        source_hash = source.get("receipt_sha256")
+        eligible_hash = source.get("model_eligible_identity_sha256")
+        train_receipt = baseline_receipt.get("train_receipt")
+        train_receipt = train_receipt if isinstance(train_receipt, Mapping) else {}
+        validation_receipt = baseline_receipt.get("validation_receipt")
+        validation_receipt = (
+            validation_receipt if isinstance(validation_receipt, Mapping) else {}
+        )
+        train_identity = train_receipt.get("identity_sha256")
+        validation_identity = validation_receipt.get("identity_sha256")
+        actual_cutoff = baseline_receipt.get("cutoff")
+        implementation_hash = baseline_receipt.get("implementation_sha256")
+        config_hash = baseline_receipt.get("config_sha256")
+        series_identity = baseline_receipt.get("series_identity")
+        if not isinstance(series_identity, Mapping):
+            series_identity = source.get("series_identity")
+        if isinstance(series_identity, Mapping):
+            report["series_identity"] = dict(series_identity)
+        else:
+            series_identity = None
+    if str(source_hash or "").lower() != str(source_receipt["receipt_sha256"]).lower():
+        blockers.append(f"{method}_source_receipt_mismatch")
+    if str(eligible_hash or "").lower() != str(
+        source_receipt["model_eligible_identity_sha256"]
+    ).lower():
+        blockers.append(f"{method}_eligible_identity_mismatch")
+    if str(train_identity or "").lower() != expected_train_identity:
+        blockers.append(f"{method}_train_identity_mismatch")
+    if str(validation_identity or "").lower() != expected_validation_identity:
+        blockers.append(f"{method}_validation_identity_mismatch")
+    if method == "sequential_player_elo":
+        if str(actual_cutoff or "") != strict_cutoff:
+            blockers.append(f"{method}_strict_cutoff_mismatch")
+    if not isinstance(implementation_hash, str) or len(implementation_hash) != 64:
+        blockers.append(f"{method}_implementation_hash_missing")
+    if not isinstance(config_hash, str) or len(config_hash) != 64:
+        blockers.append(f"{method}_config_hash_missing")
+    if method == "hierarchical_bt":
+        if not isinstance(series_identity, Mapping):
+            blockers.append(f"{method}_series_identity_missing")
+        else:
+            source_types = series_identity.get("source_types")
+            source_types = (
+                [str(value) for value in source_types]
+                if isinstance(source_types, Sequence)
+                and not isinstance(source_types, (str, bytes, bytearray))
+                else []
+            )
+            if expected_series_source and expected_series_source not in source_types:
+                blockers.append(f"{method}_series_source_mismatch")
+            if (
+                expected_series_authoritative is not None
+                and bool(series_identity.get("authoritative"))
+                != bool(expected_series_authoritative)
+            ):
+                blockers.append(f"{method}_series_authority_mismatch")
+    report.update(
+        {
+            "status": "available" if not blockers else "blocked",
+            "implementation_sha256": str(implementation_hash or ""),
+            "config_sha256": str(config_hash or ""),
+            "baseline_receipt": dict(baseline_receipt),
+            "blockers": sorted(set(blockers)),
+        }
+    )
+    return report
+
+
+def _run_current_rating_baselines(
+    maps: pd.DataFrame,
+    players: pd.DataFrame,
+    validation: pd.DataFrame,
+    *,
+    train_game_ids: Sequence[str],
+    validation_game_ids: Sequence[str],
+    strict_cutoff: str,
+    source_receipt: Mapping[str, Any],
+) -> tuple[pd.Series, pd.Series, dict[str, Any]]:
+    """Run fold-local current rating baselines without production artifacts."""
+
+    from lol_kills.ratings.hierarchical_bt import (
+        HIERARCHICAL_IMPLEMENTATION_SHA256,
+        HierarchicalBTConfig,
+        fit_hierarchical_bt_research_prediction,
+    )
+    from lol_kills.ratings.player_elo import (
+        PlayerEloConfig,
+        _sequential_baseline_implementation_digest,
+        build_sequential_player_elo_baseline,
+    )
+
+    requested = set(str(value) for value in (*train_game_ids, *validation_game_ids))
+    raw_map_ids = _frame_game_ids(maps, "maps").astype(str)
+    fold_maps = maps.loc[raw_map_ids.isin(requested)].copy().reset_index(drop=True)
+    fold_map_ids = _frame_game_ids(fold_maps, "maps").astype(str)
+    fold_players = players.copy().reset_index(drop=True)
+    derived_map_frame = _map_model_frame(fold_maps)
+    fold_maps["series_id"] = derived_map_frame["series_id"].astype(str).to_numpy()
+    fold_maps["series_id_source"] = str(
+        derived_map_frame.attrs.get("series_cluster_source", "")
+    )
+    series_cluster = {
+        "source": derived_map_frame.attrs.get("series_cluster_source"),
+        "audit": derived_map_frame.attrs.get("series_cluster_audit"),
+        "authoritative": str(
+            derived_map_frame.attrs.get("series_cluster_source", "")
+        ).startswith("authoritative:"),
+    }
+    validation_ids = validation["game_id"].astype(str)
+    reports: dict[str, Any] = {}
+    errors: dict[str, str] = {}
+    sequential_output: pd.DataFrame | None = None
+    sequential_receipt: Mapping[str, Any] | None = None
+    try:
+        sequential_output, sequential_receipt = build_sequential_player_elo_baseline(
+            fold_maps,
+            fold_players,
+            train_game_ids=train_game_ids,
+            validation_game_ids=validation_game_ids,
+            strict_cutoff=strict_cutoff,
+            source_receipt=source_receipt,
+        )
+    except Exception as error:
+        errors["sequential_player_elo"] = f"{type(error).__name__}: {error}"
+    seq_binding = _baseline_source_binding(
+        "sequential_player_elo",
+        sequential_receipt,
+        source_receipt,
+        train_game_ids=train_game_ids,
+        validation_game_ids=validation_game_ids,
+        strict_cutoff=strict_cutoff,
+    )
+    if sequential_receipt is None:
+        seq_binding["implementation_sha256"] = _sequential_baseline_implementation_digest()
+        seq_binding["config_sha256"] = hashlib.sha256(
+            _canonical_json_bytes(dict(PlayerEloConfig().__dict__))
+        ).hexdigest()
+    seq_probability, seq_alignment = _baseline_output_alignment(
+        validation,
+        sequential_output,
+        game_id_column="game_uid",
+        probability_column="p_player_elo",
+        method="sequential_player_elo",
+    )
+    if seq_binding["status"] != "available":
+        seq_probability.loc[:] = np.nan
+        seq_alignment["blockers"] = sorted(
+            set(seq_alignment["blockers"]) | set(seq_binding["blockers"])
+        )
+        seq_alignment["status"] = "blocked"
+    if "sequential_player_elo" in errors:
+        seq_alignment["error"] = errors["sequential_player_elo"]
+    reports["sequential_player_elo"] = {
+        **seq_alignment,
+        "source_binding": seq_binding,
+    }
+
+    hierarchical_output: pd.DataFrame | None = None
+    hierarchical_receipt: Mapping[str, Any] | None = None
+    hierarchical_cutoff = pd.Timestamp(strict_cutoff) - pd.Timedelta(nanoseconds=1)
+    try:
+        import inspect
+
+        hierarchical_kwargs: dict[str, Any] = {}
+        if "series_id_column" in inspect.signature(
+            fit_hierarchical_bt_research_prediction
+        ).parameters:
+            hierarchical_kwargs["series_id_column"] = "series_id"
+        hierarchical_receipt = fit_hierarchical_bt_research_prediction(
+            fold_maps[fold_map_ids.isin(set(train_game_ids))].copy(),
+            fold_maps[fold_map_ids.isin(set(validation_game_ids))].copy(),
+            cutoff=hierarchical_cutoff,
+            source_receipt=source_receipt,
+            source_identity_sha256=str(source_receipt["source_identity_sha256"]),
+            train_source_identity_sha256=identity_sha256(train_game_ids),
+            validation_source_identity_sha256=identity_sha256(validation_game_ids),
+            **hierarchical_kwargs,
+        )
+        hierarchical_output = pd.DataFrame(hierarchical_receipt.get("predictions", []))
+    except Exception as error:
+        errors["hierarchical_bt"] = f"{type(error).__name__}: {error}"
+    hierarchical_binding = _baseline_source_binding(
+        "hierarchical_bt",
+        hierarchical_receipt,
+        source_receipt,
+        train_game_ids=train_game_ids,
+        validation_game_ids=validation_game_ids,
+        strict_cutoff=hierarchical_cutoff.isoformat(),
+        expected_series_source=str(series_cluster.get("source") or ""),
+        expected_series_authoritative=bool(series_cluster.get("authoritative")),
+    )
+    if hierarchical_receipt is None:
+        hierarchical_binding["implementation_sha256"] = HIERARCHICAL_IMPLEMENTATION_SHA256
+        hierarchical_binding["config_sha256"] = hashlib.sha256(
+            _canonical_json_bytes(dict(HierarchicalBTConfig().__dict__))
+        ).hexdigest()
+    excluded_hierarchical: Iterable[str] = ()
+    if isinstance(hierarchical_receipt, Mapping):
+        missing = hierarchical_receipt.get("missing")
+        if isinstance(missing, Mapping):
+            excluded_hierarchical = tuple(
+                str(value) for value in missing.get("unseen_model_game_ids", [])
+            )
+        excluded_hierarchical = tuple(
+            {*excluded_hierarchical, *map(str, hierarchical_receipt.get("missing_ids", []))}
+        )
+    hierarchical_probability, hierarchical_alignment = _baseline_output_alignment(
+        validation,
+        hierarchical_output,
+        game_id_column="game_id",
+        probability_column="predicted_blue_win",
+        method="hierarchical_bt",
+        excluded_game_ids=excluded_hierarchical,
+    )
+    if hierarchical_binding["status"] != "available":
+        hierarchical_probability.loc[:] = np.nan
+        hierarchical_alignment["blockers"] = sorted(
+            set(hierarchical_alignment["blockers"])
+            | set(hierarchical_binding["blockers"])
+        )
+        hierarchical_alignment["status"] = "blocked"
+    if "hierarchical_bt" in errors:
+        hierarchical_alignment["error"] = errors["hierarchical_bt"]
+        if "grid_series_id" in errors["hierarchical_bt"]:
+            hierarchical_alignment["blockers"] = sorted(
+                set(hierarchical_alignment["blockers"])
+                | {"hierarchical_bt_authoritative_series_id_missing"}
+            )
+    reports["hierarchical_bt"] = {
+        **hierarchical_alignment,
+        "source_binding": hierarchical_binding,
+        "series_cluster": series_cluster,
+    }
+    reports["errors"] = errors
+    return seq_probability, hierarchical_probability, reports
+
+
 def evaluate_future_value(
     maps: pd.DataFrame,
     players: pd.DataFrame,
@@ -1784,6 +2194,26 @@ def evaluate_future_value(
     pooled_predictions: list[pd.Series] = []
     pooled_baselines: list[pd.Series] = []
     pooled_slice_blockers: list[str] = []
+    pooled_current_targets: list[pd.Series] = []
+    pooled_current_predictions: dict[str, list[pd.Series]] = {
+        "candidate": [],
+        "intercept_baseline": [],
+        "sequential_player_elo": [],
+        "hierarchical_bt": [],
+    }
+    pooled_candidate_paired_targets: dict[str, list[pd.Series]] = {
+        "candidate": [],
+        "intercept_baseline": [],
+        "sequential_player_elo": [],
+        "hierarchical_bt": [],
+    }
+    pooled_candidate_paired_predictions: dict[str, list[pd.Series]] = {
+        "candidate": [],
+        "intercept_baseline": [],
+        "sequential_player_elo": [],
+        "hierarchical_bt": [],
+    }
+    current_fold_reports: list[dict[str, Any]] = []
     for fold in folds:
         model, design = fit_future_value_model(
             map_frame,
@@ -1809,6 +2239,134 @@ def evaluate_future_value(
             and paired_target.index.equals(paired_baseline.index)
         ):
             raise FutureValueSourceError("candidate and baseline rows are not paired")
+        sequential_probability, hierarchical_probability, current_reports = (
+            _run_current_rating_baselines(
+                maps,
+                players,
+                validation,
+                train_game_ids=tuple(str(value) for value in fold["train_game_ids"]),
+                validation_game_ids=tuple(
+                    str(value) for value in fold["validation_game_ids"]
+                ),
+                strict_cutoff=str(fold["validation_start"]),
+                source_receipt=source_receipt,
+            )
+        )
+        current_mask = (
+            paired_mask
+            & sequential_probability.notna()
+            & hierarchical_probability.notna()
+        )
+        current_ids = tuple(
+            sorted(validation.loc[current_mask, "game_id"].astype(str))
+        )
+        paired_ids_set = set(validation.loc[paired_mask, "game_id"].astype(str))
+        common_ids_set = set(current_ids)
+        current_blockers: list[str] = []
+        for method_name in ("sequential_player_elo", "hierarchical_bt"):
+            method_report = current_reports[method_name]
+            if method_report.get("status") != "available":
+                current_blockers.extend(str(value) for value in method_report["blockers"])
+            binding = method_report.get("source_binding", {})
+            if binding.get("status") != "available":
+                current_blockers.extend(str(value) for value in binding.get("blockers", []))
+        if common_ids_set != paired_ids_set:
+            current_blockers.append("current_rating_row_id_parity_incomplete")
+        common_target = target.loc[current_mask]
+        common_predictions = {
+            "candidate": prediction.loc[current_mask],
+            "intercept_baseline": baseline_probability.loc[current_mask],
+            "sequential_player_elo": sequential_probability.loc[current_mask],
+            "hierarchical_bt": hierarchical_probability.loc[current_mask],
+        }
+        current_methods = {
+            method_name: {
+                "metrics": _classification_metrics(common_target, values),
+                "calibration": _calibration_metrics(common_target, values),
+                "rows": int(len(values)),
+                "game_ids": list(current_ids),
+            }
+            for method_name, values in common_predictions.items()
+        }
+        candidate_paired_methods = {
+            "candidate": prediction,
+            "intercept_baseline": baseline_probability,
+            "sequential_player_elo": sequential_probability,
+            "hierarchical_bt": hierarchical_probability,
+        }
+        candidate_paired_method_reports: dict[str, Any] = {}
+        for method_name, values in candidate_paired_methods.items():
+            method_mask = paired_mask & values.notna()
+            method_target = target.loc[method_mask]
+            method_values = values.loc[method_mask]
+            candidate_paired_method_reports[method_name] = {
+                "rows": int(len(method_values)),
+                "game_ids": sorted(
+                    set(validation.loc[method_mask, "game_id"].astype(str))
+                ),
+                "metrics": _classification_metrics(method_target, method_values),
+                "calibration": _calibration_metrics(method_target, method_values),
+            }
+            if len(method_values):
+                pooled_candidate_paired_targets[method_name].append(method_target)
+                pooled_candidate_paired_predictions[method_name].append(method_values)
+        finite_ids = {
+            "candidate": sorted(
+                set(validation.loc[paired_mask, "game_id"].astype(str))
+            ),
+            "intercept_baseline": sorted(
+                set(validation.loc[paired_mask, "game_id"].astype(str))
+            ),
+            "sequential_player_elo": sorted(
+                set(validation.loc[sequential_probability.notna(), "game_id"].astype(str))
+            ),
+            "hierarchical_bt": sorted(
+                set(validation.loc[hierarchical_probability.notna(), "game_id"].astype(str))
+            ),
+        }
+        current_complete = (
+            not current_blockers
+            and len(current_ids) == len(paired_target)
+            and all(
+                current_reports[method_name].get("status") == "available"
+                and current_reports[method_name]
+                .get("source_binding", {})
+                .get("status")
+                == "available"
+                for method_name in ("sequential_player_elo", "hierarchical_bt")
+            )
+        )
+        current_comparison = {
+            "status": "available" if current_complete else "blocked",
+            "strict_cutoff": str(fold["validation_start"]),
+            "requested_paired_rows": int(len(paired_target)),
+            "common_finite_rows": int(len(current_ids)),
+            "common_finite_game_ids": list(current_ids),
+            "excluded_paired_game_ids": sorted(paired_ids_set - common_ids_set),
+            "method_finite_game_ids": finite_ids,
+            "row_id_parity": {
+                "common_ids_equal_for_all_methods": bool(
+                    all(values == list(current_ids) for values in finite_ids.values())
+                ),
+                "scored_game_ids": list(current_ids),
+            },
+            "methods": current_methods,
+            "candidate_paired_methods": candidate_paired_method_reports,
+            "baselines": {
+                method_name: current_reports[method_name]
+                for method_name in ("sequential_player_elo", "hierarchical_bt")
+            },
+            "errors": dict(current_reports.get("errors", {})),
+            "series_cluster": current_reports["hierarchical_bt"].get(
+                "series_cluster"
+            ),
+            "blockers": sorted(set(current_blockers)),
+        }
+        current_fold_reports.append(current_comparison)
+        if len(current_ids):
+            pooled_current_targets.append(common_target)
+            for method_name, values in common_predictions.items():
+                pooled_current_predictions[method_name].append(values)
         train_design = design[design["game_id"].isin(fold["train_game_ids"])].copy()
         calibration = _calibration_metrics(paired_target, paired_prediction)
         baseline_calibration = _calibration_metrics(paired_target, paired_baseline)
@@ -1903,13 +2461,16 @@ def evaluate_future_value(
                 "sparse_support": support_slice,
                 "missingness": missingness,
                 "side_swap": side_swap,
+                "current_rating_comparison": current_comparison,
             }
         )
     cluster_source = map_frame.attrs.get("series_cluster_source")
+    cluster_audit = map_frame.attrs.get("series_cluster_audit")
     blockers = [
-        "current_player_team_rating_comparison_missing",
         "support_uncertainty_proxy_not_calibrated",
     ]
+    if any(report["status"] != "available" for report in current_fold_reports):
+        blockers.append("current_player_team_rating_comparison_missing")
     if int(n_folds) < 3 or len(fold_reports) < int(n_folds):
         blockers.append("complete_chronological_evaluation_missing")
     if int(n_folds) < 3:
@@ -1937,6 +2498,68 @@ def evaluate_future_value(
     blockers = sorted(set(blockers))
     if not str(cluster_source).startswith("authoritative:"):
         blockers.append("authoritative_series_id_missing_proxy_cluster_used")
+    pooled_candidate_paired_methods: dict[str, Any] = {}
+    for method_name, targets in pooled_candidate_paired_targets.items():
+        predictions = pooled_candidate_paired_predictions[method_name]
+        if not targets:
+            continue
+        method_target = pd.concat(targets, ignore_index=True)
+        method_prediction = pd.concat(predictions, ignore_index=True)
+        pooled_candidate_paired_methods[method_name] = {
+            "rows": int(len(method_target)),
+            "metrics": _classification_metrics(method_target, method_prediction),
+            "calibration": _calibration_metrics(method_target, method_prediction),
+        }
+    pooled_current_comparison: dict[str, Any]
+    if pooled_current_targets:
+        pooled_current_target = pd.concat(pooled_current_targets, ignore_index=True)
+        pooled_current_methods = {
+            method_name: {
+                "metrics": _classification_metrics(
+                    pooled_current_target,
+                    pd.concat(values, ignore_index=True),
+                ),
+                "calibration": _calibration_metrics(
+                    pooled_current_target,
+                    pd.concat(values, ignore_index=True),
+                ),
+                "rows": int(len(pooled_current_target)),
+            }
+            for method_name, values in pooled_current_predictions.items()
+            if values
+        }
+        pooled_current_comparison = {
+            "status": (
+                "available"
+                if current_fold_reports
+                and all(report["status"] == "available" for report in current_fold_reports)
+                else "blocked"
+            ),
+            "requested_folds": int(n_folds),
+            "valid_comparison_folds": int(
+                sum(report["status"] == "available" for report in current_fold_reports)
+            ),
+            "rows": int(len(pooled_current_target)),
+            "methods": pooled_current_methods,
+            "candidate_paired_methods": pooled_candidate_paired_methods,
+            "blockers": sorted(
+                {
+                    blocker
+                    for report in current_fold_reports
+                    for blocker in report["blockers"]
+                }
+            ),
+        }
+    else:
+        pooled_current_comparison = {
+            "status": "blocked",
+            "requested_folds": int(n_folds),
+            "valid_comparison_folds": 0,
+            "rows": 0,
+            "methods": {},
+            "candidate_paired_methods": pooled_candidate_paired_methods,
+            "blockers": ["current_rating_no_common_finite_rows"],
+        }
     return {
         "schema_version": MODEL_FIT_SCHEMA_VERSION,
         "status": "development_evaluated",
@@ -1949,6 +2572,7 @@ def evaluate_future_value(
             "model_eligible_identity_sha256": identity_sha256(verified_eligible_ids),
             "model_eligible_game_ids": list(verified_eligible_ids),
             "series_cluster_source": cluster_source,
+            "series_cluster_audit": cluster_audit,
             "half_life_days": float(half_life_days),
             "source_as_of": _utc_text(source_receipt["source_as_of"]),
             "source_files": source_receipt["source_files"],
@@ -1966,6 +2590,7 @@ def evaluate_future_value(
             ),
             "pooled_calibration": pooled_calibration_report,
             "pooled_baseline_calibration": pooled_baseline_calibration_report,
+            "pooled_current_rating_comparison": pooled_current_comparison,
         },
         "folds": fold_reports,
         "blockers": blockers,
@@ -2037,7 +2662,7 @@ def future_value_model_contract() -> dict[str, Any]:
         "evaluation": [
             "chronological whole-series folds",
             "intercept baseline and proper scores",
-            "proxy series clusters with an authoritative-series blocker",
+            "conservative series-superset clusters with collision audit",
             "validation calibration bins and pooled proper scores",
             "regional and patch transfer slices with training-support checks",
             "roster-change and tournament-boundary slices",
