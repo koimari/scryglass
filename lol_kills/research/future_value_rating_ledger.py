@@ -776,6 +776,14 @@ def build_fold_current_rating_feature_ledger(
     fit_window_end: Any,
     destination: Path | None = None,
     source_frame_sha256: Mapping[str, str] | None = None,
+    series_by_game: Mapping[str, str] | None = None,
+    series_partition_source: str = "conservative_series_superset",
+    series_partition_key_fields: Sequence[str] = (
+        "league",
+        "tournament",
+        "unordered_team_pair",
+    ),
+    series_partition_receipt_file_sha256: str | None = None,
     dual_config: DualEloConfig | None = None,
     player_config: PlayerEloConfig | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -835,10 +843,36 @@ def build_fold_current_rating_feature_ledger(
     map_frame, player_frame, team_frame = _validate_source_frames(
         maps, players, teams, eligible_ids, output_ids
     )
-    full_series_by_id = pd.Series(
-        _series_ids(maps, raw_map_ids_series).astype(str).to_numpy(),
-        index=raw_map_ids_series,
-    )
+    if series_by_game is None:
+        full_series_by_id = pd.Series(
+            _series_ids(maps, raw_map_ids_series).astype(str).to_numpy(),
+            index=raw_map_ids_series,
+        )
+        if series_partition_source != "conservative_series_superset" or tuple(
+            series_partition_key_fields
+        ) != ("league", "tournament", "unordered_team_pair"):
+            raise CurrentRatingLedgerError("conservative series metadata changed")
+        if series_partition_receipt_file_sha256 is not None:
+            raise CurrentRatingLedgerError("conservative series has an external receipt")
+    else:
+        if series_partition_source != "mixed:leaguepedia_crosswalk+conservative_series_superset":
+            raise CurrentRatingLedgerError("verified mixed series source is invalid")
+        if not isinstance(series_partition_receipt_file_sha256, str) or re.fullmatch(
+            r"[0-9a-f]{64}", series_partition_receipt_file_sha256, re.I
+        ) is None:
+            raise CurrentRatingLedgerError("verified mixed series receipt hash is invalid")
+        normalized_series = {
+            str(game_id): str(series_id).strip()
+            for game_id, series_id in series_by_game.items()
+        }
+        if not raw_map_ids.issubset(normalized_series) or any(
+            not normalized_series[game_id] for game_id in raw_map_ids
+        ):
+            raise CurrentRatingLedgerError("verified mixed series mapping is incomplete")
+        full_series_by_id = pd.Series(
+            [normalized_series[str(game_id)] for game_id in raw_map_ids_series],
+            index=raw_map_ids_series,
+        )
     map_frame["series_id"] = full_series_by_id.loc[
         map_frame["__game_id"].astype(str)
     ].to_numpy()
@@ -912,12 +946,9 @@ def build_fold_current_rating_feature_ledger(
         "validation_series_count": len(validation_series_ids),
         "validation_series_identity_sha256": identity_sha256(validation_series_ids),
         "series_disjoint": True,
-        "series_partition_source": "conservative_series_superset",
-        "series_partition_key_fields": [
-            "league",
-            "tournament",
-            "unordered_team_pair",
-        ],
+        "series_partition_source": series_partition_source,
+        "series_partition_key_fields": list(series_partition_key_fields),
+        "series_partition_receipt_file_sha256": series_partition_receipt_file_sha256,
         "state_key_policy": dict(_RECEIPT_STATE_KEY_POLICY),
         "fit_window_end": _utc_text(cutoff),
         "strict_prior_timing": "train_outcomes_only_strictly_before_cutoff",
@@ -999,6 +1030,7 @@ def validate_fold_current_rating_feature_ledger(
         "validation_series_ids", "validation_series_count",
         "validation_series_identity_sha256", "series_disjoint", "state_key_policy",
         "series_partition_source", "series_partition_key_fields",
+        "series_partition_receipt_file_sha256",
         "strict_prior_timing", "same_timestamp_policy", "masked_nontraining_map_columns",
         "masked_nontraining_player_columns", "source_frame_sha256", "feature_names",
         "ledger_rows_sha256", "implementation_locator", "implementation_sha256", "artifact",
@@ -1047,11 +1079,25 @@ def validate_fold_current_rating_feature_ledger(
         raise CurrentRatingLedgerError("current rating feature names changed")
     if receipt.get("state_key_policy") != _RECEIPT_STATE_KEY_POLICY:
         raise CurrentRatingLedgerError("current rating state key policy changed")
-    if (
-        receipt.get("series_partition_source") != "conservative_series_superset"
-        or tuple(receipt.get("series_partition_key_fields", ()))
-        != ("league", "tournament", "unordered_team_pair")
-    ):
+    series_source = receipt.get("series_partition_source")
+    series_receipt_file_sha256 = receipt.get(
+        "series_partition_receipt_file_sha256"
+    )
+    if series_source == "conservative_series_superset":
+        valid_series_binding = (
+            tuple(receipt.get("series_partition_key_fields", ()))
+            == ("league", "tournament", "unordered_team_pair")
+            and series_receipt_file_sha256 is None
+        )
+    else:
+        valid_series_binding = (
+            series_source
+            == "mixed:leaguepedia_crosswalk+conservative_series_superset"
+            and isinstance(series_receipt_file_sha256, str)
+            and re.fullmatch(r"[0-9a-f]{64}", series_receipt_file_sha256, re.I)
+            is not None
+        )
+    if not valid_series_binding:
         raise CurrentRatingLedgerError("current rating series partition changed")
     authority = receipt.get("authority")
     if not isinstance(authority, Mapping) or authority.get("research_only") is not True or any(authority.get(key) is not False for key in ("public_player_rating", "public_team_rating", "public_probability", "promotion", "merge", "deployment", "betting")):

@@ -11,6 +11,8 @@ import time
 import pandas as pd
 
 from lol_kills.research.future_value_rating import (
+    _map_model_frame,
+    bind_verified_leaguepedia_series_crosswalk,
     build_rating_feature_producer_manifest,
     write_rating_feature_producer_receipt,
 )
@@ -52,6 +54,9 @@ def main() -> int:
     parser.add_argument("--source-receipt", required=True, type=Path)
     parser.add_argument("--fold-spec", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--crosswalk", type=Path)
+    parser.add_argument("--crosswalk-receipt", type=Path)
+    parser.add_argument("--crosswalk-receipt-file-sha256")
     args = parser.parse_args()
     source_root = args.source_root.resolve()
     source_receipt_path = args.source_receipt.resolve()
@@ -63,6 +68,46 @@ def main() -> int:
     maps = pd.read_parquet(source_root / "maps.parquet")
     players = pd.read_parquet(source_root / "oe_player_games.parquet")
     teams = pd.read_parquet(source_root / "oe_team_games.parquet")
+    crosswalk_values = (
+        args.crosswalk,
+        args.crosswalk_receipt,
+        args.crosswalk_receipt_file_sha256,
+    )
+    if any(value is not None for value in crosswalk_values) and not all(
+        value is not None for value in crosswalk_values
+    ):
+        raise RuntimeError("crosswalk inputs must be supplied together")
+    series_by_game = None
+    series_source = "conservative_series_superset"
+    series_receipt_file_sha256 = None
+    if args.crosswalk is not None and args.crosswalk_receipt is not None:
+        bound_maps = bind_verified_leaguepedia_series_crosswalk(
+            maps,
+            crosswalk_path=args.crosswalk.resolve(),
+            receipt_path=args.crosswalk_receipt.resolve(),
+            source_receipt=source_receipt,
+            expected_receipt_file_sha256=str(
+                args.crosswalk_receipt_file_sha256
+            ),
+        )
+        model_frame = _map_model_frame(
+            bound_maps,
+            verified_source_receipt=source_receipt,
+            verified_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+            verified_crosswalk_receipt_file_sha256=str(
+                args.crosswalk_receipt_file_sha256
+            ),
+        )
+        series_by_game = dict(
+            zip(
+                model_frame["game_id"].astype(str),
+                model_frame["series_id"].astype(str),
+            )
+        )
+        series_source = str(model_frame.attrs["series_cluster_source"])
+        series_receipt_file_sha256 = str(
+            args.crosswalk_receipt_file_sha256
+        )
     train_ids = tuple(str(value) for value in fold["train_game_ids"])
     validation_ids = tuple(str(value) for value in fold["validation_game_ids"])
     started = time.perf_counter()
@@ -75,6 +120,9 @@ def main() -> int:
         validation_game_ids=validation_ids,
         fit_window_end=fold["fit_window_end"],
         destination=output_dir,
+        series_by_game=series_by_game,
+        series_partition_source=series_source,
+        series_partition_receipt_file_sha256=series_receipt_file_sha256,
     )
     elapsed = time.perf_counter() - started
     native_path = output_dir / "current-rating-feature-ledger.parquet"
