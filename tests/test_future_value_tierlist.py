@@ -4,10 +4,12 @@ import copy
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 
 import pandas as pd
 import pytest
 
+import benchmarks.future_value_tierlist_fourway as fourway_benchmark
 from lol_kills.research.future_value_tierlist import (
     AUTHORITY,
     TRUST_SCHEMA_VERSION,
@@ -19,6 +21,7 @@ from lol_kills.research.future_value_tierlist import (
     load_trust_manifest,
     validate_common_prediction_universe,
 )
+from lol_kills.research.future_value_tierlist import sha256_path
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 
@@ -34,6 +37,7 @@ SOURCE = {
     "model_eligible_game_count": 2,
     "model_eligible_identity_sha256": "1" * 64,
 }
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _write_json(path: Path, value: object) -> str:
@@ -70,6 +74,62 @@ def test_trust_manifest_requires_external_file_hash(tmp_path: Path) -> None:
     _write_json(path, changed)
     with pytest.raises(FutureValueTierListError, match="file hash changed"):
         load_trust_manifest(path, expected_raw_sha256=raw_hash)
+
+
+def test_implementation_binding_rejects_a_dirty_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_run = subprocess.run
+
+    def fake_run(command, *args, **kwargs):
+        if list(command)[0:4] == [
+            "git",
+            "-C",
+            str(REPO_ROOT),
+            "status",
+        ]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=" M lol_kills/v2/tierlists/pooled_candidate.py\n",
+                stderr="",
+            )
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(fourway_benchmark.subprocess, "run", fake_run)
+    with pytest.raises(FutureValueTierListError, match="working tree must be clean"):
+        fourway_benchmark._implementation_binding(REPO_ROOT)
+
+
+def test_implementation_binding_records_the_committed_source_and_runtime() -> None:
+    binding = fourway_benchmark._implementation_binding(REPO_ROOT)
+    commit = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "rev-parse", "--verify", "HEAD^{commit}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert binding["git_commit"] == commit
+    files = binding["files"]
+    assert isinstance(files, dict)
+    assert files["lol_kills/v2/tierlists/champion_elo.py"] == sha256_path(
+        REPO_ROOT / "lol_kills/v2/tierlists/champion_elo.py"
+    )
+    assert files["lol_kills/v2/tierlists/atom_matchup_features.py"] == sha256_path(
+        REPO_ROOT / "lol_kills/v2/tierlists/atom_matchup_features.py"
+    )
+    assert files["lol_kills/v2/tierlists/patch_mapping.py"] == sha256_path(
+        REPO_ROOT / "lol_kills/v2/tierlists/patch_mapping.py"
+    )
+    assert set(files).issuperset(
+        {
+            "benchmarks/future_value_tierlist_fourway.py",
+            "lol_kills/research/future_value_tierlist.py",
+            "lol_kills/research/future_value_rating.py",
+        }
+    )
+    runtime = binding["runtime"]
+    assert runtime["python_version"]
+    assert runtime["python_implementation"]
+    assert set(runtime["packages"]) == {"numpy", "pandas", "scipy", "pyarrow"}
 
 
 def _model(variant: str) -> dict[str, object]:
@@ -110,7 +170,11 @@ def _model(variant: str) -> dict[str, object]:
                     "fit_window_end": "2026-01-01T00:00:00Z",
                     "strict_prior_timing": "fit_rows_strictly_before_cutoff",
                     "same_timestamp_policy": "batch_exclude_same_timestamp",
-                    "series_safety": {"policy": "whole_series_disjoint"},
+                    "series_safety": {
+                        "policy": "whole_series_disjoint",
+                        "train_series_identity_sha256": "5" * 64,
+                        "validation_series_identity_sha256": "6" * 64,
+                    },
                 },
             }
         )
@@ -159,6 +223,28 @@ def test_prediction_offsets_are_hash_bound_and_finite(tmp_path: Path) -> None:
     assert offsets["g1"] == pytest.approx(1.0986122886681098)
     assert targets == {"g1": 1.0, "g2": 0.0, "g3": 1.0}
     assert binding["blockers"] == ["research_blocker"]
+    bad_maps = pd.DataFrame(
+        {
+            "game_uid": ["g1", "g2", "g3"],
+            "date": [
+                "2026-01-01T23:59:59Z",
+                "2026-01-02T00:00:00Z",
+                "2026-01-02T00:00:00Z",
+            ],
+            "y_blue_win": [1, 0, 1],
+        }
+    )
+    bad_maps_path = tmp_path / "bad-maps.parquet"
+    bad_maps.to_parquet(bad_maps_path)
+    with pytest.raises(FutureValueTierListError, match="validation window"):
+        load_prediction_offsets(
+            path,
+            variant="future_player_form",
+            expected_raw_sha256=raw_hash,
+            source=SOURCE,
+            maps_path=bad_maps_path,
+            expected_maps_sha256=hashlib.sha256(bad_maps_path.read_bytes()).hexdigest(),
+        )
     changed = _model("future_player_form")
     changed["variants"]["future_player_form"]["prediction_ledger"]["rows"][0]["candidate"] = 1.0  # type: ignore[index]
     changed_hash = _write_json(path, changed)
@@ -200,7 +286,7 @@ def test_common_prediction_universe_checks_frozen_targets(tmp_path: Path) -> Non
         )
 
 
-def _candidate(swapped: bool = False) -> dict[str, object]:
+def _candidate(swapped: bool = False, variant: str = "current_only") -> dict[str, object]:
     first_rank, second_rank = ((2, 1) if swapped else (1, 2))
     candidate: dict[str, object] = {
         "artifact_sha256": "",
@@ -265,7 +351,7 @@ def _candidate(swapped: bool = False) -> dict[str, object]:
         "schema_version": "scryglass:tierlist-pre-map-offset-override:v1",
         "status": "research_only",
         "authority": False,
-        "producer": "test",
+        "producer": f"future_value_rating:{variant}",
         "timing": "strict_prior_pre_map",
         "source_receipt_sha256": "8" * 64,
         "source_identity_sha256": "7" * 64,
@@ -281,8 +367,18 @@ def _candidate(swapped: bool = False) -> dict[str, object]:
 
 
 def test_fourway_diff_uses_exact_stable_identity_and_rank_direction() -> None:
-    candidates = {variant: _candidate(variant == "future_player_form") for variant in VARIANTS}
-    bindings = {variant: {"blockers": []} for variant in VARIANTS}
+    candidates = {
+        variant: _candidate(variant == "future_player_form", variant)
+        for variant in VARIANTS
+    }
+    bindings = {
+        variant: {
+            "blockers": [],
+            "offsets_sha256": "5" * 64,
+            "producer": f"future_value_rating:{variant}",
+        }
+        for variant in VARIANTS
+    }
     report = build_fourway_diff(
         candidates,
         source={
@@ -306,3 +402,50 @@ def test_fourway_diff_uses_exact_stable_identity_and_rank_direction() -> None:
     )
     assert ahri["delta"]["rank_delta"] == -1
     assert report["authority"]["public_tierlist"] is False
+
+
+def test_fourway_diff_rejects_resealed_offset_digest() -> None:
+    candidates = {
+        variant: _candidate(variant == "future_player_form", variant)
+        for variant in VARIANTS
+    }
+    broken = copy.deepcopy(candidates["future_player_form"])
+    override = broken["pre_map_offset_override"]  # type: ignore[index]
+    override["offsets_sha256"] = "f" * 64
+    override["provenance"]["offsets_sha256"] = "f" * 64
+    override["provenance"]["receipt_sha256"] = hashlib.sha256(
+        canonical_json_bytes(
+            {
+                key: value
+                for key, value in override["provenance"].items()
+                if key != "receipt_sha256"
+            }
+        )
+    ).hexdigest()
+    broken["artifact_sha256"] = hashlib.sha256(
+        canonical_json_bytes(
+            {key: value for key, value in broken.items() if key != "artifact_sha256"}
+        )
+    ).hexdigest()
+    candidates["future_player_form"] = broken
+    bindings = {
+        variant: {
+            "blockers": [],
+            "offsets_sha256": "5" * 64,
+            "producer": f"future_value_rating:{variant}",
+        }
+        for variant in VARIANTS
+    }
+    with pytest.raises(FutureValueTierListError, match="differ from the verified model"):
+        build_fourway_diff(
+            candidates,
+            source={
+                "source_as_of": SOURCE["source_as_of"],
+                "source_identity_sha256": "7" * 64,
+                "source_receipt_sha256": "8" * 64,
+            },
+            universe={"game_count": 2, "game_identity_sha256": "7" * 64},
+            model_bindings=bindings,
+            trust_manifest_raw_sha256="8" * 64,
+            baseline_candidate_raw_sha256="9" * 64,
+        )

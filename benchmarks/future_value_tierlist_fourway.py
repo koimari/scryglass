@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from importlib import metadata
 import json
 import os
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 from typing import Any, Mapping
@@ -49,11 +51,30 @@ def _write_json(path: Path, value: Mapping[str, Any]) -> None:
 
 
 def _implementation_binding(repo_root: Path) -> dict[str, Any]:
-    """Bind the code that produced a research run receipt."""
+    """Bind the clean source tree and runtime that produced a run receipt."""
+
+    try:
+        status = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise FutureValueTierListError("implementation git status is unavailable") from error
+    if status.stdout.strip():
+        raise FutureValueTierListError("implementation working tree must be clean")
 
     try:
         commit = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            ["git", "-C", str(repo_root), "rev-parse", "--verify", "HEAD^{commit}"],
             check=True,
             capture_output=True,
             text=True,
@@ -62,19 +83,86 @@ def _implementation_binding(repo_root: Path) -> dict[str, Any]:
         raise FutureValueTierListError("implementation git commit is unavailable") from error
     if not commit:
         raise FutureValueTierListError("implementation git commit is empty")
-    locators = (
+    if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit.lower()):
+        raise FutureValueTierListError("implementation git commit is not a full hash")
+    try:
+        tracked_raw = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "ls-files",
+                "-z",
+                "--",
+                "lol_kills/v2/tierlists",
+                "benchmarks/future_value_tierlist_fourway.py",
+                "lol_kills/research/future_value_tierlist.py",
+                "lol_kills/research/future_value_rating.py",
+            ],
+            check=True,
+            capture_output=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise FutureValueTierListError("implementation source listing is unavailable") from error
+    if isinstance(tracked_raw, bytes):
+        tracked_text = tracked_raw.decode("utf-8")
+    else:
+        tracked_text = str(tracked_raw)
+    locators = tuple(
+        sorted(
+            {
+                locator
+                for locator in tracked_text.split("\0")
+                if locator.endswith(".py")
+                and (
+                    locator.startswith("lol_kills/v2/tierlists/")
+                    or locator
+                    in {
+                        "benchmarks/future_value_tierlist_fourway.py",
+                        "lol_kills/research/future_value_tierlist.py",
+                        "lol_kills/research/future_value_rating.py",
+                    }
+                )
+            }
+        )
+    )
+    required = {
         "benchmarks/future_value_tierlist_fourway.py",
         "lol_kills/research/future_value_tierlist.py",
-        "lol_kills/v2/tierlists/pooled_candidate.py",
+        "lol_kills/v2/tierlists/atom_matchup_features.py",
+        "lol_kills/v2/tierlists/champion_elo.py",
         "lol_kills/v2/tierlists/joint_pooled_model.py",
-    )
+        "lol_kills/v2/tierlists/patch_mapping.py",
+        "lol_kills/v2/tierlists/pooled_candidate.py",
+    }
+    if not required.issubset(locators):
+        missing = sorted(required.difference(locators))
+        raise FutureValueTierListError(f"implementation source files are missing: {missing}")
     files: dict[str, str] = {}
     for locator in locators:
         path = repo_root / locator
         if not path.is_file() or path.is_symlink():
             raise FutureValueTierListError(f"implementation file is missing: {locator}")
         files[locator] = sha256_path(path)
-    return {"git_commit": commit, "files": files}
+    package_versions: dict[str, str] = {}
+    for package in ("numpy", "pandas", "scipy", "pyarrow"):
+        try:
+            package_versions[package] = metadata.version(package)
+        except metadata.PackageNotFoundError as error:
+            raise FutureValueTierListError(
+                f"implementation package version is unavailable: {package}"
+            ) from error
+    return {
+        "git_commit": commit,
+        "files": files,
+        "runtime": {
+            "python_version": platform.python_version(),
+            "python_implementation": platform.python_implementation(),
+            "python_build": list(platform.python_build()),
+            "platform": platform.platform(),
+            "packages": package_versions,
+        },
+    }
 
 
 def _verify_source(
@@ -184,6 +272,7 @@ def run_fourway(
 ) -> dict[str, Any]:
     """Verify inputs, build four candidates, and write the exact diff report."""
 
+    implementation = _implementation_binding(repo_root)
     if expected_trust_manifest_sha256 != PINNED_TRUST_MANIFEST_RAW_SHA256:
         raise FutureValueTierListError("Tier shadow trust manifest is not the code-pinned freeze")
     trust = load_trust_manifest(
@@ -271,6 +360,8 @@ def run_fourway(
                 variant=variant,
                 universe=universe,
                 expected_source_receipt_sha256=str(receipt["receipt_sha256"]),
+                expected_offsets_sha256=str(bindings[variant]["offsets_sha256"]),
+                expected_producer=str(bindings[variant]["producer"]),
             )
             candidates[variant] = candidate
             _write_json(output_root / "candidates" / f"{variant}.json", candidate)
@@ -283,7 +374,6 @@ def run_fourway(
         baseline_candidate_raw_sha256=baseline_record["raw_sha256"],
     )
     _write_json(output_root / "fourway-tierlist-report.json", report)
-    implementation = _implementation_binding(repo_root)
     receipt_payload = {
         "schema_version": "scryglass:future-value-tierlist-fourway-run:v1",
         "status": "research_only",
