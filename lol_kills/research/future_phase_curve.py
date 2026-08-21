@@ -2331,7 +2331,12 @@ def _fit_one(matrix: np.ndarray, target: np.ndarray, alpha: float) -> dict[str, 
     # fitted curve antisymmetric under a blue/red relabeling.
     model = Ridge(alpha=float(alpha), fit_intercept=False, solver="lsqr")
     model.fit(matrix[valid], target[valid])
-    residuals = target[valid] - model.predict(matrix[valid])
+    predicted = _finite_linear_predict(
+        matrix[valid],
+        np.asarray(model.coef_, dtype=float),
+        float(model.intercept_),
+    )
+    residuals = target[valid] - predicted
     sigma = float(np.std(residuals, ddof=1)) if len(residuals) > 1 else 0.0
     return {
         "intercept": float(model.intercept_),
@@ -2341,6 +2346,29 @@ def _fit_one(matrix: np.ndarray, target: np.ndarray, alpha: float) -> dict[str, 
         "rmse": float(np.sqrt(np.mean(residuals * residuals))),
         "mae": float(np.mean(np.abs(residuals))),
     }
+
+
+def _finite_linear_predict(
+    matrix: np.ndarray,
+    coefficients: np.ndarray,
+    intercept: float = 0.0,
+) -> np.ndarray:
+    """Predict a finite phase linear model without warning-prone matmul."""
+
+    values = np.asarray(matrix, dtype=float)
+    weights = np.asarray(coefficients, dtype=float)
+    if values.ndim != 2 or weights.ndim != 1 or values.shape[1] != len(weights):
+        return np.full(values.shape[0] if values.ndim else 0, np.nan, dtype=float)
+    if not np.isfinite(values).all() or not np.isfinite(weights).all():
+        return np.full(len(values), np.nan, dtype=float)
+    try:
+        with np.errstate(divide="raise", invalid="raise", over="raise"):
+            prediction = np.einsum("ij,j->i", values, weights) + float(intercept)
+    except (FloatingPointError, TypeError, ValueError):
+        return np.full(len(values), np.nan, dtype=float)
+    if not np.isfinite(prediction).all():
+        return np.full(len(values), np.nan, dtype=float)
+    return prediction
 
 
 def _observed_comeback(frame: pd.DataFrame) -> dict[str, Any]:
@@ -2559,7 +2587,12 @@ def _predict_one(model: Mapping[str, Any] | None, vector: np.ndarray) -> tuple[f
     coefficients = np.asarray(model.get("coefficients") or [], dtype=float)
     if len(coefficients) != len(vector):
         return None, None
-    value = float(model.get("intercept") or 0.0) + float(coefficients @ vector)
+    prediction = _finite_linear_predict(
+        np.asarray(vector, dtype=float).reshape(1, -1),
+        coefficients,
+        float(model.get("intercept") or 0.0),
+    )
+    value = float(prediction[0]) if len(prediction) and np.isfinite(prediction[0]) else math.nan
     residual_sd = model.get("residual_sd")
     try:
         uncertainty = float(residual_sd) if residual_sd is not None else None
@@ -2767,7 +2800,11 @@ def _prediction_errors(
             target = _target(frame, kind, phase)
             if isinstance(model, Mapping):
                 coefficients = np.asarray(model.get("coefficients") or [], dtype=float)
-                prediction = float(model.get("intercept") or 0.0) + matrix @ coefficients
+                prediction = _finite_linear_predict(
+                    matrix,
+                    coefficients,
+                    float(model.get("intercept") or 0.0),
+                )
             else:
                 prediction = np.full(len(frame), np.nan)
             errors[kind][str(phase)] = target - prediction
@@ -2798,8 +2835,16 @@ def side_swap_invariance_report(
                 report[key] = {"rows": 0, "max_abs_sum": None, "passed": False}
                 continue
             coefficients = np.asarray(model.get("coefficients") or [], dtype=float)
-            original = float(model.get("intercept") or 0.0) + original_matrix @ coefficients
-            swapped_values = float(model.get("intercept") or 0.0) + swapped_matrix @ coefficients
+            original = _finite_linear_predict(
+                original_matrix,
+                coefficients,
+                float(model.get("intercept") or 0.0),
+            )
+            swapped_values = _finite_linear_predict(
+                swapped_matrix,
+                coefficients,
+                float(model.get("intercept") or 0.0),
+            )
             finite = np.isfinite(original) & np.isfinite(swapped_values) & complete
             max_abs_sum = (
                 float(np.max(np.abs(original[finite] + swapped_values[finite])))

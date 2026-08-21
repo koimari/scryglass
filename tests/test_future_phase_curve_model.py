@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,8 @@ from lol_kills.research.future_phase_curve import (
     _revalidate_verified_phase_series_reference,
     _phase_partition_map_frame,
     _design,
+    _finite_linear_predict,
+    _fit_one,
     bind_phase_source,
     chronological_folds,
     evaluate_phase_curve,
@@ -182,6 +185,34 @@ def test_design_replaces_nonfinite_feature_values_with_zero() -> None:
     assert np.isfinite(matrix).all()
     assert matrix[:, 0].tolist() == [0.0, 0.0, 0.0, 0.1]
     assert matrix[:, 1].tolist() == [1.0, 1.0, 1.0, 0.0]
+
+
+def test_phase_linear_prediction_is_finite_warning_free_and_parity_safe() -> None:
+    matrix = np.asarray(
+        [[1.25, -2.0, 0.5], [-3.0, 4.0, 1.5], [0.0, 2.5, -1.0]],
+        dtype=float,
+    )
+    coefficients = np.asarray([2.0, -0.75, 1.5], dtype=float)
+    expected = (matrix * coefficients).sum(axis=1) + 0.125
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        predicted = _finite_linear_predict(matrix, coefficients, 0.125)
+    assert not [item for item in caught if issubclass(item.category, RuntimeWarning)]
+    np.testing.assert_allclose(predicted, expected, rtol=0.0, atol=1e-12)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        fit = _fit_one(matrix, expected, alpha=10.0)
+    assert fit is not None
+    assert not [item for item in caught if issubclass(item.category, RuntimeWarning)]
+
+    invalid = matrix.copy()
+    invalid[0, 0] = np.inf
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        invalid_prediction = _finite_linear_predict(invalid, coefficients)
+    assert np.isnan(invalid_prediction).all()
+    assert not [item for item in caught if issubclass(item.category, RuntimeWarning)]
 
 
 def test_prepare_phase_frame_marks_short_game_targets_as_censored() -> None:
