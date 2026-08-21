@@ -11,6 +11,10 @@ from lol_kills.research.future_value_draft_score_adapter import (
     DraftScoreAdapterError,
     adapt_public_crossfit_draft_rows,
     adapt_public_descriptive_draft_records,
+    adapt_verified_public_descriptive_draft_records,
+    load_source_bound_atom_ledger,
+    verify_public_descriptive_authority,
+    write_source_bound_atom_ledger,
 )
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
@@ -155,6 +159,87 @@ def test_public_descriptive_adapter_rejects_symlinked_source_artifact(tmp_path: 
     _write_json(source_path, source)
     with pytest.raises(DraftScoreAdapterError, match="unsafe|symlink"):
         adapt_public_descriptive_draft_records(draft_path, manifest_path, source_path)
+
+
+def test_independent_descriptive_authority_binds_model_recipe_and_scorer() -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    authority_path = repository_root / "data/lol/v2/evaluation/composition-descriptive-authority.json"
+    result = verify_public_descriptive_authority(
+        authority_path,
+        repository_root=repository_root,
+    )
+    assert result.model_sha256 == "3a42542710e8a61f11f740ff85965d7f4541724575c3dc7fd063872b7a0c71fe"
+    assert result.recipe_sha256
+    assert result.scorer_sha256
+    assert result.authority_receipt_sha256
+
+
+def test_verified_adapter_writes_source_bound_atom_ledger(tmp_path: Path) -> None:
+    draft_path, manifest_path, source_path = _public_files(tmp_path, fit_through="2026-02-01T00:00:00Z")
+    model_path = tmp_path / "model.json"
+    recipe_path = tmp_path / "recipe.json"
+    scorer_path = tmp_path / "scorer.py"
+    model_raw = b"{\"model\":\"fixture\"}\n"
+    recipe_raw = b"{\"recipe\":\"fixture\"}\n"
+    scorer_raw = b"# fixture scorer\n"
+    model_path.write_bytes(model_raw)
+    recipe_path.write_bytes(recipe_raw)
+    scorer_path.write_bytes(scorer_raw)
+    draft = json.loads(draft_path.read_text())
+    draft["artifact_sha256"] = hashlib.sha256(model_raw).hexdigest()
+    draft_path.write_bytes(_write_json(draft_path, draft))
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files"][0]["bytes"] = draft_path.stat().st_size
+    manifest["files"][0]["sha256"] = hashlib.sha256(draft_path.read_bytes()).hexdigest()
+    _write_json(manifest_path, manifest)
+    authority = {
+        "schema_version": "scryglass:draft-authority:v1",
+        "status": "descriptive",
+        "estimand": "composition_only",
+        "model_version": "draft-recommendation-static-v2",
+        "artifact_path": model_path.name,
+        "artifact_sha256": hashlib.sha256(model_raw).hexdigest(),
+        "recipe_path": recipe_path.name,
+        "recipe_sha256": hashlib.sha256(recipe_raw).hexdigest(),
+        "scorer_code_path": scorer_path.name,
+        "scorer_code_sha256": hashlib.sha256(scorer_raw).hexdigest(),
+        "probability_authority": False,
+        "recommendation_authority": False,
+        "betting_authority": False,
+    }
+    authority_path = tmp_path / "authority.json"
+    _write_json(authority_path, authority)
+    result = adapt_verified_public_descriptive_draft_records(
+        draft_path,
+        manifest_path,
+        source_path,
+        authority_path=authority_path,
+        repository_root=tmp_path,
+        output_dir=tmp_path / "adapter",
+    )
+    ledger = write_source_bound_atom_ledger(
+        result,
+        tmp_path / "ledger" / "atoms.json",
+        authority=verify_public_descriptive_authority(authority_path, repository_root=tmp_path),
+        fold_id="fold-1",
+        fit_game_ids=["game-1"],
+        fit_window_start="2026-01-30T00:00:00Z",
+        fit_window_end="2026-02-01T00:00:00Z",
+        fit_game_dates={"game-1": "2026-01-31T00:00:00Z"},
+    )
+    assert ledger.row_count == 2
+    assert ledger.ledger_path.is_file()
+    assert ledger.receipt_path.is_file()
+    assert ledger.producer_receipt_path.is_file()
+    assert ledger.receipt["source_identity_sha256"] == result.source_receipt["source_identity_sha256"]
+    loaded = load_source_bound_atom_ledger(
+        ledger.ledger_path,
+        ledger.receipt_path,
+        source_receipt=result.source_receipt,
+        authority=verify_public_descriptive_authority(authority_path, repository_root=tmp_path),
+        expected_fold_id="fold-1",
+    )
+    assert list(loaded["game_id"]) == ["game-1", "game-2"]
 
 
 def test_crossfit_adapter_maps_public_component_rows(tmp_path: Path) -> None:

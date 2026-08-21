@@ -26,6 +26,8 @@ ADAPTER_SCHEMA = "scryglass:future-value-draft-score-adapter:v1"
 PUBLIC_DRAFT_RECORDS_SCHEMA = "scryglass:draft-records:v1"
 ARTIFACT_RECEIPT_SCHEMA = "scryglass:public-draft-artifact-receipt:v1"
 CROSSFIT_RECEIPT_SCHEMA = "scryglass:public-crossfit-draft-receipt:v1"
+PUBLIC_DESCRIPTIVE_AUTHORITY_SCHEMA = "scryglass:draft-authority:v1"
+SOURCE_BOUND_ATOM_LEDGER_SCHEMA = "scryglass:future-value-draft-score-atom-ledger:v1"
 CANONICAL_EDGE_COMPONENTS = core.STATIC_COMPOSITION_COMPONENTS
 _CROSSFIT_RECEIPT_FIELDS = frozenset(
     {
@@ -48,6 +50,91 @@ _CROSSFIT_RECEIPT_FIELDS = frozenset(
 
 class DraftScoreAdapterError(ValueError):
     """A public Draft artifact cannot be safely adapted."""
+
+
+@dataclass(frozen=True)
+class PublicDescriptiveAuthorityBinding:
+    """Independent receipt binding for the frozen descriptive producer."""
+
+    authority_path: Path
+    authority_receipt_sha256: str
+    model_path: Path
+    model_sha256: str
+    recipe_path: Path
+    recipe_sha256: str
+    scorer_path: Path
+    scorer_sha256: str
+    model_version: str
+
+
+@dataclass(frozen=True)
+class SourceBoundAtomLedgerResult:
+    """Durable source-bound public atom rows for one evaluation fold."""
+
+    ledger_path: Path
+    receipt_path: Path
+    receipt: Mapping[str, Any]
+    producer_receipt_path: Path
+    producer_receipt: Mapping[str, Any]
+    row_count: int
+
+
+def _safe_relative_path(root: Path, value: object, label: str) -> Path:
+    text = str(value or "").strip()
+    if not text:
+        raise DraftScoreAdapterError(f"{label} locator is required")
+    raw = Path(text)
+    if raw.is_absolute() or ".." in raw.parts:
+        raise DraftScoreAdapterError(f"{label} locator is unsafe")
+    candidate = _file(root / raw, label)
+    try:
+        candidate.relative_to(root.resolve())
+    except ValueError as error:
+        raise DraftScoreAdapterError(f"{label} locator escapes repository root") from error
+    return candidate
+
+
+def verify_public_descriptive_authority(
+    authority_path: Path | str,
+    *,
+    repository_root: Path | str | None = None,
+) -> PublicDescriptiveAuthorityBinding:
+    """Verify the independent static descriptive model and its source files.
+
+    The public draft rows contain model hashes, but those fields alone are not
+    an independent receipt.  This function checks the repository authority
+    record, the model bytes, the recipe bytes, and the scorer code bytes.
+    """
+
+    authority_file = _file(authority_path, "descriptive authority receipt")
+    payload, raw = _json(authority_file, "descriptive authority receipt")
+    if payload.get("schema_version") != PUBLIC_DESCRIPTIVE_AUTHORITY_SCHEMA:
+        raise DraftScoreAdapterError("descriptive authority schema is invalid")
+    if payload.get("status") != "descriptive" or payload.get("estimand") != "composition_only":
+        raise DraftScoreAdapterError("descriptive authority contract is invalid")
+    for field in ("artifact_path", "artifact_sha256", "recipe_path", "recipe_sha256", "scorer_code_path", "scorer_code_sha256", "model_version"):
+        if not str(payload.get(field) or "").strip():
+            raise DraftScoreAdapterError(f"descriptive authority field is missing: {field}")
+    if any(payload.get(field) is not False for field in ("probability_authority", "recommendation_authority", "betting_authority")):
+        raise DraftScoreAdapterError("descriptive authority grants a prohibited output")
+    root = Path(repository_root).expanduser().resolve() if repository_root is not None else authority_file.parents[4]
+    model_file = _safe_relative_path(root, payload["artifact_path"], "descriptive model")
+    recipe_file = _safe_relative_path(root, payload["recipe_path"], "descriptive recipe")
+    scorer_file = _safe_relative_path(root, payload["scorer_code_path"], "descriptive scorer")
+    model_sha = _verify_file(model_file, expected_bytes=model_file.stat().st_size, expected_sha256=payload["artifact_sha256"], label="descriptive model")
+    recipe_sha = _verify_file(recipe_file, expected_bytes=recipe_file.stat().st_size, expected_sha256=payload["recipe_sha256"], label="descriptive recipe")
+    scorer_sha = _verify_file(scorer_file, expected_bytes=scorer_file.stat().st_size, expected_sha256=payload["scorer_code_sha256"], label="descriptive scorer")
+    return PublicDescriptiveAuthorityBinding(
+        authority_path=authority_file,
+        authority_receipt_sha256=_sha_bytes(raw),
+        model_path=model_file,
+        model_sha256=model_sha,
+        recipe_path=recipe_file,
+        recipe_sha256=recipe_sha,
+        scorer_path=scorer_file,
+        scorer_sha256=scorer_sha,
+        model_version=str(payload["model_version"]),
+    )
 
 
 def _canonical_json(value: object) -> bytes:
@@ -426,6 +513,330 @@ def load_public_descriptive_draft_atoms(*args: Any, **kwargs: Any) -> PublicDraf
     return adapt_public_descriptive_draft_records(*args, **kwargs)
 
 
+def adapt_verified_public_descriptive_draft_records(
+    draft_records_path: Path | str,
+    manifest_path: Path | str,
+    source_receipt_path: Path | str,
+    *,
+    authority_path: Path | str,
+    repository_root: Path | str,
+    output_dir: Path | str | None = None,
+    source_root: Path | str | None = None,
+) -> PublicDraftAtomAdapterResult:
+    """Adapt public rows after checking the independent model authority.
+
+    The regular adapter verifies the release asset.  This entry point also
+    verifies the frozen descriptive model, recipe, and scorer code named by
+    the independent authority file.  It is the only adapter suitable for a
+    chronological four-variant evaluation.
+    """
+
+    authority = verify_public_descriptive_authority(
+        authority_path,
+        repository_root=repository_root,
+    )
+    result = adapt_public_descriptive_draft_records(
+        draft_records_path,
+        manifest_path,
+        source_receipt_path,
+        output_dir=output_dir,
+        source_root=source_root,
+    )
+    payload, _raw = _json(result.artifact_path, "public draft records")
+    if str(payload.get("model_version") or "") != authority.model_version:
+        raise DraftScoreAdapterError("public draft model version changed")
+    if str(payload.get("artifact_sha256") or "").lower() != authority.model_sha256:
+        raise DraftScoreAdapterError("public draft model artifact binding changed")
+    if not result.chronological_evaluation_suitable:
+        raise DraftScoreAdapterError("public descriptive artifact is not chronologically suitable")
+    static_receipt = dict(result.static_atom_receipt)
+    static_receipt.update(
+        {
+            "authority_receipt_sha256": authority.authority_receipt_sha256,
+            "authority_receipt_locator": str(authority.authority_path),
+            "authority_receipt_bytes": authority.authority_path.stat().st_size,
+            "model_artifact_sha256": authority.model_sha256,
+            "recipe_sha256": authority.recipe_sha256,
+            "scorer_code_sha256": authority.scorer_sha256,
+        }
+    )
+    static_receipt.pop("receipt_sha256", None)
+    static_receipt["receipt_sha256"] = _sha(static_receipt)
+    _write_json(result.static_atom_receipt_path, static_receipt)
+    if isinstance(result.static_atom_receipt, dict):
+        result.static_atom_receipt.clear()
+        result.static_atom_receipt.update(static_receipt)
+    # The source receipt is already checked by the base adapter.  Bind the
+    # independent authority digest into the returned producer evidence so a
+    # later ledger cannot silently switch model releases.
+    # The base producer schema is intentionally closed.  Keep the durable
+    # base receipt unchanged and expose the independent binding on the frame.
+    result.frame["authority_receipt_sha256"] = authority.authority_receipt_sha256
+    result.frame["model_artifact_sha256"] = authority.model_sha256
+    result.frame["recipe_sha256"] = authority.recipe_sha256
+    result.frame["scorer_code_sha256"] = authority.scorer_sha256
+    return result
+
+
+def write_source_bound_atom_ledger(
+    result: PublicDraftAtomAdapterResult,
+    output_path: Path | str,
+    *,
+    authority: PublicDescriptiveAuthorityBinding,
+    fold_id: str,
+    fit_game_ids: Iterable[object],
+    fit_window_end: object,
+    fit_window_start: object | None = None,
+    fit_game_dates: Mapping[str, object] | None = None,
+    producer_timing: str = "pregame_strict_prior",
+) -> SourceBoundAtomLedgerResult:
+    """Write exact public component rows with a durable source receipt.
+
+    The ledger contains only the five public edge components and date.  It
+    binds the accepted census, the release asset, the independent descriptive
+    authority, and the fold.  The caller must provide a fold fitting window.
+    Every fit date is checked as strictly earlier than the fold cutoff.
+    """
+
+    if producer_timing not in core._ALLOWED_PRODUCER_TIMINGS:
+        raise DraftScoreAdapterError("atom ledger timing is not pregame")
+    if not str(fold_id).strip():
+        raise DraftScoreAdapterError("atom ledger fold_id is required")
+    frame = result.frame.copy()
+    required = {"game_id", "date", *core.STATIC_COMPOSITION_FEATURES}
+    if not required.issubset(frame.columns):
+        raise DraftScoreAdapterError("public atom frame is incomplete")
+    ids = core._normalise_ids(frame["game_id"].astype(str), "public atom game IDs")
+    if ids != tuple(result.source_receipt["accepted_game_ids"]):
+        raise DraftScoreAdapterError("public atom ledger census changed")
+    for field, expected in (
+        ("authority_receipt_sha256", authority.authority_receipt_sha256),
+        ("model_artifact_sha256", authority.model_sha256),
+        ("recipe_sha256", authority.recipe_sha256),
+        ("scorer_code_sha256", authority.scorer_sha256),
+    ):
+        if field not in frame.columns or not frame[field].astype(str).str.lower().eq(str(expected).lower()).all():
+            raise DraftScoreAdapterError(f"public atom ledger {field} binding is missing")
+    dates = pd.to_datetime(frame["date"], utc=True, errors="coerce")
+    if dates.isna().any():
+        raise DraftScoreAdapterError("public atom ledger dates are invalid")
+    if not result.chronological_evaluation_suitable:
+        raise DraftScoreAdapterError("public descriptive artifact is not chronologically suitable")
+    fit_ids = core._normalise_ids(fit_game_ids, "atom ledger fit_game_ids")
+    if not fit_ids:
+        raise DraftScoreAdapterError("atom ledger fit_game_ids are required")
+    if not set(fit_ids).issubset(set(ids)):
+        raise DraftScoreAdapterError("atom ledger fit IDs are outside the census")
+    cutoff = core._timestamp(fit_window_end, "atom ledger fit_window_end")
+    supplied_dates = dict(fit_game_dates or {})
+    if set(supplied_dates) != set(fit_ids):
+        raise DraftScoreAdapterError("atom ledger fit dates do not match fit IDs")
+    normalized_fit_dates: dict[str, str] = {}
+    for game_id in fit_ids:
+        stamp = core._timestamp(supplied_dates[game_id], f"atom ledger fit date {game_id}")
+        if stamp >= cutoff:
+            raise DraftScoreAdapterError("atom ledger fit date is not strictly prior")
+        normalized_fit_dates[game_id] = stamp.isoformat().replace("+00:00", "Z")
+    normalized_start = (
+        core._timestamp_text(fit_window_start, "atom ledger fit_window_start")
+        if fit_window_start is not None
+        else min(normalized_fit_dates.values())
+    )
+    if core._timestamp(normalized_start, "atom ledger fit_window_start") >= cutoff:
+        raise DraftScoreAdapterError("atom ledger fit window is not strictly prior")
+    rows: list[dict[str, Any]] = []
+    ordered = frame.sort_values("game_id", kind="stable")
+    for row in ordered.itertuples(index=False):
+        values = {feature: float(getattr(row, feature)) for feature in core.STATIC_COMPOSITION_FEATURES}
+        if not all(np.isfinite(value) for value in values.values()):
+            raise DraftScoreAdapterError("public atom ledger contains a non-finite component")
+        rows.append(
+            {
+                "game_id": str(row.game_id),
+                "date": pd.Timestamp(row.date).isoformat().replace("+00:00", "Z"),
+                **values,
+            }
+        )
+    row_digest = _sha(rows)
+    output = Path(output_path).expanduser()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fold_producer = dict(result.producer_receipt)
+    fold_producer.update(
+        {
+            "accepted_game_count": len(ids),
+            "accepted_game_ids": list(ids),
+            "fit_game_count": len(fit_ids),
+            "fit_game_ids": list(fit_ids),
+            "fit_game_identity_sha256": identity_sha256(fit_ids),
+            "fit_window_start": normalized_start,
+            "fit_window_end": core._timestamp_text(fit_window_end, "atom ledger fit_window_end"),
+            "fit_game_dates": normalized_fit_dates,
+            "fold_id": str(fold_id),
+            "producer_timing": producer_timing,
+        }
+    )
+    fold_producer.pop("receipt_sha256", None)
+    fold_producer["receipt_sha256"] = _sha(fold_producer)
+    producer_receipt_path = output.with_name(output.stem + "-producer-receipt.json")
+    producer_receipt_raw = _write_json(producer_receipt_path, fold_producer)
+    artifact_payload = {
+        "schema_version": SOURCE_BOUND_ATOM_LEDGER_SCHEMA,
+        "authority": {"research_only": True, "public_probability": False, "deployment": False},
+        "source_receipt_sha256": str(result.source_receipt["receipt_sha256"]).lower(),
+        "source_identity_sha256": str(result.source_receipt["source_identity_sha256"]).lower(),
+        "game_ids": list(ids),
+        "fold_id": str(fold_id),
+        "fit_game_ids": list(fit_ids),
+        "fit_game_identity_sha256": identity_sha256(fit_ids),
+        "fit_window_start": normalized_start,
+        "fit_window_end": core._timestamp_text(fit_window_end, "atom ledger fit_window_end"),
+        "fit_game_dates": normalized_fit_dates,
+        "producer_receipt_sha256": str(fold_producer["receipt_sha256"]).lower(),
+        "producer_receipt_locator": producer_receipt_path.name,
+        "producer_receipt_bytes": len(producer_receipt_raw),
+        "producer_receipt_file_sha256": _sha_bytes(producer_receipt_raw),
+        "authority_receipt_sha256": authority.authority_receipt_sha256,
+        "model_artifact_sha256": authority.model_sha256,
+        "recipe_sha256": authority.recipe_sha256,
+        "scorer_code_sha256": authority.scorer_sha256,
+        "producer_timing": producer_timing,
+        "row_digest_sha256": row_digest,
+        "rows": rows,
+    }
+    artifact_raw = _write_json(output, artifact_payload)
+    receipt_payload = {
+        "schema_version": SOURCE_BOUND_ATOM_LEDGER_SCHEMA,
+        "authority": {"research_only": True, "public_probability": False, "deployment": False},
+        "source_receipt_sha256": artifact_payload["source_receipt_sha256"],
+        "source_identity_sha256": artifact_payload["source_identity_sha256"],
+        "game_ids": list(ids),
+        "fold_id": str(fold_id),
+        "fit_game_ids": list(fit_ids),
+        "fit_game_identity_sha256": identity_sha256(fit_ids),
+        "fit_window_start": artifact_payload["fit_window_start"],
+        "fit_window_end": artifact_payload["fit_window_end"],
+        "fit_game_dates": normalized_fit_dates,
+        "producer_receipt_sha256": artifact_payload["producer_receipt_sha256"],
+        "producer_receipt_locator": artifact_payload["producer_receipt_locator"],
+        "producer_receipt_bytes": artifact_payload["producer_receipt_bytes"],
+        "producer_receipt_file_sha256": artifact_payload["producer_receipt_file_sha256"],
+        "authority_receipt_sha256": authority.authority_receipt_sha256,
+        "model_artifact_sha256": authority.model_sha256,
+        "recipe_sha256": authority.recipe_sha256,
+        "scorer_code_sha256": authority.scorer_sha256,
+        "producer_timing": producer_timing,
+        "row_digest_sha256": row_digest,
+        "artifact_locator": output.name,
+        "artifact_bytes": len(artifact_raw),
+        "artifact_sha256": _sha_bytes(artifact_raw),
+    }
+    receipt_payload["receipt_sha256"] = _sha(receipt_payload)
+    receipt_path = output.with_name(output.stem + "-receipt.json")
+    _write_json(receipt_path, receipt_payload)
+    return SourceBoundAtomLedgerResult(
+        ledger_path=output,
+        receipt_path=receipt_path,
+        receipt=receipt_payload,
+        producer_receipt_path=producer_receipt_path,
+        producer_receipt=fold_producer,
+        row_count=len(rows),
+    )
+
+
+def load_source_bound_atom_ledger(
+    ledger_path: Path | str,
+    receipt_path: Path | str,
+    *,
+    source_receipt: Mapping[str, Any],
+    authority: PublicDescriptiveAuthorityBinding,
+    expected_fold_id: str | None = None,
+) -> pd.DataFrame:
+    """Verify and load one durable source-bound atom ledger."""
+
+    ledger_file = _file(ledger_path, "source-bound atom ledger")
+    receipt_file = _file(receipt_path, "source-bound atom ledger receipt")
+    ledger_payload, ledger_raw = _json(ledger_file, "source-bound atom ledger")
+    receipt_payload, _receipt_raw = _json(receipt_file, "source-bound atom ledger receipt")
+    if ledger_payload.get("schema_version") != SOURCE_BOUND_ATOM_LEDGER_SCHEMA or receipt_payload.get("schema_version") != SOURCE_BOUND_ATOM_LEDGER_SCHEMA:
+        raise DraftScoreAdapterError("source-bound atom ledger schema is invalid")
+    claimed_receipt = _require_sha(receipt_payload.get("receipt_sha256"), "atom ledger receipt_sha256")
+    unsigned = dict(receipt_payload)
+    unsigned.pop("receipt_sha256", None)
+    if _sha(unsigned) != claimed_receipt:
+        raise DraftScoreAdapterError("source-bound atom ledger receipt hash changed")
+    if receipt_payload.get("artifact_locator") not in {ledger_file.name, str(ledger_file)}:
+        raise DraftScoreAdapterError("source-bound atom ledger locator changed")
+    _verify_file(
+        ledger_file,
+        expected_bytes=receipt_payload.get("artifact_bytes"),
+        expected_sha256=receipt_payload.get("artifact_sha256"),
+        label="source-bound atom ledger",
+    )
+    producer_locator = Path(str(receipt_payload.get("producer_receipt_locator") or ""))
+    if ".." in producer_locator.parts:
+        raise DraftScoreAdapterError("source-bound atom producer receipt locator is unsafe")
+    producer_path = _file(
+        producer_locator if producer_locator.is_absolute() else receipt_file.parent / producer_locator,
+        "source-bound atom producer receipt",
+    )
+    producer_payload, producer_raw = _json(producer_path, "source-bound atom producer receipt")
+    _verify_file(
+        producer_path,
+        expected_bytes=receipt_payload.get("producer_receipt_bytes"),
+        expected_sha256=receipt_payload.get("producer_receipt_file_sha256"),
+        label="source-bound atom producer receipt",
+    )
+    producer_claimed = _require_sha(producer_payload.get("receipt_sha256"), "atom producer receipt_sha256")
+    producer_unsigned = dict(producer_payload)
+    producer_unsigned.pop("receipt_sha256", None)
+    if _sha(producer_unsigned) != producer_claimed:
+        raise DraftScoreAdapterError("source-bound atom producer receipt hash changed")
+    for payload in (ledger_payload, receipt_payload):
+        if payload.get("authority") != {"research_only": True, "public_probability": False, "deployment": False}:
+            raise DraftScoreAdapterError("source-bound atom ledger authority is invalid")
+        if str(payload.get("source_receipt_sha256") or "").lower() != str(source_receipt.get("receipt_sha256") or "").lower():
+            raise DraftScoreAdapterError("source-bound atom ledger source receipt changed")
+        if str(payload.get("source_identity_sha256") or "").lower() != str(source_receipt.get("source_identity_sha256") or "").lower():
+            raise DraftScoreAdapterError("source-bound atom ledger source identity changed")
+        if str(payload.get("authority_receipt_sha256") or "").lower() != authority.authority_receipt_sha256:
+            raise DraftScoreAdapterError("source-bound atom ledger authority changed")
+        if str(payload.get("model_artifact_sha256") or "").lower() != authority.model_sha256:
+            raise DraftScoreAdapterError("source-bound atom ledger model changed")
+        if str(payload.get("recipe_sha256") or "").lower() != authority.recipe_sha256:
+            raise DraftScoreAdapterError("source-bound atom ledger recipe changed")
+        if str(payload.get("scorer_code_sha256") or "").lower() != authority.scorer_sha256:
+            raise DraftScoreAdapterError("source-bound atom ledger scorer changed")
+    if expected_fold_id is not None and str(ledger_payload.get("fold_id")) != str(expected_fold_id):
+        raise DraftScoreAdapterError("source-bound atom ledger fold changed")
+    if producer_payload.get("receipt_sha256") != receipt_payload.get("producer_receipt_sha256"):
+        raise DraftScoreAdapterError("source-bound atom producer receipt binding changed")
+    if producer_payload.get("fold_id") != ledger_payload.get("fold_id") or tuple(producer_payload.get("fit_game_ids") or ()) != tuple(ledger_payload.get("fit_game_ids") or ()):
+        raise DraftScoreAdapterError("source-bound atom producer fold changed")
+    rows = ledger_payload.get("rows")
+    if not isinstance(rows, list) or not rows:
+        raise DraftScoreAdapterError("source-bound atom ledger rows are missing")
+    ids = tuple(str(value) for value in ledger_payload.get("game_ids", []))
+    if ids != tuple(source_receipt.get("accepted_game_ids", [])):
+        raise DraftScoreAdapterError("source-bound atom ledger census changed")
+    if any(not isinstance(row, Mapping) for row in rows):
+        raise DraftScoreAdapterError("source-bound atom ledger row schema changed")
+    if [str(row.get("game_id")) for row in rows] != list(ids):
+        raise DraftScoreAdapterError("source-bound atom ledger row order changed")
+    row_digest = _sha(rows)
+    if row_digest != _require_sha(ledger_payload.get("row_digest_sha256"), "atom ledger row_digest_sha256"):
+        raise DraftScoreAdapterError("source-bound atom ledger rows changed")
+    frame = pd.DataFrame(rows)
+    expected_columns = ["game_id", "date", *core.STATIC_COMPOSITION_FEATURES]
+    if set(frame.columns) != set(expected_columns):
+        raise DraftScoreAdapterError("source-bound atom ledger columns changed")
+    frame = frame.loc[:, expected_columns]
+    for column in core.STATIC_COMPOSITION_FEATURES:
+        values = pd.to_numeric(frame[column], errors="coerce")
+        if values.isna().any() or not np.isfinite(values.to_numpy(dtype=float)).all():
+            raise DraftScoreAdapterError("source-bound atom ledger component is invalid")
+    return frame
+
+
 @dataclass(frozen=True)
 class PublicCrossfitAtomAdapterResult:
     frame: pd.DataFrame
@@ -565,10 +976,18 @@ __all__ = [
     "CANONICAL_EDGE_COMPONENTS",
     "CROSSFIT_RECEIPT_SCHEMA",
     "DraftScoreAdapterError",
+    "PUBLIC_DESCRIPTIVE_AUTHORITY_SCHEMA",
     "PublicCrossfitAtomAdapterResult",
+    "PublicDescriptiveAuthorityBinding",
     "PublicDraftAtomAdapterResult",
+    "SOURCE_BOUND_ATOM_LEDGER_SCHEMA",
+    "SourceBoundAtomLedgerResult",
     "adapt_public_crossfit_draft_rows",
     "adapt_public_descriptive_draft_records",
+    "adapt_verified_public_descriptive_draft_records",
+    "load_source_bound_atom_ledger",
     "load_public_crossfit_draft_atoms",
     "load_public_descriptive_draft_atoms",
+    "verify_public_descriptive_authority",
+    "write_source_bound_atom_ledger",
 ]

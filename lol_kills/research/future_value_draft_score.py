@@ -111,7 +111,8 @@ CURVE_INTERACTION_FEATURES = CURVE_ATOM_INTERACTION_FEATURES
 SOURCE_RECEIPT_SCHEMA = "scryglass:future-value-rating-source:v1"
 STATIC_ATOM_RECEIPT_SCHEMA = "scryglass:atomized-composition-producer:v1"
 COEFFICIENT_RECEIPT_SCHEMA = "scryglass:future-value-draft-score-coefficients:v1"
-PREDICTION_LEDGER_SCHEMA = "scryglass:future-value-draft-score-prediction-ledger:v1"
+MODEL_RECEIPT_SCHEMA = "scryglass:future-value-draft-score-model-receipt:v1"
+PREDICTION_LEDGER_SCHEMA = "scryglass:future-value-draft-score-prediction-ledger:v2"
 _ALLOWED_PRODUCER_TIMINGS = frozenset(
     {"pregame_strict_prior", "cross_fitted_pregame", "strict_prior_pregame"}
 )
@@ -189,6 +190,12 @@ _STATIC_ATOM_REQUIRED_FIELDS = frozenset(
 _STATIC_ATOM_ALLOWED_FIELDS = frozenset(
     {
         *_STATIC_ATOM_REQUIRED_FIELDS,
+        "authority_receipt_sha256",
+        "authority_receipt_locator",
+        "authority_receipt_bytes",
+        "model_artifact_sha256",
+        "recipe_sha256",
+        "scorer_code_sha256",
         "release_id",
         "fit_through",
         "chronological_evaluation_suitable",
@@ -235,6 +242,13 @@ _PREDICTION_LEDGER_REQUIRED_FIELDS = frozenset(
         "fit_game_ids",
         "fit_game_identity_sha256",
         "coefficient_sha256",
+        "model_receipt_locator",
+        "model_receipt_bytes",
+        "model_receipt_sha256",
+        "model_artifact_locator",
+        "model_artifact_bytes",
+        "model_artifact_sha256",
+        "model_implementation_sha256",
         "row_digest_sha256",
         "artifact_locator",
         "artifact_bytes",
@@ -245,6 +259,28 @@ _PREDICTION_LEDGER_REQUIRED_FIELDS = frozenset(
 _PREDICTION_LEDGER_ALLOWED_FIELDS = frozenset(
     {*_PREDICTION_LEDGER_REQUIRED_FIELDS, "authority", "rows"}
 )
+_MODEL_RECEIPT_REQUIRED_FIELDS = frozenset(
+    {
+        "schema_version",
+        "model_id",
+        "model_version",
+        "variant",
+        "source_receipt_sha256",
+        "source_identity_sha256",
+        "fold_id",
+        "fit_game_ids",
+        "fit_game_identity_sha256",
+        "fit_id",
+        "coefficient_sha256",
+        "artifact_locator",
+        "artifact_bytes",
+        "artifact_sha256",
+        "implementation_sha256",
+        "authority",
+        "receipt_sha256",
+    }
+)
+_MODEL_RECEIPT_ALLOWED_FIELDS = frozenset(_MODEL_RECEIPT_REQUIRED_FIELDS)
 
 
 _TARGET_TOKENS = frozenset(
@@ -1089,6 +1125,9 @@ def _validate_static_atom_receipt(
     side_swap_source_frame: pd.DataFrame | None = None,
     receipt_path: Path | str | None = None,
     artifact_root: Path | str | None = None,
+    require_independent_authority: bool = False,
+    authority_receipt_path: Path | str | None = None,
+    authority_root: Path | str | None = None,
 ) -> dict[str, Any]:
     """Bind canonical atom values to an existing producer artifact.
 
@@ -1195,6 +1234,53 @@ def _validate_static_atom_receipt(
         expected_values_hashes.add(static_composition_parity_hash(transformed))
     if actual_values_hash not in expected_values_hashes:
         raise FutureValueDraftScoreError("atomized composition values do not match producer receipt")
+    if require_independent_authority:
+        required_authority = {
+            "authority_receipt_sha256",
+            "authority_receipt_locator",
+            "authority_receipt_bytes",
+            "model_artifact_sha256",
+            "recipe_sha256",
+            "scorer_code_sha256",
+        }
+        missing_authority = sorted(required_authority - set(receipt))
+        if missing_authority:
+            raise FutureValueDraftScoreError(
+                "independent atom authority is incomplete: " + ", ".join(missing_authority)
+            )
+        if authority_receipt_path is None:
+            raise FutureValueDraftScoreError("independent atom authority path is required")
+        authority_path = _regular_file(authority_receipt_path, "atom authority receipt")
+        authority_payload, authority_raw = _load_json_file(
+            authority_path,
+            "atom authority receipt",
+        )
+        expected_authority_hash = _require_hash(
+            receipt["authority_receipt_sha256"],
+            "authority_receipt_sha256",
+        )
+        if hashlib.sha256(authority_raw).hexdigest() != expected_authority_hash:
+            raise FutureValueDraftScoreError("atom authority receipt bytes changed")
+        if receipt["authority_receipt_bytes"] != len(authority_raw):
+            raise FutureValueDraftScoreError("atom authority receipt byte count changed")
+        if authority_path != _safe_locator(
+            receipt["authority_receipt_locator"],
+            base=Path(authority_root).expanduser().resolve()
+            if authority_root is not None
+            else authority_path.parent,
+            field="atom authority receipt",
+        ):
+            raise FutureValueDraftScoreError("atom authority receipt locator changed")
+        if authority_payload.get("schema_version") != "scryglass:draft-authority:v1" or authority_payload.get("status") != "descriptive" or authority_payload.get("estimand") != "composition_only":
+            raise FutureValueDraftScoreError("atom authority receipt contract is invalid")
+        if any(authority_payload.get(field) is not False for field in ("probability_authority", "recommendation_authority", "betting_authority")):
+            raise FutureValueDraftScoreError("atom authority receipt grants a prohibited output")
+        if str(authority_payload.get("artifact_sha256") or "").lower() != str(receipt["model_artifact_sha256"]).lower():
+            raise FutureValueDraftScoreError("atom authority model binding changed")
+        if str(authority_payload.get("recipe_sha256") or "").lower() != str(receipt["recipe_sha256"]).lower():
+            raise FutureValueDraftScoreError("atom authority recipe binding changed")
+        if str(authority_payload.get("scorer_code_sha256") or "").lower() != str(receipt["scorer_code_sha256"]).lower():
+            raise FutureValueDraftScoreError("atom authority scorer binding changed")
     return {
         **dict(receipt),
         "artifact_sha256": artifact_hash,
@@ -1202,6 +1288,18 @@ def _validate_static_atom_receipt(
         "receipt_sha256": receipt_hash,
         "artifact_locator": str(receipt["artifact_locator"]),
         "artifact_receipt_locator": str(receipt["artifact_receipt_locator"]),
+        **{
+            key: receipt[key]
+            for key in (
+                "authority_receipt_sha256",
+                "authority_receipt_locator",
+                "authority_receipt_bytes",
+                "model_artifact_sha256",
+                "recipe_sha256",
+                "scorer_code_sha256",
+            )
+            if key in receipt
+        },
     }
 
 
@@ -1639,6 +1737,9 @@ def build_draft_score_variant_design(
     static_atom_side_swap_source_frame: pd.DataFrame | None = None,
     static_atom_receipt_path: Path | str | None = None,
     static_atom_artifact_root: Path | str | None = None,
+    require_independent_static_authority: bool = False,
+    static_atom_authority_path: Path | str | None = None,
+    static_atom_authority_root: Path | str | None = None,
 ) -> DraftScoreVariantDesign:
     """Build one immutable, source-bound research matrix."""
 
@@ -1659,6 +1760,9 @@ def build_draft_score_variant_design(
         side_swap_source_frame=static_atom_side_swap_source_frame,
         receipt_path=static_atom_receipt_path,
         artifact_root=static_atom_artifact_root,
+        require_independent_authority=require_independent_static_authority,
+        authority_receipt_path=static_atom_authority_path,
+        authority_root=static_atom_authority_root,
     )
     raw_ids = frame["game_id"].astype(str)
     if raw_ids.eq("").any() or raw_ids.duplicated().any():
@@ -1867,6 +1971,185 @@ def make_coefficient_receipt(
     return payload
 
 
+def _validate_prediction_model_receipt(
+    receipt_path: Path,
+    *,
+    expected_source_receipt_sha256: str,
+    expected_source_identity_sha256: str,
+    expected_fold_id: str,
+    expected_fit_game_ids: Sequence[str],
+    expected_fit_id: str,
+    expected_model_id: str,
+    expected_coefficient_sha256: str,
+    expected_variant: str | None,
+) -> tuple[dict[str, Any], str, str]:
+    """Verify the independent fitted-model receipt named by a ledger."""
+
+    payload, raw = _load_json_file(receipt_path, "prediction model receipt")
+    unknown = sorted(set(payload) - _MODEL_RECEIPT_ALLOWED_FIELDS)
+    if unknown:
+        raise FutureValueDraftScoreError(
+            "prediction model receipt has unknown fields: " + ", ".join(unknown)
+        )
+    missing = sorted(_MODEL_RECEIPT_REQUIRED_FIELDS - set(payload))
+    if missing:
+        raise FutureValueDraftScoreError(
+            "prediction model receipt is incomplete: " + ", ".join(missing)
+        )
+    if payload.get("schema_version") != MODEL_RECEIPT_SCHEMA:
+        raise FutureValueDraftScoreError("prediction model receipt schema is invalid")
+    authority = payload.get("authority")
+    if not isinstance(authority, Mapping) or authority.get("research_only") is not True:
+        raise FutureValueDraftScoreError("prediction model receipt authority is invalid")
+    if any(value is not False for key, value in authority.items() if key != "research_only"):
+        raise FutureValueDraftScoreError("prediction model receipt grants authority")
+    receipt_hash = _require_hash(payload["receipt_sha256"], "prediction model receipt_sha256")
+    unsigned = dict(payload)
+    unsigned.pop("receipt_sha256", None)
+    if _sha256(unsigned) != receipt_hash:
+        raise FutureValueDraftScoreError("prediction model receipt hash does not match payload")
+    if str(payload["source_receipt_sha256"]).lower() != _require_hash(
+        expected_source_receipt_sha256, "source_receipt_sha256"
+    ):
+        raise FutureValueDraftScoreError("prediction model receipt source changed")
+    if str(payload["source_identity_sha256"]).lower() != _require_hash(
+        expected_source_identity_sha256, "source_identity_sha256"
+    ):
+        raise FutureValueDraftScoreError("prediction model receipt census changed")
+    if str(payload["fold_id"]) != str(expected_fold_id):
+        raise FutureValueDraftScoreError("prediction model receipt fold changed")
+    fit_ids = _normalise_ids(payload["fit_game_ids"], "prediction model fit game IDs")
+    expected_fit = _normalise_ids(expected_fit_game_ids, "expected fit game IDs")
+    if fit_ids != expected_fit:
+        raise FutureValueDraftScoreError("prediction model receipt fit IDs changed")
+    if str(payload["fit_id"]) != str(expected_fit_id):
+        raise FutureValueDraftScoreError("prediction model receipt fit identity changed")
+    if str(payload["fit_game_identity_sha256"]).lower() != identity_sha256(fit_ids):
+        raise FutureValueDraftScoreError("prediction model receipt fit identity changed")
+    if str(payload["model_id"]) != str(expected_model_id):
+        raise FutureValueDraftScoreError("prediction model receipt model identity changed")
+    if str(payload["coefficient_sha256"]).lower() != _require_hash(
+        expected_coefficient_sha256, "coefficient_sha256"
+    ):
+        raise FutureValueDraftScoreError("prediction model receipt coefficients changed")
+    if str(payload["fit_game_identity_sha256"]).lower() != identity_sha256(expected_fit):
+        raise FutureValueDraftScoreError("prediction model receipt fit identity changed")
+    if expected_variant is not None and str(payload["variant"]) != str(expected_variant):
+        raise FutureValueDraftScoreError("prediction model receipt variant changed")
+    if not str(payload["model_version"]).strip():
+        raise FutureValueDraftScoreError("prediction model receipt implementation identity is required")
+    _require_hash(payload["implementation_sha256"], "prediction model implementation_sha256")
+    artifact_path = _safe_locator(
+        payload["artifact_locator"],
+        base=receipt_path.parent,
+        field="prediction model artifact",
+    )
+    artifact_hash = _verify_file_digest(
+        artifact_path,
+        expected_bytes=payload["artifact_bytes"],
+        expected_sha256=payload["artifact_sha256"],
+        field="prediction model artifact",
+    )
+    return payload, hashlib.sha256(raw).hexdigest(), artifact_hash
+
+
+def write_independent_prediction_ledger(
+    output_path: Path | str,
+    game_ids: Sequence[object],
+    model_logits: Sequence[object],
+    *,
+    source_receipt_sha256: str,
+    source_identity_sha256: str,
+    fold_id: str,
+    fit_game_ids: Sequence[object],
+    fit_id: str,
+    model_id: str,
+    coefficient_sha256: str,
+    model_receipt_path: Path | str,
+    variant: DraftScoreVariant | RatingVariant | str | None = None,
+) -> tuple[Path, Path]:
+    """Write a receipt-bound prediction artifact from an external model run.
+
+    The model receipt and model artifact are verified before the prediction
+    rows are written.  The returned paths can be passed to
+    :func:`score_draft_score_variant`.
+    """
+
+    raw_ids = tuple(str(value) for value in game_ids)
+    ids = _normalise_ids(raw_ids, "prediction ledger game IDs")
+    if raw_ids != ids:
+        raise FutureValueDraftScoreError("prediction ledger game IDs are not canonical")
+    fit_ids = _normalise_ids(fit_game_ids, "prediction ledger fit game IDs")
+    values: list[float] = []
+    for value in model_logits:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError) as error:
+            raise FutureValueDraftScoreError("prediction ledger values are invalid") from error
+        if not math.isfinite(parsed):
+            raise FutureValueDraftScoreError("prediction ledger values are not finite")
+        values.append(parsed)
+    if len(values) != len(ids):
+        raise FutureValueDraftScoreError("prediction ledger row count does not match game IDs")
+    source_hash = _require_hash(source_receipt_sha256, "source_receipt_sha256")
+    source_identity = _require_hash(source_identity_sha256, "source_identity_sha256")
+    coefficient_hash = _require_hash(coefficient_sha256, "coefficient_sha256")
+    if not str(fold_id).strip() or not str(fit_id).strip() or not str(model_id).strip():
+        raise FutureValueDraftScoreError("prediction ledger model identity is required")
+    model_path = _regular_file(model_receipt_path, "prediction model receipt")
+    model_payload, model_receipt_hash, model_artifact_hash = _validate_prediction_model_receipt(
+        model_path,
+        expected_source_receipt_sha256=source_hash,
+        expected_source_identity_sha256=source_identity,
+        expected_fold_id=str(fold_id),
+        expected_fit_game_ids=fit_ids,
+        expected_fit_id=str(fit_id),
+        expected_model_id=str(model_id),
+        expected_coefficient_sha256=coefficient_hash,
+        expected_variant=None if variant is None else _canonical_variant(variant).value,
+    )
+    implementation_hash = _require_hash(
+        model_payload["implementation_sha256"], "model_implementation_sha256"
+    )
+    rows = [
+        {"game_id": game_id, "model_logit": value}
+        for game_id, value in zip(ids, values)
+    ]
+    row_digest = _sha256(rows)
+    output = Path(output_path).expanduser()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    artifact_raw = _canonical_json_bytes({"rows": rows}) + b"\n"
+    output.write_bytes(artifact_raw)
+    receipt_payload: dict[str, Any] = {
+        "schema_version": PREDICTION_LEDGER_SCHEMA,
+        "authority": {"research_only": True},
+        "source_receipt_sha256": source_hash,
+        "source_identity_sha256": source_identity,
+        "game_ids": list(ids),
+        "fold_id": str(fold_id),
+        "fit_id": str(fit_id),
+        "model_id": str(model_id),
+        "fit_game_ids": list(fit_ids),
+        "fit_game_identity_sha256": identity_sha256(fit_ids),
+        "coefficient_sha256": coefficient_hash,
+        "model_receipt_locator": str(model_path),
+        "model_receipt_bytes": model_path.stat().st_size,
+        "model_receipt_sha256": model_receipt_hash,
+        "model_artifact_locator": str(model_payload["artifact_locator"]),
+        "model_artifact_bytes": model_payload["artifact_bytes"],
+        "model_artifact_sha256": model_artifact_hash,
+        "model_implementation_sha256": implementation_hash,
+        "row_digest_sha256": row_digest,
+        "artifact_locator": output.name,
+        "artifact_bytes": len(artifact_raw),
+        "artifact_sha256": hashlib.sha256(artifact_raw).hexdigest(),
+    }
+    receipt_payload["receipt_sha256"] = _sha256(receipt_payload)
+    receipt_path = output.with_name(output.stem + "-receipt.json")
+    receipt_path.write_bytes(_canonical_json_bytes(receipt_payload) + b"\n")
+    return output, receipt_path
+
+
 def _prediction_ledger_values(
     ledger: Path | str | None,
     game_ids: Sequence[str],
@@ -1879,6 +2162,7 @@ def _prediction_ledger_values(
     fit_id: str | None = None,
     model_id: str | None = None,
     coefficient_sha256: str | None = None,
+    variant: str | None = None,
 ) -> tuple[np.ndarray, str]:
     """Read one durable, receipt-bound independent model-logit ledger.
 
@@ -1944,6 +2228,18 @@ def _prediction_ledger_values(
     if artifact_path != ledger_path:
         raise FutureValueDraftScoreError("prediction ledger artifact path changed")
 
+    model_receipt_path = _safe_locator(
+        receipt_payload["model_receipt_locator"],
+        base=receipt_path.parent,
+        field="prediction model receipt",
+    )
+    model_receipt_hash = _verify_file_digest(
+        model_receipt_path,
+        expected_bytes=receipt_payload["model_receipt_bytes"],
+        expected_sha256=receipt_payload["model_receipt_sha256"],
+        field="prediction model receipt",
+    )
+
     expected_ids = tuple(str(value) for value in game_ids)
     receipt_ids = receipt_payload["game_ids"]
     if not isinstance(receipt_ids, list) or tuple(str(value) for value in receipt_ids) != expected_ids:
@@ -1974,6 +2270,25 @@ def _prediction_ledger_values(
         raise FutureValueDraftScoreError("prediction ledger fit IDs are not canonical")
     if receipt_payload["fit_game_identity_sha256"] != identity_sha256(tuple(str(value) for value in fit_ids)):
         raise FutureValueDraftScoreError("prediction ledger fit identity changed")
+    model_payload, expected_model_receipt_hash, model_artifact_hash = _validate_prediction_model_receipt(
+        model_receipt_path,
+        expected_source_receipt_sha256=str(receipt_payload["source_receipt_sha256"]),
+        expected_source_identity_sha256=str(receipt_payload["source_identity_sha256"]),
+        expected_fold_id=str(receipt_payload["fold_id"]),
+        expected_fit_game_ids=tuple(str(value) for value in fit_ids),
+        expected_fit_id=str(receipt_payload["fit_id"]),
+        expected_model_id=str(receipt_payload["model_id"]),
+        expected_coefficient_sha256=str(receipt_payload["coefficient_sha256"]),
+        expected_variant=variant,
+    )
+    if model_receipt_hash != expected_model_receipt_hash:
+        raise FutureValueDraftScoreError("prediction model receipt file changed")
+    if str(receipt_payload["model_artifact_locator"]) != str(model_payload["artifact_locator"]):
+        raise FutureValueDraftScoreError("prediction model artifact locator changed")
+    if receipt_payload["model_artifact_bytes"] != model_payload["artifact_bytes"] or str(receipt_payload["model_artifact_sha256"]).lower() != model_artifact_hash:
+        raise FutureValueDraftScoreError("prediction model artifact binding changed")
+    if str(receipt_payload["model_implementation_sha256"]).lower() != str(model_payload["implementation_sha256"]).lower():
+        raise FutureValueDraftScoreError("prediction model implementation changed")
 
     parsed: list[dict[str, Any]] = []
     for row in rows:
@@ -2045,6 +2360,7 @@ def score_draft_score_variant(
         fit_id=coefficient_binding["fit_id"],
         model_id=coefficient_binding["model_id"],
         coefficient_sha256=coefficient_binding["coefficient_sha256"],
+        variant=design.variant.value,
     )
     external_error = float(
         np.max(np.abs(contribution["composite_logit"].to_numpy(dtype=float) - independent_values))
@@ -2231,6 +2547,7 @@ __all__ = [
     "PHASE_SHAPE_SIGNED_FEATURES",
     "SCHEMA_VERSION",
     "PREDICTION_LEDGER_SCHEMA",
+    "MODEL_RECEIPT_SCHEMA",
     "STATIC_COMPOSITION_COMPONENTS",
     "STATIC_COMPOSITION_FEATURES",
     "VARIANT_CONFIGS",
@@ -2241,6 +2558,7 @@ __all__ = [
     "score_draft_score_variant",
     "score_variant",
     "make_coefficient_receipt",
+    "write_independent_prediction_ledger",
     "static_composition_parity_hash",
     "swap_variant_feature_frame",
     "swap_raw_blue_red_frame",

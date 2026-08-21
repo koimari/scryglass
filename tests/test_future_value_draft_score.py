@@ -28,6 +28,7 @@ from lol_kills.research.future_value_draft_score import (
     swap_variant_feature_frame,
     swap_raw_blue_red_frame,
     validate_feature_names,
+    write_independent_prediction_ledger,
     validate_side_swap,
     validate_raw_side_swap,
     variant_registry_receipt,
@@ -254,6 +255,42 @@ def _atom_kwargs(frame: pd.DataFrame) -> dict[str, object]:
 def _coefficients_and_ledger(design: object) -> tuple[dict[str, float], dict[str, object], Path, Path]:
     coefficients = {feature: 1.0 for feature in design.feature_frame.columns}
     coefficient_receipt = make_coefficient_receipt(design, coefficients)
+    model_artifact_path = _FIXTURE_ROOT / "prediction-model-artifact.json"
+    model_artifact_raw = json.dumps(
+        {
+            "model_id": coefficient_receipt["model_id"],
+            "variant": design.variant.value,
+            "fit_id": coefficient_receipt["fit_id"],
+            "coefficient_sha256": coefficient_receipt["coefficient_sha256"],
+            "implementation": "independent-fixture-model",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    model_artifact_path.write_bytes(model_artifact_raw)
+    implementation_sha256 = "c" * 64
+    model_receipt = {
+        "schema_version": "scryglass:future-value-draft-score-model-receipt:v1",
+        "model_id": coefficient_receipt["model_id"],
+        "model_version": "independent-fixture-v1",
+        "variant": design.variant.value,
+        "source_receipt_sha256": design.source_binding.source_receipt_sha256,
+        "source_identity_sha256": design.source_binding.source_identity_sha256,
+        "fold_id": design.source_binding.fold_id,
+        "fit_game_ids": list(design.source_binding.fit_game_ids),
+        "fit_game_identity_sha256": identity_sha256(design.source_binding.fit_game_ids),
+        "fit_id": coefficient_receipt["fit_id"],
+        "coefficient_sha256": coefficient_receipt["coefficient_sha256"],
+        "artifact_locator": str(model_artifact_path),
+        "artifact_bytes": len(model_artifact_raw),
+        "artifact_sha256": hashlib.sha256(model_artifact_raw).hexdigest(),
+        "implementation_sha256": implementation_sha256,
+        "authority": {"research_only": True},
+    }
+    model_receipt["receipt_sha256"] = _sha(model_receipt)
+    model_receipt_path = _FIXTURE_ROOT / "prediction-model-receipt.json"
+    model_receipt_raw = json.dumps(model_receipt, sort_keys=True, separators=(",", ":")).encode()
+    model_receipt_path.write_bytes(model_receipt_raw)
     rows = [
         {"game_id": game_id, "model_logit": float(value)}
         for game_id, value in zip(design.game_ids, design.feature_frame.sum(axis=1).to_numpy())
@@ -261,7 +298,7 @@ def _coefficients_and_ledger(design: object) -> tuple[dict[str, float], dict[str
     ledger_path = _FIXTURE_ROOT / "prediction-ledger.json"
     ledger_path.write_text(json.dumps({"rows": rows}, sort_keys=True, separators=(",", ":")), encoding="utf-8")
     ledger_receipt = {
-        "schema_version": "scryglass:future-value-draft-score-prediction-ledger:v1",
+        "schema_version": "scryglass:future-value-draft-score-prediction-ledger:v2",
         "source_receipt_sha256": design.source_binding.source_receipt_sha256,
         "source_identity_sha256": design.source_binding.source_identity_sha256,
         "game_ids": list(design.game_ids),
@@ -271,6 +308,13 @@ def _coefficients_and_ledger(design: object) -> tuple[dict[str, float], dict[str
         "fit_id": coefficient_receipt["fit_id"],
         "fit_game_identity_sha256": identity_sha256(design.source_binding.fit_game_ids),
         "coefficient_sha256": coefficient_receipt["coefficient_sha256"],
+        "model_receipt_locator": str(model_receipt_path),
+        "model_receipt_bytes": len(model_receipt_raw),
+        "model_receipt_sha256": hashlib.sha256(model_receipt_raw).hexdigest(),
+        "model_artifact_locator": str(model_artifact_path),
+        "model_artifact_bytes": len(model_artifact_raw),
+        "model_artifact_sha256": hashlib.sha256(model_artifact_raw).hexdigest(),
+        "model_implementation_sha256": implementation_sha256,
         "row_digest_sha256": _sha(rows),
         "artifact_locator": str(ledger_path),
         "artifact_bytes": ledger_path.stat().st_size,
@@ -351,6 +395,50 @@ def test_component_logits_reconstruct_and_static_components_are_visible() -> Non
     assert score.receipt()["authority"] is False
 
 
+def test_independent_prediction_writer_binds_model_receipt_and_artifact() -> None:
+    frame = _frame()
+    design = build_draft_score_variant_design(
+        frame,
+        DraftScoreVariant.CURRENT_ONLY,
+        _binding(),
+        **_atom_kwargs(frame),
+    )
+    coefficients, coefficient_receipt, _ledger_path, _ledger_receipt_path = _coefficients_and_ledger(design)
+    del coefficients
+    output_path, receipt_path = write_independent_prediction_ledger(
+        _FIXTURE_ROOT / "writer-predictions.json",
+        design.game_ids,
+        design.feature_frame.sum(axis=1).to_numpy(),
+        source_receipt_sha256=design.source_binding.source_receipt_sha256,
+        source_identity_sha256=design.source_binding.source_identity_sha256,
+        fold_id=design.source_binding.fold_id,
+        fit_game_ids=design.source_binding.fit_game_ids,
+        fit_id=coefficient_receipt["fit_id"],
+        model_id=coefficient_receipt["model_id"],
+        coefficient_sha256=coefficient_receipt["coefficient_sha256"],
+        model_receipt_path=_FIXTURE_ROOT / "prediction-model-receipt.json",
+        variant=design.variant,
+    )
+    score = score_draft_score_variant(
+        design,
+        {feature: 1.0 for feature in design.feature_frame.columns},
+        coefficient_receipt=coefficient_receipt,
+        independent_prediction_ledger=output_path,
+        independent_prediction_ledger_receipt=receipt_path,
+    )
+    assert score.independent_prediction_error_max <= 1e-12
+    model_artifact = _FIXTURE_ROOT / "prediction-model-artifact.json"
+    model_artifact.write_bytes(model_artifact.read_bytes() + b"mutated")
+    with pytest.raises(FutureValueDraftScoreError, match="model artifact|bytes"):
+        score_draft_score_variant(
+            design,
+            {feature: 1.0 for feature in design.feature_frame.columns},
+            coefficient_receipt=coefficient_receipt,
+            independent_prediction_ledger=output_path,
+            independent_prediction_ledger_receipt=receipt_path,
+        )
+
+
 @pytest.mark.parametrize("variant", tuple(DraftScoreVariant))
 def test_side_swap_negates_signed_features_and_preserves_phase_invariants(
     variant: DraftScoreVariant,
@@ -408,6 +496,23 @@ def test_static_atom_receipt_rejects_resealed_path_and_producer_mutation() -> No
             binding,
             static_atom_receipt=payload,
             static_atom_receipt_path=path,
+        )
+
+
+def test_strict_static_atoms_require_independent_authority_receipt() -> None:
+    frame = _frame()
+    binding = _binding()
+    payload, path = _write_atom(frame)
+    with pytest.raises(FutureValueDraftScoreError, match="independent atom authority"):
+        build_draft_score_variant_design(
+            frame,
+            DraftScoreVariant.CURRENT_ONLY,
+            binding,
+            static_atom_receipt=payload,
+            static_atom_receipt_path=path,
+            require_independent_static_authority=True,
+            static_atom_authority_path=_SOURCE_PATH,
+            static_atom_authority_root=_FIXTURE_ROOT,
         )
 
 
