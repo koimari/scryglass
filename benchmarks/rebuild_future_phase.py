@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import time
 import warnings
 from pathlib import Path
@@ -284,8 +285,10 @@ def _partition_payload(artifact: Mapping[str, Any]) -> dict[str, Any]:
         "eligible_game_ids",
         "eligible_assignment_sha256",
         "reference_game_count",
+        "reference_identity_sha256",
         "reference_assignment_sha256",
         "reference_assignment_match",
+        "reference_assignment_verified",
         "authoritative",
         "proxy_authority_blocker",
     )
@@ -296,6 +299,15 @@ def _partition_payload(artifact: Mapping[str, Any]) -> dict[str, Any]:
         raise PhaseRebuildError("phase artifact did not bind a comparable shared partition")
     if not partition.get("reference_assignment_match"):
         raise PhaseRebuildError("phase artifact did not match the reference assignments")
+    if not partition.get("reference_assignment_verified"):
+        raise PhaseRebuildError("phase artifact full reference assignments are unverified")
+    if int(partition["reference_game_count"]) <= 0:
+        raise PhaseRebuildError("phase artifact reference count is invalid")
+    if re.fullmatch(r"[0-9a-f]{64}", str(partition["reference_identity_sha256"]).lower()) is None:
+        raise PhaseRebuildError("phase artifact reference identity hash is invalid")
+    reference_assignment = str(partition["reference_assignment_sha256"]).lower()
+    if len(reference_assignment) != 64:
+        raise PhaseRebuildError("phase artifact reference assignment hash is invalid")
     return dict(partition)
 
 
@@ -340,7 +352,16 @@ def _build_rating_reference_partition_frame(
     eligible = reference.loc[reference_ids.isin(eligible_ids)].copy()
     if set(eligible["game_id"].astype(str)) != eligible_ids:
         raise PhaseRebuildError("rating reference partition is missing eligible maps")
-    digest = phase_series_assignment_sha256(eligible, game_column="game_id")
+    eligible_assignment_sha256 = phase_series_assignment_sha256(
+        eligible,
+        game_column="game_id",
+    )
+    reference_assignment_sha256 = phase_series_assignment_sha256(
+        reference,
+        game_column="game_id",
+    )
+    reference_ids = tuple(canonical_game_ids(reference["game_id"].astype(str)))
+    reference_identity_sha256 = identity_sha256(reference_ids)
     audit = dict(reference.attrs.get("series_cluster_audit") or {})
     verified_reference = _make_verified_phase_series_reference(
         reference,
@@ -349,17 +370,23 @@ def _build_rating_reference_partition_frame(
         crosswalk_receipt_path=crosswalk_receipt_path,
         crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
         eligible_ids=sorted(eligible_ids),
-        eligible_assignment_sha256=digest,
+        eligible_assignment_sha256=eligible_assignment_sha256,
     )
-    return verified_reference, digest, {
+    if verified_reference.reference_assignment_sha256 != reference_assignment_sha256:
+        raise PhaseRebuildError("reference assignment digest changed during binding")
+    if verified_reference.reference_identity_sha256 != reference_identity_sha256:
+        raise PhaseRebuildError("reference identity changed during binding")
+    return verified_reference, eligible_assignment_sha256, {
         "reference_game_count": int(len(reference)),
+        "reference_identity_sha256": reference_identity_sha256,
         "reference_promoted_game_count": int(
             reference["series_id"].astype(str).str.startswith("leaguepedia:").sum()
         ),
         "reference_eligible_promoted_game_count": int(
             eligible["series_id"].astype(str).str.startswith("leaguepedia:").sum()
         ),
-        "reference_assignment_sha256": digest,
+        "reference_assignment_sha256": reference_assignment_sha256,
+        "eligible_assignment_sha256": eligible_assignment_sha256,
         "reference_audit": audit,
     }
 
@@ -406,7 +433,7 @@ def rebuild_phase_artifacts(
     if _sha256_path(crosswalk_receipt_path) != crosswalk_receipt_file_sha256:
         raise PhaseRebuildError("crosswalk receipt file hash changed")
     reference_started = time.perf_counter()
-    reference_partition, reference_assignment_sha256, reference_stats = (
+    reference_partition, eligible_assignment_sha256, reference_stats = (
         _build_rating_reference_partition_frame(
             maps_source,
             source_receipt=receipt,
@@ -448,7 +475,7 @@ def rebuild_phase_artifacts(
             crosswalk_receipt_path=crosswalk_receipt_path,
             crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
             _series_partition_reference=reference_partition,
-            series_partition_assignment_sha256=reference_assignment_sha256,
+            series_partition_assignment_sha256=eligible_assignment_sha256,
         )
         evaluation = evaluate_phase_curve(
             eligible_frame,
@@ -464,7 +491,7 @@ def rebuild_phase_artifacts(
             crosswalk_receipt_path=crosswalk_receipt_path,
             crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
             _series_partition_reference=reference_partition,
-            series_partition_assignment_sha256=reference_assignment_sha256,
+            series_partition_assignment_sha256=eligible_assignment_sha256,
         )
     elapsed = time.perf_counter() - started
     numeric_warnings = sorted(
@@ -492,8 +519,10 @@ def rebuild_phase_artifacts(
             "eligible_identity_sha256",
             "eligible_assignment_sha256",
             "reference_game_count",
+            "reference_identity_sha256",
             "reference_assignment_sha256",
             "reference_assignment_match",
+            "reference_assignment_verified",
         )
     } != {
         key: evaluation_partition[key]
@@ -508,12 +537,24 @@ def rebuild_phase_artifacts(
             "eligible_identity_sha256",
             "eligible_assignment_sha256",
             "reference_game_count",
+            "reference_identity_sha256",
             "reference_assignment_sha256",
             "reference_assignment_match",
+            "reference_assignment_verified",
         )
     }:
         raise PhaseRebuildError("fit and evaluation series partitions differ")
     receipt_reference = _receipt_reference(receipt_path, receipt)
+    reference_binding = {
+        **reference_stats,
+        "assignment_difference_count": 0,
+        "reference_assignment_match": bool(
+            fit_partition["reference_assignment_match"]
+        ),
+        "reference_assignment_verified": bool(
+            fit_partition["reference_assignment_verified"]
+        ),
+    }
     source_payload = {
         "source_as_of": receipt["source_as_of"],
         "source_game_count": int(receipt["source_game_count"]),
@@ -530,10 +571,7 @@ def rebuild_phase_artifacts(
         "transport": fit["source_transport"],
         "source_lineage": fit["source_lineage"],
         "series_partition": fit_partition,
-        "series_partition_reference": {
-            **reference_stats,
-            "assignment_difference_count": 0,
-        },
+        "series_partition_reference": reference_binding,
     }
     candidate_blockers = [
         "fold-internal fitted weights have no independent promotion receipt",
@@ -588,8 +626,17 @@ def rebuild_phase_artifacts(
         "series_partition_reference_game_count": fit_partition[
             "reference_game_count"
         ],
+        "series_partition_reference_identity_sha256": fit_partition[
+            "reference_identity_sha256"
+        ],
         "series_partition_reference_assignment_sha256": fit_partition[
             "reference_assignment_sha256"
+        ],
+        "series_partition_reference_assignment_match": fit_partition[
+            "reference_assignment_match"
+        ],
+        "series_partition_reference_assignment_verified": fit_partition[
+            "reference_assignment_verified"
         ],
         "series_partition_proxy_authority_blocker": fit_partition["proxy_authority_blocker"],
         "feature_columns": list(FEATURE_COLUMNS),
@@ -642,8 +689,17 @@ def rebuild_phase_artifacts(
         "series_partition_reference_game_count": evaluation_partition[
             "reference_game_count"
         ],
+        "series_partition_reference_identity_sha256": evaluation_partition[
+            "reference_identity_sha256"
+        ],
         "series_partition_reference_assignment_sha256": evaluation_partition[
             "reference_assignment_sha256"
+        ],
+        "series_partition_reference_assignment_match": evaluation_partition[
+            "reference_assignment_match"
+        ],
+        "series_partition_reference_assignment_verified": evaluation_partition[
+            "reference_assignment_verified"
         ],
         "series_partition_proxy_authority_blocker": evaluation_partition["proxy_authority_blocker"],
         "blockers": sorted(set(candidate_blockers)),
@@ -676,10 +732,7 @@ def rebuild_phase_artifacts(
             "accepted_map_rows": int(len(maps)),
             "accepted_team_rows": int(len(teams)),
             **frame_stats,
-            "series_partition_reference": {
-                **reference_stats,
-                "assignment_difference_count": 0,
-            },
+            "series_partition_reference": reference_binding,
             "evaluation_rows": int(len(eligible_frame)),
             "transfer_group_limit": int(max_transfer_groups),
             "transfer_group_counts": transfer_group_counts,

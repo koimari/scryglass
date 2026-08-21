@@ -592,7 +592,9 @@ def _series_identity_report(frame: pd.DataFrame) -> dict[str, Any]:
         status = str(
             partition_binding.get("cross_model_partition_status") or "non_comparable"
         )
-        if status == "comparable" and assignment_sha256 != reference_assignment_sha256:
+        if status == "comparable" and partition_binding.get(
+            "reference_assignment_match"
+        ) is not True:
             status = "non_comparable"
         cross_model_partition = {
             "status": status,
@@ -607,6 +609,10 @@ def _series_identity_report(frame: pd.DataFrame) -> dict[str, Any]:
             ),
             "eligible_assignment_sha256": assignment_sha256,
             "reference_assignment_sha256": reference_assignment_sha256,
+            "reference_game_count": partition_binding.get("reference_game_count"),
+            "reference_identity_sha256": partition_binding.get(
+                "reference_identity_sha256"
+            ),
             "reference_assignment_match": partition_binding.get(
                 "reference_assignment_match", False
             ),
@@ -753,6 +759,7 @@ class _VerifiedPhaseSeriesReference:
     crosswalk_receipt_sha256: str
     crosswalk_receipt_file_sha256: str
     eligible_assignment_sha256: str
+    reference_assignment_sha256: str
     reference_game_count: int
     reference_identity_sha256: str
     _factory_token: object
@@ -873,6 +880,10 @@ def _make_verified_phase_series_reference(
         eligible_frame,
         game_column="game_id",
     )
+    reference_assignment_sha256 = phase_series_assignment_sha256(
+        frame,
+        game_column="game_id",
+    )
     expected_assignment = str(eligible_assignment_sha256).lower()
     if actual_assignment_sha256 != expected_assignment:
         raise FuturePhaseCurveError("verified series reference assignment digest changed")
@@ -888,6 +899,7 @@ def _make_verified_phase_series_reference(
         crosswalk_receipt_sha256=crosswalk_receipt_sha256,
         crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
         eligible_assignment_sha256=actual_assignment_sha256,
+        reference_assignment_sha256=reference_assignment_sha256,
         reference_game_count=len(expected_ids),
         reference_identity_sha256=reference_identity_sha256,
         _factory_token=_REFERENCE_FACTORY_TOKEN,
@@ -1046,6 +1058,7 @@ def _revalidate_verified_phase_series_reference(
         "crosswalk_receipt_sha256",
         "crosswalk_receipt_file_sha256",
         "eligible_assignment_sha256",
+        "reference_assignment_sha256",
         "reference_game_count",
         "reference_identity_sha256",
     ):
@@ -1217,6 +1230,13 @@ def bind_phase_series_partition(
                 "series_id": eligible_series.to_numpy(),
             }
         )
+    reference_assignment_sha256 = phase_series_assignment_sha256(
+        model_frame,
+        game_column="game_id",
+    )
+    reference_identity_sha256 = identity_sha256(
+        canonical_game_ids(model_ids.astype(str))
+    )
     eligible_assignment_sha256 = phase_series_assignment_sha256(
         assignment_frame,
         game_column="game_id",
@@ -1291,8 +1311,14 @@ def bind_phase_series_partition(
         "eligible_game_ids": list(eligible_ids),
         "eligible_assignment_sha256": eligible_assignment_sha256,
         "reference_game_count": len(reference_id_set),
-        "reference_assignment_sha256": expected_assignment,
+        "reference_identity_sha256": reference_identity_sha256,
+        "reference_assignment_sha256": reference_assignment_sha256,
         "reference_assignment_match": assignment_matches_reference,
+        "reference_assignment_verified": bool(
+            _verified_reference is None
+            or reference_assignment_sha256
+            == _verified_reference.reference_assignment_sha256
+        ),
         "authoritative": False,
         "proxy_authority_blocker": bool(
             len(mapped_ids & eligible_set) < len(eligible_set)
@@ -1312,6 +1338,10 @@ def bind_phase_series_partition(
             "phase series eligible assignments differ from the reference partition"
         )
     else:
+        if not partition["reference_assignment_verified"]:
+            raise FuturePhaseCurveError(
+                "phase series full reference assignments differ from verified reference"
+            )
         partition["cross_model_partition_status"] = "comparable"
         partition["cross_model_partition_reason"] = (
             "phase and rating use the same full-reference eligible game-to-series assignments"
@@ -2558,8 +2588,17 @@ def fit_phase_curve(
                 "series_partition_reference_game_count": partition[
                     "reference_game_count"
                 ],
+                "series_partition_reference_identity_sha256": partition[
+                    "reference_identity_sha256"
+                ],
                 "series_partition_reference_assignment_sha256": partition[
                     "reference_assignment_sha256"
+                ],
+                "series_partition_reference_assignment_match": partition[
+                    "reference_assignment_match"
+                ],
+                "series_partition_reference_assignment_verified": partition[
+                    "reference_assignment_verified"
                 ],
                 "series_partition_eligible_game_ids": list(
                     partition["eligible_game_ids"]
@@ -3237,8 +3276,17 @@ def evaluate_phase_curve(
                 "series_partition_reference_game_count": partition[
                     "reference_game_count"
                 ],
+                "series_partition_reference_identity_sha256": partition[
+                    "reference_identity_sha256"
+                ],
                 "series_partition_reference_assignment_sha256": partition[
                     "reference_assignment_sha256"
+                ],
+                "series_partition_reference_assignment_match": partition[
+                    "reference_assignment_match"
+                ],
+                "series_partition_reference_assignment_verified": partition[
+                    "reference_assignment_verified"
                 ],
                 "series_partition_eligible_game_ids": list(
                     partition["eligible_game_ids"]
