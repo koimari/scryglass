@@ -1306,23 +1306,27 @@ def _apply_verified_leaguepedia_partition(
     if team_columns is not None:
         blue_column, red_column = team_columns
         raw_ids = _frame_game_ids(maps, "maps").astype(str)
-        raw_index_by_id = {
-            str(game_id): index for index, game_id in zip(maps.index, raw_ids)
+        actual_pair_by_id = {
+            str(game_id): tuple(
+                sorted(
+                    (
+                        _leaguepedia_team_key(blue_team),
+                        _leaguepedia_team_key(red_team),
+                    )
+                )
+            )
+            for game_id, blue_team, red_team in zip(
+                raw_ids,
+                maps[blue_column].to_numpy(copy=False),
+                maps[red_column].to_numpy(copy=False),
+            )
         }
         for game_id in mapped_ids:
             assignment = assignment_by_id[game_id]
             expected_pair = tuple(
                 sorted(_leaguepedia_team_key(value) for value in assignment["normalized_team_set"])
             )
-            source_index = raw_index_by_id[game_id]
-            actual_pair = tuple(
-                sorted(
-                    (
-                        _leaguepedia_team_key(maps.loc[source_index, blue_column]),
-                        _leaguepedia_team_key(maps.loc[source_index, red_column]),
-                    )
-                )
-            )
+            actual_pair = actual_pair_by_id[game_id]
             if not expected_pair or actual_pair != expected_pair:
                 raise FutureValueSourceError(
                     "Leaguepedia crosswalk team pair does not match OE maps"
