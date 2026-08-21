@@ -63,6 +63,9 @@ from lol_kills.v2.tierlists.accepted_census import identity_sha256
 
 SCHEMA_VERSION = "scryglass:future-value-current-rating-ledger:v2"
 RECEIPT_SCHEMA_VERSION = "scryglass:future-value-current-rating-ledger-receipt:v2"
+SERIES_PARTITION_RECEIPT_SCHEMA_VERSION = (
+    "scryglass:future-value-current-rating-series-partition-receipt:v1"
+)
 IMPLEMENTATION_LOCATOR = "lol_kills/research/future_value_rating_ledger.py"
 
 _MAP_ID_COLUMNS = ("game_uid", "gameid", "game_id")
@@ -115,6 +118,11 @@ _RECEIPT_STATE_KEY_POLICY = {
     "player": "stable_oe_player_id",
     "display_names": "metadata_only",
     "display_alias_reuse": "allowed_with_stable_keys",
+}
+_SERIES_PARTITION_SOURCE_STATUS = {
+    "conservative_series_superset": (True, False),
+    "mixed:leaguepedia_crosswalk+conservative_series_superset": (True, False),
+    "verified_grid_series": (False, True),
 }
 
 
@@ -211,6 +219,15 @@ def _artifact_digest(frame: pd.DataFrame, feature_names: Sequence[str]) -> str:
                 raise CurrentRatingLedgerError(f"current rating feature is non-finite: {name}")
             item[name] = value
         rows.append(item)
+    return hashlib.sha256(_canonical_json_bytes(rows)).hexdigest()
+
+
+def _series_partition_assignment_digest(frame: pd.DataFrame) -> str:
+    rows = [
+        {"game_id": str(game_id), "series_id": str(series_id)}
+        for game_id, series_id in zip(frame["game_id"], frame["series_id"])
+    ]
+    rows.sort(key=lambda row: row["game_id"])
     return hashlib.sha256(_canonical_json_bytes(rows)).hexdigest()
 
 
@@ -929,6 +946,24 @@ def build_fold_current_rating_feature_ledger(
         ledger[feature] = values
     implementation_sha = _implementation_hash()
     artifact_digest = _artifact_digest(ledger, CURRENT_RATING_SIGNED_MAP_FEATURES)
+    partition_status = _SERIES_PARTITION_SOURCE_STATUS.get(str(series_partition_source))
+    if partition_status is None:
+        raise CurrentRatingLedgerError("series partition source is not registered")
+    series_partition_receipt: dict[str, Any] = {
+        "schema_version": SERIES_PARTITION_RECEIPT_SCHEMA_VERSION,
+        "source_type": str(series_partition_source),
+        "partition_digest": _series_partition_assignment_digest(ledger),
+        "partition_game_count": len(output_ids),
+        "partition_game_identity_sha256": identity_sha256(output_ids),
+        "accepted_census_game_count": int(source_receipt["source_game_count"]),
+        "accepted_census_identity_sha256": str(source_receipt["source_identity_sha256"]),
+        "source_receipt_sha256": str(source_receipt["receipt_sha256"]),
+        "conservative": partition_status[0],
+        "authoritative": partition_status[1],
+    }
+    series_partition_receipt["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(series_partition_receipt)
+    ).hexdigest()
     receipt: dict[str, Any] = {
         "schema_version": RECEIPT_SCHEMA_VERSION,
         "ledger_schema_version": SCHEMA_VERSION,
@@ -958,6 +993,7 @@ def build_fold_current_rating_feature_ledger(
         "series_partition_source": series_partition_source,
         "series_partition_key_fields": list(series_partition_key_fields),
         "series_partition_receipt_file_sha256": series_partition_receipt_file_sha256,
+        "series_partition_receipt": series_partition_receipt,
         "state_key_policy": dict(_RECEIPT_STATE_KEY_POLICY),
         "fit_window_end": _utc_text(cutoff),
         "strict_prior_timing": "train_outcomes_only_strictly_before_cutoff",
@@ -1040,6 +1076,7 @@ def validate_fold_current_rating_feature_ledger(
         "validation_series_identity_sha256", "series_disjoint", "state_key_policy",
         "series_partition_source", "series_partition_key_fields",
         "series_partition_receipt_file_sha256",
+        "series_partition_receipt",
         "strict_prior_timing", "same_timestamp_policy", "masked_nontraining_map_columns",
         "masked_nontraining_player_columns", "source_frame_sha256", "feature_names",
         "ledger_rows_sha256", "implementation_locator", "implementation_sha256", "artifact",
@@ -1108,6 +1145,47 @@ def validate_fold_current_rating_feature_ledger(
         )
     if not valid_series_binding:
         raise CurrentRatingLedgerError("current rating series partition changed")
+    partition = receipt.get("series_partition_receipt")
+    required_partition_keys = {
+        "schema_version", "source_type", "partition_digest",
+        "partition_game_count", "partition_game_identity_sha256",
+        "accepted_census_game_count", "accepted_census_identity_sha256",
+        "source_receipt_sha256", "conservative", "authoritative", "receipt_sha256",
+    }
+    if not isinstance(partition, Mapping) or set(partition) != required_partition_keys:
+        raise CurrentRatingLedgerError("current rating series partition receipt is incomplete")
+    partition_hash = partition.get("receipt_sha256")
+    unsigned_partition = dict(partition)
+    unsigned_partition.pop("receipt_sha256", None)
+    if (
+        not isinstance(partition_hash, str)
+        or hashlib.sha256(_canonical_json_bytes(unsigned_partition)).hexdigest()
+        != partition_hash
+    ):
+        raise CurrentRatingLedgerError("current rating series partition receipt hash does not match payload")
+    partition_source = str(partition.get("source_type") or "")
+    expected_status = _SERIES_PARTITION_SOURCE_STATUS.get(partition_source)
+    if (
+        partition.get("schema_version") != SERIES_PARTITION_RECEIPT_SCHEMA_VERSION
+        or partition_source != str(series_source)
+        or expected_status is None
+        or type(partition.get("conservative")) is not bool
+        or type(partition.get("authoritative")) is not bool
+        or (partition.get("conservative"), partition.get("authoritative"))
+        != expected_status
+    ):
+        raise CurrentRatingLedgerError("current rating series partition receipt authority changed")
+    partition_ids = tuple(sorted(str(value) for value in receipt["output_game_ids"]))
+    if (
+        int(partition.get("partition_game_count", -1)) != len(partition_ids)
+        or partition.get("partition_game_identity_sha256") != identity_sha256(partition_ids)
+        or int(partition.get("accepted_census_game_count", -1))
+        != int(source_receipt["source_game_count"])
+        or partition.get("accepted_census_identity_sha256")
+        != source_receipt.get("source_identity_sha256")
+        or partition.get("source_receipt_sha256") != source_receipt.get("receipt_sha256")
+    ):
+        raise CurrentRatingLedgerError("current rating series partition source census changed")
     authority = receipt.get("authority")
     if not isinstance(authority, Mapping) or authority.get("research_only") is not True or any(authority.get(key) is not False for key in ("public_player_rating", "public_team_rating", "public_probability", "promotion", "merge", "deployment", "betting")):
         raise CurrentRatingLedgerError("current rating receipt authority is not research-only")
@@ -1146,6 +1224,8 @@ def validate_fold_current_rating_feature_ledger(
         != identity_sha256(actual_validation_series)
     ):
         raise CurrentRatingLedgerError("current rating series binding changed")
+    if _series_partition_assignment_digest(ledger) != partition.get("partition_digest"):
+        raise CurrentRatingLedgerError("current rating series partition assignments changed")
     if _artifact_digest(ledger, CURRENT_RATING_SIGNED_MAP_FEATURES) != receipt["ledger_rows_sha256"]:
         raise CurrentRatingLedgerError("current rating ledger values changed")
     artifact = receipt.get("artifact")

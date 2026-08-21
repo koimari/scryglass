@@ -6,11 +6,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from lol_kills.v2.tierlists.accepted_census import identity_sha256
 from lol_kills.research.future_value_rating import bind_accepted_future_value_source
 from lol_kills.research.future_value_rating_ledger import (
     CurrentRatingLedgerError,
     _artifact_digest,
     _canonical_json_bytes,
+    _series_partition_assignment_digest,
     build_fold_current_rating_feature_ledger,
     validate_fold_current_rating_feature_ledger,
 )
@@ -142,6 +144,15 @@ def test_fold_replay_batches_equal_timestamp_rows_and_emits_four_features() -> N
     assert artifact["same_timestamp_policy"] == "score_full_utc_timestamp_batch_before_training_updates"
     assert artifact["authority"]["public_player_rating"] is False
     assert artifact["authority"]["public_team_rating"] is False
+    partition = artifact["series_partition_receipt"]
+    assert partition["source_type"] == "conservative_series_superset"
+    assert partition["conservative"] is True
+    assert partition["authoritative"] is False
+    assert partition["partition_game_count"] == len(GAME_IDS)
+    assert partition["partition_digest"] == _series_partition_assignment_digest(ledger)
+    assert partition["accepted_census_game_count"] == receipt["source_game_count"]
+    assert partition["accepted_census_identity_sha256"] == receipt["source_identity_sha256"]
+    assert partition["source_receipt_sha256"] == receipt["receipt_sha256"]
 
 
 def test_large_source_attrs_do_not_change_replay_values() -> None:
@@ -299,6 +310,44 @@ def test_validation_rechecks_series_disjointness_after_receipt_reseal(
         _canonical_json_bytes(payload)
     ).hexdigest()
     with pytest.raises(CurrentRatingLedgerError, match="series overlap"):
+        validate_fold_current_rating_feature_ledger(
+            bad_ledger,
+            bad_receipt,
+            source_receipt=receipt,
+            train_game_ids=("g1", "g2"),
+            validation_game_ids=("g3", "g4"),
+            fit_window_end="2026-01-02T00:00:00Z",
+            source_frames={"maps": maps, "players": players, "teams": teams},
+        )
+
+
+def test_validation_rejects_co_mutated_series_assignment_receipt(
+    tmp_path: Path,
+) -> None:
+    maps, players, teams, receipt = _source()
+    ledger, good_receipt = _build(maps, players, teams, receipt, tmp_path)
+    bad_ledger = ledger.copy()
+    bad_ledger.loc[bad_ledger["game_id"].eq("g4"), "series_id"] = "new-series"
+    bad_receipt = json.loads(json.dumps(good_receipt))
+    bad_receipt["ledger_rows_sha256"] = _artifact_digest(
+        bad_ledger,
+        ("base_team_logit", "team_rating_diff_scaled", "base_player_logit", "player_rating_diff_scaled"),
+    )
+    bad_validation_series = (
+        "new-series",
+        str(ledger.loc[ledger["game_id"].eq("g3"), "series_id"].iloc[0]),
+    )
+    bad_receipt["validation_series_ids"] = list(bad_validation_series)
+    bad_receipt["validation_series_count"] = 2
+    bad_receipt["validation_series_identity_sha256"] = identity_sha256(
+        bad_validation_series
+    )
+    payload = dict(bad_receipt)
+    payload.pop("receipt_sha256")
+    bad_receipt["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(payload)
+    ).hexdigest()
+    with pytest.raises(CurrentRatingLedgerError, match="partition assignments"):
         validate_fold_current_rating_feature_ledger(
             bad_ledger,
             bad_receipt,
