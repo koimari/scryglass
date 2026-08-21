@@ -41,8 +41,10 @@ from lol_kills.research.future_value_rating_ledger import (
     IMPLEMENTATION_LOCATOR as CURRENT_LEDGER_IMPLEMENTATION_LOCATOR,
     RECEIPT_SCHEMA_VERSION as CURRENT_LEDGER_RECEIPT_SCHEMA_VERSION,
     SCHEMA_VERSION as CURRENT_LEDGER_SCHEMA_VERSION,
+    SERIES_PARTITION_RECEIPT_SCHEMA_VERSION,
     _artifact_digest as current_artifact_digest,
     _implementation_hash as current_implementation_hash,
+    _series_partition_assignment_digest,
     _RECEIPT_STATE_KEY_POLICY,
 )
 from lol_kills.research import future_value_training as training_module
@@ -342,6 +344,19 @@ def _durable_manifest(
                 "tournament",
                 "unordered_team_pair",
             ],
+            "series_partition_receipt_file_sha256": None,
+            "series_partition_receipt": {
+                "schema_version": SERIES_PARTITION_RECEIPT_SCHEMA_VERSION,
+                "source_type": "conservative_series_superset",
+                "partition_digest": _series_partition_assignment_digest(native_frame),
+                "partition_game_count": len(game_ids),
+                "partition_game_identity_sha256": identity_sha256(game_ids),
+                "accepted_census_game_count": int(source["source_game_count"]),
+                "accepted_census_identity_sha256": str(source["source_identity_sha256"]),
+                "source_receipt_sha256": str(source["receipt_sha256"]),
+                "conservative": True,
+                "authoritative": False,
+            },
             "state_key_policy": dict(_RECEIPT_STATE_KEY_POLICY),
             "fit_window_end": _utc_text("2026-01-03T00:00:00Z"),
             "strict_prior_timing": "train_outcomes_only_strictly_before_cutoff",
@@ -365,6 +380,11 @@ def _durable_manifest(
                 "betting": False,
             },
         }
+        native_payload["series_partition_receipt"]["receipt_sha256"] = hashlib.sha256(
+            _canonical(
+                native_payload["series_partition_receipt"]
+            )
+        ).hexdigest()
     else:
         native_payload = {
             "schema_version": "scryglass:atomized-scaling-feature-ledger:v1",
