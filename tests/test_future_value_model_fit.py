@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from lol_kills.research.future_value_rating import (
+    CURRENT_RATING_SIGNED_MAP_FEATURES,
     FutureValueSourceError,
     SIDE_LEVEL_TO_MODEL_FEATURE,
     _side_level_column,
@@ -19,6 +20,8 @@ from lol_kills.research.future_value_rating import (
     _baseline_source_binding,
     _bind_baseline_fold_series,
     _current_rating_method_comparison,
+    _scope_series_cluster_audit_to_frame,
+    _sequential_current_rating_baseline,
     _fold_level_imputation_values,
     build_future_value_design,
     build_time_decayed_prior_player_form,
@@ -738,9 +741,10 @@ def test_evaluation_pairs_candidate_and_baseline_on_identical_game_ids() -> None
         "candidate_raw_logit",
         "candidate_calibrated_logit",
         "calibration_slope",
-        "intercept",
-        "sequential_player_elo",
-        "hierarchical_bt",
+            "intercept",
+            "sequential_player_elo",
+            "sequential_current_rating",
+            "hierarchical_bt",
         "minimum_metric_support",
         "minimum_effective_support",
         "minimum_atom_support",
@@ -792,6 +796,7 @@ def test_current_rating_methods_keep_partial_bt_out_of_shared_cohort() -> None:
     target = pd.Series([0.0, 1.0, 1.0, 0.0], index=validation.index)
     paired_mask = pd.Series([True, True, True, True], index=validation.index)
     sequential = pd.Series([0.2, 0.8, 0.7, 0.3], index=validation.index)
+    sequential_current = pd.Series([0.22, 0.78, 0.68, 0.32], index=validation.index)
     hierarchical = pd.Series([0.25, 0.75, np.nan, np.nan], index=validation.index)
     reports = {
         "sequential_player_elo": {
@@ -805,6 +810,11 @@ def test_current_rating_methods_keep_partial_bt_out_of_shared_cohort() -> None:
             "exclusion_reason": "validation rows with unseen teams are excluded",
             "source_binding": {"status": "available", "blockers": []},
         },
+        "sequential_current_rating": {
+            "status": "available",
+            "blockers": [],
+            "source_binding": {"status": "available", "blockers": []},
+        },
     }
 
     evidence = _current_rating_method_comparison(
@@ -814,6 +824,7 @@ def test_current_rating_methods_keep_partial_bt_out_of_shared_cohort() -> None:
         sequential,
         hierarchical,
         reports,
+        sequential_current,
     )
 
     assert evidence["method_specific"]["sequential_player_elo"]["status"] == (
@@ -821,6 +832,10 @@ def test_current_rating_methods_keep_partial_bt_out_of_shared_cohort() -> None:
     )
     assert evidence["method_specific"]["sequential_player_elo"]["scored_rows"] == 4
     assert evidence["method_specific"]["sequential_player_elo"]["missing_game_ids"] == []
+    current = evidence["method_specific"]["sequential_current_rating"]
+    assert current["status"] == "available"
+    assert current["scored_rows"] == 4
+    assert current["missing_game_ids"] == []
     bt = evidence["method_specific"]["hierarchical_bt"]
     assert bt["status"] == "partial"
     assert bt["scored_rows"] == 2
@@ -832,6 +847,76 @@ def test_current_rating_methods_keep_partial_bt_out_of_shared_cohort() -> None:
     assert "current_rating_row_id_parity_incomplete" in evidence["blockers"]
     assert "hierarchical_bt_coverage_incomplete" in evidence["blockers"]
     assert pd.isna(hierarchical.iloc[2])
+
+
+def test_series_audit_scopes_verified_model_frame_and_keeps_full_source_audit() -> None:
+    frame = pd.DataFrame(
+        {
+            "game_id": ["g1", "g2", "g3"],
+            "series_id": [
+                "leaguepedia:series-a",
+                "leaguepedia:series-a",
+                "proxy:league|tournament|teams",
+            ],
+        }
+    )
+    frame.attrs["series_cluster_source"] = "leaguepedia_crosswalk"
+    frame.attrs["series_cluster_audit"] = {
+        "source": "leaguepedia_crosswalk",
+        "authoritative": False,
+        "map_count": 7,
+        "cluster_count": 4,
+    }
+    frame.attrs["verified_leaguepedia_series_crosswalk"] = {
+        "mapped_game_ids": ["g1", "g2", "g4"],
+    }
+
+    scoped = _scope_series_cluster_audit_to_frame(frame)
+
+    assert scoped.attrs["full_source_series_cluster_audit"]["map_count"] == 7
+    audit = scoped.attrs["series_cluster_audit"]
+    assert audit["scope"] == "model_eligible_census"
+    assert audit["map_count"] == 3
+    assert audit["full_source_map_count"] == 7
+    assert audit["mapped_game_count"] == 2
+    assert audit["promoted_game_count"] == 2
+    assert audit["retained_proxy_game_count"] == 1
+    assert audit["cluster_count"] == 2
+
+
+def test_sequential_current_rating_uses_bound_team_logit(monkeypatch: pytest.MonkeyPatch) -> None:
+    validation = pd.DataFrame({"game_id": ["g3", "g4"]})
+    ledger = pd.DataFrame(
+        {
+            "game_id": ["g1", "g2", "g3", "g4"],
+            "date": pd.date_range("2026-01-01", periods=4, tz="UTC"),
+            "series_id": ["s1", "s2", "s3", "s4"],
+            "base_team_logit": [0.0, 0.1, 0.8, -0.8],
+            "team_rating_diff_scaled": [0.0, 0.1, 0.2, -0.2],
+            "base_player_logit": [0.0, 0.1, 0.2, -0.2],
+            "player_rating_diff_scaled": [0.0, 0.1, 0.2, -0.2],
+        }
+    )
+    ledger.attrs["feature_names"] = list(CURRENT_RATING_SIGNED_MAP_FEATURES)
+    ledger.attrs["schema_version"] = "scryglass:future-value-rating-ledger:v1"
+
+    monkeypatch.setattr(
+        "lol_kills.research.future_value_rating.validate_rating_feature_ledger",
+        lambda *args, **kwargs: ledger,
+    )
+    probabilities, report = _sequential_current_rating_baseline(
+        validation,
+        ledger,
+        train_game_ids=("g1", "g2"),
+        validation_game_ids=("g3", "g4"),
+        strict_cutoff="2026-01-03T00:00:00Z",
+        source_receipt={"receipt_sha256": "a" * 64},
+    )
+
+    assert report["status"] == "available"
+    assert report["probability_feature"] == "base_team_logit"
+    assert probabilities.iloc[0] == pytest.approx(1.0 / (1.0 + np.exp(-0.8)))
+    assert probabilities.iloc[1] == pytest.approx(1.0 / (1.0 + np.exp(0.8)))
 
 
 def test_hierarchical_binding_requires_the_declared_proxy_series_receipt() -> None:
