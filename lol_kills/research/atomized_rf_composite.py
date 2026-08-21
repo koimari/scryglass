@@ -1875,7 +1875,8 @@ def _scaling_alias(value: Any) -> str | None:
     normalized = normalize_team(token).strip()
     if not normalized or normalized.casefold() in {"nan", "nat", "none", "<na>"}:
         return None
-    return normalized.casefold()
+    slug = re.sub(r"[^a-z0-9]+", "-", normalized.casefold()).strip("-")
+    return slug or None
 
 
 def _scaling_row_aliases(row: Mapping[str, Any]) -> list[str]:

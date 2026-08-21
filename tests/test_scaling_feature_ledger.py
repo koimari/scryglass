@@ -247,6 +247,29 @@ def test_missing_stable_team_ids_use_alias_fallback_for_both_sides() -> None:
     assert receipt["team_identity"]["alias_fallback_identity_sha256"] == identity_sha256(IDS)
 
 
+def test_alias_display_name_and_slug_key_resolve_to_one_team() -> None:
+    maps, players, teams = _frames()
+    maps = maps.copy()
+    maps["blue_team"] = "Diversion Gaming"
+    maps["blue_team_key"] = "diversion-gaming"
+    maps["red_team"] = "Mighty Eagles"
+    maps["red_team_key"] = "mighty-eagles"
+    players = players.copy()
+    teams = teams.copy()
+    players["teamname"] = players["side"].map(
+        {"Blue": "Diversion Gaming", "Red": "Mighty Eagles"}
+    )
+    teams["teamname"] = teams["side"].map(
+        {"Blue": "Diversion Gaming", "Red": "Mighty Eagles"}
+    )
+    players.loc[players["side"].eq("Red"), "teamid"] = None
+    teams.loc[teams["side"].eq("Red"), "teamid"] = None
+
+    ledger, receipt = _build(maps, players, teams)
+    assert len(ledger) == len(IDS)
+    assert receipt["team_identity"]["mode_counts"]["alias_fallback"] == len(IDS)
+
+
 def test_team_identity_mismatch_fails_closed() -> None:
     maps, players, teams = _frames()
     mismatched_stable = teams.copy()
