@@ -36,6 +36,14 @@ from lol_kills.ratings.global_player_bt import (
     _contribution_metrics,
     _role_normalized_composite,
 )
+from lol_kills.research.future_phase_curve import (
+    MODEL_VERSION as PHASE_CURVE_PRODUCER_VERSION,
+    PHASE_FEATURE_DECLARATION,
+    PHASE_SHAPE_FEATURES,
+    PHASE_SHAPE_INVARIANT_FEATURES,
+    PHASE_SHAPE_SIGNED_FEATURES,
+    SCHEMA_VERSION as PHASE_CURVE_SCHEMA_VERSION,
+)
 from lol_kills.v2.tierlists.accepted_census import (
     canonical_game_ids,
     identity_sha256,
@@ -73,6 +81,17 @@ class RatingVariant(str, Enum):
     FUTURE_PLAYER_FORM = "future_player_form"
     SCALING_CURVE = "scaling_curve"
     BOTH = "both"
+
+
+RATING_VARIANT_ORDER = (
+    RatingVariant.CURRENT_ONLY,
+    RatingVariant.FUTURE_PLAYER_FORM,
+    RatingVariant.SCALING_CURVE,
+    RatingVariant.BOTH,
+)
+RATING_VARIANT_ORDINALS = MappingProxyType(
+    {variant: ordinal for ordinal, variant in enumerate(RATING_VARIANT_ORDER, 1)}
+)
 
 
 FORBIDDEN_PREGAME_PATTERNS = (
@@ -1265,61 +1284,66 @@ CENTERED_ATOM_LEVEL_FEATURES = frozenset(
 # These declarations are the only feature families accepted by the variant
 # contract.  Keep the names in source order.  The order is part of each
 # canonical receipt and therefore part of the model identity.
-RATING_VARIANT_SCHEMA_VERSION = "scryglass:future-value-rating-variants:v1"
+RATING_VARIANT_SCHEMA_VERSION = "scryglass:future-value-rating-variants:v2"
+RATING_FEATURE_LEDGER_SCHEMA_VERSION = "scryglass:future-value-rating-feature-ledger:v1"
 CURRENT_RATING_SIGNED_MAP_FEATURES = (
     "base_team_logit",
     "team_rating_diff_scaled",
     "base_player_logit",
     "player_rating_diff_scaled",
 )
-# A shorter name is useful to callers that already know the current-rating
-# namespace.  It remains an alias of the canonical tuple.
-CURRENT_RATING_FEATURES = CURRENT_RATING_SIGNED_MAP_FEATURES
+CURRENT_RATING_STRENGTH_FEATURES = (
+    "base_team_logit",
+    "base_player_logit",
+)
+CURRENT_RATING_RAW_DIFFERENCE_FEATURES = (
+    "team_rating_diff_scaled",
+    "player_rating_diff_scaled",
+)
+CURRENT_RATING_FEATURE_SEMANTICS = MappingProxyType(
+    {
+        "base_team_logit": "shrunk_team_strength_logit; source shrinkage carries uncertainty",
+        "base_player_logit": "shrunk_player_strength_logit; source shrinkage carries uncertainty",
+        "team_rating_diff_scaled": "raw_team_strength_difference_scaled; uncertainty stays external",
+        "player_rating_diff_scaled": "raw_player_strength_difference_scaled; uncertainty stays external",
+    }
+)
 
 FUTURE_PLAYER_FORM_SIDE_FEATURES = tuple(
     feature
     for feature in SIDE_LEVEL_TO_MODEL_FEATURE
     if feature not in {"team_prior_win", "roster_continuity"}
 )
-FUTURE_PLAYER_FORM_FEATURES = FUTURE_PLAYER_FORM_SIDE_FEATURES
-FUTURE_PLAYER_FORM_MODEL_FEATURES = tuple(
-    SIDE_LEVEL_TO_MODEL_FEATURE[feature] for feature in FUTURE_PLAYER_FORM_SIDE_FEATURES
-)
-FUTURE_PLAYER_FORM_SIDE_LEVEL_FEATURES = FUTURE_PLAYER_FORM_SIDE_FEATURES
 
 SCALING_CURVE_SIGNED_MAP_FEATURES = tuple(
     f"forecast_{metric}_diff_{checkpoint}"
     for checkpoint in CHECKPOINTS
     for metric in ("gold", "xp")
 )
-SCALING_CURVE_FEATURES = SCALING_CURVE_SIGNED_MAP_FEATURES
 
-# These are reported diagnostics.  They are not model inputs.  The list
-# covers both the atomized forecast names and the phase-curve report names.
-SCALING_CURVE_DERIVED_FEATURES = (
-    *tuple(
-        value
-        for first, second in zip(CHECKPOINTS, CHECKPOINTS[1:])
-        for value in (
-            f"forecast_gold_slope_{first}_{second}",
-            f"forecast_xp_slope_{first}_{second}",
+# The atomized producer owns the checkpoint names and the phase producer owns
+# the complete shape diagnostics.  The diagnostics remain report fields.  The
+# eight forecast differences are the only scaling inputs in the four-way fit.
+SCALING_CURVE_PRODUCER_SCHEMA_VERSION = PHASE_CURVE_SCHEMA_VERSION
+SCALING_CURVE_PRODUCER_VERSION = PHASE_CURVE_PRODUCER_VERSION
+SCALING_CURVE_FEATURE_DECLARATION = tuple(PHASE_FEATURE_DECLARATION)
+SCALING_CURVE_SHAPE_FEATURES = tuple(PHASE_SHAPE_FEATURES)
+SCALING_CURVE_SIGNED_SHAPE_FEATURES = tuple(PHASE_SHAPE_SIGNED_FEATURES)
+SCALING_CURVE_INVARIANT_SHAPE_FEATURES = tuple(PHASE_SHAPE_INVARIANT_FEATURES)
+SCALING_CURVE_DERIVED_FEATURES = tuple(
+    dict.fromkeys(
+        feature
+        for feature in (
+            *SCALING_CURVE_FEATURE_DECLARATION,
+            *SCALING_CURVE_SHAPE_FEATURES,
+            "scaling_index",
+            "snowball_index",
+            "comeback_resilience",
         )
-    ),
-    "forecast_peak_checkpoint_signed",
-    "forecast_peak_magnitude",
-    "forecast_curve_available",
-    "forecast_curve_missing",
-    "scaling_index",
-    "snowball_index",
-    "comeback_resilience",
+        if feature not in SCALING_CURVE_SIGNED_MAP_FEATURES
+    )
 )
-DERIVED_SCALING_CURVE_FEATURES = SCALING_CURVE_DERIVED_FEATURES
 
-_RATING_VARIANT_FAMILY_FEATURES = {
-    "current_rating": CURRENT_RATING_SIGNED_MAP_FEATURES,
-    "future_player_form": FUTURE_PLAYER_FORM_SIDE_FEATURES,
-    "scaling_curve": SCALING_CURVE_SIGNED_MAP_FEATURES,
-}
 _RATING_VARIANT_FEATURES = {
     RatingVariant.CURRENT_ONLY: CURRENT_RATING_SIGNED_MAP_FEATURES,
     # The current rating is the comparison baseline.  The named candidate
@@ -1450,30 +1474,12 @@ def classify_rating_feature(name: str) -> str:
     return "unknown"
 
 
-def rating_feature_class(name: str) -> str:
-    """Alias for :func:`classify_rating_feature`."""
-
-    return classify_rating_feature(name)
-
-
 def is_signed_map_feature(name: str) -> bool:
     return classify_rating_feature(name) == "signed_map"
 
 
 def is_side_level_feature(name: str) -> bool:
     return classify_rating_feature(name) == "side_level"
-
-
-def is_side_feature(name: str) -> bool:
-    """Alias for :func:`is_side_level_feature`."""
-
-    return is_side_level_feature(name)
-
-
-def is_signed_feature(name: str) -> bool:
-    """Alias for :func:`is_signed_map_feature`."""
-
-    return is_signed_map_feature(name)
 
 
 def assert_rating_feature_names(feature_names: Iterable[str]) -> tuple[str, ...]:
@@ -1552,34 +1558,6 @@ class RatingVariantConfig:
             raise FutureValueSourceError("rating variant excluded diagnostics changed")
 
     @property
-    def features(self) -> tuple[str, ...]:
-        """Compatibility alias for the canonical model feature tuple."""
-
-        return self.feature_names
-
-    @property
-    def model_features(self) -> tuple[str, ...]:
-        return self.feature_names
-
-    @property
-    def candidate_features(self) -> tuple[str, ...]:
-        """Return features beyond the current-rating comparison baseline."""
-
-        return tuple(
-            feature
-            for feature in self.feature_names
-            if feature not in CURRENT_RATING_SIGNED_MAP_FEATURES
-        )
-
-    @property
-    def signed_features(self) -> tuple[str, ...]:
-        return self.signed_map_features
-
-    @property
-    def side_features(self) -> tuple[str, ...]:
-        return self.side_level_features
-
-    @property
     def feature_families(self) -> Mapping[str, tuple[str, ...]]:
         """Return the immutable family selection used by this variant."""
 
@@ -1596,28 +1574,16 @@ class RatingVariantConfig:
         return MappingProxyType(selected)
 
     @property
-    def family_registry(self) -> Mapping[str, tuple[str, ...]]:
-        """Return all immutable family declarations."""
-
-        return MappingProxyType(
-            {
-                "current_rating": CURRENT_RATING_SIGNED_MAP_FEATURES,
-                "future_player_form": FUTURE_PLAYER_FORM_SIDE_FEATURES,
-                "scaling_curve": SCALING_CURVE_SIGNED_MAP_FEATURES,
-            }
-        )
-
-    @property
-    def included_families(self) -> tuple[str, ...]:
-        return tuple(self.feature_families)
-
-    @property
     def name(self) -> str:
         return self.variant.value
 
     @property
-    def config_hash(self) -> str:
-        return self.config_sha256
+    def ordinal(self) -> int:
+        return int(RATING_VARIANT_ORDINALS[self.variant])
+
+    @property
+    def label(self) -> str:
+        return f"V{self.ordinal}"
 
     @property
     def config_sha256(self) -> str:
@@ -1665,11 +1631,22 @@ def rating_variant_config_receipt(variant: RatingVariant | str) -> dict[str, Any
     config = rating_variant_config(variant)
     payload: dict[str, Any] = {
         "schema_version": RATING_VARIANT_SCHEMA_VERSION,
+        "ordinal": config.ordinal,
+        "label": config.label,
         "variant": config.variant.value,
         "feature_names": list(config.feature_names),
         "signed_map_features": list(config.signed_map_features),
         "side_level_features": list(config.side_level_features),
         "excluded_features": list(config.excluded_features),
+        "current_rating_feature_semantics": dict(CURRENT_RATING_FEATURE_SEMANTICS),
+        "scaling_curve_producer": {
+            "schema_version": SCALING_CURVE_PRODUCER_SCHEMA_VERSION,
+            "model_version": SCALING_CURVE_PRODUCER_VERSION,
+            "feature_declaration": list(SCALING_CURVE_FEATURE_DECLARATION),
+            "shape_features": list(SCALING_CURVE_SHAPE_FEATURES),
+            "signed_shape_features": list(SCALING_CURVE_SIGNED_SHAPE_FEATURES),
+            "invariant_shape_features": list(SCALING_CURVE_INVARIANT_SHAPE_FEATURES),
+        },
     }
     payload["config_sha256"] = hashlib.sha256(
         _canonical_json_bytes(payload)
@@ -1680,20 +1657,8 @@ def rating_variant_config_receipt(variant: RatingVariant | str) -> dict[str, Any
     return payload
 
 
-def rating_variant_receipt(variant: RatingVariant | str) -> dict[str, Any]:
-    """Alias for :func:`rating_variant_config_receipt`."""
-
-    return rating_variant_config_receipt(variant)
-
-
 def rating_variant_config_sha256(variant: RatingVariant | str) -> str:
     return str(rating_variant_config_receipt(variant)["config_sha256"])
-
-
-def rating_variant_hash(variant: RatingVariant | str) -> str:
-    """Alias for :func:`rating_variant_config_sha256`."""
-
-    return rating_variant_config_sha256(variant)
 
 
 def rating_variant_registry_receipt() -> dict[str, Any]:
@@ -1701,10 +1666,7 @@ def rating_variant_registry_receipt() -> dict[str, Any]:
 
     payload: dict[str, Any] = {
         "schema_version": RATING_VARIANT_SCHEMA_VERSION,
-        "variants": {
-            variant.value: rating_variant_config_receipt(variant)
-            for variant in RatingVariant
-        },
+        "variants": [rating_variant_config_receipt(variant) for variant in RATING_VARIANT_ORDER],
     }
     payload["registry_sha256"] = hashlib.sha256(
         _canonical_json_bytes(payload)
@@ -1725,24 +1687,6 @@ def rating_variant_configs() -> Mapping[RatingVariant, RatingVariantConfig]:
     return RATING_VARIANT_CONFIGS
 
 
-def variant_config(variant: RatingVariant | str) -> RatingVariantConfig:
-    """Short alias for :func:`rating_variant_config`."""
-
-    return rating_variant_config(variant)
-
-
-def variant_registry_receipt() -> dict[str, Any]:
-    """Short alias for :func:`rating_variant_registry_receipt`."""
-
-    return rating_variant_registry_receipt()
-
-
-def validate_rating_variant(variant: RatingVariant | str) -> RatingVariant:
-    """Resolve a variant name and fail closed for unknown values."""
-
-    return _resolve_rating_variant(variant)
-
-
 RATING_VARIANT_CONFIGS = MappingProxyType(
     {
         variant: RatingVariantConfig(
@@ -1751,13 +1695,204 @@ RATING_VARIANT_CONFIGS = MappingProxyType(
             signed_map_features=tuple(_RATING_VARIANT_SIGNED_FEATURES[variant]),
             side_level_features=tuple(_RATING_VARIANT_SIDE_FEATURES[variant]),
         )
-        for variant in RatingVariant
+        for variant in RATING_VARIANT_ORDER
     }
 )
-RATING_VARIANT_REGISTRY = RATING_VARIANT_CONFIGS
-VARIANT_CONFIGS = RATING_VARIANT_CONFIGS
-VARIANT_REGISTRY = RATING_VARIANT_CONFIGS
-RATING_VARIANTS = tuple(RatingVariant)
+
+
+def _ledger_rows_sha256(frame: pd.DataFrame, feature_names: Sequence[str]) -> str:
+    rows: list[dict[str, Any]] = []
+    for row in frame.sort_values("game_id", kind="stable").itertuples(index=False):
+        values = {str(name): getattr(row, str(name)) for name in ("game_id", *feature_names)}
+        canonical: dict[str, Any] = {"game_id": str(values.pop("game_id"))}
+        for name in feature_names:
+            value = values[name]
+            number = float(value)
+            if not math.isfinite(number):
+                raise FutureValueSourceError(f"rating feature ledger contains a non-finite value: {name}")
+            canonical[name] = number
+        rows.append(canonical)
+    return hashlib.sha256(_canonical_json_bytes(rows)).hexdigest()
+
+
+def bind_rating_feature_ledger(
+    frame: pd.DataFrame,
+    *,
+    source_receipt: Mapping[str, Any],
+    train_game_ids: Iterable[str],
+    fit_window_end: Any,
+    feature_names: Iterable[str],
+    producer: Mapping[str, Any] | None = None,
+) -> pd.DataFrame:
+    """Bind one fold-bound, out-of-sample signed-feature ledger.
+
+    The returned frame carries its receipt in ``DataFrame.attrs``.  The frame
+    must contain one row for every map in the fold's model frame.  The producer
+    receipt records the training census and strict cutoff.  A caller cannot
+    replace a feature list or source identity after binding.
+    """
+
+    if not isinstance(frame, pd.DataFrame):
+        raise FutureValueSourceError("rating feature ledger must be a DataFrame")
+    config_features = assert_rating_feature_names(feature_names)
+    if not config_features or any(
+        classify_rating_feature(name) != "signed_map" for name in config_features
+    ):
+        raise FutureValueSourceError("rating feature ledger accepts signed map features only")
+    if not isinstance(source_receipt, Mapping):
+        raise FutureValueSourceError("verified source receipt is required for rating ledger")
+    source_identity = str(source_receipt.get("source_identity_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", source_identity):
+        raise FutureValueSourceError("rating ledger source identity is invalid")
+    source_payload = dict(source_receipt)
+    source_hash = source_payload.pop("receipt_sha256", None)
+    if not isinstance(source_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", source_hash):
+        raise FutureValueSourceError("rating ledger source receipt hash is invalid")
+    if hashlib.sha256(_canonical_json_bytes(source_payload)).hexdigest() != source_hash:
+        raise FutureValueSourceError("rating ledger source receipt changed")
+    required = {"game_id", *config_features}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise FutureValueSourceError("rating feature ledger is missing: " + ", ".join(missing))
+    work = frame[list(dict.fromkeys(("game_id", *config_features)))].copy()
+    work["game_id"] = work["game_id"].astype(str)
+    if work["game_id"].eq("").any() or work["game_id"].duplicated().any():
+        raise FutureValueSourceError("rating feature ledger game IDs are not unique")
+    for name in config_features:
+        values = pd.to_numeric(work[name], errors="coerce").to_numpy(dtype=float)
+        if not np.isfinite(values).all():
+            raise FutureValueSourceError(f"rating feature ledger contains missing values: {name}")
+        work[name] = values
+    train_ids = tuple(sorted({str(value) for value in train_game_ids}))
+    if not train_ids or not set(train_ids).issubset(set(work["game_id"])):
+        raise FutureValueSourceError("rating ledger training game IDs are incomplete")
+    cutoff = _utc_text(fit_window_end)
+    rows_hash = _ledger_rows_sha256(work, config_features)
+    producer_payload: dict[str, Any] = {
+        "schema_version": RATING_FEATURE_LEDGER_SCHEMA_VERSION,
+        "source_identity_sha256": source_identity,
+        "game_identity_sha256": identity_sha256(tuple(sorted(work["game_id"].astype(str)))),
+        "fit_game_identity_sha256": identity_sha256(train_ids),
+        "fit_game_ids": list(train_ids),
+        "fit_window_end": cutoff,
+        "feature_names": list(config_features),
+        "ledger_rows_sha256": rows_hash,
+        "producer": dict(producer or {}),
+    }
+    producer_payload["receipt_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(producer_payload)
+    ).hexdigest()
+    work.attrs["schema_version"] = RATING_FEATURE_LEDGER_SCHEMA_VERSION
+    work.attrs["source_identity_sha256"] = source_identity
+    work.attrs["fit_game_ids"] = list(train_ids)
+    work.attrs["fit_game_identity_sha256"] = identity_sha256(train_ids)
+    work.attrs["game_identity_sha256"] = identity_sha256(tuple(sorted(work["game_id"].astype(str))))
+    work.attrs["fit_window_end"] = cutoff
+    work.attrs["feature_names"] = list(config_features)
+    work.attrs["ledger_rows_sha256"] = rows_hash
+    work.attrs["ledger_sha256"] = rows_hash
+    work.attrs["producer_receipt"] = producer_payload
+    work.attrs["producer_receipt_sha256"] = producer_payload["receipt_sha256"]
+    return work
+
+
+def validate_rating_feature_ledger(
+    ledger: pd.DataFrame | None,
+    *,
+    feature_names: Iterable[str],
+    model_game_ids: Iterable[str],
+    train_game_ids: Iterable[str],
+    fit_window_end: Any,
+    source_receipt: Mapping[str, Any] | None,
+) -> pd.DataFrame:
+    """Verify a fold-bound external ledger before it enters a design matrix."""
+
+    config_features = assert_rating_feature_names(feature_names)
+    if not config_features or any(
+        classify_rating_feature(name) != "signed_map" for name in config_features
+    ):
+        raise FutureValueSourceError("rating feature ledger accepts signed map features only")
+    if ledger is None:
+        raise FutureValueSourceError("rating feature ledger is required for signed map features")
+    if not isinstance(ledger, pd.DataFrame):
+        raise FutureValueSourceError("rating feature ledger must be a DataFrame")
+    required = {"game_id", *config_features}
+    missing = sorted(required - set(ledger.columns))
+    if missing:
+        raise FutureValueSourceError("rating feature ledger is missing: " + ", ".join(missing))
+    work = ledger.copy()
+    work["game_id"] = work["game_id"].astype(str)
+    model_ids = tuple(sorted({str(value) for value in model_game_ids}))
+    train_ids = tuple(sorted({str(value) for value in train_game_ids}))
+    ledger_ids = tuple(sorted(work["game_id"]))
+    if ledger["game_id"].duplicated().any() or ledger_ids != model_ids:
+        raise FutureValueSourceError("rating feature ledger game IDs do not match the model frame")
+    attrs = work.attrs
+    if attrs.get("schema_version") != RATING_FEATURE_LEDGER_SCHEMA_VERSION:
+        raise FutureValueSourceError("rating feature ledger schema is invalid")
+    source_identity = str(attrs.get("source_identity_sha256") or "")
+    expected_source_identity = str((source_receipt or {}).get("source_identity_sha256") or "")
+    if not source_identity or source_identity != expected_source_identity:
+        raise FutureValueSourceError("rating feature ledger source identity does not match source receipt")
+    if tuple(str(value) for value in attrs.get("feature_names", ())) != config_features:
+        raise FutureValueSourceError("rating feature ledger feature list is not canonical")
+    attr_train_ids = tuple(sorted({str(value) for value in attrs.get("fit_game_ids", ())}))
+    if attr_train_ids != train_ids:
+        raise FutureValueSourceError("rating feature ledger training IDs do not match fold")
+    if attrs.get("fit_game_identity_sha256") != identity_sha256(train_ids):
+        raise FutureValueSourceError("rating feature ledger fit identity does not match fold")
+    if attrs.get("game_identity_sha256") != identity_sha256(model_ids):
+        raise FutureValueSourceError("rating feature ledger game identity does not match frame")
+    expected_cutoff = _utc_text(fit_window_end)
+    if str(attrs.get("fit_window_end") or "") != expected_cutoff:
+        raise FutureValueSourceError("rating feature ledger cutoff does not match fold")
+    producer = attrs.get("producer_receipt")
+    if not isinstance(producer, Mapping):
+        raise FutureValueSourceError("rating feature ledger producer receipt is missing")
+    producer_payload = dict(producer)
+    producer_hash = producer_payload.pop("receipt_sha256", None)
+    if not isinstance(producer_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", producer_hash):
+        raise FutureValueSourceError("rating feature ledger producer hash is invalid")
+    if hashlib.sha256(_canonical_json_bytes(producer_payload)).hexdigest() != producer_hash:
+        raise FutureValueSourceError("rating feature ledger producer receipt changed")
+    if str(attrs.get("producer_receipt_sha256") or "") != producer_hash:
+        raise FutureValueSourceError("rating feature ledger producer hash binding changed")
+    if producer.get("schema_version") != RATING_FEATURE_LEDGER_SCHEMA_VERSION:
+        raise FutureValueSourceError("rating feature ledger producer schema is invalid")
+    if producer.get("source_identity_sha256") != source_identity:
+        raise FutureValueSourceError("rating feature ledger producer source identity changed")
+    if tuple(str(value) for value in producer.get("fit_game_ids", ())) != train_ids:
+        raise FutureValueSourceError("rating feature ledger producer training IDs changed")
+    if producer.get("fit_window_end") != expected_cutoff:
+        raise FutureValueSourceError("rating feature ledger producer cutoff changed")
+    if tuple(str(value) for value in producer.get("feature_names", ())) != config_features:
+        raise FutureValueSourceError("rating feature ledger producer features changed")
+    rows_hash = _ledger_rows_sha256(work, config_features)
+    claimed_rows_hash = str(attrs.get("ledger_rows_sha256") or attrs.get("ledger_sha256") or "")
+    if claimed_rows_hash != rows_hash or producer.get("ledger_rows_sha256") != rows_hash:
+        raise FutureValueSourceError("rating feature ledger row hash changed")
+    if producer.get("game_identity_sha256") != identity_sha256(model_ids):
+        raise FutureValueSourceError("rating feature ledger game identity changed")
+    if producer.get("fit_game_identity_sha256") != identity_sha256(train_ids):
+        raise FutureValueSourceError("rating feature ledger fit identity changed")
+    row_bindings = {
+        "source_identity_sha256": source_identity,
+        "producer_receipt_sha256": producer_hash,
+        "fit_window_end": expected_cutoff,
+        "fit_game_identity_sha256": identity_sha256(train_ids),
+        "game_identity_sha256": identity_sha256(model_ids),
+    }
+    for column, expected in row_bindings.items():
+        if column in work.columns:
+            values = work[column].astype(str)
+            if not values.eq(str(expected)).all():
+                raise FutureValueSourceError(f"rating feature ledger row binding changed: {column}")
+    for name in config_features:
+        values = pd.to_numeric(work[name], errors="coerce").to_numpy(dtype=float)
+        if not np.isfinite(values).all():
+            raise FutureValueSourceError(f"rating feature ledger contains missing values: {name}")
+        work[name] = values
+    return work[["game_id", *config_features]].copy()
 
 
 def _side_level_column(side: str, feature: str) -> str:
@@ -1770,6 +1905,11 @@ def build_future_value_design(
     atom_model: Rank3AtomModel,
     *,
     verified_model_frame: pd.DataFrame | None = None,
+    variant: RatingVariant | str | None = None,
+    feature_ledger: pd.DataFrame | None = None,
+    source_receipt: Mapping[str, Any] | None = None,
+    train_game_ids: Iterable[str] | None = None,
+    fit_window_end: Any | None = None,
 ) -> pd.DataFrame:
     """Build side-neutral map differences from pregame state only."""
 
@@ -1778,6 +1918,24 @@ def build_future_value_design(
         if verified_model_frame is not None
         else _map_model_frame(maps)
     )
+    variant_config = (
+        None if variant is None else rating_variant_config(variant)
+    )
+    if variant_config is not None:
+        if train_game_ids is None or fit_window_end is None:
+            raise FutureValueSourceError(
+                "explicit rating variants require fold training IDs and cutoff"
+            )
+        signed_ledger = validate_rating_feature_ledger(
+            feature_ledger,
+            feature_names=variant_config.signed_map_features,
+            model_game_ids=map_frame["game_id"].astype(str),
+            train_game_ids=train_game_ids,
+            fit_window_end=fit_window_end,
+            source_receipt=source_receipt,
+        )
+    else:
+        signed_ledger = None
     required = {"game_id", "date", "side", "role", "player_id", *[f"prior_form_{m}" for m in FORM_METRICS]}
     missing = sorted(required - set(form.columns))
     if missing:
@@ -1966,8 +2124,23 @@ def build_future_value_design(
     design["model_missing_feature_count"] = design[
         "model_missing_feature_names"
     ].map(len)
+    if variant_config is None:
+        complete_columns = raw_side_columns
+    else:
+        complete_columns = []
+        for feature in variant_config.feature_names:
+            if feature in variant_config.signed_map_features:
+                complete_columns.append(feature)
+            else:
+                complete_columns.extend(
+                    [_side_level_column("blue", feature), _side_level_column("red", feature)]
+                )
+    if signed_ledger is not None:
+        signed_lookup = signed_ledger.set_index("game_id")
+        for feature in variant_config.signed_map_features:
+            design[feature] = signed_lookup[feature].reindex(design.index)
     design["model_features_complete"] = np.isfinite(
-        design[raw_side_columns].to_numpy(dtype=float)
+        design[complete_columns].to_numpy(dtype=float)
     ).all(axis=1)
     for metadata_name in (
         "league",
@@ -1989,19 +2162,44 @@ def build_future_value_design(
         boundary = ordered["_tournament_key"].ne(ordered["_tournament_key"].shift(1))
         boundary &= ordered["_tournament_key"].ne("")
         design["tournament_boundary"] = boundary.reindex(design.index).fillna(False).astype(bool)
+    selected_feature_names = (
+        MODEL_FEATURES if variant_config is None else variant_config.feature_names
+    )
     design = design.reset_index(drop=True)
-    assert_pregame_feature_names(MODEL_FEATURES)
-    design.attrs["feature_names"] = MODEL_FEATURES
+    assert_pregame_feature_names(selected_feature_names)
+    design.attrs["feature_names"] = selected_feature_names
+    design.attrs["variant"] = variant_config.variant.value if variant_config is not None else None
+    design.attrs["variant_receipt"] = (
+        variant_config.receipt() if variant_config is not None else None
+    )
+    if signed_ledger is not None:
+        design.attrs["feature_ledger"] = {
+            "schema_version": RATING_FEATURE_LEDGER_SCHEMA_VERSION,
+            "source_identity_sha256": signed_ledger.attrs.get("source_identity_sha256"),
+            "producer_receipt_sha256": signed_ledger.attrs.get("producer_receipt_sha256"),
+            "ledger_rows_sha256": signed_ledger.attrs.get("ledger_rows_sha256"),
+            "fit_window_end": signed_ledger.attrs.get("fit_window_end"),
+            "fit_game_ids": list(signed_ledger.attrs.get("fit_game_ids", ())),
+            "feature_names": list(variant_config.signed_map_features),
+        }
     design.attrs["series_cluster_source"] = map_frame.attrs.get("series_cluster_source")
     design.attrs["series_cluster_audit"] = map_frame.attrs.get("series_cluster_audit")
     return design
 
 
-def _fold_level_imputation_values(train: pd.DataFrame) -> np.ndarray:
+def _fold_level_imputation_values(
+    train: pd.DataFrame,
+    feature_names: Sequence[str] | None = None,
+) -> np.ndarray:
     """Fit one side-neutral imputation value per side-level feature."""
 
+    selected = tuple(
+        SIDE_LEVEL_TO_MODEL_FEATURE if feature_names is None else feature_names
+    )
+    if any(name not in SIDE_LEVEL_TO_MODEL_FEATURE for name in selected):
+        raise FutureValueSourceError("fold imputation received a non-side-level feature")
     values: list[float] = []
-    for source_name in SIDE_LEVEL_TO_MODEL_FEATURE:
+    for source_name in selected:
         columns = [
             _side_level_column("blue", source_name),
             _side_level_column("red", source_name),
@@ -2029,19 +2227,35 @@ def _fold_level_imputation_values(train: pd.DataFrame) -> np.ndarray:
 def _antisymmetric_design_matrix(
     design: pd.DataFrame,
     imputation_values: np.ndarray,
+    feature_names: Sequence[str] | None = None,
 ) -> np.ndarray:
     """Build blue-minus-red values after equal fold-local side imputation."""
 
     imputation = np.asarray(imputation_values, dtype=float)
-    if imputation.shape != (len(SIDE_LEVEL_TO_MODEL_FEATURE),) or not np.isfinite(
+    selected = tuple(feature_names or SIDE_LEVEL_TO_MODEL_FEATURE)
+    if imputation.shape != (len(selected),) or not np.isfinite(
         imputation
     ).all():
         raise FutureValueSourceError("fold-local imputation values are invalid")
     columns: list[np.ndarray] = []
-    for feature_index, source_name in enumerate(SIDE_LEVEL_TO_MODEL_FEATURE):
+    inverse_side_names = {
+        value: key for key, value in SIDE_LEVEL_TO_MODEL_FEATURE.items()
+    }
+    for feature_index, source_name in enumerate(selected):
+        if classify_rating_feature(source_name) == "signed_map":
+            if source_name not in design.columns:
+                raise FutureValueSourceError("prediction design is missing: " + source_name)
+            numeric = pd.to_numeric(design[source_name], errors="coerce").to_numpy(dtype=float)
+            if not np.isfinite(numeric).all():
+                raise FutureValueSourceError("signed map feature contains missing values: " + source_name)
+            columns.append(numeric)
+            continue
+        source_key = source_name if source_name in SIDE_LEVEL_TO_MODEL_FEATURE else inverse_side_names.get(source_name)
+        if source_key is None:
+            raise FutureValueSourceError("prediction design contains an unknown feature: " + source_name)
         side_values: list[np.ndarray] = []
         for side in SIDES:
-            column = _side_level_column(side, source_name)
+            column = _side_level_column(side, source_key)
             if column not in design.columns:
                 raise FutureValueSourceError("prediction design is missing: " + column)
             numeric = pd.to_numeric(design[column], errors="coerce").to_numpy(
@@ -2055,6 +2269,39 @@ def _antisymmetric_design_matrix(
     if not np.isfinite(matrix).all():
         raise FutureValueSourceError("antisymmetric design matrix is non-finite")
     return matrix
+
+
+def _variant_imputation_values(
+    train: pd.DataFrame,
+    config: RatingVariantConfig,
+) -> np.ndarray:
+    side_values = _fold_level_imputation_values(train, config.side_level_features)
+    side_lookup = dict(zip(config.side_level_features, side_values))
+    return np.asarray(
+        [0.0 if classify_rating_feature(name) == "signed_map" else side_lookup[name] for name in config.feature_names],
+        dtype=float,
+    )
+
+
+def build_rating_variant_matrix(
+    design: pd.DataFrame,
+    variant: RatingVariant | str,
+    *,
+    imputation_values: np.ndarray | None = None,
+) -> np.ndarray:
+    """Build the selected fold matrix from a verified design frame."""
+
+    config = rating_variant_config(variant)
+    values = (
+        _variant_imputation_values(design, config)
+        if imputation_values is None
+        else np.asarray(imputation_values, dtype=float)
+    )
+    return _antisymmetric_design_matrix(
+        design,
+        values,
+        feature_names=config.feature_names,
+    )
 
 
 def _fit_zero_intercept_logistic(
@@ -2113,6 +2360,10 @@ def _select_fold_regularization(
     train_game_ids: tuple[str, ...],
     rank: int,
     min_cell_support: int,
+    variant: RatingVariant | None = None,
+    feature_ledger: pd.DataFrame | None = None,
+    source_receipt: Mapping[str, Any] | None = None,
+    fit_window_end: Any | None = None,
 ) -> dict[str, Any]:
     """Select L2 strength on one strictly earlier nested chronological fold."""
 
@@ -2138,6 +2389,11 @@ def _select_fold_regularization(
         form,
         atom_model,
         verified_model_frame=map_frame,
+        variant=variant,
+        feature_ledger=feature_ledger,
+        source_receipt=source_receipt,
+        train_game_ids=train_game_ids if variant is not None else None,
+        fit_window_end=fit_window_end if variant is not None else None,
     )
     inner_train = design[design["game_id"].isin(inner_train_ids)].copy()
     inner_validation = design[
@@ -2154,9 +2410,30 @@ def _select_fold_regularization(
         raise FutureValueSourceError(
             "nested regularization fold has insufficient two-class rows"
         )
-    imputation = _fold_level_imputation_values(inner_train)
-    matrix = _antisymmetric_design_matrix(inner_train, imputation)
-    validation_matrix = _antisymmetric_design_matrix(inner_validation, imputation)
+    selected_features = tuple(
+        MODEL_FEATURES if variant is None else rating_variant_config(variant).feature_names
+    )
+    if variant is None:
+        imputation = _fold_level_imputation_values(inner_train)
+    else:
+        imputation = _variant_imputation_values(
+            inner_train,
+            rating_variant_config(variant),
+        )
+    if variant is None:
+        matrix = _antisymmetric_design_matrix(inner_train, imputation)
+        validation_matrix = _antisymmetric_design_matrix(inner_validation, imputation)
+    else:
+        matrix = _antisymmetric_design_matrix(
+            inner_train,
+            imputation,
+            feature_names=selected_features,
+        )
+        validation_matrix = _antisymmetric_design_matrix(
+            inner_validation,
+            imputation,
+            feature_names=selected_features,
+        )
     scales = matrix.std(axis=0, ddof=0)
     scales = np.where(np.isfinite(scales) & (scales > 1e-12), scales, 1.0)
     candidate_scores: list[dict[str, Any]] = []
@@ -2165,7 +2442,7 @@ def _select_fold_regularization(
         "atom_parameter_sha256": inner_atom_receipt["parameter_sha256"],
         "imputation_values": [float(value) for value in imputation],
         "scales": [float(value) for value in scales],
-        "feature_names": list(MODEL_FEATURES),
+        "feature_names": list(selected_features),
     }
     transform_sha256 = hashlib.sha256(
         _canonical_json_bytes(transform_payload)
@@ -2240,6 +2517,8 @@ class FutureValueFoldModel:
     train_rows: int
     withheld_rows: int
     source_receipt: Mapping[str, Any]
+    variant: RatingVariant | None = None
+    feature_ledger_binding: Mapping[str, Any] | None = None
 
     @property
     def metric_weights(self) -> dict[str, float]:
@@ -2262,6 +2541,12 @@ class FutureValueFoldModel:
 
         parameters: dict[str, Any] = {
             "feature_names": list(self.feature_names),
+            "variant": self.variant.value if self.variant is not None else None,
+            "variant_receipt": (
+                rating_variant_config_receipt(self.variant)
+                if self.variant is not None
+                else None
+            ),
             "feature_means": {
                 feature: float(value)
                 for feature, value in zip(self.feature_names, self.means)
@@ -2273,7 +2558,8 @@ class FutureValueFoldModel:
             "fold_local_side_imputation": {
                 feature: float(value)
                 for feature, value in zip(
-                    SIDE_LEVEL_TO_MODEL_FEATURE, self.imputation_values
+                    SIDE_LEVEL_TO_MODEL_FEATURE if self.variant is None else self.feature_names,
+                    self.imputation_values,
                 )
             },
             "imputation_policy": {
@@ -2282,6 +2568,7 @@ class FutureValueFoldModel:
                 "all_missing_non_centered_features": "fail_closed",
                 "centered_atom_features": sorted(CENTERED_ATOM_LEVEL_FEATURES),
             },
+            "current_rating_feature_semantics": dict(CURRENT_RATING_FEATURE_SEMANTICS),
             "coefficients": self.coefficient_map,
             "intercept": float(self.intercept),
             "antisymmetric_fit": {
@@ -2292,6 +2579,7 @@ class FutureValueFoldModel:
             "regularization_selection": dict(self.regularization_selection),
             "optimizer_evidence": dict(self.optimizer_evidence),
             "rank_3": self.atom_model.parameter_receipt(),
+            "feature_ledger_binding": dict(self.feature_ledger_binding or {}),
         }
         parameters["parameter_sha256"] = hashlib.sha256(
             _canonical_json_bytes(parameters)
@@ -2299,7 +2587,11 @@ class FutureValueFoldModel:
         return parameters
 
     def predict_logit(self, design: pd.DataFrame) -> pd.Series:
-        values = _antisymmetric_design_matrix(design, self.imputation_values)
+        values = _antisymmetric_design_matrix(
+            design,
+            self.imputation_values,
+            feature_names=self.feature_names,
+        )
         scaled = values / self.scales
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             output = scaled @ self.coefficients
@@ -2338,7 +2630,11 @@ class FutureValueFoldModel:
                 "player value components require ten player rows per design game"
             )
 
-        matrix = _antisymmetric_design_matrix(design, self.imputation_values)
+        matrix = _antisymmetric_design_matrix(
+            design,
+            self.imputation_values,
+            feature_names=self.feature_names,
+        )
         contributions = (matrix / self.scales) * self.coefficients
         player_sources = {
             *[f"player_form_{metric}" for metric in FORM_METRICS],
@@ -2352,29 +2648,45 @@ class FutureValueFoldModel:
             ],
         }
         team_sources = {"team_prior_win", "roster_continuity"}
+        rating_sources = set(CURRENT_RATING_SIGNED_MAP_FEATURES)
+        scaling_sources = set(SCALING_CURVE_SIGNED_MAP_FEATURES)
         player_indexes = [
             index
-            for index, source_name in enumerate(SIDE_LEVEL_TO_MODEL_FEATURE)
+            for index, source_name in enumerate(self.feature_names)
             if source_name in player_sources
         ]
         team_indexes = [
             index
-            for index, source_name in enumerate(SIDE_LEVEL_TO_MODEL_FEATURE)
+            for index, source_name in enumerate(self.feature_names)
             if source_name in team_sources
+        ]
+        rating_indexes = [
+            index
+            for index, source_name in enumerate(self.feature_names)
+            if source_name in rating_sources
+        ]
+        scaling_indexes = [
+            index
+            for index, source_name in enumerate(self.feature_names)
+            if source_name in scaling_sources
         ]
         quality_indexes = [
             index
-            for index in range(len(SIDE_LEVEL_TO_MODEL_FEATURE))
-            if index not in {*player_indexes, *team_indexes}
+            for index in range(len(self.feature_names))
+            if index not in {*player_indexes, *team_indexes, *rating_indexes, *scaling_indexes}
         ]
         output = design[["game_id"]].copy().reset_index(drop=True)
         output["player_value_logit"] = contributions[:, player_indexes].sum(axis=1)
         output["team_context_logit"] = contributions[:, team_indexes].sum(axis=1)
+        output["current_rating_logit"] = contributions[:, rating_indexes].sum(axis=1)
+        output["scaling_curve_logit"] = contributions[:, scaling_indexes].sum(axis=1)
         output["data_quality_logit"] = contributions[:, quality_indexes].sum(axis=1)
         output["full_model_logit"] = self.predict_logit(design).to_numpy(dtype=float)
         output["component_reconstruction_error"] = output["full_model_logit"] - (
             output["player_value_logit"]
             + output["team_context_logit"]
+            + output["current_rating_logit"]
+            + output["scaling_curve_logit"]
             + output["data_quality_logit"]
         )
         if output["component_reconstruction_error"].abs().max() > 1e-12:
@@ -2471,6 +2783,12 @@ class FutureValueFoldModel:
             "fit_game_ids": list(self.fit_game_ids),
             "fit_window_end": self.fit_window_end,
             "feature_names": list(self.feature_names),
+            "variant": self.variant.value if self.variant is not None else None,
+            "variant_receipt": (
+                rating_variant_config_receipt(self.variant)
+                if self.variant is not None
+                else None
+            ),
             "metric_weights": self.metric_weights,
             "coefficients": self.coefficient_map,
             "intercept": float(self.intercept),
@@ -2485,6 +2803,7 @@ class FutureValueFoldModel:
             "optimizer_evidence": parameters["optimizer_evidence"],
             "parameter_sha256": parameters["parameter_sha256"],
             "rank_3": parameters["rank_3"],
+            "feature_ledger_binding": dict(self.feature_ledger_binding or {}),
             "train_rows": int(self.train_rows),
             "withheld_rows": int(self.withheld_rows),
             "source_binding": {
@@ -2527,6 +2846,8 @@ def fit_future_value_model(
     min_cell_support: int = 1,
     source_receipt: Mapping[str, Any] | None = None,
     verified_model_frame: pd.DataFrame | None = None,
+    variant: RatingVariant | str | None = None,
+    feature_ledger: pd.DataFrame | None = None,
 ) -> tuple[FutureValueFoldModel, pd.DataFrame]:
     """Fit one fold with all representation work bound to its train games."""
 
@@ -2556,12 +2877,19 @@ def fit_future_value_model(
     if train_dates.empty:
         raise FutureValueSourceError("future-value training games are absent")
     boundary = fit_window_end if fit_window_end is not None else train_dates.max()
+    variant_config = None if variant is None else rating_variant_config(variant)
+    if variant_config is not None and fit_window_end is None:
+        raise FutureValueSourceError("explicit rating variants require a strict fold cutoff")
     regularization_selection = _select_fold_regularization(
         map_frame,
         form,
         train_game_ids=train_ids,
         rank=rank,
         min_cell_support=min_cell_support,
+        variant=None if variant_config is None else variant_config.variant,
+        feature_ledger=feature_ledger,
+        source_receipt=source_receipt,
+        fit_window_end=boundary if variant_config is not None else None,
     )
     atom_model = fit_rank3_player_champion_role_atoms(
         form,
@@ -2575,16 +2903,34 @@ def fit_future_value_model(
         form,
         atom_model,
         verified_model_frame=map_frame,
+        variant=None if variant_config is None else variant_config.variant,
+        feature_ledger=feature_ledger,
+        source_receipt=source_receipt,
+        train_game_ids=train_ids if variant_config is not None else None,
+        fit_window_end=boundary if variant_config is not None else None,
     )
     train = design[design["game_id"].isin(train_ids)].copy()
-    feature_names = tuple(MODEL_FEATURES)
+    feature_names = tuple(
+        MODEL_FEATURES if variant_config is None else variant_config.feature_names
+    )
     target = pd.to_numeric(train["target"], errors="coerce")
     usable = target.isin({0, 1})
     usable_train = train.loc[usable]
     if len(usable_train) < 20 or usable_train["target"].nunique() != 2:
         raise FutureValueSourceError("future-value fold has insufficient two-class training rows")
-    imputation_values = _fold_level_imputation_values(usable_train)
-    matrix = _antisymmetric_design_matrix(usable_train, imputation_values)
+    if variant_config is None:
+        imputation_values = _fold_level_imputation_values(usable_train)
+    else:
+        imputation_values = _variant_imputation_values(usable_train, variant_config)
+    matrix = (
+        _antisymmetric_design_matrix(usable_train, imputation_values)
+        if variant_config is None
+        else _antisymmetric_design_matrix(
+            usable_train,
+            imputation_values,
+            feature_names=feature_names,
+        )
+    )
     means = np.zeros(matrix.shape[1], dtype=float)
     scales = matrix.std(axis=0, ddof=0)
     scales = np.where(np.isfinite(scales) & (scales > 1e-12), scales, 1.0)
@@ -2608,6 +2954,12 @@ def fit_future_value_model(
         train_rows=int(len(usable_train)),
         withheld_rows=int((~usable).sum()),
         source_receipt=dict(source_receipt or {}),
+        variant=None if variant_config is None else variant_config.variant,
+        feature_ledger_binding=(
+            dict(design.attrs.get("feature_ledger") or {})
+            if variant_config is not None
+            else None
+        ),
     )
     return model, design
 
@@ -3437,9 +3789,12 @@ def evaluate_future_value(
     source_receipt_path: str | None = None,
     source_receipt_file_sha256: str | None = None,
     runtime_receipt_path: str | None = None,
+    variant: RatingVariant | str | None = None,
+    feature_ledger: pd.DataFrame | Mapping[Any, pd.DataFrame] | None = None,
 ) -> dict[str, Any]:
     """Run a development-only chronological whole-series evaluation."""
 
+    variant_config = None if variant is None else rating_variant_config(variant)
     map_frame = _map_model_frame(maps)
     verified_eligible_ids = _validate_verified_source_receipt(
         source_receipt,
@@ -3506,6 +3861,13 @@ def evaluate_future_value(
     current_fold_reports: list[dict[str, Any]] = []
     prediction_ledger_rows: list[dict[str, Any]] = []
     for fold in folds:
+        fold_ledger: pd.DataFrame | None
+        if isinstance(feature_ledger, Mapping):
+            fold_ledger = feature_ledger.get(fold["fold"])
+            if fold_ledger is None:
+                fold_ledger = feature_ledger.get(str(fold["fold"]))
+        else:
+            fold_ledger = feature_ledger
         model, design = fit_future_value_model(
             map_frame,
             form,
@@ -3514,6 +3876,8 @@ def evaluate_future_value(
             min_cell_support=min_cell_support,
             source_receipt=source_receipt,
             verified_model_frame=map_frame,
+            variant=None if variant_config is None else variant_config.variant,
+            feature_ledger=fold_ledger,
         )
         validation = design[design["game_id"].isin(fold["validation_game_ids"])].copy()
         prediction = model.predict_probability(validation)
@@ -3802,6 +4166,13 @@ def evaluate_future_value(
                     fold["validation_game_ids"]
                 ),
                 "model_intercept": float(model.intercept),
+                "variant": model.variant.value if model.variant is not None else None,
+                "variant_receipt": (
+                    rating_variant_config_receipt(model.variant)
+                    if model.variant is not None
+                    else None
+                ),
+                "feature_ledger_binding": dict(model.feature_ledger_binding or {}),
                 "feature_means": model_parameters["feature_means"],
                 "feature_scales": model_parameters["feature_scales"],
                 "fold_local_side_imputation": model_parameters[
@@ -3992,6 +4363,10 @@ def evaluate_future_value(
     result = {
         "schema_version": MODEL_FIT_SCHEMA_VERSION,
         "status": "development_evaluated",
+        "variant": variant_config.variant.value if variant_config is not None else None,
+        "variant_receipt": (
+            variant_config.receipt() if variant_config is not None else None
+        ),
         "source": source_payload,
         "evaluation": {
             "requested_folds": int(n_folds),
@@ -4076,6 +4451,15 @@ def future_value_model_contract() -> dict[str, Any]:
     return {
         "schema_version": MODEL_CONTRACT_VERSION,
         "status": "development_only",
+        "rating_variants": [rating_variant_config_receipt(variant) for variant in RATING_VARIANT_ORDER],
+        "scaling_curve_producer": {
+            "schema_version": SCALING_CURVE_PRODUCER_SCHEMA_VERSION,
+            "model_version": SCALING_CURVE_PRODUCER_VERSION,
+            "feature_declaration": list(SCALING_CURVE_FEATURE_DECLARATION),
+            "shape_features": list(SCALING_CURVE_SHAPE_FEATURES),
+            "shape_signed_features": list(SCALING_CURVE_SIGNED_SHAPE_FEATURES),
+            "shape_invariant_features": list(SCALING_CURVE_INVARIANT_SHAPE_FEATURES),
+        },
         "estimands": {
             "future_player_value": (
                 "Development-only marginal map-win logit contribution for one player in "
@@ -4373,30 +4757,35 @@ __all__ = [
     "AcceptedFutureValueSource",
     "FutureValueFoldModel",
     "FutureValueSourceError",
-    "CURRENT_RATING_FEATURES",
+    "CURRENT_RATING_RAW_DIFFERENCE_FEATURES",
     "CURRENT_RATING_SIGNED_MAP_FEATURES",
-    "DERIVED_SCALING_CURVE_FEATURES",
-    "FUTURE_PLAYER_FORM_FEATURES",
-    "FUTURE_PLAYER_FORM_MODEL_FEATURES",
+    "CURRENT_RATING_STRENGTH_FEATURES",
+    "CURRENT_RATING_FEATURE_SEMANTICS",
+    "RATING_FEATURE_LEDGER_SCHEMA_VERSION",
     "FUTURE_PLAYER_FORM_SIDE_FEATURES",
-    "FUTURE_PLAYER_FORM_SIDE_LEVEL_FEATURES",
     "MODEL_FEATURES",
     "MODEL_FIT_SCHEMA_VERSION",
     "Rank3AtomModel",
     "RATING_VARIANT_CONFIGS",
-    "RATING_VARIANT_REGISTRY",
+    "RATING_VARIANT_ORDER",
+    "RATING_VARIANT_ORDINALS",
     "RATING_VARIANT_SCHEMA_VERSION",
-    "RATING_VARIANTS",
     "RatingVariant",
     "RatingVariantConfig",
     "SCALING_CURVE_DERIVED_FEATURES",
-    "SCALING_CURVE_FEATURES",
+    "SCALING_CURVE_FEATURE_DECLARATION",
+    "SCALING_CURVE_PRODUCER_SCHEMA_VERSION",
+    "SCALING_CURVE_PRODUCER_VERSION",
+    "SCALING_CURVE_SHAPE_FEATURES",
+    "SCALING_CURVE_SIGNED_SHAPE_FEATURES",
+    "SCALING_CURVE_INVARIANT_SHAPE_FEATURES",
     "SCALING_CURVE_SIGNED_MAP_FEATURES",
     "TEAM_CONTEXT_FEATURES",
     "assert_pregame_feature_names",
     "assert_rating_feature_names",
     "assert_rating_variant_features",
     "bind_accepted_future_value_source",
+    "bind_rating_feature_ledger",
     "build_strict_prior_player_form",
     "build_future_value_design",
     "build_time_decayed_prior_player_form",
@@ -4408,24 +4797,16 @@ __all__ = [
     "future_value_model_contract",
     "get_rating_variant_config",
     "is_side_level_feature",
-    "is_side_feature",
     "is_signed_map_feature",
-    "is_signed_feature",
     "load_accepted_future_value_source",
-    "rating_feature_class",
     "rating_variant_config",
     "rating_variant_config_receipt",
     "rating_variant_config_sha256",
-    "rating_variant_hash",
-    "rating_variant_receipt",
     "rating_variant_registry_receipt",
     "rating_variant_registry_sha256",
     "rating_variant_configs",
     "team_value_difference",
-    "validate_rating_variant",
-    "VARIANT_CONFIGS",
-    "VARIANT_REGISTRY",
-    "variant_config",
-    "variant_registry_receipt",
+    "validate_rating_feature_ledger",
+    "build_rating_variant_matrix",
     "write_source_receipt",
 ]
