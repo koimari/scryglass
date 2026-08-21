@@ -73,6 +73,29 @@ STATIC_COMPONENTS = (
     "archetype_interactions",
 )
 
+# The composition producer needs a minimum number of prior maps before it can
+# fit a model.  The first model-eligible maps can therefore have complete
+# ten-player input while no prior fitted composition model exists.  A neutral
+# zero edge is a valid strict-prior baseline for that state.  It carries an
+# explicit evidence status so it cannot be confused with fitted composition
+# evidence or with a missing source row.
+COLD_START_STATUS = "cold_start_neutral"
+COLD_START_REASON = "No earlier accepted games support this signal yet."
+COLD_START_EDGE = {
+    "base": 0.0,
+    "ally_synergy": 0.0,
+    "enemy_counter": 0.0,
+    "same_role": 0.0,
+    "archetype_interactions": 0.0,
+    "total": 0.0,
+}
+COLD_START_CONTRACT = {
+    "status": COLD_START_STATUS,
+    "fit_through": None,
+    "edge_components": "all_zero",
+    "reason": COLD_START_REASON,
+}
+
 
 _PARALLEL_SCORE_CONTEXT: tuple[Any, ...] | None = None
 
@@ -344,6 +367,52 @@ def _edge_from_signal(signal: Mapping[str, Any]) -> dict[str, float] | None:
     return values
 
 
+def _cold_start_edge(signal: Mapping[str, Any]) -> dict[str, float] | None:
+    """Return an explicit neutral edge for the no-history state only."""
+
+    if (
+        str(signal.get("status")) != "unavailable"
+        or str(signal.get("reason") or "") != COLD_START_REASON
+        or signal.get("fit_through") is not None
+    ):
+        return None
+    return dict(COLD_START_EDGE)
+
+
+def _atom_row_from_signal(
+    *,
+    game_id: str,
+    date: object,
+    signal: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Convert one signal while preserving the no-history evidence label."""
+
+    fit_through = signal.get("fit_through")
+    edge = _edge_from_signal(signal)
+    evidence_status = "available"
+    if edge is None:
+        edge = _cold_start_edge(signal)
+        if edge is not None:
+            evidence_status = COLD_START_STATUS
+    status = evidence_status if edge is not None else str(signal.get("status") or "unavailable")
+    return {
+        "game_id": game_id,
+        "date": _iso(date),
+        "fit_through": _iso(pd.to_datetime(fit_through, utc=True))
+        if fit_through is not None
+        else None,
+        "status": status,
+        "reason": signal.get("reason"),
+        "edge_components": edge,
+        "blue_prior_role_games": signal.get("blue", {}).get("prior_role_games")
+        if isinstance(signal.get("blue"), Mapping)
+        else None,
+        "red_prior_role_games": signal.get("red", {}).get("prior_role_games")
+        if isinstance(signal.get("red"), Mapping)
+        else None,
+    }
+
+
 def _iso(value: object) -> str:
     stamp = pd.Timestamp(value)
     if stamp.tzinfo is None:
@@ -451,17 +520,11 @@ def score_static_atoms(
             pd.isna(fit_stamp) or fit_stamp.normalize() >= target_date.normalize()
         ):
             raise StrictPriorAtomError(f"composition scorer leaked the target date: {game_id}")
-        edge = _edge_from_signal(signal)
-        rows_by_id[game_id] = {
-            "game_id": game_id,
-            "date": _iso(target_date),
-            "fit_through": _iso(fit_stamp) if fit_through is not None and not pd.isna(fit_stamp) else None,
-            "status": "available" if edge is not None else str(signal.get("status") or "unavailable"),
-            "reason": signal.get("reason"),
-            "edge_components": edge,
-            "blue_prior_role_games": signal.get("blue", {}).get("prior_role_games") if isinstance(signal.get("blue"), Mapping) else None,
-            "red_prior_role_games": signal.get("red", {}).get("prior_role_games") if isinstance(signal.get("red"), Mapping) else None,
-        }
+        rows_by_id[game_id] = _atom_row_from_signal(
+            game_id=game_id,
+            date=target_date,
+            signal=signal,
+        )
     for game_id in sorted(set(str(value) for value in source["accepted_game_ids"]) - set(rows_by_id)):
         map_date = maps.loc[maps["game_id"].astype(str).eq(game_id), "date"]
         rows_by_id[game_id] = {
@@ -478,8 +541,15 @@ def score_static_atoms(
     coverage = {
         "accepted_game_count": int(source["source_game_count"]),
         "composition_input_game_count": len(games),
-        "available_game_count": sum(row["status"] == "available" for row in rows),
-        "unavailable_game_count": sum(row["status"] != "available" for row in rows),
+        "available_game_count": sum(
+            row["status"] in {"available", COLD_START_STATUS} for row in rows
+        ),
+        "cold_start_neutral_game_count": sum(
+            row["status"] == COLD_START_STATUS for row in rows
+        ),
+        "unavailable_game_count": sum(
+            row["status"] not in {"available", COLD_START_STATUS} for row in rows
+        ),
         "fit_through_min": min(
             (row["fit_through"] for row in rows if row["fit_through"]),
             default=None,
@@ -687,6 +757,7 @@ def build_artifacts(
                 "same_role": "composition_signal.blue/red.components.same_role",
                 "archetype_interactions": "composition_signal.blue/red.components.atomized",
             },
+            "cold_start_contract": dict(COLD_START_CONTRACT),
         },
         "coverage": audit["coverage"],
         "score_audit": audit["score_audit"],
@@ -869,17 +940,11 @@ def build_fold_artifacts(
                 validation_model,
                 min_support_games=min_support_games,
             )
-            edge = _edge_from_signal(signal)
-            atom_rows_by_id[game_id] = {
-                "game_id": game_id,
-                "date": _iso(map_dates[game_id]),
-                "fit_through": signal.get("fit_through"),
-                "status": "available" if edge is not None else str(signal.get("status") or "unavailable"),
-                "reason": signal.get("reason"),
-                "edge_components": edge,
-                "blue_prior_role_games": signal.get("blue", {}).get("prior_role_games") if isinstance(signal.get("blue"), Mapping) else None,
-                "red_prior_role_games": signal.get("red", {}).get("prior_role_games") if isinstance(signal.get("red"), Mapping) else None,
-            }
+            atom_rows_by_id[game_id] = _atom_row_from_signal(
+                game_id=game_id,
+                date=map_dates[game_id],
+                signal=signal,
+            )
         for game_id in sorted(excluded_prior_validation):
             atom_rows_by_id[game_id] = _unavailable_atom_row(
                 game_id, map_dates[game_id], "excluded_previous_outer_validation"
@@ -944,11 +1009,21 @@ def build_fold_artifacts(
                     "same_role": "composition_signal.blue/red.components.same_role",
                     "archetype_interactions": "composition_signal.blue/red.components.atomized",
                 },
+                "cold_start_contract": dict(COLD_START_CONTRACT),
             },
             "coverage": {
                 "row_count": len(atom_rows),
-                "available_game_count": sum(row["status"] == "available" for row in atom_rows),
-                "unavailable_game_count": sum(row["status"] != "available" for row in atom_rows),
+                "available_game_count": sum(
+                    row["status"] in {"available", COLD_START_STATUS}
+                    for row in atom_rows
+                ),
+                "cold_start_neutral_game_count": sum(
+                    row["status"] == COLD_START_STATUS for row in atom_rows
+                ),
+                "unavailable_game_count": sum(
+                    row["status"] not in {"available", COLD_START_STATUS}
+                    for row in atom_rows
+                ),
                 "fit_through_max": max((row["fit_through"] for row in atom_rows if row.get("fit_through")), default=None),
             },
             "score_audit": train_audit,

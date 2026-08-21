@@ -8,6 +8,8 @@ import pandas as pd
 import pytest
 
 from benchmarks.build_strict_prior_composition_atoms import (
+    COLD_START_REASON,
+    COLD_START_STATUS,
     StrictPriorAtomError,
     _edge_from_signal,
     build_player_form,
@@ -234,6 +236,51 @@ def test_static_atom_rejects_target_date_fit(monkeypatch, tmp_path) -> None:
         score_static_atoms(games, source, maps, cache_dir=tmp_path)
 
 
+def test_static_atom_marks_no_history_as_explicit_neutral_evidence(monkeypatch, tmp_path) -> None:
+    games = [{"game_uid": "g1", "date": pd.Timestamp("2026-01-02T12:00:00Z")}]
+    maps = pd.DataFrame(
+        {
+            "game_id": ["g1"],
+            "date": pd.to_datetime(["2026-01-02T12:00:00Z"], utc=True),
+        }
+    )
+    source = {
+        "source_identity_sha256": "a" * 64,
+        "source_game_count": 1,
+        "accepted_game_ids": ["g1"],
+    }
+    monkeypatch.setattr(
+        "benchmarks.build_strict_prior_composition_atoms.composition_signal.score_games_temporally",
+        lambda *args, **kwargs: SimpleNamespace(
+            signals={
+                "g1": {
+                    "status": "unavailable",
+                    "reason": COLD_START_REASON,
+                    "fit_through": None,
+                    "blue": {"prior_role_games": 0},
+                    "red": {"prior_role_games": 0},
+                }
+            },
+            audit={},
+        ),
+    )
+
+    rows, audit = score_static_atoms(games, source, maps, cache_dir=tmp_path)
+
+    assert rows[0]["status"] == COLD_START_STATUS
+    assert rows[0]["edge_components"] == {
+        "base": 0.0,
+        "ally_synergy": 0.0,
+        "enemy_counter": 0.0,
+        "same_role": 0.0,
+        "archetype_interactions": 0.0,
+        "total": 0.0,
+    }
+    assert audit["coverage"]["available_game_count"] == 1
+    assert audit["coverage"]["cold_start_neutral_game_count"] == 1
+    assert audit["coverage"]["unavailable_game_count"] == 0
+
+
 def test_benchmark_verifies_strict_prior_atom_and_form_receipts(tmp_path) -> None:
     game_ids = ["g1", "g2"]
     maps = pd.DataFrame(
@@ -276,10 +323,30 @@ def test_benchmark_verifies_strict_prior_atom_and_form_receipts(tmp_path) -> Non
             "training_order": "earlier accepted calendar-date clusters only",
             "producer_code_sha256": "a" * 64,
             "composition_signal_code_sha256": "b" * 64,
+            "cold_start_contract": {
+                "status": COLD_START_STATUS,
+                "fit_through": None,
+                "edge_components": "all_zero",
+                "reason": COLD_START_REASON,
+            },
         },
         "coverage": {"fit_through_max": "2026-01-02T00:00:00Z"},
         "rows": [
-            {"game_id": "g1", "date": "2026-01-02T12:00:00Z", "fit_through": None, "status": "unavailable", "edge_components": None},
+            {
+                "game_id": "g1",
+                "date": "2026-01-02T12:00:00Z",
+                "fit_through": None,
+                "status": COLD_START_STATUS,
+                "reason": COLD_START_REASON,
+                "edge_components": {
+                    "base": 0.0,
+                    "ally_synergy": 0.0,
+                    "enemy_counter": 0.0,
+                    "same_role": 0.0,
+                    "archetype_interactions": 0.0,
+                    "total": 0.0,
+                },
+            },
             {"game_id": "g2", "date": "2026-01-03T12:00:00Z", "fit_through": "2026-01-02T12:00:00Z", "status": "available", "edge_components": {"base": 1.0, "ally_synergy": 2.0, "enemy_counter": 3.0, "same_role": 4.0, "archetype_interactions": 5.0, "total": 15.0}},
         ],
     }
@@ -293,7 +360,9 @@ def test_benchmark_verifies_strict_prior_atom_and_form_receipts(tmp_path) -> Non
         maps,
         expected_sha256=_sha_bytes(atom_path.read_bytes()),
     )
-    assert atom_receipt["available_game_count"] == 1
+    assert atom_receipt["available_game_count"] == 2
+    assert atom_receipt["cold_start_neutral_game_count"] == 1
+    assert atom.loc[atom["game_id"].eq("g1"), "composition_base_logit"].iloc[0] == 0.0
     assert atom.loc[atom["game_id"].eq("g2"), "composition_base_logit"].iloc[0] == 1.0
 
     form_payload = {

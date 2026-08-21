@@ -74,6 +74,13 @@ STATIC_COMPONENTS = (
     "same_role",
     "archetype_interactions",
 )
+STATIC_ATOM_AVAILABLE_STATUSES = frozenset({"available", "cold_start_neutral"})
+STATIC_ATOM_COLD_START_STATUS = "cold_start_neutral"
+STATIC_ATOM_COLD_START_REASON = "No earlier accepted games support this signal yet."
+STATIC_ATOM_COLD_START_EDGE = {
+    **{f"composition_{name}_logit": 0.0 for name in STATIC_COMPONENTS},
+    "static_total_logit": 0.0,
+}
 STATIC_FEATURES = tuple(f"composition_{name}_logit" for name in STATIC_COMPONENTS)
 CURRENT_FEATURES = (
     "base_team_logit",
@@ -516,6 +523,18 @@ def _verify_strict_prior_atom_artifact(
     producer = payload.get("producer")
     if not isinstance(producer, Mapping):
         raise FourWayDraftScoreError("strict-prior atom producer binding is missing")
+    cold_start_contract = producer.get("cold_start_contract")
+    if cold_start_contract is not None:
+        if not isinstance(cold_start_contract, Mapping) or {
+            str(key): cold_start_contract.get(key)
+            for key in ("status", "fit_through", "edge_components", "reason")
+        } != {
+            "status": STATIC_ATOM_COLD_START_STATUS,
+            "fit_through": None,
+            "edge_components": "all_zero",
+            "reason": STATIC_ATOM_COLD_START_REASON,
+        }:
+            raise FourWayDraftScoreError("strict-prior atom cold-start contract changed")
     fold_sets: tuple[set[str], set[str], set[str], pd.Timestamp] | None = None
     if fold is not None:
         if cutoff_text is None:
@@ -560,7 +579,7 @@ def _verify_strict_prior_atom_artifact(
         if fold_sets is not None:
             effective, validation, excluded, cutoff = fold_sets
             if game_id in excluded:
-                if status == "available" or raw.get("reason") != "excluded_previous_outer_validation":
+                if status in STATIC_ATOM_AVAILABLE_STATUSES or raw.get("reason") != "excluded_previous_outer_validation":
                     raise FourWayDraftScoreError(f"strict-prior atom previous validation row is usable: {game_id}")
             elif game_id in validation and (
                 raw.get("fit_through") is not None
@@ -568,7 +587,32 @@ def _verify_strict_prior_atom_artifact(
             ):
                 raise FourWayDraftScoreError(f"strict-prior atom validation fit crossed cutoff: {game_id}")
         edge = raw.get("edge_components")
-        if status == "available":
+        if status == STATIC_ATOM_COLD_START_STATUS:
+            if cold_start_contract is None:
+                raise FourWayDraftScoreError("strict-prior atom cold-start contract is missing")
+            if raw.get("reason") != STATIC_ATOM_COLD_START_REASON or raw.get("fit_through") is not None:
+                raise FourWayDraftScoreError(f"strict-prior atom cold-start evidence changed: {game_id}")
+            if raw.get("edge_components") != {
+                "base": 0.0,
+                "ally_synergy": 0.0,
+                "enemy_counter": 0.0,
+                "same_role": 0.0,
+                "archetype_interactions": 0.0,
+                "total": 0.0,
+            }:
+                raise FourWayDraftScoreError(f"strict-prior atom cold-start edge changed: {game_id}")
+            parsed.append(
+                {
+                    "game_id": game_id,
+                    "date": date,
+                    **STATIC_ATOM_COLD_START_EDGE,
+                    "atom_available": True,
+                    "atom_evidence_status": STATIC_ATOM_COLD_START_STATUS,
+                    "atom_fit_through": pd.NaT,
+                    "atom_exclusion_reason": None,
+                }
+            )
+        elif status == "available":
             if not isinstance(edge, Mapping) or set(edge) != {*STATIC_COMPONENTS, "total"}:
                 raise FourWayDraftScoreError(f"strict-prior atom components are incomplete: {game_id}")
             values = {feature: float(edge[feature]) for feature in STATIC_COMPONENTS}
@@ -587,6 +631,7 @@ def _verify_strict_prior_atom_artifact(
                     },
                     "static_total_logit": total,
                     "atom_available": True,
+                    "atom_evidence_status": "available",
                     "atom_fit_through": fit,
                     "atom_exclusion_reason": None,
                 }
@@ -598,6 +643,7 @@ def _verify_strict_prior_atom_artifact(
                 **{feature: np.nan for feature in STATIC_FEATURES},
                 "static_total_logit": np.nan,
                 "atom_available": False,
+                "atom_evidence_status": status,
                 "atom_fit_through": fit if raw.get("fit_through") is not None else pd.NaT,
                 "atom_exclusion_reason": raw.get("reason"),
             })
@@ -614,6 +660,9 @@ def _verify_strict_prior_atom_artifact(
         "composition_signal_code_sha256": composition_code,
         "game_count": len(frame),
         "available_game_count": int(frame["atom_available"].sum()),
+        "cold_start_neutral_game_count": int(
+            (frame["atom_evidence_status"] == STATIC_ATOM_COLD_START_STATUS).sum()
+        ),
         "fit_through": payload.get("coverage", {}).get("fit_through_max")
         if isinstance(payload.get("coverage"), Mapping)
         else None,
@@ -1481,6 +1530,15 @@ def _joined_fold(
         "missing_game_ids": missing[:20],
         "static_atom_missing_game_count": len(static_atom_missing),
         "static_atom_missing_game_ids": static_atom_missing[:20],
+        "static_atom_cold_start_neutral_game_count": int(
+            (
+                atom.get(
+                    "atom_evidence_status",
+                    pd.Series(index=atom.index, dtype=object),
+                )
+                == STATIC_ATOM_COLD_START_STATUS
+            ).sum()
+        ),
         "excluded_previous_validation_game_count": len(excluded_previous_ids & expected),
         "train_dates_at_or_after_cutoff": prior_violations,
         "validation_dates_at_or_before_cutoff": validation_prior_violations,
@@ -2020,6 +2078,9 @@ def _static_descriptive_rows(frame: pd.DataFrame) -> list[dict[str, Any]]:
                 if pd.isna(raw.get("static_total_logit"))
                 else float(raw["static_total_logit"])
             ),
+            "static_atom_evidence_status": str(
+                raw.get("atom_evidence_status") or "unknown"
+            ),
         }
         for feature in CURRENT_FEATURES:
             if feature in raw:
@@ -2435,6 +2496,28 @@ def build_report(
         draws=bootstrap_draws,
     )
     descriptive_rows = _static_descriptive_rows(descriptive_frame)
+    if strict_fold_root is not None:
+        static_atom_rows = pd.concat(
+            [frame[["game_id", "atom_available", "atom_evidence_status"]]
+             for frame in joined_by_fold.values()],
+            ignore_index=True,
+        ).drop_duplicates("game_id", keep="first")
+        static_atom_available_count = int(
+            static_atom_rows["atom_available"].astype(bool).sum()
+        )
+        static_atom_cold_start_count = int(
+            (
+                static_atom_rows["atom_evidence_status"]
+                == STATIC_ATOM_COLD_START_STATUS
+            ).sum()
+        )
+    else:
+        static_atom_available_count = int(
+            atom["atom_available"].astype(bool).sum()
+            if "atom_available" in atom.columns
+            else len(atom)
+        )
+        static_atom_cold_start_count = 0
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "status": "research_only",
@@ -2458,11 +2541,8 @@ def build_report(
         "coverage": {
             "accepted_game_count": int(source["source_game_count"]),
             "public_atom_game_count": int(len(atom)) if strict_fold_root is None else 0,
-            "static_atom_available_game_count": int(
-                atom["atom_available"].astype(bool).sum()
-                if strict_fold_root is None and "atom_available" in atom.columns
-                else (len(atom) if strict_fold_root is None else 0)
-            ),
+            "static_atom_available_game_count": static_atom_available_count,
+            "static_atom_cold_start_neutral_game_count": static_atom_cold_start_count,
             "strict_prior_atom": strict_atom_path is not None or strict_fold_root is not None,
             "strict_prior_form": strict_form_path is not None or strict_fold_root is not None,
             "descriptive_subset_game_count": int(len(descriptive_rows)),
