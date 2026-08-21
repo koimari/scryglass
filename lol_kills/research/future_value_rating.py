@@ -2235,11 +2235,20 @@ def bind_verified_leaguepedia_series_crosswalk(
     frame_ids = set(model_frame["game_id"].astype(str))
     accepted_ids = set(map(str, source_receipt["accepted_game_ids"]))
     eligible_ids = set(map(str, source_receipt["model_eligible_game_ids"]))
-    if not frame_ids.issubset(accepted_ids):
+    extra_sources = source_receipt.get("source_extra_game_ids")
+    map_extra_ids = set(
+        map(
+            str,
+            extra_sources.get("maps", ())
+            if isinstance(extra_sources, Mapping)
+            else (),
+        )
+    )
+    if not frame_ids.issubset(accepted_ids | map_extra_ids):
         raise FutureValueSourceError(
             "Leaguepedia crosswalk maps are outside the accepted census"
         )
-    if frame_ids == accepted_ids:
+    if accepted_ids.issubset(frame_ids):
         validation_frame = model_frame[
             model_frame["game_id"].astype(str).isin(eligible_ids)
         ].copy()
