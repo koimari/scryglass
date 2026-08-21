@@ -5,6 +5,11 @@ import json
 
 import pytest
 
+from benchmarks.build_future_value_snapshot_comparison import (
+    DEFAULT_FUTURE_ROOT,
+    DEFAULT_OUTPUT,
+    TRUSTED_V15_INPUT_HASHES,
+)
 from lol_kills.research.future_value_snapshot_comparison import (
     SnapshotComparisonError,
     build_snapshot_comparison_report,
@@ -206,7 +211,7 @@ def _trust_root(
     }
 
 
-def test_snapshot_comparison_binds_common_ids_and_inherited_blocker() -> None:
+def test_snapshot_comparison_keeps_join_verified_with_inherited_blocker() -> None:
     current, future, player, team = _fixtures()
     trust_root = _trust_root(current, future, player, team)
     report = build_snapshot_comparison_report(
@@ -231,6 +236,8 @@ def test_snapshot_comparison_binds_common_ids_and_inherited_blocker() -> None:
     assert report["independent_join"]["team"]["full_snapshot_rank_status"] == "incomparable"
     assert report["blocker_context"]["identity_blocker_is_join_failure"] is False
     assert report["model_authorization_blocker"]["status"] == "stale_inherited"
+    assert report["model_authorization_blocker"]["inherited"] is True
+    assert report["model_authorization_blocker"]["stale"] is True
     assert report["model_authorization_blocker"]["label"] == (
         "stale_inherited_for_model_authorization"
     )
@@ -244,6 +251,41 @@ def test_snapshot_comparison_binds_common_ids_and_inherited_blocker() -> None:
     assert report["receipts"]["current"]["receipt_sha256"] == current["receipt_sha256"]
     assert report["receipts"]["future"]["receipt_sha256"] == future["receipt_sha256"]
     assert len(report["report_sha256"]) == 64
+
+
+def test_snapshot_comparison_join_stays_verified_when_identity_blocker_is_absent() -> None:
+    current, future, player, team = _fixtures()
+    future["blockers"] = ["current_player_team_rating_comparison_missing"]
+    future.pop("receipt_sha256")
+    future["receipt_sha256"] = hashlib.sha256(_canonical(future)).hexdigest()
+    trust_root = _trust_root(current, future, player, team)
+    report = build_snapshot_comparison_report(
+        current_receipt=current,
+        future_receipt=future,
+        player_rank_diff_artifact=player,
+        team_rank_diff_artifact=team,
+        current_receipt_file_sha256="d" * 64,
+        future_receipt_file_sha256="e" * 64,
+        player_rank_diff_file_sha256="f" * 64,
+        team_rank_diff_file_sha256="0" * 64,
+        expected_source_receipt_sha256="a" * 64,
+        current_snapshot_trust_root=trust_root,
+    )
+    assert report["independent_join"]["status"] == "verified"
+    assert report["independent_join"]["source_bound"] is True
+    assert report["model_authorization_blocker"]["status"] == "none"
+    assert report["blocker_context"]["status"] == "none"
+
+
+def test_snapshot_comparison_builder_pins_v15_calibrated_bundle() -> None:
+    assert DEFAULT_FUTURE_ROOT.name == "future-value-snapshots-v15-calibrated"
+    assert DEFAULT_OUTPUT.name == "future-value-snapshot-comparisons-v15-calibrated.json"
+    assert set(TRUSTED_V15_INPUT_HASHES) == {
+        "current_receipt",
+        "future_receipt",
+        "player_rank_diffs",
+        "team_rank_diffs",
+    }
 
 
 def test_snapshot_comparison_rejects_changed_paired_digest() -> None:

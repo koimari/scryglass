@@ -23,21 +23,21 @@ from lol_kills.research.future_value_snapshot_comparison import (
 
 DEFAULT_ROOT = Path("/private/tmp/scryglass-four-variant-runs")
 DEFAULT_CURRENT_RECEIPT = DEFAULT_ROOT / "current-ratings-final-fit-v2/current-rating-snapshot-receipt-v1.json"
-DEFAULT_FUTURE_ROOT = DEFAULT_ROOT / "future-value-snapshots-v13"
+DEFAULT_FUTURE_ROOT = DEFAULT_ROOT / "future-value-snapshots-v15-calibrated"
 DEFAULT_FUTURE_RECEIPT = DEFAULT_FUTURE_ROOT / "future-value-snapshot-receipt.json"
 DEFAULT_PLAYER_DIFF = DEFAULT_FUTURE_ROOT / "future-player-rank-diffs.json"
 DEFAULT_TEAM_DIFF = DEFAULT_FUTURE_ROOT / "future-team-rank-diffs.json"
-DEFAULT_OUTPUT = DEFAULT_ROOT / "future-value-snapshot-comparisons-v1.json"
+DEFAULT_OUTPUT = DEFAULT_ROOT / "future-value-snapshot-comparisons-v15-calibrated.json"
 
-# This report is a checked comparison of the frozen v13 bundle.  The hashes
+# This report is a checked comparison of the frozen v15 calibrated bundle.  The hashes
 # stay in the command so a changed artifact cannot silently reseal the report.
-TRUSTED_V13_INPUT_HASHES = {
+TRUSTED_V15_INPUT_HASHES = {
     "current_receipt": "89ed6c1692b393fdbf5c3bf2ca4c1b0c22bb4ea1a71f4283f7a8d8102070957b",
-    "future_receipt": "dbd7de9fd5c813bd07396796e4f27435df28ae42b9a513ea293c01b9d639f511",
-    "player_rank_diffs": "2c72020ad5897a23952f868a86c5c865b82d52ca8e615845a124fb921c0cd3d3",
-    "team_rank_diffs": "d93c908c173e6af502512f7c25ee43dbb9237ebbec046cf80b2a29bf2287c73e",
+    "future_receipt": "5cf2f4958df57b7183e46b2aa41491c4976c86a7a9c2a6e0ce51d8deb972359c",
+    "player_rank_diffs": "06435b00aeb67bfc24998f53ee62b2227c44cf15f21cfb8542ff10f69647bc6c",
+    "team_rank_diffs": "2daf16db4345166adf0f0c3fa51894299ea3505a88b85f8bc02a30f82b46a2f2",
 }
-TRUSTED_V13_SOURCE_RECEIPT_SHA256 = (
+TRUSTED_V15_SOURCE_RECEIPT_SHA256 = (
     "41325d71332147347bf915798cf6d6c9e8d0b3db1796487d84e167a1056a0212"
 )
 
@@ -159,8 +159,8 @@ def build_report(
     )
     for path, key in paths_and_keys:
         actual = _sha256_path(path)
-        if actual != TRUSTED_V13_INPUT_HASHES[key]:
-            raise SnapshotComparisonError(f"trusted v13 {key} artifact changed")
+        if actual != TRUSTED_V15_INPUT_HASHES[key]:
+            raise SnapshotComparisonError(f"trusted v15 {key} artifact changed")
     current = _load(current_receipt_path, "current snapshot receipt")
     future = _load(future_receipt_path, "future snapshot receipt")
     player = _load(player_rank_diff_path, "player rank diff artifact")
@@ -183,7 +183,7 @@ def build_report(
         future_receipt_file_sha256=_sha256_path(future_receipt_path),
         player_rank_diff_file_sha256=_sha256_path(player_rank_diff_path),
         team_rank_diff_file_sha256=_sha256_path(team_rank_diff_path),
-        expected_source_receipt_sha256=TRUSTED_V13_SOURCE_RECEIPT_SHA256,
+        expected_source_receipt_sha256=TRUSTED_V15_SOURCE_RECEIPT_SHA256,
         current_snapshot_trust_root=current_trust_root,
     )
 
