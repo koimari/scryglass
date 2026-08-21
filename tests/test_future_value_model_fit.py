@@ -1006,7 +1006,7 @@ def test_roster_continuity_unavailable_blocks_the_slice() -> None:
         }
     )
     labels = _roster_change_labels(frame)
-    assert labels is not None and labels.eq("<missing>").all()
+    assert labels is None
     report = _group_slice_metrics(
         pd.Series([0, 1] * 10, dtype=float),
         pd.Series([0.4, 0.6] * 10, dtype=float),
@@ -1014,7 +1014,7 @@ def test_roster_continuity_unavailable_blocks_the_slice() -> None:
         labels,
         slice_name="roster_change",
     )
-    assert "roster_change_labels_missing" in report["blockers"]
+    assert "roster_change_field_missing" in report["blockers"]
 
 
 def test_chronological_folds_exclude_clusters_that_cross_intervals() -> None:
