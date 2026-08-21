@@ -159,7 +159,32 @@ def _evaluation_blockers(path: Path, source_receipt: Mapping[str, Any]) -> tuple
     blockers = variant.get("blockers")
     if not isinstance(blockers, list):
         raise FinalFitError("V2 evaluation blocker list is missing")
-    return tuple(sorted({str(value) for value in blockers}))
+    output = {str(value) for value in blockers}
+    evaluation = variant.get("evaluation")
+    if not isinstance(evaluation, Mapping):
+        output.add("final_calibration_receipt_missing")
+        output.add("support_uncertainty_proxy_not_calibrated")
+        return tuple(sorted(output))
+    point = evaluation.get("strict_prior_calibration")
+    if (
+        not isinstance(point, Mapping)
+        or point.get("status") != "available"
+        or point.get("blockers")
+    ):
+        output.add("final_calibration_receipt_missing")
+    support = evaluation.get("support_uncertainty_calibration")
+    support_coverage = support.get("coverage") if isinstance(support, Mapping) else None
+    if (
+        not isinstance(support, Mapping)
+        or support.get("status") != "research_only"
+        or support.get("blockers")
+        or not isinstance(support_coverage, Mapping)
+        or support_coverage.get("complete_enough") is not True
+        or float(support_coverage.get("calibrated_row_fraction", 0.0)) != 1.0
+        or support_coverage.get("first_fold_without_history") is not False
+    ):
+        output.add("support_uncertainty_proxy_not_calibrated")
+    return tuple(sorted(output))
 
 
 def _verified_nested_selection(
@@ -692,13 +717,6 @@ def fit_final_v2(
     parameters = model.parameter_receipt()
     blockers = set(evaluation_blockers)
     blockers.update(model.regularization_selection.get("blockers", ()))
-    blockers.update(
-        {
-            "final_calibration_receipt_missing",
-            "authoritative_series_id_missing_proxy_cluster_used",
-            "current_rating_player_team_identity_missing_for_rank_diffs",
-        }
-    )
     receipt = model.receipt()
     receipt.update(
         {
