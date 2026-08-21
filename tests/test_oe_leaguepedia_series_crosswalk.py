@@ -380,6 +380,194 @@ def test_duplicate_direct_riot_id_stays_ambiguous_when_each_prefix_has_schedule(
     verify_crosswalk(result)
 
 
+def test_anchored_series_remainder_recovers_one_unique_map(
+    tmp_path: Path,
+) -> None:
+    oe, scoreboard, schedule, tournaments, _receipt_value, mapping, records, raw = _fixture()
+    oe.append(
+        {
+            "gameid": "oe-3",
+            "date": "2026-08-14T16:59:23Z",
+            "league": "LEC",
+            "patch": "16.16",
+            "teams": ["G2 Esports", "Fnatic"],
+        }
+    )
+    scoreboard.append(
+        dict(
+            scoreboard[0],
+            GameId="match-1_3",
+            **{"DateTime UTC": "2026-08-14 17:11:00"},
+        )
+    )
+    receipt = _receipt(["oe-1", "oe-2", "oe-3"])
+    payloads = {
+        "oe": oe,
+        "scoreboardgames": scoreboard,
+        "matchschedule": schedule,
+        "tournaments": tournaments,
+    }
+    records, raw = _refresh_records(records, raw, payloads)
+    records = _write_source_files(tmp_path / "anchored-source-files", payloads, records)
+
+    result = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        tournaments,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+    )
+
+    recovered = next(row for row in result["assignments"] if row["oe_game_id"] == "oe-3")
+    assert result["status"] == "complete_authoritative_coverage"
+    assert recovered["assignment_method"].startswith("anchored_series_remainder_")
+    assert recovered["evidence"]["identity"]["anchor_count"] == 2
+    assert recovered["evidence"]["identity"]["unique_bijection"] is True
+    verify_crosswalk(result)
+
+
+def test_anchored_remainder_rejects_non_unique_unused_maps() -> None:
+    oe, scoreboard, schedule, tournaments, _receipt_value, mapping, records, raw = _fixture()
+    oe.append(
+        {
+            "gameid": "oe-3",
+            "date": "2026-08-14T16:59:23Z",
+            "league": "LEC",
+            "patch": "16.16",
+            "teams": ["G2 Esports", "Fnatic"],
+        }
+    )
+    scoreboard.extend(
+        [
+            dict(scoreboard[0], GameId="match-1_3", **{"DateTime UTC": "2026-08-14 17:11:00"}),
+            dict(scoreboard[0], GameId="match-1_4", **{"DateTime UTC": "2026-08-14 17:20:00"}),
+        ]
+    )
+    receipt = _receipt(["oe-1", "oe-2", "oe-3"])
+    records, raw = _refresh_records(
+        records,
+        raw,
+        {"oe": oe, "scoreboardgames": scoreboard},
+    )
+
+    result = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        tournaments,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+        raw_source_bytes=raw,
+        allow_partial=True,
+    )
+
+    assert "oe-3" not in {row["oe_game_id"] for row in result["assignments"]}
+    assert any(
+        issue["kind"] == "calendar_day_identity_ambiguous"
+        for issue in result["issues"]
+    )
+
+
+def test_unique_calendar_day_singleton_requires_matching_explicit_order(
+    tmp_path: Path,
+) -> None:
+    oe, scoreboard, schedule, tournaments, _receipt_value, mapping, records, raw = _fixture()
+    oe = [
+        dict(
+            oe[0],
+            gameid="13023-13023_game_1",
+            date="2026-08-14T14:05:00Z",
+        )
+    ]
+    scoreboard = [
+        dict(
+            scoreboard[0],
+            GameId="demacia-day-1_1",
+            **{"DateTime UTC": "2026-08-14 11:30:00"},
+        )
+    ]
+    schedule = [
+        dict(
+            schedule[0],
+            MatchId="demacia-day-1",
+            **{"DateTime UTC": "2026-08-14 11:30:00"},
+        )
+    ]
+    receipt = _receipt(["13023-13023_game_1"])
+    payloads = {
+        "oe": oe,
+        "scoreboardgames": scoreboard,
+        "matchschedule": schedule,
+        "tournaments": tournaments,
+    }
+    records, raw = _refresh_records(records, raw, payloads)
+    records = _write_source_files(tmp_path / "calendar-source-files", payloads, records)
+
+    result = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        tournaments,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+    )
+
+    assignment = result["assignments"][0]
+    assert assignment["assignment_method"].startswith("unique_calendar_day_")
+    assert assignment["evidence"]["identity"]["game_order_enforced"] is True
+    assert assignment["scoreboard_game_order"] == 1
+    verify_crosswalk(result)
+
+
+@pytest.mark.parametrize("mutation", ["day", "patch", "order"])
+def test_calendar_singleton_rejects_day_patch_or_order_mismatch(
+    mutation: str,
+) -> None:
+    oe, scoreboard, schedule, tournaments, _receipt_value, mapping, records, raw = _fixture()
+    oe = [dict(oe[0], gameid="13023-13023_game_1", date="2026-08-14T14:05:00Z")]
+    scoreboard = [dict(scoreboard[0], GameId="demacia-day-1_1", **{"DateTime UTC": "2026-08-14 11:30:00"})]
+    schedule = [dict(schedule[0], MatchId="demacia-day-1", **{"DateTime UTC": "2026-08-14 11:30:00"})]
+    if mutation == "day":
+        scoreboard[0]["DateTime UTC"] = "2026-08-13 11:30:00"
+    elif mutation == "patch":
+        scoreboard[0]["Patch"] = "26.15"
+    else:
+        scoreboard[0]["GameId"] = "demacia-day-1_2"
+    receipt = _receipt(["13023-13023_game_1"])
+    payloads = {
+        "oe": oe,
+        "scoreboardgames": scoreboard,
+        "matchschedule": schedule,
+        "tournaments": tournaments,
+    }
+    records, raw = _refresh_records(records, raw, payloads)
+
+    result = build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        tournaments,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+        raw_source_bytes=raw,
+        allow_partial=True,
+    )
+
+    assert result["assignments"] == []
+    assert any(
+        issue["kind"] == "scoreboard_identity_missing" for issue in result["issues"]
+    )
+
+
 def test_resealed_embedded_outcome_field_fails_verification(tmp_path: Path) -> None:
     result = _build_verifiable(tmp_path)
     result["raw_sources"]["matchschedule"][0]["Winner"] = "forged"

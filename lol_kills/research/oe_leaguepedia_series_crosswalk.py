@@ -340,6 +340,14 @@ def _game_prefix_and_order(game_id: str) -> tuple[str, int]:
     return prefix, int(ordinal)
 
 
+def _oe_explicit_game_order(game_id: str) -> int | None:
+    match = re.search(r"(?:^|[_:-])(?:game|map)[_-]?(\d+)$", game_id, re.I)
+    if match is None:
+        return None
+    order = int(match.group(1))
+    return order if order >= 1 else None
+
+
 def _mapping_section(mapping: Mapping[str, Any], section: str) -> Mapping[str, Any]:
     value = mapping.get(section)
     if isinstance(value, Mapping):
@@ -837,6 +845,183 @@ def build_oe_leaguepedia_series_crosswalk(
 
     assignments: list[dict[str, Any]] = []
     used_scoreboard_ids: set[str] = set()
+    pending_relaxed_identity: list[dict[str, Any]] = []
+
+    def append_assignment(
+        oe: Mapping[str, Any],
+        selected: Mapping[str, Any],
+        evidence: Mapping[str, Any],
+        assignment_method: str,
+        mapping: Mapping[str, Any],
+        scoreboard_section: Mapping[str, Any],
+        schedule_section: Mapping[str, Any],
+    ) -> bool:
+        scoreboard_id = str(selected["_game_id"])
+        if scoreboard_id in used_scoreboard_ids:
+            issues.append(
+                {
+                    "kind": "duplicate_source_assignment",
+                    "oe_game_id": oe["_game_id"],
+                    "scoreboard_game_id": scoreboard_id,
+                }
+            )
+            return False
+        scoreboard_tournament = str(selected.get("_tournament") or "").strip()
+        if not scoreboard_tournament:
+            issues.append(
+                {
+                    "kind": "scoreboard_tournament_missing",
+                    "oe_game_id": oe["_game_id"],
+                    "scoreboard_game_id": scoreboard_id,
+                    "series_id": selected["_prefix"],
+                }
+            )
+            return False
+        tournament_candidates = tournaments.get(_norm(scoreboard_tournament), [])
+        if not tournament_candidates:
+            issues.append(
+                {
+                    "kind": "tournament_identity_missing",
+                    "oe_game_id": oe["_game_id"],
+                    "scoreboard_game_id": scoreboard_id,
+                    "scoreboard_tournament": scoreboard_tournament,
+                }
+            )
+            return False
+        if len(tournament_candidates) != 1:
+            issues.append(
+                {
+                    "kind": "tournament_identity_ambiguous",
+                    "oe_game_id": oe["_game_id"],
+                    "scoreboard_game_id": scoreboard_id,
+                    "scoreboard_tournament": scoreboard_tournament,
+                    "candidate_count": len(tournament_candidates),
+                }
+            )
+            return False
+        tournament_row = tournament_candidates[0]
+        tournament_ok, tournament_evidence = _tournament_matches_competition(
+            tournament_row, selected, scoreboard_section
+        )
+        if not tournament_ok:
+            issues.append(
+                {
+                    "kind": "tournament_competition_mismatch",
+                    "oe_game_id": oe["_game_id"],
+                    "scoreboard_game_id": scoreboard_id,
+                    "scoreboard_tournament": scoreboard_tournament,
+                    "evidence": tournament_evidence,
+                }
+            )
+            return False
+        match_id = str(selected["_prefix"])
+        match_candidates = schedules_by_match.get(match_id, [])
+        schedule_candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        direct_scoreboard_identity = assignment_method.startswith(
+            "exact_riot_platform_game_id"
+        )
+        for schedule_row in match_candidates:
+            if (
+                not direct_scoreboard_identity
+                and schedule_row["_teams"] != oe["_teams"]
+            ):
+                continue
+            competition_ok, schedule_competition_evidence = _competition_matches(
+                schedule_row, schedule_section, require_constraint=True
+            )
+            if not competition_ok:
+                continue
+            patch_ok, schedule_patch_evidence = _patch_matches(
+                oe["_patch"], schedule_row, mapping
+            )
+            if not patch_ok and not direct_scoreboard_identity:
+                continue
+            schedule_delta = (oe["_stamp"] - schedule_row["_stamp"]).total_seconds()
+            order = int(selected["_order"])
+            schedule_bound = (
+                max_first_game_schedule_delta_seconds
+                if order == 1
+                else max_later_game_schedule_age_seconds
+            )
+            if not direct_scoreboard_identity and abs(schedule_delta) > schedule_bound:
+                continue
+            schedule_candidates.append(
+                (
+                    schedule_row,
+                    {
+                        "identity": {
+                            "source_field": "ScoreboardGames.GameId prefix",
+                            "target_field": "MatchSchedule.MatchId",
+                            "value": match_id,
+                            "exact": True,
+                        },
+                        "series_timestamp_delta_seconds": schedule_delta,
+                        "team_set_consistent": schedule_row["_teams"]
+                        == oe["_teams"],
+                        "timestamp_bound_used_for_identity": not direct_scoreboard_identity,
+                        "competition": schedule_competition_evidence,
+                        "patch": {
+                            **schedule_patch_evidence,
+                            "identity_gate": (
+                                "exact_riot_platform_game_id"
+                                if direct_scoreboard_identity
+                                else "team_set_competition_patch_timestamp"
+                            ),
+                            "identity_gate_enforced": not direct_scoreboard_identity,
+                        },
+                    },
+                )
+            )
+        if len(schedule_candidates) != 1:
+            issues.append(
+                {
+                    "kind": (
+                        "schedule_identity_ambiguous"
+                        if len(schedule_candidates) > 1
+                        else "schedule_identity_missing"
+                    ),
+                    "oe_game_id": oe["_game_id"],
+                    "scoreboard_game_id": scoreboard_id,
+                    "match_id": match_id,
+                    "candidate_count": len(schedule_candidates),
+                }
+            )
+            return False
+        schedule_row, schedule_evidence = schedule_candidates[0]
+        used_scoreboard_ids.add(scoreboard_id)
+        assignments.append(
+            {
+                "oe_game_id": oe["_game_id"],
+                "scoreboard_game_id": scoreboard_id,
+                "scoreboard_riot_platform_game_id": (
+                    selected.get("_riot_platform_game_id") or None
+                ),
+                "scoreboard_game_order": int(selected["_order"]),
+                "series_id": match_id,
+                "normalized_team_set": sorted(oe["_source_teams"]),
+                "oe_timestamp": oe["_stamp"].isoformat().replace("+00:00", "Z"),
+                "scoreboard_timestamp": selected["_stamp"]
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "series_timestamp": schedule_row["_stamp"]
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "source_league": oe["_league"],
+                "source_tournament": oe["_tournament"] or None,
+                "source_patch": oe["_patch"] or None,
+                "scoreboard_tournament": scoreboard_tournament,
+                "scoreboard_game_id_prefix": selected["_prefix"],
+                "evidence": {
+                    **evidence,
+                    "schedule": schedule_evidence,
+                    "tournament": tournament_evidence,
+                },
+                "outcome_used": False,
+                "assignment_method": assignment_method,
+            }
+        )
+        return True
+
     for oe in oe_prepared:
         source_league_key = _norm(oe["_league"])
         mapping = next(
@@ -960,14 +1145,10 @@ def build_oe_leaguepedia_series_crosswalk(
                         },
                     )
                 )
-            if len(candidates) != 1:
+            if len(candidates) > 1:
                 issues.append(
                     {
-                        "kind": (
-                            "scoreboard_identity_ambiguous"
-                            if len(candidates) > 1
-                            else "scoreboard_identity_missing"
-                        ),
+                        "kind": "scoreboard_identity_ambiguous",
                         "oe_game_id": oe["_game_id"],
                         "candidate_count": len(candidates),
                         "candidate_game_ids": [
@@ -976,156 +1157,307 @@ def build_oe_leaguepedia_series_crosswalk(
                     }
                 )
                 continue
+            if len(candidates) == 0:
+                pending_relaxed_identity.append(
+                    {
+                        "oe": oe,
+                        "mapping": mapping,
+                        "scoreboard_section": scoreboard_section,
+                        "schedule_section": schedule_section,
+                    }
+                )
+                continue
             selected, evidence = candidates[0]
             assignment_method = (
                 "exact_team_set_competition_patch_bounded_timestamp_then_"
                 "exact_game_id_prefix"
             )
-        scoreboard_id = selected["_game_id"]
-        if scoreboard_id in used_scoreboard_ids:
-            issues.append({"kind": "duplicate_source_assignment", "oe_game_id": oe["_game_id"], "scoreboard_game_id": scoreboard_id})
-            continue
-        scoreboard_tournament = str(selected.get("_tournament") or "").strip()
-        if not scoreboard_tournament:
-            issues.append(
-                {
-                    "kind": "scoreboard_tournament_missing",
-                    "oe_game_id": oe["_game_id"],
-                    "scoreboard_game_id": scoreboard_id,
-                    "series_id": selected["_prefix"],
-                }
-            )
-            continue
-        tournament_candidates = tournaments.get(_norm(scoreboard_tournament), [])
-        if not tournament_candidates:
-            issues.append(
-                {
-                    "kind": "tournament_identity_missing",
-                    "oe_game_id": oe["_game_id"],
-                    "scoreboard_game_id": scoreboard_id,
-                    "scoreboard_tournament": scoreboard_tournament,
-                }
-            )
-            continue
-        if len(tournament_candidates) != 1:
-            issues.append(
-                {
-                    "kind": "tournament_identity_ambiguous",
-                    "oe_game_id": oe["_game_id"],
-                    "scoreboard_game_id": scoreboard_id,
-                    "scoreboard_tournament": scoreboard_tournament,
-                    "candidate_count": len(tournament_candidates),
-                }
-            )
-            continue
-        tournament_row = tournament_candidates[0]
-        tournament_ok, tournament_evidence = _tournament_matches_competition(
-            tournament_row, selected, scoreboard_section
+        append_assignment(
+            oe,
+            selected,
+            evidence,
+            assignment_method,
+            mapping,
+            scoreboard_section,
+            schedule_section,
         )
-        if not tournament_ok:
-            issues.append(
-                {
-                    "kind": "tournament_competition_mismatch",
-                    "oe_game_id": oe["_game_id"],
-                    "scoreboard_game_id": scoreboard_id,
-                    "scoreboard_tournament": scoreboard_tournament,
-                    "evidence": tournament_evidence,
-                }
+
+    primary_assignments = tuple(assignments)
+    primary_used_scoreboard_ids = {
+        str(assignment["scoreboard_game_id"]) for assignment in primary_assignments
+    }
+    prepared_oe_by_id = {str(row["_game_id"]): row for row in oe_prepared}
+    prepared_scoreboard_by_id = {
+        str(row["_game_id"]): row for row in scoreboard
+    }
+    primary_by_series: dict[str, list[dict[str, Any]]] = {}
+    for assignment in primary_assignments:
+        primary_by_series.setdefault(
+            str(assignment["series_id"]), []
+        ).append(assignment)
+
+    def relaxed_candidate_evidence(
+        context: Mapping[str, Any],
+        candidate: Mapping[str, Any],
+        *,
+        enforce_explicit_order: bool,
+    ) -> dict[str, Any] | None:
+        oe = context["oe"]
+        mapping = context["mapping"]
+        scoreboard_section = context["scoreboard_section"]
+        schedule_section = context["schedule_section"]
+        if candidate["_game_id"] in primary_used_scoreboard_ids:
+            return None
+        if candidate["_teams"] != oe["_teams"]:
+            return None
+        try:
+            source_normalized_teams = _row_team_set(
+                oe, label="relaxed OE identity"
             )
-            continue
-        match_id = selected["_prefix"]
-        match_candidates = schedules_by_match.get(match_id, [])
-        schedule_candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
-        direct_scoreboard_identity = assignment_method.startswith(
-            "exact_riot_platform_game_id"
+        except CrosswalkError:
+            return None
+        if source_normalized_teams != candidate["_teams"]:
+            return None
+        if candidate["_stamp"].date() != oe["_stamp"].date():
+            return None
+        competition_ok, competition_evidence = _competition_matches(
+            candidate, scoreboard_section, require_constraint=True
         )
-        for schedule_row in match_candidates:
-            if (
-                not direct_scoreboard_identity
-                and schedule_row["_teams"] != oe["_teams"]
-            ):
-                continue
-            competition_ok, schedule_competition_evidence = _competition_matches(
+        if not competition_ok:
+            return None
+        patch_ok, patch_evidence = _patch_matches(
+            oe["_patch"], candidate, mapping
+        )
+        if not patch_ok:
+            return None
+        explicit_order = _oe_explicit_game_order(str(oe["_game_id"]))
+        if (
+            enforce_explicit_order
+            and explicit_order is not None
+            and int(candidate["_order"]) != explicit_order
+        ):
+            return None
+        schedule_candidates = schedules_by_match.get(str(candidate["_prefix"]), [])
+        if len(schedule_candidates) != 1:
+            return None
+        schedule_row = schedule_candidates[0]
+        if schedule_row["_teams"] != oe["_teams"]:
+            return None
+        schedule_competition_ok, _schedule_competition_evidence = (
+            _competition_matches(
                 schedule_row, schedule_section, require_constraint=True
             )
-            if not competition_ok:
-                continue
-            patch_ok, schedule_patch_evidence = _patch_matches(oe["_patch"], schedule_row, mapping)
-            if not patch_ok and not direct_scoreboard_identity:
-                continue
-            schedule_delta = (oe["_stamp"] - schedule_row["_stamp"]).total_seconds()
-            order = int(selected["_order"])
-            schedule_bound = (
-                max_first_game_schedule_delta_seconds
-                if order == 1
-                else max_later_game_schedule_age_seconds
-            )
-            if not direct_scoreboard_identity and abs(schedule_delta) > schedule_bound:
-                continue
-            schedule_candidates.append(
-                (
-                    schedule_row,
-                    {
-                        "identity": {
-                            "source_field": "ScoreboardGames.GameId prefix",
-                            "target_field": "MatchSchedule.MatchId",
-                            "value": match_id,
-                            "exact": True,
-                        },
-                        "series_timestamp_delta_seconds": schedule_delta,
-                        "team_set_consistent": schedule_row["_teams"]
-                        == oe["_teams"],
-                        "timestamp_bound_used_for_identity": not direct_scoreboard_identity,
-                        "competition": schedule_competition_evidence,
-                        "patch": {
-                            **schedule_patch_evidence,
-                            "identity_gate": (
-                                "exact_riot_platform_game_id"
-                                if direct_scoreboard_identity
-                                else "team_set_competition_patch_timestamp"
-                            ),
-                            "identity_gate_enforced": not direct_scoreboard_identity,
-                        },
-                    },
-                )
-            )
-        if len(schedule_candidates) != 1:
-            issues.append({
-                "kind": "schedule_identity_ambiguous" if len(schedule_candidates) > 1 else "schedule_identity_missing",
-                "oe_game_id": oe["_game_id"],
-                "scoreboard_game_id": scoreboard_id,
-                "match_id": match_id,
-                "candidate_count": len(schedule_candidates),
-            })
-            continue
-        schedule_row, schedule_evidence = schedule_candidates[0]
-        used_scoreboard_ids.add(scoreboard_id)
-        assignments.append({
-            "oe_game_id": oe["_game_id"],
-            "scoreboard_game_id": scoreboard_id,
-            "scoreboard_riot_platform_game_id": (
-                selected.get("_riot_platform_game_id") or None
-            ),
-            "scoreboard_game_order": int(selected["_order"]),
-            "series_id": match_id,
-            "normalized_team_set": sorted(oe["_source_teams"]),
-            "oe_timestamp": oe["_stamp"].isoformat().replace("+00:00", "Z"),
-            "scoreboard_timestamp": selected["_stamp"].isoformat().replace("+00:00", "Z"),
-            "series_timestamp": schedule_row["_stamp"].isoformat().replace("+00:00", "Z"),
-            "source_league": oe["_league"],
-            "source_tournament": oe["_tournament"] or None,
-            "source_patch": oe["_patch"] or None,
-            "scoreboard_tournament": scoreboard_tournament,
-            "scoreboard_game_id_prefix": selected["_prefix"],
-            "evidence": {
-                **evidence,
-                "schedule": schedule_evidence,
-                "tournament": tournament_evidence,
-            },
-            "outcome_used": False,
-            "assignment_method": assignment_method,
-        })
+        )
+        if not schedule_competition_ok:
+            return None
+        schedule_patch_ok, _schedule_patch_evidence = _patch_matches(
+            oe["_patch"], schedule_row, mapping
+        )
+        if not schedule_patch_ok:
+            return None
+        schedule_delta = (oe["_stamp"] - schedule_row["_stamp"]).total_seconds()
+        schedule_bound = (
+            max_first_game_schedule_delta_seconds
+            if int(candidate["_order"]) == 1
+            else max_later_game_schedule_age_seconds
+        )
+        if abs(schedule_delta) > schedule_bound:
+            return None
+        return {
+            "competition": competition_evidence,
+            "patch": patch_evidence,
+            "utc_date": oe["_stamp"].date().isoformat(),
+            "explicit_oe_game_order": explicit_order,
+            "scoreboard_game_order": int(candidate["_order"]),
+            "game_order_enforced": enforce_explicit_order
+            and explicit_order is not None,
+        }
 
+    for context in pending_relaxed_identity:
+        oe = context["oe"]
+        oe_game_id = str(oe["_game_id"])
+        anchored_options: list[
+            tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]
+        ] = []
+        for series_id, series_assignments in primary_by_series.items():
+            relevant_anchors: list[dict[str, Any]] = []
+            for anchor in series_assignments:
+                anchor_oe = prepared_oe_by_id.get(str(anchor["oe_game_id"]))
+                anchor_scoreboard = prepared_scoreboard_by_id.get(
+                    str(anchor["scoreboard_game_id"])
+                )
+                if anchor_oe is None or anchor_scoreboard is None:
+                    continue
+                if (
+                    anchor_oe["_teams"] != oe["_teams"]
+                    or anchor_oe["_stamp"].date() != oe["_stamp"].date()
+                    or anchor_scoreboard["_stamp"].date()
+                    != oe["_stamp"].date()
+                ):
+                    continue
+                competition_ok, _competition_evidence = _competition_matches(
+                    anchor_scoreboard,
+                    context["scoreboard_section"],
+                    require_constraint=True,
+                )
+                patch_ok, _patch_evidence = _patch_matches(
+                    oe["_patch"], anchor_scoreboard, context["mapping"]
+                )
+                if competition_ok and patch_ok:
+                    relevant_anchors.append(anchor)
+            if len(relevant_anchors) < 2:
+                continue
+            unused_series_candidates: list[
+                tuple[dict[str, Any], dict[str, Any]]
+            ] = []
+            for candidate in scoreboard:
+                if str(candidate["_prefix"]) != series_id:
+                    continue
+                match_evidence = relaxed_candidate_evidence(
+                    context, candidate, enforce_explicit_order=False
+                )
+                if match_evidence is not None:
+                    unused_series_candidates.append((candidate, match_evidence))
+            if len(unused_series_candidates) != 1:
+                continue
+            candidate, match_evidence = unused_series_candidates[0]
+            matching_pending = [
+                other
+                for other in pending_relaxed_identity
+                if relaxed_candidate_evidence(
+                    other, candidate, enforce_explicit_order=False
+                )
+                is not None
+            ]
+            if (
+                len(matching_pending) == 1
+                and str(matching_pending[0]["oe"]["_game_id"]) == oe_game_id
+            ):
+                anchored_options.append(
+                    (candidate, match_evidence, relevant_anchors)
+                )
+        if len(anchored_options) == 1:
+            selected, match_evidence, anchors = anchored_options[0]
+            evidence = {
+                "identity": {
+                    "kind": "anchored_series_remainder",
+                    "series_id": selected["_prefix"],
+                    "utc_date": match_evidence["utc_date"],
+                    "normalized_team_set": sorted(oe["_teams"]),
+                    "anchor_count": len(anchors),
+                    "anchor_oe_game_ids": sorted(
+                        str(anchor["oe_game_id"]) for anchor in anchors
+                    ),
+                    "anchor_scoreboard_game_ids": sorted(
+                        str(anchor["scoreboard_game_id"]) for anchor in anchors
+                    ),
+                    "unmatched_oe_candidate_count": 1,
+                    "unused_scoreboard_candidate_count": 1,
+                    "unique_bijection": True,
+                    "outcome_used": False,
+                },
+                "competition": match_evidence["competition"],
+                "patch": match_evidence["patch"],
+            }
+            append_assignment(
+                oe,
+                selected,
+                evidence,
+                "anchored_series_remainder_unique_bijection_then_exact_game_id_prefix",
+                context["mapping"],
+                context["scoreboard_section"],
+                context["schedule_section"],
+            )
+            continue
+        if len(anchored_options) > 1:
+            issues.append(
+                {
+                    "kind": "anchored_series_remainder_ambiguous",
+                    "oe_game_id": oe_game_id,
+                    "candidate_count": len(anchored_options),
+                    "candidate_game_ids": sorted(
+                        str(option[0]["_game_id"]) for option in anchored_options
+                    ),
+                }
+            )
+            continue
+
+        calendar_candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for candidate in scoreboard:
+            match_evidence = relaxed_candidate_evidence(
+                context, candidate, enforce_explicit_order=True
+            )
+            if match_evidence is not None:
+                calendar_candidates.append((candidate, match_evidence))
+        if len(calendar_candidates) == 1:
+            selected, match_evidence = calendar_candidates[0]
+            matching_pending = [
+                other
+                for other in pending_relaxed_identity
+                if relaxed_candidate_evidence(
+                    other, selected, enforce_explicit_order=True
+                )
+                is not None
+            ]
+            if (
+                len(matching_pending) == 1
+                and str(matching_pending[0]["oe"]["_game_id"]) == oe_game_id
+            ):
+                evidence = {
+                    "identity": {
+                        "kind": "unique_calendar_day_singleton",
+                        "utc_date": match_evidence["utc_date"],
+                        "normalized_team_set": sorted(oe["_teams"]),
+                        "mapped_competition": match_evidence["competition"],
+                        "equivalent_patch": match_evidence["patch"],
+                        "direct_riot_candidate_count": 0,
+                        "oe_candidate_count": 1,
+                        "scoreboard_candidate_count": 1,
+                        "explicit_oe_game_order": match_evidence[
+                            "explicit_oe_game_order"
+                        ],
+                        "scoreboard_game_order": match_evidence[
+                            "scoreboard_game_order"
+                        ],
+                        "game_order_enforced": match_evidence[
+                            "game_order_enforced"
+                        ],
+                        "outcome_used": False,
+                    },
+                    "competition": match_evidence["competition"],
+                    "patch": match_evidence["patch"],
+                }
+                append_assignment(
+                    oe,
+                    selected,
+                    evidence,
+                    "unique_calendar_day_team_competition_patch_singleton_then_exact_game_id_prefix",
+                    context["mapping"],
+                    context["scoreboard_section"],
+                    context["schedule_section"],
+                )
+                continue
+        if len(calendar_candidates) > 1:
+            issues.append(
+                {
+                    "kind": "calendar_day_identity_ambiguous",
+                    "oe_game_id": oe_game_id,
+                    "candidate_count": len(calendar_candidates),
+                    "candidate_game_ids": sorted(
+                        str(candidate["_game_id"])
+                        for candidate, _match_evidence in calendar_candidates
+                    ),
+                }
+            )
+            continue
+        issues.append(
+            {
+                "kind": "scoreboard_identity_missing",
+                "oe_game_id": oe_game_id,
+                "candidate_count": 0,
+                "candidate_game_ids": [],
+            }
+        )
     assignments.sort(key=lambda row: (row["oe_timestamp"], row["oe_game_id"]))
     assignments_by_series: dict[str, list[dict[str, Any]]] = {}
     for assignment in assignments:
@@ -1502,9 +1834,12 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
                             f"crosswalk capture manifest differs from source record: {capture_label}"
                         )
 
-            has_direct_assignments = any(
+            needs_riot_identity_index = any(
                 str(assignment.get("assignment_method") or "").startswith(
                     "exact_riot_platform_game_id"
+                )
+                or str(assignment.get("assignment_method") or "").startswith(
+                    "unique_calendar_day_"
                 )
                 for assignment in assignments
                 if isinstance(assignment, Mapping)
@@ -1517,7 +1852,7 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
                 row = dict(raw)
                 try:
                     scoreboard_by_id.setdefault(_scoreboard_game_id(row), []).append(row)
-                    if has_direct_assignments:
+                    if needs_riot_identity_index:
                         riot_platform_game_id = _scoreboard_riot_platform_game_id(
                             row
                         )
@@ -1617,6 +1952,14 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
                     (
                         "exact_team_set_competition_patch_bounded_timestamp_then_"
                         "exact_game_id_prefix"
+                    ),
+                    (
+                        "anchored_series_remainder_unique_bijection_then_"
+                        "exact_game_id_prefix"
+                    ),
+                    (
+                        "unique_calendar_day_team_competition_patch_singleton_"
+                        "then_exact_game_id_prefix"
                     ),
                 }
                 if method not in allowed_methods:
@@ -1792,6 +2135,159 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
                     raise CrosswalkError(
                         "crosswalk schedule patch evidence changed"
                     )
+                if method.startswith(
+                    ("anchored_series_remainder_", "unique_calendar_day_")
+                ):
+                    competition_ok, expected_competition = _competition_matches(
+                        scoreboard_row,
+                        _mapping_section(mapping, "scoreboard"),
+                        require_constraint=True,
+                    )
+                    if (
+                        not competition_ok
+                        or evidence.get("competition") != expected_competition
+                    ):
+                        raise CrosswalkError(
+                            "crosswalk relaxed competition evidence changed"
+                        )
+                if method.startswith("anchored_series_remainder_"):
+                    recovery_identity = evidence.get("identity")
+                    if not isinstance(recovery_identity, Mapping):
+                        raise CrosswalkError(
+                            "crosswalk anchored remainder identity is invalid"
+                        )
+                    try:
+                        oe_date = _timestamp(
+                            oe_row, label="crosswalk anchored OE"
+                        ).date()
+                        scoreboard_date = _timestamp(
+                            scoreboard_row, label="crosswalk anchored scoreboard"
+                        ).date()
+                        normalized_scoreboard_teams = sorted(
+                            _row_team_set(
+                                scoreboard_row,
+                                label="crosswalk anchored scoreboard",
+                            )
+                        )
+                    except CrosswalkError as error:
+                        raise CrosswalkError(
+                            "crosswalk anchored remainder source evidence is invalid"
+                        ) from error
+                    anchor_oe_ids = recovery_identity.get("anchor_oe_game_ids")
+                    anchor_scoreboard_ids = recovery_identity.get(
+                        "anchor_scoreboard_game_ids"
+                    )
+                    if (
+                        not isinstance(anchor_oe_ids, list)
+                        or not isinstance(anchor_scoreboard_ids, list)
+                        or len(anchor_oe_ids) < 2
+                        or len(anchor_oe_ids) != len(anchor_scoreboard_ids)
+                    ):
+                        raise CrosswalkError(
+                            "crosswalk anchored remainder anchors are invalid"
+                        )
+                    anchors = [
+                        row
+                        for row in assignments
+                        if isinstance(row, Mapping)
+                        and row.get("oe_game_id") in anchor_oe_ids
+                    ]
+                    if (
+                        len(anchors) != len(anchor_oe_ids)
+                        or sorted(str(row.get("oe_game_id")) for row in anchors)
+                        != anchor_oe_ids
+                        or sorted(
+                            str(row.get("scoreboard_game_id")) for row in anchors
+                        )
+                        != anchor_scoreboard_ids
+                        or any(
+                            row.get("series_id") != game_prefix
+                            or str(row.get("assignment_method") or "").startswith(
+                                (
+                                    "anchored_series_remainder_",
+                                    "unique_calendar_day_",
+                                )
+                            )
+                            for row in anchors
+                        )
+                    ):
+                        raise CrosswalkError(
+                            "crosswalk anchored remainder replay changed"
+                        )
+                    if (
+                        recovery_identity.get("kind")
+                        != "anchored_series_remainder"
+                        or recovery_identity.get("series_id") != game_prefix
+                        or recovery_identity.get("utc_date") != oe_date.isoformat()
+                        or oe_date != scoreboard_date
+                        or recovery_identity.get("normalized_team_set")
+                        != normalized_scoreboard_teams
+                        or recovery_identity.get("anchor_count") != len(anchors)
+                        or recovery_identity.get("unmatched_oe_candidate_count")
+                        != 1
+                        or recovery_identity.get(
+                            "unused_scoreboard_candidate_count"
+                        )
+                        != 1
+                        or recovery_identity.get("unique_bijection") is not True
+                        or recovery_identity.get("outcome_used") is not False
+                    ):
+                        raise CrosswalkError(
+                            "crosswalk anchored remainder evidence changed"
+                        )
+                elif method.startswith("unique_calendar_day_"):
+                    recovery_identity = evidence.get("identity")
+                    if not isinstance(recovery_identity, Mapping):
+                        raise CrosswalkError(
+                            "crosswalk calendar-day identity is invalid"
+                        )
+                    try:
+                        oe_date = _timestamp(
+                            oe_row, label="crosswalk calendar OE"
+                        ).date()
+                        scoreboard_date = _timestamp(
+                            scoreboard_row, label="crosswalk calendar scoreboard"
+                        ).date()
+                        normalized_scoreboard_teams = sorted(
+                            _row_team_set(
+                                scoreboard_row,
+                                label="crosswalk calendar scoreboard",
+                            )
+                        )
+                    except CrosswalkError as error:
+                        raise CrosswalkError(
+                            "crosswalk calendar-day source evidence is invalid"
+                        ) from error
+                    explicit_order = _oe_explicit_game_order(oe_game_id)
+                    direct_candidate_count = len(
+                        scoreboard_by_riot_platform_game_id.get(oe_game_id, [])
+                    )
+                    expected_identity = {
+                        "kind": "unique_calendar_day_singleton",
+                        "utc_date": oe_date.isoformat(),
+                        "normalized_team_set": normalized_scoreboard_teams,
+                        "mapped_competition": expected_competition,
+                        "equivalent_patch": expected_score_patch,
+                        "direct_riot_candidate_count": direct_candidate_count,
+                        "oe_candidate_count": 1,
+                        "scoreboard_candidate_count": 1,
+                        "explicit_oe_game_order": explicit_order,
+                        "scoreboard_game_order": game_order,
+                        "game_order_enforced": explicit_order is not None,
+                        "outcome_used": False,
+                    }
+                    if (
+                        oe_date != scoreboard_date
+                        or direct_candidate_count != 0
+                        or (
+                            explicit_order is not None
+                            and explicit_order != game_order
+                        )
+                        or recovery_identity != expected_identity
+                    ):
+                        raise CrosswalkError(
+                            "crosswalk calendar-day singleton replay changed"
+                        )
                 tournament_ok, expected_evidence = _tournament_matches_competition(
                     tournament_candidates[0],
                     scoreboard_row,
