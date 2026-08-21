@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 import pandas as pd
@@ -25,7 +27,11 @@ from benchmarks.future_value_draft_score_fourway import (
     build_report,
     write_report,
 )
-from benchmarks.freeze_future_value_draft_score_fourway import build_freeze, write_freeze
+from benchmarks.freeze_future_value_draft_score_fourway import (
+    DraftScoreFreezeError,
+    build_freeze,
+    write_freeze,
+)
 from lol_kills.v2.tierlists.accepted_census import identity_sha256
 from lol_kills.research.atomized_rf_composite import _strict_canonical_sha256
 from lol_kills.research.future_value_rating_ledger import _artifact_digest as _current_artifact_digest
@@ -391,9 +397,113 @@ def _strict_fold_inputs(
 
 def _freeze_inputs(tmp_path: Path, source_path: Path, folds: Path, strict_root: Path) -> tuple[Path, str]:
     path = tmp_path / "fourway-freeze.json"
-    payload = build_freeze(source_receipt_path=source_path, folds_root=folds, strict_fold_root=strict_root)
+    payload = build_freeze(
+        source_receipt_path=source_path,
+        folds_root=folds,
+        strict_fold_root=strict_root,
+        evaluation_root=tmp_path / "evaluation-v2",
+    )
     digest = write_freeze(payload, path)
     return path, digest
+
+
+def test_freeze_binds_shared_future_model_for_each_fold(tmp_path: Path) -> None:
+    game_ids = [f"g{i}" for i in range(1, 7)]
+    source_path, source_root = _source(tmp_path, game_ids)
+    source = json.loads(source_path.read_text())
+    folds, evaluation = _fold_inputs(tmp_path, game_ids, source_root, source)
+    strict_root = _strict_fold_inputs(tmp_path, game_ids, source, folds)
+    payload = build_freeze(
+        source_receipt_path=source_path,
+        folds_root=folds,
+        strict_fold_root=strict_root,
+        evaluation_root=evaluation,
+    )
+    model_path = evaluation / "future_player_form" / "model.json"
+    expected = {
+        "bytes": model_path.stat().st_size,
+        "sha256": hashlib.sha256(model_path.read_bytes()).hexdigest(),
+    }
+    for fold in ("1", "2", "3"):
+        assert payload["folds"][fold]["future"]["artifact"] == expected
+
+
+def test_future_model_mutation_is_rejected_by_freeze_binding(tmp_path: Path) -> None:
+    game_ids = [f"g{i}" for i in range(1, 7)]
+    source_path, source_root = _source(tmp_path, game_ids)
+    source = json.loads(source_path.read_text())
+    folds, evaluation = _fold_inputs(tmp_path, game_ids, source_root, source)
+    strict_root = _strict_fold_inputs(tmp_path, game_ids, source, folds)
+    payload = build_freeze(
+        source_receipt_path=source_path,
+        folds_root=folds,
+        strict_fold_root=strict_root,
+        evaluation_root=evaluation,
+    )
+    model_path = evaluation / "future_player_form" / "model.json"
+    model_path.write_bytes(model_path.read_bytes() + b"mutation")
+    with pytest.raises(FourWayDraftScoreError, match="unsafe|bytes changed"):
+        from benchmarks.future_value_draft_score_fourway import _verify_pinned_file
+
+        _verify_pinned_file(
+            model_path,
+            payload["folds"]["1"]["future"]["artifact"],
+            label="future player form artifact",
+        )
+
+
+def test_freeze_rejects_symlinked_evaluation_root(tmp_path: Path) -> None:
+    game_ids = [f"g{i}" for i in range(1, 7)]
+    source_path, source_root = _source(tmp_path, game_ids)
+    source = json.loads(source_path.read_text())
+    folds, evaluation = _fold_inputs(tmp_path, game_ids, source_root, source)
+    strict_root = _strict_fold_inputs(tmp_path, game_ids, source, folds)
+    evaluation_link = tmp_path / "evaluation-link"
+    evaluation_link.symlink_to(evaluation, target_is_directory=True)
+    with pytest.raises(DraftScoreFreezeError, match="unsafe"):
+        build_freeze(
+            source_receipt_path=source_path,
+            folds_root=folds,
+            strict_fold_root=strict_root,
+            evaluation_root=evaluation_link,
+        )
+
+
+def test_freeze_cli_requires_and_emits_future_binding(tmp_path: Path) -> None:
+    game_ids = [f"g{i}" for i in range(1, 7)]
+    source_path, source_root = _source(tmp_path, game_ids)
+    source = json.loads(source_path.read_text())
+    folds, evaluation = _fold_inputs(tmp_path, game_ids, source_root, source)
+    strict_root = _strict_fold_inputs(tmp_path, game_ids, source, folds)
+    output = tmp_path / "cli-freeze.json"
+    command = [
+        sys.executable,
+        str(Path(__file__).parents[1] / "benchmarks" / "freeze_future_value_draft_score_fourway.py"),
+        "--source-receipt",
+        str(source_path),
+        "--folds-root",
+        str(folds),
+        "--strict-fold-root",
+        str(strict_root),
+        "--evaluation-root",
+        str(evaluation),
+        "--output",
+        str(output),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=Path(__file__).parents[1],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["path"] == str(output.resolve())
+    payload = json.loads(output.read_text())
+    assert payload["folds"]["1"]["future"]["artifact"]["bytes"] == (
+        evaluation / "future_player_form" / "model.json"
+    ).stat().st_size
 
 
 def test_zero_intercept_and_side_swap_are_exact() -> None:
