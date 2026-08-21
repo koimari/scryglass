@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import pandas as pd
 
@@ -46,6 +46,7 @@ from lol_kills.v2.tierlists.accepted_census import (
 SCHEMA_VERSION = "scryglass:future-value-research-run:v1"
 MODEL_RUNTIME_SCHEMA_VERSION = "scryglass:future-value-model-runtime:v1"
 FREEZE_SCHEMA_VERSION = "scryglass:future-value-source-freeze:v1"
+CALIBRATION_PRIOR_SCHEMA_VERSION = "scryglass:future-value-calibration-prior-folds:v1"
 DEFAULT_FREEZE = Path(
     "data/lol/v2/evaluation/future-value-source-freeze-20260820.json"
 )
@@ -418,6 +419,61 @@ def _load_json_mapping(path: Path, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise FutureValueTrainingError(f"{label} is not a JSON object")
     return value
+
+
+def _load_calibration_prior_folds(
+    path: Path,
+    *,
+    source_receipt_sha256: str,
+    variant_keys: Sequence[str],
+) -> tuple[dict[str, list[Mapping[str, Any]]], dict[str, Any]]:
+    """Load one source-bound calibration-prelude JSON and bind its bytes."""
+
+    payload = _load_json_mapping(path, "calibration prior fold receipt")
+    if payload.get("schema_version") != CALIBRATION_PRIOR_SCHEMA_VERSION:
+        raise FutureValueTrainingError("calibration prior fold receipt schema is invalid")
+    if payload.get("source_receipt_sha256") != str(source_receipt_sha256):
+        raise FutureValueTrainingError("calibration prior fold source receipt changed")
+    claimed_receipt = payload.get("receipt_sha256")
+    if not isinstance(claimed_receipt, str) or re.fullmatch(r"[0-9a-f]{64}", claimed_receipt, re.I) is None:
+        raise FutureValueTrainingError("calibration prior fold receipt hash is invalid")
+    receipt_payload = dict(payload)
+    receipt_payload.pop("receipt_sha256", None)
+    if hashlib.sha256(_canonical_bytes(receipt_payload)).hexdigest() != claimed_receipt.lower():
+        raise FutureValueTrainingError("calibration prior fold receipt hash does not match")
+    variants = payload.get("variants")
+    folds_by_variant: dict[str, list[Mapping[str, Any]]] = {}
+    if isinstance(variants, Mapping):
+        for variant_key in variant_keys:
+            selected = variants.get(variant_key)
+            if isinstance(selected, Mapping):
+                selected = selected.get("folds")
+            if not isinstance(selected, list) or not selected:
+                raise FutureValueTrainingError(
+                    f"calibration prior fold receipt is missing variant: {variant_key}"
+                )
+            if any(not isinstance(fold, Mapping) for fold in selected):
+                raise FutureValueTrainingError("calibration prior fold rows are invalid")
+            folds_by_variant[variant_key] = list(selected)
+    else:
+        folds = payload.get("folds")
+        if not isinstance(folds, list) or not folds:
+            raise FutureValueTrainingError("calibration prior folds are missing")
+        if any(not isinstance(fold, Mapping) for fold in folds):
+            raise FutureValueTrainingError("calibration prior fold rows are invalid")
+        for variant_key in variant_keys:
+            folds_by_variant[variant_key] = list(folds)
+    binding = {
+        "schema_version": CALIBRATION_PRIOR_SCHEMA_VERSION,
+        "path": str(path),
+        "bytes": path.stat().st_size,
+        "sha256": _sha256(path),
+        "payload_receipt_sha256": claimed_receipt.lower(),
+        "source_receipt_sha256": str(source_receipt_sha256),
+        "variant_keys": list(variant_keys),
+        "fold_count": {key: len(value) for key, value in folds_by_variant.items()},
+    }
+    return folds_by_variant, binding
 
 
 def _phase_hash(value: Any, field: str) -> str:
@@ -928,6 +984,7 @@ def run_model_evaluation(
     phase_artifact_sha256: str | None = None,
     phase_receipt_file_sha256: str | None = None,
     phase_artifact_kind: str = "candidate",
+    calibration_prior_path: Path | None = None,
 ) -> dict[str, Any]:
     """Run the frozen research model and emit a gate-grade runtime receipt."""
 
@@ -1093,6 +1150,19 @@ def run_model_evaluation(
     code_commit = _git_output(repo_root, "rev-parse", "HEAD")
     producer_code_hashes = _code_hashes(repo_root)
     selected_variants = _resolve_variant_names(rating_variant)
+    calibration_variant_keys = (
+        tuple(variant.value for variant in selected_variants)
+        if selected_variants is not None
+        else ("legacy",)
+    )
+    calibration_prior_by_variant: dict[str, list[Mapping[str, Any]]] = {}
+    calibration_prior_binding: dict[str, Any] | None = None
+    if calibration_prior_path is not None:
+        calibration_prior_by_variant, calibration_prior_binding = _load_calibration_prior_folds(
+            calibration_prior_path,
+            source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+            variant_keys=calibration_variant_keys,
+        )
     ledger_bundle = _load_feature_ledger_bundle(feature_ledger_path)
     if selected_variants is not None and ledger_bundle is None:
         raise FutureValueTrainingError(
@@ -1121,6 +1191,7 @@ def run_model_evaluation(
                 phase_partition_binding=phase_partition_binding,
                 expected_phase_artifact_sha256=phase_artifact_sha256,
                 expected_phase_receipt_file_sha256=phase_receipt_file_sha256,
+                calibration_prior_folds=calibration_prior_by_variant.get("legacy"),
             )
         else:
             variant_results: dict[str, Any] = {}
@@ -1158,6 +1229,7 @@ def run_model_evaluation(
                     phase_partition_binding=phase_partition_binding,
                     expected_phase_artifact_sha256=phase_artifact_sha256,
                     expected_phase_receipt_file_sha256=phase_receipt_file_sha256,
+                    calibration_prior_folds=calibration_prior_by_variant.get(variant_key),
                 )
             result = {
                 "schema_version": "scryglass:future-value-four-variant-evaluation:v1",
@@ -1187,6 +1259,8 @@ def run_model_evaluation(
         str(label): dict(record)
         for label, record in sorted(normalized_contract.items())
     }
+    if calibration_prior_binding is not None:
+        result["source"]["calibration_prior"] = dict(calibration_prior_binding)
     elapsed = time.perf_counter() - started
     completed_at = datetime.now(timezone.utc)
     _write_json(model_output_path, result)
@@ -1201,6 +1275,7 @@ def run_model_evaluation(
         "rating_variant": rating_variant or "legacy",
         "feature_ledger_path": str(feature_ledger_path) if feature_ledger_path else None,
         "input_binding": input_binding,
+        "calibration_prior": calibration_prior_binding,
         "series_partition": crosswalk_runtime_binding,
         "phase_partition": phase_runtime_binding,
         "started_at": started_at.isoformat().replace("+00:00", "Z"),
@@ -1319,6 +1394,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--phase-artifact-sha256")
     parser.add_argument("--phase-receipt-file-sha256")
     parser.add_argument(
+        "--calibration-prior",
+        type=Path,
+        help="source-bound JSON receipt with whole-series out-of-sample calibration prelude folds",
+    )
+    parser.add_argument(
         "--phase-artifact-kind",
         default="candidate",
         choices=("candidate", "evaluation"),
@@ -1363,6 +1443,11 @@ def main(argv: list[str] | None = None) -> int:
                 phase_artifact_sha256=args.phase_artifact_sha256,
                 phase_receipt_file_sha256=args.phase_receipt_file_sha256,
                 phase_artifact_kind=args.phase_artifact_kind,
+                calibration_prior_path=(
+                    None
+                    if args.calibration_prior is None
+                    else args.calibration_prior.resolve()
+                ),
                 command=[
                     sys.executable,
                     "-m",
@@ -1400,6 +1485,7 @@ if __name__ == "__main__":
 
 
 __all__ = [
+    "CALIBRATION_PRIOR_SCHEMA_VERSION",
     "DEFAULT_FREEZE",
     "FutureValueTrainingError",
     "frozen_census",

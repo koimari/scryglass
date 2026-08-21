@@ -1265,6 +1265,7 @@ def _support_fold_rows(
     variant: str,
     target_kind: str,
     support_column: str,
+    require_out_of_sample: bool = False,
 ) -> dict[str, Any]:
     fold_id = fold.get("fold_id", fold.get("fold"))
     if fold_id is None or not str(fold_id).strip():
@@ -1290,6 +1291,15 @@ def _support_fold_rows(
     fold_variant = fold.get("variant")
     if fold_variant is not None and str(fold_variant) != variant:
         raise FutureValueUncertaintyError("support calibration variant drift across folds")
+    if require_out_of_sample:
+        if fold.get("out_of_sample") is not True:
+            raise FutureValueUncertaintyError(
+                "support calibration prior fold is not marked out-of-sample"
+            )
+        if fold.get("whole_series") is not True:
+            raise FutureValueUncertaintyError(
+                "support calibration prior fold is not whole-series safe"
+            )
     raw_rows = fold.get("rows", fold.get("predictions", fold.get("ledger_rows")))
     if isinstance(raw_rows, pd.DataFrame):
         raw_rows = raw_rows.to_dict("records")
@@ -1460,6 +1470,7 @@ def build_strict_prior_support_calibration(
     *,
     source_receipt: Mapping[str, Any],
     variant: str,
+    calibration_prior_folds: Sequence[Mapping[str, Any]] | None = None,
     target_kind: str = "log_loss",
     support_column: str = "minimum_effective_support",
     minimum_training_rows: int = SUPPORT_CALIBRATION_DEFAULT_MINIMUM_ROWS,
@@ -1470,11 +1481,12 @@ def build_strict_prior_support_calibration(
 ) -> dict[str, Any]:
     """Fit a support-to-residual map from earlier validation folds only.
 
-    Each input fold contains out-of-sample predictions.  The first fold has no
-    earlier residual history and is marked blocked.  Later folds use only
-    rows from earlier validation windows.  The default residual is per-row
-    log loss, which is a proper scoring residual.  No current-fold target
-    enters its own mapping.
+    Each input fold contains out-of-sample predictions.  An explicit prior
+    calibration prelude can seed the first evaluation fold.  Without that
+    prelude, the first fold is marked blocked.  Later folds use only rows from
+    earlier validation windows.  The default residual is per-row log loss,
+    which is a proper scoring residual.  No current-fold target enters its
+    own mapping.
     """
 
     if not isinstance(source_receipt, Mapping):
@@ -1498,6 +1510,17 @@ def build_strict_prior_support_calibration(
     coverage_threshold = float(minimum_coverage)
     if not math.isfinite(coverage_threshold) or not 0.0 <= coverage_threshold <= 1.0:
         raise FutureValueUncertaintyError("support calibration coverage threshold is invalid")
+    normalized_prior_folds = [
+        _support_fold_rows(
+            fold,
+            source_hash=source_hash,
+            variant=variant,
+            target_kind=target_kind,
+            support_column=support_column,
+            require_out_of_sample=True,
+        )
+        for fold in (calibration_prior_folds or ())
+    ]
     normalized_folds = [
         _support_fold_rows(
             fold,
@@ -1508,16 +1531,23 @@ def build_strict_prior_support_calibration(
         )
         for fold in folds
     ]
-    if len({fold["fold_id"] for fold in normalized_folds}) != len(normalized_folds):
+    all_normalized_folds = [*normalized_prior_folds, *normalized_folds]
+    if len({fold["fold_id"] for fold in all_normalized_folds}) != len(all_normalized_folds):
         raise FutureValueUncertaintyError("support calibration fold IDs are not unique")
+    prior_fold_ids = {fold["fold_id"] for fold in normalized_prior_folds}
     previous_end: pd.Timestamp | None = None
     seen_games: set[str] = set()
     seen_series: set[str] = set()
-    for fold in normalized_folds:
+    first_evaluation_start = pd.Timestamp(normalized_folds[0]["validation_start"])
+    for fold in all_normalized_folds:
         start = pd.Timestamp(fold["validation_start"])
         end = pd.Timestamp(fold["validation_end"])
         if previous_end is not None and not previous_end < start:
             raise FutureValueUncertaintyError("support calibration validation windows overlap")
+        if fold["fold_id"] in prior_fold_ids and not end < first_evaluation_start:
+            raise FutureValueUncertaintyError(
+                "support calibration prior fold is not strictly earlier"
+            )
         row_games = {str(row["game_id"]) for row in fold["rows"]}
         row_series = {str(row["series_id"]) for row in fold["rows"]}
         if seen_games & row_games:
@@ -1528,23 +1558,46 @@ def build_strict_prior_support_calibration(
         seen_series.update(row_series)
         previous_end = end
 
+    output_prior_folds: list[dict[str, Any]] = [
+        {
+            "fold": fold["fold_id"],
+            "validation_start": fold["validation_start"],
+            "validation_end": fold["validation_end"],
+            "train_end": fold["train_end"],
+            "source_receipt_sha256": source_hash,
+            "variant": variant,
+            "out_of_sample": True,
+            "whole_series": True,
+            "input_rows": list(fold["rows"]),
+            "input_rows_sha256": fold["rows_sha256"],
+            "status": "available",
+        }
+        for fold in normalized_prior_folds
+    ]
     output_folds: list[dict[str, Any]] = []
     output_rows: list[dict[str, Any]] = []
     available_folds = 0
     eligible_rows = 0
     calibrated_rows = 0
     blockers: list[str] = []
-    prior_rows: list[dict[str, Any]] = []
+    prior_rows: list[dict[str, Any]] = [
+        row for fold in normalized_prior_folds for row in fold["rows"]
+    ]
+    initial_prior_row_count = len(prior_rows)
     for fold_index, fold in enumerate(normalized_folds):
         rows = list(fold["rows"])
-        eligible = fold_index > 0
+        eligible = bool(prior_rows)
         mapping: dict[str, Any] | None = None
         fold_blockers: list[str] = []
         if not eligible:
             fold_blockers.append("calibration_prior_validation_folds_missing")
         else:
             eligible_rows += len(rows)
-            prior_end = pd.Timestamp(normalized_folds[fold_index - 1]["validation_end"])
+            prior_end = pd.Timestamp(
+                normalized_prior_folds[-1]["validation_end"]
+                if fold_index == 0 and normalized_prior_folds
+                else normalized_folds[fold_index - 1]["validation_end"]
+            )
             current_start = pd.Timestamp(fold["validation_start"])
             if not prior_end < current_start:
                 raise FutureValueUncertaintyError("support calibration prior cutoff is not strict")
@@ -1566,7 +1619,10 @@ def build_strict_prior_support_calibration(
         # chronology or source mismatch.
         calibration_training_ids = [
             str(row["game_id"])
-            for prior_fold in normalized_folds[:fold_index]
+            for prior_fold in [
+                *normalized_prior_folds,
+                *normalized_folds[:fold_index],
+            ]
             for row in prior_fold["rows"]
         ]
         calibration_training_hash = _identity_sha256(calibration_training_ids)
@@ -1596,6 +1652,7 @@ def build_strict_prior_support_calibration(
                 "variant": variant,
                 "input_rows": len(rows),
                 "input_rows_sha256": fold["rows_sha256"],
+                "calibration_input_rows": list(fold["rows"]),
                 "status": "available" if mapping is not None else "blocked",
                 "blockers": sorted(set(fold_blockers)),
                 "calibration_training_game_count": len(calibration_training_ids),
@@ -1607,7 +1664,11 @@ def build_strict_prior_support_calibration(
         blockers.extend(fold_blockers)
         prior_rows.extend(rows)
 
-    eligible_fold_count = max(0, len(normalized_folds) - 1)
+    eligible_fold_count = (
+        len(normalized_folds)
+        if normalized_prior_folds
+        else max(0, len(normalized_folds) - 1)
+    )
     row_fraction = calibrated_rows / eligible_rows if eligible_rows else 0.0
     complete_enough = bool(
         eligible_fold_count > 0
@@ -1622,7 +1683,9 @@ def build_strict_prior_support_calibration(
         "calibrated_row_fraction": float(row_fraction),
         "minimum_coverage_threshold": coverage_threshold,
         "complete_enough": complete_enough,
-        "first_fold_without_history": True,
+        "first_fold_without_history": not bool(normalized_prior_folds),
+        "calibration_prior_fold_count": len(normalized_prior_folds),
+        "calibration_prior_row_count": initial_prior_row_count,
     }
     if not complete_enough:
         blockers.append("support_calibration_coverage_below_threshold")
@@ -1632,7 +1695,11 @@ def build_strict_prior_support_calibration(
         # history exists.  Keep the complete-enough flag separate from the
         # artifact status so callers cannot mistake later-fold coverage for a
         # fully calibrated chronological evaluation.
-        "status": "research_only_partial",
+        "status": (
+            "research_only"
+            if complete_enough and "calibration_prior_validation_folds_missing" not in blockers
+            else "research_only_partial"
+        ),
         "variant": variant,
         "source": {
             "source_receipt_sha256": source_hash,
@@ -1661,6 +1728,7 @@ def build_strict_prior_support_calibration(
             "maximum_bins": int(maximum_bins),
         },
         "coverage": coverage,
+        "calibration_prior_folds": output_prior_folds,
         "folds": output_folds,
         "rows": sorted(output_rows, key=lambda row: (str(row["fold"]), str(row["game_id"]))),
         "blockers": sorted(set(blockers)),
@@ -1674,6 +1742,10 @@ def build_strict_prior_support_calibration(
         "source_receipt_sha256": source_hash,
         "artifact_sha256": artifact_hash,
         "folds_sha256": _sha256_json(output_folds),
+        "calibration_prior_folds_sha256": _sha256_json(output_prior_folds),
+        "calibration_prior_rows_sha256": _sha256_json(
+            [row for fold in output_prior_folds for row in fold["input_rows"]]
+        ),
         "rows_sha256": _sha256_json(artifact_payload["rows"]),
         "coverage": coverage,
         "calibration_training_game_ids": sorted(
@@ -1740,10 +1812,22 @@ def verify_support_calibration_artifact(
         if not isinstance(value, Mapping) or dict(value) != SUPPORT_CALIBRATION_AUTHORITY:
             raise FutureValueUncertaintyError("support calibration authority grants access")
     folds = artifact.get("folds")
+    calibration_prior_folds = artifact.get("calibration_prior_folds", [])
     rows = artifact.get("rows")
-    if not isinstance(folds, list) or not isinstance(rows, list) or not folds or not rows:
+    if (
+        not isinstance(folds, list)
+        or not isinstance(calibration_prior_folds, list)
+        or not isinstance(rows, list)
+        or not folds
+        or not rows
+    ):
         raise FutureValueUncertaintyError("support calibration fold rows are missing")
-    if receipt.get("folds_sha256") != _sha256_json(folds) or receipt.get("rows_sha256") != _sha256_json(rows):
+    if (
+        receipt.get("folds_sha256") != _sha256_json(folds)
+        or receipt.get("rows_sha256") != _sha256_json(rows)
+        or receipt.get("calibration_prior_folds_sha256", _sha256_json(calibration_prior_folds))
+        != _sha256_json(calibration_prior_folds)
+    ):
         raise FutureValueUncertaintyError("support calibration receipt does not bind rows")
     fold_ids = [str(fold.get("fold")) for fold in folds if isinstance(fold, Mapping)]
     if len(fold_ids) != len(folds) or len(set(fold_ids)) != len(fold_ids):
@@ -1753,10 +1837,95 @@ def verify_support_calibration_artifact(
         if not isinstance(row, Mapping) or str(row.get("fold")) not in row_by_fold:
             raise FutureValueUncertaintyError("support calibration output row is invalid")
         row_by_fold[str(row["fold"])].append(row)
+    prior_fold_ids = [
+        str(fold.get("fold"))
+        for fold in calibration_prior_folds
+        if isinstance(fold, Mapping)
+    ]
+    if len(prior_fold_ids) != len(calibration_prior_folds) or len(set(prior_fold_ids)) != len(prior_fold_ids):
+        raise FutureValueUncertaintyError("support calibration prior fold IDs are invalid")
+    if set(prior_fold_ids) & set(fold_ids):
+        raise FutureValueUncertaintyError("support calibration prior fold IDs overlap evaluation folds")
+    prior_row_by_fold: dict[str, list[Mapping[str, Any]]] = {}
+    for prior_fold in calibration_prior_folds:
+        if not isinstance(prior_fold, Mapping):
+            raise FutureValueUncertaintyError("support calibration prior fold is invalid")
+        input_rows = prior_fold.get("input_rows")
+        if not isinstance(input_rows, list) or not input_rows:
+            raise FutureValueUncertaintyError("support calibration prior rows are missing")
+        claimed_input_hash = prior_fold.get("input_rows_sha256")
+        if claimed_input_hash != _sha256_json(input_rows):
+            raise FutureValueUncertaintyError("support calibration prior row hash is invalid")
+        if prior_fold.get("source_receipt_sha256") != source_hash or prior_fold.get("variant") != artifact.get("variant"):
+            raise FutureValueUncertaintyError("support calibration prior binding is inconsistent")
+        if prior_fold.get("out_of_sample") is not True or prior_fold.get("whole_series") is not True:
+            raise FutureValueUncertaintyError("support calibration prior fold authority is invalid")
+        prior_row_by_fold[str(prior_fold["fold"])] = input_rows
+    if receipt.get("calibration_prior_rows_sha256") is not None:
+        expected_prior_rows = [
+            row for prior_fold in calibration_prior_folds for row in prior_fold["input_rows"]
+        ]
+        if receipt.get("calibration_prior_rows_sha256") != _sha256_json(expected_prior_rows):
+            raise FutureValueUncertaintyError("support calibration prior rows are not bound")
     previous_end: pd.Timestamp | None = None
     seen_games: set[str] = set()
     seen_series: set[str] = set()
     expected_calibration_ids: set[str] = set()
+    evaluation_first_start = pd.to_datetime(
+        folds[0].get("validation_start"), utc=True, errors="coerce"
+    )
+    if pd.isna(evaluation_first_start):
+        raise FutureValueUncertaintyError("support calibration evaluation chronology is invalid")
+    evaluation_first_start = pd.Timestamp(evaluation_first_start)
+    for prior_fold in calibration_prior_folds:
+        start = pd.to_datetime(prior_fold.get("validation_start"), utc=True, errors="coerce")
+        end = pd.to_datetime(prior_fold.get("validation_end"), utc=True, errors="coerce")
+        train_end = pd.to_datetime(prior_fold.get("train_end"), utc=True, errors="coerce")
+        if any(pd.isna(value) for value in (start, end, train_end)) or not train_end < start <= end:
+            raise FutureValueUncertaintyError("support calibration prior fold chronology is invalid")
+        start = pd.Timestamp(start)
+        end = pd.Timestamp(end)
+        if not end < evaluation_first_start:
+            raise FutureValueUncertaintyError("support calibration prior fold is not strictly earlier")
+        if previous_end is not None and not previous_end < start:
+            raise FutureValueUncertaintyError("support calibration prior fold windows overlap")
+        previous_end = end
+        for row in prior_row_by_fold[str(prior_fold["fold"])]:
+            if not isinstance(row, Mapping):
+                raise FutureValueUncertaintyError("support calibration prior row is invalid")
+            date = pd.to_datetime(row.get("date"), utc=True, errors="coerce")
+            game_id = str(row.get("game_id", ""))
+            series_id = str(row.get("series_id", ""))
+            if (
+                pd.isna(date)
+                or not start <= pd.Timestamp(date) <= end
+                or str(row.get("fold")) != str(prior_fold["fold"])
+                or not game_id
+                or not series_id
+                or game_id in seen_games
+                or series_id in seen_series
+            ):
+                raise FutureValueUncertaintyError("support calibration prior identities are invalid")
+            try:
+                support = float(row.get("support"))
+                probability = float(row.get("prediction_probability"))
+                logit = float(row.get("prediction_logit"))
+                target = float(row.get("residual_target"))
+            except (TypeError, ValueError) as error:
+                raise FutureValueUncertaintyError("support calibration prior values are invalid") from error
+            if (
+                not math.isfinite(support)
+                or support < 0.0
+                or not math.isfinite(probability)
+                or not 0.0 < probability < 1.0
+                or not math.isfinite(logit)
+                or not math.isfinite(target)
+                or target < 0.0
+            ):
+                raise FutureValueUncertaintyError("support calibration prior values are invalid")
+            seen_games.add(game_id)
+            seen_series.add(series_id)
+            expected_calibration_ids.add(game_id)
     for index, fold in enumerate(folds):
         if not isinstance(fold, Mapping):
             raise FutureValueUncertaintyError("support calibration fold is invalid")
@@ -1795,10 +1964,52 @@ def verify_support_calibration_artifact(
         calibration_hash = fold.get("calibration_training_game_identity_sha256")
         if calibration_hash != _identity_sha256(calibration_ids):
             raise FutureValueUncertaintyError("support calibration training ID hash is invalid")
+        input_rows = fold.get("calibration_input_rows")
+        if isinstance(input_rows, list):
+            if fold.get("input_rows_sha256") != _sha256_json(input_rows):
+                raise FutureValueUncertaintyError("support calibration input rows are not bound")
+            if len(input_rows) != len(fold_rows):
+                raise FutureValueUncertaintyError("support calibration input row count is invalid")
+            input_by_game = {
+                str(row.get("game_id")): row
+                for row in input_rows
+                if isinstance(row, Mapping)
+            }
+            if len(input_by_game) != len(input_rows):
+                raise FutureValueUncertaintyError("support calibration input game IDs are invalid")
+            for output_row in fold_rows:
+                input_row = input_by_game.get(str(output_row.get("game_id")))
+                if input_row is None:
+                    raise FutureValueUncertaintyError(
+                        "support calibration input IDs do not match output rows"
+                    )
+                for field in ("fold", "game_id", "series_id", "date"):
+                    if str(input_row.get(field)) != str(output_row.get(field)):
+                        raise FutureValueUncertaintyError(
+                            "support calibration input identity does not match output rows"
+                        )
+                try:
+                    input_support = float(input_row.get("support"))
+                    output_support = float(output_row.get("support"))
+                except (TypeError, ValueError) as error:
+                    raise FutureValueUncertaintyError(
+                        "support calibration input support is invalid"
+                    ) from error
+                if not math.isclose(input_support, output_support, rel_tol=0.0, abs_tol=1e-12):
+                    raise FutureValueUncertaintyError(
+                        "support calibration input support does not match output rows"
+                    )
         expected_prior = sorted(
-            str(row["game_id"])
-            for prior_fold in folds[:index]
-            for row in row_by_fold[str(prior_fold["fold"])]
+            [
+                str(row["game_id"])
+                for prior_fold in calibration_prior_folds
+                for row in prior_fold["input_rows"]
+            ]
+            + [
+                str(row["game_id"])
+                for prior_fold in folds[:index]
+                for row in row_by_fold[str(prior_fold["fold"])]
+            ]
         )
         if sorted(str(value) for value in calibration_ids) != expected_prior:
             raise FutureValueUncertaintyError("support calibration training IDs are not strictly prior")

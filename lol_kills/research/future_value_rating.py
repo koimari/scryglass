@@ -46,6 +46,11 @@ from lol_kills.research.future_phase_curve import (
     PHASE_SHAPE_SIGNED_FEATURES,
     SCHEMA_VERSION as PHASE_CURVE_SCHEMA_VERSION,
 )
+from lol_kills.research.future_value_uncertainty import (
+    FutureValueUncertaintyError,
+    build_strict_prior_support_calibration,
+    verify_support_calibration_artifact,
+)
 from lol_kills.v2.tierlists.accepted_census import (
     canonical_game_ids,
     identity_sha256,
@@ -6088,6 +6093,266 @@ def _calibration_input_sha256(
     return hashlib.sha256(_canonical_json_bytes(rows)).hexdigest()
 
 
+def _normalise_strict_prior_calibration_folds(
+    calibration_prior_folds: Sequence[Mapping[str, Any]] | None,
+    *,
+    map_frame: pd.DataFrame,
+    source_receipt_sha256: str,
+    variant: str,
+    evaluation_folds: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Validate frozen out-of-sample calibration rows before evaluation.
+
+    The prior rows must cover complete series from the accepted model frame.
+    Their model outputs come from a prior validation fit.  Current-fold rows
+    never enter this validation path.
+    """
+
+    if calibration_prior_folds is None:
+        return []
+    if not isinstance(calibration_prior_folds, Sequence) or isinstance(
+        calibration_prior_folds, (str, bytes)
+    ):
+        raise FutureValueSourceError("calibration prior folds are invalid")
+    required_frame_columns = {"game_id", "date", "target", "series_id"}
+    if not required_frame_columns.issubset(map_frame.columns):
+        raise FutureValueSourceError("calibration prior source frame is incomplete")
+    source_hash = str(source_receipt_sha256).lower()
+    frame = map_frame[["game_id", "date", "target", "series_id"]].copy()
+    frame["game_id"] = frame["game_id"].astype(str)
+    frame["series_id"] = frame["series_id"].astype(str)
+    frame["date"] = pd.to_datetime(frame["date"], utc=True, errors="coerce")
+    if frame["date"].isna().any() or frame["game_id"].duplicated().any():
+        raise FutureValueSourceError("calibration prior source frame identity is invalid")
+    frame_by_game = frame.set_index("game_id", drop=False)
+    frame_by_series = {
+        str(series_id): group.sort_values(["date", "game_id"], kind="stable")
+        for series_id, group in frame.groupby("series_id", sort=False, observed=True)
+    }
+    evaluation_game_ids = {
+        str(game_id)
+        for fold in evaluation_folds
+        for game_id in fold.get("validation_game_ids", ())
+    }
+    evaluation_series_ids = {
+        str(series_id)
+        for fold in evaluation_folds
+        for series_id in fold.get("validation_series_ids", ())
+    }
+    if not evaluation_folds:
+        raise FutureValueSourceError("calibration evaluation folds are missing")
+    evaluation_start = _utc_timestamp(
+        str(evaluation_folds[0]["validation_start"]),
+        "calibration evaluation validation start",
+    )
+
+    normalized: list[dict[str, Any]] = []
+    seen_fold_ids: set[int] = set()
+    seen_game_ids: set[str] = set()
+    seen_series_ids: set[str] = set()
+    previous_end: pd.Timestamp | None = None
+    for raw_fold in calibration_prior_folds:
+        if not isinstance(raw_fold, Mapping):
+            raise FutureValueSourceError("calibration prior fold is invalid")
+        try:
+            fold_id = int(raw_fold.get("fold", raw_fold.get("fold_id")))
+        except (TypeError, ValueError) as error:
+            raise FutureValueSourceError("calibration prior fold ID is invalid") from error
+        if fold_id >= 1 or fold_id in seen_fold_ids:
+            raise FutureValueSourceError("calibration prior fold ID is invalid")
+        if raw_fold.get("out_of_sample") is not True:
+            raise FutureValueSourceError(
+                "calibration prior fold is not marked out-of-sample"
+            )
+        if raw_fold.get("whole_series") is not True:
+            raise FutureValueSourceError(
+                "calibration prior fold is not whole-series safe"
+            )
+        fold_source = raw_fold.get("source_receipt_sha256")
+        if fold_source is not None and str(fold_source).lower() != source_hash:
+            raise FutureValueSourceError("calibration prior fold source drift")
+        fold_variant = raw_fold.get("variant")
+        if fold_variant is not None and str(fold_variant) != variant:
+            raise FutureValueSourceError("calibration prior fold variant drift")
+        try:
+            train_end = _utc_timestamp(
+                str(raw_fold["train_end"]), "calibration prior train end"
+            )
+            validation_start = _utc_timestamp(
+                str(raw_fold["validation_start"]),
+                "calibration prior validation start",
+            )
+            validation_end = _utc_timestamp(
+                str(raw_fold["validation_end"]),
+                "calibration prior validation end",
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise FutureValueSourceError(
+                "calibration prior fold cutoffs are invalid"
+            ) from error
+        if not train_end < validation_start <= validation_end:
+            raise FutureValueSourceError(
+                "calibration prior fold cutoffs are not strictly chronological"
+            )
+        if previous_end is not None and not previous_end < validation_start:
+            raise FutureValueSourceError("calibration prior fold windows overlap")
+        if not validation_end < evaluation_start:
+            raise FutureValueSourceError(
+                "calibration prior fold is not strictly earlier than evaluation"
+            )
+        raw_rows = raw_fold.get("rows", raw_fold.get("predictions"))
+        if not isinstance(raw_rows, list) or not raw_rows:
+            raise FutureValueSourceError("calibration prior fold rows are missing")
+        fold_rows: list[dict[str, Any]] = []
+        fold_games: set[str] = set()
+        fold_series: set[str] = set()
+        for raw_row in raw_rows:
+            if not isinstance(raw_row, Mapping):
+                raise FutureValueSourceError("calibration prior row is invalid")
+            game_id = str(raw_row.get("game_id", "")).strip()
+            if not game_id or game_id not in frame_by_game.index:
+                raise FutureValueSourceError("calibration prior game ID is outside the source")
+            if game_id in seen_game_ids or game_id in fold_games:
+                raise FutureValueSourceError("calibration prior game IDs are not unique")
+            if game_id in evaluation_game_ids:
+                raise FutureValueSourceError(
+                    "calibration prior game ID overlaps evaluation"
+                )
+            source_row = frame_by_game.loc[game_id]
+            series_id = str(raw_row.get("series_id", "")).strip()
+            if not series_id or series_id != str(source_row["series_id"]):
+                raise FutureValueSourceError("calibration prior series ID does not match source")
+            if series_id in seen_series_ids:
+                raise FutureValueSourceError("calibration prior series IDs are not unique")
+            if series_id in evaluation_series_ids:
+                raise FutureValueSourceError(
+                    "calibration prior series ID overlaps evaluation"
+                )
+            date_value = raw_row.get("date")
+            date = pd.to_datetime(date_value, utc=True, errors="coerce")
+            if pd.isna(date):
+                raise FutureValueSourceError("calibration prior row date is invalid")
+            date = pd.Timestamp(date)
+            source_date = pd.Timestamp(source_row["date"])
+            if date != source_date or not validation_start <= date <= validation_end:
+                raise FutureValueSourceError(
+                    "calibration prior row date does not match source or fold"
+                )
+            try:
+                target_value = float(raw_row["target"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise FutureValueSourceError("calibration prior target is invalid") from error
+            if not math.isfinite(target_value) or target_value not in (0.0, 1.0):
+                raise FutureValueSourceError("calibration prior target is invalid")
+            target = int(target_value)
+            source_target = float(source_row["target"])
+            if not math.isfinite(source_target) or source_target != target:
+                raise FutureValueSourceError("calibration prior target does not match source")
+            try:
+                raw_logit = float(
+                    raw_row.get(
+                        "raw_logit",
+                        raw_row.get("candidate_raw_logit", raw_row.get("prediction_logit")),
+                    )
+                )
+            except (TypeError, ValueError) as error:
+                raise FutureValueSourceError("calibration prior raw logit is invalid") from error
+            if not math.isfinite(raw_logit):
+                raise FutureValueSourceError("calibration prior raw logit is non-finite")
+            raw_probability_value = raw_row.get(
+                "raw_probability",
+                raw_row.get(
+                    "candidate_raw_probability", raw_row.get("prediction_probability")
+                ),
+            )
+            if raw_probability_value is None:
+                raw_probability = float(_stable_sigmoid(np.asarray([raw_logit]))[0])
+            else:
+                try:
+                    raw_probability = float(raw_probability_value)
+                except (TypeError, ValueError) as error:
+                    raise FutureValueSourceError(
+                        "calibration prior raw probability is invalid"
+                    ) from error
+                expected_probability = float(_stable_sigmoid(np.asarray([raw_logit]))[0])
+                if not math.isfinite(raw_probability) or not 0.0 < raw_probability < 1.0:
+                    raise FutureValueSourceError(
+                        "calibration prior raw probability is invalid"
+                    )
+                if not math.isclose(
+                    raw_probability, expected_probability, rel_tol=1e-8, abs_tol=1e-10
+                ):
+                    raise FutureValueSourceError(
+                        "calibration prior raw logit and probability disagree"
+                    )
+            support_value = raw_row.get(
+                "support",
+                raw_row.get("minimum_effective_support"),
+            )
+            support: float | None = None
+            if support_value is not None:
+                try:
+                    support = float(support_value)
+                except (TypeError, ValueError) as error:
+                    raise FutureValueSourceError(
+                        "calibration prior support is invalid"
+                    ) from error
+                if not math.isfinite(support) or support < 0.0:
+                    raise FutureValueSourceError(
+                        "calibration prior support is invalid"
+                    )
+            fold_rows.append(
+                {
+                    "fold": fold_id,
+                    "game_id": game_id,
+                    "series_id": series_id,
+                    "date": _utc_text(date),
+                    "raw_logit": raw_logit,
+                    "raw_probability": raw_probability,
+                    "target": target,
+                    **({"support": support} if support is not None else {}),
+                }
+            )
+            fold_games.add(game_id)
+            fold_series.add(series_id)
+        for series_id in fold_series:
+            source_series = frame_by_series.get(series_id)
+            if source_series is None:
+                raise FutureValueSourceError("calibration prior series is outside the source")
+            source_series_ids = set(source_series["game_id"].astype(str))
+            if source_series_ids != fold_games.intersection(source_series_ids):
+                raise FutureValueSourceError(
+                    "calibration prior rows do not cover a complete series"
+                )
+            if source_series["date"].min() < validation_start or source_series["date"].max() > validation_end:
+                raise FutureValueSourceError(
+                    "calibration prior series crosses its validation fold"
+                )
+        fold_rows.sort(key=lambda row: (str(row["date"]), str(row["game_id"])))
+        row_identity = [str(row["game_id"]) for row in fold_rows]
+        normalized.append(
+            {
+                "fold": fold_id,
+                "train_end": _utc_text(train_end),
+                "validation_start": _utc_text(validation_start),
+                "validation_end": _utc_text(validation_end),
+                "source_receipt_sha256": source_hash,
+                "variant": variant,
+                "out_of_sample": True,
+                "whole_series": True,
+                "rows": fold_rows,
+                "row_count": len(fold_rows),
+                "game_identity_sha256": identity_sha256(row_identity),
+                "rows_sha256": hashlib.sha256(_canonical_json_bytes(fold_rows)).hexdigest(),
+            }
+        )
+        seen_fold_ids.add(fold_id)
+        seen_game_ids.update(fold_games)
+        seen_series_ids.update(fold_series)
+        previous_end = validation_end
+    return normalized
+
+
 def _fit_strict_prior_calibration(
     raw_logits: Sequence[float],
     targets: Sequence[int],
@@ -6102,9 +6367,9 @@ def _fit_strict_prior_calibration(
 ) -> dict[str, Any]:
     """Fit one positive, zero-intercept slope on prior outer-fold rows only.
 
-    The first outer fold uses the identity transform.  It carries a named
-    blocker because no earlier validation outcome exists.  Later folds fit
-    the slope from the supplied rows, which must all come from earlier folds.
+    An outer fold without prior rows uses the identity transform and carries a
+    named blocker.  A supplied calibration prelude lets the first evaluation
+    fold fit the slope.  Every supplied row must come from an earlier fold.
     """
 
     if not isinstance(source_receipt_sha256, str) or len(source_receipt_sha256) != 64:
@@ -7373,6 +7638,7 @@ def evaluate_future_value(
     phase_partition_binding: Mapping[str, Any] | None = None,
     expected_phase_artifact_sha256: str | None = None,
     expected_phase_receipt_file_sha256: str | None = None,
+    calibration_prior_folds: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run a development-only chronological whole-series evaluation."""
 
@@ -7501,16 +7767,45 @@ def evaluate_future_value(
         n_folds=n_folds,
         verified_model_frame=map_frame,
     )
+    calibration_prior_variant = (
+        variant_config.variant.value if variant_config is not None else "legacy"
+    )
+    normalized_calibration_prior_folds = _normalise_strict_prior_calibration_folds(
+        calibration_prior_folds,
+        map_frame=map_frame,
+        source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+        variant=calibration_prior_variant,
+        evaluation_folds=folds,
+    )
     fold_reports: list[dict[str, Any]] = []
     pooled_targets: list[pd.Series] = []
     pooled_predictions: list[pd.Series] = []
     pooled_raw_predictions: list[pd.Series] = []
     pooled_baselines: list[pd.Series] = []
-    calibration_history_logits: list[float] = []
-    calibration_history_targets: list[int] = []
-    calibration_history_folds: list[int] = []
-    calibration_history_game_ids: list[str] = []
-    calibration_history_ends: list[str] = []
+    calibration_history_logits: list[float] = [
+        float(row["raw_logit"])
+        for fold in normalized_calibration_prior_folds
+        for row in fold["rows"]
+    ]
+    calibration_history_targets: list[int] = [
+        int(row["target"])
+        for fold in normalized_calibration_prior_folds
+        for row in fold["rows"]
+    ]
+    calibration_history_folds: list[int] = [
+        int(fold["fold"])
+        for fold in normalized_calibration_prior_folds
+        for _row in fold["rows"]
+    ]
+    calibration_history_game_ids: list[str] = [
+        str(row["game_id"])
+        for fold in normalized_calibration_prior_folds
+        for row in fold["rows"]
+    ]
+    calibration_history_ends: list[str] = [
+        str(fold["validation_end"]) for fold in normalized_calibration_prior_folds
+    ]
+    support_calibration_folds: list[dict[str, Any]] = []
     pooled_slice_blockers: list[str] = []
     pooled_current_targets: list[pd.Series] = []
     pooled_current_predictions: dict[str, list[pd.Series]] = {
@@ -7609,6 +7904,35 @@ def evaluate_future_value(
         paired_prediction = prediction.loc[paired_mask]
         paired_raw_prediction = raw_prediction.loc[paired_mask]
         paired_raw_logit = raw_logit.loc[paired_mask]
+        support_rows: list[dict[str, Any]] = []
+        for row_index in validation.index[paired_mask]:
+            support_value = validation.loc[
+                row_index, "player_form_minimum_effective_support"
+            ]
+            support_rows.append(
+                {
+                    "game_id": str(validation.loc[row_index, "game_id"]),
+                    "series_id": str(validation.loc[row_index, "series_id"]),
+                    "date": _utc_text(validation.loc[row_index, "date"]),
+                    "support": _ledger_value(support_value),
+                    "prediction_logit": _ledger_value(raw_logit.loc[row_index]),
+                    "prediction_probability": _ledger_value(
+                        raw_prediction.loc[row_index]
+                    ),
+                    "target": _ledger_value(target.loc[row_index]),
+                }
+            )
+        support_calibration_folds.append(
+            {
+                "fold": int(fold["fold"]),
+                "train_end": str(fold["train_end"]),
+                "validation_start": str(fold["validation_start"]),
+                "validation_end": str(fold["validation_end"]),
+                "source_receipt_sha256": str(source_receipt["receipt_sha256"]),
+                "variant": calibration_prior_variant,
+                "rows": support_rows,
+            }
+        )
         baseline_probability = pd.Series(
             float(design.loc[design["game_id"].isin(fold["train_game_ids"]), "target"].mean()),
             index=validation.index,
@@ -8048,14 +8372,82 @@ def evaluate_future_value(
             str(value) for value in validation.loc[paired_mask, "game_id"]
         )
         calibration_history_ends.append(str(fold["validation_end"]))
+    support_calibration_artifact: dict[str, Any] | None = None
+    support_calibration_error: str | None = None
+    if normalized_calibration_prior_folds:
+        try:
+            support_calibration_prior_folds = [
+                {
+                    key: value
+                    for key, value in fold.items()
+                    if key not in {"row_count", "game_identity_sha256", "rows_sha256"}
+                }
+                for fold in normalized_calibration_prior_folds
+            ]
+            support_calibration_artifact = build_strict_prior_support_calibration(
+                support_calibration_folds,
+                calibration_prior_folds=support_calibration_prior_folds,
+                source_receipt=source_receipt,
+                variant=calibration_prior_variant,
+                support_column="support",
+            )
+            verify_support_calibration_artifact(
+                support_calibration_artifact,
+                expected_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+                expected_variant=calibration_prior_variant,
+            )
+        except FutureValueUncertaintyError as error:
+            support_calibration_error = str(error)
     cluster_source = map_frame.attrs.get("series_cluster_source")
     cluster_audit = map_frame.attrs.get("series_cluster_audit")
     full_source_cluster_audit = map_frame.attrs.get(
         "full_source_series_cluster_audit"
     )
-    blockers = [
-        "support_uncertainty_proxy_not_calibrated",
-    ]
+    blockers: list[str] = []
+    if support_calibration_artifact is None:
+        blockers.append("support_uncertainty_proxy_not_calibrated")
+    elif support_calibration_artifact.get("status") != "research_only":
+        blockers.append("support_uncertainty_proxy_not_calibrated")
+    if support_calibration_artifact is not None:
+        support_fold_lookup = {
+            str(fold.get("fold")): fold
+            for fold in support_calibration_artifact.get("folds", [])
+            if isinstance(fold, Mapping)
+        }
+        for report in fold_reports:
+            support_fold = support_fold_lookup.get(str(report["fold"]))
+            if support_fold is None:
+                report["support_uncertainty"] = {
+                    "status": "blocked",
+                    "blockers": ["support_calibration_fold_missing"],
+                }
+            else:
+                report["support_uncertainty"] = {
+                    "status": str(support_fold.get("status")),
+                    "blockers": list(support_fold.get("blockers", [])),
+                    "calibration_training_game_count": int(
+                        support_fold.get("calibration_training_game_count", 0)
+                    ),
+                    "calibration_training_game_identity_sha256": support_fold.get(
+                        "calibration_training_game_identity_sha256"
+                    ),
+                    "mapping_sha256": (
+                        support_fold.get("mapping", {}).get("mapping_sha256")
+                        if isinstance(support_fold.get("mapping"), Mapping)
+                        else None
+                    ),
+                }
+    else:
+        for report in fold_reports:
+            report["support_uncertainty"] = {
+                "status": "blocked",
+                "blockers": [
+                    "calibration_prior_validation_folds_missing"
+                    if not normalized_calibration_prior_folds
+                    else "support_calibration_build_failed"
+                ],
+                **({"detail": support_calibration_error} if support_calibration_error else {}),
+            }
     blockers.extend(
         _required_current_rating_comparison_blockers(current_fold_reports)
     )
@@ -8313,6 +8705,43 @@ def evaluate_future_value(
     prediction_ledger["sha256"] = hashlib.sha256(
         _canonical_json_bytes(prediction_ledger_rows)
     ).hexdigest()
+    support_calibration_report: dict[str, Any] = {
+        "status": (
+            str(support_calibration_artifact.get("status"))
+            if support_calibration_artifact is not None
+            else "blocked"
+        ),
+        "source_receipt_sha256": str(source_receipt["receipt_sha256"]),
+        "variant": calibration_prior_variant,
+        "calibration_prior_fold_count": len(normalized_calibration_prior_folds),
+        "calibration_prior_row_count": sum(
+            int(fold["row_count"]) for fold in normalized_calibration_prior_folds
+        ),
+        "blockers": sorted(
+            set(
+                (
+                    support_calibration_artifact.get("blockers", [])
+                    if support_calibration_artifact is not None
+                    else [
+                        "calibration_prior_validation_folds_missing"
+                        if not normalized_calibration_prior_folds
+                        else "support_calibration_build_failed"
+                    ]
+                )
+            )
+        ),
+    }
+    if support_calibration_artifact is not None:
+        support_calibration_report.update(
+            {
+                "artifact_sha256": support_calibration_artifact.get("artifact_sha256"),
+                "receipt_sha256": support_calibration_artifact.get("receipt_sha256"),
+                "coverage": support_calibration_artifact.get("coverage"),
+                "artifact": support_calibration_artifact,
+            }
+        )
+    if support_calibration_error is not None:
+        support_calibration_report["detail"] = support_calibration_error
     source_payload = {
         "game_count": int(len(map_frame)),
         "source_game_count": int(source_receipt["source_game_count"]),
@@ -8418,6 +8847,23 @@ def evaluate_future_value(
                 "method": "strict_prior_outer_validation_zero_intercept_positive_slope",
                 "uses_current_validation": False,
                 "folds": [report["calibration_fit"] for report in fold_reports],
+                "calibration_prior_folds": [
+                    {
+                        key: value
+                        for key, value in fold.items()
+                        if key != "rows"
+                    }
+                    for fold in normalized_calibration_prior_folds
+                ],
+                "calibration_prior_rows_sha256": hashlib.sha256(
+                    _canonical_json_bytes(
+                        [
+                            row
+                            for fold in normalized_calibration_prior_folds
+                            for row in fold["rows"]
+                        ]
+                    )
+                ).hexdigest(),
                 "blockers": sorted(
                     {
                         blocker
@@ -8426,6 +8872,7 @@ def evaluate_future_value(
                     }
                 ),
             },
+            "support_uncertainty_calibration": support_calibration_report,
         },
         "folds": fold_reports,
         "prediction_ledger": prediction_ledger,

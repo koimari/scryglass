@@ -78,6 +78,34 @@ def _artifact(**kwargs: object) -> dict[str, object]:
     )
 
 
+def _calibration_prior_folds() -> list[dict[str, object]]:
+    start = datetime(2025, 12, 1, tzinfo=timezone.utc)
+    rows: list[dict[str, object]] = []
+    for row_number in range(20):
+        date = start + timedelta(days=row_number)
+        rows.append(
+            {
+                "game_id": f"g-prior-{row_number}",
+                "series_id": f"s-prior-{row_number}",
+                "date": date.isoformat().replace("+00:00", "Z"),
+                "minimum_effective_support": float(row_number % 10),
+                "prediction_probability": 0.25 + 0.5 * ((row_number % 4) / 3.0),
+                "target": float(row_number % 2),
+            }
+        )
+    return [
+        {
+            "fold": 0,
+            "train_end": "2025-11-30T00:00:00Z",
+            "validation_start": "2025-12-01T00:00:00Z",
+            "validation_end": "2025-12-20T00:00:00Z",
+            "out_of_sample": True,
+            "whole_series": True,
+            "rows": rows,
+        }
+    ]
+
+
 def test_support_calibration_is_strict_prior_monotonic_and_receipted() -> None:
     artifact = _artifact()
 
@@ -99,6 +127,53 @@ def test_support_calibration_is_strict_prior_monotonic_and_receipted() -> None:
     )
     assert values.name == "calibrated_support_uncertainty"
     assert values.notna().all()
+
+
+def test_calibration_prelude_closes_first_fold_with_oos_whole_series_rows() -> None:
+    artifact = build_strict_prior_support_calibration(
+        _folds(),
+        calibration_prior_folds=_calibration_prior_folds(),
+        source_receipt=SOURCE,
+        variant="future_player_form",
+        minimum_training_rows=10,
+        minimum_bin_rows=2,
+        minimum_bins=2,
+        maximum_bins=5,
+    )
+
+    assert artifact["status"] == "research_only"
+    assert artifact["blockers"] == []
+    assert artifact["coverage"]["complete_enough"] is True  # type: ignore[index]
+    assert artifact["coverage"]["first_fold_without_history"] is False  # type: ignore[index]
+    assert artifact["coverage"]["calibration_prior_row_count"] == 20  # type: ignore[index]
+    assert all(fold["status"] == "available" for fold in artifact["folds"])  # type: ignore[index]
+    assert artifact["folds"][0]["calibration_training_game_count"] == 20  # type: ignore[index]
+    assert verify_support_calibration_artifact(artifact)
+
+    values = apply_strict_prior_support_calibration(
+        artifact,
+        [0.0, 4.0, 9.0],
+        fold_id=1,
+        expected_source_receipt_sha256=SOURCE["receipt_sha256"],
+        expected_variant="future_player_form",
+    )
+    assert values.notna().all()
+
+
+def test_calibration_prelude_requires_explicit_oos_and_whole_series_flags() -> None:
+    prior = _calibration_prior_folds()
+    prior[0]["out_of_sample"] = False
+    with pytest.raises(FutureValueUncertaintyError, match="out-of-sample"):
+        build_strict_prior_support_calibration(
+            _folds(),
+            calibration_prior_folds=prior,
+            source_receipt=SOURCE,
+            variant="future_player_form",
+            minimum_training_rows=10,
+            minimum_bin_rows=2,
+            minimum_bins=2,
+            maximum_bins=5,
+        )
 
 
 def test_first_fold_and_insufficient_prior_support_fail_closed() -> None:

@@ -1021,6 +1021,67 @@ def test_evaluation_pairs_candidate_and_baseline_on_identical_game_ids() -> None
     ).hexdigest()
 
 
+def test_evaluation_accepts_source_bound_calibration_prelude() -> None:
+    maps, players = _raw_source(60)
+    source = _source_receipt(
+        list(_frame_game_ids(maps, "maps")),
+        source_as_of=maps["date"].max().isoformat(),
+    )
+    frame = _map_model_frame(maps)
+    outer_fold = chronological_whole_series_folds(
+        maps,
+        n_folds=1,
+        verified_model_frame=frame,
+    )[0]
+    train_ids = set(str(value) for value in outer_fold["train_game_ids"])
+    prior = frame[frame["game_id"].astype(str).isin(train_ids)].sort_values("date").head(20)
+    prior_rows = [
+        {
+            "game_id": str(row.game_id),
+            "series_id": str(row.series_id),
+            "date": row.date.isoformat().replace("+00:00", "Z"),
+            "raw_logit": 1.0 if index % 2 else -1.0,
+            "target": int(row.target),
+            "support": float(index % 10),
+        }
+        for index, row in enumerate(prior.itertuples(index=False))
+    ]
+    prior_folds = [
+        {
+            "fold": 0,
+            "train_end": (
+                prior["date"].min() - pd.Timedelta(seconds=1)
+            ).isoformat().replace("+00:00", "Z"),
+            "validation_start": prior["date"].min().isoformat().replace(
+                "+00:00", "Z"
+            ),
+            "validation_end": prior["date"].max().isoformat().replace(
+                "+00:00", "Z"
+            ),
+            "out_of_sample": True,
+            "whole_series": True,
+            "rows": prior_rows,
+        }
+    ]
+
+    result = evaluate_future_value(
+        maps,
+        players,
+        n_folds=1,
+        source_receipt=source,
+        calibration_prior_folds=prior_folds,
+    )
+
+    calibration = result["evaluation"]["strict_prior_calibration"]["folds"][0]
+    assert calibration["mode"] == "fitted"
+    assert calibration["prior_fold_numbers"] == [0]
+    assert "calibration_prior_validation_folds_missing" not in result["blockers"]
+    support = result["evaluation"]["support_uncertainty_calibration"]
+    assert support["status"] == "research_only"
+    assert support["blockers"] == []
+    assert "support_uncertainty_proxy_not_calibrated" not in result["blockers"]
+
+
 def test_baseline_output_alignment_reports_missing_and_extra_ids() -> None:
     validation = pd.DataFrame({"game_id": ["g1", "g2", "g3"]})
     output = pd.DataFrame(
@@ -1602,6 +1663,55 @@ def test_model_runtime_receipt_binds_code_source_environment_and_output(
             model_output_path=tmp_path / "unused-model.json",
             runtime_receipt_path=tmp_path / "unused-runtime.json",
             crosswalk_path=tmp_path / "crosswalk.json",
+        )
+
+
+def test_calibration_prior_receipt_binds_payload_and_file(tmp_path) -> None:
+    source_hash = "a" * 64
+    payload = {
+        "schema_version": training_module.CALIBRATION_PRIOR_SCHEMA_VERSION,
+        "source_receipt_sha256": source_hash,
+        "variants": {
+            "future_player_form": {
+                "folds": [
+                    {
+                        "fold": 0,
+                        "out_of_sample": True,
+                        "whole_series": True,
+                        "rows": [],
+                    }
+                ]
+            }
+        },
+    }
+    payload["receipt_sha256"] = hashlib.sha256(
+        json.dumps(
+            {key: value for key, value in payload.items() if key != "receipt_sha256"},
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    path = tmp_path / "calibration-prior.json"
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+    folds, binding = training_module._load_calibration_prior_folds(
+        path,
+        source_receipt_sha256=source_hash,
+        variant_keys=("future_player_form",),
+    )
+    assert folds["future_player_form"][0]["fold"] == 0
+    assert binding["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert binding["payload_receipt_sha256"] == payload["receipt_sha256"]
+
+    payload["source_receipt_sha256"] = "b" * 64
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    with pytest.raises(FutureValueTrainingError, match="source receipt changed"):
+        training_module._load_calibration_prior_folds(
+            path,
+            source_receipt_sha256=source_hash,
+            variant_keys=("future_player_form",),
         )
 
 
