@@ -97,6 +97,49 @@ def _build(**kwargs):
     )
 
 
+def _write_source_files(
+    root: Path,
+    payloads: dict[str, list[dict[str, object]]],
+    records: dict[str, dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    root.mkdir(parents=True, exist_ok=True)
+    for label, rows in payloads.items():
+        path = root / f"{label}.json"
+        raw = _canonical(rows)
+        path.write_bytes(raw)
+        records[label].update(
+            path=str(path.resolve()),
+            sha256=hashlib.sha256(raw).hexdigest(),
+            bytes=len(raw),
+        )
+    return records
+
+
+def _build_verifiable(tmp_path: Path, **kwargs):
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, _raw = _fixture()
+    records = _write_source_files(
+        tmp_path / "source-files",
+        {
+            "oe": oe,
+            "scoreboardgames": scoreboard,
+            "matchschedule": schedule,
+            "tournaments": tournaments,
+        },
+        records,
+    )
+    return build_oe_leaguepedia_series_crosswalk(
+        oe,
+        scoreboard,
+        schedule,
+        tournaments,
+        source_receipt=receipt,
+        source_records=records,
+        competition_mapping=mapping,
+        captured_at="2026-08-15T00:00:00Z",
+        **kwargs,
+    )
+
+
 def _refresh_records(
     records: dict[str, dict[str, object]], raw: dict[str, bytes], payloads: dict[str, list[dict[str, object]]]
 ) -> tuple[dict[str, dict[str, object]], dict[str, bytes]]:
@@ -113,8 +156,10 @@ def _refresh_records(
     return records, raw
 
 
-def test_complete_crosswalk_binds_exact_prefix_and_keeps_outcomes_out() -> None:
-    result = _build()
+def test_complete_crosswalk_binds_exact_prefix_and_keeps_outcomes_out(
+    tmp_path: Path,
+) -> None:
+    result = _build_verifiable(tmp_path)
 
     assert result["status"] == "complete_authoritative_coverage"
     assert result["coverage"]["mapped_game_count"] == 2
@@ -139,8 +184,8 @@ def test_complete_crosswalk_binds_exact_prefix_and_keeps_outcomes_out() -> None:
     verify_crosswalk(result)
 
 
-def test_resealed_embedded_outcome_field_fails_verification() -> None:
-    result = _build()
+def test_resealed_embedded_outcome_field_fails_verification(tmp_path: Path) -> None:
+    result = _build_verifiable(tmp_path)
     result["raw_sources"]["matchschedule"][0]["Winner"] = "forged"
     projected = _canonical(result["raw_sources"]["matchschedule"])
     result["source_records"]["matchschedule"]["payload_sha256"] = hashlib.sha256(
@@ -319,8 +364,10 @@ def test_tournament_assignment_tamper_changes_hash_and_fails_verification() -> N
         verify_crosswalk(replay)
 
 
-def test_resealed_raw_tournament_overview_mutation_fails_verification() -> None:
-    result = _build()
+def test_resealed_raw_tournament_overview_mutation_fails_verification(
+    tmp_path: Path,
+) -> None:
+    result = _build_verifiable(tmp_path)
     result["raw_sources"]["tournaments"][0]["OverviewPage"] = "Forged/Overview"
     tournament_payload = _canonical(result["raw_sources"]["tournaments"])
     result["source_records"]["tournaments"]["payload_sha256"] = hashlib.sha256(
@@ -332,14 +379,43 @@ def test_resealed_raw_tournament_overview_mutation_fails_verification() -> None:
     result.pop("crosswalk_sha256")
     result["crosswalk_sha256"] = hashlib.sha256(_canonical(result)).hexdigest()
 
-    with pytest.raises(CrosswalkError, match="tournament evidence changed"):
+    with pytest.raises(CrosswalkError, match="projection differs from source file"):
         verify_crosswalk(result)
 
 
-def test_invalid_raw_tournament_rows_replay_exact_builder_issues() -> None:
-    oe, scoreboard, schedule, tournaments, receipt, mapping, records, raw = _fixture()
+def test_resealed_non_outcome_projection_field_fails_verification(
+    tmp_path: Path,
+) -> None:
+    result = _build_verifiable(tmp_path)
+    result["raw_sources"]["tournaments"][0]["ForgedProjectionField"] = "forged"
+    projected = _canonical(result["raw_sources"]["tournaments"])
+    result["source_records"]["tournaments"]["payload_sha256"] = hashlib.sha256(
+        projected
+    ).hexdigest()
+    result["source_records"]["tournaments"]["payload_bytes"] = len(projected)
+    result.pop("crosswalk_sha256")
+    result["crosswalk_sha256"] = hashlib.sha256(_canonical(result)).hexdigest()
+
+    with pytest.raises(CrosswalkError, match="projection differs from source file"):
+        verify_crosswalk(result)
+
+
+def test_invalid_raw_tournament_rows_replay_exact_builder_issues(
+    tmp_path: Path,
+) -> None:
+    oe, scoreboard, schedule, tournaments, receipt, mapping, records, _raw = _fixture()
     tournaments.append({"Name": "Incomplete Tournament"})
-    records, raw = _refresh_records(records, raw, {"tournaments": tournaments})
+    records, _raw = _refresh_records(records, _raw, {"tournaments": tournaments})
+    records = _write_source_files(
+        tmp_path / "source-files",
+        {
+            "oe": oe,
+            "scoreboardgames": scoreboard,
+            "matchschedule": schedule,
+            "tournaments": tournaments,
+        },
+        records,
+    )
     result = build_oe_leaguepedia_series_crosswalk(
         oe,
         scoreboard,
@@ -349,7 +425,6 @@ def test_invalid_raw_tournament_rows_replay_exact_builder_issues() -> None:
         source_records=records,
         competition_mapping=mapping,
         captured_at="2026-08-15T00:00:00Z",
-        raw_source_bytes=raw,
         allow_partial=True,
     )
 
@@ -390,8 +465,30 @@ def test_invalid_raw_tournament_rows_replay_exact_builder_issues() -> None:
     )
     added.pop("crosswalk_sha256")
     added["crosswalk_sha256"] = hashlib.sha256(_canonical(added)).hexdigest()
-    with pytest.raises(CrosswalkError, match="invalid tournament issues differ"):
+    with pytest.raises(CrosswalkError, match="projection differs from source file"):
         verify_crosswalk(added)
+
+
+def test_source_replay_rejects_symlink_leaf_and_ancestor(tmp_path: Path) -> None:
+    result = _build_verifiable(tmp_path / "baseline")
+    target = Path(result["source_records"]["tournaments"]["path"])
+    link_root = tmp_path / "links"
+    link_root.mkdir()
+    leaf = link_root / "tournaments.json"
+    ancestor = link_root / "source-dir"
+    try:
+        leaf.symlink_to(target)
+        ancestor.symlink_to(target.parent, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+
+    for unsafe in (leaf, ancestor / target.name):
+        mutated = json.loads(json.dumps(result))
+        mutated["source_records"]["tournaments"]["path"] = str(unsafe)
+        mutated.pop("crosswalk_sha256")
+        mutated["crosswalk_sha256"] = hashlib.sha256(_canonical(mutated)).hexdigest()
+        with pytest.raises(CrosswalkError, match="contains a symlink"):
+            verify_crosswalk(mutated)
 
 
 def test_safe_capture_path_rejects_symlink_leaf_and_ancestor(tmp_path: Path) -> None:

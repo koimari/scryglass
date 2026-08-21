@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
@@ -113,6 +115,48 @@ def _outcome_free_rows(
         {str(key): item for key, item in row.items() if not _is_outcome_field(key)}
         for row in value
     ]
+
+
+def _read_safe_source_rows(
+    path_text: object,
+    *,
+    label: str,
+) -> tuple[bytes, list[dict[str, Any]]]:
+    path = Path(str(path_text or ""))
+    if not path.is_absolute():
+        raise CrosswalkError(f"crosswalk source path is invalid: {label}")
+    lexical = Path(os.path.abspath(path))
+    if lexical != path:
+        raise CrosswalkError(f"crosswalk source path is invalid: {label}")
+    current = Path(lexical.anchor)
+    try:
+        for part in lexical.parts[1:]:
+            current = current / part
+            mode = os.lstat(current).st_mode
+            if stat.S_ISLNK(mode):
+                raise CrosswalkError(
+                    f"crosswalk source path contains a symlink: {label}"
+                )
+        if not stat.S_ISREG(os.lstat(lexical).st_mode):
+            raise CrosswalkError(f"crosswalk source path is not a file: {label}")
+        raw = lexical.read_bytes()
+    except CrosswalkError:
+        raise
+    except OSError as error:
+        raise CrosswalkError(
+            f"crosswalk source file cannot be read: {label}"
+        ) from error
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise CrosswalkError(
+            f"crosswalk source file is not valid JSON: {label}"
+        ) from error
+    if not isinstance(value, list) or any(not isinstance(row, Mapping) for row in value):
+        raise CrosswalkError(
+            f"crosswalk source file must contain a row array: {label}"
+        )
+    return raw, [dict(row) for row in value]
 
 
 def _assignment_rows(
@@ -1209,6 +1253,23 @@ def verify_crosswalk(payload: Mapping[str, Any]) -> None:
                 ):
                     raise CrosswalkError(
                         f"crosswalk original source binding is invalid: {label}"
+                    )
+                source_raw, source_rows = _read_safe_source_rows(
+                    record.get("path"), label=label
+                )
+                source_payload_hash, source_payload_bytes = _payload_hash(source_rows)
+                if (
+                    len(source_raw) != record.get("bytes")
+                    or _sha256_bytes(source_raw) != record.get("sha256")
+                    or source_payload_hash != record.get("source_payload_sha256")
+                    or source_payload_bytes != record.get("source_payload_bytes")
+                ):
+                    raise CrosswalkError(
+                        f"crosswalk original source bytes changed: {label}"
+                    )
+                if _outcome_free_rows(source_rows) != rows:
+                    raise CrosswalkError(
+                        f"crosswalk raw source projection differs from source file: {label}"
                     )
 
             if (

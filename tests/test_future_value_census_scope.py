@@ -159,10 +159,13 @@ def _crosswalk_fixture(
         payload_bytes = json.dumps(
             rows, ensure_ascii=True, sort_keys=True, separators=(",", ":")
         ).encode()
-        raw = b"captured:" + label.encode() + b":" + payload_bytes
+        source_path = tmp_path / f"crosswalk-source-{label}.json"
+        source_path.write_bytes(payload_bytes)
+        raw = payload_bytes
         raw_bytes[label] = raw
         source_records[label] = {
             "url": f"https://example.test/{label}",
+            "path": str(source_path.resolve()),
             "retrieved_at": "2026-01-02T00:00:00Z",
             "sha256": hashlib.sha256(raw).hexdigest(),
             "bytes": len(raw),
