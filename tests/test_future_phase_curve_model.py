@@ -4,13 +4,18 @@ import hashlib
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 import lol_kills.research.future_value_rating as future_value_rating
 
 from lol_kills.research.future_phase_curve import (
     FuturePhaseCurveError,
+    _VerifiedPhaseSeriesReference,
+    _make_verified_phase_series_reference,
+    _revalidate_verified_phase_series_reference,
     _phase_partition_map_frame,
+    _design,
     bind_phase_source,
     chronological_folds,
     evaluate_phase_curve,
@@ -166,6 +171,17 @@ def _fake_crosswalk_loader(monkeypatch: pytest.MonkeyPatch) -> None:
         bind,
     )
     monkeypatch.setattr(future_value_rating, "_map_model_frame", model_frame)
+
+
+def test_design_replaces_nonfinite_feature_values_with_zero() -> None:
+    frame = pd.DataFrame(
+        {"prior_form_gold_diff": [float("inf"), float("-inf"), float("nan"), 1000.0]}
+    )
+    matrix, columns = _design(frame, ["prior_form_gold_diff"])
+    assert columns == ("prior_form_gold_diff", "prior_form_gold_diff__missing")
+    assert np.isfinite(matrix).all()
+    assert matrix[:, 0].tolist() == [0.0, 0.0, 0.0, 0.1]
+    assert matrix[:, 1].tolist() == [1.0, 1.0, 1.0, 0.0]
 
 
 def test_prepare_phase_frame_marks_short_game_targets_as_censored() -> None:
@@ -659,6 +675,111 @@ def test_verified_mixed_partition_requires_full_reference_digest(
     assert artifact["cross_model_series_partition"]["status"] == "comparable"
     assert artifact["series_partition_reference_assignment_sha256"] == expected
     assert artifact["series_partition_eligible_assignment_sha256"] == expected
+
+
+def test_forged_prebound_series_reference_is_rejected() -> None:
+    frame = _phase_frame(2)
+    with pytest.raises(FuturePhaseCurveError, match="not verified"):
+        _VerifiedPhaseSeriesReference(
+            frame=frame,
+            source_game_count=2,
+            source_identity_sha256="a" * 64,
+            source_receipt_sha256="b" * 64,
+            crosswalk_artifact_sha256="c" * 64,
+            crosswalk_sha256="d" * 64,
+            crosswalk_assignment_sha256="e" * 64,
+            crosswalk_receipt_sha256="f" * 64,
+            crosswalk_receipt_file_sha256="0" * 64,
+            eligible_assignment_sha256="1" * 64,
+            reference_game_count=2,
+            reference_identity_sha256="2" * 64,
+            _factory_token=object(),
+        )
+
+
+def test_cached_series_reference_revalidates_mutated_assignments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = pd.DataFrame(
+        {
+            "game_id": ["1", "2"],
+            "date": ["2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"],
+            "blue_team_key": ["blue-1", "blue-2"],
+            "red_team_key": ["red-1", "red-2"],
+            "series_id": ["leaguepedia:series-1", "leaguepedia:series-1"],
+            "_series_crosswalk_mapped": [True, True],
+        }
+    )
+    source_receipt = _crosswalk_receipt(frame["game_id"].tolist())
+    crosswalk_path = tmp_path / "crosswalk.json"
+    crosswalk_receipt_path = tmp_path / "crosswalk.receipt.json"
+    crosswalk_path.write_bytes(b"crosswalk")
+    crosswalk_receipt_path.write_bytes(b"crosswalk-receipt")
+    crosswalk_artifact_sha256 = hashlib.sha256(crosswalk_path.read_bytes()).hexdigest()
+    crosswalk_receipt_file_sha256 = hashlib.sha256(
+        crosswalk_receipt_path.read_bytes()
+    ).hexdigest()
+    frame.attrs["series_cluster_source"] = (
+        "mixed:leaguepedia_crosswalk+conservative_series_superset"
+    )
+    frame.attrs["series_cluster_audit"] = {
+        "source_receipt_sha256": source_receipt["receipt_sha256"],
+        "crosswalk_artifact_sha256": crosswalk_artifact_sha256,
+        "crosswalk_sha256": "a" * 64,
+        "crosswalk_assignment_sha256": "b" * 64,
+        "crosswalk_receipt_sha256": "c" * 64,
+    }
+    expected = phase_series_assignment_sha256(frame, game_column="game_id")
+    reference = _make_verified_phase_series_reference(
+        frame,
+        source_receipt=source_receipt,
+        crosswalk_path=crosswalk_path,
+        crosswalk_receipt_path=crosswalk_receipt_path,
+        crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+        eligible_ids=frame["game_id"].tolist(),
+        eligible_assignment_sha256=expected,
+    )
+
+    def bind(maps: pd.DataFrame, **_kwargs: object) -> pd.DataFrame:
+        return maps.copy()
+
+    def model_frame(maps: pd.DataFrame, **_kwargs: object) -> pd.DataFrame:
+        result = maps.copy()
+        result["series_id"] = "leaguepedia:series-1"
+        result["_series_crosswalk_mapped"] = True
+        return result
+
+    monkeypatch.setattr(
+        future_value_rating,
+        "bind_verified_leaguepedia_series_crosswalk",
+        bind,
+    )
+    monkeypatch.setattr(future_value_rating, "_map_model_frame", model_frame)
+    _revalidate_verified_phase_series_reference(
+        reference,
+        source_receipt=source_receipt,
+        crosswalk_path=crosswalk_path,
+        crosswalk_receipt_path=crosswalk_receipt_path,
+        crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+        eligible_ids=frame["game_id"].tolist(),
+        expected_assignment_sha256=expected,
+    )
+    reference.frame.loc[0, "series_id"] = "forged:series"
+    forged_expected = phase_series_assignment_sha256(
+        reference.frame,
+        game_column="game_id",
+    )
+    with pytest.raises(FuturePhaseCurveError, match="differ from verified crosswalk"):
+        _revalidate_verified_phase_series_reference(
+            reference,
+            source_receipt=source_receipt,
+            crosswalk_path=crosswalk_path,
+            crosswalk_receipt_path=crosswalk_receipt_path,
+            crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+            eligible_ids=frame["game_id"].tolist(),
+            expected_assignment_sha256=forged_expected,
+        )
 
 
 def test_verified_mixed_partition_rejects_reference_assignment_mismatch(

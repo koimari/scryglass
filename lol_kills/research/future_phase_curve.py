@@ -16,6 +16,7 @@ import hashlib
 import json
 import math
 import re
+import weakref
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -163,6 +164,17 @@ def _canonical_json_bytes(value: object) -> bytes:
 
 def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def _sha256_file(path: Path | str) -> str:
+    value = Path(path)
+    if value.is_symlink() or not value.is_file():
+        raise FuturePhaseCurveError("series crosswalk file is missing or unsafe")
+    digest = hashlib.sha256()
+    with value.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _receipt_file_reference(
@@ -724,6 +736,330 @@ def phase_series_assignment_sha256(
     return _sha256_bytes(_canonical_json_bytes(rows))
 
 
+_REFERENCE_FACTORY_TOKEN = object()
+
+
+@dataclass(frozen=True)
+class _VerifiedPhaseSeriesReference:
+    """Private, source-bound full-frame partition cache."""
+
+    frame: pd.DataFrame
+    source_game_count: int
+    source_identity_sha256: str
+    source_receipt_sha256: str
+    crosswalk_artifact_sha256: str
+    crosswalk_sha256: str
+    crosswalk_assignment_sha256: str
+    crosswalk_receipt_sha256: str
+    crosswalk_receipt_file_sha256: str
+    eligible_assignment_sha256: str
+    reference_game_count: int
+    reference_identity_sha256: str
+    _factory_token: object
+
+    def __post_init__(self) -> None:
+        if self._factory_token is not _REFERENCE_FACTORY_TOKEN:
+            raise FuturePhaseCurveError("series reference cache is not verified")
+
+
+# This cache stores only a canonical remap result.  Receipt, file, frame and
+# metadata checks still run on every reference use.  A weak reference avoids
+# retaining a benchmark frame after its fit/evaluation call ends.
+_REFERENCE_REMAP_CACHE: dict[int, tuple[Any, str, dict[str, str], dict[str, bool]]] = {}
+
+
+def _phase_reference_raw_fingerprint(frame: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+    """Return the raw crosswalk input and a cheap mutation fingerprint."""
+
+    raw = _phase_partition_map_frame(frame)
+    digest = hashlib.sha256()
+    digest.update(
+        _canonical_json_bytes(
+            {
+                "columns": list(raw.columns),
+                "dtypes": [str(value) for value in raw.dtypes],
+            }
+        )
+    )
+    digest.update(
+        pd.util.hash_pandas_object(raw, index=True)
+        .to_numpy(dtype="uint64", copy=False)
+        .tobytes()
+    )
+    mapped = frame["_series_crosswalk_mapped"]
+    digest.update(
+        pd.util.hash_pandas_object(mapped, index=True)
+        .to_numpy(dtype="uint64", copy=False)
+        .tobytes()
+    )
+    return raw, digest.hexdigest()
+
+
+def _make_verified_phase_series_reference(
+    frame: pd.DataFrame,
+    *,
+    source_receipt: Mapping[str, Any],
+    crosswalk_path: Path | str,
+    crosswalk_receipt_path: Path | str,
+    crosswalk_receipt_file_sha256: str,
+    eligible_ids: Sequence[str],
+    eligible_assignment_sha256: str,
+) -> _VerifiedPhaseSeriesReference:
+    """Create the private cache only from a verified rating map frame."""
+
+    if not isinstance(frame, pd.DataFrame) or not {
+        "game_id",
+        "series_id",
+        "_series_crosswalk_mapped",
+    }.issubset(frame.columns):
+        raise FuturePhaseCurveError("verified series reference frame is incomplete")
+    if frame.attrs.get("series_cluster_source") != MIXED_SERIES_PARTITION_SOURCE:
+        raise FuturePhaseCurveError("verified series reference source changed")
+    mapped = frame["_series_crosswalk_mapped"]
+    if not pd.api.types.is_bool_dtype(mapped.dtype) or mapped.isna().any():
+        raise FuturePhaseCurveError("verified series reference mapped flags are invalid")
+    verified_receipt = _validate_source_receipt(source_receipt)
+    source_receipt_sha256 = str(verified_receipt["receipt_sha256"]).lower()
+    source_ids = tuple(canonical_game_ids(verified_receipt["accepted_game_ids"]))
+    extras = verified_receipt.get("source_extra_game_ids")
+    extra_ids = tuple(
+        canonical_game_ids(
+            extras.get("maps", ()) if isinstance(extras, Mapping) else ()
+        )
+    )
+    expected_ids = tuple(canonical_game_ids((*source_ids, *extra_ids)))
+    frame_ids = frame["game_id"].astype("string").str.strip()
+    if frame_ids.isna().any() or frame_ids.eq("").any() or frame_ids.duplicated().any():
+        raise FuturePhaseCurveError("verified series reference IDs are invalid")
+    if tuple(canonical_game_ids(frame_ids.astype(str))) != expected_ids:
+        raise FuturePhaseCurveError("verified series reference IDs differ from source")
+    series = frame["series_id"].astype("string").str.strip()
+    if series.isna().any() or series.eq("").any():
+        raise FuturePhaseCurveError("verified series reference assignments are incomplete")
+    audit = frame.attrs.get("series_cluster_audit")
+    if not isinstance(audit, Mapping):
+        raise FuturePhaseCurveError("verified series reference audit is missing")
+    if str(audit.get("source_receipt_sha256") or "").lower() != source_receipt_sha256:
+        raise FuturePhaseCurveError("verified series reference source receipt changed")
+    crosswalk_path = Path(crosswalk_path)
+    crosswalk_receipt_path = Path(crosswalk_receipt_path)
+    crosswalk_artifact_sha256 = str(audit.get("crosswalk_artifact_sha256") or "").lower()
+    crosswalk_sha256 = str(audit.get("crosswalk_sha256") or "").lower()
+    crosswalk_assignment_sha256 = str(
+        audit.get("crosswalk_assignment_sha256") or ""
+    ).lower()
+    crosswalk_receipt_sha256 = str(audit.get("crosswalk_receipt_sha256") or "").lower()
+    crosswalk_receipt_file_sha256 = str(crosswalk_receipt_file_sha256).lower()
+    if _sha256_file(crosswalk_path) != crosswalk_artifact_sha256:
+        raise FuturePhaseCurveError("verified series crosswalk artifact changed")
+    if _sha256_file(crosswalk_receipt_path) != crosswalk_receipt_file_sha256:
+        raise FuturePhaseCurveError("verified series crosswalk receipt file changed")
+    for value, label in (
+        (crosswalk_artifact_sha256, "artifact"),
+        (crosswalk_sha256, "crosswalk"),
+        (crosswalk_assignment_sha256, "assignment"),
+        (crosswalk_receipt_sha256, "receipt"),
+        (crosswalk_receipt_file_sha256, "receipt file"),
+    ):
+        if not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise FuturePhaseCurveError(
+                f"verified series crosswalk {label} hash is invalid"
+            )
+    eligible_set = set(str(value) for value in eligible_ids)
+    if not eligible_set.issubset(set(frame_ids.astype(str))):
+        raise FuturePhaseCurveError("verified series reference is missing eligible IDs")
+    eligible_frame = frame.loc[frame_ids.astype(str).isin(eligible_set)]
+    actual_assignment_sha256 = phase_series_assignment_sha256(
+        eligible_frame,
+        game_column="game_id",
+    )
+    expected_assignment = str(eligible_assignment_sha256).lower()
+    if actual_assignment_sha256 != expected_assignment:
+        raise FuturePhaseCurveError("verified series reference assignment digest changed")
+    reference_identity_sha256 = identity_sha256(expected_ids)
+    return _VerifiedPhaseSeriesReference(
+        frame=frame.copy(deep=True),
+        source_game_count=int(verified_receipt["source_game_count"]),
+        source_identity_sha256=str(verified_receipt["source_identity_sha256"]),
+        source_receipt_sha256=source_receipt_sha256,
+        crosswalk_artifact_sha256=crosswalk_artifact_sha256,
+        crosswalk_sha256=crosswalk_sha256,
+        crosswalk_assignment_sha256=crosswalk_assignment_sha256,
+        crosswalk_receipt_sha256=crosswalk_receipt_sha256,
+        crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+        eligible_assignment_sha256=actual_assignment_sha256,
+        reference_game_count=len(expected_ids),
+        reference_identity_sha256=reference_identity_sha256,
+        _factory_token=_REFERENCE_FACTORY_TOKEN,
+    )
+
+
+def _revalidate_verified_phase_series_reference(
+    reference: _VerifiedPhaseSeriesReference,
+    *,
+    source_receipt: Mapping[str, Any],
+    crosswalk_path: Path | str,
+    crosswalk_receipt_path: Path | str,
+    crosswalk_receipt_file_sha256: str,
+    eligible_ids: Sequence[str],
+    expected_assignment_sha256: str,
+) -> _VerifiedPhaseSeriesReference:
+    """Recheck a cached reference before it can affect a fit.
+
+    The cache is an in-process optimisation.  Its DataFrame and metadata are
+    mutable Python objects, so the object itself is never a provenance proof.
+    Receipt, file, audit and assignment checks run on every use.  The exact
+    crosswalk remap is cached only while the raw frame and source-file
+    fingerprint stay unchanged.
+    """
+
+    if not isinstance(reference, _VerifiedPhaseSeriesReference):
+        raise FuturePhaseCurveError("phase series reference cache is invalid")
+    expected_assignment = str(expected_assignment_sha256).lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_assignment):
+        raise FuturePhaseCurveError("expected phase series assignment hash is invalid")
+    verified = _make_verified_phase_series_reference(
+        reference.frame,
+        source_receipt=source_receipt,
+        crosswalk_path=crosswalk_path,
+        crosswalk_receipt_path=crosswalk_receipt_path,
+        crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+        eligible_ids=eligible_ids,
+        eligible_assignment_sha256=expected_assignment,
+    )
+    try:
+        canonical_raw, raw_fingerprint = _phase_reference_raw_fingerprint(
+            reference.frame
+        )
+        raw_fingerprint = _sha256_bytes(
+            _canonical_json_bytes(
+                {
+                    "raw_frame": raw_fingerprint,
+                    "source_receipt_sha256": str(
+                        source_receipt.get("receipt_sha256") or ""
+                    ).lower(),
+                    "crosswalk_artifact_sha256": _sha256_file(crosswalk_path),
+                    "crosswalk_receipt_file_sha256": _sha256_file(
+                        crosswalk_receipt_path
+                    ),
+                }
+            )
+        )
+    except FuturePhaseCurveError:
+        raise
+    except Exception as error:
+        raise FuturePhaseCurveError(
+            "phase series reference raw frame is invalid"
+        ) from error
+    cached_remap = _REFERENCE_REMAP_CACHE.get(id(reference))
+    canonical_series: dict[str, str] | None = None
+    canonical_mapped: dict[str, bool] | None = None
+    if (
+        cached_remap is not None
+        and cached_remap[0]() is reference
+        and cached_remap[1] == raw_fingerprint
+    ):
+        canonical_series = cached_remap[2]
+        canonical_mapped = cached_remap[3]
+    else:
+        try:
+            from lol_kills.research.future_value_rating import (
+                _map_model_frame,
+                bind_verified_leaguepedia_series_crosswalk,
+            )
+            canonical_bound = bind_verified_leaguepedia_series_crosswalk(
+                canonical_raw,
+                crosswalk_path=crosswalk_path,
+                receipt_path=crosswalk_receipt_path,
+                source_receipt=source_receipt,
+                expected_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
+            )
+            canonical = _map_model_frame(
+                canonical_bound,
+                verified_source_receipt_sha256=str(source_receipt["receipt_sha256"]),
+                verified_source_receipt=source_receipt,
+                verified_crosswalk_receipt_file_sha256=str(
+                    crosswalk_receipt_file_sha256
+                ),
+            )
+        except FuturePhaseCurveError:
+            raise
+        except Exception as error:
+            raise FuturePhaseCurveError(
+                "phase series reference cannot be remapped from the verified crosswalk"
+            ) from error
+        canonical_ids = canonical["game_id"].astype(str)
+        if canonical_ids.duplicated().any():
+            raise FuturePhaseCurveError(
+                "phase series reference remap has duplicate game IDs"
+            )
+        if "_series_crosswalk_mapped" not in canonical:
+            raise FuturePhaseCurveError(
+                "phase series reference remap has no crosswalk binding"
+            )
+        mapped = canonical["_series_crosswalk_mapped"]
+        if not pd.api.types.is_bool_dtype(mapped.dtype) or mapped.isna().any():
+            raise FuturePhaseCurveError(
+                "phase series reference remap has invalid crosswalk flags"
+            )
+        canonical_series = dict(
+            zip(canonical_ids, canonical["series_id"].astype(str))
+        )
+        canonical_mapped = dict(
+            zip(canonical_ids, mapped.astype(bool))
+        )
+        _REFERENCE_REMAP_CACHE[id(reference)] = (
+            weakref.ref(reference),
+            raw_fingerprint,
+            canonical_series,
+            canonical_mapped,
+        )
+    assert canonical_series is not None
+    assert canonical_mapped is not None
+    canonical_ids = pd.Index(canonical_series)
+    cached_ids = reference.frame["game_id"].astype(str)
+    if tuple(canonical_game_ids(canonical_ids)) != tuple(canonical_game_ids(cached_ids)):
+        raise FuturePhaseCurveError(
+            "phase series reference game IDs differ from verified crosswalk"
+        )
+    cached_series = dict(
+        zip(cached_ids, reference.frame["series_id"].astype(str))
+    )
+    if canonical_series != cached_series:
+        raise FuturePhaseCurveError(
+            "phase series reference assignments differ from verified crosswalk"
+        )
+    cached_mapped = dict(
+        zip(cached_ids, reference.frame["_series_crosswalk_mapped"].astype(bool))
+    )
+    if canonical_mapped != cached_mapped:
+        raise FuturePhaseCurveError(
+            "phase series reference crosswalk flags differ from verified crosswalk"
+        )
+    for field in (
+        "source_game_count",
+        "source_identity_sha256",
+        "source_receipt_sha256",
+        "crosswalk_artifact_sha256",
+        "crosswalk_sha256",
+        "crosswalk_assignment_sha256",
+        "crosswalk_receipt_sha256",
+        "crosswalk_receipt_file_sha256",
+        "eligible_assignment_sha256",
+        "reference_game_count",
+        "reference_identity_sha256",
+    ):
+        if getattr(reference, field) != getattr(verified, field):
+            raise FuturePhaseCurveError(
+                f"phase series reference cache {field} changed"
+            )
+    if reference.source_receipt_sha256 != str(
+        source_receipt.get("receipt_sha256") or ""
+    ).lower():
+        raise FuturePhaseCurveError("pre-bound phase series source receipt changed")
+    return verified
+
+
 def bind_phase_series_partition(
     frame: pd.DataFrame,
     source_receipt: Mapping[str, Any],
@@ -733,7 +1069,7 @@ def bind_phase_series_partition(
     crosswalk_receipt_file_sha256: str,
     require_full_eligible: bool,
     reference_frame: pd.DataFrame | None = None,
-    reference_partition_frame: pd.DataFrame | None = None,
+    _verified_reference: _VerifiedPhaseSeriesReference | None = None,
     expected_assignment_sha256: str | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Verify and attach the future-value mixed series partition.
@@ -766,17 +1102,39 @@ def bind_phase_series_partition(
         )
     except ImportError as error:
         raise FuturePhaseCurveError("verified phase series partition is unavailable") from error
-    if reference_frame is not None and reference_partition_frame is not None:
+    if reference_frame is not None and _verified_reference is not None:
         raise FuturePhaseCurveError(
             "phase series partition accepts one reference frame"
         )
-    reference = reference_partition_frame if reference_partition_frame is not None else reference_frame
+    if _verified_reference is not None and not isinstance(
+        _verified_reference, _VerifiedPhaseSeriesReference
+    ):
+        raise FuturePhaseCurveError("phase series reference cache is invalid")
+    if _verified_reference is not None and expected_assignment_sha256 is None:
+        raise FuturePhaseCurveError(
+            "pre-bound phase series assignment digest is required"
+        )
+    if _verified_reference is not None:
+        _verified_reference = _revalidate_verified_phase_series_reference(
+            _verified_reference,
+            source_receipt=source_receipt,
+            crosswalk_path=crosswalk_path,
+            crosswalk_receipt_path=crosswalk_receipt_path,
+            crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+            eligible_ids=eligible_ids,
+            expected_assignment_sha256=str(expected_assignment_sha256),
+        )
+    reference = (
+        _verified_reference.frame
+        if _verified_reference is not None
+        else reference_frame
+    )
     if reference is None:
         reference = frame
     if not isinstance(reference, pd.DataFrame):
         raise FuturePhaseCurveError("phase series reference frame is invalid")
     try:
-        if reference_partition_frame is not None:
+        if _verified_reference is not None:
             model_frame = reference.copy()
             model_frame.attrs = dict(reference.attrs)
             if not {"game_id", "series_id"}.issubset(model_frame.columns):
@@ -788,6 +1146,12 @@ def bind_phase_series_partition(
             ):
                 raise FuturePhaseCurveError(
                     "pre-bound phase series reference source changed"
+                )
+            if _verified_reference.source_receipt_sha256 != str(
+                source_receipt["receipt_sha256"]
+            ).lower():
+                raise FuturePhaseCurveError(
+                    "pre-bound phase series source receipt changed"
                 )
         else:
             raw_maps = _phase_partition_map_frame(reference)
@@ -862,6 +1226,14 @@ def bind_phase_series_partition(
         if expected_assignment_sha256 is not None
         else None
     )
+    if _verified_reference is not None:
+        cached_assignment = _verified_reference.eligible_assignment_sha256
+        if expected_assignment is None:
+            expected_assignment = cached_assignment
+        elif expected_assignment != cached_assignment:
+            raise FuturePhaseCurveError(
+                "pre-bound phase series assignment digest changed"
+            )
     if expected_assignment is not None and not re.fullmatch(
         r"[0-9a-f]{64}", expected_assignment
     ):
@@ -1534,8 +1906,9 @@ def _design(
             raise FuturePhaseCurveError(f"phase feature is missing: {name}")
         assert_pregame_feature_names([name])
         values = pd.to_numeric(frame[name], errors="coerce")
-        missing = (~np.isfinite(values.to_numpy(dtype=float))).astype(float)
-        numeric = values.fillna(0.0).to_numpy(dtype=float)
+        raw = values.to_numpy(dtype=float)
+        missing = (~np.isfinite(raw)).astype(float)
+        numeric = np.where(np.isfinite(raw), raw, 0.0)
         # OE metrics have different native units.  Fixed source units keep
         # Ridge conditioning stable and make train/test scoring reproducible.
         normalized_name = _normalised_name(name)
@@ -2007,8 +2380,8 @@ def fit_phase_curve(
     crosswalk_receipt_path: Path | str | None = None,
     crosswalk_receipt_file_sha256: str | None = None,
     series_partition_reference_frame: pd.DataFrame | None = None,
-    series_partition_bound_reference_frame: pd.DataFrame | None = None,
     series_partition_assignment_sha256: str | None = None,
+    _series_partition_reference: _VerifiedPhaseSeriesReference | None = None,
 ) -> dict[str, Any]:
     """Fit OE-only gold and XP curves from strictly pregame features.
 
@@ -2044,7 +2417,7 @@ def fit_phase_curve(
             crosswalk_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
             require_full_eligible=False,
             reference_frame=series_partition_reference_frame,
-            reference_partition_frame=series_partition_bound_reference_frame,
+            _verified_reference=_series_partition_reference,
             expected_assignment_sha256=series_partition_assignment_sha256,
         )
     selected_features = tuple(feature_columns or _default_feature_columns(value))
@@ -2471,8 +2844,8 @@ def _evaluate_transfer_slices(
     crosswalk_receipt_path: Path | str | None = None,
     crosswalk_receipt_file_sha256: str | None = None,
     series_partition_reference_frame: pd.DataFrame | None = None,
-    series_partition_bound_reference_frame: pd.DataFrame | None = None,
     series_partition_assignment_sha256: str | None = None,
+    _series_partition_reference: _VerifiedPhaseSeriesReference | None = None,
 ) -> dict[str, Any]:
     """Evaluate earlier rows from other groups against each transfer group."""
 
@@ -2515,8 +2888,8 @@ def _evaluate_transfer_slices(
                 crosswalk_receipt_path=crosswalk_receipt_path,
                 crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
                 series_partition_reference_frame=series_partition_reference_frame,
-                series_partition_bound_reference_frame=series_partition_bound_reference_frame,
                 series_partition_assignment_sha256=series_partition_assignment_sha256,
+                _series_partition_reference=_series_partition_reference,
             )
             residuals, _missing = _prediction_errors(artifact, test, feature_columns)
             metric_report: dict[str, Any] = {}
@@ -2565,8 +2938,8 @@ def evaluate_phase_curve(
     crosswalk_receipt_path: Path | str | None = None,
     crosswalk_receipt_file_sha256: str | None = None,
     series_partition_reference_frame: pd.DataFrame | None = None,
-    series_partition_bound_reference_frame: pd.DataFrame | None = None,
     series_partition_assignment_sha256: str | None = None,
+    _series_partition_reference: _VerifiedPhaseSeriesReference | None = None,
 ) -> dict[str, Any]:
     """Evaluate each phase on future rows with fold-internal fitting."""
 
@@ -2597,7 +2970,7 @@ def evaluate_phase_curve(
             crosswalk_receipt_file_sha256=str(crosswalk_receipt_file_sha256),
             require_full_eligible=True,
             reference_frame=series_partition_reference_frame,
-            reference_partition_frame=series_partition_bound_reference_frame,
+            _verified_reference=_series_partition_reference,
             expected_assignment_sha256=series_partition_assignment_sha256,
         )
     effective_cluster_column = cluster_column or (
@@ -2639,8 +3012,8 @@ def evaluate_phase_curve(
             crosswalk_receipt_path=crosswalk_receipt_path,
             crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
             series_partition_reference_frame=series_partition_reference_frame,
-            series_partition_bound_reference_frame=series_partition_bound_reference_frame,
             series_partition_assignment_sha256=series_partition_assignment_sha256,
+            _series_partition_reference=_series_partition_reference,
         )
         prediction_errors, missing_count = _prediction_errors(artifact, test, feature_columns)
         side_swap_checks.append(side_swap_invariance_report(artifact, test, feature_columns))
@@ -2714,8 +3087,8 @@ def evaluate_phase_curve(
         crosswalk_receipt_path=crosswalk_receipt_path,
         crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
         series_partition_reference_frame=series_partition_reference_frame,
-        series_partition_bound_reference_frame=series_partition_bound_reference_frame,
         series_partition_assignment_sha256=series_partition_assignment_sha256,
+        _series_partition_reference=_series_partition_reference,
     )
     side_swap = {
         "passed": bool(side_swap_checks) and all(item["passed"] for item in side_swap_checks),

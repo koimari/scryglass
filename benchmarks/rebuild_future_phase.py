@@ -20,10 +20,12 @@ import pandas as pd
 
 from lol_kills.research.future_phase_curve import (
     FuturePhaseCurveError,
+    _VerifiedPhaseSeriesReference,
     _phase_partition_map_frame,
     build_strict_prior_team_features,
     evaluate_phase_curve,
     fit_phase_curve,
+    _make_verified_phase_series_reference,
     phase_series_assignment_sha256,
     prepare_phase_frame,
     verify_source_receipt_artifact,
@@ -302,7 +304,7 @@ def _build_rating_reference_partition_frame(
     crosswalk_path: Path,
     crosswalk_receipt_path: Path,
     crosswalk_receipt_file_sha256: str,
-) -> tuple[pd.DataFrame, str, dict[str, Any]]:
+) -> tuple[_VerifiedPhaseSeriesReference, str, dict[str, Any]]:
     """Build the shared partition on the complete source map frame.
 
     The rating mapper is the reference implementation.  The phase model
@@ -338,7 +340,16 @@ def _build_rating_reference_partition_frame(
         raise PhaseRebuildError("rating reference partition is missing eligible maps")
     digest = phase_series_assignment_sha256(eligible, game_column="game_id")
     audit = dict(reference.attrs.get("series_cluster_audit") or {})
-    return reference, digest, {
+    verified_reference = _make_verified_phase_series_reference(
+        reference,
+        source_receipt=source_receipt,
+        crosswalk_path=crosswalk_path,
+        crosswalk_receipt_path=crosswalk_receipt_path,
+        crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
+        eligible_ids=sorted(eligible_ids),
+        eligible_assignment_sha256=digest,
+    )
+    return verified_reference, digest, {
         "reference_game_count": int(len(reference)),
         "reference_promoted_game_count": int(
             reference["series_id"].astype(str).str.startswith("leaguepedia:").sum()
@@ -393,7 +404,7 @@ def rebuild_phase_artifacts(
     if _sha256_path(crosswalk_receipt_path) != crosswalk_receipt_file_sha256:
         raise PhaseRebuildError("crosswalk receipt file hash changed")
     reference_started = time.perf_counter()
-    reference_partition_frame, reference_assignment_sha256, reference_stats = (
+    reference_partition, reference_assignment_sha256, reference_stats = (
         _build_rating_reference_partition_frame(
             maps_source,
             source_receipt=receipt,
@@ -434,7 +445,7 @@ def rebuild_phase_artifacts(
             crosswalk_path=crosswalk_path,
             crosswalk_receipt_path=crosswalk_receipt_path,
             crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
-            series_partition_bound_reference_frame=reference_partition_frame,
+            _series_partition_reference=reference_partition,
             series_partition_assignment_sha256=reference_assignment_sha256,
         )
         evaluation = evaluate_phase_curve(
@@ -449,7 +460,7 @@ def rebuild_phase_artifacts(
             crosswalk_path=crosswalk_path,
             crosswalk_receipt_path=crosswalk_receipt_path,
             crosswalk_receipt_file_sha256=crosswalk_receipt_file_sha256,
-            series_partition_bound_reference_frame=reference_partition_frame,
+            _series_partition_reference=reference_partition,
             series_partition_assignment_sha256=reference_assignment_sha256,
         )
     elapsed = time.perf_counter() - started
@@ -519,7 +530,6 @@ def rebuild_phase_artifacts(
         "series_partition_reference": {
             **reference_stats,
             "assignment_difference_count": 0,
-            "binding_wall_seconds": reference_elapsed,
         },
     }
     candidate_blockers = [
